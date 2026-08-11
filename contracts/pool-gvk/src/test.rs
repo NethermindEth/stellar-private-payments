@@ -1464,10 +1464,15 @@ fn expected_ark_public_inputs(
     result
 }
 
-/// Runs a full successful `transact` for `gvk_mode`, using a `TestVerifier`
-/// proving a toy circuit matched to this exact call's public inputs, and
-/// returns the pool address for the caller to inspect emitted events on.
-fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /* pool_id */) {
+/// Builds a pool, a matching Groth16 fixture, and a ready-to-submit
+/// `(Proof, ExtData)` pair for `gvk_mode`/`ext_amount`, without calling
+/// `transact`.
+fn build_gvk_transact(
+    gvk_mode: u32,
+    nullifier: u32,
+    ext_amount: i32,
+    maximum_deposit_amount: u32,
+) -> (Env, PoolGvkContractClient<'static>, Proof, ExtData, Address) {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let admin_view_key = mk_point(&env, 1, 2);
@@ -1479,7 +1484,7 @@ fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /
     let throwaway_id = register_pool_gvk(
         &env,
         &setup,
-        U256::from_u32(&env, 1000),
+        U256::from_u32(&env, maximum_deposit_amount),
         levels,
         0,
         admin_view_key.clone(),
@@ -1487,7 +1492,7 @@ fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /
     );
     let root = PoolGvkContractClient::new(&env, &throwaway_id).get_root();
 
-    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let ext = mk_ext_data(&env, Address::generate(&env), ext_amount);
     let ext_hash = compute_ext_hash(&env, &ext);
     let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
         mk_input_ciphertexts(&env, 1)
@@ -1498,13 +1503,16 @@ fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /
     let mut input_nullifiers: Vec<U256> = Vec::new(&env);
     input_nullifiers.push_back(U256::from_u32(&env, nullifier));
 
+    let public_amount = pool_core::amounts::calculate_public_amount(&env, ext.ext_amount.clone())
+        .expect("ext_amount within the 2^248 bound used by these tests");
+
     let mut proof = Proof {
         proof: mk_mock_groth16_proof(&env), // placeholder, replaced below
         root,
         input_nullifiers,
         output_commitment0: U256::from_u32(&env, 0x01),
         output_commitment1: U256::from_u32(&env, 0x02),
-        public_amount: U256::from_u32(&env, 0),
+        public_amount,
         ext_data_hash: ext_hash,
         asp_membership_root: U256::from_u32(&env, 0),
         asp_non_membership_root: U256::from_u32(&env, 0),
@@ -1526,7 +1534,7 @@ fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /
             verifier_id,
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
-            U256::from_u32(&env, 1000),
+            U256::from_u32(&env, maximum_deposit_amount),
             levels,
             0u32,
             admin_view_key,
@@ -1536,6 +1544,16 @@ fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
+
+    (env, pool, proof, ext, sender)
+}
+
+/// Runs a full successful `transact` for `gvk_mode`, using a `TestVerifier`
+/// proving a toy circuit matched to this exact call's public inputs, and
+/// returns the pool address for the caller to inspect emitted events on.
+fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /* pool_id */) {
+    let (env, pool, proof, ext, sender) = build_gvk_transact(gvk_mode, nullifier, 0, 1000);
+    let pool_id = pool.address.clone();
 
     let result = pool.try_transact(&proof, &ext, &sender);
     assert!(
@@ -1626,5 +1644,91 @@ fn transact_accepts_correct_traceable_ciphertexts_and_emits_all_events() {
     assert!(
         events.contains(&expected_nullifier),
         "missing NewNullifierEvent+ciphertext for the traceable input nullifier"
+    );
+}
+
+#[test]
+fn transact_accepts_positive_ext_amount_deposit() {
+    let (_env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE3, 50, 1000);
+
+    let result = pool.try_transact(&proof, &ext, &sender);
+    assert!(
+        result.is_ok(),
+        "expected transact to succeed on the deposit path (ext_amount > 0): {result:?}"
+    );
+}
+
+#[test]
+fn transact_accepts_negative_ext_amount_withdrawal() {
+    let (_env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE4, -50, 1000);
+
+    let result = pool.try_transact(&proof, &ext, &sender);
+    assert!(
+        result.is_ok(),
+        "expected transact to succeed on the withdrawal path (ext_amount < 0): {result:?}"
+    );
+}
+
+#[test]
+fn transact_rejects_deposit_over_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let ext = mk_ext_data(&env, Address::generate(&env), 101); // exceeds the 100 maximum
+    let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
+
+    // Mock proof, `transact` rejects the deposit before `internal_transact` is
+    // reached, so the proof itself never needs to be valid.
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(&env),
+        root: pool.get_root(),
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xD1));
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x01),
+        output_commitment1: U256::from_u32(&env, 0x02),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: compute_ext_hash(&env, &ext),
+        asp_membership_root,
+        asp_non_membership_root,
+        output_gvk_ciphertexts: mk_output_ciphertexts(&env),
+        input_gvk_ciphertexts: Vec::new(&env),
+    };
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtAmount))
+    ));
+}
+
+/// Replaying the same nullifier must be rejected
+#[test]
+fn transact_rejects_replayed_nullifier() {
+    let (_env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE5, 0, 1000);
+
+    let first = pool.try_transact(&proof, &ext, &sender);
+    assert!(
+        first.is_ok(),
+        "expected the first transact to succeed: {first:?}"
+    );
+
+    let second = pool.try_transact(&proof, &ext, &sender);
+    assert!(
+        matches!(second, Err(Ok(Error::AlreadySpentNullifier))),
+        "expected replaying the same nullifier to be rejected, got {second:?}"
     );
 }

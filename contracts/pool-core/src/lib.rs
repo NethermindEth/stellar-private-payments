@@ -12,6 +12,7 @@
 
 #![no_std]
 
+pub mod amounts;
 pub mod clients;
 pub mod ext_data;
 pub mod merkle_with_history;

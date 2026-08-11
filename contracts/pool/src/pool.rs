@@ -15,7 +15,7 @@
 #![allow(clippy::too_many_arguments)]
 use contract_types::Groth16Proof;
 use pool_core::{
-    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient,
+    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
@@ -225,13 +225,6 @@ impl PoolContract {
         Ok(())
     }
 
-    /// Maximum absolute external amount allowed (2^248)
-    ///
-    /// This limit ensures amounts fit within field arithmetic constraints.
-    fn max_ext_amount(env: &Env) -> U256 {
-        U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
-    }
-
     /// Convert a non-negative I256 to i128 with bounds checking
     ///
     /// # Arguments
@@ -244,10 +237,7 @@ impl PoolContract {
     /// Returns `Ok(i128)` if the value is non-negative and fits in i128,
     /// or `Err(Error::WrongExtAmount)` otherwise
     fn i256_to_i128_nonneg(env: &Env, v: &I256) -> Result<i128, Error> {
-        if *v < I256::from_i32(env, 0) {
-            return Err(Error::WrongExtAmount);
-        }
-        v.to_i128().ok_or(Error::WrongExtAmount)
+        amounts::i256_to_i128_nonneg(env, v).ok_or(Error::WrongExtAmount)
     }
 
     /// Calculate the public amount from external amount
@@ -267,25 +257,7 @@ impl PoolContract {
     /// Returns the public amount as U256 in the BN256 field, or an error
     /// if the amounts exceed limits
     fn calculate_public_amount(env: &Env, ext_amount: I256) -> Result<U256, Error> {
-        let abs_ext = Self::i256_abs_to_u256(env, &ext_amount);
-        if abs_ext >= Self::max_ext_amount(env) {
-            return Err(Error::WrongExtAmount);
-        }
-
-        let zero = I256::from_i32(env, 0);
-
-        if ext_amount >= zero {
-            let pa_bytes = ext_amount.to_be_bytes();
-            Ok(U256::from_be_bytes(env, &pa_bytes))
-        } else {
-            // Negative: compute FIELD_SIZE - |ext_amount|
-            let neg = zero.sub(&ext_amount);
-            let neg_bytes = neg.to_be_bytes();
-            let neg_u256 = U256::from_be_bytes(env, &neg_bytes);
-
-            let field = bn256_modulus(env);
-            Ok(field.sub(&neg_u256))
-        }
+        amounts::calculate_public_amount(env, ext_amount).ok_or(Error::WrongExtAmount)
     }
 
     /// Mark a nullifier as spent
@@ -307,11 +279,11 @@ impl PoolContract {
     /// converted into a verifier public input must be checked before
     /// conversion.
     fn validate_bn256_public_input(value: &U256, modulus: &U256) -> Result<(), Error> {
-        if value >= modulus {
-            return Err(Error::NonCanonicalPublicInput);
+        if amounts::is_canonical_bn256_public_input(value, modulus) {
+            Ok(())
+        } else {
+            Err(Error::NonCanonicalPublicInput)
         }
-
-        Ok(())
     }
 
     /// Validate every `U256` field that contributes to the verifier's public
@@ -365,26 +337,29 @@ impl PoolContract {
         // [root, public_amount, ext_data_hash, input_nullifiers,
         // output_commitments, membership_roots?, non_membership_roots]
         let mut public_inputs: Vec<Bn254Fr> = Vec::new(env);
-        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
-        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+        public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
+            env,
+            &proof.root,
+        )));
+        public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
             env,
             &proof.public_amount,
         )));
         public_inputs.push_back(Bn254Fr::from_bytes(proof.ext_data_hash.clone()));
         for nullifier in proof.input_nullifiers.iter() {
-            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+            public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(env, &nullifier)));
         }
-        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+        public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
             env,
             &proof.output_commitment0,
         )));
-        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+        public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
             env,
             &proof.output_commitment1,
         )));
         if policy::requires_membership_proofs(policy_flags) {
             for _ in 0..proof.input_nullifiers.len() {
-                public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+                public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
                     env,
                     &proof.asp_membership_root,
                 )));
@@ -392,7 +367,7 @@ impl PoolContract {
         }
         if policy::requires_non_membership_proofs(policy_flags) {
             for _ in 0..proof.input_nullifiers.len() {
-                public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+                public_inputs.push_back(Bn254Fr::from_bytes(amounts::u256_to_bytes(
                     env,
                     &proof.asp_non_membership_root,
                 )));
@@ -419,22 +394,6 @@ impl PoolContract {
     /// Returns the 32-byte hash of the external data
     fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
         hash_ext_data(env, ext)
-    }
-
-    /// Convert I256 to its absolute value as U256
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `v` - The I256 value
-    ///
-    /// # Returns
-    ///
-    /// Returns the absolute value of `v` as U256
-    fn i256_abs_to_u256(env: &Env, v: &I256) -> U256 {
-        let zero = I256::from_i32(env, 0);
-        let abs = if *v >= zero { v.clone() } else { zero.sub(v) };
-        U256::from_be_bytes(env, &abs.to_be_bytes())
     }
 
     /// Execute a shielded transaction with deposit handling
@@ -613,13 +572,6 @@ impl PoolContract {
             .persistent()
             .get(&DataKey::Verifier)
             .ok_or(Error::NotInitialized)
-    }
-
-    /// Convert a U256 into a 32-byte big-endian field element
-    fn u256_to_bytes(env: &Env, v: &U256) -> BytesN<32> {
-        let mut buf = [0u8; 32];
-        v.to_be_bytes().copy_into_slice(&mut buf);
-        BytesN::from_array(env, &buf)
     }
 
     /// Get the admin address
