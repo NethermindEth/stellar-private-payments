@@ -30,6 +30,7 @@ EXPLORER_URL="https://stellar.expert/explorer/testnet"
 
 ALIAS_PREFIX="spp-e2e"
 VERIFY_ONLY=0
+REREGISTER=0
 FORCE=0
 FUND_RETRIES=6
 
@@ -60,6 +61,8 @@ needs the deployment admin secret plus an EURC trustline.
 
 Options:
   --verify              Re-check existing accounts without creating anything
+  --reregister          Re-onboard the EXISTING accounts against the current
+                        deployment, keeping their keypairs and the env file
   --force               Recreate accounts even if the env file already exists
   -h, --help            Show this help
 
@@ -70,9 +73,23 @@ Idempotency:
   C and D are provisioned and the file rewritten; A and B are untouched.
   --force regenerates all keypairs and overwrites the env file.
 
+After a redeploy:
+  A redeploy mints a NEW public-key registry, so accounts that were fine
+  yesterday stop verifying: the keypairs and funding are untouched, but the
+  registration lives in a contract nothing points at any more. Use
+  --reregister for that. It re-runs `spp onboard --register` for the four
+  accounts already in the env file, against whatever deployment is current,
+  and leaves keypairs, addresses, secrets and the env file alone — so
+  secrets already copied into CI stay valid.
+
+  Do NOT reach for --force here. It regenerates every keypair and rewrites
+  the env file, abandoning four funded accounts to fix a registration that
+  --reregister repairs in place.
+
 Examples:
   deployments/scripts/e2e-accounts-setup.sh
   deployments/scripts/e2e-accounts-setup.sh --verify
+  deployments/scripts/e2e-accounts-setup.sh --reregister
   deployments/scripts/e2e-accounts-setup.sh --force
 USAGE
 }
@@ -80,6 +97,7 @@ USAGE
 while [ $# -gt 0 ]; do
   case "$1" in
     --verify) VERIFY_ONLY=1; shift ;;
+    --reregister) REREGISTER=1; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument '$1'" ;;
@@ -363,6 +381,56 @@ have_cd() {
   [ -n "${E2E_ACCOUNT_C_ADDRESS:-}" ] && [ -n "${E2E_ACCOUNT_D_ADDRESS:-}" ]
 }
 
+# Repair path for "it worked yesterday, then the deployment changed".
+#
+# A redeploy mints a new public-key registry, so the four accounts keep their
+# keypairs, addresses, secrets and funding but lose their registration — it
+# still exists, in a contract no deployments.json points at any more. Before
+# this existed the script offered no way out: --verify died telling you to run
+# without --verify, and running without --verify saw the env file and verified
+# again, so the only reachable escape was --force, which regenerates every
+# keypair and abandons four funded accounts to fix a registration.
+#
+# Re-onboarding is safe to repeat: `spp onboard --register` derives the same
+# privacy keys from the same secret and writes them to whichever registry is
+# current, so an account that is somehow still registered simply ends up
+# registered again.
+do_reregister() {
+  [ -f "$ENV_FILE" ] || die "$ENV_FILE not found; run without --reregister to provision"
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  have_cd || die "env file has no C/D accounts; run without --reregister to backfill them"
+
+  step "re-registering the existing accounts against pool $POOL_CONTRACT"
+
+  local alias_a="${E2E_ACCOUNT_A_ALIAS:-$ALIAS_A}"
+  local alias_b="${E2E_ACCOUNT_B_ALIAS:-$ALIAS_B}"
+  local alias_c="${E2E_ACCOUNT_C_ALIAS:-$ALIAS_C}"
+  local alias_d="${E2E_ACCOUNT_D_ALIAS:-$ALIAS_D}"
+
+  local alias
+  for alias in "$alias_a" "$alias_b" "$alias_c" "$alias_d"; do
+    [ -n "$(address_for_alias "$alias")" ] \
+      || die "no keypair for '$alias' in $DATA_DIR/stellar — the keystore and the env file disagree, which --reregister cannot repair"
+  done
+
+  # Funding is checked, not assumed: an account can also have been reaped or
+  # never funded, and onboarding fails obscurely against a missing account.
+  fund_account "$E2E_ACCOUNT_A_ADDRESS"
+  fund_account "$E2E_ACCOUNT_B_ADDRESS"
+  fund_account "$E2E_ACCOUNT_C_ADDRESS"
+  fund_account "$E2E_ACCOUNT_D_ADDRESS"
+
+  onboard_account "$alias_a"
+  onboard_account "$alias_b"
+  onboard_account "$alias_c"
+  onboard_account "$alias_d"
+
+  verify_ab
+  verify_cd
+  step "re-registration complete — env file and keypairs untouched"
+}
+
 do_verify() {
   [ -f "$ENV_FILE" ] || die "$ENV_FILE not found; run without --verify to provision"
   # shellcheck disable=SC1090
@@ -477,6 +545,10 @@ do_provision() {
 main() {
   if [ "$VERIFY_ONLY" -eq 1 ]; then
     do_verify
+    return
+  fi
+  if [ "$REREGISTER" -eq 1 ]; then
+    do_reregister
     return
   fi
   if [ -s "$ENV_FILE" ] && [ "$FORCE" -eq 0 ]; then
