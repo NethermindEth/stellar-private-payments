@@ -1,0 +1,13 @@
+{
+  "name": "e2e-freighter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "demo": "HEADFUL=1 APPROVE=human bash scripts/run-all.sh",
+    "ci": "APPROVE=auto bash scripts/run-all.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

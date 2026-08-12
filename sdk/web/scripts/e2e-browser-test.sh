@@ -66,6 +66,10 @@ Runs <command> with everything the sdk/web browser e2e tests need:
      file exists. Variables already exported win over the file, so injected CI
      secrets are never clobbered. These are read at COMPILE time by option_env!,
      so they must be set for the cargo invocation, not just for the test run.
+  6. scripts/e2e-preflight.sh --check --suite sdk has passed. It runs after the
+     env-file load, so it can verify the values are coherent (notably that
+     E2E_POOL_CONTRACT matches deployments.json) rather than merely present.
+     E2E_SKIP_PREFLIGHT=1 bypasses it.
 
 An already-running server on that origin is reused and left running. A server
 this script started is stopped on exit.
@@ -75,6 +79,7 @@ Environment:
                              deployments/testnet/.e2e-accounts.env; written by
                              deployments/scripts/e2e-accounts-setup.sh). Missing
                              file is not an error.
+  E2E_SKIP_PREFLIGHT         Set to 1 to bypass scripts/e2e-preflight.sh
   E2E_STATIC_ORIGIN          Origin to serve assets on (default http://127.0.0.1:8099)
   CHROMEDRIVER               Path to chromedriver (default: from PATH)
   WASM_BINDGEN_TEST_TIMEOUT  Per-test timeout in seconds (default 600). The
@@ -201,6 +206,21 @@ cleanup() {
 trap cleanup EXIT
 
 main() {
+  # Runs AFTER the env-file load above, deliberately: the preflight's
+  # env.compiletime.exported check wants the E2E_* values already exported, and
+  # env.pool.matches_deployments compares E2E_POOL_CONTRACT against
+  # deployments.json — neither can do real work on variables the loader has not
+  # supplied yet. Reversed, the preflight fails on its own missing prerequisite.
+  #
+  # Skipped entirely with E2E_SKIP_PREFLIGHT=1. On failure, abort with the
+  # preflight's own report already printed — no extra wrapping. Its sdk group
+  # deliberately overlaps ensure_dist below (both know about dist/workers): the
+  # preflight must be able to report a missing dist without building it, so it
+  # does not replace ensure_dist here.
+  if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
+    bash "$ROOT/scripts/e2e-preflight.sh" --check --suite sdk || exit 1
+  fi
+
   ensure_dist
 
   if serves_assets; then
