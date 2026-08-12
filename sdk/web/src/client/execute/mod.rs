@@ -212,3 +212,50 @@ impl PrivatePool {
         Ok(completed.into_iter().map(|tx| tx.tx_hash).collect())
     }
 }
+
+/// Spike tests for the JS-visible end of the sentinel mapping: only a wallet
+/// rejection may surface as `code: -4`, which is what lets an e2e test tell
+/// "halted at the signing boundary" apart from a genuine prove/simulate
+/// failure.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod spike_tests {
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
+    // is meant for production paths, not assertions.
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn spike_error_mapping_rejection_code() {
+        assert_eq!(
+            wallet_rejection_code(&Error::UserRejected("stub halt".to_string())),
+            Some(-4),
+            "a user rejection must surface as SEP-0043 code -4"
+        );
+
+        assert_eq!(
+            wallet_rejection_code(&Error::Other("simulate failed".to_string())),
+            None,
+            "an unrelated failure must not carry a code"
+        );
+
+        // A mid-plan failure wraps the cause in Error::PlanExecution; the code
+        // must still be reachable through it.
+        let mid_plan = PlanExecutionError::into_error(
+            vec![TransactionResult {
+                tx_hash: "abc123".to_string(),
+            }],
+            Error::UserRejected("stub halt".to_string()),
+        );
+        assert_eq!(
+            wallet_rejection_code(&mid_plan),
+            Some(-4),
+            "PlanExecution must be unwrapped to reach the rejection cause"
+        );
+
+        let mid_plan_other =
+            PlanExecutionError::into_error(Vec::new(), Error::Other("simulate failed".to_string()));
+        assert_eq!(wallet_rejection_code(&mid_plan_other), None);
+    }
+}

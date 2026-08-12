@@ -2,6 +2,8 @@
 //! [`Client`](NativeClient).
 
 mod account;
+#[cfg(all(test, target_arch = "wasm32"))]
+mod e2e_tests;
 mod execute;
 mod pool;
 mod transact;

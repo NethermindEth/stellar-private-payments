@@ -71,6 +71,22 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed=build.rs");
+
+    // The browser e2e tests read their configuration at compile time via
+    // `option_env!` (src/client/e2e_tests.rs). Without these, editing
+    // deployments/<network>/.e2e-accounts.env would not rebuild the test binary
+    // and the tests would silently keep using stale values.
+    for var in [
+        "E2E_STATIC_ORIGIN",
+        "E2E_RPC_URL",
+        "E2E_POOL_CONTRACT",
+        "E2E_ACCOUNT_A_ADDRESS",
+        "E2E_ACCOUNT_A_SECRET",
+        "E2E_ACCOUNT_B_ADDRESS",
+        "E2E_ACCOUNT_B_SECRET",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir
