@@ -47,6 +47,18 @@ if [ ! -d "$PKG_ROOT/node_modules" ]; then
   ( cd "$PKG_ROOT" && npm ci )
 fi
 
+# Step 2, same story: vendor/freighter is git-ignored (third-party build
+# output), so a fresh checkout has no extension at all until this runs.
+# Without it, runner.mjs's --load-extension points at a directory with no
+# valid manifest, Chromium never derives the pinned extension id, and
+# provisioning fails navigating to chrome-extension://<id>/... with
+# ERR_BLOCKED_BY_CLIENT — a failure that looks like a browser/launch
+# problem but is actually just a missing fetch step. fetch-extension.sh is
+# itself idempotent (skips cleanly if the pinned version is already
+# vendored), so this is safe to run unconditionally.
+step "ensuring the pinned Freighter extension is vendored"
+bash "$SCRIPT_DIR/fetch-extension.sh"
+
 case "${1:-}" in
   --force) exec bash "$SCRIPT_DIR/provision.sh" --force ;;
   --add-account) exec bash "$SCRIPT_DIR/provision.sh" --add-account ;;
