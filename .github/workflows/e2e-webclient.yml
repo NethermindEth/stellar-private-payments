@@ -87,6 +87,21 @@ jobs:
           path: target/tmp/binaryen/binaryen-version_131
           key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
 
+      # circuits/build.rs generates a fresh Groth16 trusted-setup keypair for
+      # every circuit (~7 minutes) whenever `testdata/` is missing them — and
+      # `testdata/` is NOT part of what Swatinem/rust-cache restores (it lives
+      # at the repo root, outside target/), so a cache miss here means paying
+      # that cost in full regardless. cli-release.yml already avoids this by
+      # seeding testdata/ from the committed, already-generated keys instead
+      # of letting the build regenerate them; do the same here. testdata/ is
+      # not profile-scoped, so seeding it once covers both cargo invocations
+      # below.
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
       # BOTH profiles are needed: sdk/web's build.rs requires the debug
       # artifacts (target/circuits-artifacts/debug) to compile the debug test
       # binary, and the release artifacts feed the sdk/web npm dist the prover
