@@ -2,8 +2,10 @@
 //!
 //! Provides merkle tree operations matching the Circom circuit implementations.
 //!
-//! `circuits` crate keeps a duplicated copy of this logic, so we can avoid
-//! inter-dependency. Coherence tests in `e2e-tests` keep them in sync.
+//! `circuits` crate keeps a duplicated copy of this logic
+//! (`circuits/src/core/merkle.rs`), so we can avoid inter-dependency.
+//! Bit-identical synchronization is enforced at production depth 10
+//! (1024 leaves) by `e2e-tests/src/tests/coherence/merkle.rs`.
 
 use core::ops::Add;
 

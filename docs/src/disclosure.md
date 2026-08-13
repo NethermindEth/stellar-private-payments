@@ -104,10 +104,10 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 
 | Circuit | Canonical `vk_hash` |
 |---|---|
-| `selectiveDisclosure_1` | `0xdd999a5b59411ae38199843aba90fef90fdc4e91ba3169768122efed6c8fcb74` |
-| `selectiveDisclosure_2` | `0x937c4ee647d7747f90ec6eff0dcc67f4b00772e8239a87a973267ff15f2dd327` |
-| `selectiveDisclosure_3` | `0x87f63204e0f0106c94fab4aa1a626f7df287604025a3915220624f7166bfaa7c` |
-| `selectiveDisclosure_4` | `0x02284c751a2fbdb3f7a731f3dc4a6b3585489d269324c4bcc73afdcbffb66096` |
+| `selectiveDisclosure_1` | `0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107` |
+| `selectiveDisclosure_2` | `0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd` |
+| `selectiveDisclosure_3` | `0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f` |
+| `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
 

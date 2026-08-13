@@ -8,20 +8,22 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
 import { filterNotes, createNoteRow } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
+import { onEnter } from './ui/keys.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
 // ---------------------------------------------------------------------------
 
+// Source of truth: sdk/native/src/zk/disclosure/mod.rs (test: vk_hash_matches_committed_keys)
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_1:
-    '0xdd999a5b59411ae38199843aba90fef90fdc4e91ba3169768122efed6c8fcb74',
+    '0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107',
   selectiveDisclosure_2:
-    '0x937c4ee647d7747f90ec6eff0dcc67f4b00772e8239a87a973267ff15f2dd327',
+    '0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd',
   selectiveDisclosure_3:
-    '0x87f63204e0f0106c94fab4aa1a626f7df287604025a3915220624f7166bfaa7c',
+    '0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f',
   selectiveDisclosure_4:
-    '0x02284c751a2fbdb3f7a731f3dc4a6b3585489d269324c4bcc73afdcbffb66096',
+    '0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0',
 };
 
 // Public testnet endpoint used to verify a receipt when no wallet is connected.
@@ -487,6 +489,10 @@ export function mountGenerate(container) {
   nonceField.input.value = generateRandomNonce();
   formWrap.appendChild(nonceField.wrap);
 
+  onEnter(authorityField.input, () => payloadField.input.focus());
+  onEnter(payloadField.input, () => purposeField.input.focus());
+  onEnter(purposeField.input, () => nonceField.input.focus());
+
   // Validation helpers matching DisclosureContext::validate
   const validateHex = (value, label) => {
     if (!value.startsWith('0x')) return `${label}: must start with 0x`;
@@ -695,15 +701,12 @@ export function mountGenerate(container) {
   generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
   formWrap.appendChild(generateBtn);
 
-  generateBtn.addEventListener('click', async () => {
-    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
-      Toast.show('Please select 1 to 4 notes', 'error');
-      return;
-    }
+  // Enter in the nonce field bypasses `generateBtn.disabled`, so track the
+  // in-flight state separately to keep a second generate from starting.
+  let generating = false;
 
-    const form = validateForm();
-    if (!form) return;
-
+  async function executeGenerate(form) {
+    generating = true;
     generateBtn.disabled = true;
     generateBtn.textContent = 'Generating…';
     resultArea.classList.add('hidden');
@@ -724,8 +727,28 @@ export function mountGenerate(container) {
     } catch (err) {
       console.error('Generate failed:', err);
       showGenerateError(err.message || 'Generation failed');
+    } finally {
+      generating = false;
     }
-  });
+  }
+
+  async function runGenerate() {
+    if (generating) return;
+    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+      Toast.show('Please select 1 to 4 notes', 'error');
+      return;
+    }
+
+    const form = validateForm();
+    if (!form) return;
+
+    // No confirmation dialog here: receipt generation is a purely off-chain
+    // action (local proving only), so there is nothing on-chain to confirm.
+    await executeGenerate(form);
+  }
+
+  onEnter(nonceField.input, runGenerate);
+  generateBtn.addEventListener('click', runGenerate);
 
   container.appendChild(formWrap);
 }
@@ -775,8 +798,34 @@ async function generateReceipt(form) {
       contextNonce: form.nonce,
     });
 
-    // Receipt is a JS object (already deserialized by wasm_bindgen) or null.
-    return receipt || null;
+    if (!receipt) {
+      return null;
+    }
+
+    // Fail-closed validation: ensure receipt contains valid proof bytes and circuit metadata
+    if (
+      !receipt.proofCompressedHex ||
+      typeof receipt.proofCompressedHex !== 'string' ||
+      !receipt.proofCompressedHex.startsWith('0x') ||
+      receipt.proofCompressedHex.length <= 2
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing proof bytes');
+    }
+
+    if (
+      !receipt.circuit ||
+      !receipt.circuit.vkHash ||
+      typeof receipt.circuit.vkHash !== 'string' ||
+      !receipt.circuit.vkHash.startsWith('0x')
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing circuit metadata');
+    }
+
+    if (!receipt.publicInputs) {
+      throw new Error('Generated disclosure receipt has missing public inputs');
+    }
+
+    return receipt;
   } finally {
     window.removeEventListener(TX_PROGRESS_EVENT, handler);
   }

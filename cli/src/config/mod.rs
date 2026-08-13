@@ -21,6 +21,9 @@ pub const DEFAULT_DEPLOYMENT_JSON: &str =
 
 pub const EMBEDDED_DEPLOYMENT_LABEL: &str = "embedded:testnet";
 
+/// Deployment config provisioned into the data dir by `scripts/install.sh`.
+pub const DEPLOYMENT_FILE_NAME: &str = "deployments.json";
+
 /// CLI flag overrides used to build a [`CliConfig`].
 #[derive(Debug, Default)]
 pub struct CliConfigOverrides {
@@ -79,7 +82,8 @@ impl CliConfig {
         let stellar_config_dir =
             stellar_config_dir.or(file.defaults.stellar_config_dir.map(toml::expand_path));
 
-        let (deployment_source, deployment) = load_deployment(deployment_path.as_deref())?;
+        let (deployment_source, deployment) =
+            load_deployment(deployment_path.as_deref(), &data_dir)?;
         // Network name: --network > config default > the deployment's network
         // (which matches a Stellar CLI built-in like `testnet`).
         let network = network
@@ -148,21 +152,29 @@ pub fn default_circuits_dir(data_dir: &Path) -> PathBuf {
     }
 }
 
-fn load_deployment(path: Option<&Path>) -> Result<(String, ContractConfig)> {
-    match path {
-        Some(path) => {
-            let raw = std::fs::read_to_string(path)
-                .with_context(|| format!("read deployment file {}", path.display()))?;
-            let deployment = serde_json::from_str(&raw)
-                .with_context(|| format!("parse deployment file {}", path.display()))?;
-            Ok((path.display().to_string(), deployment))
-        }
-        None => {
-            let deployment = serde_json::from_str(DEFAULT_DEPLOYMENT_JSON)
-                .context("parse embedded testnet deployment")?;
-            Ok((EMBEDDED_DEPLOYMENT_LABEL.to_string(), deployment))
-        }
+/// Resolve the deployment config: `--deployment` > the copy provisioned into
+/// the data dir by `scripts/install.sh` > [`DEFAULT_DEPLOYMENT_JSON`].
+fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, ContractConfig)> {
+    if let Some(path) = path {
+        return read_deployment_file(path);
     }
+    let provisioned = data_dir.join(DEPLOYMENT_FILE_NAME);
+    if provisioned.is_file() {
+        return read_deployment_file(&provisioned);
+    }
+    let deployment = serde_json::from_str(DEFAULT_DEPLOYMENT_JSON)
+        .context("parse embedded testnet deployment")?;
+    Ok((EMBEDDED_DEPLOYMENT_LABEL.to_string(), deployment))
+}
+
+fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("read deployment file {}", path.display()))?;
+
+    // A schema mismatch here usually means the file is newer than this binary
+    let deployment = serde_json::from_str(&raw)
+        .with_context(|| format!("parse deployment file {}", path.display()))?;
+    Ok((path.display().to_string(), deployment))
 }
 
 pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {

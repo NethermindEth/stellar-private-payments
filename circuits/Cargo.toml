@@ -19,6 +19,7 @@ std = [
     "ark-std",
     "num-bigint",
     "num-integer",
+    "serde_json",
 ]
 # Enables circom-witness-rs C++ graph generation (`make witness-graphs`).
 regen-graph = ["dep:circom-witness-rs"]
@@ -40,6 +41,7 @@ ark-snark = { workspace = true, optional = true }
 ark-std = { workspace = true, optional = true }
 num-bigint = { workspace = true, optional = true }
 num-integer = { workspace = true, optional = true }
+serde_json = { workspace = true, default-features = false, features = ["alloc", "std"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # external

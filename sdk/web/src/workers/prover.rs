@@ -1,8 +1,5 @@
 use crate::{
-    circuits::{
-        ensure_sha256_matches, fetch_circuit_file, fetch_circuit_file_verified,
-        get_or_derive_uncompressed,
-    },
+    circuits::{ensure_sha256_matches, fetch_circuit_file_verified, get_or_derive_uncompressed},
     protocol::{CorrelatedRequest, ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
@@ -303,8 +300,22 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     if !to_load.is_empty() {
         let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
             futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
-                let graph = fetch_circuit_file(&format!("{stem}.graph.bin")).await?;
-                let r1cs = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
+                let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
+                    .ok_or_else(|| {
+                        JsError::new(&format!("unsupported transact circuit stem: {stem}"))
+                    })?;
+                let graph = fetch_circuit_file_verified(
+                    &format!("{stem}.graph.bin"),
+                    hashes.graph_len,
+                    hashes.graph_sha256,
+                )
+                .await?;
+                let r1cs = fetch_circuit_file_verified(
+                    &format!("{stem}.r1cs"),
+                    hashes.r1cs_len,
+                    hashes.r1cs_sha256,
+                )
+                .await?;
                 Ok::<_, JsError>((graph, r1cs))
             }))
             .await?;

@@ -63,3 +63,10 @@ sdk/web/.trunk-wasm-profile
 
 # JS license tooling
 js-license-scan-report.json
+
+# SDK example wallets. The examples default SPP_WALLET_PATH to
+# ./spp-example-wallet.sqlite, and `spp onboard --data-dir ./spp-<name>-wallet`
+# writes spp.db there, so a first run would otherwise dirty the working tree.
+spp-example-wallet.sqlite
+spp-example-wallet.sqlite-*
+spp-*-wallet/

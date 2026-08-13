@@ -14,6 +14,7 @@ circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
 circuits = { workspace = true, features = ["std"] }
 # Contract dependencies
+contract-types = { workspace = true }
 pool = { workspace = true }
 # Shared deps
 soroban-utils = { workspace = true }

@@ -56,38 +56,40 @@ ruint = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-futures-timer = "3"
-tokio = { workspace = true, features = ["rt-multi-thread"] }
-rusqlite = { workspace = true, features = ["bundled"] }
 ark-ff = { workspace = true, features = ["parallel"] }
 ark-groth16 = { workspace = true, features = ["parallel"] }
 ark-poly = { workspace = true, features = ["parallel"] }
 ark-std = { workspace = true, features = ["parallel"] }
+futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false }
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
 gloo-timers = { workspace = true }
 rusqlite = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
 
 [build-dependencies]
 hex = { workspace = true }
 sha2 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-wiremock = { workspace = true }
 contract-types = { workspace = true }
 pool = { workspace = true }
 public-key-registry = { workspace = true }
-soroban-sdk = { workspace = true, features = ["testutils"] }
+reqwest = { workspace = true, features = ["rustls"] }
 rusqlite = { workspace = true, features = ["bundled"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+wiremock = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = { workspace = true }
 rusqlite = { workspace = true }
+wasm-bindgen-test = { workspace = true }
 
 [lints]
 workspace = true
