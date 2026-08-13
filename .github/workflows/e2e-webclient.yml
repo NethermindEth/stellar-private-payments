@@ -41,6 +41,17 @@ permissions:
 jobs:
   e2e-webclient:
     name: Pre-signing SDK E2E tests
+    # The e2e-testnet environment's deployment branch policy was relaxed to
+    # "all branches" because pull_request runs use the synthetic merge ref
+    # (refs/pull/N/merge), which never matches a protected-branch pattern —
+    # the branch-policy restriction was silently denying secrets to every PR
+    # run regardless of which branch it came from, not just forks. This
+    # condition is what actually keeps fork PRs out now: it skips the job
+    # entirely unless the PR's head repo is this repo, so an outside
+    # contributor's PR never even starts a job that would read these secrets.
+    # push and workflow_dispatch aren't pull_request events, so they pass
+    # through untouched.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
     runs-on: ubuntu-latest
     environment: e2e-testnet
