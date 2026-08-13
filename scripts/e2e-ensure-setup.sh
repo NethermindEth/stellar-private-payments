@@ -64,7 +64,13 @@ else
   if [ ! -s "$SNAPSHOT" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
     die "building the profile snapshot needs a display (it completes the wallet and app onboarding headed). Run under a desktop session, or wrap this in xvfb-run."
   fi
-  bash "$PKG/scripts/setup.sh"
+  # setup.sh needs a served app regardless of which piece was missing:
+  # provision.mjs completes the APP's onboarding wizard (navigates to
+  # APP_URL), and even the snapshot-already-exists verify path calls
+  # connectApp(), which needs one too. Routed through serve-and-run.sh
+  # rather than duplicated here, so the same start/stop/reuse-if-already-
+  # running logic applies as it does for an actual test run.
+  bash "$PKG/scripts/serve-and-run.sh" -- bash "$PKG/scripts/setup.sh"
 fi
 
 step "setup check complete"

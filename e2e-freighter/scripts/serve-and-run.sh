@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Run the Freighter e2e suite against a locally served app, starting the
-# server first and stopping it afterwards — including when the tests fail,
-# when the build never comes up, and when the run is interrupted.
+# Run something against a locally served app, starting the server first and
+# stopping it afterwards — including when the command fails, when the build
+# never comes up, and when the run is interrupted.
 #
-# Usage: serve-and-run.sh [--url URL] [TEST_FILE ...]   (default: whole suite)
+# Usage: serve-and-run.sh [--url URL] [TEST_FILE ...]         (default: whole suite)
+#        serve-and-run.sh [--url URL] -- COMMAND [ARG ...]    (run COMMAND instead)
+#
+# The -- form exists because profile provisioning needs a served app too,
+# not just the test suite: provision.mjs completes the app's own onboarding
+# wizard (navigates to APP_URL, not just the extension's pages). scripts/
+# e2e-ensure-setup.sh calls `serve-and-run.sh -- bash setup.sh` for exactly
+# this, rather than duplicating the server lifecycle a second time.
 #
 # This script owns the server, so it decides the URL: an APP_URL inherited
 # from the environment is REPLACED with the one actually being served, and
@@ -34,11 +41,13 @@ READY_TIMEOUT="${E2E_SERVE_TIMEOUT:-900}"
 SERVE_LOG="${E2E_SERVE_LOG:-$PKG_ROOT/test-results/serve.log}"
 
 EXPLICIT_URL=""
+CUSTOM_CMD=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
     --url) [ $# -ge 2 ] || die "--url needs a URL"; EXPLICIT_URL="$2"; shift 2 ;;
     --url=*) EXPLICIT_URL="${1#--url=}"; shift ;;
+    --) CUSTOM_CMD=1; shift; break ;;
     *) break ;;
   esac
 done
@@ -118,7 +127,12 @@ fi
 # Override with APPROVE=human (and HEADFUL=1) to approve them by hand.
 export APPROVE="${APPROVE:-auto}"
 
-bash "$PKG_ROOT/scripts/run-all.sh" "$@"
+if [ "$CUSTOM_CMD" -eq 1 ]; then
+  [ $# -gt 0 ] || die "-- given with no command to run"
+  "$@"
+else
+  bash "$PKG_ROOT/scripts/run-all.sh" "$@"
+fi
 STATUS=$?
 
 # stop_server runs here via the EXIT trap, on success and failure alike.
