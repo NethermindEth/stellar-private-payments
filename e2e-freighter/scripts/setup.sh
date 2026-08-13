@@ -12,10 +12,10 @@ die() { echo "setup.sh: $*" >&2; exit 1; }
 step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 case "${1:-}" in
-  --force) exec bash "$SCRIPT_DIR/provision.sh" --force ;;
-  --add-account) exec bash "$SCRIPT_DIR/provision.sh" --add-account ;;
+  --force|--add-account|"") ;;
   -h|--help)
     cat >&2 <<'USAGE'
 Usage: setup.sh [--force] [--add-account]
@@ -35,9 +35,22 @@ Idempotent: with a good existing snapshot it verifies and exits.
   --add-account  Also import account B (E2E_ACCOUNT_D_SECRET).
 USAGE
     exit 0 ;;
-  "") ;;  # default: run provision with existing snapshot check
   *) die "unknown argument '$1'" ;;
 esac
 
-step "running the consolidated provision pipeline"
-bash "$SCRIPT_DIR/provision.sh"
+# Step 1, documented above but previously never actually run: provision.mjs
+# imports playwright directly (src/runner.mjs), so a fresh checkout with no
+# node_modules failed inside provisioning itself with ERR_MODULE_NOT_FOUND,
+# well past the point a human would think to check for a missing npm install.
+if [ ! -d "$PKG_ROOT/node_modules" ]; then
+  step "installing e2e-freighter npm dependencies: npm ci"
+  ( cd "$PKG_ROOT" && npm ci )
+fi
+
+case "${1:-}" in
+  --force) exec bash "$SCRIPT_DIR/provision.sh" --force ;;
+  --add-account) exec bash "$SCRIPT_DIR/provision.sh" --add-account ;;
+  *)
+    step "running the consolidated provision pipeline"
+    exec bash "$SCRIPT_DIR/provision.sh" ;;
+esac
