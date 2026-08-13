@@ -1,5 +1,34 @@
 name: E2E Web Client
 
+# PR #471 broke because the CI secret E2E_POOL_CONTRACT held a pool address
+# from a superseded deployment generation, and the workflow's own fallback
+# default baked the SAME stale address into the YAML as a literal — two
+# independent copies of a contract address, disconnected from
+# deployments.json, both wrong in the same way, with nothing to notice the
+# drift.
+#
+# The fix keeps two persistent account secrets (E2E_ACCOUNT_A/B_SECRET) but
+# never stores a pool address at all: the pool is always resolved fresh from
+# the COMMITTED deployments.json, every run. "Provision test accounts" below
+# then funds (only if unfunded) and registers (always, idempotently) those
+# two accounts against whatever pool that file currently names. So even if
+# main gets manually redeployed, the very next run re-registers the same
+# persistent accounts against the new pool automatically — no human has to
+# notice or update a secret for this to keep working, which is the failure
+# mode that actually broke #471.
+#
+# An earlier version of this fix deployed a fresh throwaway pool and fresh
+# throwaway accounts on every run instead of reusing persistent ones. That
+# also can't go stale, but it triggers real testnet spend and 3 friendbot
+# calls on every PR push (this codebase's own retry/backoff around friendbot
+# in e2e-accounts-setup.sh is there because friendbot is already flaky), and
+# leaves a new orphaned contract set behind every time with no way to reclaim
+# it before TTL/rent expiry. Reusing persistent accounts against the shared,
+# human-deployed pool avoids both: funding is a no-op check after the first
+# run, and no new contract is ever created by CI.
+#
+# Still on pull_request for now, deliberately: this needs to be watched
+# running for real before the trigger narrows to push:main only.
 on:
   push:
     branches: ["main"]
@@ -12,6 +41,17 @@ permissions:
 jobs:
   e2e-webclient:
     name: Pre-signing SDK E2E tests
+    # The e2e-testnet environment's deployment branch policy was relaxed to
+    # "all branches" because pull_request runs use the synthetic merge ref
+    # (refs/pull/N/merge), which never matches a protected-branch pattern —
+    # the branch-policy restriction was silently denying secrets to every PR
+    # run regardless of which branch it came from, not just forks. This
+    # condition is what actually keeps fork PRs out now: it skips the job
+    # entirely unless the PR's head repo is this repo, so an outside
+    # contributor's PR never even starts a job that would read these secrets.
+    # push and workflow_dispatch aren't pull_request events, so they pass
+    # through untouched.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
     runs-on: ubuntu-latest
     environment: e2e-testnet
@@ -38,6 +78,11 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        with:
+          version: v27.1.0
+
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
         with:
@@ -53,6 +98,21 @@ jobs:
           path: target/tmp/binaryen/binaryen-version_131
           key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
 
+      # circuits/build.rs generates a fresh Groth16 trusted-setup keypair for
+      # every circuit (~7 minutes) whenever `testdata/` is missing them — and
+      # `testdata/` is NOT part of what Swatinem/rust-cache restores (it lives
+      # at the repo root, outside target/), so a cache miss here means paying
+      # that cost in full regardless. cli-release.yml already avoids this by
+      # seeding testdata/ from the committed, already-generated keys instead
+      # of letting the build regenerate them; do the same here. testdata/ is
+      # not profile-scoped, so seeding it once covers both cargo invocations
+      # below.
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
       # BOTH profiles are needed: sdk/web's build.rs requires the debug
       # artifacts (target/circuits-artifacts/debug) to compile the debug test
       # binary, and the release artifacts feed the sdk/web npm dist the prover
@@ -62,6 +122,64 @@ jobs:
         run: |
           cargo build -p circuits
           cargo build -p circuits --release
+
+      # Imports the two persistent account secrets into the local `stellar
+      # keys` store under the aliases e2e-accounts-setup.sh expects
+      # (spp-e2e-a / spp-e2e-b — ALIAS_PREFIX-a/-b, no E2E_ACCOUNT_*_ALIAS
+      # override set here), so ensure_keypair sees them as already existing
+      # and never generates new ones.
+      #
+      # Writes the identity file directly instead of `stellar keys add
+      # --secret-key`: that command was confirmed broken for any
+      # non-interactive input (plain pipe or a real pty, with a
+      # cryptographically valid secret) on v25.1.0, which this workflow was
+      # pinned to at the time. Now on v27.1.0, where it does work — but the
+      # identity file format is trivial and stable regardless of version
+      # (stellar-cli's secret.rs: `Secret::SecretKey { secret_key: String }`,
+      # the same way `keys generate` writes `seed_phrase = "..."`), so this
+      # stays version-independent rather than leaning on interactive-prompt
+      # behavior that already broke once across a version bump.
+      - name: Import persistent test account keys
+        env:
+          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
+          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
+        run: |
+          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
+          mkdir -p "$CONFIG_DIR/identity"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
+          chmod 600 "$CONFIG_DIR/identity/spp-e2e-a.toml" "$CONFIG_DIR/identity/spp-e2e-b.toml"
+
+      # With both keypairs already resolving locally, do_provision() in
+      # e2e-accounts-setup.sh runs its normal idempotent sequence every time:
+      # skip keypair generation (already present), fund only if unfunded
+      # (persistent accounts stay funded forever after their first run), and
+      # unconditionally re-register (`spp onboard --register`, safe to
+      # repeat — same secret, same derived keys, written to whichever
+      # registry the freshly-resolved pool currently uses). That last step is
+      # the self-heal: it is what makes a manual redeploy of the shared pool
+      # something this job recovers from automatically instead of failing
+      # the way an earlier version of this workflow did. Builds the spp CLI
+      # itself on demand if missing.
+      - name: Provision test accounts
+        run: |
+          bash deployments/scripts/e2e-accounts-setup.sh
+          set -a
+          . deployments/testnet/.e2e-accounts.env
+          set +a
+          # Belt-and-braces: these ARE registered secrets, so GitHub already
+          # masks them from the `secrets.*` context, but that masking does
+          # not automatically extend to a value re-derived via a file read
+          # and re-exported through $GITHUB_ENV.
+          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
+          {
+            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
+            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
+            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
+            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
+            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
+          } >> "$GITHUB_ENV"
 
       # scripts/e2e-preflight.sh --check runs at the START of
       # e2e-browser-test.sh's main(), before ensure_dist — on a fresh
@@ -86,32 +204,26 @@ jobs:
       # readiness, and raises WASM_BINDGEN_TEST_TIMEOUT (the wasm-bindgen
       # default of 20s cannot cover real proving plus testnet confirmation).
       #
-      # CI preflight decision (plan step 3.5, option (c) from the 1.2
-      # contract): no .e2e-accounts.env exists here — every variable below
-      # is an injected secret instead. The preflight's env-file checks SKIP
-      # when CI is detected and the vars this suite needs are already
-      # exported (scripts/e2e-preflight.sh's ci_env_already_satisfied), so
-      # this stays a real tripwire rather than permanent noise. The
-      # env.compiletime.exported/env.vars.required checks still verify
-      # against the environment for real and can fail this job if a secret
-      # is missing — that is intentional, not something this relaxes.
+      # No .e2e-accounts.env exists here — "Provision test accounts" above
+      # already exported E2E_ACCOUNT_A/B_ADDRESS/SECRET and E2E_POOL_CONTRACT
+      # to $GITHUB_ENV, so they're plain OS env vars in this step, not
+      # secrets read from a file. They're read at COMPILE time via
+      # option_env! (sdk/web/src/client/e2e_tests.rs), so they must be set
+      # before the cargo invocation, which they are — both prior steps run
+      # first. The preflight's own env-file checks SKIP when CI is detected
+      # and these vars are already exported (scripts/e2e-preflight.sh's
+      # ci_env_already_satisfied), so that stays a real tripwire rather than
+      # permanent noise; env.compiletime.exported/env.vars.required still
+      # verify against the environment for real and can fail this job if a
+      # value is missing — that's intentional, not something this relaxes.
       #
       # --include-ignored is REQUIRED: the six e2e tests are #[ignore]d by
       # default so the PR-time wasm-test job can run this crate's other tests
-      # without secrets or a static server. Without this flag the gate passes
-      # having silently skipped every e2e test.
+      # without a deploy step or a static server. Without this flag the gate
+      # passes having silently skipped every e2e test.
       - name: Run browser e2e tests
         env:
           E2E_STATIC_ORIGIN: http://127.0.0.1:8099
-          # Read at COMPILE time via option_env! (sdk/web/src/client/e2e_tests.rs),
-          # so these must be set for the cargo invocation, not just at runtime.
-          E2E_ACCOUNT_A_ADDRESS: ${{ secrets.E2E_ACCOUNT_A_ADDRESS }}
-          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
-          E2E_ACCOUNT_B_ADDRESS: ${{ secrets.E2E_ACCOUNT_B_ADDRESS }}
-          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
-          # Native XLM pool used by the SDK browser e2e tests (compile-time
-          # option_env! in sdk/web/src/client/e2e_tests.rs).
-          E2E_POOL_CONTRACT: ${{ secrets.E2E_POOL_CONTRACT || 'CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV' }}
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
