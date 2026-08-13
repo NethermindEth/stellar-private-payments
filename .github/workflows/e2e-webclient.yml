@@ -1,19 +1,34 @@
 name: E2E Web Client
 
-# Deploys a fresh, throwaway set of contracts and test accounts on every run
-# (see "Deploy fresh test contracts" below) rather than depending on a
-# long-lived pool/account setup shared across runs. That shared setup is what
-# broke PR #471: the CI secret E2E_POOL_CONTRACT pointed at a pool from a
-# superseded deployment generation, and the workflow's own fallback default
-# baked the same stale address into the YAML — two independent copies of a
-# contract address, disconnected from deployments.json, both wrong in the
-# same way. A fresh deploy per run has nothing to go stale: every run's pool
-# and accounts are only ever compared against contracts it just created.
+# PR #471 broke because the CI secret E2E_POOL_CONTRACT held a pool address
+# from a superseded deployment generation, and the workflow's own fallback
+# default baked the SAME stale address into the YAML as a literal — two
+# independent copies of a contract address, disconnected from
+# deployments.json, both wrong in the same way, with nothing to notice the
+# drift.
 #
-# Still on pull_request for now, deliberately: this is a real behavior change
-# (a new deploy step, real testnet spend, no more static account secrets) and
-# it needs to be watched running for real before the trigger narrows to
-# push:main only.
+# The fix keeps two persistent account secrets (E2E_ACCOUNT_A/B_SECRET) but
+# never stores a pool address at all: the pool is always resolved fresh from
+# the COMMITTED deployments.json, every run. "Provision test accounts" below
+# then funds (only if unfunded) and registers (always, idempotently) those
+# two accounts against whatever pool that file currently names. So even if
+# main gets manually redeployed, the very next run re-registers the same
+# persistent accounts against the new pool automatically — no human has to
+# notice or update a secret for this to keep working, which is the failure
+# mode that actually broke #471.
+#
+# An earlier version of this fix deployed a fresh throwaway pool and fresh
+# throwaway accounts on every run instead of reusing persistent ones. That
+# also can't go stale, but it triggers real testnet spend and 3 friendbot
+# calls on every PR push (this codebase's own retry/backoff around friendbot
+# in e2e-accounts-setup.sh is there because friendbot is already flaky), and
+# leaves a new orphaned contract set behind every time with no way to reclaim
+# it before TTL/rent expiry. Reusing persistent accounts against the shared,
+# human-deployed pool avoids both: funding is a no-op check after the first
+# run, and no new contract is ever created by CI.
+#
+# Still on pull_request for now, deliberately: this needs to be watched
+# running for real before the trigger narrows to push:main only.
 on:
   push:
     branches: ["main"]
@@ -77,55 +92,48 @@ jobs:
       # binary, and the release artifacts feed the sdk/web npm dist the prover
       # fetches at runtime. Building only --release fails the test compile on a
       # fresh checkout (masked locally by pre-existing target/ artifacts).
-      #
-      # Independent of the deploy step below — deploy.sh reads verification
-      # keys from the COMMITTED deployments/testnet/circuit_keys/, not from
-      # these build outputs — so the order relative to it doesn't matter.
       - name: Build circuit artifacts
         run: |
           cargo build -p circuits
           cargo build -p circuits --release
 
-      # Deploys a throwaway deployer identity, ASP contracts, one verifier,
-      # and the native XLM pool the e2e tests actually exercise (the real
-      # testnet deployment also carries an EURC allowlist-blocklist pool for
-      # allowlist-blocklist testing, which this suite does not use — omitted
-      # here to avoid a second, needless verifier deploy every run).
-      #
-      # This OVERWRITES the checked-out deployments/testnet/deployments.json
-      # (never committed — the runner's copy only). Must run before both
-      # "Provision throwaway test accounts" (resolves the pool from this
-      # file) and "Build sdk/web dist" (embeds this file at compile time via
-      # include_str!, same as the spp CLI does).
-      - name: Deploy fresh test contracts
+      # Imports the two persistent account secrets into the local `stellar
+      # keys` store under the aliases e2e-accounts-setup.sh expects
+      # (spp-e2e-a / spp-e2e-b — ALIAS_PREFIX-a/-b, no E2E_ACCOUNT_*_ALIAS
+      # override set here), so ensure_keypair sees them as already existing
+      # and never generates new ones. `--secret-key` reads the S... key from
+      # stdin non-interactively; confirmed this works headless before relying
+      # on it here.
+      - name: Import persistent test account keys
+        env:
+          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
+          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
         run: |
-          stellar keys generate ci-deployer --network testnet --fund
-          deployments/scripts/deploy.sh testnet \
-            --deployer ci-deployer \
-            --asp-levels 10 \
-            --pool-levels 10 \
-            --max-deposit 1000000000 \
-            --policy-flags blocklist \
-            --pool "native:$(stellar contract id asset --asset native --network testnet)"
+          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
+          mkdir -p "$CONFIG_DIR"
+          echo "$E2E_ACCOUNT_A_SECRET" | stellar keys add spp-e2e-a --secret-key --config-dir "$CONFIG_DIR"
+          echo "$E2E_ACCOUNT_B_SECRET" | stellar keys add spp-e2e-b --secret-key --config-dir "$CONFIG_DIR"
 
-      # Generates fresh A/B keypairs, funds them via friendbot, and registers
-      # them against the pool deployed above — deployments/scripts/
-      # e2e-accounts-setup.sh with no existing env file always takes this
-      # first-run path, building the spp CLI itself on demand. Its output
-      # (deployments/testnet/.e2e-accounts.env) replaces what used to be
-      # E2E_ACCOUNT_A/B_ADDRESS/SECRET and E2E_POOL_CONTRACT secrets — those
-      # secrets described accounts registered against whichever deployment
-      # generation existed when someone last set them, which is exactly the
-      # drift that broke PR #471. Nothing here is a stored secret: every
-      # value is generated this run and gone when the runner is destroyed.
-      - name: Provision throwaway test accounts
+      # With both keypairs already resolving locally, do_provision() in
+      # e2e-accounts-setup.sh runs its normal idempotent sequence every time:
+      # skip keypair generation (already present), fund only if unfunded
+      # (persistent accounts stay funded forever after their first run), and
+      # unconditionally re-register (`spp onboard --register`, safe to
+      # repeat — same secret, same derived keys, written to whichever
+      # registry the freshly-resolved pool currently uses). That last step is
+      # the self-heal: it is what makes a manual redeploy of the shared pool
+      # something this job recovers from automatically instead of failing
+      # the way #471 did. Builds the spp CLI itself on demand if missing.
+      - name: Provision test accounts
         run: |
           bash deployments/scripts/e2e-accounts-setup.sh
           set -a
           . deployments/testnet/.e2e-accounts.env
           set +a
-          # Masked so a plaintext testnet secret key doesn't sit in the log,
-          # even though it is worthless beyond this run.
+          # Belt-and-braces: these ARE registered secrets, so GitHub already
+          # masks them from the `secrets.*` context, but that masking does
+          # not automatically extend to a value re-derived via a file read
+          # and re-exported through $GITHUB_ENV.
           echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
           {
@@ -139,8 +147,7 @@ jobs:
       # e2e-browser-test.sh builds sdk/web/dist on demand when it is missing,
       # but a fresh checkout has no cached dist and that build would then run
       # inside the timed test step. Build it explicitly here instead, matching
-      # the "Build circuit artifacts" step above. Must run after the deploy
-      # step: this embeds the just-written deployments.json via include_str!.
+      # the "Build circuit artifacts" step above.
       - name: Build sdk/web dist
         run: |
           npm ci --prefix sdk/web
