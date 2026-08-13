@@ -128,6 +128,21 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   await page.fill(SEL.unlockPasswordInput, password);
   await page.getByText(SEL.unlockButtonText, { exact: true }).click();
   await page.waitForTimeout(1000);
+  // A wrong password leaves Freighter sitting on this same unlock screen with
+  // no popup and no thrown error — previously this returned as if unlocked,
+  // so the wallet never injected a provider and every downstream failure
+  // surfaced three steps later at connectApp ("Connect Freighter still
+  // shown"), which looks like an app or connection bug and is neither. The
+  // real cause: the profile snapshot's wallet and the current
+  // E2E_FREIGHTER_PASSWORD were provisioned at different times and no longer
+  // match — e.g. .e2e-accounts.env regenerated after the snapshot was built.
+  if (page.url().includes('unlock-account')) {
+    throw new Error(
+      "unlockFreighter: still on the unlock screen after entering E2E_FREIGHTER_PASSWORD — " +
+      "it does not match this profile's wallet. The snapshot and .e2e-accounts.env must come " +
+      'from the same provisioning run; rebuild with: bash e2e-freighter/scripts/setup.sh --force',
+    );
+  }
   return page;
 }
 
