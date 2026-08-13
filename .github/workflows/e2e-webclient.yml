@@ -1,5 +1,19 @@
 name: E2E Web Client
 
+# Deploys a fresh, throwaway set of contracts and test accounts on every run
+# (see "Deploy fresh test contracts" below) rather than depending on a
+# long-lived pool/account setup shared across runs. That shared setup is what
+# broke PR #471: the CI secret E2E_POOL_CONTRACT pointed at a pool from a
+# superseded deployment generation, and the workflow's own fallback default
+# baked the same stale address into the YAML — two independent copies of a
+# contract address, disconnected from deployments.json, both wrong in the
+# same way. A fresh deploy per run has nothing to go stale: every run's pool
+# and accounts are only ever compared against contracts it just created.
+#
+# Still on pull_request for now, deliberately: this is a real behavior change
+# (a new deploy step, real testnet spend, no more static account secrets) and
+# it needs to be watched running for real before the trigger narrows to
+# push:main only.
 on:
   push:
     branches: ["main"]
@@ -38,6 +52,11 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@a048a57a75762458b487052e0021ea704a926bee # v25.1.0
+        with:
+          version: v25.1.0
+
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
         with:
@@ -58,15 +77,70 @@ jobs:
       # binary, and the release artifacts feed the sdk/web npm dist the prover
       # fetches at runtime. Building only --release fails the test compile on a
       # fresh checkout (masked locally by pre-existing target/ artifacts).
+      #
+      # Independent of the deploy step below — deploy.sh reads verification
+      # keys from the COMMITTED deployments/testnet/circuit_keys/, not from
+      # these build outputs — so the order relative to it doesn't matter.
       - name: Build circuit artifacts
         run: |
           cargo build -p circuits
           cargo build -p circuits --release
 
+      # Deploys a throwaway deployer identity, ASP contracts, one verifier,
+      # and the native XLM pool the e2e tests actually exercise (the real
+      # testnet deployment also carries an EURC allowlist-blocklist pool for
+      # allowlist-blocklist testing, which this suite does not use — omitted
+      # here to avoid a second, needless verifier deploy every run).
+      #
+      # This OVERWRITES the checked-out deployments/testnet/deployments.json
+      # (never committed — the runner's copy only). Must run before both
+      # "Provision throwaway test accounts" (resolves the pool from this
+      # file) and "Build sdk/web dist" (embeds this file at compile time via
+      # include_str!, same as the spp CLI does).
+      - name: Deploy fresh test contracts
+        run: |
+          stellar keys generate ci-deployer --network testnet --fund
+          deployments/scripts/deploy.sh testnet \
+            --deployer ci-deployer \
+            --asp-levels 10 \
+            --pool-levels 10 \
+            --max-deposit 1000000000 \
+            --policy-flags blocklist \
+            --pool "native:$(stellar contract id asset --asset native --network testnet)"
+
+      # Generates fresh A/B keypairs, funds them via friendbot, and registers
+      # them against the pool deployed above — deployments/scripts/
+      # e2e-accounts-setup.sh with no existing env file always takes this
+      # first-run path, building the spp CLI itself on demand. Its output
+      # (deployments/testnet/.e2e-accounts.env) replaces what used to be
+      # E2E_ACCOUNT_A/B_ADDRESS/SECRET and E2E_POOL_CONTRACT secrets — those
+      # secrets described accounts registered against whichever deployment
+      # generation existed when someone last set them, which is exactly the
+      # drift that broke PR #471. Nothing here is a stored secret: every
+      # value is generated this run and gone when the runner is destroyed.
+      - name: Provision throwaway test accounts
+        run: |
+          bash deployments/scripts/e2e-accounts-setup.sh
+          set -a
+          . deployments/testnet/.e2e-accounts.env
+          set +a
+          # Masked so a plaintext testnet secret key doesn't sit in the log,
+          # even though it is worthless beyond this run.
+          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
+          {
+            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
+            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
+            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
+            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
+            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
+          } >> "$GITHUB_ENV"
+
       # e2e-browser-test.sh builds sdk/web/dist on demand when it is missing,
       # but a fresh checkout has no cached dist and that build would then run
       # inside the timed test step. Build it explicitly here instead, matching
-      # the "Build circuit artifacts" step above.
+      # the "Build circuit artifacts" step above. Must run after the deploy
+      # step: this embeds the just-written deployments.json via include_str!.
       - name: Build sdk/web dist
         run: |
           npm ci --prefix sdk/web
@@ -83,27 +157,20 @@ jobs:
       # WASM_BINDGEN_TEST_TIMEOUT (the wasm-bindgen default of 20s cannot
       # cover real proving plus testnet confirmation).
       #
-      # There is no .e2e-accounts.env here — every E2E_* variable below is an
-      # injected secret instead. They are read at COMPILE time via option_env!,
-      # so a missing secret does not fail loudly; it compiles the test with the
-      # value absent and the test then panics with its own explanatory message.
+      # E2E_ACCOUNT_A/B_ADDRESS/SECRET and E2E_POOL_CONTRACT are no longer
+      # secrets — "Provision throwaway test accounts" above already exported
+      # them to $GITHUB_ENV, so they're plain OS env vars in this step like
+      # any other. They are read at COMPILE time via option_env!
+      # (sdk/web/src/client/e2e_tests.rs), so they must be set before the
+      # cargo invocation, which they are — both prior steps run first.
       #
       # --include-ignored is REQUIRED: the six e2e tests are #[ignore]d by
       # default so the PR-time wasm-test job can run this crate's other tests
-      # without secrets or a static server. Without this flag the gate passes
-      # having silently skipped every e2e test.
+      # without a deploy step or a static server. Without this flag the gate
+      # passes having silently skipped every e2e test.
       - name: Run browser e2e tests
         env:
           E2E_STATIC_ORIGIN: http://127.0.0.1:8099
-          # Read at COMPILE time via option_env! (sdk/web/src/client/e2e_tests.rs),
-          # so these must be set for the cargo invocation, not just at runtime.
-          E2E_ACCOUNT_A_ADDRESS: ${{ secrets.E2E_ACCOUNT_A_ADDRESS }}
-          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
-          E2E_ACCOUNT_B_ADDRESS: ${{ secrets.E2E_ACCOUNT_B_ADDRESS }}
-          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
-          # Native XLM pool used by the SDK browser e2e tests (compile-time
-          # option_env! in sdk/web/src/client/e2e_tests.rs).
-          E2E_POOL_CONTRACT: ${{ secrets.E2E_POOL_CONTRACT || 'CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV' }}
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
