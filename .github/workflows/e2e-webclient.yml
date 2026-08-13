@@ -79,9 +79,9 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@a048a57a75762458b487052e0021ea704a926bee # v25.1.0
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
         with:
-          version: v25.1.0
+          version: v27.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
@@ -127,18 +127,28 @@ jobs:
       # keys` store under the aliases e2e-accounts-setup.sh expects
       # (spp-e2e-a / spp-e2e-b — ALIAS_PREFIX-a/-b, no E2E_ACCOUNT_*_ALIAS
       # override set here), so ensure_keypair sees them as already existing
-      # and never generates new ones. `--secret-key` reads the S... key from
-      # stdin non-interactively; confirmed this works headless before relying
-      # on it here.
+      # and never generates new ones.
+      #
+      # Writes the identity file directly instead of `stellar keys add
+      # --secret-key`: that command was confirmed broken for any
+      # non-interactive input (plain pipe or a real pty, with a
+      # cryptographically valid secret) on v25.1.0, which this workflow was
+      # pinned to at the time. Now on v27.1.0, where it does work — but the
+      # identity file format is trivial and stable regardless of version
+      # (stellar-cli's secret.rs: `Secret::SecretKey { secret_key: String }`,
+      # the same way `keys generate` writes `seed_phrase = "..."`), so this
+      # stays version-independent rather than leaning on interactive-prompt
+      # behavior that already broke once across a version bump.
       - name: Import persistent test account keys
         env:
           E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
           E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
         run: |
           CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
-          mkdir -p "$CONFIG_DIR"
-          echo "$E2E_ACCOUNT_A_SECRET" | stellar keys add spp-e2e-a --secret-key --config-dir "$CONFIG_DIR"
-          echo "$E2E_ACCOUNT_B_SECRET" | stellar keys add spp-e2e-b --secret-key --config-dir "$CONFIG_DIR"
+          mkdir -p "$CONFIG_DIR/identity"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
+          chmod 600 "$CONFIG_DIR/identity/spp-e2e-a.toml" "$CONFIG_DIR/identity/spp-e2e-b.toml"
 
       # With both keypairs already resolving locally, do_provision() in
       # e2e-accounts-setup.sh runs its normal idempotent sequence every time:
