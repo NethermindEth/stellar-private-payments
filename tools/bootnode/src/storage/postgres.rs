@@ -1,6 +1,7 @@
 use super::{
     CompressStats, InsertGetEventsPage, KvState, PageMeta, Storage, apply_result_cursor,
     plan_empty_compression,
+    tables::{GET_EVENTS_PAGES, INDEXER_STATE},
 };
 use crate::messages::GetEventsResponse;
 use anyhow::{Context, Result, bail};
@@ -35,13 +36,15 @@ impl Postgres {
 
     pub async fn init(&self) -> Result<()> {
         let mut client = self.pool.get().await?;
-        migrate(&mut client).await?;
+        super::migrations::migrate(&mut client).await?;
         client
             .execute(
-                r#"
-INSERT INTO indexer_state (deployment_id) VALUES ($1)
+                &format!(
+                    r#"
+INSERT INTO {INDEXER_STATE} (deployment_id) VALUES ($1)
 ON CONFLICT (deployment_id) DO NOTHING
-"#,
+"#
+                ),
                 &[&self.deployment_id],
             )
             .await?;
@@ -55,12 +58,14 @@ ON CONFLICT (deployment_id) DO NOTHING
     async fn list_page_meta(&self, client: &Client) -> Result<Vec<PageMeta>> {
         let rows = client
             .query(
-                r#"
+                &format!(
+                    r#"
 SELECT id, cursor_in, start_ledger, cursor_out, last_event_ledger, latest_ledger
-FROM get_events_pages
+FROM {GET_EVENTS_PAGES}
 WHERE deployment_id = $1
 ORDER BY id
-"#,
+"#
+                ),
                 &[&self.deployment_id()],
             )
             .await?;
@@ -93,7 +98,9 @@ ORDER BY id
     async fn load_result(&self, client: &Client, id: i64) -> Result<GetEventsResponse> {
         let row = client
             .query_one(
-                "SELECT result FROM get_events_pages WHERE id = $1 AND deployment_id = $2",
+                &format!(
+                    "SELECT result FROM {GET_EVENTS_PAGES} WHERE id = $1 AND deployment_id = $2"
+                ),
                 &[&id, &self.deployment_id()],
             )
             .await
@@ -102,106 +109,6 @@ ORDER BY id
         Ok(result)
     }
 }
-
-async fn migrate(client: &mut Client) -> Result<()> {
-    client
-        .batch_execute(
-            r#"
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
-  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-"#,
-        )
-        .await?;
-
-    let applied = applied_versions(client).await?;
-    for (version, sql) in MIGRATIONS {
-        if applied.contains(version) {
-            continue;
-        }
-        let tx = client.transaction().await?;
-        tx.batch_execute(sql)
-            .await
-            .with_context(|| format!("failed applying schema migration {version}"))?;
-        tx.execute(
-            "INSERT INTO schema_migrations (version) VALUES ($1)",
-            &[version],
-        )
-        .await?;
-        tx.commit().await?;
-        tracing::info!(version, "applied schema migration");
-    }
-    Ok(())
-}
-
-async fn applied_versions(client: &Client) -> Result<std::collections::HashSet<i32>> {
-    let rows = client
-        .query("SELECT version FROM schema_migrations", &[])
-        .await?;
-    let mut versions = std::collections::HashSet::with_capacity(rows.len());
-    for row in rows {
-        versions.insert(row.get(0));
-    }
-    Ok(versions)
-}
-
-/// Ordered schema migrations. Each runs at most once inside a transaction.
-///
-/// Version 1 introduces deployment-namespaced pages + KV. Pre-v1 tables are
-/// dropped (no data migration).
-/// Version 2 tracks how far empty-page compression has advanced.
-const MIGRATIONS: &[(i32, &str)] = &[
-    (
-        1,
-        r#"
-DROP TABLE IF EXISTS get_events_pages CASCADE;
-DROP TABLE IF EXISTS indexer_state CASCADE;
-
-CREATE TABLE indexer_state (
-  deployment_id TEXT PRIMARY KEY,
-  last_cursor TEXT,
-  last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
-  ledger_tip INTEGER NOT NULL DEFAULT 0,
-  in_sync BOOLEAN NOT NULL DEFAULT false,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE get_events_pages (
-  id BIGSERIAL PRIMARY KEY,
-  deployment_id TEXT NOT NULL,
-  cursor_in TEXT,
-  start_ledger INTEGER,
-  request JSONB NOT NULL,
-  result JSONB NOT NULL,
-  cursor_out TEXT NOT NULL,
-  last_event_ledger INTEGER,
-  latest_ledger INTEGER NOT NULL,
-  oldest_ledger INTEGER NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE UNIQUE INDEX get_events_pages_deployment_cursor_in_uniq
-  ON get_events_pages(deployment_id, cursor_in) WHERE cursor_in IS NOT NULL;
-CREATE UNIQUE INDEX get_events_pages_deployment_start_ledger_uniq
-  ON get_events_pages(deployment_id, start_ledger) WHERE cursor_in IS NULL;
-CREATE INDEX get_events_pages_latest_ledger_idx
-  ON get_events_pages(latest_ledger);
-CREATE INDEX get_events_pages_cursor_out_ledger_idx
-  ON get_events_pages(deployment_id, cursor_out)
-  WHERE last_event_ledger IS NOT NULL;
-CREATE INDEX get_events_pages_deployment_id_idx
-  ON get_events_pages(deployment_id);
-"#,
-    ),
-    (
-        2,
-        r#"
-ALTER TABLE indexer_state
-  ADD COLUMN IF NOT EXISTS last_empty_compress_ledger INTEGER NOT NULL DEFAULT 0;
-"#,
-    ),
-];
 
 #[async_trait]
 impl Storage for Postgres {
@@ -215,10 +122,12 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                r#"
+                &format!(
+                    r#"
 SELECT last_cursor, last_fully_indexed_ledger, ledger_tip, in_sync, last_empty_compress_ledger
-FROM indexer_state WHERE deployment_id = $1
-"#,
+FROM {INDEXER_STATE} WHERE deployment_id = $1
+"#
+                ),
                 &[&self.deployment_id()],
             )
             .await?;
@@ -244,13 +153,15 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                "UPDATE indexer_state SET last_cursor = $1, updated_at = now() WHERE deployment_id = $2",
+                &format!(
+                    "UPDATE {INDEXER_STATE} SET last_cursor = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
                 &[&cursor, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {
             bail!(
-                "indexer_state row missing for deployment_id={}",
+                "bootnode_indexer_state row missing for deployment_id={}",
                 self.deployment_id()
             );
         }
@@ -262,13 +173,15 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                "UPDATE indexer_state SET last_fully_indexed_ledger = $1, updated_at = now() WHERE deployment_id = $2",
+                &format!(
+                    "UPDATE {INDEXER_STATE} SET last_fully_indexed_ledger = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
                 &[&ledger, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {
             bail!(
-                "indexer_state row missing for deployment_id={}",
+                "bootnode_indexer_state row missing for deployment_id={}",
                 self.deployment_id()
             );
         }
@@ -281,13 +194,15 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                "UPDATE indexer_state SET ledger_tip = $1, updated_at = now() WHERE deployment_id = $2",
+                &format!(
+                    "UPDATE {INDEXER_STATE} SET ledger_tip = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
                 &[&ledger_tip, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {
             bail!(
-                "indexer_state row missing for deployment_id={}",
+                "bootnode_indexer_state row missing for deployment_id={}",
                 self.deployment_id()
             );
         }
@@ -298,13 +213,15 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                "UPDATE indexer_state SET in_sync = $1, updated_at = now() WHERE deployment_id = $2",
+                &format!(
+                    "UPDATE {INDEXER_STATE} SET in_sync = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
                 &[&in_sync, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {
             bail!(
-                "indexer_state row missing for deployment_id={}",
+                "bootnode_indexer_state row missing for deployment_id={}",
                 self.deployment_id()
             );
         }
@@ -317,13 +234,15 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                "UPDATE indexer_state SET last_empty_compress_ledger = $1, updated_at = now() WHERE deployment_id = $2",
+                &format!(
+                    "UPDATE {INDEXER_STATE} SET last_empty_compress_ledger = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
                 &[&ledger, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {
             bail!(
-                "indexer_state row missing for deployment_id={}",
+                "bootnode_indexer_state row missing for deployment_id={}",
                 self.deployment_id()
             );
         }
@@ -351,12 +270,14 @@ FROM indexer_state WHERE deployment_id = $1
         let client = self.pool.get().await?;
         client
             .execute(
-                r#"
-INSERT INTO get_events_pages
+                &format!(
+                    r#"
+INSERT INTO {GET_EVENTS_PAGES}
   (deployment_id, cursor_in, start_ledger, request, result, cursor_out, last_event_ledger, latest_ledger, oldest_ledger)
 VALUES
   ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-"#,
+"#
+                ),
                 &[
                     &self.deployment_id(),
                     &page.cursor_in,
@@ -392,8 +313,9 @@ VALUES
         let client = self.pool.get().await?;
         let updated = client
             .execute(
-                r#"
-UPDATE get_events_pages
+                &format!(
+                    r#"
+UPDATE {GET_EVENTS_PAGES}
 SET request = $1,
     result = $2,
     cursor_out = $3,
@@ -401,7 +323,8 @@ SET request = $1,
     latest_ledger = $5,
     oldest_ledger = $6
 WHERE deployment_id = $7 AND cursor_in = $8
-"#,
+"#
+                ),
                 &[
                     &Json(page.request),
                     &Json(page.result),
@@ -427,11 +350,13 @@ WHERE deployment_id = $7 AND cursor_in = $8
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                r#"
-SELECT last_event_ledger FROM get_events_pages
+                &format!(
+                    r#"
+SELECT last_event_ledger FROM {GET_EVENTS_PAGES}
 WHERE deployment_id = $1 AND cursor_out = $2 AND last_event_ledger IS NOT NULL
 LIMIT 1
-"#,
+"#
+                ),
                 &[&self.deployment_id(), &cursor],
             )
             .await?;
@@ -451,7 +376,9 @@ LIMIT 1
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in = $2 LIMIT 1",
+                &format!(
+                    "SELECT result FROM {GET_EVENTS_PAGES} WHERE deployment_id = $1 AND cursor_in = $2 LIMIT 1"
+                ),
                 &[&self.deployment_id(), &cursor],
             )
             .await?;
@@ -470,7 +397,9 @@ LIMIT 1
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in IS NULL AND start_ledger = $2 LIMIT 1",
+                &format!(
+                    "SELECT result FROM {GET_EVENTS_PAGES} WHERE deployment_id = $1 AND cursor_in IS NULL AND start_ledger = $2 LIMIT 1"
+                ),
                 &[&self.deployment_id(), &start_ledger],
             )
             .await?;
@@ -512,11 +441,13 @@ LIMIT 1
                 .context("latest_ledger exceeds postgres INTEGER range")?;
             let updated = tx
                 .execute(
-                    r#"
-UPDATE get_events_pages
+                    &format!(
+                        r#"
+UPDATE {GET_EVENTS_PAGES}
 SET cursor_out = $1, result = $2, latest_ledger = $3
 WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
-"#,
+"#
+                    ),
                     &[
                         &update.cursor_out,
                         &Json(result),
@@ -537,7 +468,9 @@ WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
         for id in &plan.deletes {
             let deleted = tx
                 .execute(
-                    "DELETE FROM get_events_pages WHERE id = $1 AND deployment_id = $2 AND last_event_ledger IS NULL",
+                    &format!(
+                        "DELETE FROM {GET_EVENTS_PAGES} WHERE id = $1 AND deployment_id = $2 AND last_event_ledger IS NULL"
+                    ),
                     &[id, &self.deployment_id()],
                 )
                 .await?;
@@ -555,7 +488,9 @@ WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in = $2 AND last_event_ledger IS NULL LIMIT 1",
+                &format!(
+                    "SELECT result FROM {GET_EVENTS_PAGES} WHERE deployment_id = $1 AND cursor_in = $2 AND last_event_ledger IS NULL LIMIT 1"
+                ),
                 &[&self.deployment_id(), &cursor_in],
             )
             .await?;
@@ -566,11 +501,13 @@ WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
         result.latest_ledger = latest_ledger;
         let updated = client
             .execute(
-                r#"
-UPDATE get_events_pages
+                &format!(
+                    r#"
+UPDATE {GET_EVENTS_PAGES}
 SET result = $1, latest_ledger = $2
 WHERE deployment_id = $3 AND cursor_in = $4 AND last_event_ledger IS NULL
-"#,
+"#
+                ),
                 &[&Json(result), &latest, &self.deployment_id(), &cursor_in],
             )
             .await?;

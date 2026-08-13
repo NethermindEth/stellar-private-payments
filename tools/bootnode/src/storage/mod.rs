@@ -1,6 +1,8 @@
 mod compress;
 mod in_memory;
+mod migrations;
 mod postgres;
+mod tables;
 
 pub use compress::{
     CompressStats, CompressUpdate, PageMeta, apply_result_cursor, plan_empty_compression,
