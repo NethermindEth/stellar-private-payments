@@ -26,6 +26,9 @@ concurrency:
 jobs:
   e2e-freighter:
     name: Freighter e2e
+    # Fork PRs must not run this job: it reads the e2e-testnet environment's
+    # secrets. Same guard as e2e-webclient.yml.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment: e2e-testnet
     timeout-minutes: 75
@@ -57,6 +60,13 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
+      # e2e-accounts-setup.sh needs the stellar CLI to fund/register the four
+      # shared testnet accounts; without it the provisioning step below fails.
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        with:
+          version: v27.1.0
+
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
         with:
@@ -80,15 +90,100 @@ jobs:
           fi
           echo "E2E_CHROMIUM_PATH=$CHROMIUM_PATH" >> "$GITHUB_ENV"
 
+      # On a miss build.sh downloads and sha256-verifies binaryen itself; this
+      # only persists the extracted tree between runs (same as webclient).
+      - name: Cache binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+
+      # circuits/build.rs regenerates a fresh Groth16 trusted-setup keypair for
+      # every circuit (~7 minutes) whenever testdata/ lacks them — and
+      # testdata/ is NOT restored by rust-cache (it lives outside target/).
+      # Seed it from the committed keys instead (same as webclient).
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      # Both profiles: make serve (via serve-and-run.sh below) serves the
+      # release artifacts, and spp builds from the debug profile. Building
+      # explicitly here keeps the served-app cold build short.
+      - name: Build circuit artifacts
+        run: |
+          cargo build -p circuits
+          cargo build -p circuits --release
+
+      # Imports the persistent account secrets into the local stellar keys
+      # store under the aliases e2e-accounts-setup.sh expects (spp-e2e-a/b/c),
+      # so ensure_keypair sees them as already existing and never generates
+      # new ones. Writes the identity file directly instead of `stellar keys
+      # add --secret-key` — the same version-independent approach webclient
+      # uses (that command was confirmed broken for non-interactive input on
+      # v25.1.0; the identity file format is trivial and stable).
+      - name: Import persistent test account keys
+        env:
+          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
+          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
+          E2E_ACCOUNT_C_SECRET: ${{ secrets.E2E_ACCOUNT_C_SECRET }}
+        run: |
+          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
+          mkdir -p "$CONFIG_DIR/identity"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_C_SECRET" > "$CONFIG_DIR/identity/spp-e2e-c.toml"
+          chmod 600 "$CONFIG_DIR/identity/"*.toml
+
+      # Self-healing account provisioning, identical to webclient: A/B/C
+      # already resolve from the tomls above (no regeneration), D is
+      # generated, all four are funded only if unfunded and unconditionally
+      # re-registered against whatever pool deployments.json currently names.
+      # That re-registration is what recovers from a manual redeploy of the
+      # shared pool without a human noticing — the "No local registration
+      # found" failure class. Builds spp on demand if missing.
+      - name: Provision test accounts
+        run: |
+          bash deployments/scripts/e2e-accounts-setup.sh
+          set -a
+          . deployments/testnet/.e2e-accounts.env
+          set +a
+          # Belt-and-braces: these ARE registered secrets, so GitHub already
+          # masks them from the secrets.* context, but that masking does not
+          # automatically extend to a value re-derived via a file read and
+          # re-exported through $GITHUB_ENV.
+          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
+          {
+            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
+            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
+            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
+            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
+            echo "E2E_ACCOUNT_C_ADDRESS=$E2E_ACCOUNT_C_ADDRESS"
+            echo "E2E_ACCOUNT_C_SECRET=$E2E_ACCOUNT_C_SECRET"
+            echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
+            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
+          } >> "$GITHUB_ENV"
+
       # The profile is generated fresh on every run — nothing is stored in
       # releases, caches, or the repo. setup.sh's headed steps (Freighter
       # provisioning, app onboarding wizard) get a virtual display from xvfb.
+      # The onboarding wizard navigates to APP_URL, so setup must run through
+      # serve-and-run.sh (the -- form) exactly like e2e-ensure-setup.sh does
+      # locally: it builds+serves the app on :8000, exports APP_URL, and stops
+      # the server afterwards. Without it provisioning dies with
+      # "APP_URL is not set".
+      # E2E_ACCOUNT_C_SECRET/ADDRESS come from the Provision step above; only
+      # the CI-only wallet password is a secret here.
       - name: Generate Freighter profile snapshot
         env:
           E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
-          E2E_ACCOUNT_C_SECRET: ${{ secrets.E2E_ACCOUNT_C_SECRET }}
-          E2E_ACCOUNT_C_ADDRESS: ${{ secrets.E2E_ACCOUNT_C_ADDRESS }}
-        run: xvfb-run -a bash e2e-freighter/scripts/setup.sh
+          # Cold `make serve` (circuits + wasm SDK) takes longer than the
+          # default 900s on a fresh runner, same as the test step below.
+          E2E_SERVE_TIMEOUT: "1800"
+        run: xvfb-run -a bash e2e-freighter/scripts/serve-and-run.sh -- bash e2e-freighter/scripts/setup.sh
 
       # Empty = the whole suite. run-all.sh takes the subset as arguments.
       - name: Select tests
@@ -106,18 +201,15 @@ jobs:
       # exercise identical wiring.
       #
       # run-all.sh runs scripts/e2e-preflight.sh --check --suite freighter once
-      # before the tests. No .e2e-accounts.env exists here — every var below is
-      # an injected secret instead, so the preflight's env-file checks SKIP when
-      # CI is detected while env.vars.required still verifies against the
-      # environment for real. chain.accounts.* SKIP on CI, trusting the account
-      # state a human verified once before copying the secrets in.
+      # before the tests. The account vars were exported to $GITHUB_ENV by the
+      # Provision step above (no .e2e-accounts.env is committed), so the
+      # preflight's env-file checks SKIP when CI is detected while
+      # env.vars.required still verifies against the environment for real, and
+      # chain.accounts.* now runs for real — they were registered moments ago.
       - name: Run Freighter tests
         env:
           APPROVE: auto
           E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
-          # Transfer recipient for 05/10/11 (registered address). No env file
-          # exists in CI, so every var a test reads must be set here.
-          E2E_ACCOUNT_D_ADDRESS: ${{ secrets.E2E_ACCOUNT_D_ADDRESS }}
           # A cold CI build (circuits + wasm SDK) is slower than a warm local one.
           E2E_SERVE_TIMEOUT: "1800"
         run: bash e2e-freighter/scripts/serve-and-run.sh ${{ steps.select.outputs.tests }}
