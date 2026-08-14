@@ -97,21 +97,29 @@ function onEnterUnlessBusy(input, button, handler) {
     });
 }
 
-// Builds a confirmation-dialog row with the number of transactions the action
-// requires. Best-effort only: a failed estimate must not block the action.
-async function txCountRow(amountValue) {
+// Best-effort estimate of how many on-chain transactions an amount requires.
+// Returns null on any failure — the confirmation dialog and submit path already
+// surface anything that truly blocks the operation.
+async function estimateTxCount(amountValue) {
     try {
         const session = await ensureAppPool();
         const estimate = await session.estimate(amountValue);
-        const txCount = estimate?.txCount;
-        if (!txCount) return null;
-        return {
-            label: 'Transactions',
-            value: `${txCount} transaction${txCount === 1 ? '' : 's'}`,
-        };
+        const txCount = Number(estimate?.txCount ?? 0);
+        return txCount > 0 ? txCount : null;
     } catch {
         return null;
     }
+}
+
+// Builds a confirmation-dialog row with the number of transactions the action
+// requires. Best-effort only: a failed estimate must not block the action.
+async function txCountRow(amountValue) {
+    const txCount = await estimateTxCount(amountValue);
+    if (!txCount) return null;
+    return {
+        label: 'Transactions',
+        value: `${txCount} transaction${txCount === 1 ? '' : 's'}`,
+    };
 }
 
 // Re-estimate callbacks for every bound amount input, so a pool change can
@@ -125,10 +133,7 @@ function clearCostHint(hintId) {
 
 // Live "this will take N transactions" hint under an amount input, refreshed as
 // the user types. Only a split is worth flagging, so a single-transaction amount
-// leaves the hint empty. Best-effort like `txCountRow`: a disconnected wallet or
-// a failed estimate clears the hint rather than reporting an error, since the
-// confirmation dialog and submit path already surface anything that truly blocks
-// the operation.
+// leaves the hint empty.
 function bindAmountCostHint(input, hint) {
     if (!input || !hint) return;
     let timer = null;
@@ -145,17 +150,11 @@ function bindAmountCostHint(input, hint) {
             return;
         }
         timer = setTimeout(async () => {
-            try {
-                const session = await ensureAppPool();
-                const estimate = await session.estimate(amount.value);
-                if (current !== seq) return;
-                const txCount = Number(estimate?.txCount ?? 0);
-                hint.textContent = txCount > 1
-                    ? `This amount requires ${txCount} transactions to complete.`
-                    : '';
-            } catch {
-                if (current === seq) hint.textContent = '';
-            }
+            const txCount = await estimateTxCount(amount.value);
+            if (current !== seq) return;
+            hint.textContent = txCount && txCount > 1
+                ? `This amount requires ${txCount} transactions to complete.`
+                : '';
         }, ESTIMATE_DEBOUNCE_MS);
     };
 
@@ -412,7 +411,10 @@ export const Transactions = {
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
-        App.events.addEventListener('pool:selected', refreshCostHints);
+        // Wait for pool.js to publish the new session rather than racing it on
+        // pool:selected — otherwise the debounced estimate can trigger a second
+        // concurrent createAppPool while the first is still in-flight.
+        App.events.addEventListener('pool:session-ready', refreshCostHints);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success');
