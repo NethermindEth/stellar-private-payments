@@ -1,0 +1,32 @@
+[package]
+name = "pool-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Non-contract infrastructure shared by the pool and pool-gvk contracts"
+
+# Deliberately no `cdylib`: this crate must never contain a `#[contract]` or
+# `#[contractimpl]`. Soroban's `#[contractimpl]` emits `#[no_mangle] extern "C"`
+# exports that survive dead-code elimination, so anything with one cannot be
+# shared between two contract crates without colliding at link time. Keeping
+# this crate free of them is what lets both `pool` and `pool-gvk` depend on it.
+[lib]
+crate-type = ["lib"]
+doctest = false
+
+[dependencies]
+# workspace
+contract-types.workspace = true
+soroban-utils.workspace = true
+
+# external
+soroban-sdk.workspace = true
+
+[dev-dependencies]
+# external
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[lints]
+workspace = true

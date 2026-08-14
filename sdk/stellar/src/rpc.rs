@@ -182,6 +182,11 @@ pub struct GetLedgerEntriesResponse {
 pub struct ContractDataBulkRequest<'a> {
     pub contract_id: &'a str,
     pub enum_keys: Vec<&'a str>,
+    /// Enum keys that may legitimately be absent: fetched the same way as
+    /// `enum_keys`, but a missing entry is reported as absent rather than as
+    /// `Error::MissingRequiredContractKeys`. Used for keys that only exist on
+    /// some deployments of a contract family.
+    pub optional_enum_keys: Vec<&'a str>,
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
@@ -457,6 +462,7 @@ impl Client {
         &self,
         contract_id: &str,
         enum_keys: &[&'a str],
+        optional_enum_keys: &[&'a str],
         valued_keys: &[(&'a str, u32)],
     ) -> Result<Vec<(LedgerKey, &'a str, bool)>, Error> {
         let contract =
@@ -467,6 +473,7 @@ impl Client {
         let mut out = Vec::with_capacity(
             1usize
                 .saturating_add(enum_keys.len())
+                .saturating_add(optional_enum_keys.len())
                 .saturating_add(valued_keys.len()),
         );
 
@@ -480,9 +487,14 @@ impl Client {
             false,
         ));
 
-        for variant in enum_keys {
+        let enum_specs = enum_keys
+            .iter()
+            .map(|variant| (*variant, true))
+            .chain(optional_enum_keys.iter().map(|variant| (*variant, false)));
+
+        for (variant, required) in enum_specs {
             let symbol =
-                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+                xdr::ScSymbol::try_from(variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
             let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
 
             out.push((
@@ -491,8 +503,8 @@ impl Client {
                     key: xdr::ScVal::Vec(Some(sc_vec)),
                     durability: xdr::ContractDataDurability::Persistent,
                 }),
-                *variant,
-                true,
+                variant,
+                required,
             ));
         }
 
@@ -534,6 +546,7 @@ impl Client {
             let specs = self.build_contract_data_key_specs(
                 request.contract_id,
                 request.enum_keys.as_slice(),
+                request.optional_enum_keys.as_slice(),
                 request.valued_keys.as_slice(),
             )?;
 
@@ -714,6 +727,86 @@ fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TEST_CONTRACT_ID: &str = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+
+    fn test_client() -> Client {
+        Client::new("https://example.org").expect("client")
+    }
+
+    /// `AdminViewKey`/`GvkMode` exist only on `contracts/pool-gvk`
+    /// deployments. Requesting them as required keys makes
+    /// `get_contract_data_bulk` fail for every `contracts/pool` deployment,
+    /// so they must be marked optional.
+    #[test]
+    fn optional_enum_keys_are_not_required() {
+        let specs = test_client()
+            .build_contract_data_key_specs(
+                TEST_CONTRACT_ID,
+                &["Admin", "PolicyFlags"],
+                &["AdminViewKey", "GvkMode"],
+                &[],
+            )
+            .expect("key specs");
+
+        let required: Vec<&str> = specs
+            .iter()
+            .filter(|(_, _, required)| *required)
+            .map(|(_, name, _)| *name)
+            .collect();
+        let optional: Vec<&str> = specs
+            .iter()
+            .filter(|(_, _, required)| !*required)
+            .map(|(_, name, _)| *name)
+            .collect();
+
+        assert_eq!(required, vec!["Admin", "PolicyFlags"]);
+        assert_eq!(
+            optional,
+            vec!["__contract_instance", "AdminViewKey", "GvkMode"]
+        );
+    }
+
+    /// Moving a key between `enum_keys` and `optional_enum_keys` must change
+    /// only its required flag, never which ledger entry gets fetched.
+    #[test]
+    fn optional_enum_keys_build_the_same_ledger_key_as_required_ones() {
+        let client = test_client();
+        let as_required = client
+            .build_contract_data_key_specs(TEST_CONTRACT_ID, &["GvkMode"], &[], &[])
+            .expect("required key specs");
+        let as_optional = client
+            .build_contract_data_key_specs(TEST_CONTRACT_ID, &[], &["GvkMode"], &[])
+            .expect("optional key specs");
+
+        let (required_key, required_name, required_flag) =
+            as_required.last().expect("required spec");
+        let (optional_key, optional_name, optional_flag) =
+            as_optional.last().expect("optional spec");
+
+        assert_eq!(required_key, optional_key);
+        assert_eq!(required_name, optional_name);
+        assert!(*required_flag);
+        assert!(!*optional_flag);
+    }
+
+    #[test]
+    fn valued_keys_stay_required_alongside_optional_enum_keys() {
+        let specs = test_client()
+            .build_contract_data_key_specs(
+                TEST_CONTRACT_ID,
+                &["CurrentRootIndex"],
+                &["GvkMode"],
+                &[("Root", 3)],
+            )
+            .expect("key specs");
+
+        let root = specs
+            .iter()
+            .find(|(_, name, _)| *name == "Root")
+            .expect("Root spec");
+        assert!(root.2);
+    }
 
     #[test]
     fn parsing_range_error() {

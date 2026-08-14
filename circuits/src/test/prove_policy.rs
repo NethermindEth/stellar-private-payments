@@ -11,7 +11,8 @@ mod tests {
         sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
         transaction::{commitment, prepopulated_leaves},
         transaction_case::{
-            InputNote, OutputNote, TxCase, build_base_inputs, prepare_transaction_witness,
+            InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
+            prepare_transaction_witness,
         },
     };
     use anyhow::{Context, Result, ensure};
@@ -1538,13 +1539,28 @@ mod tests {
         encrypt_inputs: bool,
     }
 
-    /// Prove a `policy_tx_gvk_2_2*` circuit for a balanced 2-in/2-out
-    /// transaction and confirm the encrypted notes appear among the public
-    /// signals and decrypt back to their plaintext. View-only encrypts
-    /// outputs only; traceable also encrypts inputs (reusing the in-circuit
-    /// input public keys).
+    /// A test run (verified) for `policy_tx_gvk_2_2*`, shared by every test
+    /// below that needs its public signals.
+    /// 2 inputs (50 + 30) and 2 outputs (60 + 20)
+    struct PolicyGvkProof {
+        stem: &'static str,
+        encrypt_inputs: bool,
+        d: (Scalar, Scalar),
+        d_priv: Scalar,
+        nonce: Scalar,
+        in_notes: Vec<InputNote>,
+        out_notes: Vec<OutputNote>,
+        in_salts: Vec<Scalar>,
+        out_salts: Vec<Scalar>,
+        witness: TransactionWitness,
+        public_amount: Scalar,
+        publics: Vec<Scalar>,
+    }
+
+    /// Prove a `policy_tx_gvk_2_2*` circuit for the fixed scenario described
+    /// on [`PolicyGvkProof`] and assert it verifies.
     #[allow(clippy::arithmetic_side_effects)]
-    fn run_policy_gvk(circuit: PolicyGvkCircuit) -> Result<()> {
+    fn prove_policy_gvk_case(circuit: PolicyGvkCircuit) -> Result<PolicyGvkProof> {
         let (wasm, r1cs) = load_artifacts(circuit.stem)
             .with_context(|| format!("load policy+gvk circuit {}", circuit.stem))?;
         let keys = generate_keys(&wasm, &r1cs)?;
@@ -1596,7 +1612,8 @@ mod tests {
         let non_membership = default_non_membership_keys(&case);
 
         let witness = prepare_transaction_witness(&case, leaves, LEVELS)?;
-        let mut inputs = build_base_inputs(&case, &witness, Scalar::from(0u64));
+        let public_amount = Scalar::from(0u64);
+        let mut inputs = build_base_inputs(&case, &witness, public_amount);
         apply_policy_asp_witness(
             &mut inputs,
             &case,
@@ -1620,48 +1637,74 @@ mod tests {
             .map(|fr| fr_to_scalar(*fr))
             .collect();
 
+        Ok(PolicyGvkProof {
+            stem: circuit.stem,
+            encrypt_inputs: circuit.encrypt_inputs,
+            d,
+            d_priv,
+            nonce,
+            in_notes,
+            out_notes,
+            in_salts,
+            out_salts,
+            witness,
+            public_amount,
+            publics,
+        })
+    }
+
+    /// Confirm the encrypted notes appear among the public signals and
+    /// decrypt back to their plaintext. View-only encrypts outputs only,
+    /// traceable also encrypts inputs.
+    /// Checks the public signals as a multiset only. See
+    /// `run_policy_gvk_public_input_order` below for the exact-order pin.
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_policy_gvk(circuit: PolicyGvkCircuit) -> Result<()> {
+        let proof = prove_policy_gvk_case(circuit)?;
+        let n_ins = proof.in_notes.len();
+
         // The admin decrypts each emitted ciphertext back to its note. Outputs are
         // encrypted at idx nIns+k; inputs (traceable only) at idx k.
         let check = |note: Note, idx: usize| {
             let ct = encrypt_note(
                 &note,
-                d,
-                nonce,
+                proof.d,
+                proof.nonce,
                 Scalar::from(u64::try_from(idx).expect("idx")),
             );
             assert_eq!(
-                decrypt_note(&ct, d_priv),
+                decrypt_note(&ct, proof.d_priv),
                 note.recovered(),
                 "admin must recover the note"
             );
             for v in [ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3] {
                 assert!(
-                    publics.contains(&v),
+                    proof.publics.contains(&v),
                     "ciphertext value missing from public signals for {}",
-                    circuit.stem
+                    proof.stem
                 );
             }
         };
 
-        for (k, out) in out_notes.iter().enumerate() {
+        for (k, out) in proof.out_notes.iter().enumerate() {
             check(
                 Note {
                     pk: out.pub_key,
                     amount: out.amount,
                     blinding: out.blinding,
-                    salt: out_salts[k],
+                    salt: proof.out_salts[k],
                 },
                 n_ins + k,
             );
         }
-        if circuit.encrypt_inputs {
-            for (k, inp) in in_notes.iter().enumerate() {
+        if proof.encrypt_inputs {
+            for (k, inp) in proof.in_notes.iter().enumerate() {
                 check(
                     Note {
                         pk: derive_public_key(inp.priv_key),
                         amount: inp.amount,
                         blinding: inp.blinding,
-                        salt: in_salts[k],
+                        salt: proof.in_salts[k],
                     },
                     k,
                 );
@@ -1746,6 +1789,104 @@ mod tests {
         run_policy_gvk(PolicyGvkCircuit {
             stem: "policy_tx_gvk_2_2_AB_traceable",
             asp: PolicyAspWitness::Both,
+            encrypt_inputs: true,
+        })
+    }
+
+    /// Pins the exact order in which `policy_tx_gvk_2_2_viewonly`/`_traceable`
+    /// expose their public signals.
+    /// INPUT signals (`D`, `nonce`, `root`, `publicAmount`, `extDataHash`,
+    /// `inputNullifier[]`, `outputCommitment[]`). Unlike `run_policy_gvk`
+    /// above (which only checks the public signals as a sorted multiset),
+    /// this is the load-bearing fact the pool-gvk contract's `verify_proof`
+    /// public-input assembly will depend on.
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_policy_gvk_public_input_order(circuit: PolicyGvkCircuit) -> Result<()> {
+        let proof = prove_policy_gvk_case(circuit)?;
+        let n_ins = proof.in_notes.len();
+        // build_base_inputs always sets extDataHash to 0 in these tests.
+        let ext_data_hash = Scalar::from(0u64);
+
+        let idx = |i: usize| Scalar::from(u64::try_from(i).expect("small note index"));
+        let mut ciphertexts = Vec::new();
+        if proof.encrypt_inputs {
+            for (k, inp) in proof.in_notes.iter().enumerate() {
+                let note = Note {
+                    pk: derive_public_key(inp.priv_key),
+                    amount: inp.amount,
+                    blinding: inp.blinding,
+                    salt: proof.in_salts[k],
+                };
+                ciphertexts.push(encrypt_note(&note, proof.d, proof.nonce, idx(k)));
+            }
+        }
+        for (k, out) in proof.out_notes.iter().enumerate() {
+            let note = Note {
+                pk: out.pub_key,
+                amount: out.amount,
+                blinding: out.blinding,
+                salt: proof.out_salts[k],
+            };
+            ciphertexts.push(encrypt_note(&note, proof.d, proof.nonce, idx(n_ins + k)));
+        }
+
+        let mut expected: Vec<Scalar> = Vec::new();
+        for ct in &ciphertexts {
+            expected.push(ct.r.0);
+            expected.push(ct.r.1);
+        }
+        for ct in &ciphertexts {
+            expected.push(ct.c1);
+        }
+        for ct in &ciphertexts {
+            expected.push(ct.c2);
+        }
+        for ct in &ciphertexts {
+            expected.push(ct.c3);
+        }
+
+        // component main {public [D, nonce, root, publicAmount, extDataHash,
+        // inputNullifier, outputCommitment]}
+        expected.extend([
+            proof.d.0,
+            proof.d.1,
+            proof.nonce,
+            proof.witness.root,
+            proof.public_amount,
+            ext_data_hash,
+        ]);
+        expected.extend(proof.witness.nullifiers.iter().copied());
+        expected.extend(
+            proof
+                .out_notes
+                .iter()
+                .map(|out| commitment(out.amount, out.pub_key, out.blinding)),
+        );
+
+        assert_eq!(
+            proof.publics, expected,
+            "{}: public signal order must match the measured output-signals-then-public-inputs order",
+            proof.stem
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_tx_gvk_2_2_viewonly_public_input_order() -> Result<()> {
+        run_policy_gvk_public_input_order(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_viewonly",
+            asp: PolicyAspWitness::None,
+            encrypt_inputs: false,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_tx_gvk_2_2_traceable_public_input_order() -> Result<()> {
+        run_policy_gvk_public_input_order(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_traceable",
+            asp: PolicyAspWitness::None,
             encrypt_inputs: true,
         })
     }
