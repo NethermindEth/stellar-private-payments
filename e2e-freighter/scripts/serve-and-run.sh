@@ -97,11 +97,25 @@ elif server_responds; then
 else
   mkdir -p "$(dirname "$SERVE_LOG")"
   step "starting the app server: make serve (log: $SERVE_LOG)"
-  # setsid puts make and every child it spawns in a fresh process group, so
-  # stop_server can take all of them down together.
-  setsid make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+  # Put make and every child it spawns in a fresh process group, so
+  # stop_server can take all of them down together with `kill -TERM -$PGID`.
+  # Linux has `setsid` (util-linux); macOS does not, so use a portable shim:
+  # perl's setpgrp(0,0) makes the process a new group leader, then execs the
+  # command in its place. This works on both platforms.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+  else
+    perl -e 'setpgrp 0,0; exec @ARGV' make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+  fi
   SERVE_PID=$!
-  SERVER_PGID="$(ps -o pgid= -p "$SERVE_PID" 2>/dev/null | tr -d ' ')"
+  # On a fast mac the process may still be loading when pgid is polled, so
+  # retry briefly instead of failing immediately (the old code died here).
+  SERVER_PGID=""
+  for _ in 1 2 3 4 5; do
+    SERVER_PGID="$(ps -o pgid= -p "$SERVE_PID" 2>/dev/null | tr -d ' ')"
+    [ -n "$SERVER_PGID" ] && break
+    sleep 0.2
+  done
   [ -n "$SERVER_PGID" ] || die "could not determine the server's process group"
 
   step "waiting up to ${READY_TIMEOUT}s for $LOCAL_URL (a cold build takes minutes)"
