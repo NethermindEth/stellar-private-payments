@@ -12,20 +12,30 @@ import { assert } from '../src/assert.mjs';
 
 const log = createLogger('01-connect');
 
-
-
 export async function run({ page }) {
+  // After a successful connect the wallet button is hidden and the address
+  // text replaces it in the settings button. These elements already have stable
+  // ids, so use them directly instead of adding redundant data-testid attrs.
   const connectBtnVisible = await page
-    .getByText('Connect Freighter', { exact: true })
+    .locator('#wallet-btn')
     .isVisible()
     .catch(() => false);
-  assert(!connectBtnVisible, '"Connect Freighter" is still visible after connecting');
+  assert(!connectBtnVisible, '"Connect Freighter" button is still visible after connecting');
 
-  const addressVisible = await page.getByText(/^G[A-Z2-7]{4,10}\.{3}[A-Z2-7]{4,10}$/).isVisible().catch(() => false);
-  assert(addressVisible, 'no truncated account address (e.g. "GCDVNXYD...6SE75S") is visible');
+  const walletText = await page
+    .locator('#wallet-text')
+    .textContent()
+    .catch(() => '');
+  const walletTextContent = (walletText || '').trim();
+  // The app renders Utils.shortAddress(address, 8, 6) -> first 8 chars + "..." + last 6.
+  const addressVisible = /^G[A-Z2-7]{7}\.{3}[A-Z2-7]{6}$/.test(walletTextContent);
+  assert(addressVisible, `no truncated account address (e.g. "GCDVNXYD...6SE75S") is visible; got "${walletTextContent}"`);
 
-  const testnetVisible = await page.getByText('TESTNET', { exact: true }).isVisible().catch(() => false);
-  assert(testnetVisible, 'network indicator does not show "TESTNET"');
+  const networkName = await page
+    .locator('#network-name')
+    .textContent()
+    .catch(() => '');
+  assert((networkName || '').trim() === 'TESTNET', 'network indicator does not show "TESTNET"');
 
   log.info('OK: connected, address shown, network is TESTNET');
 }

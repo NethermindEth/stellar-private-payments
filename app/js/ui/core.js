@@ -149,6 +149,10 @@ export const Toast = {
         icon?.classList.add(dot);
         toast.classList.add(border);
 
+        if (opts.origin) {
+            toast.setAttribute('data-toast-origin', opts.origin);
+        }
+
         if (opts.linkUrl && link) {
             link.href = opts.linkUrl;
             if (opts.linkAriaLabel) link.setAttribute('aria-label', opts.linkAriaLabel);
