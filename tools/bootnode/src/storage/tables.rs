@@ -2,4 +2,4 @@
 
 pub(crate) const SCHEMA_MIGRATIONS: &str = "bootnode_schema_migrations";
 pub(crate) const INDEXER_STATE: &str = "bootnode_indexer_state";
-pub(crate) const GET_EVENTS_PAGES: &str = "bootnode_get_events_pages";
+pub(crate) const EVENTS: &str = "bootnode_events";

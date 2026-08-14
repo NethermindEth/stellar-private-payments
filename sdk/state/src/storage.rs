@@ -157,6 +157,19 @@ impl Storage {
         Ok(())
     }
 
+    /// Lowers `last_fully_indexed_ledger` after bootnode handoff so stale tip
+    /// markers do not survive past the retention cutoff.
+    pub fn clamp_last_fully_indexed_ledger(&mut self, max_ledger: u32) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE indexing_metadata
+                 SET last_fully_indexed_ledger = MIN(last_fully_indexed_ledger, ?1)",
+                params![max_ledger],
+            )
+            .context("failed to clamp last_fully_indexed_ledger")?;
+        Ok(())
+    }
+
     pub fn get_sync_metadata(&self) -> Result<Vec<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.address, m.last_indexed_ledger, m.last_fully_indexed_ledger, m.last_cursor
@@ -1800,6 +1813,49 @@ mod tests {
         assert!(meta.cursor.is_empty());
         assert_eq!(meta.last_indexed_ledger, 123);
         assert_eq!(meta.last_fully_indexed_ledger, 123);
+
+        Ok(())
+    }
+
+    #[test]
+    fn clamp_last_fully_indexed_ledger_after_handoff() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        const HANDOFF: u32 = 2_999_000;
+        const TIP: u32 = 3_000_000;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "c1".to_string(),
+            latest_ledger: TIP,
+            events: vec![dummy_event("evt-1")],
+        })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: "c1".to_string(),
+                last_indexed_ledger: TIP,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: String::new(),
+                last_indexed_ledger: HANDOFF,
+                last_fully_indexed_ledger: 0,
+            }],
+            false,
+        )?;
+
+        storage.clamp_last_fully_indexed_ledger(HANDOFF)?;
+
+        let meta = storage
+            .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == "CPOOL")
+            .expect("expected sync metadata");
+        assert_eq!(meta.last_indexed_ledger, HANDOFF);
+        assert_eq!(meta.last_fully_indexed_ledger, HANDOFF);
 
         Ok(())
     }

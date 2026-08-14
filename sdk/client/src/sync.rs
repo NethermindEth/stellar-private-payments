@@ -9,7 +9,7 @@ use futures::task::AtomicWaker;
 use stellar::{
     ContractDataStorage, Indexer, RpcError, TxConfirmStatus, confirm_tx as rpc_confirm_tx,
 };
-use types::ContractConfig;
+use types::{ContractConfig, SyncMetadata};
 
 use crate::{Error, Handle, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult};
 
@@ -17,9 +17,6 @@ const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 const BACKGROUND_SYNC_INTERVAL_MS: u32 = 5_000;
 const BOOTNODE_CATCH_UP_MAX_FAILURES: u32 = 10;
-/// Bootnode JSON-RPC code: historical range complete, continue on the main
-/// RPC.
-const RETENTION_HANDOFF_CODE: i64 = -32_002;
 
 const SYNC_MODE_INLINE: u8 = 0;
 const SYNC_MODE_BACKGROUND: u8 = 1;
@@ -309,13 +306,56 @@ impl<S: Storage> BackgroundSync<S> {
 }
 
 fn is_retention_handoff(err: &RpcError) -> bool {
-    matches!(
-        err,
-        RpcError::JsonRpc {
-            code: RETENTION_HANDOFF_CODE,
-            ..
-        }
-    )
+    matches!(err, RpcError::RetentionHandoff { .. })
+}
+
+fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
+    match err {
+        RpcError::RetentionHandoff { from_ledger } => Some(*from_ledger),
+        _ => None,
+    }
+}
+
+async fn apply_bootnode_handoff<S: Storage>(
+    storage: &S,
+    contract_config: &ContractConfig,
+    from_ledger: u32,
+) -> Result<(), Error> {
+    let metadata: Vec<SyncMetadata> = contract_config
+        .all_contract_ids()
+        .into_iter()
+        .map(|contract_id| SyncMetadata {
+            contract_id,
+            cursor: String::new(),
+            last_indexed_ledger: from_ledger,
+            last_fully_indexed_ledger: 0,
+        })
+        .collect();
+    storage
+        .save_sync_progress(metadata, false)
+        .await
+        .map_err(|e| Error::Other(format!("handoff sync progress: {e:#}")))?;
+    storage.clear_indexing_cursors().await?;
+    storage
+        .clamp_last_fully_indexed_ledger(from_ledger)
+        .await
+        .map_err(|e| Error::Other(format!("handoff clamp fully indexed: {e:#}")))?;
+    tracing::info!(
+        from_ledger,
+        "bootnode handoff, resuming main RPC from cutoff"
+    );
+    Ok(())
+}
+
+async fn apply_bootnode_handoff_from_err<S: Storage>(
+    storage: &S,
+    contract_config: &ContractConfig,
+    err: &RpcError,
+) -> Result<(), Error> {
+    let from_ledger = retention_handoff_from_ledger(err).ok_or_else(|| {
+        Error::Other("bootnode handoff missing fromLedger in error data".to_string())
+    })?;
+    apply_bootnode_handoff(storage, contract_config, from_ledger).await
 }
 
 fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
@@ -402,7 +442,9 @@ async fn bootnode_catch_up<S: Storage>(
         match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
             Ok(indexer) => indexer,
             Err(e) if is_retention_handoff_err(&e) => {
-                tracing::info!("bootnode handoff, resuming on main RPC");
+                if let Some(rpc_err) = e.downcast_ref::<RpcError>() {
+                    apply_bootnode_handoff_from_err(storage, contract_config, rpc_err).await?;
+                }
                 return Ok(());
             }
             Err(e) => return Err(Error::Other(format!("bootnode indexer: {e:#}"))),
@@ -427,8 +469,9 @@ async fn bootnode_catch_up<S: Storage>(
                 if e.downcast_ref::<RpcError>()
                     .is_some_and(is_retention_handoff) =>
             {
-                tracing::info!("bootnode handoff, resuming on main RPC");
-                storage.clear_indexing_cursors().await?;
+                if let Some(rpc_err) = e.downcast_ref::<RpcError>() {
+                    apply_bootnode_handoff_from_err(storage, contract_config, rpc_err).await?;
+                }
                 return Ok(());
             }
             // bootnode generic error
@@ -606,7 +649,7 @@ mod tests {
             "jsonrpc": "2.0",
             "id": 1,
             "error": {
-                "code": RETENTION_HANDOFF_CODE,
+                "code": -32002,
                 "message": "Continue syncing on your RPC endpoint",
                 "data": { "fromLedger": 2_999_000 },
             }
@@ -637,7 +680,12 @@ mod tests {
             .get_contract_events(&["C".into()], 1, 1, None)
             .await
             .expect_err("handoff should fail");
-        assert!(is_retention_handoff(&err));
+        assert!(matches!(
+            err,
+            RpcError::RetentionHandoff {
+                from_ledger: 2_999_000
+            }
+        ));
     }
 
     #[tokio::test]
@@ -723,7 +771,19 @@ mod tests {
         }
 
         impl MemStorage {
-            fn clear_indexing_cursors(&self) {
+            async fn apply_handoff(&self, from_ledger: u32, contract_ids: &[String]) {
+                let metadata: Vec<SyncMetadata> = contract_ids
+                    .iter()
+                    .map(|contract_id| SyncMetadata {
+                        contract_id: contract_id.clone(),
+                        cursor: String::new(),
+                        last_indexed_ledger: from_ledger,
+                        last_fully_indexed_ledger: 0,
+                    })
+                    .collect();
+                self.save_sync_progress(metadata, false)
+                    .await
+                    .expect("save handoff progress");
                 let mut sync = self.sync.borrow_mut();
                 for entry in sync.iter_mut() {
                     entry.cursor.clear();
@@ -776,11 +836,18 @@ mod tests {
             "expected handoff, got {err:?}"
         );
 
-        storage.clear_indexing_cursors();
+        let rpc_err = err.downcast_ref::<RpcError>().expect("rpc error");
+        storage
+            .apply_handoff(
+                retention_handoff_from_ledger(rpc_err).expect("fromLedger"),
+                &config.all_contract_ids(),
+            )
+            .await;
         assert!(
             storage.sync.borrow()[0].cursor.is_empty(),
             "cursors should clear on handoff"
         );
+        assert_eq!(storage.sync.borrow()[0].last_indexed_ledger, 2_999_000);
         let _ = storage.batches;
     }
 }

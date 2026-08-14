@@ -68,6 +68,7 @@ pub enum StorageWorkerRequest {
         fully_indexed: bool,
     },
     ClearIndexingCursors,
+    ClampLastFullyIndexedLedger(u32),
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
