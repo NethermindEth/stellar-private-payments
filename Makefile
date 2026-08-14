@@ -53,12 +53,25 @@ WITNESS_GRAPH_STEMS := \
 	selectiveDisclosure_3.circom \
 	selectiveDisclosure_4.circom
 
+# Vendors circomlib and injects the black-box hints the graph
+# runtime needs. Cargo runs the
+# circom-witness-rs build script before
+# circuits/build.rs, so the hints have to be on disk before the loop below
+# starts. The timestamp keeps cargo from treating the build script as fresh and
+# replaying a cached run.
+.PHONY: circomlib-hints
+circomlib-hints:
+	@echo "Applying circomlib black-box hints..."
+	@CIRCOMLIB_HINTS_ONLY=$$(date +%s) cargo build -p circuits
+	@grep -q "function bbf_inv" circuits/src/circomlib/circuits/comparators.circom || \
+		{ echo "circomlib hints missing after priming build"; exit 1; }
+
 # Regenerates committed circom-witness-rs graphs under
 # deployments/testnet/circuit_keys/*.graph.bin. Requires Circom CLI matching
 # circuits/circom.lock and a C++ toolchain. One stem per cargo build (single-
 # circuit circom-witness-rs); clean between stems so WITNESS_CPP is re-read.
 .PHONY: witness-graphs
-witness-graphs:
+witness-graphs: circomlib-hints
 	@echo "Regenerating witness graphs (Circom $$(tr -d '[:space:]' < circuits/circom.lock))..."
 	@for entry in $(WITNESS_GRAPH_STEMS); do \
 		stem=$${entry%.circom}; \

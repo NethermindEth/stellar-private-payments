@@ -169,6 +169,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
     println!("cargo:rerun-if-env-changed=WITNESS_CPP");
     println!("cargo:rerun-if-env-changed=CIRCOM_LIBRARY_PATH");
+    println!("cargo:rerun-if-env-changed=CIRCOMLIB_HINTS_ONLY");
     println!(
         "cargo:rerun-if-changed={}",
         crate_dir.join("circom.lock").display()
@@ -195,7 +196,15 @@ fn main() -> Result<()> {
         crate_dir.join("circomlib.lock").display()
     );
     get_circomlib(&crate_dir, &src_dir)?;
-    let _circomlib_guard = CircomlibRestoreGuard::new_and_patch(&src_dir.join("circomlib"))?;
+    // The hints stay on disk after the build
+    let circomlib_was_patched = inject_black_box_hints(&src_dir.join("circomlib"))?;
+
+    // `make witness-graphs` primes the hints through this flag before its
+    // per-circuit builds, so there is nothing else to do in that pass.
+    if env::var("CIRCOMLIB_HINTS_ONLY").is_ok() {
+        println!("cargo:warning=CIRCOMLIB_HINTS_ONLY set. Stopping after circomlib hints");
+        return Ok(());
+    }
 
     // === FIND CIRCOM FILES ===
     // Find all .circom files with a main component
@@ -436,7 +445,7 @@ fn main() -> Result<()> {
     // Regen via `make witness-graphs` / `--features regen-graph` with
     // `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` for one circuit at a time.
     if env::var("WITNESS_CPP").is_ok() {
-        regenerate_witness_graphs(&crate_dir)?;
+        regenerate_witness_graphs(&crate_dir, circomlib_was_patched)?;
     }
 
     Ok(())
@@ -851,6 +860,7 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         .arg("-C")
         .arg(&circomlib_path)
         .arg("checkout")
+        .arg("--force")
         .arg("--detach")
         .arg("FETCH_HEAD")
         .status()
@@ -862,82 +872,21 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Scope guard that ensures `circomlib` BBF patches are transient.
-///
-/// On creation, resets `comparators.circom` and `bitify.circom` to pristine,
-/// saves their pristine byte contents, and applies `inject_black_box_hints`.
-/// On drop (or build completion), restores the pristine byte contents and
-/// runs `git checkout` so `circuits/src/circomlib` git status remains clean.
-struct CircomlibRestoreGuard {
-    circomlib_path: PathBuf,
-    files: Vec<(PathBuf, Vec<u8>)>,
-}
-
-impl CircomlibRestoreGuard {
-    fn new_and_patch(circomlib_path: &Path) -> Result<Self> {
-        let comparators_path = circomlib_path.join("circuits/comparators.circom");
-        let bitify_path = circomlib_path.join("circuits/bitify.circom");
-
-        // Guarantee starting from clean/pristine files
-        let _ = Command::new("git")
-            .arg("-C")
-            .arg(circomlib_path)
-            .arg("checkout")
-            .arg("--")
-            .arg("circuits/comparators.circom")
-            .arg("circuits/bitify.circom")
-            .status();
-
-        let mut files = Vec::new();
-        if let Ok(b) = fs::read(&comparators_path) {
-            files.push((comparators_path.clone(), b));
-        }
-        if let Ok(b) = fs::read(&bitify_path) {
-            files.push((bitify_path.clone(), b));
-        }
-
-        // Apply black box hints patch
-        inject_black_box_hints(circomlib_path)?;
-
-        Ok(Self {
-            circomlib_path: circomlib_path.to_path_buf(),
-            files,
-        })
-    }
-
-    fn restore(&self) {
-        for (path, content) in &self.files {
-            let _ = fs::write(path, content);
-        }
-        let _ = Command::new("git")
-            .arg("-C")
-            .arg(&self.circomlib_path)
-            .arg("checkout")
-            .arg("--")
-            .arg("circuits/comparators.circom")
-            .arg("circuits/bitify.circom")
-            .status();
-    }
-}
-
-impl Drop for CircomlibRestoreGuard {
-    fn drop(&mut self) {
-        self.restore();
-    }
-}
-
 /// Run circom-witness-rs graph generation and publish a `*.graph.bin` artifact.
 ///
 /// Requires `--features regen-graph` (so the C++ generator is linked) plus
 /// `WITNESS_CPP` / `CIRCOM_LIBRARY_PATH` (see `make witness-graphs`).
 /// Circom CLI must match `circuits/circom.lock`.
 ///
+/// `circomlib_was_patched` reports whether the black-box hints were already on
+/// disk when this build started
+///
 /// Expects a single `.circom` path in `WITNESS_CPP`. Writes
 /// `deployments/testnet/circuit_keys/<stem>.graph.bin`.
-fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
+fn regenerate_witness_graphs(crate_dir: &Path, circomlib_was_patched: bool) -> Result<()> {
     #[cfg(not(feature = "regen-graph"))]
     {
-        let _ = crate_dir;
+        let _ = (crate_dir, circomlib_was_patched);
         bail!(
             "WITNESS_CPP requires `cargo build -p circuits --features regen-graph` \
              (see `make witness-graphs`)"
@@ -962,6 +911,12 @@ fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
         anyhow::ensure!(
             ver.status.success() && ver_text.contains(&expected),
             "Circom CLI must be {expected} (circuits/circom.lock); got:\n{ver_text}"
+        );
+
+        anyhow::ensure!(
+            circomlib_was_patched,
+            "circomlib was missing the black-box hints when circom-witness-rs \
+             generated its C++; they are applied now, so re-run the build"
         );
 
         let witness_cpp = env::var("WITNESS_CPP")
@@ -999,10 +954,13 @@ fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
 /// lives in a `bbf*`-prefixed circom *function*. Stock circomlib computes
 /// `1/in` (`IsZero`) and the bit decomposition (`Num2Bits`) inline inside
 /// templates, which the graph runtime cannot evaluate.
-fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
+///
+/// Returns `true` when every hint was already present, i.e. this build did not
+/// have to touch circomlib.
+fn inject_black_box_hints(circomlib_path: &Path) -> Result<bool> {
     let circuits_dir = circomlib_path.join("circuits");
 
-    inject_hint(
+    let comparators_hinted = inject_hint(
         &circuits_dir.join("comparators.circom"),
         "function bbf_inv",
         "include \"binsum.circom\";",
@@ -1010,7 +968,7 @@ fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
         &[("    inv <-- in!=0 ? 1/in : 0;", "    inv <-- bbf_inv(in);")],
     )?;
 
-    inject_hint(
+    let bitify_hinted = inject_hint(
         &circuits_dir.join("bitify.circom"),
         "function bbf_bit",
         "include \"aliascheck.circom\";",
@@ -1027,22 +985,24 @@ fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
         ],
     )?;
 
-    Ok(())
+    Ok(comparators_hinted && bitify_hinted)
 }
 
 /// Apply a single circomlib black-box hint patch (one `bbf_*` function).
+///
+/// Returns `true` if the hint was already present and the file was left alone.
 fn inject_hint(
     file: &Path,
     marker: &str,
     anchor: &str,
     fn_def: &str,
     rewrites: &[(&str, &str)],
-) -> Result<()> {
+) -> Result<bool> {
     let content =
         fs::read_to_string(file).with_context(|| format!("Failed to read {}", file.display()))?;
 
     if content.contains(marker) {
-        return Ok(());
+        return Ok(true);
     }
 
     let anchor_idx = content
@@ -1075,7 +1035,7 @@ fn inject_hint(
 
     fs::write(file, patched).with_context(|| format!("Failed to write {}", file.display()))?;
     println!("cargo:warning=Injected {marker} into {}", file.display());
-    Ok(())
+    Ok(false)
 }
 
 /// Compile WASM using Rust through Circom library

@@ -1,4 +1,4 @@
-use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
+use crate::{BabyJubJubPoint, EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
 use serde::{Deserialize, Serialize};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
@@ -55,6 +55,18 @@ pub struct PoolInfo {
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
     pub policy_flags: PolicyFlags,
+    /// Admin's Global View Key public point `D`. `None` for pools deployed
+    /// from `contracts/pool`.
+    /// `Some` for `contracts/pool-gvk` deployments.
+    ///
+    /// Omitted from serialized output when absent
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_view_key: Option<BabyJubJubPoint>,
+    /// Global View Key mode (`1` = view-only, `2` = traceable). `None` for
+    /// pools deployed from `contracts/pool`
+    /// Omitted from serialized output when absent, as for `admin_view_key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gvk_mode: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,4 +330,93 @@ pub enum ProcessedEvent {
     LeafInserted(LeafInsertedEvent),
     LeafUpdated(LeafUpdatedEvent),
     LeafDeleted(LeafDeletedEvent),
+}
+
+#[cfg(test)]
+mod pool_info_gvk_tests {
+    use super::*;
+    use crate::U256;
+
+    fn pool_info_with_gvk() -> PoolInfo {
+        PoolInfo {
+            ledger: 42,
+            contract_id: "CPOOL".to_string(),
+            contract_type: "Privacy Pool".to_string(),
+            admin: "GADMIN".to_string(),
+            token: "CTOKEN".to_string(),
+            verifier: "CVERIFIER".to_string(),
+            aspmembership: "CASPM".to_string(),
+            aspnonmembership: "CASPN".to_string(),
+            merkle_levels: 10,
+            merkle_current_root_index: Some(3),
+            merkle_next_index: "6".to_string(),
+            maximum_deposit_amount: ExtAmount::from(1_000i128),
+            merkle_root: Some(Field(U256::from(7))),
+            merkle_capacity: 1024,
+            total_commitments: "6".to_string(),
+            policy_flags: PolicyFlags::EMPTY,
+            admin_view_key: Some(BabyJubJubPoint {
+                x: Field(U256::from(1)),
+                y: Field(U256::from(2)),
+            }),
+            gvk_mode: Some(2),
+        }
+    }
+
+    /// State serialized before the GVK fields existed must still decode.
+    ///
+    /// `skip_serializing_if` makes this the *normal* path rather than a
+    /// legacy one: every non-GVK pool now round-trips through JSON with both
+    /// keys absent, so this covers current output as much as old output.
+    #[test]
+    fn pool_info_decodes_json_written_before_the_gvk_fields_existed() {
+        let mut value =
+            serde_json::to_value(pool_info_with_gvk()).expect("serialize PoolInfo to value");
+        let object = value
+            .as_object_mut()
+            .expect("PoolInfo serializes as object");
+        assert!(object.remove("adminViewKey").is_some(), "field was present");
+        assert!(object.remove("gvkMode").is_some(), "field was present");
+
+        let decoded: PoolInfo = serde_json::from_value(value).expect("decode pre-GVK PoolInfo");
+
+        assert!(decoded.admin_view_key.is_none());
+        assert!(decoded.gvk_mode.is_none());
+        assert_eq!(decoded.contract_id, "CPOOL");
+        assert_eq!(decoded.merkle_levels, 10);
+    }
+
+    #[test]
+    fn pool_info_round_trips_with_gvk_fields_set() {
+        let pool = pool_info_with_gvk();
+        let encoded = serde_json::to_string(&pool).expect("serialize PoolInfo");
+        let decoded: PoolInfo = serde_json::from_str(&encoded).expect("decode PoolInfo");
+
+        assert_eq!(decoded.admin_view_key, pool.admin_view_key);
+        assert_eq!(decoded.gvk_mode, pool.gvk_mode);
+    }
+
+    /// A `contracts/pool` deployment must emit no GVK keys at all, rather
+    /// than nulls a consumer would have to distinguish from a real value.
+    #[test]
+    fn pool_info_omits_gvk_keys_for_a_non_gvk_pool() {
+        let pool = PoolInfo {
+            admin_view_key: None,
+            gvk_mode: None,
+            ..pool_info_with_gvk()
+        };
+
+        let value = serde_json::to_value(&pool).expect("serialize PoolInfo to value");
+        let object = value.as_object().expect("PoolInfo serializes as object");
+
+        assert!(!object.contains_key("adminViewKey"));
+        assert!(!object.contains_key("gvkMode"));
+        // Unrelated optional fields keep their existing null-emitting shape.
+        assert!(object.contains_key("merkleRoot"));
+        assert!(object.contains_key("merkleCurrentRootIndex"));
+
+        let decoded: PoolInfo = serde_json::from_value(value).expect("decode non-GVK PoolInfo");
+        assert!(decoded.admin_view_key.is_none());
+        assert!(decoded.gvk_mode.is_none());
+    }
 }

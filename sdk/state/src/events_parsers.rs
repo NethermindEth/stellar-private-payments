@@ -8,6 +8,28 @@ use types::{
     NewCommitmentEvent, NewNullifierEvent, ProcessedEvent, PublicKeyEvent,
 };
 
+/// Field name emitted by `contracts/pool-gvk`'s pool events, carrying the
+/// admin-decryptable ciphertext of the note.
+const GVK_CIPHERTEXT_FIELD: &str = "gvk_ciphertext";
+
+/// Warn when a pool event carries GVK data this SDK does not yet decode.
+///
+/// `pool-gvk` reuses `pool`'s event names and adds `gvk_ciphertext`. Event
+/// data is a name-keyed map, so the extra field decodes harmlessly and the
+/// parsers below simply ignore it — but ignoring it silently means a GVK pool
+/// can be indexed with its audit data quietly discarded. This makes that
+/// visible until the field is actually consumed.
+fn warn_unconsumed_gvk_ciphertext(parsed: &ParsedContractEvent) {
+    if parsed.values.contains_key(GVK_CIPHERTEXT_FIELD) {
+        tracing::warn!(
+            "event `{}` id {} from contract {} carries a `{GVK_CIPHERTEXT_FIELD}` field that is not yet parsed; GVK data is being dropped",
+            parsed.name,
+            parsed.id,
+            parsed.contract_id,
+        );
+    }
+}
+
 pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
     let parsed = parse_event_metadata(event)?;
     let ev = match parsed.name.as_str() {
@@ -47,6 +69,7 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 //     pub nullifier: U256,
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
+    warn_unconsumed_gvk_ciphertext(&parsed);
     let ParsedContractEvent {
         id, name, topics, ..
     } = parsed;
@@ -69,6 +92,7 @@ fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifier
 //     pub encrypted_output: Bytes,
 // }
 fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitmentEvent> {
+    warn_unconsumed_gvk_ciphertext(&parsed);
     let ParsedContractEvent {
         id,
         name,
@@ -255,4 +279,179 @@ fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
     let root = Field::try_from_u256(scval_to_u256(root_scval)?)?;
     Ok(LeafDeletedEvent { id, key, root })
+}
+
+#[cfg(test)]
+mod gvk_passthrough_tests {
+    use super::*;
+    use stellar_xdr::{self as xdr, WriteXdr};
+
+    fn b64(val: &xdr::ScVal) -> String {
+        val.to_xdr_base64(xdr::Limits::none())
+            .expect("encode scval")
+    }
+
+    fn symbol(s: &str) -> xdr::ScVal {
+        xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")))
+    }
+
+    fn u256(v: u64) -> xdr::ScVal {
+        xdr::ScVal::U256(xdr::UInt256Parts {
+            hi_hi: 0,
+            hi_lo: 0,
+            lo_hi: 0,
+            lo_lo: v,
+        })
+    }
+
+    /// A `GvkCiphertext` as `pool-gvk` encodes it: a `#[contracttype]` struct
+    /// serializes to an `ScVal::Map` keyed by field-name symbols.
+    fn gvk_ciphertext() -> xdr::ScVal {
+        let point = xdr::ScVal::Map(Some(xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: symbol("x"),
+                    val: u256(11),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("y"),
+                    val: u256(12),
+                },
+            ]
+            .try_into()
+            .expect("point map"),
+        )));
+        xdr::ScVal::Map(Some(xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: symbol("c1"),
+                    val: u256(1),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("c2"),
+                    val: u256(2),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("c3"),
+                    val: u256(3),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("r"),
+                    val: point,
+                },
+            ]
+            .try_into()
+            .expect("ciphertext map"),
+        )))
+    }
+
+    fn commitment_event(with_gvk: bool) -> ContractEvent {
+        let mut entries = vec![
+            xdr::ScMapEntry {
+                key: symbol("encrypted_output"),
+                val: xdr::ScVal::Bytes(xdr::ScBytes(vec![7, 8, 9].try_into().expect("bytes"))),
+            },
+            xdr::ScMapEntry {
+                key: symbol("index"),
+                val: xdr::ScVal::U32(4),
+            },
+        ];
+        if with_gvk {
+            entries.push(xdr::ScMapEntry {
+                key: symbol(GVK_CIPHERTEXT_FIELD),
+                val: gvk_ciphertext(),
+            });
+        }
+        // Soroban emits map entries in key order.
+        entries.sort_by(|a, b| a.key.cmp(&b.key));
+
+        ContractEvent {
+            id: "0000000000000000001-0000000000".to_string(),
+            ledger: 1,
+            contract_id: "CPOOLGVK".to_string(),
+            topics: vec![b64(&symbol("new_commitment_event")), b64(&u256(99))],
+            value: b64(&xdr::ScVal::Map(Some(xdr::ScMap(
+                entries.try_into().expect("data map"),
+            )))),
+        }
+    }
+
+    fn nullifier_event(with_gvk: bool) -> ContractEvent {
+        let entries = if with_gvk {
+            vec![xdr::ScMapEntry {
+                key: symbol(GVK_CIPHERTEXT_FIELD),
+                val: gvk_ciphertext(),
+            }]
+        } else {
+            vec![]
+        };
+
+        ContractEvent {
+            id: "0000000000000000002-0000000000".to_string(),
+            ledger: 1,
+            contract_id: "CPOOLGVK".to_string(),
+            topics: vec![b64(&symbol("new_nullifier_event")), b64(&u256(55))],
+            value: b64(&xdr::ScVal::Map(Some(xdr::ScMap(
+                entries.try_into().expect("data map"),
+            )))),
+        }
+    }
+
+    /// Guards the two tests below from passing vacuously: if the fixture did
+    /// not actually carry `gvk_ciphertext`, "parses identically" would be
+    /// trivially true and would prove nothing.
+    #[test]
+    fn gvk_fixtures_really_carry_the_field() {
+        for (event, expected) in [
+            (commitment_event(true), true),
+            (commitment_event(false), false),
+            (nullifier_event(true), true),
+            (nullifier_event(false), false),
+        ] {
+            let parsed = parse_event_metadata(event).expect("parse metadata");
+            assert_eq!(
+                parsed.values.contains_key(GVK_CIPHERTEXT_FIELD),
+                expected,
+                "fixture `{}` gvk presence",
+                parsed.name
+            );
+        }
+    }
+
+    /// The deferral of GVK support rests on this: a `pool-gvk` commitment
+    /// event must decode to exactly what the equivalent `pool` event decodes
+    /// to, with the unknown field ignored rather than breaking the parse.
+    #[test]
+    fn commitment_event_parses_identically_with_and_without_gvk_ciphertext() {
+        let ProcessedEvent::Commitment(without) =
+            parse_event(commitment_event(false)).expect("parse pool event")
+        else {
+            panic!("expected a commitment event");
+        };
+        let ProcessedEvent::Commitment(with) =
+            parse_event(commitment_event(true)).expect("parse pool-gvk event")
+        else {
+            panic!("expected a commitment event");
+        };
+
+        assert_eq!(with.commitment, without.commitment);
+        assert_eq!(with.index, without.index);
+        assert_eq!(with.encrypted_output, without.encrypted_output);
+    }
+
+    #[test]
+    fn nullifier_event_parses_identically_with_and_without_gvk_ciphertext() {
+        let ProcessedEvent::Nullifier(without) =
+            parse_event(nullifier_event(false)).expect("parse pool event")
+        else {
+            panic!("expected a nullifier event");
+        };
+        let ProcessedEvent::Nullifier(with) =
+            parse_event(nullifier_event(true)).expect("parse pool-gvk event")
+        else {
+            panic!("expected a nullifier event");
+        };
+
+        assert_eq!(with.nullifier, without.nullifier);
+    }
 }
