@@ -581,10 +581,36 @@ check_freighter_onboarding() {
   if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="onboarding is baked into the existing profile snapshot"
   else _STATUS="MISSING"; _DETAIL="onboarding wizard completion is not baked into a valid snapshot yet"; fi; }
 
+check_freighter_snapshot_freshness() {
+  local env_file snapshot_file env_mtime snap_mtime
+  env_file="$(env_file_path)"
+  snapshot_file="$(snapshot_file)"
+  if [ ! -s "$snapshot_file" ] || [ ! -f "$env_file" ]; then _STATUS="SKIP"; _DETAIL="need both snapshot and env file to compare"; return; fi
+  if ci_env_already_satisfied; then _STATUS="SKIP"; _DETAIL="CI detected — env file is not relevant"; return; fi
+  env_mtime="$(stat -c '%Y' "$env_file" 2>/dev/null || stat -f '%m' "$env_file" 2>/dev/null || echo 0)"
+  snap_mtime="$(stat -c '%Y' "$snapshot_file" 2>/dev/null || stat -f '%m' "$snapshot_file" 2>/dev/null || echo 0)"
+  if [ "$env_mtime" -gt "$snap_mtime" ]; then
+    _STATUS="MISSING"
+    _DETAIL=".e2e-accounts.env (mtime $(date -d @"$env_mtime" '+%F %T' 2>/dev/null || echo "$env_mtime")) is newer than profile-snapshot.tar.gz (mtime $(date -d @"$snap_mtime" '+%F %T' 2>/dev/null || echo "$snap_mtime")) — the snapshot may have a stale password. Rebuild with: bash e2e-freighter/scripts/setup.sh --force"
+  else
+    _STATUS="OK"; _DETAIL="snapshot is at least as recent as the env file"
+  fi; }
+
 # --- browser ---
 check_browser_chromium_resolved() {
-  local path="${E2E_CHROMIUM_PATH:-/usr/bin/chromium}"
-  if [ -x "$path" ]; then _STATUS="OK"; _DETAIL="$path"; else _STATUS="MISSING"; _DETAIL="$path is not executable"; fi; }
+  local path resolved=""
+  path="${E2E_CHROMIUM_PATH:-/usr/bin/chromium}"
+  if [ ! -x "$path" ]; then _STATUS="MISSING"; _DETAIL="$path is not executable"; return; fi
+  resolved="$(readlink -f "$path" 2>/dev/null || echo "$path")"
+  case "$resolved" in
+    /snap/*|/var/snap/*|/var/lib/snapd/*)
+      _STATUS="MISSING"
+      _DETAIL="$path resolves to $resolved — snap chromium cannot load unpacked extensions for e2e tests. Install real Chromium: sudo add-apt-repository ppa:canonical-chromium-builds/stable && sudo apt install chromium-browser"
+      ;;
+    *)
+      _STATUS="OK"; _DETAIL="$path" ;;
+  esac
+}
 
 heal_browser_profile_tmpdir() { local base; base="$(resolve_profile_tmpdir_base)"; step "creating profile tmpdir: mkdir -p $base"; mkdir -p "$base"; }
 
@@ -715,6 +741,7 @@ group_freighter() {
   run_check freighter.snapshot.exists freighter check_freighter_snapshot_exists "" "$(onboarding_remediation_command)"
   run_check freighter.snapshot.integrity freighter check_freighter_snapshot_integrity "" "$(onboarding_remediation_command)"
   run_check freighter.onboarding freighter check_freighter_onboarding "" "$(onboarding_remediation_command)"
+  run_check freighter.snapshot.freshness freighter check_freighter_snapshot_freshness "" "Rebuild with: bash e2e-freighter/scripts/setup.sh --force"
 }
 
 group_browser() {

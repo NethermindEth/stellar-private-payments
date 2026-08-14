@@ -74,6 +74,7 @@ export async function launch({ userDataDir, headless = true, video = false } = {
       `--disable-extensions-except=${EXT_PATH}`,
       `--load-extension=${EXT_PATH}`,
       '--no-first-run',
+      ...(process.env.CHROMIUM_FLAGS ? process.env.CHROMIUM_FLAGS.split(/\s+/) : []),
     ],
     // The app's onboarding wizard offers a notification permission prompt
     // (retention step) via Notification.requestPermission(); a scripted,
@@ -127,23 +128,20 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   if (!page.url().includes('unlock-account')) return page; // already unlocked
   await page.fill(SEL.unlockPasswordInput, password);
   await page.getByText(SEL.unlockButtonText, { exact: true }).click();
-  await page.waitForTimeout(1000);
-  // A wrong password leaves Freighter sitting on this same unlock screen with
-  // no popup and no thrown error — previously this returned as if unlocked,
-  // so the wallet never injected a provider and every downstream failure
-  // surfaced three steps later at connectApp ("Connect Freighter still
-  // shown"), which looks like an app or connection bug and is neither. The
-  // real cause: the profile snapshot's wallet and the current
-  // E2E_FREIGHTER_PASSWORD were provisioned at different times and no longer
-  // match — e.g. .e2e-accounts.env regenerated after the snapshot was built.
-  if (page.url().includes('unlock-account')) {
-    throw new Error(
+  // Poll for the unlock screen to disappear — the extension can take >1s to
+  // process the password on a cold start (service worker init, key derivation),
+  // so a fixed wait is unreliable. The error message is only accurate when the
+  // screen genuinely does not change after a generous timeout.
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(200);
+    if (!page.url().includes('unlock-account')) return page;
+  }
+  throw new Error(
       "unlockFreighter: still on the unlock screen after entering E2E_FREIGHTER_PASSWORD — " +
       "it does not match this profile's wallet. The snapshot and .e2e-accounts.env must come " +
       'from the same provisioning run; rebuild with: bash e2e-freighter/scripts/setup.sh --force',
     );
-  }
-  return page;
 }
 
 // Switch Freighter's active wallet, e.g. between multiple imported accounts
