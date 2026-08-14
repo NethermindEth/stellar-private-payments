@@ -61,6 +61,7 @@ pub struct DisclaimerStatePayload {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     Ping,
+    Pause,
     SyncState,
     SaveEvents(ContractsEventData),
     SaveSyncProgress {

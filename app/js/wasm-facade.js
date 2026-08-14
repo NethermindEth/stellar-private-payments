@@ -126,8 +126,37 @@ export async function ensureStorage() {
     if (!storageHandle) {
         storageHandle = await Storage.open();
         bindAppStorage(storageHandle);
+        installStoragePauseOnUnload();
     }
     return appStorageInstance;
+}
+
+let pauseOnUnloadInstalled = false;
+
+/**
+ * Ask the storage worker to release its OPFS sync access handles as soon as
+ * this page starts unloading, instead of waiting for the worker to be torn
+ * down by the browser (which happens asynchronously and can race the next
+ * page's worker trying to acquire the same handles — surfacing as a false
+ * "another tab is using this app" error).
+ *
+ * Fire-and-forget: we don't await the response, since the page may not
+ * survive long enough to receive it. Posting the request is enough — the
+ * worker releases the handles synchronously as soon as it processes the
+ * message.
+ */
+function installStoragePauseOnUnload() {
+    if (pauseOnUnloadInstalled) {
+        return;
+    }
+    pauseOnUnloadInstalled = true;
+    window.addEventListener('pagehide', () => {
+        try {
+            storageHandle?.call('Pause', 1_000)?.catch(() => {});
+        } catch {
+            // Best-effort: nothing to do if the worker is already gone.
+        }
+    });
 }
 
 /**
