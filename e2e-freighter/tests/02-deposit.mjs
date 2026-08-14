@@ -27,6 +27,10 @@ import { driveWizard } from '../src/onboarding.mjs';
 
 const log = createLogger('02-deposit');
 
+// Poll-read budget for the success toast. Must be short: the toast link is
+// absent for most of the run, and every absent read costs this much.
+const TOAST_READ_MS = 500;
+
 
 
 export async function run({ page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch }) {
@@ -81,17 +85,47 @@ export async function run({ page, context, waitForAnyFreighterApproval, waitForF
   const progressDeadline = Date.now() + 120000;
   let txHash = null;
 
+  // Elapsed-time instrumentation. This loop's wall clock is dominated by work
+  // that happens OUTSIDE it — the SDK's own per-transaction
+  // prove -> simulate -> sign -> submit -> confirm cycle
+  // (sdk/web/src/client/execute/mod.rs), whose final confirm() polls the chain
+  // for up to 30s (sdk/client/src/sync.rs's confirm_tx) BEFORE the success
+  // toast is ever rendered. Attributing a slow run needs per-phase timestamps,
+  // not a single total: log how long each poll step actually costs, since a
+  // DOM read against the app page blocks while the WASM prover holds the main
+  // thread.
+  const t0 = Date.now();
+  const el = () => `${Date.now() - t0}ms`;
+  let iteration = 0;
+  log.info('deposit: submitted, entering approval/toast poll loop');
+
   while (Date.now() < progressDeadline) {
+    iteration += 1;
+    const iterStart = Date.now();
+
     const stageText = await depositBtn.locator('.btn-loading').innerText().catch(() => '');
-    if (stageText) seenStages.add(stageText);
+    const stageReadMs = Date.now() - iterStart;
+    if (stageText && !seenStages.has(stageText)) {
+      seenStages.add(stageText);
+      log.info(`deposit: progress stage "${stageText}" at ${el()}`);
+    }
+    // A DOM read that takes seconds means the app page's main thread was
+    // blocked (WASM proving), not that the test was idle.
+    if (stageReadMs > 1000) {
+      log.info(`deposit: iteration ${iteration}: .btn-loading read blocked for ${stageReadMs}ms at ${el()}`);
+    }
 
     // signMessage shouldn't appear here (key derivation already happened
     // during wizard completion) but is tolerated either way.
+    const scanStart = Date.now();
     const pending = await waitForAnyFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
       timeoutMs: 2000,
     }).catch(() => null);
     if (pending) {
+      log.info(`deposit: approval "${pending.kind}" detected at ${el()} (scan took ${Date.now() - scanStart}ms)`);
+      const approveStart = Date.now();
       await approve(pending.kind, { timeoutMs: 15000 });
+      log.info(`deposit: approval "${pending.kind}" driven in ${Date.now() - approveStart}ms, now at ${el()}`);
       // A deposit can raise several sequential approvals; give the just-
       // approved popup a moment to fully close before rescanning, rather
       // than racing the next scan against its own teardown.
@@ -99,10 +133,17 @@ export async function run({ page, context, waitForAnyFreighterApproval, waitForF
       continue;
     }
 
+    // Bounded read. getAttribute auto-waits for the element to exist, and the
+    // toast link does not exist until the flow succeeds — so an unbounded read
+    // here blocks for Playwright's 30s default on every pre-toast iteration,
+    // throws, and gets swallowed by the .catch(). That stall is invisible in
+    // the logs and dominates the run: it delays the rescan that drives the
+    // Freighter approval, so the wallet sits open and idle the whole time.
     const toastLink = page.locator('#toast-container .toast-link:not(.hidden)').first();
-    const href = await toastLink.getAttribute('href').catch(() => null);
+    const href = await toastLink.getAttribute('href', { timeout: TOAST_READ_MS }).catch(() => null);
     if (href) {
       txHash = href.split('/').filter(Boolean).pop();
+      log.info(`deposit: success toast link seen at ${el()} (iteration ${iteration})`);
       break;
     }
 
@@ -111,23 +152,31 @@ export async function run({ page, context, waitForAnyFreighterApproval, waitForF
       // Button re-enabled after showing progress, but no toast link was
       // caught (the toast auto-hides after ~4s) — one more short grace
       // window in case it's still visible right now.
-      const lateHref = await toastLink.getAttribute('href').catch(() => null);
+      const lateHref = await toastLink.getAttribute('href', { timeout: TOAST_READ_MS }).catch(() => null);
       if (lateHref) {
         txHash = lateHref.split('/').filter(Boolean).pop();
       }
+      log.info(`deposit: submit button re-enabled at ${el()}; late toast link ${lateHref ? 'found' : 'missing'}`);
       break;
     }
 
     await page.waitForTimeout(500);
   }
 
+  log.info(`deposit: poll loop finished after ${iteration} iterations at ${el()}`);
+
   assert(seenStages.size > 0, 'deposit button never showed a progress stage — the click may not have started anything');
   log.debug('progress stages:', [...seenStages].join(' -> '));
   assert(txHash, "no transaction hash was captured from the submitted-transaction toast's explorer link");
   log.info('captured tx hash:', txHash);
 
+  // Second confirmation of the same transaction: the SDK already polled it to
+  // SUCCESS before the toast rendered, so this should cost one RPC round trip.
+  // If it costs more, the toast is being rendered ahead of chain finality.
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const confirmStart = Date.now();
   const status = await waitForTransactionSuccess(txHash, { rpcUrl });
+  log.info(`deposit: chain re-confirmation took ${Date.now() - confirmStart}ms, total ${el()}`);
   assert(status === 'SUCCESS', `deposit transaction ${txHash} resolved with status ${status}, not SUCCESS`);
 
   log.info('OK: deposit tx', txHash, 'confirmed SUCCESS on-chain');

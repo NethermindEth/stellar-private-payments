@@ -74,6 +74,9 @@ export async function launch({ userDataDir, headless = true, video = false } = {
       `--disable-extensions-except=${EXT_PATH}`,
       `--load-extension=${EXT_PATH}`,
       '--no-first-run',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
       ...(process.env.CHROMIUM_FLAGS ? process.env.CHROMIUM_FLAGS.split(/\s+/) : []),
     ],
     // The app's onboarding wizard offers a notification permission prompt
@@ -167,18 +170,56 @@ export async function switchFreighterAccount(context, accountName) {
   return page;
 }
 
+function isFreighterExtensionPage(url) {
+  return url.startsWith(`chrome-extension://${EXT_ID}/`);
+}
+
+async function pageShowsApprovalButton(page, buttonText) {
+  // In headed mode Freighter renders approvals as modals inside the existing
+  // extension page (URL stays index.html#/) rather than as separate targets
+  // with approval-specific hash routes. Detect those by looking for the
+  // visible approval button text.
+  return page.getByRole('button', { name: buttonText, exact: true }).isVisible().catch(() => false);
+}
+
+// Find an approval of the requested kind across all open targets.
+// Two strategies:
+//   1. URL hash-route match (headless / sidebar mode opens a dedicated target).
+//   2. Visible approval button inside the existing Freighter extension page
+//      (headed mode renders the approval as a modal in the same page).
+async function findApproval(context, kinds) {
+  const pages = context.pages();
+  for (const page of pages) {
+    const url = page.url();
+    for (const kind of kinds) {
+      if (isFreighterApprovalUrl(url, kind)) return { page, kind };
+    }
+    if (isFreighterExtensionPage(url)) {
+      for (const kind of kinds) {
+        const buttonText = APPROVE_BUTTON_TEXT[kind];
+        if (!buttonText) continue;
+        const shows = await pageShowsApprovalButton(page, buttonText);
+        if (shows) return { page, kind };
+      }
+    }
+  }
+  return null;
+}
+
 // Surface-agnostic finder: scans every open target browser-wide (never
 // assumes one window) and matches on the approval's hash route regardless
 // of whether "?mode=sidebar" precedes it.
 export async function waitForFreighterApproval(context, kind, { timeoutMs = 30000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    for (const page of context.pages()) {
-      if (isFreighterApprovalUrl(page.url(), kind)) return page;
-    }
+    const found = await findApproval(context, [kind]);
+    if (found) return found.page;
     await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error(`waitForFreighterApproval: no '${kind}' approval target appeared within ${timeoutMs}ms`);
+  const finalUrls = context.pages().map((p) => p.url());
+  throw new Error(
+    `waitForFreighterApproval: no '${kind}' approval target appeared within ${timeoutMs}ms; final pages: ${JSON.stringify(finalUrls)}`,
+  );
 }
 
 // For flows that can raise more than one kind of approval in an order the
@@ -187,14 +228,14 @@ export async function waitForFreighterApproval(context, kind, { timeoutMs = 3000
 export async function waitForAnyFreighterApproval(context, kinds, { timeoutMs = 30000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    for (const page of context.pages()) {
-      for (const kind of kinds) {
-        if (isFreighterApprovalUrl(page.url(), kind)) return { page, kind };
-      }
-    }
+    const found = await findApproval(context, kinds);
+    if (found) return found;
     await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error(`waitForAnyFreighterApproval: none of [${kinds.join(', ')}] appeared within ${timeoutMs}ms`);
+  const finalUrls = context.pages().map((p) => p.url());
+  throw new Error(
+    `waitForAnyFreighterApproval: none of [${kinds.join(', ')}] appeared within ${timeoutMs}ms; final pages: ${JSON.stringify(finalUrls)}`,
+  );
 }
 
 async function clickByText(page, text) {
@@ -214,12 +255,15 @@ async function clickByText(page, text) {
 // APPROVE=auto clicks the text-matched approve button. APPROVE=human is a
 // first-class preset (the demo path, not an afterthought): it never touches
 // the popup, just waits for the human to act and for the target to close.
-export async function approveOrWatch(context, kind, { timeoutMs = 30000 } = {}) {
+export async function approveOrWatch(context, kind, { timeoutMs = 30000, label = kind } = {}) {
+  const t0 = Date.now();
   const page = await waitForFreighterApproval(context, kind, { timeoutMs });
+  const foundAt = Date.now();
+  log.info(`APPROVE: '${label}' approval page found after ${foundAt - t0}ms`);
   const mode = (process.env.APPROVE || 'auto').toLowerCase();
 
   if (mode === 'human') {
-    log.info(`APPROVE=human: waiting for you to act on the '${kind}' approval (Confirm/Cancel)...`);
+    log.info(`APPROVE=human: waiting for you to act on the '${label}' approval (Confirm/Cancel)...`);
     await Promise.race([
       new Promise((resolve) => page.once('close', resolve)),
       new Promise((r) => setTimeout(r, timeoutMs)),
@@ -227,11 +271,17 @@ export async function approveOrWatch(context, kind, { timeoutMs = 30000 } = {}) 
     return;
   }
 
-  await clickByText(page, APPROVE_BUTTON_TEXT[kind] || 'Confirm');
+  const buttonText = APPROVE_BUTTON_TEXT[kind] || 'Confirm';
+  await page.getByText(buttonText, { exact: true }).first().waitFor({ state: 'visible', timeout: 10000 });
+  const visibleAt = Date.now();
+  log.info(`APPROVE: '${label}' Confirm button visible after ${visibleAt - t0}ms`);
+  await clickByText(page, buttonText);
+  log.info(`APPROVE: '${label}' Confirm clicked after ${Date.now() - t0}ms`);
 }
 
 export async function rejectInFreighter(context, kind, { timeoutMs = 30000 } = {}) {
   const page = await waitForFreighterApproval(context, kind, { timeoutMs });
+  await page.getByText('Cancel', { exact: true }).first().waitFor({ state: 'visible', timeout: 10000 });
   await clickByText(page, 'Cancel');
 }
 

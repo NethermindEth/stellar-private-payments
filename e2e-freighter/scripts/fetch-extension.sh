@@ -86,6 +86,23 @@ fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
 console.log(`    manifest ${m.version}, extension id ${id} verified`);
 NODE
 
+step "patching background script to open approvals in a tab instead of a popup"
+# Freighter's background.min.js uses chrome.windows.create with type:"popup" for
+# approvals. In headed runs that popup is a separate OS window that Playwright
+# sometimes struggles to attach to promptly. Opening it as a normal browser
+# window/tab makes it a first-class Playwright page target.
+BG="$TMP/unpacked/background.min.js"
+if [ -f "$BG" ]; then
+  sed -i 's/He={type:"popup",width:360,height:632}/He={type:"normal"}/g' "$BG"
+  if grep -q 'He={type:"normal"}' "$BG"; then
+    echo "    background.min.js patched to open approvals as normal windows"
+  else
+    die "background.min.js popup patch failed — upstream code may have changed"
+  fi
+else
+  die "background.min.js not found in unpacked extension"
+fi
+
 rm -rf "$VENDOR_DIR"
 mkdir -p "$(dirname "$VENDOR_DIR")"
 mv "$TMP/unpacked" "$VENDOR_DIR"
