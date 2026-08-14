@@ -27,23 +27,30 @@ checks for:
 
 ```bash
 sudo apt update
-sudo apt install -y nodejs npm chromium-browser
+sudo apt install -y nodejs npm
 ```
 
-If `chromium-browser` isn't available (some Ubuntu versions ship Chromium
-only as a snap), install the snap instead and point `E2E_CHROMIUM_PATH` at
-it:
+For Chromium, use the `canonical-chromium-builds` PPA — the scripts launch the
+system browser directly with an unpacked extension, which the Ubuntu snap
+package cannot do:
 
 ```bash
-sudo snap install chromium
-export E2E_CHROMIUM_PATH=/snap/bin/chromium
+sudo add-apt-repository ppa:canonical-chromium-builds/stable
+sudo apt update
+sudo apt install -y chromium-browser
 ```
 
-The snap package runs Chromium in its own mount namespace with a private
-`/tmp`, so the profile snapshot is restored inside `e2e-freighter/.tmp-profiles/`
-instead of `/tmp`. If you use another sandboxed browser that cannot see the
-host `/tmp` (Flatpak, etc.), set `E2E_PROFILE_TMPDIR` to a directory that the
-browser process can see.
+**Do not use the `chromium` snap for these tests.** The snap wrapper runs
+Chromium in its own mount namespace with a private `/tmp`, so the extension
+never loads and every test fails with "Connect Freighter is still shown". The
+preflight detects snap installs (`/snap/*`, `/var/snap/*`,
+`/var/lib/snapd/*`) and reports them as MISSING with the PPA install
+instructions above.
+
+If you already have the snap installed and just want the tests to work, remove
+it and install from the PPA. If you use another sandboxed browser that cannot
+see the host `/tmp` (Flatpak, etc.), set `E2E_PROFILE_TMPDIR` to a directory
+that the browser process can see.
 
 Ubuntu's `apt` Node.js package can lag well behind current releases; if you
 hit version issues, install via [nvm](https://github.com/nvm-sh/nvm) or
@@ -63,19 +70,46 @@ default, so no `E2E_CHROMIUM_PATH` override is needed.
 Install [Homebrew](https://brew.sh) first if you don't have it, then:
 
 ```bash
-brew install node
-brew install --cask chromium
+brew install node llvm
 ```
 
-macOS installs Chromium as an app bundle, not a plain binary, so point
-`E2E_CHROMIUM_PATH` at the binary inside it:
+Two macOS-specific prerequisites beyond the common ones:
+
+- **`llvm` from Homebrew is required to build the SDK's WASM artifacts.**
+  Apple's bundled clang has no `wasm32-unknown-unknown` backend, so
+  `cargo build` (and `make serve`) fails with "No available targets are
+  compatible with triple wasm32-unknown-unknown". Put Homebrew's clang
+  first on `PATH`:
+
+  ```bash
+  export PATH="$(brew --prefix llvm)/bin:$PATH"
+  ```
+
+- **The e2e suite serves the app itself (`make serve`) and manages the
+  server's process group.** `serve-and-run.sh` uses `setsid` when present
+  and falls back to a perl `setpgrp` shim on macOS, so `make freighter-e2e`
+  works out of the box — but don't remove the fallback or run the server
+  in a way that detaches it from the script's process group, or you'll hit
+  "could not determine the server's process group".
+
+For the browser, the tests launch Chromium directly via Playwright
+(`launchPersistentContext`) with an unpacked extension. The most reliable
+way to get a compatible build is Playwright's own Chrome for Testing:
 
 ```bash
-export E2E_CHROMIUM_PATH="/Applications/Chromium.app/Contents/MacOS/Chromium"
+cd e2e-freighter && npx playwright install chromium
 ```
 
-Add that `export` to your shell profile so it's set for every run, or
-prefix each command with it inline.
+then point `E2E_CHROMIUM_PATH` at the binary inside the downloaded bundle:
+
+```bash
+export E2E_CHROMIUM_PATH="$HOME/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+```
+
+(`brew install --cask chromium` also works; either way, set
+`E2E_CHROMIUM_PATH` to the real binary — the app-bundle path above, not the
+`Chromium` symlink — and add the `export` to your shell profile or prefix
+each command with it.)
 
 ## First time run
 
@@ -201,8 +235,9 @@ a tight loop.
 
 ## CI
 
-Three GitHub Actions workflows automate e2e testing: two gates on push and
-pull request to main, plus a manual dispatch job for the full suite:
+Two GitHub Actions workflows automate e2e testing: the pre-signing SDK
+suite gates on push/PR to main, and the Freighter suite runs a smoke
+subset on PR plus the full suite on manual dispatch.
 
 ### Workflows
 
@@ -216,78 +251,92 @@ headless Chrome against testnet. These exercise the pre-signing SDK path
 deployed app), so they need no nullifier-detection support in the deployed
 app. Locally the same suite runs via `sdk/web/scripts/e2e-browser-test.sh`.
 
-**`e2e-freighter-smoke.yml`** — Selected smoke tests (push/PR to main)
+**`e2e-freighter.yml`** — Freighter suite (smoke on PR, full on demand)
 
-A fast gate that validates core Freighter integration: connect, rejection
-UX, and deposit+transfer (01-connect, 03-rejection, 05-deposit-transfer)
-against the deployed app on every push and PR to main.
-
-**`e2e-freighter-full.yml`** — Full Freighter suite (manual dispatch only)
-
-Comprehensive validation: all tests (01–11), built and served locally from
-the checked-out commit (to include the nullifier fix). Triggered manually
-via GitHub Actions UI or CLI:
+On pull requests to main it runs the smoke subset (01-connect,
+03-rejection, 05-deposit-transfer) as a fast gate; `workflow_dispatch`
+runs the whole suite (01-11). Both build and serve the app **from the
+checked-out commit** on localhost:8000 via `serve-and-run.sh` — the same
+path `make freighter-e2e` uses locally — so a PR is tested against its own
+code, not whatever is deployed. Trigger the full suite with:
 
 ```bash
-gh workflow run e2e-freighter-full.yml --repo <OWNER/REPO>
+gh workflow run e2e-freighter.yml --repo <OWNER/REPO>
 ```
+
+Runs are serialized (`concurrency` group) because the suite spends shared
+testnet notes: two overlapping runs would spend each other's notes and
+fail in ways that look like product bugs. Fork PRs never run this job (it
+reads the protected environment's secrets).
 
 ### Environment and secrets
 
-All three workflows require the protected `e2e-testnet` environment,
+The Freighter workflow requires the protected `e2e-testnet` environment,
 which provides these secrets:
 
-- `E2E_ACCOUNT_A_ADDRESS` / `E2E_ACCOUNT_A_SECRET` — test account A,
-  used by the pre-signing SDK suite (compiled into the test binary)
-- `E2E_ACCOUNT_B_ADDRESS` / `E2E_ACCOUNT_B_SECRET` — test account B,
-  used by the pre-signing SDK suite
-- `E2E_ACCOUNT_C_ADDRESS` / `E2E_ACCOUNT_C_SECRET` — the wallet imported
-  into the generated Freighter profile (profile generation in CI)
-- `E2E_ACCOUNT_D_ADDRESS` — registered recipient address for the
-  Freighter transfer tests (05, 10, 11; address only, no secret needed)
+- `E2E_ACCOUNT_A_SECRET` / `E2E_ACCOUNT_B_SECRET` — persistent test
+  accounts, imported into the stellar keys store as identity tomls
+  (`spp-e2e-a` / `spp-e2e-b`) so the setup script never regenerates them
+- `E2E_ACCOUNT_C_SECRET` — the account imported into the generated
+  Freighter wallet profile (`spp-e2e-c`; its address is derived, not
+  stored)
 - `E2E_FREIGHTER_PASSWORD` — password the generated Freighter profile is
-  created with and unlocked with (the provisioning script generates one that
-  satisfies Freighter's uppercase/lowercase/digit rules)
+  created with and unlocked with (CI-only; the local setup script
+  generates one that satisfies Freighter's
+  uppercase/lowercase/digit rules)
 
-Note the Freighter workflows must set every one of these explicitly: no
-`.e2e-accounts.env` file exists in CI, and once `E2E_FREIGHTER_PASSWORD`
-is set the scripts deliberately do not source one.
+There are **no address secrets** — `E2E_ACCOUNT_C_ADDRESS`,
+`E2E_ACCOUNT_D_ADDRESS`, and `E2E_POOL_CONTRACT` are exported to
+`$GITHUB_ENV` by the account-provisioning step at run time (the pool is
+whatever `deployments.json` currently names). The webclient workflow uses
+the same `e2e-testnet` environment with its own secret set.
 
-Provision these once using the setup script:
+Provision the persistent accounts once using the setup script:
 
 ```bash
 deployments/scripts/e2e-accounts-setup.sh
-# Then copy from deployments/testnet/.e2e-accounts.env into the e2e-testnet
-# environment secrets (minus the .env shell syntax)
+# Then copy A/B/C secrets (and the password) from
+# deployments/testnet/.e2e-accounts.env into the e2e-testnet environment
+# secrets (minus the .env shell syntax)
 ```
 
-### Profile generation in CI
+### Account provisioning in CI
 
-Nothing is stored outside the workflow run — no release assets, no
-caches, nothing committed. Each Freighter workflow generates the profile
-snapshot fresh via the same chain used for local setup:
+The Freighter workflow provisions the shared testnet accounts itself,
+identically to webclient — nothing is assumed from pre-seeded state:
 
-```bash
-xvfb-run -a bash e2e-freighter/scripts/setup.sh
-```
+1. **Import persistent test account keys** — writes the three identity
+   tomls directly from the secrets (`printf 'secret_key = "%s"\n'`), the
+   same version-independent approach webclient uses (`stellar keys add
+   --secret-key` is confirmed broken for non-interactive input).
+2. **Provision test accounts** — runs `e2e-accounts-setup.sh`: A/B/C
+   resolve from the imported tomls (no regeneration), D is generated
+   fresh; all four are friendbot-funded only if unfunded and
+   **unconditionally re-registered** against whatever pool
+   `deployments.json` currently names. That re-registration is what
+   recovers from a manual pool redeploy without a human noticing — the
+   "No local registration found" failure class.
+3. **Generate Freighter profile snapshot** — `setup.sh` runs through
+   `serve-and-run.sh --` (the `--` form), which builds+serves the app on
+   :8000, exports `APP_URL`, and stops the server afterwards. The
+   onboarding wizard navigates to `APP_URL`, so running bare `setup.sh`
+   dies with "APP_URL is not set". `xvfb-run` provides the virtual
+   display for setup's headed steps.
 
-`setup.sh`'s provisioning and onboarding steps drive a headed browser, so
-CI provides a virtual display with `xvfb-run` (preinstalled on
-`ubuntu-latest`). The same step also downloads the pinned Freighter
-extension from the upstream `stellar/freighter` GitHub release
-(`scripts/fetch-extension.sh` — `vendor/` is git-ignored, so nothing
-third-party is committed here either). The generated snapshot lands at
-`e2e-freighter/profile-snapshot.tar.gz`, exactly where `run-all.sh`
-expects it.
+Because the accounts are registered moments before the tests run, the
+preflight's `chain.accounts.*` checks execute for real instead of
+skipping. The env-file checks do skip (no `.e2e-accounts.env` is
+committed; the vars arrive via `$GITHUB_ENV`), while `env.vars.required`
+still verifies against the environment for real.
 
 ### Gating
 
 The pre-signing suite gates every push and PR to main, validating the
-checked-out commit's SDK code. The smoke workflow gates the same events
-but validates the *deployed* app — it catches environment/state drift,
-not app-code regressions in the commit. The full suite does not gate — it
-is opt-in only, run manually when you want to validate against a freshly
-built app including any pending nullifier fixes.
+checked-out commit's SDK code. The Freighter smoke gate runs on the same
+events and validates the checked-out app plus environment/state health.
+The full Freighter suite does not gate — it is opt-in only, run manually
+when you want to validate against a freshly built app including any
+pending nullifier fixes.
 
 Note: `deployment.yml` (Pages build and deploy) is no longer gated by
 the e2e signal. It runs independently; the push-triggered e2e jobs
