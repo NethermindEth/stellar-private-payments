@@ -16,6 +16,7 @@ import '../src/env.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { scrub } from '../src/redact.mjs';
 import {
   launch,
   unlockFreighter,
@@ -293,6 +294,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('provision: FAILED —', err.message);
+  console.error('provision: FAILED —', scrub(err.message));
   process.exit(1);
 });
