@@ -76,11 +76,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("User notes (up to 10):");
-    let notes = account.user_notes(10)?;
-    if notes.is_empty() {
+    let page = account.user_notes(0, 10, None)?;
+    if page.notes.is_empty() {
         println!("  (no notes)");
     } else {
-        for note in notes {
+        println!("  (showing {} of {} total)", page.notes.len(), page.total);
+        for note in page.notes {
             println!(
                 "  {} | amount={} | spent={} | pool={}",
                 note.id, note.amount, note.spent, note.pool_contract_id
