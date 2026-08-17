@@ -80,6 +80,7 @@ pub fn test_config(port: u16, initial_ledger_tip: u32) -> Config {
         rate_limit_burst: 1_000,
         otel: None,
         initial_ledger_tip,
+        delete_other_deployments: false,
     }
 }
 

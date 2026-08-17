@@ -11,6 +11,7 @@ use tokio_postgres::types::Json;
 pub struct Postgres {
     pool: Pool,
     deployment_id: String,
+    delete_other_deployments: bool,
 }
 
 impl Postgres {
@@ -18,6 +19,7 @@ impl Postgres {
         database_url: &str,
         max_connections: usize,
         deployment_id: impl Into<String>,
+        delete_other_deployments: bool,
     ) -> Result<Self> {
         let pg_cfg: tokio_postgres::Config = database_url
             .parse()
@@ -30,6 +32,7 @@ impl Postgres {
         Ok(Self {
             pool,
             deployment_id: deployment_id.into(),
+            delete_other_deployments,
         })
     }
 
@@ -47,11 +50,41 @@ ON CONFLICT (deployment_id) DO NOTHING
                 &[&self.deployment_id],
             )
             .await?;
+
+        if self.delete_other_deployments {
+            let (events, state_rows) = self.delete_other_deployment_rows().await?;
+            if events > 0 || state_rows > 0 {
+                tracing::info!(
+                    events,
+                    state_rows,
+                    deployment_id = self.deployment_id(),
+                    "deleted other deployment data"
+                );
+            }
+        }
+
         Ok(())
     }
 
     fn deployment_id(&self) -> &str {
         &self.deployment_id
+    }
+
+    async fn delete_other_deployment_rows(&self) -> Result<(u64, u64)> {
+        let client = self.pool.get().await?;
+        let events = client
+            .execute(
+                &format!("DELETE FROM {EVENTS} WHERE deployment_id != $1"),
+                &[&self.deployment_id()],
+            )
+            .await?;
+        let state_rows = client
+            .execute(
+                &format!("DELETE FROM {INDEXER_STATE} WHERE deployment_id != $1"),
+                &[&self.deployment_id()],
+            )
+            .await?;
+        Ok((events, state_rows))
     }
 
     async fn insert_events_batch(
