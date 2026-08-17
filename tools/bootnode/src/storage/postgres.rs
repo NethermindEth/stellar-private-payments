@@ -53,6 +53,45 @@ ON CONFLICT (deployment_id) DO NOTHING
     fn deployment_id(&self) -> &str {
         &self.deployment_id
     }
+
+    async fn insert_events_batch(
+        &self,
+        client: &deadpool_postgres::Object,
+        events: &[Event],
+    ) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+
+        let deployment_id = self.deployment_id();
+        let mut ids = Vec::with_capacity(events.len());
+        let mut ledgers = Vec::with_capacity(events.len());
+        let mut payloads = Vec::with_capacity(events.len());
+
+        for event in events {
+            ids.push(event.id.as_str());
+            ledgers.push(
+                i32::try_from(event.ledger)
+                    .context("event ledger exceeds postgres INTEGER range")?,
+            );
+            payloads.push(Json(event));
+        }
+
+        client
+            .execute(
+                &format!(
+                    r#"
+INSERT INTO {EVENTS} (deployment_id, id, ledger, payload)
+SELECT $1, batch.id, batch.ledger, batch.payload
+FROM UNNEST($2::text[], $3::int4[], $4::jsonb[]) AS batch(id, ledger, payload)
+ON CONFLICT (deployment_id, id) DO NOTHING
+"#
+                ),
+                &[&deployment_id, &ids, &ledgers, &payloads],
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -175,22 +214,11 @@ FROM {STATE} WHERE deployment_id = $1
         if events.is_empty() {
             return Ok(());
         }
+
+        const BATCH_SIZE: usize = 1_000;
         let client = self.pool.get().await?;
-        for event in events {
-            let ledger = i32::try_from(event.ledger)
-                .context("event ledger exceeds postgres INTEGER range")?;
-            client
-                .execute(
-                    &format!(
-                        r#"
-INSERT INTO {EVENTS} (deployment_id, id, ledger, payload)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (deployment_id, id) DO NOTHING
-"#
-                    ),
-                    &[&self.deployment_id(), &event.id, &ledger, &Json(event)],
-                )
-                .await?;
+        for chunk in events.chunks(BATCH_SIZE) {
+            self.insert_events_batch(&client, chunk).await?;
         }
         Ok(())
     }
