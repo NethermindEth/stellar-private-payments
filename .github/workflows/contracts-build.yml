@@ -45,7 +45,7 @@ jobs:
       - name: Build contracts
         run: |
           mkdir -p target/stellar
-          for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+          for pkg in asp-membership asp-non-membership circom-groth16-verifier pool pool-gvk; do
             stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize \
               --package "$pkg"
           done

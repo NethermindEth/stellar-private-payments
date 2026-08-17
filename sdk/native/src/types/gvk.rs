@@ -168,6 +168,33 @@ impl GvkMode {
             _ => Err(anyhow!("Unknown GVK circuit mode word: {word}")),
         }
     }
+
+    /// Value stored under `pool-gvk`'s `DataKey::GvkMode`, matching
+    /// `pool_gvk::gvk::{VIEW_ONLY, TRACEABLE}`. `None` for [`GvkMode::Off`],
+    /// which has no on-chain discriminant at all: a `contracts/pool`
+    /// deployment simply has no `GvkMode` storage key.
+    ///
+    /// Written out explicitly rather than derived from the enum's declaration
+    /// order, so reordering the variants cannot silently change the mapping.
+    pub fn on_chain_value(self) -> Option<u32> {
+        match self {
+            GvkMode::Off => None,
+            GvkMode::ViewOnly => Some(1),
+            GvkMode::Traceable => Some(2),
+        }
+    }
+
+    /// Inverse of [`GvkMode::on_chain_value`]. `None` input means the pool has
+    /// no `GvkMode` key, i.e. [`GvkMode::Off`]; an unrecognized value is an
+    /// error rather than a silent [`GvkMode::Off`].
+    pub fn from_on_chain_value(value: Option<u32>) -> Result<Self> {
+        match value {
+            None => Ok(GvkMode::Off),
+            Some(1) => Ok(GvkMode::ViewOnly),
+            Some(2) => Ok(GvkMode::Traceable),
+            Some(other) => Err(anyhow!("unknown on-chain GVK mode: {other}")),
+        }
+    }
 }
 
 /// Circuit artifact stem prefix for GVK-composed policy-transact circuits,
@@ -443,5 +470,35 @@ mod tests {
     #[test]
     fn parse_gvk_circuit_stem_rejects_unknown_mode_word() {
         assert!(parse_gvk_circuit_stem("policy_tx_gvk_2_2_A_bogus").is_err());
+    }
+}
+
+#[cfg(test)]
+mod on_chain_mode_tests {
+    use super::*;
+
+    /// These values are a wire contract with `pool_gvk::gvk::{VIEW_ONLY,
+    /// TRACEABLE}`. Changing either side alone silently misreads deployed
+    /// pools, so pin the literals.
+    #[test]
+    fn on_chain_values_match_the_contract_constants() {
+        assert_eq!(GvkMode::Off.on_chain_value(), None);
+        assert_eq!(GvkMode::ViewOnly.on_chain_value(), Some(1));
+        assert_eq!(GvkMode::Traceable.on_chain_value(), Some(2));
+    }
+
+    #[test]
+    fn on_chain_value_round_trips() -> Result<()> {
+        for mode in [GvkMode::Off, GvkMode::ViewOnly, GvkMode::Traceable] {
+            assert_eq!(GvkMode::from_on_chain_value(mode.on_chain_value())?, mode);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_on_chain_value_is_an_error_not_off() {
+        assert!(GvkMode::from_on_chain_value(Some(0)).is_err());
+        assert!(GvkMode::from_on_chain_value(Some(3)).is_err());
+        assert!(GvkMode::from_on_chain_value(Some(u32::MAX)).is_err());
     }
 }
