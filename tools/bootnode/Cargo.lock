@@ -445,6 +445,7 @@ dependencies = [
  "axum-server",
  "clap",
  "deadpool-postgres",
+ "getrandom 0.2.17",
  "http-body-util",
  "jsonrpsee",
  "metrics",

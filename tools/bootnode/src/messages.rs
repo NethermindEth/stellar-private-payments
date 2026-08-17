@@ -155,7 +155,7 @@ impl GetEventsParams {
         contract_ids: &[String],
         start_ledger: Option<u32>,
         cursor: Option<&str>,
-        limit: u32,
+        limit: Option<u32>,
     ) -> Self {
         Self {
             filters: vec![ContractEventFilter {
@@ -164,7 +164,7 @@ impl GetEventsParams {
                 contract_ids: contract_ids.to_vec(),
             }],
             pagination: PaginationParams {
-                limit: Some(limit),
+                limit,
                 cursor: cursor.map(str::to_owned),
             },
             start_ledger,
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn for_contracts_shape() {
         let ids = vec!["CABC".to_string(), "CDEF".to_string()];
-        let params = GetEventsParams::for_contracts(&ids, Some(100), Some("cursor-1"), 1000);
+        let params = GetEventsParams::for_contracts(&ids, Some(100), Some("cursor-1"), Some(1000));
 
         assert_eq!(params.start_ledger, Some(100));
         assert_eq!(params.pagination.limit, Some(1000));
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn for_contracts_serializes_roundtrip() {
-        let params = GetEventsParams::for_contracts(&["CA".to_string()], Some(1), None, 10);
+        let params = GetEventsParams::for_contracts(&["CA".to_string()], Some(1), None, Some(10));
         let value = serde_json::to_value(params).expect("params should serialize");
         let roundtrip: GetEventsParams =
             serde_json::from_value(value).expect("params should deserialize");
