@@ -172,7 +172,35 @@ async fn handoff_simple() {
     server.abort();
 }
 
-// TODO cursor for unknown event
+#[tokio::test]
+async fn get_events_unknown_cursor_invalid_params() {
+    const PORT: u16 = 40410;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let storage = test_storage(GENESIS_LEDGER);
+    seed_tip(&storage, NETWORK_TIP).await;
+    seed_archive_ready(&storage).await;
+
+    let server = spawn_bootnode(storage, test_config(PORT, NETWORK_TIP), GENESIS_LEDGER).await;
+
+    let client = reqwest::Client::new();
+    wait_listening(&client, &base).await;
+
+    let response = post_get_events(
+        &client,
+        &base,
+        GetEventsParams::for_contracts(&ids, None, Some("unknown-event-id"), 1000),
+    )
+    .await;
+
+    server.abort();
+
+    assert!(response.result.is_none());
+    let err = response.error.expect("expected invalid params");
+    assert_eq!(err.code, -32_602);
+}
+
 // TODO young pool deployment
 
 #[tokio::test]

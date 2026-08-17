@@ -80,14 +80,16 @@ impl BootnodeRpc {
                 counter!("bootnode_handoffs_total").increment(1);
                 return Err(retention_handoff(cutoff_ledger));
             }
-            if self
+            let cursor_ledger = self
                 .state
                 .storage
                 .event_ledger(cursor)
                 .await
-                .map_err(internal_error)?
-                .is_some_and(|ledger| ledger >= cutoff_ledger)
-            {
+                .map_err(internal_error)?;
+            let Some(cursor_ledger) = cursor_ledger else {
+                return Err(invalid_params("invalid cursor"));
+            };
+            if cursor_ledger >= cutoff_ledger {
                 counter!("bootnode_handoffs_total").increment(1);
                 return Err(retention_handoff(cutoff_ledger));
             }

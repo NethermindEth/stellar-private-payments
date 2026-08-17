@@ -34,9 +34,7 @@ impl Indexer {
 
         let latest = self.state.upstream.get_latest_ledger().await?;
         let tip_sequence = latest.sequence;
-        self.state
-            .ledger_tip
-            .store(tip_sequence, Ordering::Relaxed);
+        self.state.ledger_tip.store(tip_sequence, Ordering::Relaxed);
         gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
         self.state.storage.set_ledger_tip(tip_sequence).await?;
 
