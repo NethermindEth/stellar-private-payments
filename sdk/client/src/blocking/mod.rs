@@ -8,9 +8,11 @@
 
 mod account;
 mod client;
+mod disclosure;
 mod pool;
 mod runtime;
 
 pub use account::Account;
 pub use client::Client;
+pub use disclosure::verify_disclosure_receipt;
 pub use pool::PrivatePool;

@@ -118,6 +118,8 @@ pub struct RegisteredCircuit {
     pub levels: u32,
     /// Number of note disclosures represented by the circuit.
     pub n_notes: u32,
+    /// Canonical verifying-key hash.
+    pub canonical_vk_hash: &'static str,
     /// Public input order used by the witness and verifier.
     pub public_inputs_order: &'static [&'static str],
     /// Artifact file names used by build, web, and CLI callers.
@@ -288,6 +290,7 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_1_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_1_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
+    canonical_vk_hash: "0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_1.graph.bin",
@@ -302,6 +305,7 @@ pub const SELECTIVE_DISCLOSURE_2: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_2_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_2_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_2_N_NOTES,
+    canonical_vk_hash: "0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_2.graph.bin",
@@ -316,6 +320,7 @@ pub const SELECTIVE_DISCLOSURE_3: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_3_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_3_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_3_N_NOTES,
+    canonical_vk_hash: "0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_3.graph.bin",
@@ -330,6 +335,7 @@ pub const SELECTIVE_DISCLOSURE_4: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_4_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_4_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_4_N_NOTES,
+    canonical_vk_hash: "0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_4.graph.bin",

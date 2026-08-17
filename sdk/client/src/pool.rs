@@ -205,7 +205,11 @@ impl<S: Storage> PrivatePool<S> {
                     };
                     let receipt = self
                         .prover
-                        .prove_disclosure(DisclosureProveParams { notes, context })
+                        .prove_disclosure(DisclosureProveParams {
+                            notes,
+                            context,
+                            issued_at: req.issued_at,
+                        })
                         .await?;
                     return Ok(Some(receipt));
                 }
