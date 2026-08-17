@@ -95,14 +95,9 @@ impl BootnodeRpc {
             }
         }
 
-        let indexer = self
-            .state
-            .storage
-            .load_indexer_state()
-            .await
-            .map_err(internal_error)?;
-        let oldest_ledger = if indexer.oldest_ledger > 0 {
-            indexer.oldest_ledger
+        let stored_oldest = self.state.oldest_ledger.load(Ordering::Relaxed);
+        let oldest_ledger = if stored_oldest > 0 {
+            stored_oldest
         } else {
             self.state.min_deployment_ledger
         };
