@@ -131,20 +131,9 @@ impl Storage for InMemory {
         Ok(())
     }
 
-    async fn event_ledger(&self, event_id: &str) -> Result<Option<u32>> {
-        Ok(self.with_deployment(|state| {
-            state
-                .events
-                .values()
-                .find(|event| event.id == event_id)
-                .map(|event| event.ledger)
-        }))
-    }
-
-    async fn page_events(
+    async fn page_events_ledger(
         &self,
-        start_ledger: Option<u32>,
-        after_event_id: Option<&str>,
+        start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
     ) -> Result<Vec<Event>> {
@@ -152,26 +141,7 @@ impl Storage for InMemory {
             let mut events: Vec<Event> = state
                 .events
                 .values()
-                .filter(|event| event.ledger < cutoff_ledger)
-                .filter(|event| {
-                    if let Some(after_event_id) = after_event_id {
-                        if event.id == after_event_id {
-                            return false;
-                        }
-                        if let Some(after_ledger) = state
-                            .events
-                            .values()
-                            .find(|candidate| candidate.id == after_event_id)
-                            .map(|candidate| candidate.ledger)
-                        {
-                            return event.ledger > after_ledger
-                                || (event.ledger == after_ledger
-                                    && event.id.as_str() > after_event_id);
-                        }
-                        return false;
-                    }
-                    start_ledger.is_some_and(|start| event.ledger >= start)
-                })
+                .filter(|event| event.ledger < cutoff_ledger && event.ledger >= start_ledger)
                 .cloned()
                 .collect();
             events.sort_by(|left, right| {
@@ -181,6 +151,43 @@ impl Storage for InMemory {
             });
             events.truncate(limit as usize);
             events
+        }))
+    }
+
+    async fn page_events_cursor(
+        &self,
+        after_event_id: &str,
+        cutoff_ledger: u32,
+        limit: u32,
+    ) -> Result<(Option<u32>, Vec<Event>)> {
+        Ok(self.with_deployment(|state| {
+            let Some(after_ledger) = state
+                .events
+                .values()
+                .find(|event| event.id == after_event_id)
+                .map(|event| event.ledger)
+            else {
+                return (None, Vec::new());
+            };
+
+            let mut events: Vec<Event> = state
+                .events
+                .values()
+                .filter(|event| event.ledger < cutoff_ledger)
+                .filter(|event| {
+                    event.id != after_event_id
+                        && (event.ledger > after_ledger
+                            || (event.ledger == after_ledger && event.id.as_str() > after_event_id))
+                })
+                .cloned()
+                .collect();
+            events.sort_by(|left, right| {
+                left.ledger
+                    .cmp(&right.ledger)
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            events.truncate(limit as usize);
+            (Some(after_ledger), events)
         }))
     }
 }
@@ -217,17 +224,18 @@ mod tests {
             .expect("seed");
 
         let first = storage
-            .page_events(Some(100), None, 400, 10)
+            .page_events_ledger(100, 400, 10)
             .await
             .expect("first page");
         assert_eq!(first.len(), 2);
         assert_eq!(first[0].id, "event-a");
         assert_eq!(first[1].id, "event-b");
 
-        let second = storage
-            .page_events(None, Some("event-b"), 600, 10)
+        let (cursor_ledger, second) = storage
+            .page_events_cursor("event-b", 600, 10)
             .await
             .expect("second page");
+        assert_eq!(cursor_ledger, Some(200));
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].id, "event-c");
     }

@@ -32,12 +32,16 @@ pub trait Storage: Send + Sync {
     async fn set_oldest_ledger(&self, oldest_ledger: u32) -> Result<()>;
     async fn set_archive_ready(&self) -> Result<()>;
     async fn upsert_events(&self, events: &[Event]) -> Result<()>;
-    async fn event_ledger(&self, event_id: &str) -> Result<Option<u32>>;
-    async fn page_events(
+    async fn page_events_ledger(
         &self,
-        start_ledger: Option<u32>,
-        after_event_id: Option<&str>,
+        start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
     ) -> Result<Vec<Event>>;
+    async fn page_events_cursor(
+        &self,
+        after_event_id: &str,
+        cutoff_ledger: u32,
+        limit: u32,
+    ) -> Result<(Option<u32>, Vec<Event>)>;
 }
