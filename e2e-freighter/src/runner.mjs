@@ -204,7 +204,7 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(async (err) => {
-    log.error('FAILED:', err.message);
+    log.error('FAILED:', err.stack || err.message);
     process.exit(1);
   });
 }

@@ -5,7 +5,7 @@ import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
 import { waitForSyncedLedger } from '../src/indexer.mjs';
 import { deposit, withdraw } from '../src/moveFunds.mjs';
-import { gotoAdvanced, gotoMoveFunds } from '../src/navigation.mjs';
+import { gotoAdvanced, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
@@ -44,8 +44,7 @@ export async function run(helpers) {
   assert(noteResult.notes.matchingNotes.length > 0, 'no note was ready after indexer progress');
 
   await gotoMoveFunds(page);
-  await page.getByTestId('move-flow-withdraw').click();
-  await page.getByTestId('move-panel-withdraw').waitFor({ state: 'visible', timeout: 10_000 });
+  await gotoMoveFlow(page, 'withdraw');
 
   const withdrawResult = await withdraw(helpers, {
     logTag,

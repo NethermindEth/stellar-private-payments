@@ -54,7 +54,7 @@ export async function waitForNotes(page, {
     isReady: (snapshot) => (
       snapshot.refreshState === 'ready' &&
       snapshot.noteCount >= minCount &&
-      snapshot.matchingNotes.length > 0
+      (minCount === 0 || snapshot.matchingNotes.length > 0)
     ),
   });
 }

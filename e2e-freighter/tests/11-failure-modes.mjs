@@ -3,6 +3,7 @@
 // deposit to ensure no failure left the app in a poisoned state.
 
 import { createLogger } from '../src/logger.mjs';
+import { randomBytes } from 'node:crypto';
 import { assert } from '../src/assert.mjs';
 import { waitForSyncedLedger } from '../src/indexer.mjs';
 import {
@@ -19,6 +20,44 @@ import { expectNoFreighterApproval } from '../src/wallet.mjs';
 
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function crc16Xmodem(bytes) {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte << 8;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+      crc &= 0xffff;
+    }
+  }
+  return crc;
+}
+
+function base32Encode(bytes) {
+  let value = 0;
+  let bits = 0;
+  let output = '';
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  return bits ? output + BASE32_ALPHABET[(value << (5 - bits)) & 31] : output;
+}
+
+function randomUnregisteredAddress() {
+  const encoded = Buffer.alloc(35);
+  encoded[0] = 6 << 3;
+  randomBytes(32).copy(encoded, 1);
+  const checksum = crc16Xmodem(encoded.subarray(0, 33));
+  encoded[33] = checksum & 0xff;
+  encoded[34] = checksum >>> 8;
+  return base32Encode(encoded);
+}
 
 async function confirmOperation(page, title) {
   const dialog = page.getByTestId('confirm-dialog').filter({ hasText: title });
@@ -53,10 +92,7 @@ export async function run(helpers) {
   // Far above every funded test account's private balance, while remaining a
   // valid decimal amount. Coin selection must fail locally before signing.
   const overAmount = '1000000';
-  const unregisteredAddress = await page.evaluate(async () => {
-    const mod = await import('https://esm.sh/@stellar/stellar-sdk@13');
-    return mod.default.Keypair.random().publicKey();
-  });
+  const unregisteredAddress = randomUnregisteredAddress();
 
   // (1) Over-withdraw: planner rejects the amount before signing.
   await gotoMoveFlow(page, 'withdraw');

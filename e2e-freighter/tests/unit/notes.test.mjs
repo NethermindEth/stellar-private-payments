@@ -62,6 +62,18 @@ test('waitForNotes resolves only after the table count and predicate are ready',
   assert.equal(result.elapsedMs, 200);
 });
 
+test('waitForNotes accepts a ready empty table when minCount is zero', async () => {
+  const result = await waitForNotes(fakeNotesPage([readySnapshot([])]), {
+    minCount: 0,
+    waitOptions: {
+      now: () => 0,
+      sleep: async () => { throw new Error('empty ready table should not sleep'); },
+    },
+  });
+
+  assert.deepEqual(result.value.matchingNotes, []);
+});
+
 test('waitForNotesAfterIndexer waits for progress before reading the table', async () => {
   const listeners = new Map();
   const page = Object.assign(fakeNotesPage([

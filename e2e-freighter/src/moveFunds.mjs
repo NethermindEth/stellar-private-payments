@@ -204,6 +204,7 @@ export async function submitAndConfirmOperation(
 
   log.info(`${flowName}: driving Freighter approvals (deadline ${progressTimeoutMs}ms)`);
   const seenStages = new Set();
+  let sawSubmitting = (await submitBtn.getAttribute('data-status').catch(() => 'unknown')) === 'submitting';
   let firstApprovalElapsed = null;
   const pollStart = Date.now();
   const progressDeadline = Date.now() + progressTimeoutMs;
@@ -226,6 +227,7 @@ export async function submitAndConfirmOperation(
   try {
     while (Date.now() < progressDeadline) {
       const buttonState = await submitBtn.getAttribute('data-status').catch(() => 'unknown');
+      if (buttonState === 'submitting') sawSubmitting = true;
       const pending = await waitForAnyFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
         timeoutMs: APPROVAL_GRACE_MS,
       }).catch(() => null);
@@ -233,7 +235,7 @@ export async function submitAndConfirmOperation(
       if (!pending) {
         // Proving can precede a later signing prompt. Only stop watching for
         // approvals once the production operation control has returned idle.
-        if (seenStages.size > 0 && buttonState === 'idle') {
+        if (sawSubmitting && buttonState === 'idle') {
           operationSettled = true;
           break;
         }
@@ -251,8 +253,8 @@ export async function submitAndConfirmOperation(
     clearInterval(progressInterval);
   }
 
-  if (seenStages.size === 0) {
-    fail(`${flowName}: submit button never showed a progress stage — the click may not have started anything`);
+  if (!sawSubmitting) {
+    fail(`${flowName}: submit button never left its idle state — the click may not have started anything`);
   }
   log.debug(flowName, 'progress stages:', [...seenStages].join(' -> '));
 
