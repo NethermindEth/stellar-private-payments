@@ -395,9 +395,9 @@ mod tests {
         }
     }
 
-    /// Replace `window.fetch` with a hermetic shim that returns `GOOD_BYTES` and
-    /// counts calls. The counter lets tests assert how many network round-trips
-    /// happened.
+    /// Replace `window.fetch` with a hermetic shim that returns `GOOD_BYTES`
+    /// and counts calls. The counter lets tests assert how many network
+    /// round-trips happened.
     fn install_fetch_shim() -> FetchShim {
         let counter = Rc::new(Cell::new(0u32));
         let counter_for_closure = counter.clone();

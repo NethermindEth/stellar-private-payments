@@ -1,14 +1,14 @@
 //! End-to-end browser tests for the web client.
 //!
 //! These tests run under `wasm-bindgen-test` in a headless browser and drive
-//! `Client`/`PrivatePool` with a stub wallet signer. Setup deposits are genuinely
-//! signed and submitted so later tests have spendable notes; the flow tests
-//! assert the SEP-0043 `code: -4` sentinel at the signing boundary.
+//! `Client`/`PrivatePool` with a stub wallet signer. Setup deposits are
+//! genuinely signed and submitted so later tests have spendable notes; the flow
+//! tests assert the SEP-0043 `code: -4` sentinel at the signing boundary.
 //!
 //! Worker JS and circuit artifacts are served from `sdk/web/dist` on a separate
 //! local origin. Because `wasm-bindgen-test-runner` serves the test page from a
-//! fresh temp directory, a plain cross-origin module worker would not start; the
-//! tests build a same-origin `blob:` URL for the worker loader instead.
+//! fresh temp directory, a plain cross-origin module worker would not start;
+//! the tests build a same-origin `blob:` URL for the worker loader instead.
 //!
 //! Run via `sdk/web/scripts/e2e-browser-test.sh` with `-- --include-ignored`.
 

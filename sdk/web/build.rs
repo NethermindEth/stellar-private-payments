@@ -72,15 +72,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed=build.rs");
 
-    // The e2e tests read these at compile time via option_env!.
+    // Non-secret e2e config only.
     for var in [
         "E2E_STATIC_ORIGIN",
         "E2E_RPC_URL",
         "E2E_POOL_CONTRACT",
         "E2E_ACCOUNT_A_ADDRESS",
-        "E2E_ACCOUNT_A_SECRET",
         "E2E_ACCOUNT_B_ADDRESS",
-        "E2E_ACCOUNT_B_SECRET",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
     }
