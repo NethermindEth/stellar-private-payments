@@ -13,18 +13,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
 DIST="$WEB/dist"
 
-# Load the provisioned account material, if present. The E2E_* values are read
-# at COMPILE time by option_env! (sdk/web/src/client/e2e_tests.rs), so they must
-# be exported before cargo runs, not merely before the test does; when they are
-# absent cargo silently bakes in None and the e2e tests panic on their own guard
-# message. Sourcing here — before the defaults below — rather than making every
-# caller remember `set -a; . …; set +a`.
-#
-# Precedence: an already-exported, non-empty variable is NEVER overwritten. In
-# CI every value is an injected secret and must win over any file on disk.
-# Deliberately not `set -a; . "$file"; set +a`, which would clobber them.
-#
-# Values are never echoed: this file holds testnet secret keys.
+# Load provisioned account material, if present. Values are read at compile time
+# via option_env!, so they must be exported before cargo runs. Already-exported
+# vars take precedence so CI secrets are never clobbered.
 E2E_ENV_FILE="${E2E_ENV_FILE:-$ROOT/deployments/testnet/.e2e-accounts.env}"
 if [ -f "$E2E_ENV_FILE" ]; then
   step "loading account env from $E2E_ENV_FILE (already-exported vars win)"
@@ -33,15 +24,12 @@ if [ -f "$E2E_ENV_FILE" ]; then
     case "$_line" in *=*) ;; *) continue ;; esac
     _key="${_line%%=*}"
     case "$_key" in E2E_*) ;; *) continue ;; esac
-    [ -n "${!_key:-}" ] && continue
+    [ -n "${_key:-}" ] && continue
     export "$_key=${_line#*=}"
   done < "$E2E_ENV_FILE"
   unset _line _key
 fi
 
-# The origin the test page fetches worker JS and circuit artifacts from. Must
-# match the value compiled into the tests (option_env!("E2E_STATIC_ORIGIN") in
-# sdk/web/src/client/e2e_tests.rs, same default).
 E2E_STATIC_ORIGIN="${E2E_STATIC_ORIGIN:-http://127.0.0.1:8099}"
 
 READY_PATH="/workers/storage-worker.js"
@@ -55,36 +43,26 @@ Usage: e2e-browser-test.sh <command> [args...]
 
 Runs <command> with everything the sdk/web browser e2e tests need:
 
-  1. sdk/web/dist is built (built on demand when dist/workers is missing).
-  2. A CORS-enabled static server rooted at sdk/web/dist is listening on
-     $E2E_STATIC_ORIGIN. Plain `python3 -m http.server` is NOT sufficient: the
-     test page loads these assets cross-origin, so they need
-     Access-Control-Allow-Origin headers.
-  3. The server is ready (polled, not raced) before <command> starts.
-  4. E2E_STATIC_ORIGIN is exported, and CHROMEDRIVER is set from PATH if unset.
-  5. The provisioned account material in $E2E_ENV_FILE is exported, when that
-     file exists. Variables already exported win over the file, so injected CI
-     secrets are never clobbered. These are read at COMPILE time by option_env!,
-     so they must be set for the cargo invocation, not just for the test run.
-  6. scripts/e2e-preflight.sh --check --suite sdk has passed. It runs after the
-     env-file load, so it can verify the values are coherent (notably that
-     E2E_POOL_CONTRACT matches deployments.json) rather than merely present.
+  1. sdk/web/dist is built on demand when dist/workers is missing.
+  2. A CORS-enabled static server is started on $E2E_STATIC_ORIGIN, rooted at
+     sdk/web/dist.
+  3. The server is polled for readiness before <command> starts.
+  4. E2E_STATIC_ORIGIN and any loaded account material are exported.
+  5. CHROMEDRIVER is resolved from PATH when unset.
+  6. scripts/e2e-preflight.sh --check --suite sdk has passed.
      E2E_SKIP_PREFLIGHT=1 bypasses it.
 
 An already-running server on that origin is reused and left running. A server
-this script started is stopped on exit.
+started by this script is stopped on exit.
 
 Environment:
   E2E_ENV_FILE               Account material to export (default
-                             deployments/testnet/.e2e-accounts.env; written by
-                             deployments/scripts/e2e-accounts-setup.sh). Missing
+                             deployments/testnet/.e2e-accounts.env). Missing
                              file is not an error.
   E2E_SKIP_PREFLIGHT         Set to 1 to bypass scripts/e2e-preflight.sh
   E2E_STATIC_ORIGIN          Origin to serve assets on (default http://127.0.0.1:8099)
   CHROMEDRIVER               Path to chromedriver (default: from PATH)
-  WASM_BINDGEN_TEST_TIMEOUT  Per-test timeout in seconds (default 600). The
-                             wasm-bindgen default of 20s is far too short for
-                             real proving plus testnet confirmation.
+  WASM_BINDGEN_TEST_TIMEOUT  Per-test timeout in seconds (default 600)
 
 Examples:
   sdk/web/scripts/e2e-browser-test.sh \
@@ -104,7 +82,6 @@ esac
 need curl
 need python3
 
-# http://host:port -> host / port
 origin_host_port() {
   local hostport="${E2E_STATIC_ORIGIN#*://}"
   hostport="${hostport%%/*}"
@@ -129,7 +106,6 @@ ensure_dist() {
     npm run build --prefix "$WEB" >&2
     [ -d "$DIST/workers" ] || die "build did not produce $DIST/workers"
   else
-    # A stale dist silently tests old code; rebuilding is the caller's choice.
     warn "reusing existing $DIST (run 'npm run build --prefix sdk/web' if it is stale)"
   fi
 }
@@ -150,7 +126,6 @@ class CORSHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=root, **kwargs)
 
     def end_headers(self):
-        # The test page loads these assets cross-origin.
         self.send_header("Access-Control-Allow-Origin", "*")
         super().end_headers()
 
@@ -193,7 +168,6 @@ wait_ready() {
 }
 
 cleanup() {
-  # Only ever stop a server this script started, never a reused one.
   if [ -n "$SERVER_PID" ]; then
     step "stopping static server"
     kill "$SERVER_PID" 2>/dev/null || true
@@ -206,17 +180,6 @@ cleanup() {
 trap cleanup EXIT
 
 main() {
-  # Runs AFTER the env-file load above, deliberately: the preflight's
-  # env.compiletime.exported check wants the E2E_* values already exported, and
-  # env.pool.matches_deployments compares E2E_POOL_CONTRACT against
-  # deployments.json — neither can do real work on variables the loader has not
-  # supplied yet. Reversed, the preflight fails on its own missing prerequisite.
-  #
-  # Skipped entirely with E2E_SKIP_PREFLIGHT=1. On failure, abort with the
-  # preflight's own report already printed — no extra wrapping. Its sdk group
-  # deliberately overlaps ensure_dist below (both know about dist/workers): the
-  # preflight must be able to report a missing dist without building it, so it
-  # does not replace ensure_dist here.
   if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
     bash "$ROOT/scripts/e2e-preflight.sh" --check --suite sdk || exit 1
   fi
@@ -231,9 +194,7 @@ main() {
 
   export E2E_STATIC_ORIGIN
 
-  # wasm-bindgen's headless runner defaults to a 20s per-test timeout and then
-  # SIGKILLs the driver. These tests do real Groth16 proving, submit to testnet
-  # and wait for confirmation, so they need far longer.
+  # wasm-bindgen's default 20s timeout is too short for proving + testnet.
   export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-600}"
   step "WASM_BINDGEN_TEST_TIMEOUT=${WASM_BINDGEN_TEST_TIMEOUT}s"
 

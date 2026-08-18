@@ -370,16 +370,9 @@ mod tests {
         }
     }
 
-    /// Active `window.fetch` shim; restores the previous `fetch` when dropped.
+    /// `window.fetch` shim that restores the original `fetch` on drop.
     ///
-    /// Restoring matters beyond tidiness: `wasm-bindgen-test` runs every test
-    /// in one page, and `reqwest`'s wasm client routes all HTTP through
-    /// `window.fetch`, then parses the *response's* URL
-    /// (`reqwest/src/wasm/client.rs:262`). The shim's synthetic `Response` has
-    /// an empty `url`, so leaving it installed makes every later test that
-    /// touches RPC panic with `RelativeUrlWithoutBase`.
-    ///
-    /// Derefs to the call counter, so `shim.get()` reads it directly.
+    /// Derefs to the call counter.
     struct FetchShim {
         original: JsValue,
         counter: Rc<Cell<u32>>,
@@ -402,15 +395,9 @@ mod tests {
         }
     }
 
-    /// Replace `window.fetch` with a hermetic shim that never touches the
-    /// network: it returns a fresh 200 Response carrying `GOOD_BYTES` and
-    /// increments a counter on every call. The returned counter lets tests
-    /// assert exactly how many network round-trips happened, so "cache hit
-    /// == no refetch" and "self-heal refetches once" become real assertions
-    /// rather than hopes.
-    ///
-    /// Hold the returned [`FetchShim`] for as long as the shim should be
-    /// installed; dropping it puts the original `fetch` back.
+    /// Replace `window.fetch` with a hermetic shim that returns `GOOD_BYTES`
+    /// and counts calls. The counter lets tests assert how many network
+    /// round-trips happened.
     fn install_fetch_shim() -> FetchShim {
         let counter = Rc::new(Cell::new(0u32));
         let counter_for_closure = counter.clone();
@@ -424,8 +411,6 @@ mod tests {
         }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
 
         let window = web_sys::window().expect("wasm-bindgen-test runs in a window context");
-        // Capture whatever `fetch` is installed right now — after a previous
-        // shim has been restored, that is the pristine one.
         let original = Reflect::get(&window, &JsValue::from_str("fetch"))
             .expect("window.fetch must be readable");
         Reflect::set(
@@ -434,8 +419,7 @@ mod tests {
             closure.as_ref().unchecked_ref(),
         )
         .unwrap();
-        // Leaking the closure keeps it callable while installed; the guard's
-        // Drop is what removes it from `window`.
+        // Leak the closure so it stays callable while the shim is installed.
         closure.forget();
 
         FetchShim { original, counter }

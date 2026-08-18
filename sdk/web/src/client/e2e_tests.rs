@@ -1,92 +1,16 @@
-//! End-to-end browser tests for the web client (issue #168).
+//! End-to-end browser tests for the web client.
 //!
-//! Runs under `wasm-bindgen-test` in a real headless browser
-//! (`run_in_browser`), driving [`Client`]/[`super::PrivatePool`] directly with
-//! a stub wallet signer so a flow can be taken up to the signing boundary.
+//! These tests run under `wasm-bindgen-test` in a headless browser and drive
+//! `Client`/`PrivatePool` with a stub wallet signer. Setup deposits are
+//! genuinely signed and submitted so later tests have spendable notes; the flow
+//! tests assert the SEP-0043 `code: -4` sentinel at the signing boundary.
 //!
-//! # Worker loading
+//! Worker JS and circuit artifacts are served from `sdk/web/dist` on a separate
+//! local origin. Because `wasm-bindgen-test-runner` serves the test page from a
+//! fresh temp directory, a plain cross-origin module worker would not start;
+//! the tests build a same-origin `blob:` URL for the worker loader instead.
 //!
-//! `wasm-bindgen-test-runner` serves its test page from a fresh
-//! `tempfile::tempdir()` created per run (wasm-bindgen-cli 0.2.126,
-//! `src/wasm_bindgen_test_runner.rs:217`), so the built worker JS and circuit
-//! artifacts cannot live on the test page's own origin — they must be served
-//! from a separate local origin ([`STATIC_ORIGIN`]).
-//!
-//! That is a problem, because a **cross-origin module worker never starts**
-//! (the script is fetched — the static server logs a 200 — but never executes,
-//! with no error event), and `sdk/web` spawns both workers as module workers
-//! (`.as_module(true)`: [`crate::storage`] and [`super`]).
-//!
-//! The way through: a `blob:` URL inherits the *page* origin, and a
-//! same-origin blob module worker does start. `gloo_worker` already relies on
-//! exactly this when `with_loader(false)` — it wraps an absolutised import in a
-//! blob (gloo-worker 0.6.0 `src/actor/spawner.rs:181-205`). Since `sdk/web`
-//! passes `with_loader(true)`, the worker URL is used verbatim, so these tests
-//! hand it a blob URL built the same way: fetch the loader shim cross-origin
-//! (allowed, with CORS), rewrite its relative specifiers to absolute
-//! [`STATIC_ORIGIN`] URLs, and wrap that in a blob. Everything the shim then
-//! imports has a real absolute base, so the wasm resolves correctly.
-//!
-//! # Setup transactions really are signed and submitted
-//!
-//! Transfer and withdraw need pre-existing spendable notes, so on-chain state
-//! is seeded by genuinely signed and submitted deposits ([`seed_deposit`],
-//! using [`SignerMode::Signing`]). Issue #168's "stop before signing" scope
-//! applies to the **flows under test**, which use [`SignerMode::Sentinel`] —
-//! not to setup. The accounts are disposable testnet accounts from
-//! `deployments/scripts/e2e-accounts-setup.sh`.
-//!
-//! # Key derivation: why `signMessage` returns a fixed blob in both modes
-//!
-//! `Client::account` derives privacy keys on first use from whatever
-//! `signMessage` returns (`sdk/web/src/client/mod.rs:207-213`), so both modes
-//! need a working `signMessage`. Both return the same fixed 64-byte blob, which
-//! means **the session's privacy keys differ from the keys
-//! `deployments/scripts/e2e-accounts-setup.sh` registered on-chain** (those
-//! came from a real SEP-53 signature via `spp onboard`).
-//!
-//! That is deliberate:
-//!
-//! * No flow under test resolves the account's *own* registered keys. Deposit
-//!   and withdraw never consult the registry; `resolve_transfer_recipient`
-//!   resolves only the **recipient's** keys (`sdk/client/src/pool.rs:338-352`).
-//!   `Account::is_registered` does look up the own entry but only tests that
-//!   one *exists* (`sdk/client/src/account.rs:111-119`).
-//! * What seeding actually requires is that the seeding session and the
-//!   asserted-flow session derive the *same* keys, so seeded notes are
-//!   spendable later. A fixed blob guarantees that.
-//! * Reproducing the registered signature would mean reimplementing SEP-53
-//!   (prefix `"Stellar Signed Message:\n"`, SHA-256, sign —
-//!   `cli/src/stellar_cli.rs:101-103`), for which there is no in-repo Rust
-//!   helper; the CLI shells out to the `stellar` binary. A subtly wrong
-//!   reimplementation would derive different keys *silently*.
-//!
-//! Consequence to keep in mind: these tests do **not** validate recipient-key
-//! interop. A note encrypted to an account's *registered* key would not be
-//! decryptable by one of these sessions. Nothing here depends on that, because
-//! the asserted flows never submit.
-//!
-//! # Running these tests
-//!
-//! They need a CORS-enabled static server rooted at `sdk/web/dist` on
-//! [`STATIC_ORIGIN`] plus `CHROMEDRIVER`. `sdk/web/scripts/e2e-browser-test.sh`
-//! owns that whole lifecycle — build, serve, wait for readiness, run, tear
-//! down:
-//!
-//! ```text
-//! sdk/web/scripts/e2e-browser-test.sh \
-//!   cargo test --target wasm32-unknown-unknown \
-//!     -p stellar-private-payments-sdk-web -- --include-ignored
-//! ```
-//!
-//! Every test here carries an `ignore` attribute, because each needs testnet
-//! accounts and that static server. `--include-ignored` opts them in. That is
-//! what lets the PR-time `wasm-test` job in `.github/workflows/wasm-build.yml`
-//! run the rest of this crate's tests (the spike and circuits tests, which need
-//! neither secrets nor a server) without these failing. The deployment gate in
-//! `.github/workflows/deployment.yml` passes `--include-ignored` so it really
-//! runs them — without that flag the gate would silently pass having skipped
-//! everything.
+//! Run via `sdk/web/scripts/e2e-browser-test.sh` with `-- --include-ignored`.
 
 // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny is
 // meant for production paths, not assertions.
@@ -109,84 +33,59 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 /// Origin of the CORS-enabled static server rooted at `sdk/web/dist`.
 ///
-/// Compiled in from `E2E_STATIC_ORIGIN` when set (the wrapper script exports
-/// it), otherwise the documented default. `option_env!` is resolved at build
-/// time, so changing the variable rebuilds these tests.
+/// Compiled in from `E2E_STATIC_ORIGIN`; defaults to the documented origin.
 const STATIC_ORIGIN: &str = match option_env!("E2E_STATIC_ORIGIN") {
     Some(origin) => origin,
     None => "http://127.0.0.1:8099",
 };
 
-/// Testnet RPC endpoint (the repo's existing default,
-/// `app/js/disclosure.js:29`).
+/// Testnet RPC endpoint.
 const RPC_URL: &str = match option_env!("E2E_RPC_URL") {
     Some(url) => url,
     None => "https://soroban-testnet.stellar.org",
 };
 
-/// Native XLM pool. `policyFlags: ["blocklist"]`, so it needs non-membership
-/// only — no ASP membership leaf, hence no admin secret (membership proofs are
-/// Allowlist-gated — `sdk/types/src/policy_tx.rs`; the pool's flags are in
-/// `deployments/testnet/deployments.json`).
+/// Native XLM pool. `policyFlags: ["blocklist"]`, so no ASP membership leaf is
+/// required.
 const POOL_CONTRACT: &str = match option_env!("E2E_POOL_CONTRACT") {
     Some(id) => id,
-    // Current testnet native XLM pool (`deployments/testnet/deployments.json`).
     None => "CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV",
 };
 
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
-/// Amount seeded per setup deposit, in stroops (0.1 XLM). Deliberately small:
-/// these are friendbot-funded testnet accounts and every seed costs real
-/// (testnet) balance plus proving time.
+/// Amount seeded per setup deposit, in stroops (0.1 XLM).
 const SEED_DEPOSIT_STROOPS: u128 = 1_000_000;
 
-/// Address of test account A, provisioned by
-/// `deployments/scripts/e2e-accounts-setup.sh`.
-///
-/// Flows that halt at the signing boundary need only the *address*.
+/// Address of test account A.
 const ACCOUNT_A_ADDRESS: Option<&str> = option_env!("E2E_ACCOUNT_A_ADDRESS");
 
-/// Address of test account B — the transfer recipient. Registered in the
-/// public-key registry by the provisioning script, which is what lets
-/// `resolve_transfer_recipient` find its keys
-/// (`sdk/client/src/pool.rs:338-352`).
+/// Address of test account B, the transfer recipient.
 const ACCOUNT_B_ADDRESS: Option<&str> = option_env!("E2E_ACCOUNT_B_ADDRESS");
 
-/// Amount moved by the transfer/withdraw flow tests, in stroops. Smaller than
-/// [`SEED_DEPOSIT_STROOPS`] so a single seeded note covers it.
+/// Amount moved by the transfer/withdraw flow tests, in stroops.
 const FLOW_AMOUNT_STROOPS: u128 = 500_000;
 
-/// Secret for test account A, used **only** by [`SignerMode::Signing`] to sign
-/// the setup transactions that seed on-chain state.
+/// Secret for test account A, used only to sign setup transactions.
 ///
-/// This is compiled into the test binary under `target/`. Acceptable because
-/// these are disposable testnet accounts created by
-/// `deployments/scripts/e2e-accounts-setup.sh`; never point this at an account
-/// that matters. The flows under test never need it — they halt before signing.
+/// These are disposable testnet accounts; never point this at an account that
+/// matters.
 const ACCOUNT_A_SECRET: Option<&str> = option_env!("E2E_ACCOUNT_A_SECRET");
 
-/// Fixed 64-byte signature blob the stub signer returns from `signMessage`,
-/// base64-encoded. Key derivation SHA-256s these bytes with a domain tag and
-/// never verifies them as a real Ed25519 signature, but the length must be
-/// exactly 64 (`sdk/prover/src/encryption.rs:121-123`). Base64 — never hex:
-/// `wallet_message_signature_to_bytes` tries base64 first, and 128 hex chars
-/// are themselves valid base64, decoding to 96 bytes.
+/// Fixed 64-byte signature blob the stub signer returns from `signMessage`.
+///
+/// Key derivation SHA-256s these bytes with a domain tag and never verifies
+/// them as a real Ed25519 signature, but the length must be exactly 64. Base64,
+/// not hex: `wallet_message_signature_to_bytes` tries base64 first, and 128 hex
+/// chars are themselves valid base64, decoding to 96 bytes.
 const STUB_SIGNATURE_B64: &str =
     "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpQ==";
 
 /// Build a same-origin `blob:` URL for a worker loader served at
 /// `{STATIC_ORIGIN}/workers/{file}`.
-///
-/// Fetches the shim, absolutises its relative import specifiers and its
-/// `import.meta.url`-derived circuits base (which would otherwise resolve
-/// against the blob URL and fail), then wraps the result in a blob.
 async fn blob_worker_url(file: &str) -> String {
-    // Deliberately XMLHttpRequest, NOT fetch: the circuits tests in this same
-    // crate replace `window.fetch` with a shim that returns 4 canned bytes and
-    // never restore it (`closure.forget()`, sdk/web/src/circuits.rs:373-403).
-    // They share this page, so a `fetch` here would silently receive garbage
-    // instead of the worker JS and the worker would never start.
+    // Use XMLHttpRequest, not fetch, because this crate's circuits tests replace
+    // `window.fetch` with a shim and never restore it.
     let js = format!(
         r#"(async function () {{
              const base = '{STATIC_ORIGIN}/workers';
@@ -201,9 +100,7 @@ async fn blob_worker_url(file: &str) -> String {
                xhr.onerror = function () {{ reject(new Error('network error for ' + url)); }};
                xhr.send();
              }});
-             // './foo.js' -> absolute on the static origin
              src = src.replace(/from '\.\/([^']+)'/g, "from '" + base + "/$1'");
-             // new URL('../circuits/', import.meta.url).href -> absolute
              src = src.replace(
                /new URL\('\.\.\/circuits\/', import\.meta\.url\)\.href/g,
                "'{STATIC_ORIGIN}/circuits/'"
@@ -225,18 +122,12 @@ thread_local! {
     static SHARED_STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
 }
 
-/// Open [`Storage`] against a blob-wrapped storage worker.
+/// Open `Storage` against a blob-wrapped storage worker.
 ///
-/// `Storage::open` pings the worker before returning
-/// (`sdk/web/src/storage.rs:57-62`), so success is a real round-trip, not just
-/// a constructor that did not throw.
+/// `Storage::open` must be called once per page session because OPFS holds the
+/// SQLite file with an exclusive sync access handle. Open lazily and hand out
+/// `fork()` handles to the same worker.
 async fn open_test_storage() -> Storage {
-    // `Storage::open` must be called ONCE per page session — the OPFS-backed
-    // SQLite file is held with an exclusive sync access handle, so a second
-    // storage worker fails with "Another tab or window is using this app's local
-    // database". Every test in this module shares one page, so open lazily and
-    // hand out `fork()` handles to the same worker, exactly as
-    // `sdk/web/src/storage.rs:70-73` prescribes.
     if let Some(handle) = SHARED_STORAGE.with(|cell| cell.borrow().as_ref().map(Storage::fork)) {
         return handle;
     }
@@ -259,7 +150,7 @@ async fn open_test_storage() -> Storage {
     handle
 }
 
-/// Build a [`Client`] with a blob-wrapped prover worker.
+/// Build a `Client` with a blob-wrapped prover worker.
 async fn build_test_client(storage: &Storage) -> Client {
     let prover_url = blob_worker_url("prover-worker.js").await;
     Client::new(RPC_URL.to_string(), storage, prover_url, None)
@@ -267,18 +158,11 @@ async fn build_test_client(storage: &Storage) -> Client {
         .expect("client construction must succeed")
 }
 
-/// Stub wallet signer for driving a flow to the signing boundary.
+/// Stub wallet signer that halts flows at the signing boundary.
 ///
-/// `WalletSigner::new` requires all three of `signMessage`, `signTransaction`
-/// and `signAuthEntry` to be present (`sdk/web/src/signer.rs:16`, `:36-42`),
-/// even though only some are called.
-///
-/// `signMessage` succeeds so key derivation can complete. Both signing methods
-/// reject with SEP-0043 `code: -4`, which maps to `Error::UserRejected` and
-/// surfaces to JS as `{status:"failed", code:-4}` — a value no other stage of
-/// the pipeline can produce. Note `signAuthEntry` is called *before*
-/// `signTransaction` (`signer.rs:66-68` vs `:78-80`), so a flow may halt at
-/// either; rejecting both means the sentinel appears whichever comes first.
+/// `signMessage` succeeds so key derivation can complete. `signTransaction` and
+/// `signAuthEntry` both reject with SEP-0043 `code: -4`, which maps to
+/// `Error::UserRejected` and surfaces to JS as `{status:"failed", code:-4}`.
 fn stub_signer() -> JsValue {
     signer_with_mode(SignerMode::Sentinel)
 }
@@ -286,17 +170,13 @@ fn stub_signer() -> JsValue {
 /// Which way a test signer answers signing requests.
 #[derive(Clone, Copy)]
 enum SignerMode {
-    /// Reject with the SEP-0043 `code: -4` sentinel. Used by the flows under
-    /// test, so they halt at the signing boundary.
+    /// Reject with the SEP-0043 `code: -4` sentinel.
     Sentinel,
-    /// Produce real Ed25519 signatures. Used **only** for setup transactions
-    /// that must actually land on chain (see [`seed_deposit`]).
+    /// Produce real Ed25519 signatures for setup transactions.
     Signing,
 }
 
-/// `signMessage` return, shared by both modes — see the key-derivation note in
-/// the module header for why this is the fixed blob rather than a real SEP-53
-/// signature.
+/// `signMessage` return, shared by both modes.
 fn sign_message_fn() -> Function {
     Function::new_with_args(
         "message, opts",
@@ -343,11 +223,7 @@ fn signer_with_mode(mode: SignerMode) -> JsValue {
     signer.into()
 }
 
-/// Install `signTransaction` / `signAuthEntry` that really sign, mirroring what
-/// a wallet does, via `chain::LocalSigner` (the same signer the native CLI and
-/// tests use). Bridging through JS closures is far less code than
-/// reimplementing the XDR signing dance, and it exercises the exact
-/// `WalletSigner` call path production uses.
+/// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
 fn install_real_signing(signer: &Object) {
     let secret = ACCOUNT_A_SECRET.expect(
         "E2E_ACCOUNT_A_SECRET not compiled in: run via \
@@ -374,9 +250,6 @@ fn install_real_signing(signer: &Object) {
         as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>);
 
     // signAuthEntry(preimageBase64, opts) -> Promise<signatureBase64>
-    // `LocalSigner::sign` SHA-256s the bytes then signs, which is exactly what
-    // `sign_auth_preimage` does to the preimage XDR
-    // (`sdk/stellar/src/signer.rs:110-116`).
     let entry_signer = local.clone();
     let sign_entry = Closure::wrap(Box::new(move |preimage_b64: JsValue, _opts: JsValue| {
         let b64 = preimage_b64
@@ -406,45 +279,36 @@ fn install_real_signing(signer: &Object) {
     .unwrap();
 }
 
-/// Both workers must start and answer, and [`Client`] must construct.
+/// Both workers must start and answer, and `Client` must construct.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_smoke_client_construction() {
     let storage = open_test_storage().await;
 
     let mut client = build_test_client(&storage).await;
 
-    // `Client::new` spawns the prover but does not ping it; ping explicitly so
-    // this asserts the prover worker really came up.
+    // `Client::new` spawns the prover but does not ping it; ping explicitly.
     client
         .ensure_prover()
         .await
         .expect("prover worker must start and answer its ping");
 
-    // The bundled deployment must parse, and the stub signer must satisfy
-    // WalletSigner's acceptance rules.
     Client::contract_config().expect("bundled deployment config must parse");
     assert!(!stub_signer().is_undefined());
 
-    // Release the background indexer slot before drop.
     client.stop_background_sync();
 }
 
-/// Open an [`super::Account`] session for test account A.
-///
-/// First use derives privacy keys from the stub's `signMessage` return
-/// (`sdk/web/src/client/mod.rs:207-213`).
+/// Open an `Account` session for test account A using the sentinel signer.
 async fn open_account_a(client: &Client) -> super::Account {
     open_account_a_with(client, SignerMode::Sentinel).await
 }
 
-/// Open an [`super::Account`] session for test account A with an explicit
-/// signer mode.
+/// Open an `Account` session for test account A with an explicit signer mode.
 async fn open_account_a_with(client: &Client, mode: SignerMode) -> super::Account {
     let address = ACCOUNT_A_ADDRESS.expect(
         "E2E_ACCOUNT_A_ADDRESS not compiled in: run via \
-         `set -a; . deployments/testnet/.e2e-accounts.env; set +a` \
-         (see deployments/scripts/e2e-accounts-setup.sh)",
+         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
     );
 
     let options = Object::new();
@@ -464,11 +328,10 @@ async fn open_account_a_with(client: &Client, mode: SignerMode) -> super::Accoun
     client
         .account(options.into(), signer_with_mode(mode))
         .await
-        .expect("account session must open and derive keys from the stub blob")
+        .expect("account session must open")
 }
 
-/// Read the `status` field of an `execute_plan` response
-/// (`sdk/web/src/client/execute/mod.rs:29-42`).
+/// Read the `status` field of an `execute_plan` response.
 fn response_status(response: &JsValue) -> String {
     Reflect::get(response, &JsValue::from_str("status"))
         .unwrap()
@@ -486,24 +349,17 @@ fn response_hash_count(response: &JsValue) -> u32 {
 
 /// SEP-0043 error code from an `execute_plan` response, when present.
 ///
-/// `-4` is the sentinel: it is reachable only via `Error::UserRejected`, which
-/// only the signer path constructs
-/// (`sdk/web/src/client/execute/mod.rs:92-104`).
+/// `-4` is the sentinel for a user rejection.
 fn response_code(response: &JsValue) -> Option<f64> {
     Reflect::get(response, &JsValue::from_str("code"))
         .ok()
         .and_then(|code| code.as_f64())
 }
 
-/// DOM event carrying transaction progress
-/// (`TX_PROGRESS_EVENT`, `sdk/web/src/client/execute/progress.rs:8`).
+/// DOM event carrying transaction progress.
 const TX_PROGRESS_EVENT: &str = "stellar-private-payments:tx-progress";
 
 /// Start recording `stage` values from progress events.
-///
-/// Needed to tell "halted at signing" apart from "died earlier and never
-/// reached signing" — a `{status:"failed"}` response alone cannot distinguish
-/// them.
 fn start_progress_capture() {
     js_sys::eval(&format!(
         r#"(function () {{
@@ -537,10 +393,9 @@ fn captured_stages() -> Vec<String> {
     joined.split(',').map(str::to_string).collect()
 }
 
-/// Run a deposit to completion — prove, simulate, **sign, submit, confirm** —
-/// so later tests start from real on-chain notes.
+/// Run a deposit to completion so later tests start from real on-chain notes.
 ///
-/// Uses [`SignerMode::Signing`]: this is setup, not a flow under test.
+/// Uses `SignerMode::Signing` because this is setup, not a flow under test.
 async fn seed_deposit(client: &Client, amount: u128) {
     let account = open_account_a_with(client, SignerMode::Signing).await;
     let pool = open_pool(&account).await;
@@ -567,7 +422,7 @@ async fn seed_deposit(client: &Client, amount: u128) {
 
 /// A real signed+submitted deposit must leave spendable notes behind.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_seed_deposit_creates_spendable_notes() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
@@ -597,12 +452,10 @@ async fn e2e_seed_deposit_creates_spendable_notes() {
     client.stop_background_sync();
 }
 
-/// Assert a response is the signing-boundary sentinel and nothing weaker.
+/// Assert a response is the signing-boundary sentinel.
 ///
-/// Three conditions together, because any one alone is a false-green risk:
-/// `code == -4` proves the halt came from the signer, an empty `hashes` proves
-/// nothing was submitted, and a `sign` stage in `stages` proves proving and
-/// simulation actually completed rather than the flow dying early.
+/// Checks status=failed, code=-4, no submitted hashes, and that the `sign`
+/// stage was reached.
 fn assert_halted_at_signing(flow: &str, response: &JsValue, stages: &[String]) {
     let status = response_status(response);
     let message = Reflect::get(response, &JsValue::from_str("message"))
@@ -626,16 +479,13 @@ fn assert_halted_at_signing(flow: &str, response: &JsValue, stages: &[String]) {
     );
     assert!(
         stages.iter().any(|stage| stage == "sign"),
-        "{flow}: must have reached the 'sign' stage — otherwise the failure came \
-         from prove/simulate, not the signing boundary (stages: {stages:?})"
+        "{flow}: must have reached the 'sign' stage (stages: {stages:?})"
     );
 }
 
-/// Deposit must run prove → simulate and then halt exactly at signing.
-///
-/// Deposit needs no pre-existing notes, so this test seeds nothing.
+/// Deposit must reach prove → simulate and then halt at signing.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_deposit_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
@@ -656,7 +506,7 @@ async fn e2e_deposit_halts_at_signing() {
 
     assert_halted_at_signing("deposit", &response, &stages);
 
-    // Belt and braces: a halted flow must not have moved any funds.
+    // A halted flow must not have moved any funds.
     let balance_after = pool.balance().await.expect("balance read after");
     assert_eq!(
         balance_after, balance_before,
@@ -668,12 +518,8 @@ async fn e2e_deposit_halts_at_signing() {
 
 /// Transfer must spend seeded notes through prove → simulate, then halt at
 /// signing.
-///
-/// Unlike deposit, this exercises the *spend* path, so it needs pre-existing
-/// spendable notes (seeded here) and a non-membership proof for the inputs
-/// (`policyFlags: ["blocklist"]` on the target pool).
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_transfer_halts_at_signing() {
     let recipient = ACCOUNT_B_ADDRESS.expect(
         "E2E_ACCOUNT_B_ADDRESS not compiled in: run via \
@@ -720,11 +566,8 @@ async fn e2e_transfer_halts_at_signing() {
 
 /// Withdraw must spend seeded notes through prove → simulate, then halt at
 /// signing.
-///
-/// `recipient` is omitted, so it defaults to the account's own address
-/// (`sdk/web/src/client/pool.rs:123`).
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_withdraw_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
@@ -780,12 +623,8 @@ async fn open_pool(account: &super::Account) -> super::PrivatePool {
 
 /// A full session against testnet: key derivation from the stub blob, sync, and
 /// a pool state read.
-///
-/// This is the runtime proof of the phase-1 assumption that a fixed 64-byte
-/// `signMessage` blob survives `derive_save_user_keys` — the spike only
-/// verified that the blob decodes to 64 bytes.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and a CORS static server; run via sdk/web/scripts/e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_session_account_setup_and_sync() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
@@ -812,7 +651,5 @@ async fn e2e_session_account_setup_and_sync() {
         !notes.is_undefined()
     );
 
-    // Reaching here means neither signTransaction nor signAuthEntry was called:
-    // both reject with the code -4 sentinel, which would have failed the reads.
     client.stop_background_sync();
 }

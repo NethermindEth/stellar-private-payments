@@ -62,6 +62,7 @@ pub struct DisclaimerStatePayload {
 pub enum StorageWorkerRequest {
     Ping,
     SyncState,
+    ProcessPendingState,
     SaveEvents(ContractsEventData),
     SaveSyncProgress {
         metadata: Vec<SyncMetadata>,

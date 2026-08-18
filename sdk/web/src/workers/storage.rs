@@ -212,6 +212,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             tracing::trace!("[{WORKER_NAME}] sending current sync");
             resp
         }
+        StorageWorkerRequest::ProcessPendingState => {
+            tracing::trace!("[{WORKER_NAME}] processing pending state");
+            process_until_empty().await?;
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::SaveEvents(events_data) => {
             tracing::trace!(
                 "[{WORKER_NAME}] saving {} raw contract events",
@@ -623,9 +628,16 @@ impl Storage for StorageBridge {
     }
 
     async fn process_pending_state(&self) -> Result<(), Error> {
-        // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
-        // in the worker background loop without blocking this bridge.
-        Ok(())
+        match self
+            .call(StorageWorkerRequest::ProcessPendingState, 30_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::Saved) => Ok(()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected process_pending_state response: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn clear_indexing_cursors(&self) -> Result<(), Error> {
