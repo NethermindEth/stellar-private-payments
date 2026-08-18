@@ -39,6 +39,10 @@ const PKG_ROOT = path.resolve(__dirname, '..');
 const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
 const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
 const log = createLogger('runner');
+// A fresh headed CI profile may still be initializing the WASM runtime and
+// selected pool after Freighter has supplied the address. Keep a cold-start
+// margin here; ordinary app navigation and approval waits remain shorter.
+const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
 export async function launch({ userDataDir, headless = true, video = false } = {}) {
   if (!userDataDir) throw new Error('launch: userDataDir is required');
@@ -145,7 +149,7 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
   const walletState = page.locator('body');
   await waitForCondition({
     operation: 'app:connect-or-disclaimer',
-    timeoutMs: 30_000,
+    timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
     observe: async () => ({
       walletState: await walletState.getAttribute('data-wallet-state').catch(() => 'unknown'),
@@ -169,7 +173,7 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
   // operation cannot race the post-connect initialization.
   await waitForCondition({
     operation: 'app:wallet-runtime-ready',
-    timeoutMs: 30_000,
+    timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
     observe: async () => ({
       walletState: await walletState.getAttribute('data-wallet-state').catch(() => 'unknown'),

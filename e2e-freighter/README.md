@@ -248,9 +248,10 @@ to wait for the required proof, context, root, and note-readiness result.
 Timeouts are ownership-specific, not one global test timeout:
 
 - DOM/view and dialog transitions are bounded at 5–15 seconds.
-- Wallet runtime readiness is bounded at 30 seconds; `connectApp` waits for
-  the app's `body[data-wallet-state="ready"]`, which means the selected pool
-  is usable, not merely that an address is rendered.
+- Wallet runtime readiness is bounded at 60 seconds to cover a cold headed CI
+  profile initializing Freighter, WASM, and the selected pool. `connectApp`
+  waits for the app's `body[data-wallet-state="ready"]`, which means the
+  selected pool is usable, not merely that an address is rendered.
 - Freighter approval discovery is short and repeated while an operation is
   active; the observed first approval is normally about 3–4 seconds.
 - Submitted transaction confirmation has a 60-second chain/RPC bound.
