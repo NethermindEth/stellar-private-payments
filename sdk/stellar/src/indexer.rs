@@ -60,8 +60,7 @@ impl<S: ContractDataStorage> Indexer<S> {
     ///
     /// Returns `true` when another round may be needed. Returns `false` when
     /// caught up for now:
-    /// - empty page (best-effort; sparse RPC scans can also be empty),
-    /// - non-full page with `max(event.ledger) >= latestLedger`, or
+    /// - cursor did not advance, or
     /// - local sync ahead of the RPC events tip (`RpcAhead`).
     ///
     /// A full page (`PAGE_SIZE` events) always continues, even at the tip
@@ -113,12 +112,14 @@ impl<S: ContractDataStorage> Indexer<S> {
         };
 
         let mut may_have_more = false;
+        let mut progress_ledger = start_ledger;
 
         for page in 0..MAX_PAGES_PER_ROUND {
             tracing::trace!(
                 "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
 
+            let prev_cursor = cursor.clone();
             let (new_cursor, events, latest_ledger) = match self
                 .client
                 .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor)
@@ -136,24 +137,22 @@ impl<S: ContractDataStorage> Indexer<S> {
                 Err(e) => return Err(e.into()),
             };
 
-            let new_cursor = new_cursor
-                .clone()
-                .ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
-            let event_count = events.len();
-            let is_empty = event_count == 0;
-            let full_page = event_count == PAGE_SIZE;
-            let progress_ledger = if is_empty {
-                latest_ledger
+            let new_cursor =
+                new_cursor.ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
+            let cursor_advanced = prev_cursor.as_deref() != Some(new_cursor.as_str());
+            let at_events_tip = prev_cursor.is_some() && !cursor_advanced;
+            if events.is_empty() {
+                if at_events_tip {
+                    progress_ledger = progress_ledger.max(latest_ledger);
+                }
             } else {
-                events
+                let page_ledger = events
                     .iter()
                     .map(|event| event.ledger)
                     .max()
-                    .unwrap_or(latest_ledger)
-            };
-            // Non-full page whose newest event is at/past the RPC events tip.
-            let at_events_tip = !is_empty && !full_page && progress_ledger >= latest_ledger;
-            let fully_indexed = is_empty || at_events_tip;
+                    .unwrap_or(latest_ledger);
+                progress_ledger = progress_ledger.max(page_ledger);
+            }
 
             self.storage
                 .save_events_batch(ContractsEventData {
@@ -174,15 +173,14 @@ impl<S: ContractDataStorage> Indexer<S> {
                             last_fully_indexed_ledger: 0,
                         })
                         .collect(),
-                    fully_indexed,
+                    at_events_tip,
                 )
                 .await?;
 
             cursor = Some(new_cursor);
-            if fully_indexed {
+            if at_events_tip {
                 return Ok(false);
             }
-            // Full page, or partial page still behind latestLedger: keep going.
             may_have_more = true;
         }
 

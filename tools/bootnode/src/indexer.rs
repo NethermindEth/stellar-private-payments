@@ -65,10 +65,8 @@ impl Indexer {
 
             let cursor_out = result.cursor.clone();
             let cursor_advanced = prev_cursor.as_deref() != Some(cursor_out.as_str());
-            let event_count = result.events.len();
-            let is_empty = event_count == 0;
-            let full_page = event_count == page_size as usize;
-            let progress_ledger = if is_empty {
+            let at_upstream_tail = prev_cursor.is_some() && !cursor_advanced;
+            let progress_ledger = if result.events.is_empty() {
                 result.latest_ledger
             } else {
                 result
@@ -76,11 +74,6 @@ impl Indexer {
                     .last()
                     .map(|event| event.ledger)
                     .unwrap_or(result.latest_ledger)
-            };
-            let at_upstream_tail = if is_empty {
-                prev_cursor.is_some() && !cursor_advanced
-            } else {
-                !full_page && progress_ledger >= result.latest_ledger
             };
 
             self.state
