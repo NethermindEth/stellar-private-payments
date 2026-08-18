@@ -501,12 +501,12 @@ mod tests {
             set_log_level("error").expect("set level to error");
             // The loop body is a single callsite visited twice: the first
             // visit is filtered out at error level, the second must be
-            // emitted after raising the level to debug.
+            // emitted after raising the level to warn.
             for round in 0..2 {
                 if round == 1 {
-                    set_log_level("debug").expect("set level to debug");
+                    set_log_level("warn").expect("set level to warn");
                 }
-                tracing::debug!("loop callsite event");
+                tracing::warn!("loop callsite event");
             }
             set_log_level("info").expect("restore level");
 
