@@ -266,3 +266,177 @@ mod tests {
         );
     }
 }
+
+/// Acceptance tests for [`WalletSigner::new`]. Node mode is sufficient because
+/// acceptance is pure `Reflect` plumbing and no method is called.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod spike_tests {
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
+    // is meant for production paths, not assertions.
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+    const ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    /// A JS function returning a promise that never settles.
+    fn pending_method() -> JsValue {
+        Function::new_no_args("return new Promise(function () {});").into()
+    }
+
+    /// Build a signer object exposing exactly `methods`.
+    fn signer_with(methods: &[&str]) -> JsValue {
+        let signer = Object::new();
+        for method in methods {
+            Reflect::set(&signer, &JsValue::from_str(method), &pending_method()).unwrap();
+        }
+        signer.into()
+    }
+
+    fn new_signer(signer: JsValue) -> Result<WalletSigner, JsError> {
+        WalletSigner::new(signer, PASSPHRASE.to_string(), ADDRESS.to_string())
+    }
+
+    fn error_message(error: JsError) -> String {
+        Reflect::get(&JsValue::from(error), &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap()
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_signer_acceptance_rejects_null() {
+        for empty in [JsValue::NULL, JsValue::UNDEFINED] {
+            let error = new_signer(empty)
+                .err()
+                .expect("null/undefined signer must be rejected");
+            assert_eq!(error_message(error), "signer is required");
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_signer_acceptance_rejects_partial() {
+        for omitted in SIGN_METHODS {
+            let present: Vec<&str> = SIGN_METHODS
+                .iter()
+                .copied()
+                .filter(|method| method != omitted)
+                .collect();
+            let error = new_signer(signer_with(&present))
+                .err()
+                .unwrap_or_else(|| panic!("signer missing {omitted} must be rejected"));
+            assert_eq!(
+                error_message(error),
+                format!("signer must implement {omitted}(...)")
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_signer_acceptance_accepts_full() {
+        assert!(new_signer(signer_with(SIGN_METHODS)).is_ok());
+    }
+
+    /// Build a JS rejection carrying `code`.
+    fn rejection_with_code(message: &str, code: f64) -> JsValue {
+        let rejection = js_sys::Error::new(message);
+        Reflect::set(
+            &rejection,
+            &JsValue::from_str("code"),
+            &JsValue::from_f64(code),
+        )
+        .unwrap();
+        rejection.into()
+    }
+
+    fn code_of(error: &JsError) -> Option<f64> {
+        Reflect::get(&JsValue::from(error.clone()), &JsValue::from_str("code"))
+            .ok()
+            .and_then(|code| code.as_f64())
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_error_mapping_copies_code() {
+        let wrapped = wallet_js_error(
+            "signTransaction",
+            "failed",
+            rejection_with_code("stub halt", SEP43_USER_REJECTED_CODE),
+        );
+
+        assert_eq!(code_of(&wrapped), Some(SEP43_USER_REJECTED_CODE));
+        assert_eq!(
+            Reflect::get(&JsValue::from(wrapped), &JsValue::from_str("message"))
+                .unwrap()
+                .as_string()
+                .unwrap(),
+            "signer.signTransaction failed: stub halt"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_error_mapping_user_rejected() {
+        let sentinel = wallet_js_error(
+            "signTransaction",
+            "failed",
+            rejection_with_code("stub halt", SEP43_USER_REJECTED_CODE),
+        );
+        assert!(
+            matches!(wallet_sign_error(sentinel), Error::UserRejected(_)),
+            "code -4 must map to Error::UserRejected"
+        );
+
+        let codeless = wallet_js_error(
+            "signTransaction",
+            "failed",
+            js_sys::Error::new("network blew up").into(),
+        );
+        assert_eq!(code_of(&codeless), None);
+        assert!(
+            matches!(wallet_sign_error(codeless), Error::Other(_)),
+            "a code-less signer error must map to Error::Other"
+        );
+
+        let other_code = wallet_js_error(
+            "signTransaction",
+            "failed",
+            rejection_with_code("some other wallet error", -1.0),
+        );
+        assert!(
+            matches!(wallet_sign_error(other_code), Error::Other(_)),
+            "only code -4 may map to Error::UserRejected"
+        );
+    }
+
+    /// Fixed 64-byte signature blob the stub signer returns from `signMessage`.
+    /// Key derivation SHA-256s the bytes with a domain tag; any 64-byte value
+    /// works, but the length is enforced.
+    const STUB_SIGNATURE_B64: &str =
+        "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpQ==";
+    /// The same 64 bytes as hex, kept to show it is not usable.
+    const STUB_SIGNATURE_HEX: &str = concat!(
+        "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+    );
+
+    #[wasm_bindgen_test]
+    fn spike_key_derivation_blob_decodes() {
+        let bytes = wallet_message_signature_to_bytes(STUB_SIGNATURE_B64).unwrap();
+        assert_eq!(
+            bytes.len(),
+            64,
+            "derivation rejects anything but exactly 64 bytes"
+        );
+        assert_eq!(bytes, vec![0xA5u8; 64]);
+
+        // 128 hex chars decode as base64 before the hex fallback is tried, so a
+        // 64-byte hex string yields 96 bytes and fails the length check.
+        let via_hex = wallet_message_signature_to_bytes(STUB_SIGNATURE_HEX).unwrap();
+        assert_eq!(
+            via_hex.len(),
+            96,
+            "128 hex chars decode as base64, not as hex"
+        );
+    }
+}

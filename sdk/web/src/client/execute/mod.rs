@@ -212,3 +212,45 @@ impl PrivatePool {
         Ok(completed.into_iter().map(|tx| tx.tx_hash).collect())
     }
 }
+
+/// Tests for the SEP-0043 rejection-code mapping exposed to JS.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod spike_tests {
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
+    // is meant for production paths, not assertions.
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn spike_error_mapping_rejection_code() {
+        assert_eq!(
+            wallet_rejection_code(&Error::UserRejected("stub halt".to_string())),
+            Some(-4),
+            "a user rejection must surface as SEP-0043 code -4"
+        );
+
+        assert_eq!(
+            wallet_rejection_code(&Error::Other("simulate failed".to_string())),
+            None,
+            "an unrelated failure must not carry a code"
+        );
+
+        let mid_plan = PlanExecutionError::into_error(
+            vec![TransactionResult {
+                tx_hash: "abc123".to_string(),
+            }],
+            Error::UserRejected("stub halt".to_string()),
+        );
+        assert_eq!(
+            wallet_rejection_code(&mid_plan),
+            Some(-4),
+            "PlanExecution must be unwrapped to reach the rejection cause"
+        );
+
+        let mid_plan_other =
+            PlanExecutionError::into_error(Vec::new(), Error::Other("simulate failed".to_string()));
+        assert_eq!(wallet_rejection_code(&mid_plan_other), None);
+    }
+}
