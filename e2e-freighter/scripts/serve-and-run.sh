@@ -6,18 +6,10 @@
 # Usage: serve-and-run.sh [--url URL] [TEST_FILE ...]         (default: whole suite)
 #        serve-and-run.sh [--url URL] -- COMMAND [ARG ...]    (run COMMAND instead)
 #
-# The -- form exists because profile provisioning needs a served app too,
-# not just the test suite: provision.mjs completes the app's own onboarding
-# wizard (navigates to APP_URL, not just the extension's pages). scripts/
-# e2e-ensure-setup.sh calls `serve-and-run.sh -- bash setup.sh` for exactly
-# this, rather than duplicating the server lifecycle a second time.
+# The -- form also supports profile provisioning, whose onboarding flow
+# navigates to APP_URL.
 #
-# This script owns the server, so it decides the URL: an APP_URL inherited
-# from the environment is REPLACED with the one actually being served, and
-# said so out loud. Honouring it instead makes a stale export — left over
-# from a manual run in the same shell — silently point the suite at a port
-# with nothing behind it, and every test then fails on connection refused
-# having never started a server at all.
+# When this script starts the server, it sets APP_URL to that server's URL.
 #
 # --url targets something else explicitly (a deployed app, a server on
 # another host). That path starts and stops nothing.
@@ -108,8 +100,7 @@ else
     perl -e 'setpgrp 0,0; exec @ARGV' make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
   fi
   SERVE_PID=$!
-  # On a fast mac the process may still be loading when pgid is polled, so
-  # retry briefly instead of failing immediately (the old code died here).
+  # The process group may not be available immediately after startup.
   SERVER_PGID=""
   for _ in 1 2 3 4 5; do
     SERVER_PGID="$(ps -o pgid= -p "$SERVE_PID" 2>/dev/null | tr -d ' ')"

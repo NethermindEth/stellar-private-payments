@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Runner core for driving the app against a real Freighter extension.
 //
-// Built directly on the U1 probe findings (the sidebar/headless approval
-// surface investigation): approvals appear as ordinary CDP page targets at
+// Freighter approvals appear as ordinary CDP page targets at
 // chrome-extension://<freighter-id>/index.html#/<route>?<payload> where
 // <route> is "grant-access" (connect), "sign-message" (key derivation), or
 // "sign-transaction". Headed + sidebar mode prefixes that with
@@ -67,13 +66,8 @@ export async function launch({ userDataDir, headless = true, video = false } = {
       '--disable-renderer-backgrounding',
       ...(process.env.CHROMIUM_FLAGS ? process.env.CHROMIUM_FLAGS.split(/\s+/) : []),
     ],
-    // The app's onboarding wizard offers a notification permission prompt
-    // (retention step) via Notification.requestPermission(); a scripted,
-    // non-genuine-gesture click never resolves that in real Chrome, which
-    // stalls the step's resolve() forever. Pre-granting it here is the
-    // supported Playwright equivalent of a human clicking "Allow" — not a
-    // workaround of app behavior, just letting an automated run get past a
-    // permission prompt with no human present to click it.
+    // The onboarding flow requests notification permission. Grant it before
+    // navigation because automated clicks cannot satisfy this browser prompt.
     permissions: ['notifications'],
   };
   if (video) {
@@ -81,13 +75,8 @@ export async function launch({ userDataDir, headless = true, video = false } = {
   }
   const context = await chromium.launchPersistentContext(userDataDir, contextOptions);
 
-  // durableStorage cannot be baked into the profile snapshot: Chrome's
-    // Permissions API grants are per-browser-session state, not profile data
-    // that carries over in a user-data-dir tar.gz. Playwright's permission
-    // model doesn't expose 'persistent-storage', so it goes through raw CDP
-    // (Browser.grantPermissions), same effect as a human clicking "Allow".
-    // Without this, navigator.storage.persist() never resolves true in a
-    // scripted session, stalling the wizard's storage step forever.
+  // Persistent-storage permission is session-scoped and must be granted via
+  // CDP for each browser context.
   try {
     const appOrigin = new URL(requireAppUrl()).origin;
     const page = context.pages()[0] || (await context.newPage());
@@ -103,11 +92,8 @@ export async function launch({ userDataDir, headless = true, video = false } = {
 // Opens the app, connects Freighter if not already connected, and asserts
 // the connection succeeded.
 //
-// The app renders the connected address TRUNCATED (e.g. "GCDVNXYD...6SE75S"),
-// not the full 56-char form, so this doesn't pattern-match a full address —
-// it asserts the "Connect Freighter" button is gone (the app only shows it
-// while disconnected) and returns whatever truncated address text is shown,
-// for logging only.
+// The app displays a truncated address. Connection is asserted from the
+// wallet button's visibility; the returned address is for logging only.
 export async function connectApp(page, { appUrl = requireAppUrl(), context } = {}) {
   if (!context) throw new Error('connectApp: context is required (needed to watch for the connect approval)');
   await page.goto(appUrl);
@@ -123,19 +109,14 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     isReady: ({ readyState, dashboardVisible }) => readyState === 'complete' && dashboardVisible,
   });
 
-  // The button stays in the DOM (class "hidden") even once connected, so
-  // .count() alone always finds it — visibility, not presence, is what
-  // distinguishes disconnected from connected here.
-  // Use the app's stable identity rather than text.  The button remains in
-  // the DOM while connected and can be rerendered while the wallet bootstrap
-  // finishes, so a text locator can resolve a transiently hidden element.
+  // The button remains in the DOM while connected; visibility distinguishes
+  // the disconnected state. Use its stable identity rather than button text.
   const connectBtn = page.locator('#wallet-btn');
   let clickedConnect = false;
   if (await connectBtn.isVisible().catch(() => false)) {
     try {
-      // The app may complete an automatic connection between the visibility
-      // probe and the click.  Keep this timeout short and accept that race
-      // when the button has become hidden by the time click() returns.
+      // Automatic connection may hide the button between the visibility check
+      // and the click.
       await connectBtn.click({ timeout: 5_000 });
       clickedConnect = true;
     } catch (err) {
@@ -143,8 +124,7 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
   if (clickedConnect) {
-    // Freighter auto-approves a previously-granted origin without a popup,
-    // so a grant-access target may never appear; only handle it if it does.
+    // The approval target is optional.
     try {
       await approveOrWatch(context, 'connect', { timeoutMs: 8_000 });
     } catch {
@@ -152,8 +132,7 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
 
-  // First connect on a fresh profile surfaces the app's own onboarding wizard
-  // (unrelated to Freighter) before the runtime becomes usable.
+  // Onboarding may appear before the runtime becomes usable.
   await waitForCondition({
     operation: 'app:connect-or-onboarding',
     timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
@@ -162,18 +141,11 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
   });
 
-  // The wizard is the caller's to drive: Wallet.connect() awaits
-  // runOnboardingWizard(), so the lifecycle marker stays 'connecting' until
-  // the modal is completed. Waiting for 'ready' here would deadlock against
-  // driveWizard(), which callers only run once connectApp() has returned.
-  // Hand back with the wizard open and let the caller finish it — driveWizard
-  // waits for runtime readiness itself once the modal closes.
+  // The caller completes onboarding before continuing with the scenario.
   if (await isOnboardingWizardVisible(page)) {
     log.info('connectApp: onboarding wizard is open — returning for the caller to drive it');
   } else {
-    // No wizard: a connected address is rendered before the runtime and
-    // selected pool are usable, so wait for the production lifecycle marker
-    // and the first operation cannot race post-connect initialization.
+    // An address can render before the runtime and selected pool are usable.
     await waitForWalletRuntimeReady(page, { timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS });
 
     if (await connectBtn.isVisible().catch(() => false)) {

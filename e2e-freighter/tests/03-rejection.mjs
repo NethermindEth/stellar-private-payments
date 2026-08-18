@@ -20,9 +20,8 @@ export async function run({ page, context, waitForFreighterApproval, approveOrWa
   const depositButton = page.locator('#btn-deposit');
   await depositButton.click();
 
-  // The confirmation dialog is intentionally optional because older deployed
-  // builds may not expose it. The wallet rejection remains the behavior under
-  // test in either case.
+  // The wallet rejection is the behavior under test; confirm the dialog when
+  // the current app exposes it.
   const dialog = page.getByTestId('confirm-dialog');
   const dialogAppeared = await dialog
     .waitFor({ state: 'visible', timeout: 5_000 })

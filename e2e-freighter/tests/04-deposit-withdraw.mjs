@@ -1,30 +1,5 @@
-// Compound test: deposit 0.01 XLM, then withdraw 0.01 XLM back to the same
-// (connected) wallet. The shared move-funds operation — the runtime
-// confirmation dialog, .btn-loading progress-stage tracking, sequential
-// Freighter approval handling, and toast-link hash capture + on-chain
-// confirmation — is shared with tests/05-deposit-transfer.mjs.
-//
-// Withdraw discovery (not in this checkout's app/js source — same
-// build/deploy drift 02-deposit found): switching to the Withdraw tab is
-// `[data-move-flow="withdraw"]` (plain text "Withdraw" also matches an
-// unrelated hidden quick-flow button elsewhere on the page, so the tab
-// needs this more specific selector). Its own runtime dialog is titled
-// "Confirm withdrawal" with a "Withdraw" confirm button. Leaving
-// #withdraw-recipient blank withdraws to the connected wallet (its
-// placeholder says so, and the confirm dialog fills the recipient row with
-// the connected address to prove it).
-//
-// SYNC-WAIT: withdraw needs the just-deposited note to be visible to the
-// client before it can build its withdrawal plan. This is NOT gated on
-// here with an explicit wait — the SDK's own client (sdk/client/src/sync.rs,
-// confirmed via the vendored wasm binary's string table: "sync_wait",
-// "Waiting to sync …") retries internally and surfaces its own progress
-// stage through the same .btn-loading text this test already tracks
-// generically. The deposit's own on-chain SUCCESS confirmation (not a UI
-// balance read — see 02-deposit.mjs for why) is started immediately before
-// withdrawing; if the SDK's internal retry ever proves insufficient, that
-// will show up as a withdraw progress-stage timeout, not a silent wrong
-// result.
+// Deposit 0.01 XLM, then withdraw 0.01 XLM to the connected wallet.
+// The test waits for indexer progress and note readiness before withdrawal.
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
@@ -41,7 +16,7 @@ const log = createLogger('04-deposit-withdraw');
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
 
-  // Wizard state is per-origin: drive it on fresh origins, no-op elsewhere.
+  // Complete onboarding when required.
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '04-deposit-withdraw' });
   await gotoMoveFunds(page);
 
@@ -76,8 +51,7 @@ export async function run(helpers) {
     logTag,
     amount: '0.01',
     rpcUrl,
-    // Generous: the just-deposited note may need the SDK's own sync-wait
-    // retry (see module comment) before a withdrawal plan can build.
+    // Allow the SDK to synchronize the deposited note before planning.
     progressTimeoutMs: 180000,
   });
   const withdrawHash = withdrawResult.transactionHash;

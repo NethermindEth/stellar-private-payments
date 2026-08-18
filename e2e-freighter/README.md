@@ -149,8 +149,7 @@ bash e2e-freighter/scripts/setup.sh
 bash e2e-freighter/scripts/run-all.sh
 ```
 
-Note: until the deployed app is redeployed with the nullifier-detection
-fix, the disclosure tests (06–09) must run against a locally built app —
+Disclosure tests (06–09) require a locally built app —
 start `env -u NO_COLOR trunk serve` in one terminal and add
 `APP_URL=http://localhost:8000` to the run command in the other.
 
@@ -248,27 +247,17 @@ to wait for the required proof, context, root, and note-readiness result.
 Timeouts are ownership-specific, not one global test timeout:
 
 - DOM/view and dialog transitions are bounded at 5–15 seconds.
-- Wallet runtime readiness is bounded at 60 seconds to cover a cold headed CI
-  profile initializing Freighter, WASM, and the selected pool. Readiness means
+- Wallet runtime readiness is bounded at 60 seconds. Readiness means
   the app's `body[data-wallet-state="ready"]` — the selected pool is usable,
   not merely that an address is rendered.
 
-  Who waits for it depends on onboarding, because `Wallet.connect()` itself
-  awaits `runOnboardingWizard(...)`: while the wizard modal is open the marker
-  stays at `connecting` and *cannot* advance. So `connectApp` returns as soon
-  as it sees either `ready` or an open wizard, and `driveWizard` waits for
-  readiness once it has completed the modal. Keep that order — `connectApp`
-  first, then `driveWizard` — and never wait for `ready` between the two, or
-  the wait deadlocks against the wizard it is waiting on. If you do,
-  `waitForWalletRuntimeReady` (`src/appState.mjs`) fails immediately with that
-  explanation instead of consuming the full 60 seconds.
+  `connectApp` returns when the runtime is ready or onboarding is open.
+  `driveWizard` completes onboarding and then waits for runtime readiness.
 - Freighter approval discovery is short and repeated while an operation is
-  active; the observed first approval is normally about 3–4 seconds.
+  active.
 - Submitted transaction confirmation has a 60-second chain/RPC bound.
 - Indexer, note readiness, and disclosure proof/root work use their own
-  operation-level conditions and larger 120–180 second budgets. The
-  repeatability runs placed disclosure-basic at 59–67 seconds, so these
-  bounds intentionally retain margin for testnet and proof-worker variance.
+  operation-level conditions and 120–180 second budgets.
 
 Do not replace these waits with `page.waitForTimeout(...)`. If a bounded wait
 fails, retain its last observed state and investigate the owning boundary:
@@ -285,9 +274,8 @@ bash e2e-freighter/scripts/serve-and-run.sh e2e-freighter/tests/demo.mjs
 bash e2e-freighter/scripts/serve-and-run.sh                       # full local suite
 ```
 
-`demo.mjs` is a diagnostic: it reports first/next indexer ledgers and active
-view transitions. Run it when a test may be racing indexer or navigation
-state; it does not submit a transaction.
+`demo.mjs` demonstrates indexer and navigation helpers without submitting a
+transaction.
 
 ## The tests
 
@@ -297,16 +285,16 @@ a tight loop.
 | File | Proves |
 |---|---|
 | `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, wallet address shown, network is TESTNET. |
-| `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, real Freighter signTransaction approval(s), transaction confirmed `SUCCESS` via direct Soroban RPC lookup (not the UI balance display — see the file's header comment for why). |
+| `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, Freighter signTransaction approval(s), and `SUCCESS` confirmation through Soroban RPC. |
 | `tests/03-rejection.mjs` | Rejecting a deposit's signing prompt: the app surfaces it as "Deposit cancelled." (not a crash or generic error) and returns to idle. |
 | `tests/04-deposit-withdraw.mjs` | Deposit then withdraw to self back-to-back: two distinct transactions, both confirmed `SUCCESS` on-chain. |
 | `tests/05-deposit-transfer.mjs` | Deposit then transfer to a second, registered account (`E2E_ACCOUNT_D_ADDRESS`): recipient resolves through the public-key registry, two distinct transactions, both confirmed `SUCCESS` on-chain. |
-| `tests/06-disclose-basic.mjs` | Deposit twice, generate a 1-note selective-disclosure receipt for an unspent note, then verify that receipt through the app's own verify flow: proof and context check out, and the note's status shows unspent. Single account throughout — see the file's header comment for why. |
-| `tests/07-disclose-spent.mjs` | Deposit three times, withdraw once (spending one note), then generate and verify disclosure receipts for BOTH a spent note (proof/context/root still pass, but no "Fully verified" badge, status shows spent) and a still-unspent note (fully verified, status shows unspent) — the second guards against an overcorrected check that marks everything spent. Also accepts `APP_URL` pointing at a locally-served build, driving the onboarding wizard on first connect if needed. |
-| `tests/08-disclose-lifecycle.mjs` | Full lifecycle: deposit five times, withdraw once, generate 1/2/3/4-note disclosures of the remaining unspent notes plus one of the spent note, verify all five, withdraw again, then RE-VERIFY the same five receipts — whichever receipt(s) disclose the note the second withdraw just spent must flip to spent, every other receipt's result must stay exactly as it was. Proves verification reflects current chain state, not a snapshot frozen at receipt creation. Needs `APP_URL` pointing at a locally-served build with the nullifier fix (the deployed app doesn't have it yet). |
-| `tests/09-disclose-negative.mjs` | Adversarial battery against a single valid receipt: garbage/unparsable input fails cleanly with "Invalid JSON" and the import flow recovers right after; a tampered proof fails specifically on "Proof invalid"; a tampered context field fails specifically on "Context mismatch" (proof still valid). Each case asserts the SPECIFIC check that fails, not a generic error. A stale-root case was tried and dropped: the pool's on-chain root history is 90 entries deep, so one extra deposit never evicts a fresh receipt's root — see the file's header for the full explanation. Also needs the local `APP_URL` build. |
-| `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account entirely through the Advanced tab (a fixed-shape single-`transact`-step composer, not a form or JSON plan builder — see the file's header for the full UI discovery): select the deposited note via its own "Use" button, fill a recipient/amount output row, execute, confirm SUCCESS on-chain. |
-| `tests/11-failure-modes.mjs` | Failure-mode battery, all pre-signing and non-submitting: over-withdraw and over-transfer (10x the deposited balance) both fail on tx-planner's local "no combination of notes" check; transferring to a freshly-generated, never-registered address fails the same local-registry lookup 05 documents ("No local registration found"); depositing above the on-chain 100 XLM cap fails during simulation with no client-side pre-check at all (confirmed live via `getLedgerEntries` — see the file's header). Ends with a real, successful recovery deposit proving the battery leaves no poisoned state. |
+| `tests/06-disclose-basic.mjs` | Deposit twice, generate a 1-note selective-disclosure receipt for an unspent note, then verify the receipt through the app's verify flow. |
+| `tests/07-disclose-spent.mjs` | Deposit three times, withdraw once, then verify a spent-note receipt and an unspent-note receipt. Supports a locally served app through `APP_URL`. |
+| `tests/08-disclose-lifecycle.mjs` | Verify 1/2/3/4-note and spent-note receipts, withdraw again, then re-verify each receipt against current chain state. Requires a locally served app. |
+| `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
+| `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
+| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, and the pool deposit cap, then complete a successful recovery deposit. |
 
 ## CI
 
@@ -382,15 +370,12 @@ identically to webclient — nothing is assumed from pre-seeded state:
 
 1. **Import persistent test account keys** — writes the three identity
    tomls directly from the secrets (`printf 'secret_key = "%s"\n'`), the
-   same version-independent approach webclient uses (`stellar keys add
-   --secret-key` is confirmed broken for non-interactive input).
+   compatible with non-interactive input.
 2. **Provision test accounts** — runs `e2e-accounts-setup.sh`: A/B/C
    resolve from the imported tomls (no regeneration), D is generated
    fresh; all four are friendbot-funded only if unfunded and
    **unconditionally re-registered** against whatever pool
-   `deployments.json` currently names. That re-registration is what
-   recovers from a manual pool redeploy without a human noticing — the
-   "No local registration found" failure class.
+   `deployments.json` currently names.
 3. **Generate Freighter profile snapshot** — `setup.sh` runs through
    `serve-and-run.sh --` (the `--` form), which builds+serves the app on
    :8000, exports `APP_URL`, and stops the server afterwards. The
@@ -409,9 +394,8 @@ still verifies against the environment for real.
 The pre-signing suite gates every push and PR to main, validating the
 checked-out commit's SDK code. The Freighter smoke gate runs on the same
 events and validates the checked-out app plus environment/state health.
-The full Freighter suite does not gate — it is opt-in only, run manually
-when you want to validate against a freshly built app including any
-pending nullifier fixes.
+The full Freighter suite does not gate and runs manually against a locally
+built app.
 
 Note: `deployment.yml` (Pages build and deploy) is no longer gated by
 the e2e signal. It runs independently; the push-triggered e2e jobs
@@ -420,7 +404,7 @@ provide visibility into integration health.
 ## Building the profile snapshot
 
 One command does the whole chain (npm deps, the pinned Freighter
-extension fetch, Freighter profile provisioning, the one-time headed
+extension fetch, Freighter profile provisioning, headed
 onboarding completion, the snapshot, and a verification pass):
 
 ```bash
@@ -429,12 +413,11 @@ bash e2e-freighter/scripts/setup.sh
 
 It is idempotent: with a working existing snapshot it verifies and exits.
 Re-run with `--force` if the vendored extension version changes or the
-profile gets corrupted. The extension itself comes from the upstream
-`stellar/freighter` GitHub release, pinned by version in
-`scripts/fetch-extension.sh` — bump the pin there, run it with `--force`,
-then rebuild the snapshot. The onboarding step must run headed (it can
-stall under headless rendering), so run setup on a machine with a desktop
-session. The env file is self-sourced by every step.
+profile is corrupted. The extension comes from the upstream
+`stellar/freighter` GitHub release and is pinned in
+`scripts/fetch-extension.sh`. The onboarding step requires headed rendering,
+so run setup on a machine with a desktop session. The env file is self-sourced
+by every step.
 
 What setup.sh does under the hood, if you ever need the pieces:
 
@@ -445,8 +428,7 @@ bash e2e-freighter/scripts/fetch-extension.sh
 # 1. Provision a fresh Freighter profile from scratch
 bash e2e-freighter/scripts/provision.sh
 
-# 2. Complete the app's onboarding wizard once, HEADED (it can stall
-#    under headless rendering — see the script's header comment)
+# 2. Complete the app's onboarding wizard once in headed mode
 DISPLAY=:1 bash e2e-freighter/scripts/provision.sh --skip-wizard
 
 # 3. Snapshot the result

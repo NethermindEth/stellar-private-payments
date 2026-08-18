@@ -13,8 +13,7 @@ export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '02-deposit';
 
-  // The wizard is a no-op for the provisioned profile and handles fresh
-  // origins without leaking onboarding details into transaction tests.
+  // Complete onboarding when required before exercising the transaction flow.
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 

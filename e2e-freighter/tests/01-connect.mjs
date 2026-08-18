@@ -2,8 +2,8 @@
 //
 // By the time run() is called, the runner has already unlocked Freighter
 // and called connectApp() — which itself exercises Freighter's grant-access
-// approval path (auto-approved here, since APPROVE=auto; tolerates a
-// previously-granted origin needing no popup at all). This test's job is
+// approval path (auto-approved when APPROVE=auto; the popup is optional).
+// This test's job is
 // just to assert the connected end state is what it actually looks like in
 // the app, proving the whole launch -> unlock -> connect pipeline works.
 

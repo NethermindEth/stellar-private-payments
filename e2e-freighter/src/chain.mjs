@@ -1,9 +1,5 @@
-// Chain-level confirmation helper, shared across tests. Extracted from
-// tests/02-deposit.mjs's original inline version — proof-of-success for a
-// submitted transaction must come from the chain itself, never from a UI
-// balance display (see 02-deposit.mjs's module comment for why: the
-// displayed balance is eventually consistent against a lagging backend
-// indexer with no client-observable freshness signal).
+// Chain-level confirmation helper. Transaction success is confirmed through
+// Soroban RPC rather than an eventually consistent UI.
 
 import { createLogger } from './logger.mjs';
 

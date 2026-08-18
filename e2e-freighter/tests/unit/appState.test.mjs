@@ -54,9 +54,8 @@ test('waitForWalletRuntimeReady resolves once the lifecycle marker reaches ready
 });
 
 test('an open onboarding wizard fails fast instead of burning the whole deadline', async () => {
-  // The CI deadlock: Wallet.connect() awaits runOnboardingWizard(), so the
-  // marker is pinned at 'connecting' until the modal is driven. Waiting is
-  // futile, and a 60s timeout hid the real cause.
+  // Wallet.connect() awaits runOnboardingWizard(), so readiness cannot be
+  // reached while the modal remains open.
   const page = fakePage([{ walletState: 'connecting', onboardingVisible: true }]);
 
   await assert.rejects(

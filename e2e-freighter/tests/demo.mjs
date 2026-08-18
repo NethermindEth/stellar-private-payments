@@ -1,6 +1,5 @@
-// Diagnostic scenario for experimenting with shared primitives. It is not
-// part of numbered scenario discovery; run it explicitly when investigating
-// indexer-console signals or navigation state.
+// Demonstrates indexer and navigation helpers without submitting a transaction.
+// It is not part of numbered scenario discovery.
 
 import { createLogger } from '../src/logger.mjs';
 import { waitForIndexerProgress, waitForSyncedLedger } from '../src/indexer.mjs';

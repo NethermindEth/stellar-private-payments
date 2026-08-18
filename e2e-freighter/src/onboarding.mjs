@@ -1,11 +1,5 @@
-// Shared "drive the app's onboarding wizard to completion" machinery.
-// Extracted from the original complete-onboarding script (now merged into
-// scripts/provision.mjs).
-// onboard account A once against the live profile) so scripts/probe-
-// multi-account.mjs can reuse it for account B's first-ever connect — the
-// wizard's per-address gates (disclaimer, registration, key derivation all
-// keyed by address in app/js/ui/onboarding-wizard.js) mean a second account
-// goes through it fresh even on an already-onboarded profile.
+// Drive the app onboarding wizard to completion. Several wizard gates are
+// keyed by wallet address, so each account can require onboarding.
 
 import { createLogger } from './logger.mjs';
 import { waitForCondition } from './waits.mjs';
@@ -36,14 +30,8 @@ const WIZARD_BUTTON_PRIORITY = [
 export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding' }) {
   const log = createLogger(`${logTag}/wizard`);
   for (let step = 0; step < 10; step += 1) {
-    // #onboarding-modal is always present in the DOM — the app toggles a
-    // "hidden" class rather than removing it. A plain existence check never
-    // sees completion; check that class instead.
-    //
-    // The app's startOnboarding runs async storage checks before deciding to
-    // show the wizard, so on first load the modal can be hidden for a short
-    // window and then appear. Don't treat the initial hidden state as
-    // "finished" until the app has had time to settle.
+    // The modal remains in the DOM and may appear after asynchronous storage
+    // checks, so visibility is checked after a short settle window.
     const modalHidden = async () => page.evaluate(
       () => document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true,
     );
@@ -59,11 +47,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       }
       if (await modalHidden()) {
         log.debug('wizard finished after', step, 'step(s)');
-        // Completing the wizard is what unblocks Wallet.connect()'s own
-        // `await runOnboardingWizard(...)`, so the app only now finishes
-        // opening the account and creating the pool. Wait for the production
-        // lifecycle marker here, once, so every caller gets a usable app
-        // rather than a wizard-free but half-initialized one.
+        // Wait until account and pool initialization complete.
         const lifecycle = await waitForWalletRuntimeReady(page);
         log.debug('wallet runtime ready:', lifecycle.walletState);
         return;
@@ -92,8 +76,8 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     if (!buttons.length) throw new Error(`${logTag}: onboarding modal present but has no labeled buttons`);
     if (buttons.every((b) => b.zeroRect)) {
       throw new Error(
-        `${logTag}: buttons still laid out at 0x0 after a 5s settle wait, even headed ` +
-          `(${buttons.map((b) => b.text).join(', ')}) — the headed fix did not hold; this needs a fresh deviation.`,
+        `${logTag}: buttons still laid out at 0x0 after a 5s settle wait: ` +
+          `(${buttons.map((b) => b.text).join(', ')})`,
       );
     }
 

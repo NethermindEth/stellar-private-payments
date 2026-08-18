@@ -1,14 +1,6 @@
-// Shared "submit one Move Funds transaction and confirm it" machinery.
-// Extracted from tests/04-deposit-withdraw.mjs (originally written for
-// deposit + withdraw), reused by tests/05-deposit-transfer.mjs (transfer) —
-// deposit, withdraw, and transfer all follow the same shape in the deployed
-// app: fill an amount field, click a submit button, handle that flow's own
-// runtime confirmation dialog (role="dialog", not in this checkout's app/js
-// source — a build/deploy drift found by screenshotting live runs), drive
-// every sequential Freighter approval, capture the tx hash from the
-// success toast's explorer link, then confirm SUCCESS on-chain via
-// ./chain.mjs (never trust a UI balance display — see tests/02-deposit.mjs
-// for why).
+// Shared transaction operation for deposit, withdrawal, and transfer. It
+// fills the form, confirms the flow-specific dialog, handles Freighter
+// approvals, captures the transaction hash, and confirms it on-chain.
 
 import { createLogger } from './logger.mjs';
 import { confirmTransaction } from './chain.mjs';

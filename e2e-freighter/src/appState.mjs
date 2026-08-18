@@ -1,18 +1,10 @@
-// App lifecycle state shared by the runner and the onboarding driver.
-//
-// `body[data-wallet-state]` is the production connect lifecycle marker:
-// 'disconnected' → 'connecting' → 'ready'. Reaching 'ready' requires
-// Wallet.connect() to get past its own `await runOnboardingWizard(...)`
-// (app/js/ui/navigation.js), so on a profile that still needs onboarding the
-// marker cannot advance until something drives the wizard modal. Both
-// observations live here so connectApp() and driveWizard() agree on what
-// "usable" means instead of each waiting for the other.
+// App lifecycle state shared by the runner and onboarding driver.
+// `body[data-wallet-state]` transitions from `disconnected` to `connecting`
+// to `ready`. Onboarding must complete before the runtime can become ready.
 
 import { waitForCondition } from './waits.mjs';
 
-// A fresh headed CI profile may still be initializing the WASM runtime and the
-// selected pool after Freighter has supplied the address. Keep a cold-start
-// margin here; ordinary app navigation and approval waits remain shorter.
+// Includes runtime and selected-pool initialization.
 export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
 export const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
@@ -41,9 +33,7 @@ export async function readAppLifecycle(page) {
 /**
  * Wait until the app's runtime and selected pool are usable.
  *
- * An open onboarding wizard is a dead end here, not a slow path: the marker
- * is blocked behind the wizard's own promise, so this fails immediately with
- * the actionable cause instead of burning the whole deadline.
+ * An open onboarding wizard prevents the lifecycle from reaching `ready`.
  */
 export async function waitForWalletRuntimeReady(page, {
   timeoutMs = APP_RUNTIME_READY_TIMEOUT_MS,
