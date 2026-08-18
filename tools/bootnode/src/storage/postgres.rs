@@ -1,6 +1,6 @@
 use super::{
     IndexerState, Storage,
-    tables::{EVENTS, INDEXER_STATE},
+    tables::{EVENTS, STATE},
 };
 use crate::messages::Event;
 use anyhow::{Context, Result, bail};
@@ -40,7 +40,7 @@ impl Postgres {
             .execute(
                 &format!(
                     r#"
-INSERT INTO {INDEXER_STATE} (deployment_id) VALUES ($1)
+INSERT INTO {STATE} (deployment_id) VALUES ($1)
 ON CONFLICT (deployment_id) DO NOTHING
 "#
                 ),
@@ -70,7 +70,7 @@ impl Storage for Postgres {
                 &format!(
                     r#"
 SELECT last_upstream_cursor, ledger_tip, oldest_ledger, archive_ready
-FROM {INDEXER_STATE} WHERE deployment_id = $1
+FROM {STATE} WHERE deployment_id = $1
 "#
                 ),
                 &[&self.deployment_id()],
@@ -96,7 +96,7 @@ FROM {INDEXER_STATE} WHERE deployment_id = $1
         let updated = client
             .execute(
                 &format!(
-                    "UPDATE {INDEXER_STATE} SET last_upstream_cursor = $1, updated_at = now() WHERE deployment_id = $2"
+                    "UPDATE {STATE} SET last_upstream_cursor = $1, updated_at = now() WHERE deployment_id = $2"
                 ),
                 &[&cursor, &self.deployment_id()],
             )
@@ -117,7 +117,7 @@ FROM {INDEXER_STATE} WHERE deployment_id = $1
         let updated = client
             .execute(
                 &format!(
-                    "UPDATE {INDEXER_STATE} SET ledger_tip = $1, updated_at = now() WHERE deployment_id = $2"
+                    "UPDATE {STATE} SET ledger_tip = $1, updated_at = now() WHERE deployment_id = $2"
                 ),
                 &[&ledger_tip, &self.deployment_id()],
             )
@@ -138,7 +138,7 @@ FROM {INDEXER_STATE} WHERE deployment_id = $1
         let updated = client
             .execute(
                 &format!(
-                    "UPDATE {INDEXER_STATE} SET oldest_ledger = $1, updated_at = now() WHERE deployment_id = $2"
+                    "UPDATE {STATE} SET oldest_ledger = $1, updated_at = now() WHERE deployment_id = $2"
                 ),
                 &[&oldest_ledger, &self.deployment_id()],
             )
@@ -157,7 +157,7 @@ FROM {INDEXER_STATE} WHERE deployment_id = $1
         let updated = client
             .execute(
                 &format!(
-                    "UPDATE {INDEXER_STATE} SET archive_ready = true, updated_at = now() WHERE deployment_id = $1"
+                    "UPDATE {STATE} SET archive_ready = true, updated_at = now() WHERE deployment_id = $1"
                 ),
                 &[&self.deployment_id()],
             )
