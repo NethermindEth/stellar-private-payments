@@ -1,5 +1,5 @@
 // Compound test: deposit 0.01 XLM, then withdraw 0.01 XLM back to the same
-// (connected) wallet. submitAndConfirm (../src/moveFunds.mjs) — the runtime
+// (connected) wallet. The shared move-funds operation — the runtime
 // confirmation dialog, .btn-loading progress-stage tracking, sequential
 // Freighter approval handling, and toast-link hash capture + on-chain
 // confirmation — is shared with tests/05-deposit-transfer.mjs.
@@ -28,7 +28,10 @@
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
-import { submitAndConfirm } from '../src/moveFunds.mjs';
+import { waitForSyncedLedger } from '../src/indexer.mjs';
+import { deposit, withdraw } from '../src/moveFunds.mjs';
+import { gotoAdvanced, gotoMoveFunds } from '../src/navigation.mjs';
+import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 const log = createLogger('04-deposit-withdraw');
@@ -40,43 +43,44 @@ export async function run(helpers) {
 
   // Wizard state is per-origin: drive it on fresh origins, no-op elsewhere.
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '04-deposit-withdraw' });
-  // Bare APP_URL lands on Overview; Move Funds controls are hidden until
-  // the tab is opened.
-  await page.getByRole('button', { name: 'Move Funds', exact: true }).click();
-  await page.waitForTimeout(500);
+  await gotoMoveFunds(page);
 
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
   const logTag = '04-deposit-withdraw';
 
-  const depositHash = await submitAndConfirm(helpers, {
+  // Start the progress listener before submitting. It stays attached through
+  // duplicate sync logs and proves both indexer and note-table readiness.
+  const initialSync = await waitForSyncedLedger(page);
+  const noteReady = waitForNotesAfterIndexer(page, {
+    afterLedger: initialSync.ledger,
+    notes: { minCount: 1 },
+  });
+
+  const depositResult = await deposit(helpers, {
     logTag,
-    flowName: 'deposit',
-    amountSelector: '#deposit-amount',
-    submitSelector: '#btn-deposit',
-    confirmDialogTitle: 'Confirm deposit',
-    confirmButtonLabel: 'Deposit',
     amount: '0.01',
     rpcUrl,
   });
+  const depositHash = depositResult.transactionHash;
 
-  // Switch tabs via the stable data attribute — plain text "Withdraw" also
-  // matches an unrelated hidden quick-flow button elsewhere on the page.
-  await page.locator('[data-move-flow="withdraw"]').click();
-  await page.waitForTimeout(500);
+  await gotoAdvanced(page);
+  const noteResult = await noteReady;
+  assert(noteResult.progress.ledger > initialSync.ledger, 'indexer did not advance after the confirmed deposit');
+  assert(noteResult.notes.matchingNotes.length > 0, 'no note was ready after indexer progress');
 
-  const withdrawHash = await submitAndConfirm(helpers, {
+  await gotoMoveFunds(page);
+  await page.getByTestId('move-flow-withdraw').click();
+  await page.getByTestId('move-panel-withdraw').waitFor({ state: 'visible', timeout: 10_000 });
+
+  const withdrawResult = await withdraw(helpers, {
     logTag,
-    flowName: 'withdraw',
-    amountSelector: '#withdraw-amount',
-    submitSelector: '#btn-withdraw',
-    confirmDialogTitle: 'Confirm withdrawal',
-    confirmButtonLabel: 'Withdraw',
     amount: '0.01',
     rpcUrl,
     // Generous: the just-deposited note may need the SDK's own sync-wait
     // retry (see module comment) before a withdrawal plan can build.
     progressTimeoutMs: 180000,
   });
+  const withdrawHash = withdrawResult.transactionHash;
 
   assert(depositHash !== withdrawHash, 'deposit and withdraw somehow produced the same transaction hash');
   log.info('OK: deposit', depositHash.slice(0, 8), 'and withdraw', withdrawHash.slice(0, 8), 'both confirmed SUCCESS on-chain');

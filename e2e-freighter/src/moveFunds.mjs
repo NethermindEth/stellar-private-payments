@@ -11,16 +11,166 @@
 // for why).
 
 import { createLogger } from './logger.mjs';
-import { waitForTransactionSuccess } from './chain.mjs';
+import { confirmTransaction } from './chain.mjs';
+import { waitForCondition } from './waits.mjs';
 
 const APPROVAL_GRACE_MS = 2000;
-const TOAST_POLL_MS = 500;
 const PROGRESS_LOG_MS = 2000;
+
+async function submittedToasts(page) {
+  return page.getByTestId('toast').evaluateAll((toasts) => toasts.map((toast) => ({
+    origin: toast.getAttribute('data-toast-origin'),
+    transactionHash: toast.getAttribute('data-transaction-hash'),
+    state: toast.getAttribute('data-state'),
+    message: toast.querySelector('[data-testid="toast-message"]')?.textContent?.trim() || '',
+  })));
+}
+
+/** Wait for a visible application toast matching an operation-level predicate. */
+export async function waitForToast(page, {
+  origin,
+  predicate = () => true,
+  timeoutMs = 10_000,
+  waitOptions = {},
+} = {}) {
+  if (typeof predicate !== 'function') throw new TypeError('waitForToast predicate must be a function');
+  const result = await waitForCondition({
+    operation: `toast:${origin || 'any'}`,
+    timeoutMs,
+    intervalMs: 100,
+    ...waitOptions,
+    observe: async () => {
+      const toasts = await submittedToasts(page);
+      const match = [...toasts].reverse().find((toast) => (
+        toast.state === 'visible' &&
+        (!origin || toast.origin === origin) &&
+        predicate(toast)
+      ));
+      return { match: match || null, toasts };
+    },
+    isReady: ({ match }) => Boolean(match),
+  });
+  return result.value.match;
+}
+
+/** Wait until an operation control has visibly returned to its idle state. */
+export async function waitForOperationIdle(page, {
+  submitSelector,
+  timeoutMs = 15_000,
+  waitOptions = {},
+} = {}) {
+  if (!submitSelector) throw new TypeError('waitForOperationIdle requires submitSelector');
+  const button = page.locator(submitSelector);
+  const result = await waitForCondition({
+    operation: `operation-idle:${submitSelector}`,
+    timeoutMs,
+    intervalMs: 100,
+    ...waitOptions,
+    observe: async () => ({
+      status: await button.getAttribute('data-status').catch(() => 'unknown'),
+      disabled: await button.isDisabled().catch(() => true),
+      loadingVisible: await button.locator('.btn-loading').isVisible().catch(() => false),
+      normalLabelVisible: await button.locator('.btn-text').isVisible().catch(() => false),
+    }),
+    isReady: ({ status, disabled, loadingVisible, normalLabelVisible }) => (
+      status === 'idle' && !disabled && !loadingVisible && normalLabelVisible
+    ),
+  });
+  return result.value;
+}
+
+/** Wait for the transfer recipient lookup to reach a particular UI state. */
+export async function waitForRecipientLookup(page, {
+  expectedText,
+  manualVisible,
+  statusSelector = '#transfer-lookup-status',
+  warningSelector = '#transfer-lookup-warning',
+  manualSelector = '#transfer-manual-fields',
+  timeoutMs = 15_000,
+  waitOptions = {},
+} = {}) {
+  if (!expectedText) throw new TypeError('waitForRecipientLookup requires expectedText');
+  const status = page.locator(statusSelector);
+  const warning = page.locator(warningSelector);
+  const manual = page.locator(manualSelector);
+  const result = await waitForCondition({
+    operation: `recipient-lookup:${expectedText}`,
+    timeoutMs,
+    intervalMs: 100,
+    ...waitOptions,
+    observe: async () => ({
+      status: (await status.innerText().catch(() => '')).trim(),
+      warning: (await warning.innerText().catch(() => '')).trim(),
+      manualVisible: await manual.isVisible().catch(() => false),
+    }),
+    isReady: (state) => (
+      state.status.includes(expectedText) &&
+      (manualVisible === undefined || state.manualVisible === manualVisible)
+    ),
+  });
+  return result.value;
+}
+
+/** Wait until clearing a recipient has reset its lookup UI. */
+export async function waitForRecipientLookupReset(page, {
+  statusSelector = '#transfer-lookup-status',
+  warningSelector = '#transfer-lookup-warning',
+  manualSelector = '#transfer-manual-fields',
+  timeoutMs = 5_000,
+  waitOptions = {},
+} = {}) {
+  const status = page.locator(statusSelector);
+  const warning = page.locator(warningSelector);
+  const manual = page.locator(manualSelector);
+  const result = await waitForCondition({
+    operation: 'recipient-lookup:reset',
+    timeoutMs,
+    intervalMs: 100,
+    ...waitOptions,
+    observe: async () => ({
+      status: (await status.innerText().catch(() => '')).trim(),
+      warning: (await warning.innerText().catch(() => '')).trim(),
+      manualVisible: await manual.isVisible().catch(() => false),
+    }),
+    isReady: (state) => !state.status && !state.warning && !state.manualVisible,
+  });
+  return result.value;
+}
+
+// Wait for the newly-rendered submitted toast. This deliberately uses the
+// production transaction hash marker rather than treating an explorer href as
+// the only source of transaction identity.
+export async function waitForSubmittedTransaction(page, {
+  origin,
+  previousHashes = [],
+  timeoutMs = 30_000,
+  waitOptions = {},
+} = {}) {
+  const previous = new Set(previousHashes.filter(Boolean));
+  const result = await waitForCondition({
+    operation: `transaction-toast:${origin || 'any'}`,
+    timeoutMs,
+    intervalMs: 200,
+    ...waitOptions,
+    observe: async () => {
+      const toasts = await submittedToasts(page);
+      const match = [...toasts].reverse().find((toast) => (
+        toast.state === 'visible' &&
+        (!origin || toast.origin === origin) &&
+        toast.transactionHash &&
+        !previous.has(toast.transactionHash)
+      ));
+      return { match: match || null, toasts };
+    },
+    isReady: ({ match }) => Boolean(match),
+  });
+  return result.value.match;
+}
 
 // Fill amount, click submit, handle the runtime confirmation dialog, drive
 // every sequential Freighter approval, capture the submitted tx hash from
 // the toast's explorer link, then confirm SUCCESS on-chain.
-export async function submitAndConfirm(
+export async function submitAndConfirmOperation(
   { page, context, waitForAnyFreighterApproval, approveOrWatch },
   {
     logTag,
@@ -41,15 +191,13 @@ export async function submitAndConfirm(
     throw new Error(`${logTag}: ${message}`);
   };
 
-  // A prior toast (e.g. an earlier leg in the same compound test) can still
-  // be visible for a few seconds after its flow finished — capture
-  // whatever href is showing right now so this leg only ever accepts a
-  // DIFFERENT (i.e. genuinely new) one, never a stale leftover.
-  const toastLink = page.locator('#toast-container .toast-link').first();
-  const previousHref = await toastLink.getAttribute('href', { timeout: 500 }).catch(() => null);
+  const previousHashes = (await submittedToasts(page)).map((toast) => toast.transactionHash);
 
   if (fillBeforeSubmit) await fillBeforeSubmit();
-  await page.fill(amountSelector, amount);
+  if (amountSelector) {
+    if (amount === undefined) throw new TypeError(`${flowName}: amount is required when amountSelector is set`);
+    await page.fill(amountSelector, amount);
+  }
   const submitBtn = page.locator(submitSelector);
   await submitBtn.click();
 
@@ -67,7 +215,7 @@ export async function submitAndConfirm(
   let firstApprovalElapsed = null;
   const pollStart = Date.now();
   const progressDeadline = Date.now() + progressTimeoutMs;
-  let approvalsDone = false;
+  let operationSettled = false;
 
   // Background progress logger: reading the button label is safe; reading
   // the toast link during proving is not.
@@ -85,18 +233,18 @@ export async function submitAndConfirm(
 
   try {
     while (Date.now() < progressDeadline) {
+      const buttonState = await submitBtn.getAttribute('data-status').catch(() => 'unknown');
       const pending = await waitForAnyFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
         timeoutMs: APPROVAL_GRACE_MS,
       }).catch(() => null);
 
       if (!pending) {
-        // No approval appeared for the grace period. If we have ever seen a
-        // progress stage, the transaction is in flight and approvals are done.
-        if (seenStages.size > 0) {
-          approvalsDone = true;
+        // Proving can precede a later signing prompt. Only stop watching for
+        // approvals once the production operation control has returned idle.
+        if (seenStages.size > 0 && buttonState === 'idle') {
+          operationSettled = true;
           break;
         }
-        // Otherwise the deposit hasn't started yet; keep waiting.
         continue;
       }
 
@@ -106,8 +254,6 @@ export async function submitAndConfirm(
       }
       log.info(`${flowName}: driving Freighter approval: ${pending.kind}`);
       await approve(pending.kind, { timeoutMs: 15000, label: pending.kind });
-      // Give the just-approved popup a moment to close before the next scan.
-      await page.waitForTimeout(500);
     }
   } finally {
     clearInterval(progressInterval);
@@ -118,30 +264,68 @@ export async function submitAndConfirm(
   }
   log.debug(flowName, 'progress stages:', [...seenStages].join(' -> '));
 
-  if (!approvalsDone) {
-    fail(`${flowName}: timed out waiting for Freighter approvals`);
+  if (!operationSettled) {
+    const finalState = await submitBtn.getAttribute('data-status').catch(() => 'unknown');
+    const finalProgress = await submitBtn.getAttribute('data-progress').catch(() => null);
+    fail(`${flowName}: operation did not settle before approval deadline (button state: ${finalState}, progress: ${finalProgress})`);
   }
 
-  log.info(`${flowName}: waiting for success toast`);
-  const toastDeadline = Date.now() + 30000;
-  let txHash = null;
-  while (Date.now() < toastDeadline) {
-    const href = await toastLink.getAttribute('href', { timeout: 500 }).catch(() => null);
-    if (href && href !== previousHref) {
-      txHash = href.split('/').filter(Boolean).pop();
-      break;
-    }
-    await page.waitForTimeout(TOAST_POLL_MS);
-  }
-
-  if (!txHash) {
-    fail(`${flowName}: no transaction hash was captured from the submitted-transaction toast's explorer link`);
-  }
+  log.info(`${flowName}: waiting for submitted transaction toast`);
+  const toast = await waitForSubmittedTransaction(page, {
+    origin: flowName,
+    previousHashes,
+    timeoutMs: 30_000,
+  }).catch((error) => fail(`${flowName}: ${error.message}`));
+  const txHash = toast.transactionHash;
   log.info(flowName, 'captured tx hash:', txHash);
 
-  const status = await waitForTransactionSuccess(txHash, { rpcUrl, timeoutMs: 60000 });
-  if (status !== 'SUCCESS') fail(`${flowName}: transaction ${txHash} resolved with status ${status}, not SUCCESS`);
+  const confirmation = await confirmTransaction(txHash, { rpcUrl, timeoutMs: 60000 });
+  if (confirmation.status !== 'SUCCESS') fail(`${flowName}: transaction ${txHash} resolved with status ${confirmation.status}, not SUCCESS`);
   log.info(flowName, 'tx', txHash, 'confirmed SUCCESS on-chain');
 
-  return txHash;
+  return { transactionHash: txHash, status: confirmation.status, toast };
+}
+
+export function deposit(helpers, options) {
+  return submitAndConfirmOperation(helpers, {
+    flowName: 'deposit',
+    amountSelector: '#deposit-amount',
+    submitSelector: '#btn-deposit',
+    confirmDialogTitle: 'Confirm deposit',
+    confirmButtonLabel: 'Deposit',
+    ...options,
+  });
+}
+
+export function withdraw(helpers, options) {
+  return submitAndConfirmOperation(helpers, {
+    flowName: 'withdraw',
+    amountSelector: '#withdraw-amount',
+    submitSelector: '#btn-withdraw',
+    confirmDialogTitle: 'Confirm withdrawal',
+    confirmButtonLabel: 'Withdraw',
+    ...options,
+  });
+}
+
+export function transfer(helpers, options) {
+  return submitAndConfirmOperation(helpers, {
+    flowName: 'transfer',
+    amountSelector: '#transfer-amount',
+    submitSelector: '#btn-transfer',
+    confirmDialogTitle: 'Confirm transfer',
+    confirmButtonLabel: 'Transfer',
+    ...options,
+  });
+}
+
+export function advancedTransfer(helpers, options) {
+  return submitAndConfirmOperation(helpers, {
+    flowName: 'advanced',
+    submitSelector: '#btn-advanced-transact',
+    confirmDialogTitle: 'Confirm advanced transaction',
+    confirmButtonLabel: 'Transact',
+    progressTimeoutMs: 180_000,
+    ...options,
+  });
 }

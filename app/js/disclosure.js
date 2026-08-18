@@ -260,6 +260,7 @@ function buildGenerateFilters(container) {
       label,
     );
     btn.type = 'button';
+    btn.dataset.testid = `disclosure-filter-${key}`;
     btn.addEventListener('click', () => {
       state.noteStatusFilter = key;
       mountGenerate(container);
@@ -372,6 +373,7 @@ export function mountGenerate(container) {
         selectable: true,
         selected,
         disabled: !selected && atMaxSelection(),
+        testId: 'disclosure-note',
         onToggle: (n, checked) => {
           if (checked) {
             if (!isSelected(n)) state.selectedNotes.push(n);
@@ -407,6 +409,7 @@ export function mountGenerate(container) {
   // -------------------------------------------------------------------------
   const formWrap = document.createElement('div');
   formWrap.className = 'border-t border-dark-800 pt-4 mt-2 space-y-4';
+  formWrap.dataset.testid = 'disclosure-generate-form';
 
   // Helper to build a labeled input
   const makeField = (id, labelText, opts = {}) => {
@@ -534,11 +537,15 @@ export function mountGenerate(container) {
   const progressArea = document.createElement('div');
   progressArea.id = 'generate-progress';
   progressArea.className = 'hidden';
+  progressArea.dataset.testid = 'disclosure-generate-progress';
+  progressArea.dataset.state = 'idle';
   formWrap.appendChild(progressArea);
 
   const resultArea = document.createElement('div');
   resultArea.id = 'generate-result';
   resultArea.className = 'hidden';
+  resultArea.dataset.testid = 'disclosure-generate-result';
+  resultArea.dataset.state = 'idle';
   formWrap.appendChild(resultArea);
 
   const setGenerateState = (stage, message, error = null) => {
@@ -547,6 +554,7 @@ export function mountGenerate(container) {
     state.generateError = error;
 
     if (stage) {
+      progressArea.dataset.state = error ? 'error' : 'running';
       progressArea.classList.remove('hidden');
       const isError = !!error;
       const wrap = document.createElement('div');
@@ -561,6 +569,7 @@ export function mountGenerate(container) {
       wrap.appendChild(msg);
       progressArea.replaceChildren(wrap);
     } else {
+      progressArea.dataset.state = 'idle';
       progressArea.classList.add('hidden');
       progressArea.replaceChildren();
     }
@@ -595,6 +604,8 @@ export function mountGenerate(container) {
       const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
 
       const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
+      card.dataset.testid = 'disclosure-disclosed-note';
+      card.dataset.state = 'unspent';
       card.appendChild(
         elc('div', 'flex justify-between text-xs', [
           el('span', 'text-dark-500', `Note ${i + 1}`),
@@ -621,6 +632,7 @@ export function mountGenerate(container) {
   const showResult = (receipt) => {
     state.lastReceipt = receipt;
     resultArea.classList.remove('hidden');
+    resultArea.dataset.state = 'ready';
     const json = JSON.stringify(receipt, null, 2);
     const commitmentPrefix = state.selectedNotes.length
       ? `${state.selectedNotes.length}-note`
@@ -637,7 +649,9 @@ export function mountGenerate(container) {
     if (receipt.publicInputs) {
       box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
     }
-    box.appendChild(el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json));
+    const receiptJson = el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json);
+    receiptJson.dataset.testid = 'disclosure-receipt-json';
+    box.appendChild(receiptJson);
     const actions = el('div', 'flex gap-2');
     const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
     dlBtn.type = 'button';
@@ -677,6 +691,7 @@ export function mountGenerate(container) {
       state.generateError = null;
       state.generateStage = null;
       resultArea.classList.add('hidden');
+      resultArea.dataset.state = 'idle';
       resultArea.replaceChildren();
       progressArea.classList.add('hidden');
       progressArea.replaceChildren();
@@ -687,6 +702,7 @@ export function mountGenerate(container) {
   };
 
   const showGenerateError = (message) => {
+    resultArea.dataset.state = 'error';
     setGenerateState('error', message, true);
     generateBtn.disabled = false;
     generateBtn.textContent = 'Retry';
@@ -695,6 +711,7 @@ export function mountGenerate(container) {
   // Generate button
   const generateBtn = document.createElement('button');
   generateBtn.type = 'button';
+  generateBtn.dataset.testid = 'disclosure-generate-submit';
   generateBtn.className =
     'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
   generateBtn.textContent = 'Generate Disclosure Receipt';
@@ -708,6 +725,7 @@ export function mountGenerate(container) {
   async function executeGenerate(form) {
     generating = true;
     generateBtn.disabled = true;
+    resultArea.dataset.state = 'generating';
     generateBtn.textContent = 'Generating…';
     resultArea.classList.add('hidden');
     state.lastReceipt = null;
@@ -879,6 +897,7 @@ export function mountVerify(container) {
   pasteWrap.appendChild(pasteLabel);
 
   const pasteArea = document.createElement('textarea');
+  pasteArea.dataset.testid = 'disclosure-receipt-input';
   pasteArea.rows = 4;
   pasteArea.className =
     'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y';
@@ -889,6 +908,7 @@ export function mountVerify(container) {
   // Load button
   const loadBtn = document.createElement('button');
   loadBtn.type = 'button';
+  loadBtn.dataset.testid = 'disclosure-load-receipt';
   loadBtn.className =
     'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition';
   loadBtn.textContent = 'Load Receipt';
@@ -896,6 +916,7 @@ export function mountVerify(container) {
 
   // Receipt error display
   const importErrorEl = document.createElement('div');
+  importErrorEl.dataset.testid = 'disclosure-receipt-import-error';
   importErrorEl.className = 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden';
   importWrap.appendChild(importErrorEl);
 
@@ -906,6 +927,8 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   const summaryWrap = document.createElement('div');
   summaryWrap.className = 'hidden space-y-4 mb-4';
+  summaryWrap.dataset.testid = 'disclosure-receipt-summary';
+  summaryWrap.dataset.state = 'idle';
 
   const summaryHeading = document.createElement('h3');
   summaryHeading.className = 'text-xs font-medium text-dark-400 uppercase tracking-wide';
@@ -994,6 +1017,7 @@ export function mountVerify(container) {
   // Verify button
   const verifyBtn = document.createElement('button');
   verifyBtn.type = 'button';
+  verifyBtn.dataset.testid = 'disclosure-verify-submit';
   verifyBtn.className =
     'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
   verifyBtn.textContent = 'Verify Receipt';
@@ -1002,6 +1026,7 @@ export function mountVerify(container) {
   // Disclosed notes section (populated after loading a receipt)
   const disclosedNotesWrap = document.createElement('div');
   disclosedNotesWrap.className = 'hidden space-y-2';
+  disclosedNotesWrap.dataset.testid = 'disclosure-disclosed-notes';
   summaryWrap.appendChild(disclosedNotesWrap);
 
   container.appendChild(summaryWrap);
@@ -1011,6 +1036,8 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   const resultsWrap = document.createElement('div');
   resultsWrap.className = 'hidden space-y-3';
+  resultsWrap.dataset.testid = 'disclosure-verification-results';
+  resultsWrap.dataset.state = 'idle';
   container.appendChild(resultsWrap);
 
   // -------------------------------------------------------------------------
@@ -1020,6 +1047,7 @@ export function mountVerify(container) {
     importErrorEl.textContent = msg;
     importErrorEl.classList.remove('hidden');
     summaryWrap.classList.add('hidden');
+    summaryWrap.dataset.state = 'error';
     resultsWrap.classList.add('hidden');
   };
 
@@ -1109,6 +1137,8 @@ export function mountVerify(container) {
           ? 'bg-amber-500/5 border-amber-500/30'
           : 'bg-dark-800 border-dark-700'
       }`);
+      card.dataset.testid = 'disclosure-disclosed-note';
+      card.dataset.state = isSpent ? 'spent' : 'unspent';
       card.appendChild(
         elc('div', 'flex justify-between text-xs', [
           el('span', 'text-dark-500', `Note ${i + 1}`),
@@ -1197,7 +1227,9 @@ export function mountVerify(container) {
     receiptError = null;
     renderSummary(receipt);
     summaryWrap.classList.remove('hidden');
+    summaryWrap.dataset.state = 'ready';
     resultsWrap.classList.add('hidden');
+    resultsWrap.dataset.state = 'idle';
   };
 
   fileInput.addEventListener('change', (e) => {
@@ -1242,6 +1274,7 @@ export function mountVerify(container) {
     verifyBtn.disabled = true;
     verifyBtn.textContent = 'Verifying…';
     resultsWrap.classList.remove('hidden');
+    resultsWrap.dataset.state = 'verifying';
     const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-dark-300');
     verifyingRow.append(spinnerEl(), el('span', null, 'Running verification checks…'));
     resultsWrap.replaceChildren(verifyingRow);
@@ -1287,6 +1320,8 @@ export function mountVerify(container) {
               ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
               : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
         }`);
+        li.dataset.testid = `disclosure-check-${label}`;
+        li.dataset.state = pass ? 'pass' : 'fail';
         const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
         if (pass) {
           iconWrap.appendChild(checkCircleIcon('w-4 h-4'));
@@ -1362,6 +1397,7 @@ export function mountVerify(container) {
         badge.append(shieldIcon('w-5 h-5'), el('span', null, 'Fully verified — this receipt is trustworthy.'));
         resultsWrap.appendChild(badge);
       }
+      resultsWrap.dataset.state = 'complete';
     } catch (err) {
       console.error('Verification failed:', err);
       if (isDbLockedError(err?.message)) {
@@ -1371,6 +1407,7 @@ export function mountVerify(container) {
         el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
           `Verification could not be completed: ${err.message || 'Unknown error'}`),
       );
+      resultsWrap.dataset.state = 'error';
     } finally {
       verifyBtn.disabled = false;
       verifyBtn.textContent = 'Verify Receipt';
@@ -1418,5 +1455,3 @@ export async function initDisclosure() {
     loadNotes();
   }
 }
-
-

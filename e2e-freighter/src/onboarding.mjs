@@ -8,6 +8,7 @@
 // goes through it fresh even on an already-onboarded profile.
 
 import { createLogger } from './logger.mjs';
+import { waitForCondition } from './waits.mjs';
 
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
@@ -47,11 +48,13 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     );
     if (await modalHidden()) {
       if (step === 0) {
-        const settleDeadline = Date.now() + 5000;
-        while (Date.now() < settleDeadline) {
-          await page.waitForTimeout(300);
-          if (!await modalHidden()) break;
-        }
+        await waitForCondition({
+          operation: 'onboarding:appear',
+          timeoutMs: 5000,
+          intervalMs: 100,
+          observe: async () => ({ hidden: await modalHidden() }),
+          isReady: ({ hidden }) => !hidden,
+        }).catch(() => {});
       }
       if (await modalHidden()) {
         log.debug('wizard finished after', step, 'step(s)');
@@ -68,11 +71,16 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
           .filter((b) => b.text),
       );
     let buttons = await readButtons();
-    const settleDeadline = Date.now() + 5000;
-    while (buttons.length && buttons.every((b) => b.zeroRect) && Date.now() < settleDeadline) {
-      await page.waitForTimeout(300);
-      buttons = await readButtons();
-    }
+    await waitForCondition({
+      operation: 'onboarding:layout',
+      timeoutMs: 5000,
+      intervalMs: 100,
+      observe: async () => {
+        buttons = await readButtons();
+        return { buttons };
+      },
+      isReady: ({ buttons: observed }) => observed.length > 0 && observed.some((button) => !button.zeroRect),
+    });
     if (!buttons.length) throw new Error(`${logTag}: onboarding modal present but has no labeled buttons`);
     if (buttons.every((b) => b.zeroRect)) {
       throw new Error(
@@ -84,6 +92,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     const choice = WIZARD_BUTTON_PRIORITY.find((text) => buttons.some((b) => b.text === text));
     if (!choice) throw new Error(`${logTag}: no recognized button among [${buttons.map((b) => b.text).join(', ')}]`);
 
+    const previousButtonText = buttons.map((button) => button.text).join('|');
     log.debug('step', step, 'clicking', choice);
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 
@@ -92,7 +101,16 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       if (approvalPage) await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
     }
 
-    await page.waitForTimeout(1000);
+    await waitForCondition({
+      operation: 'onboarding:step-settle',
+      timeoutMs: 5000,
+      intervalMs: 100,
+      observe: async () => ({
+        hidden: await modalHidden(),
+        buttonText: (await readButtons()).map((button) => button.text).join('|'),
+      }),
+      isReady: ({ hidden, buttonText }) => hidden || buttonText !== previousButtonText,
+    });
   }
   throw new Error(`${logTag}: wizard did not finish within 10 steps`);
 }

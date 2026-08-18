@@ -9,10 +9,12 @@
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
+import { gotoDashboard } from '../src/navigation.mjs';
 
 const log = createLogger('01-connect');
 
 export async function run({ page }) {
+  await gotoDashboard(page);
   // After a successful connect the wallet button is hidden and the address
   // text replaces it in the settings button. These elements already have stable
   // ids, so use them directly instead of adding redundant data-testid attrs.

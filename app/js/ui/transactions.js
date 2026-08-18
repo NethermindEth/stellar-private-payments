@@ -53,6 +53,8 @@ function requireWallet() {
 function setLoading(button, loading, label = 'Submitting…') {
     if (!button) return;
     button.disabled = loading;
+    button.dataset.status = loading ? 'submitting' : 'idle';
+    if (!loading) delete button.dataset.progress;
     button.querySelector('.btn-text')?.classList.toggle('hidden', loading);
     const loadingEl = button.querySelector('.btn-loading');
     if (loadingEl) {
@@ -71,6 +73,8 @@ function bindTxProgress(button, flow) {
         if (!loadingEl) return;
         loadingEl.classList.remove('hidden');
         loadingEl.textContent = detail.message;
+        button.dataset.status = 'submitting';
+        button.dataset.progress = detail.message;
     };
     window.addEventListener(TX_PROGRESS_EVENT, handler);
     return () => window.removeEventListener(TX_PROGRESS_EVENT, handler);
@@ -638,6 +642,7 @@ export const Transactions = {
             linkUrl: Utils.explorerTxUrl(lastHash),
             linkAriaLabel: 'Open transaction in explorer',
             origin,
+            transactionHash: lastHash,
         });
         for (const txHash of hashes) {
             App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));

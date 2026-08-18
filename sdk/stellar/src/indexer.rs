@@ -180,6 +180,11 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             cursor = Some(new_cursor);
             if fully_indexed {
+                // Deterministic catch-up signal: callers (e.g. e2e tests) can wait
+                // for this instead of polling UI side-effects that lag the index
+                // on their own schedule. `progress_ledger` is non-sensitive sync
+                // metadata, not user data.
+                tracing::info!("[INDEXER] synced to ledger {progress_ledger}");
                 return Ok(false);
             }
             // Full page, or partial page still behind latestLedger: keep going.

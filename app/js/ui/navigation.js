@@ -77,9 +77,15 @@ function setActiveView(view) {
         btn.classList.toggle('bg-cyan-400/15', active);
         btn.classList.toggle('text-cyan-100', active);
         btn.classList.toggle('text-slate-400', !active);
+        btn.dataset.state = active ? 'active' : 'inactive';
+        if (active) btn.setAttribute('aria-current', 'page');
+        else btn.removeAttribute('aria-current');
     });
     document.querySelectorAll('.view-panel').forEach(panel => {
-        panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
+        const active = panel.dataset.viewPanel === view;
+        panel.classList.toggle('hidden', !active);
+        panel.dataset.state = active ? 'active' : 'inactive';
+        panel.setAttribute('aria-hidden', String(!active));
     });
 
     if (view === 'disclosure' && !disclosureLoaded) {
@@ -100,9 +106,14 @@ function setMoveFlow(flow) {
         btn.classList.toggle('bg-cyan-400', active);
         btn.classList.toggle('text-slate-950', active);
         btn.classList.toggle('text-slate-300', !active);
+        btn.dataset.state = active ? 'active' : 'inactive';
+        btn.setAttribute('aria-pressed', String(active));
     });
     document.querySelectorAll('.move-flow-panel').forEach(panel => {
-        panel.classList.toggle('hidden', panel.dataset.movePanel !== flow);
+        const active = panel.dataset.movePanel === flow;
+        panel.classList.toggle('hidden', !active);
+        panel.dataset.state = active ? 'active' : 'inactive';
+        panel.setAttribute('aria-hidden', String(!active));
     });
 }
 
@@ -403,6 +414,10 @@ export const Wallet = {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
+            // This is intentionally separate from wallet.connected: that flag
+            // flips as soon as Freighter supplies an address, while runtime
+            // and pool initialization still make transaction controls unusable.
+            document.body.dataset.walletState = 'connecting';
             const signer = new FreighterSigner();
 
             try {
@@ -441,6 +456,7 @@ export const Wallet = {
                 renderWallet();
                 App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
                 await createAppPool();
+                document.body.dataset.walletState = 'ready';
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
@@ -490,6 +506,7 @@ export const Wallet = {
             networkPassphrase: null,
         };
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
+        document.body.dataset.walletState = 'disconnected';
         renderWallet();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));

@@ -214,6 +214,70 @@ as a fast sanity check.
 APPROVE=auto bash e2e-freighter/scripts/run-e2e.sh --smoke
 ```
 
+## Operation building blocks and timeout policy
+
+The numbered scenarios compose small operations from `src/` rather than
+sleeping for a guessed amount of time. Use the same pattern for a new flow:
+
+```js
+import { deposit, withdraw } from '../src/moveFunds.mjs';
+import { gotoAdvanced, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
+import { waitForSyncedLedger } from '../src/indexer.mjs';
+import { waitForNotesAfterIndexer } from '../src/notes.mjs';
+
+await gotoMoveFunds(page);
+await deposit(helpers, { logTag: 'my-flow', amount: '0.01', rpcUrl });
+
+const beforeWithdrawal = await waitForSyncedLedger(page);
+const spentNote = waitForNotesAfterIndexer(page, {
+  afterLedger: beforeWithdrawal.ledger,
+  notes: { minCount: 1, predicate: (note) => note.state === 'spent' },
+});
+await gotoMoveFlow(page, 'withdraw');
+await withdraw(helpers, { logTag: 'my-flow', amount: '0.01', rpcUrl });
+await gotoAdvanced(page);
+await spentNote;
+```
+
+For transfers, navigate to the `transfer` flow and use `transfer(...)` after
+the recipient lookup reaches its observable ready state. For selective
+disclosure, navigate with `gotoDisclosure(page)`, select notes through the
+disclosure helpers, generate a receipt, then use `verifyDisclosureUntil(...)`
+to wait for the required proof, context, root, and note-readiness result.
+
+Timeouts are ownership-specific, not one global test timeout:
+
+- DOM/view and dialog transitions are bounded at 5–15 seconds.
+- Wallet runtime readiness is bounded at 30 seconds; `connectApp` waits for
+  the app's `body[data-wallet-state="ready"]`, which means the selected pool
+  is usable, not merely that an address is rendered.
+- Freighter approval discovery is short and repeated while an operation is
+  active; the observed first approval is normally about 3–4 seconds.
+- Submitted transaction confirmation has a 60-second chain/RPC bound.
+- Indexer, note readiness, and disclosure proof/root work use their own
+  operation-level conditions and larger 120–180 second budgets. The
+  repeatability runs placed disclosure-basic at 59–67 seconds, so these
+  bounds intentionally retain margin for testnet and proof-worker variance.
+
+Do not replace these waits with `page.waitForTimeout(...)`. If a bounded wait
+fails, retain its last observed state and investigate the owning boundary:
+the DOM state, extension approval, chain transaction, indexer ledger, note
+readiness, or proof worker.
+
+### Useful commands
+
+```bash
+npm --prefix e2e-freighter run test:unit                         # helper tests
+bash e2e-freighter/scripts/serve-and-run.sh e2e-freighter/tests/04-deposit-withdraw.mjs
+APPROVE=auto bash e2e-freighter/scripts/run-e2e.sh --smoke        # connection only
+bash e2e-freighter/scripts/serve-and-run.sh e2e-freighter/tests/demo.mjs
+bash e2e-freighter/scripts/serve-and-run.sh                       # full local suite
+```
+
+`demo.mjs` is a diagnostic: it reports first/next indexer ledgers and active
+view transitions. Run it when a test may be racing indexer or navigation
+state; it does not submit a transaction.
+
 ## The tests
 
 Each submits real transactions on testnet — run them deliberately, not in

@@ -1,27 +1,58 @@
-// Top-level view navigation helpers.
-//
-// The nav buttons in app/index.html have stable data-testid attributes so
-// tests don't depend on button text or aria labels. Each helper clicks the
-// nav button and waits a short beat for the view panel to mount/update.
+// Top-level view navigation helpers. The production UI exposes matching nav
+// and panel state, so navigation completes when the requested view is actually
+// active instead of after an arbitrary transition delay.
 
-const VIEW_TRANSITION_MS = 500;
+import { waitForCondition } from './waits.mjs';
+
+async function gotoView(page, view) {
+  const nav = page.getByTestId(`nav-${view}`);
+  const panel = page.getByTestId(`view-${view}`);
+  await nav.click();
+
+  return waitForCondition({
+    operation: `navigate:${view}`,
+    observe: async () => ({
+      panelVisible: await panel.isVisible(),
+      panelState: await panel.getAttribute('data-state'),
+      navCurrent: await nav.getAttribute('aria-current'),
+    }),
+    isReady: ({ panelVisible, panelState, navCurrent }) => (
+      panelVisible && panelState === 'active' && navCurrent === 'page'
+    ),
+  });
+}
 
 export async function gotoDashboard(page) {
-  await page.getByTestId('nav-dashboard').click();
-  await page.waitForTimeout(VIEW_TRANSITION_MS);
+  return gotoView(page, 'dashboard');
 }
 
 export async function gotoMoveFunds(page) {
-  await page.getByTestId('nav-move-funds').click();
-  await page.waitForTimeout(VIEW_TRANSITION_MS);
+  return gotoView(page, 'move-funds');
+}
+
+export async function gotoMoveFlow(page, flow) {
+  const tab = page.getByTestId(`move-flow-${flow}`);
+  const panel = page.getByTestId(`move-panel-${flow}`);
+  await tab.click();
+
+  return waitForCondition({
+    operation: `move-flow:${flow}`,
+    observe: async () => ({
+      panelVisible: await panel.isVisible(),
+      panelState: await panel.getAttribute('data-state'),
+      tabState: await tab.getAttribute('data-state'),
+      tabPressed: await tab.getAttribute('aria-pressed'),
+    }),
+    isReady: ({ panelVisible, panelState, tabState, tabPressed }) => (
+      panelVisible && panelState === 'active' && tabState === 'active' && tabPressed === 'true'
+    ),
+  });
 }
 
 export async function gotoAdvanced(page) {
-  await page.getByTestId('nav-advanced').click();
-  await page.waitForTimeout(VIEW_TRANSITION_MS);
+  return gotoView(page, 'advanced');
 }
 
 export async function gotoDisclosure(page) {
-  await page.getByTestId('nav-disclosure').click();
-  await page.waitForTimeout(VIEW_TRANSITION_MS);
+  return gotoView(page, 'disclosure');
 }
