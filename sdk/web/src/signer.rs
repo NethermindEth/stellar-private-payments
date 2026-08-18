@@ -267,10 +267,8 @@ mod tests {
     }
 }
 
-/// Spike tests for [`WalletSigner::new`]'s acceptance rules — the gate a stub
-/// signer must pass before an e2e test can drive a flow to the signing
-/// boundary. Node mode is sufficient: acceptance is pure `Reflect` plumbing and
-/// no method is ever called, so no browser is needed.
+/// Acceptance tests for [`WalletSigner::new`]. Node mode is sufficient because
+/// acceptance is pure `Reflect` plumbing and no method is called.
 #[cfg(all(test, target_arch = "wasm32"))]
 mod spike_tests {
     // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
@@ -284,8 +282,6 @@ mod spike_tests {
     const ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
     /// A JS function returning a promise that never settles.
-    /// `WalletSigner::new` checks only for the presence of each method, so
-    /// it is never awaited.
     fn pending_method() -> JsValue {
         Function::new_no_args("return new Promise(function () {});").into()
     }
@@ -343,8 +339,7 @@ mod spike_tests {
         assert!(new_signer(signer_with(SIGN_METHODS)).is_ok());
     }
 
-    /// Build a JS rejection carrying `code`, as a wallet signalling SEP-0043
-    /// user rejection would.
+    /// Build a JS rejection carrying `code`.
     fn rejection_with_code(message: &str, code: f64) -> JsValue {
         let rejection = js_sys::Error::new(message);
         Reflect::set(
@@ -392,7 +387,6 @@ mod spike_tests {
             "code -4 must map to Error::UserRejected"
         );
 
-        // No `code` at all — the genuine-upstream-failure shape.
         let codeless = wallet_js_error(
             "signTransaction",
             "failed",
@@ -404,7 +398,6 @@ mod spike_tests {
             "a code-less signer error must map to Error::Other"
         );
 
-        // A different code is also not the sentinel.
         let other_code = wallet_js_error(
             "signTransaction",
             "failed",
@@ -416,13 +409,12 @@ mod spike_tests {
         );
     }
 
-    /// The fixed blob the phase-3 stub signer returns from `signMessage`:
-    /// 64 × `0xA5`, base64-encoded. Key derivation SHA-256s the bytes with a
-    /// domain tag and never verifies them as a real Ed25519 signature, so any
-    /// 64-byte value works — but the length is enforced.
+    /// Fixed 64-byte signature blob the stub signer returns from `signMessage`.
+    /// Key derivation SHA-256s the bytes with a domain tag; any 64-byte value
+    /// works, but the length is enforced.
     const STUB_SIGNATURE_B64: &str =
         "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpQ==";
-    /// The same 64 bytes as hex — deliberately kept to prove it is NOT usable.
+    /// The same 64 bytes as hex, kept to show it is not usable.
     const STUB_SIGNATURE_HEX: &str = concat!(
         "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
         "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
@@ -438,10 +430,8 @@ mod spike_tests {
         );
         assert_eq!(bytes, vec![0xA5u8; 64]);
 
-        // The hex fallback is unreachable for a 64-byte signature: 128 hex chars
-        // are themselves valid base64, so the base64 branch wins and yields 96
-        // bytes. The stub must return base64 — hex would fail derivation with
-        // "Signature must be 64 bytes (Ed25519)".
+        // 128 hex chars decode as base64 before the hex fallback is tried, so a
+        // 64-byte hex string yields 96 bytes and fails the length check.
         let via_hex = wallet_message_signature_to_bytes(STUB_SIGNATURE_HEX).unwrap();
         assert_eq!(
             via_hex.len(),

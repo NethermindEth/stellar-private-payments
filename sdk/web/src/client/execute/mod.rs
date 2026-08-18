@@ -213,10 +213,7 @@ impl PrivatePool {
     }
 }
 
-/// Spike tests for the JS-visible end of the sentinel mapping: only a wallet
-/// rejection may surface as `code: -4`, which is what lets an e2e test tell
-/// "halted at the signing boundary" apart from a genuine prove/simulate
-/// failure.
+/// Tests for the SEP-0043 rejection-code mapping exposed to JS.
 #[cfg(all(test, target_arch = "wasm32"))]
 mod spike_tests {
     // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
@@ -240,8 +237,6 @@ mod spike_tests {
             "an unrelated failure must not carry a code"
         );
 
-        // A mid-plan failure wraps the cause in Error::PlanExecution; the code
-        // must still be reachable through it.
         let mid_plan = PlanExecutionError::into_error(
             vec![TransactionResult {
                 tx_hash: "abc123".to_string(),

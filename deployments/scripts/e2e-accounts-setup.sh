@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Provision the two test accounts the pre-signing SDK wasm e2e suite drives
-# (issue #168).
+# Provision the two test accounts used by the SDK wasm e2e suite.
 # Usage: e2e-accounts-setup.sh [options]
 
 set -euo pipefail
@@ -15,17 +14,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NETWORK="testnet"
 RPC_URL="https://soroban-testnet.stellar.org"
 FRIENDBOT_URL="https://friendbot.stellar.org"
-# Two accounts: A (the account under test) and B (the registered transfer
-# recipient), both for the pre-signing SDK wasm suite. The target pool is the
-# native XLM pool
-# (policyFlags ["blocklist"]), which requires NO ASP membership leaf and hence
-# no admin secret (membership proofs are Allowlist-gated —
-# sdk/types/src/policy_tx.rs; the pool's flags are in
-# deployments/testnet/deployments.json).
-# The pool address is resolved from deployments.json at runtime — a hardcoded
-# address silently goes stale on every redeploy.
 POOL_CONTRACT=""
-# Passed explicitly to `spp onboard` so it never falls through to a prompt.
 EXPLORER_URL="https://stellar.expert/explorer/testnet"
 
 ALIAS_PREFIX="spp-e2e"
@@ -37,25 +26,18 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: e2e-accounts-setup.sh [OPTIONS]
 
-Creates, funds and registers the two Stellar test accounts used by the
-pre-signing SDK wasm e2e suite (A: the account under test; B: the transfer
-recipient), then records them in deployments/<network>/.e2e-accounts.env
-(git-ignored; contains secret keys).
+Creates, funds and registers the two Stellar test accounts used by the SDK
+wasm e2e suite, then writes their material to
+deployments/<network>/.e2e-accounts.env (git-ignored; contains secret keys).
 
 What each account gets:
   1. a keypair in the `stellar keys` keystore (alias <prefix>-a / <prefix>-b)
   2. testnet XLM via friendbot (with retry/backoff)
-  3. privacy keys derived and note/encryption public keys registered in the
-     on-chain public-key registry, via `spp onboard` invoked fully
-     non-interactively (every prompt pre-answered by an explicit flag, so a
-     TTY-less CI run behaves identically to a local one)
+  3. privacy keys derived and note/encryption public keys registered on-chain
+     via `spp onboard --register`
 
-Deliberately NOT done: inserting ASP membership leaves. The target pool carries
-policyFlags ["blocklist"], so membership proofs are not required and the ASP
-membership contract's insert_leaf is admin-only. Registration here means the
-PUBLIC-KEY REGISTRY, which is self-service. If a future run targets the EURC
-pool (policyFlags ["allowlist","blocklist"]) this script is NOT sufficient: that
-needs the deployment admin secret plus an EURC trustline.
+Membership leaves are not inserted: the target native XLM pool is
+blocklist-only, so membership proofs are not required.
 
 Options:
   --verify              Re-check existing accounts without creating anything
@@ -86,9 +68,7 @@ done
 ENV_DIR="$REPO_ROOT/deployments/$NETWORK"
 ENV_FILE="$ENV_DIR/.e2e-accounts.env"
 
-# Resolve the native XLM pool from the deployment config (the same file the
-# CLI and sdk/web compile in), so a redeploy never leaves this script
-# pointing at a pool the CLI no longer knows.
+# Resolve the native XLM pool from the committed deployment config.
 DEPLOYMENTS_JSON="$ENV_DIR/deployments.json"
 [ -f "$DEPLOYMENTS_JSON" ] || die "no deployment config at $DEPLOYMENTS_JSON"
 POOL_CONTRACT="$(python3 - "$DEPLOYMENTS_JSON" <<'EOF'
@@ -99,6 +79,7 @@ assert len(native) == 1, f"expected exactly one enabled native pool, found {len(
 print(native[0]["poolContractId"])
 EOF
 )" || die "could not resolve the native pool from $DEPLOYMENTS_JSON"
+
 # Isolated wallet/data dir so a run never touches a developer's real spp state.
 DATA_DIR="$REPO_ROOT/deployments/scripts/.e2e-wallet-$NETWORK"
 
@@ -110,23 +91,16 @@ need curl
 need git
 need python3
 
-# Resolve the spp CLI once per run: an installed binary on PATH, else the
-# workspace build. We build loudly and call the binary directly — NOT
-# `cargo run`, which re-resolves (and can silently rebuild) on every call
-# and whose failures were invisible behind swallowed stderr.
-# `type -P` (not `command -v`) because `command -v spp` would find THIS
-# function and always take the first branch.
 SPP_BIN=""
 spp() {
   if [ -z "$SPP_BIN" ]; then
-    # Always use the project's own build. A generic `spp` on PATH may be a
-    # completely unrelated tool (e.g. ~/.local/bin/spp), so we never trust it.
+    # Prefer a project build over any unrelated `spp` on PATH.
     if [ -n "${E2E_SPP_PATH:-}" ]; then
       SPP_BIN="$E2E_SPP_PATH"
     elif [ -x "$REPO_ROOT/target/release/spp" ]; then
       SPP_BIN="$REPO_ROOT/target/release/spp"
     else
-      step "building the spp CLI (cargo build --release -p stellar-private-payments-cli)"
+      step "building the spp CLI"
       ( cd "$REPO_ROOT" && cargo build --release -p stellar-private-payments-cli ) \
         || die "failed to build the spp CLI"
       SPP_BIN="$REPO_ROOT/target/release/spp"
@@ -154,9 +128,9 @@ ensure_keypair() {
   step "generating keypair '$alias'"
   # `stellar keys generate` does not fund unless asked (--fund); friendbot
   # funding is done separately below so it can retry with backoff.
-  # bash 3.2 + `set -u` errors on "${arr[@]}" when empty; this form is safe.
   local extra=()
   [ "$FORCE" -eq 1 ] && extra+=(--overwrite)
+  # bash 3.2 safe form for an empty array under `set -u`.
   stellar keys generate "$alias" \
     --network "$NETWORK" \
     --config-dir "$DATA_DIR/stellar" \
@@ -193,21 +167,8 @@ fund_account() {
   die "friendbot funding failed for $address after $FUND_RETRIES attempts"
 }
 
-# Derive privacy keys, accept the disclaimer, and register public keys on-chain.
-# `spp onboard --register` is the self-service path the real client uses; no
-# admin authority is involved.
-#
-# Every prompt is pre-answered by an explicit flag so behavior does not depend
-# on stdin being a TTY: --accept (cli/src/onboard.rs:83), --no-bootnode
-# (onboard.rs:154), --explorer-url (onboard.rs:190) and --register
-# (onboard.rs:212) each short-circuit BEFORE their interactive branch. Relying
-# on EOF-means-default instead would be fragile in CI.
-# --no-bootnode: the provisioned account config needs no bootnode; the e2e tests
-# pass bootnode_url to Client::new themselves if they ever need one.
-# Friendbot-funded accounts are visible on Horizon immediately, but the
-# on-chain Soroban RPC node can lag behind by a few seconds. A registration
-# attempt against a not-yet-visible account fails with "Account not found", so
-# retry briefly before giving up.
+# Derive privacy keys and register public keys on-chain. Every prompt is
+# pre-answered with explicit flags so the call is non-interactive.
 onboard_account() {
   local alias="$1" attempt=1 delay=2 err_file
   step "onboarding + registering '$alias'"
@@ -229,7 +190,7 @@ onboard_account() {
       die "onboarding '$alias' failed"
     fi
     [ "$attempt" -lt 5 ] || die "onboarding '$alias' failed: account still not visible to RPC after retries"
-    step "account not yet visible to RPC; retrying onboard in ${delay}s ($attempt/5)"
+    step "account not yet visible to RPC; retrying in ${delay}s ($attempt/5)"
     sleep "$delay"
     delay=$((delay * 2))
     attempt=$((attempt + 1))
@@ -246,7 +207,6 @@ registration_status() {
       --json \
       overview "$POOL_CONTRACT" 2>"$err_file")" || true
   if [ -z "$out" ]; then
-    # Surface the real failure instead of an opaque empty result.
     warn "overview call failed for '$alias': $(tail -3 "$err_file")"
   fi
   rm -f "$err_file"
@@ -262,10 +222,8 @@ verify_account() {
   account_exists_on_chain "$address" \
     || die "$label $address is not funded on $NETWORK"
 
-  # `overview --json` reports registration state; require an explicit true.
-  # Retry with backoff: a registration that just confirmed on-chain can take
-  # seconds to show up in the RPC's ledger view, so a single immediate read
-  # false-negatives right after provisioning.
+  # `overview --json` reports registration state; retry because the RPC view
+  # can lag behind the chain.
   local overview attempt=1 delay=2
   while true; do
     overview="$(registration_status "$alias")"
@@ -293,8 +251,6 @@ write_env_file() {
   local tmp="$ENV_FILE.tmp"
   rm -f "$tmp"
   (umask 077 && : > "$tmp")
-  # Aliases come from the sourced env file when present (a rewrite preserves
-  # whatever aliases the original provisioning used), else the defaults.
   cat > "$tmp" <<ENVFILE
 # Generated by deployments/scripts/e2e-accounts-setup.sh — DO NOT COMMIT.
 # Contains $NETWORK secret keys. This file is git-ignored.

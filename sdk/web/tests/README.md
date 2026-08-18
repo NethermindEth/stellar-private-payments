@@ -1,8 +1,8 @@
 # Browser e2e tests for the web client
 
-End-to-end smoke tests that drive `Client`/`PrivatePool` (`sdk/web/src/client/`) in a
-real headless browser against testnet, covering deposit, transfer and withdraw up
-to — but excluding — transaction signing and submission (issue #168).
+End-to-end smoke tests that drive `Client`/`PrivatePool` in a real headless
+browser against testnet, covering deposit, transfer and withdraw up to — but
+excluding — transaction signing and submission.
 
 The tests live in [`../src/client/e2e_tests.rs`](../src/client/e2e_tests.rs) (an
 inline `#[cfg(test)]` module, not this directory — they need crate-internal
@@ -66,9 +66,8 @@ the PR-time `wasm-test` job run the rest of this crate's tests (the spike and
 circuits tests) without either. Omit the flag and all six are silently skipped —
 the run still reports success.
 
-Run the suite **unfiltered**, as above. A per-test filter once hid cross-test
-interference that only appeared when everything ran in one page, so CI runs it
-unfiltered too. To iterate on a single test while debugging, append a filter:
+Run the suite **unfiltered** as shown above; the tests are designed to run in
+one page. To iterate on a single test while debugging, append a filter:
 
 ```bash
 sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-sdk-web e2e_deposit_halts_at_signing -- --include-ignored --nocapture
@@ -121,14 +120,14 @@ Every flow test asserts four things together:
    completed, rather than the flow dying early).
 
 `signMessage` still succeeds — `Client::account` derives privacy keys from it on
-first use — returning a fixed 64-byte blob. See the module header in
-`e2e_tests.rs` for why that is a fixed blob rather than a real SEP-53 signature,
-and what it means for recipient-key interop.
+first use — returning a fixed 64-byte blob. The test signer intentionally does
+not reproduce a real SEP-53 signature, because key derivation only needs a
+64-byte input and the flows under test never submit.
 
 **Setup transactions are signed and submitted, by design.** Transfer and withdraw
 need pre-existing spendable notes, so the suite seeds them with genuinely
-submitted deposits using a real Ed25519 signer. The issue's "stop before signing"
-scope applies to the flows under assertion, not to setup. The accounts are
+submitted deposits using a real Ed25519 signer. The flows under assertion stop
+before signing; setup is not covered by that boundary. The accounts are
 disposable testnet accounts, and each seeded deposit spends a small amount of
 testnet XLM, so repeated local runs slowly drain them — re-run the provisioning
 script if an account runs dry.
