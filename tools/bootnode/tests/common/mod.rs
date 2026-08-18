@@ -133,10 +133,6 @@ pub async fn spawn_bootnode(
     })
 }
 
-pub fn event_id_for_ledger(ledger: u32) -> String {
-    format!("event-{ledger:010}")
-}
-
 fn random_event_id(ledger: u32) -> String {
     let mut bytes = [0u8; 8];
     getrandom::getrandom(&mut bytes).expect("random event id");
