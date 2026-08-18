@@ -14,6 +14,12 @@
 import { createLogger } from './logger.mjs';
 import { requireAppUrl } from './env.mjs';
 import { waitForCondition } from './waits.mjs';
+import {
+  APP_RUNTIME_READY_TIMEOUT_MS,
+  isOnboardingWizardVisible,
+  readAppLifecycle,
+  waitForWalletRuntimeReady,
+} from './appState.mjs';
 import { chromium } from 'playwright';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,15 +40,18 @@ export {
   waitForFreighterApproval,
 } from './wallet.mjs';
 
+export {
+  APP_RUNTIME_READY_TIMEOUT_MS,
+  isOnboardingWizardVisible,
+  readAppLifecycle,
+  waitForWalletRuntimeReady,
+} from './appState.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
 const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
 const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
 const log = createLogger('runner');
-// A fresh headed CI profile may still be initializing the WASM runtime and
-// selected pool after Freighter has supplied the address. Keep a cold-start
-// margin here; ordinary app navigation and approval waits remain shorter.
-const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
 export async function launch({ userDataDir, headless = true, video = false } = {}) {
   if (!userDataDir) throw new Error('launch: userDataDir is required');
@@ -143,47 +152,33 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
 
-  // First connect on a fresh profile surfaces the app's own disclaimer
-  // modal (unrelated to Freighter) before the connected address renders.
-  const disclaimerBtn = page.getByText('Accept disclaimer', { exact: true });
-  const walletState = page.locator('body');
+  // First connect on a fresh profile surfaces the app's own onboarding wizard
+  // (unrelated to Freighter) before the runtime becomes usable.
   await waitForCondition({
-    operation: 'app:connect-or-disclaimer',
+    operation: 'app:connect-or-onboarding',
     timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
-    observe: async () => ({
-      walletState: await walletState.getAttribute('data-wallet-state').catch(() => 'unknown'),
-      disclaimerVisible: await disclaimerBtn.isVisible().catch(() => false),
-    }),
-    isReady: ({ walletState: state, disclaimerVisible }) => state === 'ready' || disclaimerVisible,
-  });
-  if (await disclaimerBtn.isVisible().catch(() => false)) {
-    await disclaimerBtn.click();
-    await waitForCondition({
-      operation: 'app:disclaimer',
-      timeoutMs: 10_000,
-      intervalMs: 100,
-      observe: async () => ({ visible: await disclaimerBtn.isVisible().catch(() => false) }),
-      isReady: ({ visible }) => !visible,
-    });
-  }
-
-  // A connected address is rendered before the runtime and selected pool are
-  // usable. Wait for the app's production lifecycle marker so the first
-  // operation cannot race the post-connect initialization.
-  await waitForCondition({
-    operation: 'app:wallet-runtime-ready',
-    timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
-    intervalMs: 100,
-    observe: async () => ({
-      walletState: await walletState.getAttribute('data-wallet-state').catch(() => 'unknown'),
-      connectButtonVisible: await connectBtn.isVisible().catch(() => false),
-    }),
-    isReady: ({ walletState: state }) => state === 'ready',
+    observe: () => readAppLifecycle(page),
+    isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
   });
 
-  if (await connectBtn.isVisible().catch(() => false)) {
-    throw new Error('connectApp: "Connect Freighter" is still shown after connecting — connection did not succeed');
+  // The wizard is the caller's to drive: Wallet.connect() awaits
+  // runOnboardingWizard(), so the lifecycle marker stays 'connecting' until
+  // the modal is completed. Waiting for 'ready' here would deadlock against
+  // driveWizard(), which callers only run once connectApp() has returned.
+  // Hand back with the wizard open and let the caller finish it — driveWizard
+  // waits for runtime readiness itself once the modal closes.
+  if (await isOnboardingWizardVisible(page)) {
+    log.info('connectApp: onboarding wizard is open — returning for the caller to drive it');
+  } else {
+    // No wizard: a connected address is rendered before the runtime and
+    // selected pool are usable, so wait for the production lifecycle marker
+    // and the first operation cannot race post-connect initialization.
+    await waitForWalletRuntimeReady(page, { timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS });
+
+    if (await connectBtn.isVisible().catch(() => false)) {
+      throw new Error('connectApp: "Connect Freighter" is still shown after connecting — connection did not succeed');
+    }
   }
 
   const bodyText = await page.innerText('body');

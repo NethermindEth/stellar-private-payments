@@ -65,3 +65,44 @@ test('waitForCondition records an observer error as its final state', async () =
     },
   );
 });
+
+test('waitForCondition rethrows an observer error the caller marks as fatal', async () => {
+  let now = 0;
+  let polls = 0;
+
+  await assert.rejects(
+    waitForCondition({
+      operation: 'unit-fatal-observer-error',
+      observe: async () => { polls += 1; throw new Error('page is closed'); },
+      timeoutMs: 10_000,
+      intervalMs: 10,
+      now: () => now,
+      sleep: async (ms) => { now += ms; },
+      ignoreError: (error) => !/closed/i.test(error.message),
+    }),
+    (error) => {
+      assert.equal(error.message, 'page is closed');
+      assert.equal(polls, 1, 'a fatal observation must not keep polling');
+      return true;
+    },
+  );
+});
+
+test('waitForCondition keeps swallowing observer errors by default', async () => {
+  let now = 0;
+  await assert.rejects(
+    waitForCondition({
+      operation: 'unit-default-swallows',
+      observe: async () => { throw new Error('locator not attached'); },
+      timeoutMs: 20,
+      intervalMs: 10,
+      now: () => now,
+      sleep: async (ms) => { now += ms; },
+    }),
+    (error) => {
+      assert.ok(error instanceof WaitTimeoutError);
+      assert.deepEqual(error.lastObservedState, { error: 'locator not attached' });
+      return true;
+    },
+  );
+});

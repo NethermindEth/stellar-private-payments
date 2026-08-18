@@ -38,7 +38,9 @@ export class WaitTimeoutError extends Error {
  * Poll an observable state until its readiness predicate succeeds.
  *
  * `now` and `sleep` are injectable so the timeout behavior has deterministic
- * unit coverage without waiting in real time.
+ * unit coverage without waiting in real time. `ignoreError` decides which
+ * observation failures are transient (the default treats all of them as
+ * transient, which is what a locator that is not attached yet needs).
  */
 export async function waitForCondition({
   operation,
@@ -48,10 +50,12 @@ export async function waitForCondition({
   intervalMs = 100,
   now = Date.now,
   sleep = defaultSleep,
+  ignoreError = () => true,
 } = {}) {
   if (!operation) throw new TypeError('waitForCondition requires an operation');
   if (typeof observe !== 'function') throw new TypeError('waitForCondition requires observe');
   if (typeof isReady !== 'function') throw new TypeError('waitForCondition requires isReady');
+  if (typeof ignoreError !== 'function') throw new TypeError('ignoreError must be a function');
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new TypeError('timeoutMs must be a non-negative number');
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new TypeError('intervalMs must be a positive number');
 
@@ -70,6 +74,11 @@ export async function waitForCondition({
         };
       }
     } catch (error) {
+      // "Not attached yet" is the normal case and must keep polling. An
+      // observation that can never succeed (a closed page, or a state the
+      // caller knows is terminal) should surface now rather than after the
+      // whole deadline, so callers can opt out of swallowing it.
+      if (!ignoreError(error)) throw error;
       lastObservedState = observedError(error);
     }
 

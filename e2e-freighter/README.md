@@ -249,9 +249,19 @@ Timeouts are ownership-specific, not one global test timeout:
 
 - DOM/view and dialog transitions are bounded at 5–15 seconds.
 - Wallet runtime readiness is bounded at 60 seconds to cover a cold headed CI
-  profile initializing Freighter, WASM, and the selected pool. `connectApp`
-  waits for the app's `body[data-wallet-state="ready"]`, which means the
-  selected pool is usable, not merely that an address is rendered.
+  profile initializing Freighter, WASM, and the selected pool. Readiness means
+  the app's `body[data-wallet-state="ready"]` — the selected pool is usable,
+  not merely that an address is rendered.
+
+  Who waits for it depends on onboarding, because `Wallet.connect()` itself
+  awaits `runOnboardingWizard(...)`: while the wizard modal is open the marker
+  stays at `connecting` and *cannot* advance. So `connectApp` returns as soon
+  as it sees either `ready` or an open wizard, and `driveWizard` waits for
+  readiness once it has completed the modal. Keep that order — `connectApp`
+  first, then `driveWizard` — and never wait for `ready` between the two, or
+  the wait deadlocks against the wizard it is waiting on. If you do,
+  `waitForWalletRuntimeReady` (`src/appState.mjs`) fails immediately with that
+  explanation instead of consuming the full 60 seconds.
 - Freighter approval discovery is short and repeated while an operation is
   active; the observed first approval is normally about 3–4 seconds.
 - Submitted transaction confirmation has a 60-second chain/RPC bound.

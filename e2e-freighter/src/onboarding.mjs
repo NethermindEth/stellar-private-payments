@@ -9,6 +9,7 @@
 
 import { createLogger } from './logger.mjs';
 import { waitForCondition } from './waits.mjs';
+import { waitForWalletRuntimeReady } from './appState.mjs';
 
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
@@ -58,6 +59,13 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       }
       if (await modalHidden()) {
         log.debug('wizard finished after', step, 'step(s)');
+        // Completing the wizard is what unblocks Wallet.connect()'s own
+        // `await runOnboardingWizard(...)`, so the app only now finishes
+        // opening the account and creating the pool. Wait for the production
+        // lifecycle marker here, once, so every caller gets a usable app
+        // rather than a wizard-free but half-initialized one.
+        const lifecycle = await waitForWalletRuntimeReady(page);
+        log.debug('wallet runtime ready:', lifecycle.walletState);
         return;
       }
     }
