@@ -11,7 +11,8 @@ share one DB.
 Empty pages are stored so upstream cursor chains stay intact. Once at tip, a
 daily compressor collapses recent empty spans near tip (within the handoff
 window); historical pages below the cutoff stay intact for client catch-up.
-Schema changes apply via versioned migrations in `schema_migrations`.
+Schema changes are versioned SQL files in `src/storage/migrations/` (tracked in
+`bootnode_schema_migrations`).
 Indexing starts at the compiled-in deployment ledger. Once a request is safely
 within the retention window buffer, it returns a JSON-RPC handoff error
 (`-32002` with `fromLedger`) so the app indexer resumes on the user's
