@@ -246,6 +246,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.clear_indexing_cursors()?)?;
             StorageWorkerResponse::Saved
         }
+        StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger) => {
+            tracing::trace!("[{WORKER_NAME}] clamping last_fully_indexed_ledger to {max_ledger}");
+            with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
             tracing::trace!(
                 "[{WORKER_NAME}] deriving and saving user keys for the account {}",
@@ -643,6 +648,20 @@ impl Storage for StorageBridge {
     async fn clear_indexing_cursors(&self) -> Result<(), Error> {
         match self
             .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await
+            .map_err(|e| Error::Other(e.to_string()))?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error> {
+        match self
+            .call(
+                StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger),
+                2_000,
+            )
             .await
             .map_err(|e| Error::Other(e.to_string()))?
         {

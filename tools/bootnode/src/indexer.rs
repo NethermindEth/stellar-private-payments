@@ -1,6 +1,6 @@
-use crate::{AppState, messages::GetEventsParams, storage::InsertGetEventsPage};
+use crate::{AppState, messages::GetEventsParams};
 use metrics::{counter, gauge};
-use std::time::Instant;
+use std::{sync::atomic::Ordering, time::Instant};
 use tokio::time::{Duration, sleep};
 
 pub(crate) struct Indexer {
@@ -29,94 +29,73 @@ impl Indexer {
         }
     }
 
-    /// Fetch up to `max_pages_per_round` event pages from upstream.
-    ///
-    /// Returns `true` when another round may be needed (page budget exhausted
-    /// while still behind tip). Returns `false` when caught up for now.
     async fn run_round(&self) -> anyhow::Result<bool> {
         let t0 = Instant::now();
 
         let latest = self.state.upstream.get_latest_ledger().await?;
         let tip_sequence = latest.sequence;
-        self.state
-            .ledger_tip
-            .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
+        self.state.ledger_tip.store(tip_sequence, Ordering::Relaxed);
         gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
         self.state.storage.set_ledger_tip(tip_sequence).await?;
 
-        let kv = self.state.storage.load_kv().await?;
-        let mut cursor = kv.last_cursor;
-        let mut progress_ledger = kv.last_fully_indexed_ledger;
-
+        let indexer = self.state.storage.load_indexer_state().await?;
+        let mut cursor = indexer.last_upstream_cursor;
         let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
         let page_size = self.state.cfg.page_size;
         let mut may_have_more = false;
+        let cutoff = tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers());
 
         for _page in 0..self.state.cfg.max_pages_per_round {
+            let prev_cursor = cursor.clone();
             let params = GetEventsParams::for_contracts(
                 self.state.contract_ids.as_ref(),
                 start_ledger,
                 cursor.as_deref(),
                 page_size,
             );
-            let result = self.state.upstream.get_events(params.clone()).await?;
+            let result = self.state.upstream.get_events(params).await?;
+
+            self.state.storage.upsert_events(&result.events).await?;
+            if result.oldest_ledger > 0 {
+                self.state
+                    .storage
+                    .set_oldest_ledger(result.oldest_ledger)
+                    .await?;
+            }
 
             let cursor_out = result.cursor.clone();
-            let last_event_ledger = result.events.last().map(|event| event.ledger);
-            let event_count = result.events.len();
-            let is_empty = event_count == 0;
-            let full_page = event_count == page_size as usize;
-            if let Some(ledger) = last_event_ledger {
-                progress_ledger = progress_ledger.max(ledger);
-            }
-            let at_tip = is_empty
-                || (!full_page && progress_ledger > 0 && progress_ledger >= result.latest_ledger);
+            let cursor_advanced = prev_cursor.as_deref() != Some(cursor_out.as_str());
+            let at_upstream_tail = prev_cursor.is_some() && !cursor_advanced;
+            let progress_ledger = if result.events.is_empty() {
+                result.latest_ledger
+            } else {
+                result
+                    .events
+                    .last()
+                    .map(|event| event.ledger)
+                    .unwrap_or(result.latest_ledger)
+            };
 
-            if !is_empty {
-                self.state.set_in_sync(false).await?;
-            }
-            // Always persist, including empty pages, so clients can follow
-            // upstream cursors across sparse/empty gaps. Persist before
-            // advancing `last_cursor` so a failed insert cannot skip a page.
             self.state
                 .storage
-                .insert_get_events_page(InsertGetEventsPage {
-                    cursor_in: cursor.as_deref(),
-                    start_ledger,
-                    request: &params,
-                    result: &result,
-                    cursor_out: &cursor_out,
-                    last_event_ledger,
-                    latest_ledger: result.latest_ledger,
-                    oldest_ledger: result.oldest_ledger,
-                })
+                .set_last_upstream_cursor(&cursor_out)
                 .await?;
 
             cursor = Some(cursor_out);
             start_ledger = None;
 
-            if at_tip {
-                let caught_up_ledger = if is_empty {
-                    result.latest_ledger
-                } else {
-                    progress_ledger
-                };
-                self.state
-                    .mark_caught_up(cursor.as_deref().expect("cursor set"), caught_up_ledger)
-                    .await?;
-                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(caught_up_ledger));
+            if !self.state.archive_ready.load(Ordering::Relaxed)
+                && at_upstream_tail
+                && progress_ledger >= cutoff
+            {
+                self.mark_archive_ready().await?;
+            }
+
+            if at_upstream_tail {
                 may_have_more = false;
                 break;
             }
 
-            self.state
-                .storage
-                .update_cursor(cursor.as_deref().expect("cursor set"))
-                .await?;
-            self.state
-                .storage
-                .set_last_fully_indexed_ledger(progress_ledger)
-                .await?;
             may_have_more = true;
         }
 
@@ -125,5 +104,15 @@ impl Indexer {
             .record(t0.elapsed().as_secs_f64());
 
         Ok(may_have_more)
+    }
+
+    async fn mark_archive_ready(&self) -> anyhow::Result<()> {
+        if self.state.archive_ready.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        self.state.storage.set_archive_ready().await?;
+        self.state.archive_ready.store(true, Ordering::Relaxed);
+        tracing::info!("archive ready: ingestion crossed retention cutoff");
+        Ok(())
     }
 }

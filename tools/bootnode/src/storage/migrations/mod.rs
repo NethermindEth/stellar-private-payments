@@ -3,7 +3,10 @@ use anyhow::{Context, Result};
 use deadpool_postgres::Client;
 use std::collections::HashSet;
 
-const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("001_initial.sql"))];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, include_str!("001_initial.sql")),
+    (2, include_str!("002_event_archive.sql")),
+];
 
 pub async fn migrate(client: &mut Client) -> Result<()> {
     client
