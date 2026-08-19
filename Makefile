@@ -2,7 +2,8 @@
 # change where serve, build, and clean write/read compiled assets.
 DIST_DIR ?= dist
 PUBLIC_URL ?= /
-BUILD_TESTS ?=
+TESTS ?=
+REGEN_KEYS ?=
 RELEASE ?=
 # LOGS=1 builds the WASM SDK with verbose diagnostic logging enabled
 # (WASM_PROFILE=release-with-logs) instead of the quiet, privacy-first default.
@@ -40,8 +41,11 @@ build-debug:
 .PHONY: circuits
 circuits:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) \
-		cargo run -p circuit-compiler --release -- compile
+	cargo run -p circuit-compiler --release -- compile \
+		--circuits $(CURDIR)/circuits \
+		--out $(CURDIR)/target/circuits-artifacts \
+		$(if $(TESTS),--tests) \
+		$(if $(REGEN_KEYS),--regen-keys)
 
 # Production stems for circom-witness-rs graph regen (keep in sync with SDK).
 WITNESS_GRAPH_STEMS := \

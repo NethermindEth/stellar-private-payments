@@ -4,10 +4,8 @@
 //! R1CS / WASM / keys / witness graphs. The CLI entrypoint is
 //! `bin/compiler.rs`.
 //!
-//! Env flags (`BUILD_TESTS`, `REGEN_KEYS`, …) are still honored; CLI flags will
-//! replace them in later steps. When `WITNESS_CPP` is set (with
-//! `--features regen-graph`), writes `*.graph.bin` into
-//! `deployments/testnet/circuit_keys/`.
+//! Graph regen still uses `WITNESS_CPP` / `CIRCOM_LIBRARY_PATH` (consumed by
+//! `circom-witness-rs` at crate-build time).
 
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
@@ -73,29 +71,6 @@ fn groth16_key_circuits() -> Vec<String> {
     circuits
 }
 
-fn workspace_root() -> Result<PathBuf> {
-    let mut root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    loop {
-        if root.join("Cargo.lock").is_file() {
-            return Ok(root);
-        }
-        if !root.pop() {
-            bail!("could not find workspace root (no Cargo.lock)");
-        }
-    }
-}
-
-fn circuits_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root.join("circuits")
-}
-
-fn publish_dir_path(workspace_root: &Path) -> Result<PathBuf> {
-    let target_dir = env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("target"));
-    Ok(target_dir.join("circuits-artifacts"))
-}
-
 fn copy(src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)
@@ -133,26 +108,36 @@ fn publish_circuit_artifacts(
     Ok(())
 }
 
+/// Options for [`run`].
+#[derive(Debug, Clone)]
+pub struct CompileOptions {
+    /// Circom package directory (`src/`, `circom.lock`, `circomlib.lock`).
+    pub circuits: PathBuf,
+    /// Directory for published R1CS/WASM (and compile intermediates under
+    /// `out/`).
+    pub out: PathBuf,
+    /// Include `.circom` files under directories named `test`.
+    pub tests: bool,
+    /// Force Groth16 key regeneration even when keys already exist.
+    pub regen_keys: bool,
+}
+
 /// Run the full compile pipeline (circomlib, R1CS/WASM, keys, optional graphs).
-pub fn run() -> Result<()> {
+pub fn run(opts: CompileOptions) -> Result<()> {
     eprintln!(
         "Circuits builder Copyright (C) 2025 Stellar Development Foundation. This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions."
     );
-    // === PATH SETUP ===
-    // Sources live in workspace `circuits/`; this crate is
-    // `tools/circuit-compiler`.
-    let workspace_root = workspace_root()?;
-    let circuits_dir = circuits_dir(&workspace_root);
+    let circuits_dir = opts.circuits;
     let src_dir = circuits_dir.join("src");
-
-    // Deterministic publish dir under target/circuits-artifacts/
-    let publish_dir = publish_dir_path(&workspace_root)?;
+    let publish_dir = opts.out;
     fs::create_dir_all(&publish_dir)
         .with_context(|| format!("Could not create {}", publish_dir.display()))?;
 
-    // Intermediates under target/circuits-artifacts/out/
+    // Circom scratch (R1CS/SYM/WASM js folders) under `--out/out`.
     let out_dir = publish_dir.join("out");
     fs::create_dir_all(&out_dir).context("Could not create circuit out dir")?;
+    // Local Groth16 keys (gitignored), next to the circuits package.
+    let testdata_dir = circuits_dir.join("..").join("testdata");
 
     let groth16_key_circuits = groth16_key_circuits();
 
@@ -163,8 +148,7 @@ pub fn run() -> Result<()> {
     // The hints stay on disk after the build
     let circomlib_was_patched = inject_black_box_hints(&src_dir.join("circomlib"))?;
 
-    // `make witness-graphs` primes the hints through this flag before its
-    // per-circuit builds, so there is nothing else to do in that pass.
+    // `make witness-graphs` primes hints through this flag (circom-witness-rs).
     if env::var("CIRCOMLIB_HINTS_ONLY").is_ok() {
         eprintln!("CIRCOMLIB_HINTS_ONLY set. Stopping after circomlib hints");
         return Ok(());
@@ -174,16 +158,14 @@ pub fn run() -> Result<()> {
     // Find all .circom files with a main component
     let mut circom_files = find_circom_files(&src_dir);
 
-    // Optionally include test circuits when BUILD_TESTS=1
+    // Optionally include test circuits (`--tests`).
     // This includes both src/test/ and any other test directories (e.g.,
     // circomlib/test/)
-    let build_tests = env::var("BUILD_TESTS").is_ok();
-    if build_tests {
+    if opts.tests {
         eprintln!("Including test circuits in build...");
-        // Re-scan src/ without skipping test directories to include all test circuits
         circom_files = find_circom_files_impl(&src_dir, false);
     } else {
-        eprintln!("Skipping test circuits (set BUILD_TESTS=1 to include)");
+        eprintln!("Skipping test circuits (pass --tests to include)");
     }
 
     // Skip circom compilation if no files to compile
@@ -285,10 +267,11 @@ pub fn run() -> Result<()> {
                     && wasm_path.exists()
                 {
                     match generate_keys_if_needed(
-                        &workspace_root,
+                        &testdata_dir,
                         &out_dir,
                         &circuit_name,
                         &r1cs_file,
+                        opts.regen_keys,
                     ) {
                         Ok(_) => {}
                         Err(e) => {
@@ -380,8 +363,13 @@ pub fn run() -> Result<()> {
                     circuit_name
                 );
             } else {
-                match generate_keys_if_needed(&workspace_root, &out_dir, &circuit_name, &r1cs_file)
-                {
+                match generate_keys_if_needed(
+                    &testdata_dir,
+                    &out_dir,
+                    &circuit_name,
+                    &r1cs_file,
+                    opts.regen_keys,
+                ) {
                     Ok(generated) => {
                         if generated {
                             println!("Key generation completed for {}", circuit_name);
@@ -400,12 +388,7 @@ pub fn run() -> Result<()> {
     // Regen via `make witness-graphs` / `--features regen-graph` with
     // `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` for one circuit at a time.
     if env::var("WITNESS_CPP").is_ok() {
-        regenerate_witness_graphs(
-            &circuits_dir,
-            &workspace_root,
-            &out_dir,
-            circomlib_was_patched,
-        )?;
+        regenerate_witness_graphs(&circuits_dir, &out_dir, circomlib_was_patched)?;
     }
 
     Ok(())
@@ -846,13 +829,12 @@ fn get_circomlib(circuits_dir: &Path, src_dir: &Path) -> Result<()> {
 /// `deployments/testnet/circuit_keys/<stem>.graph.bin`.
 fn regenerate_witness_graphs(
     circuits_dir: &Path,
-    workspace_root: &Path,
     out_dir: &Path,
     circomlib_was_patched: bool,
 ) -> Result<()> {
     #[cfg(not(feature = "regen-graph"))]
     {
-        let _ = (circuits_dir, workspace_root, out_dir, circomlib_was_patched);
+        let _ = (circuits_dir, out_dir, circomlib_was_patched);
         bail!(
             "WITNESS_CPP requires `cargo run -p circuit-compiler --features regen-graph -- compile` \
              (see `make witness-graphs`)"
@@ -897,14 +879,14 @@ fn regenerate_witness_graphs(
             .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
 
         // circom-witness-rs writes `graph.bin` into the process cwd / package dir.
-        // Prefer out_dir, then tool manifest dir.
-        let tool_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+        let tool_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let candidates = [out_dir.join("graph.bin"), tool_dir.join("graph.bin")];
         let src = candidates
             .into_iter()
             .find(|p| p.is_file())
             .ok_or_else(|| anyhow!("expected circom-witness-rs to write graph.bin; not found"))?;
-        let dst = workspace_root
+        let dst = circuits_dir
+            .join("..")
             .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}.graph.bin"));
         copy(&src, &dst)?;
@@ -1222,7 +1204,7 @@ fn check_keys_need_generation(
     if force_regen {
         return (
             true,
-            "REGEN_KEYS=1 was set - forcing key regeneration".to_string(),
+            "--regen-keys was set - forcing key regeneration".to_string(),
         );
     }
 
@@ -1237,61 +1219,58 @@ fn check_keys_need_generation(
             "WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
         );
         eprintln!(
-            "If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 make circuits"
+            "If you need new keys (e.g., circuit changed), run: make circuits TESTS=1 REGEN_KEYS=1"
         );
         eprintln!("Then REDEPLOY contracts with the new verification key!");
     }
 
     // Note: vk_const.rs is optional (only for embedding VK in contracts).
     // We don't trigger regeneration just for this file since it would create
-    // new incompatible keys. The user must explicitly use REGEN_KEYS=1.
+    // new incompatible keys. The user must explicitly use `--regen-keys`.
     if !vk_const_path.exists() {
         eprintln!("Note: vk_const.rs is missing but essential keys exist - skipping");
-        eprintln!("Run REGEN_KEYS=1 BUILD_TESTS=1 make circuits if you need vk_const.rs");
+        eprintln!("Run `make circuits TESTS=1 REGEN_KEYS=1` if you need vk_const.rs");
     }
 
     (
         false,
-        "Essential keys exist and REGEN_KEYS not set".to_string(),
+        "Essential keys exist and --regen-keys was not set".to_string(),
     )
 }
 
-/// Generate Groth16 keys if they don't exist or REGEN_KEYS=1 is set.
+/// Generate Groth16 keys if they don't exist or `--regen-keys` is set.
 ///
-/// Set `REGEN_KEYS=1` environment variable to force regeneration (e.g., after
-/// circuit changes). Redeployment of contracts will be needed after this.
+/// Redeployment of contracts will be needed after forced regeneration.
 ///
 /// # Arguments
 ///
-/// * `workspace_root` - Workspace root (for `testdata/`)
-/// * `out_dir` - The output directory containing WASM files
+/// * `testdata_dir` - Directory for generated Groth16 keys
+/// * `out_dir` - Scratch dir containing WASM files
 /// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_AB`,
 ///   `selectiveDisclosure_1`)
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
+/// * `force_regen` - Force key regeneration even if keys already exist
 ///
 /// # Returns
 ///
 /// Returns `Ok(true)` if keys were generated, `Ok(false)` if skipped,
 /// or an error if generation failed critically.
 fn generate_keys_if_needed(
-    workspace_root: &Path,
+    testdata_dir: &Path,
     out_dir: &Path,
     circuit_name: &str,
     r1cs_file: &Path,
+    force_regen: bool,
 ) -> Result<bool> {
-    // Output keys to testdata/
-    let keys_dir = workspace_root.join("testdata");
-    fs::create_dir_all(&keys_dir).context("Could not create testdata")?;
+    fs::create_dir_all(testdata_dir).context("Could not create testdata")?;
 
-    let pk_path = keys_dir.join(format!("{circuit_name}_proving_key.bin"));
-    let vk_path = keys_dir.join(format!("{circuit_name}_vk.json"));
-    let vk_soroban_path = keys_dir.join(format!("{circuit_name}_vk_soroban.bin"));
-    let vk_const_path = keys_dir.join(format!("{circuit_name}_vk_const.rs"));
+    let pk_path = testdata_dir.join(format!("{circuit_name}_proving_key.bin"));
+    let vk_path = testdata_dir.join(format!("{circuit_name}_vk.json"));
+    let vk_soroban_path = testdata_dir.join(format!("{circuit_name}_vk_soroban.bin"));
+    let vk_const_path = testdata_dir.join(format!("{circuit_name}_vk_const.rs"));
 
-    // Check for force regeneration flag
-    let force_regen = env::var("REGEN_KEYS").is_ok();
     if force_regen {
-        eprintln!("REGEN_KEYS=1 detected - will regenerate keys");
+        eprintln!("--regen-keys set - will regenerate keys");
         eprintln!("WARNING: Remember to REDEPLOY contracts with the new VK!");
     }
 
@@ -1326,9 +1305,9 @@ fn generate_keys_if_needed(
             wasm_path.display()
         );
         eprintln!("This usually happens when:");
-        eprintln!("  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 make circuits)");
+        eprintln!("  1. --tests was not set (run: make circuits TESTS=1)");
         eprintln!("  2. WASM compilation failed earlier in the build");
-        eprintln!("  3. circuit artifacts were cleaned (try: BUILD_TESTS=1 make circuits)");
+        eprintln!("  3. circuit artifacts were cleaned (try: make circuits TESTS=1)");
         return Err(anyhow!(
             "WASM file not found for key generation: {}",
             wasm_path.display()
