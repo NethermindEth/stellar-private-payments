@@ -14,14 +14,10 @@ on:
 permissions:
   contents: read
 
-# The suite drives four shared testnet accounts against one pool: it deposits,
-# withdraws, and asserts on balances and nullifier state. Two runs at once
-# spend each other's notes and fail in ways that look like product bugs, so
-# runs queue instead of overlapping. Not cancel-in-progress: a half-finished
-# run leaves on-chain state behind, so it is better to let it finish.
-concurrency:
-  group: e2e-freighter-testnet
-  cancel-in-progress: false
+# Each run provisions fresh ephemeral testnet accounts (--ephemeral in
+# e2e-accounts-setup.sh), so overlapping runs cannot interfere with each
+# other. No concurrency group needed; the old one serialised runs because
+# they used shared persistent accounts and could spend each other's notes.
 
 jobs:
   e2e-freighter:
@@ -116,46 +112,20 @@ jobs:
           cargo build -p circuits
           cargo build -p circuits --release
 
-      # Imports the persistent account secrets into the local stellar keys
-      # store under the aliases e2e-accounts-setup.sh expects (spp-e2e-a/b/c),
-      # so ensure_keypair sees them as already existing and never generates
-      # new ones. Writes the identity file directly instead of `stellar keys
-      # add --secret-key` — the same version-independent approach webclient
-      # uses (that command was confirmed broken for non-interactive input on
-      # v25.1.0; the identity file format is trivial and stable).
-      - name: Import persistent test account keys
-        env:
-          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
-          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
-          E2E_ACCOUNT_C_SECRET: ${{ secrets.E2E_ACCOUNT_C_SECRET }}
-        run: |
-          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
-          mkdir -p "$CONFIG_DIR/identity"
-          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
-          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
-          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_C_SECRET" > "$CONFIG_DIR/identity/spp-e2e-c.toml"
-          chmod 600 "$CONFIG_DIR/identity/"*.toml
-
-      # Self-healing account provisioning, identical to webclient: A/B/C
-      # already resolve from the tomls above (no regeneration), D is
-      # generated, all four are funded only if unfunded and unconditionally
-      # re-registered against whatever pool deployments.json currently names.
-      # That re-registration is what recovers from a manual redeploy of the
-      # shared pool without a human noticing — the "No local registration
-      # found" failure class. Builds spp on demand if missing.
+      # All four testnet accounts are generated fresh per run (account A is
+      # friendbot-funded as the faucet and distributes XLM to B/C/D), so no
+      # persistent secrets or key imports are needed.
       - name: Provision test accounts
         run: |
-          bash deployments/scripts/e2e-accounts-setup.sh
+          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral
           set -a
           . deployments/testnet/.e2e-accounts.env
           set +a
-          # Belt-and-braces: these ARE registered secrets, so GitHub already
-          # masks them from the secrets.* context, but that masking does not
-          # automatically extend to a value re-derived via a file read and
-          # re-exported through $GITHUB_ENV.
+          # These mask freshly-generated secrets so they never leak in logs.
           echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_D_SECRET"
           {
             echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
             echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
@@ -164,8 +134,10 @@ jobs:
             echo "E2E_ACCOUNT_C_ADDRESS=$E2E_ACCOUNT_C_ADDRESS"
             echo "E2E_ACCOUNT_C_SECRET=$E2E_ACCOUNT_C_SECRET"
             echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
+            echo "E2E_ACCOUNT_D_SECRET=$E2E_ACCOUNT_D_SECRET"
             echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
           } >> "$GITHUB_ENV"
+
 
       # The profile is generated fresh on every run — nothing is stored in
       # releases, caches, or the repo. setup.sh's headed steps (Freighter

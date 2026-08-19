@@ -66,6 +66,12 @@ privacy keys and registers public keys on-chain, then writes
 secret keys**). Re-running verifies instead of re-provisioning; `--verify`
 checks without creating, and `--force` recreates.
 
+CI does none of this: the `e2e-webclient.yml` workflow runs the script with
+`--ephemeral --accounts a,b`, which generates fresh keypairs on the runner
+every run — the first account is friendbot-funded as a faucet and distributes
+XLM to the second in one multi-operation transaction — so no account secrets
+are stored anywhere.
+
 No ASP membership registration and no admin secret are required: the target pool
 carries `policyFlags: ["blocklist"]`, so membership proofs are not needed (they
 are gated on the `Allowlist` flag — `sdk/types/src/policy_tx.rs`; the pool's

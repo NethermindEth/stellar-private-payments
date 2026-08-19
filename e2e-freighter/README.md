@@ -327,56 +327,40 @@ code, not whatever is deployed. Trigger the full suite with:
 gh workflow run e2e-freighter.yml --repo <OWNER/REPO>
 ```
 
-Runs are serialized (`concurrency` group) because the suite spends shared
-testnet notes: two overlapping runs would spend each other's notes and
-fail in ways that look like product bugs. Fork PRs never run this job (it
-reads the protected environment's secrets).
+Overlapping runs are safe: each run provisions its own ephemeral testnet
+accounts (`--ephemeral`), so two runs cannot spend each other's notes and
+no `concurrency` group is needed. Fork PRs never run this job (it reads
+the protected environment's secrets).
 
 ### Environment and secrets
 
 The Freighter workflow requires the protected `e2e-testnet` environment,
-which provides these secrets:
+which provides exactly one secret:
 
-- `E2E_ACCOUNT_A_SECRET` / `E2E_ACCOUNT_B_SECRET` — persistent test
-  accounts, imported into the stellar keys store as identity tomls
-  (`spp-e2e-a` / `spp-e2e-b`) so the setup script never regenerates them
-- `E2E_ACCOUNT_C_SECRET` — the account imported into the generated
-  Freighter wallet profile (`spp-e2e-c`; its address is derived, not
-  stored)
 - `E2E_FREIGHTER_PASSWORD` — password the generated Freighter profile is
   created with and unlocked with (CI-only; the local setup script
   generates one that satisfies Freighter's
   uppercase/lowercase/digit rules)
 
-There are **no address secrets** — `E2E_ACCOUNT_C_ADDRESS`,
-`E2E_ACCOUNT_D_ADDRESS`, and `E2E_POOL_CONTRACT` are exported to
-`$GITHUB_ENV` by the account-provisioning step at run time (the pool is
-whatever `deployments.json` currently names). The webclient workflow uses
-the same `e2e-testnet` environment with its own secret set.
-
-Provision the persistent accounts once using the setup script:
-
-```bash
-deployments/scripts/e2e-accounts-setup.sh
-# Then copy A/B/C secrets (and the password) from
-# deployments/testnet/.e2e-accounts.env into the e2e-testnet environment
-# secrets (minus the .env shell syntax)
-```
+No account secrets exist in CI. The account addresses, secrets, and the
+pool contract id are exported to `$GITHUB_ENV` by the account-provisioning
+step at run time (the pool is whatever `deployments.json` currently
+names). The webclient workflow uses the same `e2e-testnet` environment
+with the same single secret.
 
 ### Account provisioning in CI
 
-The Freighter workflow provisions the shared testnet accounts itself,
-identically to webclient — nothing is assumed from pre-seeded state:
+Both workflows provision ephemeral per-run accounts themselves — nothing
+is assumed from pre-seeded state:
 
-1. **Import persistent test account keys** — writes the three identity
-   tomls directly from the secrets (`printf 'secret_key = "%s"\n'`), the
-   compatible with non-interactive input.
-2. **Provision test accounts** — runs `e2e-accounts-setup.sh`: A/B/C
-   resolve from the imported tomls (no regeneration), D is generated
-   fresh; all four are friendbot-funded only if unfunded and
-   **unconditionally re-registered** against whatever pool
-   `deployments.json` currently names.
-3. **Generate Freighter profile snapshot** — `setup.sh` runs through
+1. **Provision test accounts** — runs `e2e-accounts-setup.sh --ephemeral`
+   (webclient passes `--accounts a,b`): all keypairs are generated fresh
+   on the runner, the first account is friendbot-funded as a faucet and
+   distributes XLM to the rest in a single multi-operation transaction,
+   and every account is onboarded and registered against whatever pool
+   `deployments.json` currently names. The generated secrets are masked
+   with `::add-mask::` and exported via `$GITHUB_ENV`.
+2. **Generate Freighter profile snapshot** — `setup.sh` runs through
    `serve-and-run.sh --` (the `--` form), which builds+serves the app on
    :8000, exports `APP_URL`, and stops the server afterwards. The
    onboarding wizard navigates to `APP_URL`, so running bare `setup.sh`
