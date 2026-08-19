@@ -1068,6 +1068,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn parse_vk_from_json(json_str: &str) -> Result<ark_groth16::VerifyingKey<ark_bn254::Bn254>> {
         use ark_bn254::{G1Affine, G2Affine};
         use ark_groth16::VerifyingKey;
@@ -1120,6 +1121,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn vk_hash_matches_committed_keys() {
         use ark_bn254::Bn254;
         use ark_groth16::ProvingKey;

@@ -7,7 +7,7 @@ use bootnode::{
     deployment_storage_id,
     messages::{Event, GetEventsParams, GetEventsResponse},
     metrics,
-    storage::{InsertGetEventsPage, Storage},
+    storage::Storage,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -133,8 +133,15 @@ pub async fn spawn_bootnode(
     })
 }
 
+fn random_event_id(ledger: u32) -> String {
+    let mut bytes = [0u8; 8];
+    getrandom::getrandom(&mut bytes).expect("random event id");
+    let suffix = u64::from_le_bytes(bytes);
+    format!("event-{ledger:010}-{suffix:016x}")
+}
+
 pub fn sample_event() -> Event {
-    sample_event_at(2_999_000)
+    sample_event_at(GENESIS_LEDGER + 10_000)
 }
 
 pub fn sample_event_at(ledger: u32) -> Event {
@@ -143,27 +150,24 @@ pub fn sample_event_at(ledger: u32) -> Event {
         "ledger": ledger,
         "ledgerClosedAt": "2024-01-01T00:00:00Z",
         "contractId": FIXTURE_CONTRACT_IDS[0],
-        "id": format!("event-{ledger}"),
+        "id": random_event_id(ledger),
         "topic": [],
         "value": "00",
     }))
     .expect("sample event")
 }
 
-pub fn empty_response(cursor: &str, latest_ledger: u32) -> GetEventsResponse {
-    GetEventsResponse {
-        cursor: cursor.into(),
-        events: vec![],
-        latest_ledger,
-        latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
-        oldest_ledger: GENESIS_LEDGER,
-        oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
-    }
+pub async fn seed_events(storage: &InMemory, events: &[Event]) {
+    storage.upsert_events(events).await.expect("seed events");
 }
 
-pub async fn insert_page(storage: &InMemory, page: InsertGetEventsPage<'_>) {
+pub async fn seed_tip(storage: &InMemory, tip: u32) {
+    storage.set_ledger_tip(tip).await.expect("seed tip");
+}
+
+pub async fn seed_archive_ready(storage: &InMemory) {
     storage
-        .insert_get_events_page(page)
+        .set_archive_ready()
         .await
-        .expect("insert page");
+        .expect("seed archive ready");
 }

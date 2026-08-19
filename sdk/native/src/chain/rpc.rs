@@ -22,6 +22,8 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
     JsonRpc { code: i64, message: String },
+    #[error("bootnode retention handoff - continue on main RPC from ledger {from_ledger}")]
+    RetentionHandoff { from_ledger: u32 },
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -70,6 +72,27 @@ struct JsonRpcResponse<T> {
 struct JsonRpcErrorResponse {
     code: i64,
     message: String,
+    data: Option<serde_json::Value>,
+}
+
+const RETENTION_HANDOFF_CODE: i64 = -32_002;
+
+fn retention_handoff_from_data(data: Option<serde_json::Value>) -> Option<u32> {
+    let value = data?;
+    let ledger = value.get("fromLedger")?.as_u64()?;
+    u32::try_from(ledger).ok()
+}
+
+fn map_json_rpc_error(err: JsonRpcErrorResponse) -> Error {
+    if err.code == RETENTION_HANDOFF_CODE
+        && let Some(from_ledger) = retention_handoff_from_data(err.data)
+    {
+        return Error::RetentionHandoff { from_ledger };
+    }
+    Error::JsonRpc {
+        code: err.code,
+        message: err.message,
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
@@ -324,10 +347,7 @@ impl Client {
         let resp = request.await?;
 
         if let Some(err) = resp.error {
-            return Err(Error::JsonRpc {
-                code: err.code,
-                message: err.message,
-            });
+            return Err(map_json_rpc_error(err));
         }
 
         resp.result
@@ -358,6 +378,9 @@ impl Client {
         {
             Ok(r) => r,
             Err(e) => {
+                if matches!(e, Error::RetentionHandoff { .. }) {
+                    return Err(e);
+                }
                 if let Error::JsonRpc { message, .. } = &e
                     && let Some((oldest, newest)) = parse_ledger_range(message)
                 {
@@ -732,6 +755,21 @@ mod tests {
 
     fn test_client() -> Client {
         Client::new("https://example.org").expect("client")
+    }
+
+    #[test]
+    fn parse_retention_handoff_error() {
+        let err = map_json_rpc_error(JsonRpcErrorResponse {
+            code: RETENTION_HANDOFF_CODE,
+            message: "Continue syncing on your RPC endpoint".into(),
+            data: Some(json!({ "fromLedger": 2_913_600 })),
+        });
+        assert!(matches!(
+            err,
+            Error::RetentionHandoff {
+                from_ledger: 2_913_600
+            }
+        ));
     }
 
     /// `AdminViewKey`/`GvkMode` exist only on `contracts/pool-gvk`

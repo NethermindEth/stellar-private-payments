@@ -51,6 +51,7 @@ url = "2.5.8"
 stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
 
 # external
+getrandom = { version = "0.2", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false }
 

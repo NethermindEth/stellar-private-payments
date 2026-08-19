@@ -370,13 +370,35 @@ mod tests {
         }
     }
 
-    /// Replace `window.fetch` with a hermetic shim that never touches the
-    /// network: it returns a fresh 200 Response carrying `GOOD_BYTES` and
-    /// increments a counter on every call. The returned counter lets tests
-    /// assert exactly how many network round-trips happened, so "cache hit
-    /// == no refetch" and "self-heal refetches once" become real assertions
-    /// rather than hopes.
-    fn install_fetch_shim() -> Rc<Cell<u32>> {
+    /// `window.fetch` shim that restores the original `fetch` on drop.
+    ///
+    /// Derefs to the call counter.
+    struct FetchShim {
+        original: JsValue,
+        counter: Rc<Cell<u32>>,
+    }
+
+    impl core::ops::Deref for FetchShim {
+        type Target = Rc<Cell<u32>>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.counter
+        }
+    }
+
+    impl Drop for FetchShim {
+        fn drop(&mut self) {
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+            let _ = Reflect::set(&window, &JsValue::from_str("fetch"), &self.original);
+        }
+    }
+
+    /// Replace `window.fetch` with a hermetic shim that returns `GOOD_BYTES`
+    /// and counts calls. The counter lets tests assert how many network
+    /// round-trips happened.
+    fn install_fetch_shim() -> FetchShim {
         let counter = Rc::new(Cell::new(0u32));
         let counter_for_closure = counter.clone();
 
@@ -389,16 +411,18 @@ mod tests {
         }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
 
         let window = web_sys::window().expect("wasm-bindgen-test runs in a window context");
+        let original = Reflect::get(&window, &JsValue::from_str("fetch"))
+            .expect("window.fetch must be readable");
         Reflect::set(
             &window,
             &JsValue::from_str("fetch"),
             closure.as_ref().unchecked_ref(),
         )
         .unwrap();
-        // Keep the shim alive for the remainder of the test.
+        // Leak the closure so it stays callable while the shim is installed.
         closure.forget();
 
-        counter
+        FetchShim { original, counter }
     }
 
     #[wasm_bindgen_test]

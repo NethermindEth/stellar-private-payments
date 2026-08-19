@@ -190,4 +190,7 @@ pub trait Storage: crate::chain::ContractDataStorage {
     /// Clear RPC pagination cursors so the indexer resumes by ledger (used on
     /// wallet↔bootnode handoff).
     async fn clear_indexing_cursors(&self) -> Result<(), Error>;
+
+    /// Lower proven catch-up ledger after bootnode handoff (retention cutoff).
+    async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error>;
 }
