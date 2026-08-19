@@ -4,6 +4,7 @@ use crate::{
         ContractEventFilter, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
         PaginationParams,
     },
+    storage::{build_response, page_limit, parse_genesis_cursor},
 };
 use jsonrpsee::{
     core::{RpcResult, async_trait},
@@ -14,17 +15,10 @@ use metrics::counter;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
-/// `-32004`: bootnode-specific JSON-RPC error when a requested `getEvents` page
-/// is not cached yet.
-///
-/// Clients should retry with backoff.
-pub const CACHE_MISS_CODE: i32 = -32_004;
+/// `-32004`: bootnode warming up (unknown tip or pre-cutoff archive not ready).
+pub const WARMING_UP_CODE: i32 = -32_004;
 
-/// `-32002`: bootnode-specific JSON-RPC error telling the client to resume on
-/// its main RPC.
-///
-/// Returned when the requested range is within the retention handoff window.
-/// (jsonrpsee reserves `-32005` for batch-not-supported.)
+/// `-32002`: resume `getEvents` on the wallet RPC from `fromLedger`.
 pub const RETENTION_HANDOFF_CODE: i32 = -32_002;
 
 #[rpc(server)]
@@ -48,30 +42,16 @@ pub struct BootnodeRpc {
 }
 
 impl BootnodeRpc {
-    // getEvents request flow
-    //                    getEvents request
-    //                           │
-    //           ┌───────────────┴───────────────┐
-    //           │                               │
-    //    startLedger only                  cursor only
-    //           │                               │
-    //    tip known & ledger              tip known & cursor's
-    //    >= cutoff? ──yes──► handoff       last event ledger
-    //           │no                             >= cutoff?
-    //           ▼                               │yes
-    //    cache by startLedger              handoff
-    //           │                               │no
-    //    ┌──────┴──────┐                        ▼
-    //   hit           miss              cache by cursor
-    //    │             │                        │
-    //    ▼             ▼                  ┌─────┴─────┐
-    //  200 OK        in_sync?            hit         miss
-    //                │yes   │no           │           │
-    //                ▼      ▼     terminal empty     in_sync?
-    //             handoff   -32004   +in_sync?       │yes   │no
-    //             (tip==0: -32004)  yes│    │no      ▼      ▼
-    //                                  ▼    ▼     handoff -32004
-    //                               handoff 200
+    /// Main events provider
+    ///
+    /// Respond with handoff (code -32002) if:
+    /// - requested startLedger >= cutoff ledger, or
+    /// - requested cursor's ledger >= cutoff ledger.
+    ///
+    /// Cutoff ledger is 5 days ago from current time.
+    ///
+    /// Return warm-up (code -32004) while tip is unknown or the pre-cutoff
+    /// archive is not ready.
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
@@ -79,151 +59,94 @@ impl BootnodeRpc {
         }
 
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);
-        let tip_known = tip > 0;
+        if tip == 0 || !self.state.archive_ready.load(Ordering::Relaxed) {
+            counter!("bootnode_warming_up_total").increment(1);
+            return Err(warming_up());
+        }
+
         let cutoff_ledger = tip.saturating_sub(self.state.cfg.cutoff_ledgers());
-        let in_sync = tip_known && self.state.in_sync.load(Ordering::Relaxed);
+        let limit = page_limit(parsed.limit);
 
-        let handoff_ledger = match (parsed.start_ledger, parsed.cursor.as_deref()) {
-            (Some(start_ledger), None) => Some(start_ledger),
-            (None, Some(cursor)) => {
-                let last_event_ledger = self
-                    .state
-                    .storage
-                    .lookup_last_event_ledger_for_cursor(cursor)
-                    .await
-                    .map_err(|e| {
-                        counter!("bootnode_handler_errors_total").increment(1);
-                        internal_error(e)
-                    })?;
-
-                if tip_known
-                    && let Some(last_event_ledger) = last_event_ledger
-                    && last_event_ledger >= cutoff_ledger
-                {
-                    counter!("bootnode_handoffs_total").increment(1);
-                    return Err(retention_handoff(cutoff_ledger));
-                }
-
-                let Some(result) = self
-                    .state
-                    .storage
-                    .get_cached_get_events_by_cursor(cursor)
-                    .await
-                    .map_err(|e| {
-                        counter!("bootnode_handler_errors_total").increment(1);
-                        internal_error(e)
-                    })?
-                else {
-                    return self.cache_miss_or_handoff(tip, tip_known, cutoff_ledger, in_sync);
-                };
-
-                // Terminal empty while caught up: tip self-loop or no next
-                // cached page. Mid-history quiet gaps still have a next page
-                // and must return 200 so clients can keep walking the chain.
-                if tip_known && self.is_terminal_empty(cursor, &result, in_sync).await? {
-                    if result.latest_ledger < cutoff_ledger {
-                        // Sealed below cutoff: persist bump, return empty so the
-                        // wallet advances; the next request handoffs.
-                        self.state
-                            .storage
-                            .bump_empty_latest_ledger(cursor, cutoff_ledger)
-                            .await
-                            .map_err(|e| {
-                                counter!("bootnode_handler_errors_total").increment(1);
-                                internal_error(e)
-                            })?;
-                        counter!("bootnode_cache_hits_total").increment(1);
-                        let mut page = result;
-                        page.latest_ledger = cutoff_ledger;
-                        return Ok(page);
-                    }
-                    counter!("bootnode_handoffs_total").increment(1);
-                    return Err(retention_handoff(cutoff_ledger));
-                }
-
-                counter!("bootnode_cache_hits_total").increment(1);
-                return Ok(result);
-            }
-            _ => None,
-        };
-
-        if tip_known
-            && let Some(handoff_ledger) = handoff_ledger
-            && handoff_ledger >= cutoff_ledger
+        if parsed
+            .start_ledger
+            .is_some_and(|start_ledger| start_ledger >= cutoff_ledger)
         {
             counter!("bootnode_handoffs_total").increment(1);
             return Err(retention_handoff(cutoff_ledger));
         }
 
-        let cached = match parsed.start_ledger {
-            Some(start_ledger) => {
-                self.state
-                    .storage
-                    .get_cached_get_events_by_start_ledger(start_ledger)
-                    .await
+        if let Some(cursor) = parsed.cursor.as_deref() {
+            if parse_genesis_cursor(cursor).is_some() {
+                counter!("bootnode_handoffs_total").increment(1);
+                return Err(retention_handoff(cutoff_ledger));
             }
-            None => Ok(None),
-        }
-        .map_err(|e| {
-            counter!("bootnode_handler_errors_total").increment(1);
-            internal_error(e)
-        })?;
-
-        let Some(result) = cached else {
-            return self.cache_miss_or_handoff(tip, tip_known, cutoff_ledger, in_sync);
-        };
-
-        counter!("bootnode_cache_hits_total").increment(1);
-        Ok(result)
-    }
-
-    fn cache_miss_or_handoff(
-        &self,
-        tip: u32,
-        tip_known: bool,
-        cutoff_ledger: u32,
-        in_sync: bool,
-    ) -> RpcResult<GetEventsResponse> {
-        if !tip_known {
-            counter!("bootnode_cache_misses_total").increment(1);
-            return Err(cache_miss_for_tip(tip));
+            let cursor_ledger = self
+                .state
+                .storage
+                .event_ledger(cursor)
+                .await
+                .map_err(internal_error)?;
+            let Some(cursor_ledger) = cursor_ledger else {
+                return Err(invalid_params("invalid cursor"));
+            };
+            if cursor_ledger >= cutoff_ledger {
+                counter!("bootnode_handoffs_total").increment(1);
+                return Err(retention_handoff(cutoff_ledger));
+            }
         }
 
-        if in_sync {
-            counter!("bootnode_handoffs_total").increment(1);
-            return Err(retention_handoff(cutoff_ledger));
-        }
-
-        counter!("bootnode_cache_misses_total").increment(1);
-        Err(cache_miss_for_tip(tip))
-    }
-
-    /// True when an empty cached page is the end of the archive chain while
-    /// the indexer is caught up (tip self-loop, or no next page cached).
-    async fn is_terminal_empty(
-        &self,
-        request_cursor: &str,
-        result: &GetEventsResponse,
-        in_sync: bool,
-    ) -> RpcResult<bool> {
-        if !result.events.is_empty() || !in_sync {
-            return Ok(false);
-        }
-        // Tip empties typically echo the same cursor; nothing further to serve.
-        if result.cursor == request_cursor {
-            return Ok(true);
-        }
-        // Mid-history quiet gap: next cursor still has a cached page.
-        let next = self
+        let indexer = self
             .state
             .storage
-            .get_cached_get_events_by_cursor(&result.cursor)
+            .load_indexer_state()
             .await
-            .map_err(|e| {
-                counter!("bootnode_handler_errors_total").increment(1);
-                internal_error(e)
-            })?;
-        Ok(next.is_none())
+            .map_err(internal_error)?;
+        let oldest_ledger = if indexer.oldest_ledger > 0 {
+            indexer.oldest_ledger
+        } else {
+            self.state.min_deployment_ledger
+        };
+
+        let events = if let Some(cursor) = parsed.cursor.as_deref() {
+            self.state
+                .storage
+                .page_events(None, Some(cursor), cutoff_ledger, limit)
+                .await
+                .map_err(internal_error)?
+        } else {
+            let start_ledger = parsed
+                .start_ledger
+                .unwrap_or(self.state.min_deployment_ledger);
+            self.state
+                .storage
+                .page_events(Some(start_ledger), None, cutoff_ledger, limit)
+                .await
+                .map_err(internal_error)?
+        };
+
+        if events.is_empty() {
+            if parsed.cursor.is_some() {
+                counter!("bootnode_handoffs_total").increment(1);
+                return Err(retention_handoff(cutoff_ledger));
+            }
+            counter!("bootnode_empty_pages_total").increment(1);
+            return Ok(build_response(
+                events,
+                parsed.start_ledger,
+                parsed.cursor.as_deref(),
+                tip,
+                oldest_ledger,
+            ));
+        }
+
+        counter!("bootnode_cache_hits_total").increment(1);
+        Ok(build_response(
+            events,
+            None,
+            parsed.cursor.as_deref(),
+            tip,
+            oldest_ledger,
+        ))
     }
 }
 
@@ -251,7 +174,6 @@ impl BootnodeApiServer for BootnodeRpc {
             end_ledger,
             xdr_format,
         };
-        // Bootnode intentionally supports a narrow subset of getEvents.
         if params.end_ledger.is_some() {
             return Err(invalid_params("endLedger is not supported by bootnode"));
         }
@@ -274,16 +196,12 @@ fn internal_error(err: impl std::fmt::Display) -> ErrorObjectOwned {
     ErrorObject::owned(-32_603, err.to_string(), None::<()>)
 }
 
-pub fn cache_miss(msg: impl Into<String>) -> ErrorObjectOwned {
-    ErrorObject::owned(CACHE_MISS_CODE, msg.into(), None::<()>)
-}
-
-fn cache_miss_for_tip(tip: u32) -> ErrorObjectOwned {
-    if tip == 0 {
-        cache_miss("bootnode warming up; retry later")
-    } else {
-        cache_miss("cache miss; indexer may still be catching up")
-    }
+fn warming_up() -> ErrorObjectOwned {
+    ErrorObject::owned(
+        WARMING_UP_CODE,
+        "bootnode warming up; retry later",
+        None::<()>,
+    )
 }
 
 pub fn retention_handoff(from_ledger: u32) -> ErrorObjectOwned {

@@ -187,4 +187,10 @@ impl Storage for LocalStorage {
             .clear_indexing_cursors()
             .map_err(|e| Error::Other(e.to_string()))
     }
+
+    async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error> {
+        self.storage_mut()
+            .clamp_last_fully_indexed_ledger(max_ledger)
+            .map_err(|e| Error::Other(e.to_string()))
+    }
 }

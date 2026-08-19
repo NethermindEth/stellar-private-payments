@@ -1,0 +1,111 @@
+name: E2E Web Client
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-webclient:
+    name: Pre-signing SDK E2E tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    environment: e2e-testnet
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          profile: minimal
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          cache-targets: "true"
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        with:
+          version: v27.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+
+      - name: Cache binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Build circuit artifacts
+        run: |
+          cargo build -p circuits
+          cargo build -p circuits --release
+
+      - name: Import persistent test account keys
+        env:
+          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
+          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
+        run: |
+          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
+          mkdir -p "$CONFIG_DIR/identity"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
+          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
+          chmod 600 "$CONFIG_DIR/identity/spp-e2e-a.toml" "$CONFIG_DIR/identity/spp-e2e-b.toml"
+
+      - name: Provision test accounts
+        run: |
+          bash deployments/scripts/e2e-accounts-setup.sh
+          set -a
+          . deployments/testnet/.e2e-accounts.env
+          set +a
+          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
+          {
+            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
+            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
+            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
+            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
+            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
+          } >> "$GITHUB_ENV"
+
+      - name: Build sdk/web dist
+        run: |
+          npm ci --prefix sdk/web
+          npm run build --prefix sdk/web
+
+      - name: Run browser e2e tests
+        env:
+          E2E_STATIC_ORIGIN: http://127.0.0.1:8099
+        run: |
+          export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
+          test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
+          bash sdk/web/scripts/e2e-browser-test.sh \
+            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-sdk-web \
+            -- --include-ignored

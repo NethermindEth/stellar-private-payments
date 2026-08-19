@@ -5,8 +5,9 @@ Stellar RPC nodes typically expose contract events only for a limited **retentio
 The **bootnode** is a narrow, public service that:
 
 - Implements only `getEvents` and `getLatestLedger` (JSON-RPC compatible request/response shape).
-- Caches historical `getEvents` pages from the contract deployment ledger onward.
-- Once a request is safely within the retention window buffer (currently **tip − 5 days**), returns a JSON-RPC **handoff** error (`-32002`) with `fromLedger` so the app indexer continues on the user's configured main RPC.
+- Caches historical contract events from the deployment ledger onward in Postgres.
+- Serves paginated `getEvents` for all events with `ledger < tip − 5 days`.
+- Once a request enters the retention window (`startLedger` or cursor at/after the cutoff), returns a JSON-RPC **handoff** error (`-32002`) with `fromLedger` so the app indexer continues on the user's configured main RPC.
 
 The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC usage for transaction submission / contract state reads is separate. The bootnode does not redirect HTTP clients; handoff is signaled in the JSON-RPC response.
 
@@ -16,8 +17,8 @@ The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC
 
 | Code | Meaning | Client action |
 |------|---------|---------------|
-| `-32004` | **Cache miss** — the requested page is not cached yet. | Retry with backoff. Message is `"bootnode warming up; retry later"` while the service has no ledger tip yet, or `"cache miss; indexer may still be catching up"` when the background indexer has not reached that page. |
-| `-32002` | **Retention handoff** — the requested range is within the retention window; bootnode archive is complete for this sync. | Stop using the bootnode and continue `getEvents` on the wallet's main RPC from `error.data.fromLedger`. |
+| `-32004` | **Warming up** — ledger tip unknown or pre-cutoff archive not ready. | Retry with backoff (`bootnode warming up; retry later`). |
+| `-32002` | **Retention handoff** — the requested range is within the retention window. | Stop using the bootnode and continue `getEvents` on the wallet's main RPC from `error.data.fromLedger`. |
 
 Handoff response shape:
 

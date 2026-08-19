@@ -162,22 +162,9 @@ async fn healthz(State(state): State<RpcState>) -> impl IntoResponse {
     }
 
     let tip = state.app.ledger_tip.load(Ordering::Relaxed);
-    if tip == 0 {
+    let ready = state.app.archive_ready.load(Ordering::Relaxed);
+    if tip == 0 || !ready {
         return (StatusCode::SERVICE_UNAVAILABLE, "warming up");
-    }
-
-    let kv = match state.app.storage.load_kv().await {
-        Ok(kv) => kv,
-        Err(e) => {
-            tracing::warn!(error = %e, "healthz: failed to load kv");
-            return (StatusCode::SERVICE_UNAVAILABLE, "kv unavailable");
-        }
-    };
-
-    // Unhealthy if the indexer is more than one handoff window behind tip.
-    let cutoff = state.app.cfg.cutoff_ledgers();
-    if tip > 0 && kv.last_fully_indexed_ledger.saturating_add(cutoff) < tip {
-        return (StatusCode::SERVICE_UNAVAILABLE, "indexer behind");
     }
 
     (StatusCode::OK, "ok")

@@ -8,7 +8,6 @@ pub mod otel;
 pub mod rpc;
 pub mod storage;
 
-mod compressor;
 mod deployment;
 mod http_server;
 mod indexer;
@@ -18,14 +17,11 @@ use anyhow::Result;
 use config::Config;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32},
 };
 use storage::Storage;
 
-use self::{
-    compressor::EmptyPageCompressor, http_server::HttpServer, indexer::Indexer,
-    upstream::UpstreamClient,
-};
+use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
 pub use deployment::{current_deployment_storage_id, deployment_storage_id};
 pub use storage::{InMemory, Postgres};
@@ -58,24 +54,10 @@ pub(crate) struct AppState {
     pub(crate) storage: Arc<dyn Storage>,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
-    pub(crate) in_sync: Arc<AtomicBool>,
+    pub(crate) archive_ready: Arc<AtomicBool>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
     pub(crate) min_deployment_ledger: u32,
-}
-
-impl AppState {
-    pub(crate) async fn set_in_sync(&self, in_sync: bool) -> Result<()> {
-        self.storage.set_in_sync(in_sync).await?;
-        self.in_sync.store(in_sync, Ordering::Relaxed);
-        Ok(())
-    }
-
-    pub(crate) async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {
-        self.storage.mark_caught_up(cursor, latest_ledger).await?;
-        self.in_sync.store(true, Ordering::Relaxed);
-        Ok(())
-    }
 }
 
 impl Bootnode {
@@ -105,14 +87,14 @@ impl Bootnode {
             contracts = contract_ids.len(),
             "bootnode deployment namespace"
         );
-        let kv = storage.load_kv().await?;
-        let ledger_tip = cfg.initial_ledger_tip.max(kv.ledger_tip);
+        let indexer = storage.load_indexer_state().await?;
+        let ledger_tip = cfg.initial_ledger_tip.max(indexer.ledger_tip);
 
         Ok(Self {
             state: AppState {
                 upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
                 ledger_tip: Arc::new(AtomicU32::new(ledger_tip)),
-                in_sync: Arc::new(AtomicBool::new(kv.in_sync)),
+                archive_ready: Arc::new(AtomicBool::new(indexer.archive_ready)),
                 cfg,
                 storage,
                 prom_handle,
@@ -125,24 +107,16 @@ impl Bootnode {
     pub async fn serve(self) -> Result<()> {
         let state = self.state;
         let mut indexer_task = tokio::spawn(Indexer::new(state.clone()).run());
-        let mut compressor_task = tokio::spawn(EmptyPageCompressor::new(state.clone()).run());
         let mut server_task = tokio::spawn(HttpServer::new(state).run());
 
         tokio::select! {
             res = &mut server_task => {
                 indexer_task.abort();
-                compressor_task.abort();
                 res??;
             }
             _ = &mut indexer_task => {
-                compressor_task.abort();
                 server_task.abort();
                 anyhow::bail!("indexer task exited unexpectedly");
-            }
-            _ = &mut compressor_task => {
-                indexer_task.abort();
-                server_task.abort();
-                anyhow::bail!("empty page compressor exited unexpectedly");
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received ctrl-c, shutting down");

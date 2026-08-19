@@ -212,6 +212,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             tracing::trace!("[{WORKER_NAME}] sending current sync");
             resp
         }
+        StorageWorkerRequest::ProcessPendingState => {
+            tracing::trace!("[{WORKER_NAME}] processing pending state");
+            process_until_empty().await?;
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::SaveEvents(events_data) => {
             tracing::trace!(
                 "[{WORKER_NAME}] saving {} raw contract events",
@@ -239,6 +244,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::ClearIndexingCursors => {
             tracing::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
             with_storage_mut!(s => s.clear_indexing_cursors()?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger) => {
+            tracing::trace!("[{WORKER_NAME}] clamping last_fully_indexed_ledger to {max_ledger}");
+            with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
@@ -623,14 +633,35 @@ impl Storage for StorageBridge {
     }
 
     async fn process_pending_state(&self) -> Result<(), Error> {
-        // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
-        // in the worker background loop without blocking this bridge.
-        Ok(())
+        match self
+            .call(StorageWorkerRequest::ProcessPendingState, 30_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::Saved) => Ok(()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected process_pending_state response: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn clear_indexing_cursors(&self) -> Result<(), Error> {
         match self
             .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await
+            .map_err(|e| Error::Other(e.to_string()))?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error> {
+        match self
+            .call(
+                StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger),
+                2_000,
+            )
             .await
             .map_err(|e| Error::Other(e.to_string()))?
         {
