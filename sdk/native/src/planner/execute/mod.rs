@@ -5,7 +5,8 @@ mod error;
 pub use error::SpendSessionError;
 
 use crate::types::{
-    EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey, correlation_id_or_new,
+    EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey, Sensitive,
+    correlation_id_or_new,
 };
 
 use crate::planner::plan::{PlannedStep, SpendableNote, StepAction, plan};
@@ -78,7 +79,7 @@ pub struct SpendSession {
 
 impl SpendSession {
     /// Create a new SpendSession from a wallet, amount, and target.
-    #[tracing::instrument(skip_all, fields(stage = "spend_session_setup", correlation_id = %correlation_id_or_new(), wallet_size = wallet.len(), amount = ?crate::types::Sensitive(&amount), target = ?crate::types::Sensitive(&target)))]
+    #[tracing::instrument(skip_all, fields(stage = "spend_session_setup", correlation_id = %correlation_id_or_new(), wallet_size = wallet.len(), amount = ?Sensitive(&amount), target = ?Sensitive(&target)))]
     pub fn setup(
         wallet: Vec<SpendableNote>,
         amount: NoteAmount,

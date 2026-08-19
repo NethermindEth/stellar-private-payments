@@ -2,7 +2,7 @@
 
 use crate::{
     planner::{SpendableNote, Transact},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary},
+    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
 };
 
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
@@ -105,9 +105,9 @@ impl<S: Storage> PrivatePool<S> {
         self.core.estimate(&wallet, amount)
     }
 
-    #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?crate::types::Sensitive(amount)))]
+    #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, Error> {
-        tracing::info!(amount = ?crate::types::Sensitive(amount), "deposit started");
+        tracing::info!(amount = ?Sensitive(amount), "deposit started");
         let mut plan = self.prepare_deposit(amount)?;
         self.execute(&mut plan)
             .await?
@@ -115,27 +115,27 @@ impl<S: Storage> PrivatePool<S> {
             .ok_or_else(|| Error::Other("deposit produced no transaction".into()))
     }
 
-    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?crate::types::Sensitive(amount)))]
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
     pub async fn transfer(
         &self,
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, Error> {
         let recipient = recipient.into();
-        tracing::info!(recipient = ?crate::types::Sensitive(&recipient), amount = ?crate::types::Sensitive(amount), "transfer started");
+        tracing::info!(recipient = ?Sensitive(&recipient), amount = ?Sensitive(amount), "transfer started");
         let wallet = self.spendable_notes().await?;
         let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
-    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?crate::types::Sensitive(amount)))]
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
     pub async fn withdraw(
         &self,
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, Error> {
         let recipient = recipient.into();
-        tracing::info!(amount = ?crate::types::Sensitive(amount), recipient = ?crate::types::Sensitive(&recipient), "withdraw started");
+        tracing::info!(amount = ?Sensitive(amount), recipient = ?Sensitive(&recipient), "withdraw started");
         let wallet = self.spendable_notes().await?;
         let mut plan = self.prepare_withdraw(&wallet, amount, recipient)?;
         self.execute(&mut plan).await
@@ -143,7 +143,7 @@ impl<S: Storage> PrivatePool<S> {
 
     #[tracing::instrument(skip(self, step), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn transact(&self, step: Transact) -> Result<TransactionResult, Error> {
-        tracing::info!(step = ?crate::types::Sensitive(&step), "transact started");
+        tracing::info!(step = ?Sensitive(&step), "transact started");
         let mut plan = self.prepare_transact(step);
         self.execute(&mut plan)
             .await?
@@ -156,7 +156,7 @@ impl<S: Storage> PrivatePool<S> {
         &self,
         req: DisclosureRequest,
     ) -> Result<Option<DisclosureReceipt>, Error> {
-        tracing::info!(selected_commitments = ?crate::types::Sensitive(&req.selected_commitments), "disclose started");
+        tracing::info!(selected_commitments = ?Sensitive(&req.selected_commitments), "disclose started");
         if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
             return Err(Error::Other(
                 "selective disclosure requires 1..=4 selected commitments".into(),
@@ -233,7 +233,7 @@ impl<S: Storage> PrivatePool<S> {
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<DisclosureVerificationReport, Error> {
-        tracing::info!(expected_vk_hash = ?crate::types::Sensitive(expected_vk_hash), "verify_disclosure started");
+        tracing::info!(expected_vk_hash = ?Sensitive(expected_vk_hash), "verify_disclosure started");
         verify_disclosure_receipt(
             &self.fetcher,
             self.prover.as_ref(),

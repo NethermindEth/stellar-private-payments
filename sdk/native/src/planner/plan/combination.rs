@@ -1,7 +1,7 @@
 //! Coin selection: pick note indices that reach a target amount.
 
 use super::PlanError;
-use crate::types::{NoteAmount, correlation_id_or_new};
+use crate::types::{NoteAmount, Sensitive, correlation_id_or_new};
 
 /// Upper bound on combination size explored by [`find_combination`].
 pub const TRANSACTION_LIMIT: usize = 10;
@@ -27,7 +27,7 @@ pub enum CombinationResult {
 /// Find a combination of elements with sum equal to or larger than the goal,
 /// prioritizing the lowest combination count (with two-note pairs preferred
 /// over single-note exact matches).
-#[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), goal = ?crate::types::Sensitive(&goal)))]
+#[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), goal = ?Sensitive(&goal)))]
 pub fn find_combination(
     values: &[NoteAmount],
     goal: NoteAmount,

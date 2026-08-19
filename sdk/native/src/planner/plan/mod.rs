@@ -6,7 +6,7 @@ mod error;
 pub use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
 pub use error::PlanError;
 
-use crate::types::{Field, NoteAmount, correlation_id_or_new};
+use crate::types::{Field, NoteAmount, Sensitive, correlation_id_or_new};
 
 /// Full plan: one or more on-chain `transact` calls (2-in / 2-out each).
 #[derive(Clone, Debug)]
@@ -108,7 +108,7 @@ fn combo_tier(combo: &CombinationResult) -> &'static str {
 }
 
 /// Build a plan from unspent notes and a target spend amount.
-#[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?crate::types::Sensitive(&amount), note_count = notes.len()))]
+#[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount), note_count = notes.len()))]
 pub fn plan(
     amount: NoteAmount,
     notes: &[SpendableNote],

@@ -9,7 +9,7 @@ use crate::{
         SELECTIVE_DISCLOSURE_2_N_NOTES, SELECTIVE_DISCLOSURE_3_CIRCUIT,
         SELECTIVE_DISCLOSURE_3_LEVELS, SELECTIVE_DISCLOSURE_3_N_NOTES,
         SELECTIVE_DISCLOSURE_4_CIRCUIT, SELECTIVE_DISCLOSURE_4_LEVELS,
-        SELECTIVE_DISCLOSURE_4_N_NOTES, correlation_id_or_new,
+        SELECTIVE_DISCLOSURE_4_N_NOTES, Sensitive, correlation_id_or_new,
     },
     zk::prover::{Prover, verify_proof},
 };
@@ -372,7 +372,7 @@ pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
 /// # Errors
 /// Returns an error if the receipt names an unknown circuit, fails schema
 /// validation, or does not match the expected circuit metadata.
-#[tracing::instrument(skip(receipt), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_validation", circuit_name = %receipt.circuit.name, expected_vk_hash = ?crate::types::Sensitive(expected_vk_hash)))]
+#[tracing::instrument(skip(receipt), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_validation", circuit_name = %receipt.circuit.name, expected_vk_hash = ?Sensitive(expected_vk_hash)))]
 pub fn validate_registered_receipt(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
@@ -514,7 +514,7 @@ pub fn validate_and_serialize_receipt_public_inputs(
 /// Returns an error if `vk_bytes` do not match `expected_vk_hash`, the receipt
 /// is malformed, targets an unsupported circuit, has unexpected metadata, or
 /// contains malformed proof bytes.
-#[tracing::instrument(skip(receipt, vk_bytes), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_proof_verification", circuit_name = %receipt.circuit.name, expected_vk_hash = ?crate::types::Sensitive(expected_vk_hash)))]
+#[tracing::instrument(skip(receipt, vk_bytes), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_proof_verification", circuit_name = %receipt.circuit.name, expected_vk_hash = ?Sensitive(expected_vk_hash)))]
 pub fn verify_receipt_proof(
     receipt: &DisclosureReceipt,
     vk_bytes: &[u8],
@@ -585,7 +585,7 @@ where
 ///
 /// # Errors
 /// Returns an error if receipt metadata is invalid or if callbacks fail.
-#[tracing::instrument(name = "verify_receipt_report", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?crate::types::Sensitive(expected_vk_hash)))]
+#[tracing::instrument(name = "verify_receipt_report", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?Sensitive(expected_vk_hash)))]
 pub fn verify_receipt_report_with<P, R>(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,

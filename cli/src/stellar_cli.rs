@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 
 use stellar_private_payments::{
     chain::Signature,
-    types::{KeyDerivationSignature, correlation_id_or_new},
+    types::{KeyDerivationSignature, Sensitive, correlation_id_or_new},
 };
 
 /// Env var to override the `stellar` binary path (default: `stellar` on PATH).
@@ -45,7 +45,7 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
     tracing::info!(
         bin = %bin,
         subcommand = %args.first().map(String::as_str).unwrap_or(""),
-        args = ?stellar_private_payments::types::Sensitive(&args),
+        args = ?Sensitive(&args),
         "running external stellar command"
     );
     let mut cmd = Command::new(&bin);
@@ -85,7 +85,7 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
 #[tracing::instrument(
     name = "stellar_public_key",
     skip_all,
-    fields(correlation_id = %correlation_id_or_new(), alias = ?stellar_private_payments::types::Sensitive(&alias))
+    fields(correlation_id = %correlation_id_or_new(), alias = ?Sensitive(&alias))
 )]
 pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
     let args = vec![
@@ -108,7 +108,7 @@ pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
 #[tracing::instrument(
     name = "stellar_sign_message",
     skip_all,
-    fields(correlation_id = %correlation_id_or_new(), alias = ?stellar_private_payments::types::Sensitive(&alias), message_len = message.len())
+    fields(correlation_id = %correlation_id_or_new(), alias = ?Sensitive(&alias), message_len = message.len())
 )]
 pub fn sign_message(
     alias: &str,
@@ -117,7 +117,7 @@ pub fn sign_message(
 ) -> Result<KeyDerivationSignature> {
     // The message contents and the produced signature are never logged.
     tracing::info!(
-        alias = ?stellar_private_payments::types::Sensitive(&alias),
+        alias = ?Sensitive(&alias),
         message_len = message.len(),
         "awaiting external signer (may prompt for key)"
     );
@@ -142,7 +142,7 @@ pub fn sign_message(
 #[tracing::instrument(
     name = "stellar_sign_tx",
     skip_all,
-    fields(correlation_id = %correlation_id_or_new(), alias = ?stellar_private_payments::types::Sensitive(&alias), xdr_len = tx_xdr.len(), network = %network_passphrase)
+    fields(correlation_id = %correlation_id_or_new(), alias = ?Sensitive(&alias), xdr_len = tx_xdr.len(), network = %network_passphrase)
 )]
 pub fn sign_tx(
     alias: &str,
@@ -162,7 +162,7 @@ pub fn sign_tx(
         .next()
         .unwrap_or("");
     tracing::info!(
-        alias = ?stellar_private_payments::types::Sensitive(&alias),
+        alias = ?Sensitive(&alias),
         xdr_len = tx_xdr.len(),
         network = %network_passphrase,
         rpc_host,
