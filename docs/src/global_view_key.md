@@ -140,6 +140,6 @@ by the round-trip tests.
 ## Key material provenance
 
 The proving/verifying keys for the GVK circuits are locally generated (see
-`REGEN_KEYS=1 BUILD_TESTS=1 cargo build`) and land in the gitignored `testdata/`.
+`REGEN_KEYS=1 BUILD_TESTS=1 make circuits`) and land in the gitignored `testdata/`.
 As with the other circuits, a trusted ceremony would be required before any
 mainnet deployment.

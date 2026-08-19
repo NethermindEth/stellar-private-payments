@@ -37,10 +37,11 @@ build: install $(if $(LOGS),sdk-web-build-debug,sdk-web-build)
 build-debug:
 	@$(MAKE) build LOGS=1
 
-.PHONY: circuits-build
-circuits-build:
+.PHONY: circuits
+circuits:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) \
+		cargo run -p circuit-compiler --release -- compile
 
 # Production stems for circom-witness-rs graph regen (keep in sync with SDK).
 WITNESS_GRAPH_STEMS := \
@@ -53,22 +54,17 @@ WITNESS_GRAPH_STEMS := \
 	selectiveDisclosure_3.circom \
 	selectiveDisclosure_4.circom
 
-# Vendors circomlib and injects the black-box hints the graph
-# runtime needs. Cargo runs the
-# circom-witness-rs build script before
-# circuits/build.rs, so the hints have to be on disk before the loop below
-# starts. The timestamp keeps cargo from treating the build script as fresh and
-# replaying a cached run.
+# Vendors circomlib and injects the black-box hints the graph runtime needs.
 .PHONY: circomlib-hints
 circomlib-hints:
 	@echo "Applying circomlib black-box hints..."
-	@CIRCOMLIB_HINTS_ONLY=$$(date +%s) cargo build -p circuits
+	@CIRCOMLIB_HINTS_ONLY=1 cargo run -p circuit-compiler -- compile
 	@grep -q "function bbf_inv" circuits/src/circomlib/circuits/comparators.circom || \
 		{ echo "circomlib hints missing after priming build"; exit 1; }
 
 # Regenerates committed circom-witness-rs graphs under
 # deployments/testnet/circuit_keys/*.graph.bin. Requires Circom CLI matching
-# circuits/circom.lock and a C++ toolchain. One stem per cargo build (single-
+# circuits/circom.lock and a C++ toolchain. One stem per run (single-
 # circuit circom-witness-rs); clean between stems so WITNESS_CPP is re-read.
 .PHONY: witness-graphs
 witness-graphs: circomlib-hints
@@ -79,7 +75,7 @@ witness-graphs: circomlib-hints
 		cargo clean -p circom-witness-rs >/dev/null; \
 		CIRCOM_LIBRARY_PATH="$(CURDIR)/circuits/src" \
 		WITNESS_CPP="$(CURDIR)/circuits/src/$$entry" \
-		cargo build -p circuits --features regen-graph || exit 1; \
+		cargo run -p circuit-compiler --features regen-graph -- compile || exit 1; \
 	done
 	@echo "Done. Graphs in deployments/testnet/circuit_keys/"
 

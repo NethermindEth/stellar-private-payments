@@ -23,7 +23,7 @@
 //!   SPP_CIRCUIT_KEYS_DIR      default: deployments/testnet/circuit_keys
 //!
 //!   SPP_CIRCUIT_ARTIFACTS_DIR default:
-//! target/circuits-artifacts/{debug|release}
+//! target/circuits-artifacts
 //!
 //!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
 //!
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (client, account, pool, _config, pool_config) = match common::init_transact_session() {
         Ok(session) => session,
-        Err(e) if e.contains("cargo build -p circuits") => {
+        Err(e) if e.contains("make circuits") => {
             eprintln!("Skipping: {e}");
             std::process::exit(0);
         }

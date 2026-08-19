@@ -65,8 +65,7 @@ jobs:
 
       - name: Build circuit artifacts
         run: |
-          cargo build -p circuits
-          cargo build -p circuits --release
+          make circuits
 
       - name: Import persistent test account keys
         env:

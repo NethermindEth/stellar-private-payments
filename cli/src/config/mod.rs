@@ -146,7 +146,7 @@ pub fn default_data_dir() -> PathBuf {
 
 pub fn default_circuits_dir(data_dir: &Path) -> PathBuf {
     if cfg!(debug_assertions) {
-        PathBuf::from("target/circuits-artifacts/release")
+        PathBuf::from("target/circuits-artifacts")
     } else {
         data_dir.join("circuits")
     }

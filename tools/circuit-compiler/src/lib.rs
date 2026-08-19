@@ -1,31 +1,13 @@
-//! Build script for compiling Circom circuits
+//! Circuit artifact compiler library.
 //!
-//! This build script automatically compiles all `.circom` files in the `src/`
-//! directory into R1CS constraint systems, symbol files and WASM for witness
-//! generation.
+//! Circom sources live under workspace `circuits/`. This crate builds
+//! R1CS / WASM / keys / witness graphs. The CLI entrypoint is
+//! `bin/compiler.rs`.
 //!
-//! > [!WARNING]
-//! > **Source Tree Writes Outside `OUT_DIR`**:
-//! > When compiled with `--features regen-graph` and `WITNESS_CPP` set,
-//! > `regenerate_witness_graphs`
-//! > generates binary witness graphs (`*.graph.bin`) directly into the
-//! > `circuits/` crate root
-//! > and copies them into `deployments/testnet/circuit_keys/` (outside standard
-//! > `OUT_DIR`).
-//! > This intentionally mutates committed source-tree artifacts during `make
-//! > witness-graphs`.
-//!
-//! ## Usage
-//! The build script runs automatically when you run `cargo build`. It will:
-//! 1. Find all `.circom` files in `src/` directory
-//! 2. Compile each circuit using the circom compiler
-//!
-//! To Build the test circuits use `BUILD_TESTS=1 cargo build`
-//!
-//! The script also generates Groth16 proving and verification keys for selected
-//! entry-point circuits (see `types::PolicyFlags::all_stems` and
-//! `selectiveDisclosure_*` below) and outputs them to `testdata/`.
-//! `std::env::var("CIRCUIT_OUT_DIR")`
+//! Env flags (`BUILD_TESTS`, `REGEN_KEYS`, …) are still honored; CLI flags will
+//! replace them in later steps. When `WITNESS_CPP` is set (with
+//! `--features regen-graph`), writes `*.graph.bin` into
+//! `deployments/testnet/circuit_keys/`.
 
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
@@ -72,10 +54,6 @@ const POLICY_GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
     "policy_tx_gvk_2_2_AB_traceable",
 ];
 
-/// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
-/// changed.
-const GROTH16_TESTDATA_SUFFIXES: &[&str] = &["_proving_key.bin", "_vk.json", "_vk_soroban.bin"];
-
 fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bool {
     groth16_key_circuits.iter().any(|stem| stem == name)
 }
@@ -95,13 +73,27 @@ fn groth16_key_circuits() -> Vec<String> {
     circuits
 }
 
-fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
-    let workspace_root = crate_dir.parent().unwrap_or(crate_dir);
+fn workspace_root() -> Result<PathBuf> {
+    let mut root = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    loop {
+        if root.join("Cargo.lock").is_file() {
+            return Ok(root);
+        }
+        if !root.pop() {
+            bail!("could not find workspace root (no Cargo.lock)");
+        }
+    }
+}
+
+fn circuits_dir(workspace_root: &Path) -> PathBuf {
+    workspace_root.join("circuits")
+}
+
+fn publish_dir_path(workspace_root: &Path) -> Result<PathBuf> {
     let target_dir = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root.join("target"));
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-    Ok(target_dir.join("circuits-artifacts").join(profile))
+    Ok(target_dir.join("circuits-artifacts"))
 }
 
 fn copy(src: &Path, dst: &Path) -> Result<()> {
@@ -141,68 +133,40 @@ fn publish_circuit_artifacts(
     Ok(())
 }
 
-fn main() -> Result<()> {
-    println!(
-        "cargo:warning=Circuits builder Copyright (C) 2025 Stellar Development Foundation. This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions."
+/// Run the full compile pipeline (circomlib, R1CS/WASM, keys, optional graphs).
+pub fn run() -> Result<()> {
+    eprintln!(
+        "Circuits builder Copyright (C) 2025 Stellar Development Foundation. This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions."
     );
     // === PATH SETUP ===
-    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let src_dir = crate_dir.join("src");
+    // Sources live in workspace `circuits/`; this crate is
+    // `tools/circuit-compiler`.
+    let workspace_root = workspace_root()?;
+    let circuits_dir = circuits_dir(&workspace_root);
+    let src_dir = circuits_dir.join("src");
 
-    // Put build artifacts under OUT_DIR/circuits
-    let out_dir = PathBuf::from(env::var("OUT_DIR")?).join("circuits");
-    fs::create_dir_all(&out_dir).context("Could not create OUT_DIR/circuits")?;
-
-    // Also publish artifacts to a deterministic directory under target/
-    let publish_dir = publish_dir_path(&crate_dir)?;
+    // Deterministic publish dir under target/circuits-artifacts/
+    let publish_dir = publish_dir_path(&workspace_root)?;
     fs::create_dir_all(&publish_dir)
         .with_context(|| format!("Could not create {}", publish_dir.display()))?;
 
-    // Expose the path to your runtime/tests
-    println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
-    println!("cargo:rerun-if-changed=build.rs");
-    println!(
-        "cargo:rerun-if-changed={}",
-        crate_dir.join("../sdk/types/src/policy_tx.rs").display()
-    );
-    println!("cargo:rerun-if-env-changed=BUILD_TESTS");
-    println!("cargo:rerun-if-env-changed=REGEN_KEYS");
-    println!("cargo:rerun-if-env-changed=WITNESS_CPP");
-    println!("cargo:rerun-if-env-changed=CIRCOM_LIBRARY_PATH");
-    println!("cargo:rerun-if-env-changed=CIRCOMLIB_HINTS_ONLY");
-    println!(
-        "cargo:rerun-if-changed={}",
-        crate_dir.join("circom.lock").display()
-    );
+    // Intermediates under target/circuits-artifacts/out/
+    let out_dir = publish_dir.join("out");
+    fs::create_dir_all(&out_dir).context("Could not create circuit out dir")?;
 
     let groth16_key_circuits = groth16_key_circuits();
-
-    // Rerun if testdata key files are missing or changed
-    let testdata_dir = crate_dir.join("../testdata");
-    for stem in &groth16_key_circuits {
-        for suffix in GROTH16_TESTDATA_SUFFIXES {
-            println!(
-                "cargo:rerun-if-changed={}",
-                testdata_dir.join(format!("{stem}{suffix}")).display()
-            );
-        }
-    }
 
     // === CIRCOMLIB DEPENDENCY ===
     // Import circomlib library (only if not already present) and pin it to the
     // revision in `circomlib.lock` for reproducible builds.
-    println!(
-        "cargo:rerun-if-changed={}",
-        crate_dir.join("circomlib.lock").display()
-    );
-    get_circomlib(&crate_dir, &src_dir)?;
+    get_circomlib(&circuits_dir, &src_dir)?;
     // The hints stay on disk after the build
     let circomlib_was_patched = inject_black_box_hints(&src_dir.join("circomlib"))?;
 
     // `make witness-graphs` primes the hints through this flag before its
     // per-circuit builds, so there is nothing else to do in that pass.
     if env::var("CIRCOMLIB_HINTS_ONLY").is_ok() {
-        println!("cargo:warning=CIRCOMLIB_HINTS_ONLY set. Stopping after circomlib hints");
+        eprintln!("CIRCOMLIB_HINTS_ONLY set. Stopping after circomlib hints");
         return Ok(());
     }
 
@@ -215,23 +179,21 @@ fn main() -> Result<()> {
     // circomlib/test/)
     let build_tests = env::var("BUILD_TESTS").is_ok();
     if build_tests {
-        println!("cargo:warning=Including test circuits in build...");
+        eprintln!("Including test circuits in build...");
         // Re-scan src/ without skipping test directories to include all test circuits
         circom_files = find_circom_files_impl(&src_dir, false);
     } else {
-        println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
+        eprintln!("Skipping test circuits (set BUILD_TESTS=1 to include)");
     }
 
     // Skip circom compilation if no files to compile
     if circom_files.is_empty() {
-        println!("cargo:warning=No circom files found to compile");
+        eprintln!("No circom files found to compile");
         return Ok(());
     }
 
     // === COMPILE EACH CIRCUIT ===
     for circom_file in circom_files {
-        println!("cargo:rerun-if-changed={}", circom_file.display());
-
         // Output file
         let out_file = out_dir.join(circom_file.file_stem().context("Invalid circom filename")?);
 
@@ -269,12 +231,7 @@ fn main() -> Result<()> {
         // We now extract all included files from the parsed circuit and check if
         // rebuild is needed This prevents situations where a circuit is not
         // updated, but its dependencies are
-        let dependencies = extract_circom_dependencies(&circom_file, &crate_dir)?;
-        for dep_path in &dependencies {
-            // Register each dependency file with cargo so it knows to rebuild when they
-            // change
-            println!("cargo:rerun-if-changed={}", dep_path.display());
-        }
+        let dependencies = extract_circom_dependencies(&circom_file, &circuits_dir)?;
 
         // Get circuit name for key generation check
         let circuit_name = circom_file
@@ -298,8 +255,8 @@ fn main() -> Result<()> {
                 check_dependencies_need_rebuild(&dependencies, &circom_file, newest_artifact)?;
 
             if !needs_rebuild {
-                println!(
-                    "cargo:warning=Skipping {} (already compiled, all dependencies up to date)",
+                eprintln!(
+                    "Skipping {} (already compiled, all dependencies up to date)",
                     circom_file.display()
                 );
 
@@ -311,15 +268,13 @@ fn main() -> Result<()> {
                         &r1cs_file,
                         Some(&wasm_path),
                     ) {
-                        println!(
-                            "cargo:warning=Failed to publish artifacts for {circuit_name}: {e}"
-                        );
+                        eprintln!("Failed to publish artifacts for {circuit_name}: {e}");
                     }
                 } else {
                     // WASM missing: fall through so we can regenerate it instead of silently
                     // leaving the deterministic directory incomplete.
-                    println!(
-                        "cargo:warning=WASM missing for {} - recompiling to restore deterministic artifacts",
+                    eprintln!(
+                        "WASM missing for {} - recompiling to restore deterministic artifacts",
                         circuit_name
                     );
                 }
@@ -329,10 +284,15 @@ fn main() -> Result<()> {
                 if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits)
                     && wasm_path.exists()
                 {
-                    match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                    match generate_keys_if_needed(
+                        &workspace_root,
+                        &out_dir,
+                        &circuit_name,
+                        &r1cs_file,
+                    ) {
                         Ok(_) => {}
                         Err(e) => {
-                            println!("cargo:warning=Key generation failed: {e}");
+                            eprintln!("Key generation failed: {e}");
                         }
                     }
                     continue;
@@ -394,7 +354,7 @@ fn main() -> Result<()> {
         let wasm_success = match compile_wasm(&circom_file, &out_dir, vcp) {
             Ok(()) => true,
             Err(e) => {
-                println!("cargo:warning=WASM generation failed for {circom_file:?}: {e}");
+                eprintln!("WASM generation failed for {circom_file:?}: {e}");
                 false
             }
         };
@@ -409,7 +369,7 @@ fn main() -> Result<()> {
                 None
             },
         ) {
-            println!("cargo:warning=Failed to publish artifacts for {circuit_name}: {e}");
+            eprintln!("Failed to publish artifacts for {circuit_name}: {e}");
         }
 
         // === GROTH16 Proving/Verifying key generation ===
@@ -420,20 +380,15 @@ fn main() -> Result<()> {
                     circuit_name
                 );
             } else {
-                match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                match generate_keys_if_needed(&workspace_root, &out_dir, &circuit_name, &r1cs_file)
+                {
                     Ok(generated) => {
                         if generated {
-                            println!(
-                                "cargo:warning=Key generation completed for {}",
-                                circuit_name
-                            );
+                            println!("Key generation completed for {}", circuit_name);
                         }
                     }
                     Err(e) => {
-                        println!(
-                            "cargo:warning=Key generation failed for {}: {}",
-                            circuit_name, e
-                        );
+                        eprintln!("Key generation failed for {}: {}", circuit_name, e);
                     }
                 }
             }
@@ -445,7 +400,12 @@ fn main() -> Result<()> {
     // Regen via `make witness-graphs` / `--features regen-graph` with
     // `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` for one circuit at a time.
     if env::var("WITNESS_CPP").is_ok() {
-        regenerate_witness_graphs(&crate_dir, circomlib_was_patched)?;
+        regenerate_witness_graphs(
+            &circuits_dir,
+            &workspace_root,
+            &out_dir,
+            circomlib_was_patched,
+        )?;
     }
 
     Ok(())
@@ -571,8 +531,8 @@ fn check_dependencies_need_rebuild(
     for file_path in all_files {
         let modified = fs::metadata(file_path)?.modified()?;
         if modified > artifact_modified {
-            println!(
-                "cargo:warning=File {} is newer than artifacts, rebuilding...",
+            eprintln!(
+                "File {} is newer than artifacts, rebuilding...",
                 file_path.display()
             );
             return Ok(true);
@@ -656,7 +616,7 @@ fn has_main_component(file_path: &Path) -> bool {
             content_lower.contains("component main ")
         }
         Err(e) => {
-            println!("cargo:warning=Failed to read file {file_path:?}: {e}");
+            eprintln!("Failed to read file {file_path:?}: {e}");
             false
         }
     }
@@ -711,7 +671,7 @@ fn generate_output_sym(file: &str, exporter: &dyn ConstraintExporter) -> Result<
     }
 }
 
-/// Parse the Circom compiler version from Cargo.toml
+/// Parse the Circom compiler version from this crate's Cargo.toml
 ///
 /// Searches the Cargo.toml file for the specified package in either
 /// `[build-dependencies]` or `[dependencies]` sections and extracts
@@ -726,10 +686,11 @@ fn generate_output_sym(file: &str, exporter: &dyn ConstraintExporter) -> Result<
 /// Returns `Some(String)` with the version tag (with "v" prefix removed)
 /// if found, or `None` if the package or version cannot be found.
 fn parse_circom_version(package_name: &str) -> Option<String> {
-    let cargo_toml = match fs::read_to_string("Cargo.toml") {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let cargo_toml = match fs::read_to_string(&manifest) {
         Ok(content) => content,
         Err(e) => {
-            eprintln!("Failed to read Cargo.toml: {e}");
+            eprintln!("Failed to read {}: {e}", manifest.display());
             return None;
         }
     };
@@ -781,9 +742,9 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
 ///
 /// # Returns
 /// Returns exit status of the import procedure
-fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
+fn get_circomlib(circuits_dir: &Path, src_dir: &Path) -> Result<()> {
     let circomlib_path = src_dir.join("circomlib");
-    let locked_rev = fs::read_to_string(crate_dir.join("circomlib.lock"))
+    let locked_rev = fs::read_to_string(circuits_dir.join("circomlib.lock"))
         .context("Failed to read circuits/circomlib.lock")?;
     let locked_rev = locked_rev.trim();
     if locked_rev.len() != 40 || !locked_rev.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -836,12 +797,12 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
     {
         let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if head == locked_rev {
-            println!("cargo:warning=circomlib already at locked revision {locked_rev}");
+            eprintln!("circomlib already at locked revision {locked_rev}");
             return Ok(());
         }
     }
 
-    println!("cargo:warning=Fetching circomlib revision {locked_rev}...");
+    eprintln!("Fetching circomlib revision {locked_rev}...");
     let fetch_status = Command::new("git")
         .arg("-C")
         .arg(&circomlib_path)
@@ -883,19 +844,24 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
 ///
 /// Expects a single `.circom` path in `WITNESS_CPP`. Writes
 /// `deployments/testnet/circuit_keys/<stem>.graph.bin`.
-fn regenerate_witness_graphs(crate_dir: &Path, circomlib_was_patched: bool) -> Result<()> {
+fn regenerate_witness_graphs(
+    circuits_dir: &Path,
+    workspace_root: &Path,
+    out_dir: &Path,
+    circomlib_was_patched: bool,
+) -> Result<()> {
     #[cfg(not(feature = "regen-graph"))]
     {
-        let _ = (crate_dir, circomlib_was_patched);
+        let _ = (circuits_dir, workspace_root, out_dir, circomlib_was_patched);
         bail!(
-            "WITNESS_CPP requires `cargo build -p circuits --features regen-graph` \
+            "WITNESS_CPP requires `cargo run -p circuit-compiler --features regen-graph -- compile` \
              (see `make witness-graphs`)"
         );
     }
 
     #[cfg(feature = "regen-graph")]
     {
-        let expected = fs::read_to_string(crate_dir.join("circom.lock"))
+        let expected = fs::read_to_string(circuits_dir.join("circom.lock"))
             .context("read circuits/circom.lock")?
             .trim()
             .to_string();
@@ -926,23 +892,24 @@ fn regenerate_witness_graphs(crate_dir: &Path, circomlib_was_patched: bool) -> R
             .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow!("invalid WITNESS_CPP circuit path: {witness_cpp}"))?;
 
-        println!("cargo:warning=WITNESS_CPP detected - regenerating witness graph for {stem}");
+        eprintln!("WITNESS_CPP detected - regenerating witness graph for {stem}");
         circom_witness_rs::generate::build_witness()
             .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
 
-        // circom-witness-rs writes `graph.bin` into the circuits crate dir (cwd).
-        let src = crate_dir.join("graph.bin");
-        anyhow::ensure!(
-            src.is_file(),
-            "expected circom-witness-rs to write {}; not found",
-            src.display()
-        );
-        let dst = crate_dir
-            .join("../deployments/testnet/circuit_keys")
+        // circom-witness-rs writes `graph.bin` into the process cwd / package dir.
+        // Prefer out_dir, then tool manifest dir.
+        let tool_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+        let candidates = [out_dir.join("graph.bin"), tool_dir.join("graph.bin")];
+        let src = candidates
+            .into_iter()
+            .find(|p| p.is_file())
+            .ok_or_else(|| anyhow!("expected circom-witness-rs to write graph.bin; not found"))?;
+        let dst = workspace_root
+            .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}.graph.bin"));
         copy(&src, &dst)?;
         fs::remove_file(&src)?;
-        println!("cargo:warning=Wrote witness graph {}", dst.display());
+        eprintln!("Wrote witness graph {}", dst.display());
         Ok(())
     }
 }
@@ -1034,7 +1001,7 @@ fn inject_hint(
     }
 
     fs::write(file, patched).with_context(|| format!("Failed to write {}", file.display()))?;
-    println!("cargo:warning=Injected {marker} into {}", file.display());
+    eprintln!("Injected {marker} into {}", file.display());
     Ok(false)
 }
 
@@ -1126,7 +1093,7 @@ fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
         parser::{self, ParseBuffer},
     };
 
-    println!("cargo:warning= ===== wat_file {}...", wat_file.display());
+    eprintln!(" ===== wat_file {}...", wat_file.display());
 
     let wat_contents = fs::read_to_string(wat_file)
         .map_err(|e| anyhow!("read_to_string({}): {e}", wat_file.display()))?;
@@ -1266,23 +1233,21 @@ fn check_keys_need_generation(
         && let (Ok(r1cs_time), Ok(pk_time)) = (r1cs_meta.modified(), pk_meta.modified())
         && r1cs_time > pk_time
     {
-        println!(
-            "cargo:warning=WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
+        eprintln!(
+            "WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
         );
-        println!(
-            "cargo:warning=If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 cargo build"
+        eprintln!(
+            "If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 make circuits"
         );
-        println!("cargo:warning=Then REDEPLOY contracts with the new verification key!");
+        eprintln!("Then REDEPLOY contracts with the new verification key!");
     }
 
     // Note: vk_const.rs is optional (only for embedding VK in contracts).
     // We don't trigger regeneration just for this file since it would create
     // new incompatible keys. The user must explicitly use REGEN_KEYS=1.
     if !vk_const_path.exists() {
-        println!("cargo:warning=Note: vk_const.rs is missing but essential keys exist - skipping");
-        println!(
-            "cargo:warning=Run REGEN_KEYS=1 BUILD_TESTS=1 cargo build if you need vk_const.rs"
-        );
+        eprintln!("Note: vk_const.rs is missing but essential keys exist - skipping");
+        eprintln!("Run REGEN_KEYS=1 BUILD_TESTS=1 make circuits if you need vk_const.rs");
     }
 
     (
@@ -1298,7 +1263,7 @@ fn check_keys_need_generation(
 ///
 /// # Arguments
 ///
-/// * `crate_dir` - The circuits crate directory
+/// * `workspace_root` - Workspace root (for `testdata/`)
 /// * `out_dir` - The output directory containing WASM files
 /// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_AB`,
 ///   `selectiveDisclosure_1`)
@@ -1309,13 +1274,13 @@ fn check_keys_need_generation(
 /// Returns `Ok(true)` if keys were generated, `Ok(false)` if skipped,
 /// or an error if generation failed critically.
 fn generate_keys_if_needed(
-    crate_dir: &Path,
+    workspace_root: &Path,
     out_dir: &Path,
     circuit_name: &str,
     r1cs_file: &Path,
 ) -> Result<bool> {
     // Output keys to testdata/
-    let keys_dir = crate_dir.join("../testdata");
+    let keys_dir = workspace_root.join("testdata");
     fs::create_dir_all(&keys_dir).context("Could not create testdata")?;
 
     let pk_path = keys_dir.join(format!("{circuit_name}_proving_key.bin"));
@@ -1326,8 +1291,8 @@ fn generate_keys_if_needed(
     // Check for force regeneration flag
     let force_regen = env::var("REGEN_KEYS").is_ok();
     if force_regen {
-        println!("cargo:warning=REGEN_KEYS=1 detected - will regenerate keys");
-        println!("cargo:warning=WARNING: Remember to REDEPLOY contracts with the new VK!");
+        eprintln!("REGEN_KEYS=1 detected - will regenerate keys");
+        eprintln!("WARNING: Remember to REDEPLOY contracts with the new VK!");
     }
 
     // Check if keys need regeneration
@@ -1341,17 +1306,11 @@ fn generate_keys_if_needed(
     );
 
     if !needs_generation {
-        println!(
-            "cargo:warning=Skipping key generation for {} ({})",
-            circuit_name, reason
-        );
+        eprintln!("Skipping key generation for {} ({})", circuit_name, reason);
         return Ok(false);
     }
 
-    println!(
-        "cargo:warning=Key generation needed for {}: {}",
-        circuit_name, reason
-    );
+    println!("Key generation needed for {}: {}", circuit_name, reason);
 
     // Check for WASM file
     let wasm_path = out_dir
@@ -1361,65 +1320,63 @@ fn generate_keys_if_needed(
 
     if !wasm_path.exists() {
         // WASM is required for key generation - this is an error condition
-        println!(
-            "cargo:warning=ERROR: Cannot generate keys for {} - WASM file not found at {}",
+        eprintln!(
+            "ERROR: Cannot generate keys for {} - WASM file not found at {}",
             circuit_name,
             wasm_path.display()
         );
-        println!("cargo:warning=This usually happens when:");
-        println!("cargo:warning=  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 cargo build)");
-        println!("cargo:warning=  2. WASM compilation failed earlier in the build");
-        println!(
-            "cargo:warning=  3. OUT_DIR was cleaned (try: cargo clean && BUILD_TESTS=1 cargo build)"
-        );
+        eprintln!("This usually happens when:");
+        eprintln!("  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 make circuits)");
+        eprintln!("  2. WASM compilation failed earlier in the build");
+        eprintln!("  3. circuit artifacts were cleaned (try: BUILD_TESTS=1 make circuits)");
         return Err(anyhow!(
             "WASM file not found for key generation: {}",
             wasm_path.display()
         ));
     }
 
-    println!("cargo:warning=Generating Groth16 keys for {circuit_name}...");
+    eprintln!("Generating Groth16 keys for {circuit_name}...");
     match generate_groth16_keys(&wasm_path, r1cs_file) {
         Ok((pk, vk)) => {
             // Write proving key (binary)
             if let Err(e) = write_proving_key(&pk, &pk_path) {
-                println!("cargo:warning=Failed to write proving key: {e}");
+                eprintln!("Failed to write proving key: {e}");
             } else {
-                println!("cargo:warning=Proving key written to {}", pk_path.display());
+                eprintln!("Proving key written to {}", pk_path.display());
             }
 
             // Write verification key (snarkjs JSON format)
             if let Err(e) = write_verification_key(&vk, &vk_path) {
-                println!("cargo:warning=Failed to write verification key JSON: {e}");
+                eprintln!("Failed to write verification key JSON: {e}");
             } else {
-                println!(
-                    "cargo:warning=Verification key (snark JSON) written to {}",
+                eprintln!(
+                    "Verification key (snark JSON) written to {}",
                     vk_path.display()
                 );
             }
 
             // Write verification key for Soroban binary format
             if let Err(e) = write_verification_key_soroban_bin(&vk, &vk_soroban_path) {
-                println!("cargo:warning=Failed to write VK Soroban binary: {e}");
+                eprintln!("Failed to write VK Soroban binary: {e}");
             } else {
-                println!(
-                    "cargo:warning=Verification key (Soroban bin) written to {}",
+                eprintln!(
+                    "Verification key (Soroban bin) written to {}",
                     vk_soroban_path.display()
                 );
             }
 
             // Write verification key (const Rust) for potential embedding in contract
             if let Err(e) = write_verification_key_rust_const(&vk, &vk_const_path) {
-                println!("cargo:warning=Failed to write VK Rust const: {e}");
+                eprintln!("Failed to write VK Rust const: {e}");
             } else {
-                println!(
-                    "cargo:warning=Verification key (Rust const) written to {}",
+                eprintln!(
+                    "Verification key (Rust const) written to {}",
                     vk_const_path.display()
                 );
             }
 
-            println!(
-                "cargo:warning=VK has {} IC points ({} public inputs)",
+            eprintln!(
+                "VK has {} IC points ({} public inputs)",
                 vk.gamma_abc_g1.len(),
                 vk.gamma_abc_g1.len().saturating_sub(1)
             );
@@ -1427,7 +1384,7 @@ fn generate_keys_if_needed(
             Ok(true)
         }
         Err(e) => {
-            println!("cargo:warning=Failed to generate keys for {circuit_name}: {e}");
+            eprintln!("Failed to generate keys for {circuit_name}: {e}");
             Err(e)
         }
     }

@@ -66,9 +66,7 @@ The SDK does not read circuit files from disk — callers supply [`ProverArtifac
 The `examples/` directory demonstrates the blocking SDK API surface. Each example uses the shared `examples/common` bootstrap and exits 0 with instructions when a prerequisite is missing.
 
 All examples run in **release mode**. The transact examples resolve circuit
-artifacts from `target/circuits-artifacts/release`, which only a release build
-populates, so a debug build fails with a misleading "run `cargo build -p
-circuits`" error even after you have built the circuits correctly.
+artifacts from `target/circuits-artifacts` (populated by `make circuits`).
 
 | Example | What it shows | Run |
 |---------|---------------|-----|
@@ -89,7 +87,7 @@ See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup 
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
 | `SPP_CIRCUIT_KEYS_DIR` | `deployments/testnet/circuit_keys` | `deposit`, `transfer`, `withdraw` |
-| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts/{debug\|release}` | `deposit`, `transfer`, `withdraw` |
+| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts` | `deposit`, `transfer`, `withdraw` |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples (set to an empty string to disable the fallback) |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
@@ -108,7 +106,7 @@ See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup 
 ### Prerequisites
 
 - The examples target the checked-in **testnet** deployment by default.
-- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. Build them first with `cargo build -p circuits --release`.
+- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. Build them first with `make circuits`.
 - Transact examples need a **funded, onboarded** testnet account: onboard the wallet (for example with the `spp` CLI) and ensure the account holds the pool asset.
 - **Allowlist pools require ASP membership.** The default testnet pool (native XLM) carries only the `blocklist` flag and needs no membership setup. The second testnet pool (EURC) adds the `allowlist` flag; before a wallet can `deposit` or `transfer` through it, the pool admin must insert each participant's ASP membership leaf into the `asp_membership` contract. Without it those examples fail even though the account is funded, onboarded, and circuit-ready. See [ASP membership for allowlist pools](examples/SETUP.md#asp-membership-for-allowlist-pools).
 - These prerequisite classes print a skip message and exit 0 rather than failing: a missing `STELLAR_SECRET_KEY`, a wallet without privacy keys, missing circuit artifacts, and an RPC retention gap. Other misconfiguration — an unreadable `SPP_DEPLOYMENT_JSON`, an unopenable `SPP_WALLET_PATH`, or a `SPP_POOL_CONTRACT_ID` that is not in the deployment config — surfaces as a hard error, because those paths propagate rather than exiting early.

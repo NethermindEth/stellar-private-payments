@@ -206,7 +206,7 @@ const POLICY_TX_GVK_2_2: &str = "policy_tx_gvk_2_2";
 /// `GvkMode::Off` maps to `policy_flags.circuit_stem()` unchanged.
 ///  Non-GVK pools are untouched by this function.
 /// `ViewOnly`/`Traceable` produce one of the 8 stems registered in
-/// `circuits/build.rs` as `POLICY_GLOBAL_VIEW_KEY_CIRCUITS`, of the shape
+/// `tools/circuit-compiler` as `POLICY_GLOBAL_VIEW_KEY_CIRCUITS`, of the shape
 /// `policy_tx_gvk_2_2[_{A|B|AB}]_{viewonly|traceable}`.
 pub fn gvk_circuit_stem(policy_flags: PolicyFlags, gvk_mode: GvkMode) -> String {
     let Some(mode_word) = gvk_mode.stem_word() else {
@@ -249,7 +249,7 @@ pub fn parse_gvk_circuit_stem(stem: &str) -> Result<(PolicyFlags, GvkMode)> {
     Ok((flags, mode))
 }
 
-/// All 8 GVK circuit stems registered in `circuits/build.rs` as
+/// All 8 GVK circuit stems registered in `tools/circuit-compiler` as
 /// `POLICY_GLOBAL_VIEW_KEY_CIRCUITS`: every [`PolicyFlags`] combination
 /// crossed with [`GvkMode::ViewOnly`] and [`GvkMode::Traceable`].
 pub fn all_gvk_circuit_stems() -> Vec<String> {
@@ -453,7 +453,7 @@ mod tests {
         let stems = all_gvk_circuit_stems();
         assert_eq!(
             stems, expected,
-            "stems must match circuits/build.rs exactly"
+            "stems must match tools/circuit-compiler exactly"
         );
 
         for stem in &stems {

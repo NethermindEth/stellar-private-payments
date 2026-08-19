@@ -1,17 +1,17 @@
 # Licensing and Legal Nuances
 
 ## Primary License
-The source code in this directory is licensed under the *Apache 2.0*, consistent with the rest of the repository. The only exception is the `build.rs` file.
+The source code in this directory is licensed under the *Apache 2.0*, consistent with the rest of the repository.
 
 ## Dependencies and Exceptions
 
-### 1. Build Scripts (`build.rs`)
+### 1. Circuit Compiler (`tools/circuit-compiler`)
 
-The `build.rs` file included in this crate utilizes dependencies (`https://github.com/iden3/circom`) licensed under *GPLv3*.
+Circuit artifact compilation lives in `tools/circuit-compiler` and utilizes dependencies (`https://github.com/iden3/circom`) licensed under *GPLv3*.
 
-* *Status:* While `build.rs` itself is subject to *GPLv3* due to these linkings, it is used strictly as a build-time tool.
+* *Status:* That tool is subject to *GPLv3* due to these linkings, and is used strictly as a build-time tool.
 
-* *No Contamination:* The `build.rs` script is not compiled into the final project binaries or artifacts. Its *GPLv3* licensing does not extend to the crate's main source code or the generated build artifacts.
+* *No Contamination:* The compiler is not compiled into the final project binaries or artifacts. Its *GPLv3* licensing does not extend to this crate's main source code or the generated build artifacts.
 
 ### 2. Circom Circuits (files with `.circom` extension)
 

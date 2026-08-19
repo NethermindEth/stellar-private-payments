@@ -40,7 +40,7 @@ jobs:
           version: v25.1.0
 
       - name: Build circuit artifacts
-        run: cargo build -p circuits
+        run: make circuits
 
       - name: Build contracts
         run: |

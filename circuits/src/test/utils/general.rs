@@ -97,23 +97,39 @@ pub fn scalar_to_bigint(s: Scalar) -> BigInt {
     BigInt::from(u)
 }
 
-/// Load the compiled WASM and R1CS artifacts for a circuit by name.
-/// This expects files to be located under the `CIRCUIT_OUT_DIR` tree
-/// as produced by the build system.
-///
-/// # Arguments
-///
-/// * `name` - Name of the circuit (without file extension)
-///
-/// # Returns
-///
-/// Returns `Ok((wasm_path, r1cs_path))` if both files exist, or an error
-/// if either file is not found at the expected location.
+/// Load the compiled WASM and R1CS artifacts for a circuit by name from
+/// `target/circuits-artifacts/` (`make circuits`).
 pub fn load_artifacts(name: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
+    let publish = workspace_root()?.join("target").join("circuits-artifacts");
+
+    let wasm = publish.join(format!("{name}.wasm"));
+    let r1cs = publish.join(format!("{name}.r1cs"));
+    if wasm.is_file() && r1cs.is_file() {
+        return Ok((wasm, r1cs));
+    }
+
+    artifacts_in_out_dir(&publish.join("out"), name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "artifacts for `{name}` not found; run \
+                 `BUILD_TESTS=1 make circuits`"
+        )
+    })
+}
+
+fn artifacts_in_out_dir(out_dir: &std::path::Path, name: &str) -> Option<(PathBuf, PathBuf)> {
     let wasm = out_dir.join(format!("wasm/{name}_js/{name}.wasm"));
     let r1cs = out_dir.join(format!("{name}.r1cs"));
-    anyhow::ensure!(wasm.exists(), "WASM file not found at {}", wasm.display());
-    anyhow::ensure!(r1cs.exists(), "R1CS file not found at {}", r1cs.display());
-    Ok((wasm, r1cs))
+    (wasm.is_file() && r1cs.is_file()).then_some((wasm, r1cs))
+}
+
+fn workspace_root() -> anyhow::Result<PathBuf> {
+    let mut root = std::env::current_dir()?;
+    loop {
+        if root.join("Cargo.lock").is_file() {
+            return Ok(root);
+        }
+        if !root.pop() {
+            anyhow::bail!("could not find workspace root (no Cargo.lock)");
+        }
+    }
 }

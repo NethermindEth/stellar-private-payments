@@ -54,22 +54,15 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repo_root = repo_root_from_manifest_dir(&manifest_dir);
 
-    let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
-    let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
+    let circuits_out = repo_root.join("target/circuits-artifacts");
 
     if !circuits_out.is_dir() {
-        let suggestion = if profile == "release" {
-            "cargo build -p circuits --release"
-        } else {
-            "cargo build -p circuits"
-        };
         panic!(
-            "sdk/web/build.rs: missing circuit artifacts directory for PROFILE={profile}: {}. Run `{suggestion}` first.",
+            "sdk/web/build.rs: missing circuit artifacts directory: {}. Run `make circuits` first.",
             circuits_out.display(),
         );
     }
 
-    println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed=build.rs");
 
     // Non-secret e2e config only.

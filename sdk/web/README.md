@@ -193,7 +193,7 @@ npm run check:types
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
 ```bash
-cargo build -p circuits --release
+make circuits
 npm run build
 npm pack
 ```
