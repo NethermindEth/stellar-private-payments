@@ -133,8 +133,11 @@ pub async fn spawn_bootnode(
     })
 }
 
-pub fn event_id_for_ledger(ledger: u32) -> String {
-    format!("event-{ledger:010}")
+fn random_event_id(ledger: u32) -> String {
+    let mut bytes = [0u8; 8];
+    getrandom::getrandom(&mut bytes).expect("random event id");
+    let suffix = u64::from_le_bytes(bytes);
+    format!("event-{ledger:010}-{suffix:016x}")
 }
 
 pub fn sample_event() -> Event {
@@ -147,7 +150,7 @@ pub fn sample_event_at(ledger: u32) -> Event {
         "ledger": ledger,
         "ledgerClosedAt": "2024-01-01T00:00:00Z",
         "contractId": FIXTURE_CONTRACT_IDS[0],
-        "id": event_id_for_ledger(ledger),
+        "id": random_event_id(ledger),
         "topic": [],
         "value": "00",
     }))

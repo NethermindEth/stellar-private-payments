@@ -51,7 +51,7 @@ impl Indexer {
                 self.state.contract_ids.as_ref(),
                 start_ledger,
                 cursor.as_deref(),
-                page_size,
+                Some(page_size),
             );
             let result = self.state.upstream.get_events(params).await?;
 
