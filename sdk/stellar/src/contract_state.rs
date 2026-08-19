@@ -1,9 +1,9 @@
 use crate::{
     conversions::{
-        field_to_scval_u256, scval_to_address_string, scval_to_baby_jub_jub_point, scval_to_base64,
-        scval_to_bool, scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_baby_jub_jub_point, scval_to_bool,
+        scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
     },
-    rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
+    rpc::{Client, ContractDataBulkRequest},
     soroban_encode::BASE_FEE,
 };
 use anyhow::{Result, anyhow};
@@ -62,31 +62,6 @@ pub struct PreparedSorobanTx {
     /// Ledger number from `simulateTransaction` (`latestLedger`), for auth
     /// expiration.
     pub latest_ledger: u32,
-}
-
-/// Soroban RPC `getEvents` topic filter to match a pool's `NewNullifierEvent`
-/// carrying the given base64-encoded nullifier ScVal.
-///
-/// The pool contract's `NewNullifierEvent` (contracts/pool/src/pool.rs) has a
-/// single `#[topic]` field (`nullifier`) and no explicit `#[contractevent(
-/// topics = ...)]` override, so the `#[contractevent]` macro's default
-/// applies: the event name, snake_cased, is prepended as an implicit first
-/// topic segment (soroban-sdk-macros' derive_event.rs — `prefix_topics`
-/// defaults to `vec![snake_case(event_name)]` when no explicit `topics` are
-/// given). The real on-chain topic list is therefore **two segments**:
-/// `["new_nullifier_event", nullifier]` — confirmed by decoding a live
-/// withdraw transaction's emitted `contractEventsXdr` directly. (An earlier
-/// version of this fix mistakenly concluded the topic list was
-/// single-segment and dropped the name — that was checked against the
-/// macro's `if` branch without reading the `else`, and was itself wrong;
-/// verified against the real on-chain event bytes before landing this.)
-fn nullifier_topic_filters(nullifier_b64: String) -> Result<Vec<TopicFilter>> {
-    let name_scval = xdr::ScVal::Symbol(
-        xdr::ScSymbol::try_from("new_nullifier_event")
-            .map_err(|_| anyhow!("invalid event name symbol"))?,
-    );
-    let name_b64 = scval_to_base64(&name_scval)?;
-    Ok(vec![vec![name_b64, nullifier_b64]])
 }
 
 impl StateFetcher {
@@ -635,77 +610,35 @@ impl StateFetcher {
 
     /// Checks whether a note nullifier has been spent in the pool.
     ///
-    /// Queries the pool's `NewNullifierEvent` contract events via the Soroban
-    /// RPC `getEvents` endpoint. A matching event with the supplied nullifier
-    /// means the note has been spent.
+    /// Simulates the pool's public `is_spent` entrypoint via the Soroban RPC
+    /// `simulateTransaction` endpoint. Unlike scanning `NewNullifierEvent`
+    /// contract events, this reads current contract state, so it is bounded
+    /// neither by the RPC's event retention window nor by per-request ledger
+    /// scan limits.
     ///
     /// # Arguments
     /// * `pool_contract_id` - Contract id of the enabled pool to query.
     /// * `nullifier` - Note nullifier to check.
     ///
     /// # Returns
-    /// Returns `true` when at least one `NewNullifierEvent` carrying this
-    /// nullifier exists.
+    /// Returns `true` when the pool reports the nullifier as spent.
     ///
     /// # Errors
-    /// Returns an error if the pool is not an enabled deployment, the RPC
-    /// `getEvents` call fails, or the requested ledger range is outside the
-    /// RPC's retained event window.
+    /// Returns an error if the pool is not an enabled deployment, the
+    /// simulation fails, or the contract returns a non-boolean value.
     pub async fn is_nullifier_spent(
         &self,
         pool_contract_id: &str,
         nullifier: Field,
     ) -> Result<bool> {
         let pool = self.enabled_pool_for(pool_contract_id)?;
-
-        let nullifier_scval = field_to_scval_u256(nullifier);
-        let nullifier_b64 = scval_to_base64(&nullifier_scval)?;
-        let topics = nullifier_topic_filters(nullifier_b64)?;
-
-        // A single `getEvents` call only scans a limited number of ledgers
-        // forward from its start point before returning — even when the
-        // response is empty. Confirmed empirically against the live RPC:
-        // querying from a pool's (old) deployment ledger for a nullifier
-        // spent ~30,000 ledgers later returned zero events, even though
-        // that ledger range is well within the RPC's overall retention
-        // window (bounded separately by `oldestLedger`); querying from a
-        // start within ~10,000 ledgers of the spend found it immediately.
-        // A single unpaginated call anchored at `deployment_ledger` — which
-        // only grows staler over a pool's lifetime — silently produces a
-        // false "unspent" for any note spent more than one scan window
-        // after deployment. Keep paginating via the returned `cursor` (the
-        // documented continuation mechanism) until a match is found or the
-        // cursor stops advancing (caught up to the events tip).
-        const MAX_ROUNDS: usize = 64;
-        let mut start = EventStart::Ledger(pool.deployment_ledger);
-        let mut last_cursor: Option<String> = None;
-
-        for _ in 0..MAX_ROUNDS {
-            let resp = self
-                .client
-                .get_events(
-                    start,
-                    Some(EventType::Contract),
-                    std::slice::from_ref(&pool.pool_contract_id),
-                    &topics,
-                    Some(1),
-                )
-                .await?;
-
-            if !resp.events.is_empty() {
-                return Ok(true);
-            }
-
-            if last_cursor.as_deref() == Some(resp.cursor.as_str()) {
-                // No forward progress since the last round: caught up to
-                // the events tip with no match found.
-                return Ok(false);
-            }
-            last_cursor = Some(resp.cursor.clone());
-            start = EventStart::Cursor(resp.cursor);
-        }
-
-        Ok(false)
+        let tx = Self::build_is_spent_simulation_tx(
+            &pool.pool_contract_id,
+            &self.config.deployer,
+            nullifier,
+        )?;
+        let retval = self.simulate_single_retval(&tx).await?;
+        Ok(scval_to_bool(&retval)?)
     }
 
     async fn simulate_single_retval(&self, tx: &xdr::TransactionEnvelope) -> Result<xdr::ScVal> {
@@ -757,6 +690,22 @@ impl StateFetcher {
             contract_id,
             "is_known_root",
             vec![field_to_scval_u256(root)],
+            Vec::new(),
+        )
+    }
+
+    fn build_is_spent_simulation_tx(
+        contract_id: &str,
+        source_account: &str,
+        nullifier: Field,
+    ) -> Result<xdr::TransactionEnvelope> {
+        Self::build_invoke_contract_tx_envelope(
+            source_account,
+            xdr::SequenceNumber(0),
+            BASE_FEE,
+            contract_id,
+            "is_spent",
+            vec![field_to_scval_u256(nullifier)],
             Vec::new(),
         )
     }
@@ -931,49 +880,6 @@ mod tests {
         );
 
         xdr::ScVal::Map(Some(entries))
-    }
-
-    #[test]
-    fn nullifier_topic_filters_match_a_real_on_chain_nullifier_event() {
-        // Ground truth: a live withdraw transaction's emitted contractEventsXdr
-        // (decoded via stellar-xdr from the raw event bytes returned by
-        // Soroban RPC's getTransaction), containing a genuine NewNullifierEvent
-        // for nullifier
-        // 0x136df617a7176ef26d48afe2c4a423319f853357cc12a70fdcf54b26959f42e1.
-        // Its on-chain topic list is two segments: the event name, snake_cased
-        // ("new_nullifier_event" — soroban-sdk's #[contractevent] macro default
-        // when no explicit `topics` override is given), then the nullifier.
-        const REAL_EVENT_XDR_B64: &str = "AAAAAAAAAAF8STO8BLst2Ct3llRlk+hZeOh0MzBaWHej2f2F56nPAAAAAAEAAAAAAAAAAgAAAA8AAAATbmV3X251bGxpZmllcl9ldmVudAAAAAALE232F6cXbvJtSK/ixKQjMZ+FM1fMEqcP3PVLJpWfQuEAAAARAAAAAQAAAAA=";
-        let real_event =
-            xdr::ContractEvent::from_xdr_base64(REAL_EVENT_XDR_B64, xdr::Limits::none())
-                .expect("valid ContractEvent XDR");
-        let xdr::ContractEventBody::V0(real_event_body) = real_event.body;
-        let real_topics: Vec<xdr::ScVal> = real_event_body.topics.into();
-
-        let nullifier =
-            Field::from_str("0x136df617a7176ef26d48afe2c4a423319f853357cc12a70fdcf54b26959f42e1")
-                .expect("valid field hex");
-        let nullifier_b64 = scval_to_base64(&field_to_scval_u256(nullifier)).expect("encodable");
-        let filters = nullifier_topic_filters(nullifier_b64).expect("valid topic filters");
-
-        assert_eq!(filters.len(), 1, "expected exactly one topic filter");
-        assert_eq!(
-            filters[0].len(),
-            real_topics.len(),
-            "topic filter segment count must match the real event's topic count"
-        );
-
-        for (i, (filter_segment_b64, real_topic)) in
-            filters[0].iter().zip(real_topics.iter()).enumerate()
-        {
-            let real_topic_xdr = real_topic
-                .to_xdr_base64(xdr::Limits::none())
-                .expect("encodable");
-            assert_eq!(
-                filter_segment_b64, &real_topic_xdr,
-                "topic filter segment {i} must byte-for-byte match the real event's topic {i}"
-            );
-        }
     }
 
     #[test]
