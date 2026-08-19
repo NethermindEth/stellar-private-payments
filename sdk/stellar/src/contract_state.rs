@@ -845,7 +845,6 @@ impl StateFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::WriteXdr;
 
     fn field(v: u64) -> Field {
         Field(U256::from(v))
