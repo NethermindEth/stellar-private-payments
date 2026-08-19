@@ -80,7 +80,7 @@ ON CONFLICT (deployment_id) DO NOTHING
             .await?;
         let state_rows = client
             .execute(
-                &format!("DELETE FROM {INDEXER_STATE} WHERE deployment_id != $1"),
+                &format!("DELETE FROM {STATE} WHERE deployment_id != $1"),
                 &[&self.deployment_id()],
             )
             .await?;
