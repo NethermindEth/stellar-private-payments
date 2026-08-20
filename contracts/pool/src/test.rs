@@ -1078,7 +1078,11 @@ fn transact_rejects_deposit_above_maximum() {
     env.mock_all_auths();
 
     let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD1);
-    let over = mk_ext_data(&env, Address::generate(&env), (max + 1) as i32);
+    // try_from rather than `as`: the boundary is the whole point of this test, so a
+    // value that did not fit i32 must fail loudly instead of wrapping into a
+    // negative deposit.
+    let above_max = i32::try_from(max + 1).expect("max + 1 must fit i32");
+    let over = mk_ext_data(&env, Address::generate(&env), above_max);
 
     let err = pool
         .try_transact(&proof, &over, &Address::generate(&env))
@@ -1100,7 +1104,8 @@ fn transact_accepts_deposit_at_maximum_bound() {
     env.mock_all_auths();
 
     let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD2);
-    let at = mk_ext_data(&env, Address::generate(&env), max as i32);
+    let at_max = i32::try_from(max).expect("max must fit i32");
+    let at = mk_ext_data(&env, Address::generate(&env), at_max);
 
     let err = pool
         .try_transact(&proof, &at, &Address::generate(&env))
