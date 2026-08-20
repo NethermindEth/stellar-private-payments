@@ -15,21 +15,17 @@ use crate::{
     serialization::{field_to_scalar, scalar_to_field},
 };
 use anyhow::{Result, anyhow};
+use ark_bn254::Fr as Scalar;
+use taceo_poseidon2::bn254::t2;
 use types::Field;
-use zkhash::{
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
-};
 
 /// Poseidon2 compression for merkle tree nodes.
 ///
 /// Computes `P(left, right)[0] + left` where P is the Poseidon2 permutation.
 #[inline]
 pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let input = [left, right];
-    let perm = poseidon2.permutation(&input);
-    perm[0].add(input[0])
+    let perm = t2::permutation(&[left, right]);
+    perm[0].add(left)
 }
 
 /// Build a Merkle root from a full power-of-two leaf list.
@@ -351,10 +347,8 @@ mod tests {
     use super::*;
     use crate::serialization::scalar_to_bytes;
     use alloc::vec;
-    use zkhash::{
-        ark_ff::{BigInteger, PrimeField, Zero},
-        fields::bn256::FpBN256 as Scalar,
-    };
+    use ark_bn254::Fr as Scalar;
+    use ark_ff::{BigInteger, PrimeField, Zero};
 
     #[test]
     fn prefix_built_root_matches_prefix_root() {

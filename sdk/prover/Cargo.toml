@@ -10,8 +10,6 @@ description = "Browser WASM module for ZK proof generation using Groth16"
 [dependencies]
 # workspace
 types = { workspace = true }
-# Poseidon2 hash
-zkhash = { workspace = true }
 
 # external
 anyhow = { workspace = true }
@@ -27,6 +25,7 @@ ark-std = { workspace = true }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 serde = { workspace = true }
 sha2 = { workspace = true }
+taceo-poseidon2 = { workspace = true }
 tracing = { workspace = true }
 # Cross-target clock (std on native, performance.now() on wasm)
 web-time = { workspace = true }

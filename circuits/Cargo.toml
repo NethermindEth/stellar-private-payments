@@ -10,7 +10,6 @@ publish.workspace = true
 default = ["std"]
 std = [
     "anyhow",
-    "ark-bn254",
     "ark-circom",
     "ark-ff",
     "ark-groth16",
@@ -25,14 +24,13 @@ std = [
 regen-graph = ["dep:circom-witness-rs"]
 
 [dependencies]
-# workspace
-# Core dependencies (no_std compatible)
-zkhash = { workspace = true }
-
 # external
+# Core dependencies (no_std compatible)
+ark-bn254 = { workspace = true }
+taceo-poseidon2 = { workspace = true }
+
 # Test utilities dependencies (std only — used by the `test` module)
 anyhow = { workspace = true, optional = true }
-ark-bn254 = { workspace = true, optional = true }
 ark-circom = { workspace = true, optional = true }
 ark-ff = { workspace = true, optional = true }
 ark-groth16 = { workspace = true, optional = true }

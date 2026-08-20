@@ -10,7 +10,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use anyhow::{Result, anyhow};
-use zkhash::{ark_ff::PrimeField, fields::bn256::FpBN256 as Scalar};
+use ark_bn254::Fr as Scalar;
+use ark_ff::PrimeField;
 
 use crate::{
     crypto::{poseidon2_compression, poseidon2_hash2_internal},

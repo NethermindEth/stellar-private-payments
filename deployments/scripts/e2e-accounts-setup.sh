@@ -94,12 +94,13 @@ need python3
 SPP_BIN=""
 spp() {
   if [ -z "$SPP_BIN" ]; then
-    # Prefer a project build over any unrelated `spp` on PATH.
     if [ -n "${E2E_SPP_PATH:-}" ]; then
       SPP_BIN="$E2E_SPP_PATH"
-    elif [ -x "$REPO_ROOT/target/release/spp" ]; then
-      SPP_BIN="$REPO_ROOT/target/release/spp"
     else
+      # The CLI compiles deployments.json in, so an existing target/release/spp
+      # may still target the previous deployment. Always let cargo decide
+      # whether a rebuild is needed instead of reusing the binary on sight.
+      need cargo
       step "building the spp CLI"
       ( cd "$REPO_ROOT" && cargo build --release -p stellar-private-payments-cli ) \
         || die "failed to build the spp CLI"

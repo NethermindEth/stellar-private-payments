@@ -12,7 +12,7 @@
 
 use crate::{
     r1cs::R1CS,
-    serialization::bytes_to_fr,
+    serialization::bytes_to_scalar,
     types::{FIELD_SIZE, Groth16Proof},
 };
 use alloc::vec::Vec;
@@ -107,7 +107,7 @@ fn verify_proof_with_processed_vk(
 
     let mut public_inputs = Vec::with_capacity(num_inputs);
     for chunk in public_inputs_bytes.chunks_exact(FIELD_SIZE) {
-        public_inputs.push(bytes_to_fr(chunk)?);
+        public_inputs.push(bytes_to_scalar(chunk)?);
     }
 
     <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
@@ -409,7 +409,7 @@ impl Prover {
         // Parse witness elements
         let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
         for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
-            witness.push(bytes_to_fr(chunk)?);
+            witness.push(bytes_to_scalar(chunk)?);
         }
 
         // Create circuit with R1CS and witness
@@ -498,7 +498,7 @@ impl Prover {
 
         let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
         for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
-            witness.push(bytes_to_fr(chunk)?);
+            witness.push(bytes_to_scalar(chunk)?);
         }
 
         let circuit = R1CSCircuit {

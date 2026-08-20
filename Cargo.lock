@@ -701,10 +701,12 @@ dependencies = [
 name = "asp-membership"
 version = "0.1.0"
 dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "num-bigint",
  "soroban-sdk",
  "soroban-utils",
- "zkhash",
+ "taceo-poseidon2",
 ]
 
 [[package]]
@@ -1203,10 +1205,10 @@ dependencies = [
  "program_structure",
  "regex",
  "serde_json",
+ "taceo-poseidon2",
  "type_analysis",
  "types",
  "wast",
- "zkhash",
 ]
 
 [[package]]
@@ -2306,6 +2308,8 @@ name = "e2e-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "asp-membership",
  "asp-non-membership",
  "circom-groth16-verifier",
@@ -2319,7 +2323,6 @@ dependencies = [
  "tx-planner",
  "types",
  "witness",
- "zkhash",
 ]
 
 [[package]]
@@ -4671,11 +4674,11 @@ dependencies = [
  "rayon",
  "serde",
  "sha2 0.11.0",
+ "taceo-poseidon2",
  "tracing",
  "types",
  "web-time",
  "x25519-dalek",
- "zkhash",
 ]
 
 [[package]]
@@ -6318,6 +6321,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "taceo-poseidon2"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c167df5e799207335a7acfec5404aa8fae59fad877c6cd20205815d690ba7157"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-std 0.6.0",
+ "num-bigint",
+ "num-traits",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7727,17 +7743,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "zkhash"
-version = "0.2.0"
-dependencies = [
- "ark-ff 0.6.0",
- "cfg-if",
- "hex",
- "lazy_static",
- "rand 0.8.7",
 ]
 
 [[package]]

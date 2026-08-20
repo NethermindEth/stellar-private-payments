@@ -6,14 +6,12 @@ mod tests {
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
     };
     use anyhow::Result;
-    use ark_bn254::Fr;
-    use ark_ff::{BigInteger, PrimeField};
+    use ark_bn254::Fr as Scalar;
     use core::str::FromStr;
     use std::{
         panic::{self, AssertUnwindSafe},
         path::Path,
     };
-    use zkhash::fields::bn256::FpBN256 as Scalar;
 
     /// `p - 1`, the `y`-coordinate of the Baby JubJub order-2 point `(0, -1)`.
     const NEG_ONE: &str =
@@ -60,10 +58,6 @@ mod tests {
         );
         inputs.set("salt", notes.iter().map(|n| n.salt).collect::<Vec<_>>());
         inputs
-    }
-
-    fn fr_to_scalar(fr: Fr) -> Scalar {
-        Scalar::from_le_bytes_mod_order(&fr.into_bigint().to_bytes_le())
     }
 
     /// Returns `true` when the prover produced a verifying proof. Any other
@@ -176,11 +170,7 @@ mod tests {
         }
         expected.extend([d.0, d.1, nonce]);
 
-        let mut actual: Vec<Scalar> = res
-            .public_inputs
-            .iter()
-            .map(|fr| fr_to_scalar(*fr))
-            .collect();
+        let mut actual: Vec<Scalar> = res.public_inputs.clone();
         expected.sort();
         actual.sort();
         assert_eq!(
