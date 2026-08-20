@@ -43,6 +43,7 @@
 #![deny(unsafe_code)]
 
 pub mod chain;
+pub mod circuits;
 pub mod disclosure;
 pub mod planner;
 pub mod state;
@@ -68,6 +69,9 @@ mod sync;
 mod transact;
 
 pub use account::Account;
+#[cfg(not(target_arch = "wasm32"))]
+pub use circuits::CircuitStore;
+pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
 pub use client::Client;
 pub use core::PoolCore;
 pub use disclosure::{
