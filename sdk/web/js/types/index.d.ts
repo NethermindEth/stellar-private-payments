@@ -40,11 +40,17 @@ export interface Account {
   portfolio(): Promise<unknown>;
   userPublicKeys(): Promise<unknown>;
   aspSecret(): Promise<string>;
-  userNotes(limit: number): Promise<unknown>;
+  userNotes(options?: UserNotesOptions | null): Promise<unknown>;
   isRegistered(): Promise<boolean>;
   deriveAspUserLeaf(): Promise<string>;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   pool(options: PoolOptions): Promise<PrivatePool>;
+}
+
+export interface UserNotesOptions {
+  offset?: number;
+  limit?: number;
+  spent?: boolean | null;
 }
 
 /** Deployment runtime returned by {@link Client.new}. */

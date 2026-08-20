@@ -5,7 +5,7 @@ use state::{SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
 use types::{
     ContractConfig, EncryptionPublicKey, Field, NotePublicKey, OperationalFeedItem,
-    PortfolioBalance, RecipientLookup, UserNoteSummary,
+    PortfolioBalance, RecipientLookup, UserNoteSummary, UserNotesPage,
 };
 
 use crate::{
@@ -80,13 +80,15 @@ pub(crate) fn portfolio_balances_from_storage(
         .map_err(|e| Error::Other(e.to_string()))
 }
 
-pub(crate) fn user_notes_from_storage(
+pub(crate) fn user_notes_page_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
+    offset: u32,
     limit: u32,
-) -> Result<Vec<UserNoteSummary>, Error> {
+    spent: Option<bool>,
+) -> Result<UserNotesPage, Error> {
     storage
-        .list_user_notes(user_address, limit)
+        .list_user_notes_page(user_address, offset, limit, spent)
         .map_err(|e| Error::Other(e.to_string()))
 }
 
@@ -138,11 +140,13 @@ pub trait Storage: stellar::ContractDataStorage {
         config: &ContractConfig,
     ) -> Result<Vec<PortfolioBalance>, Error>;
 
-    async fn list_user_notes(
+    async fn list_user_notes_page(
         &self,
         user_address: &str,
+        offset: u32,
         limit: u32,
-    ) -> Result<Vec<UserNoteSummary>, Error>;
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error>;
 
     async fn operational_feed(
         &self,

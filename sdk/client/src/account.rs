@@ -1,5 +1,5 @@
 use types::{
-    ContractConfig, EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary,
+    ContractConfig, EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNotesPage,
 };
 
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
@@ -95,13 +95,23 @@ impl<S: Storage> Account<S> {
         crate::crypto::derive_asp_user_leaf(&note, &blinding)
     }
 
-    /// Notes for this account across all pools (newest first).
+    /// A page of notes for this account across all pools (newest first),
+    /// together with the total number of matching notes.
+    ///
+    /// `spent` filters to spent-only (`Some(true)`), unspent-only
+    /// (`Some(false)`), or all notes (`None`) — applied in SQL so `offset`/
+    /// `limit` page over the filtered set and `total` counts the same set.
     ///
     /// With [`SyncMode::Inline`], local storage is synced before reading.
-    pub async fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {
+    pub async fn user_notes(
+        &self,
+        offset: u32,
+        limit: u32,
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error> {
         self.ensure_synced().await?;
         self.storage
-            .list_user_notes(&self.user_address, limit)
+            .list_user_notes_page(&self.user_address, offset, limit, spent)
             .await
     }
 

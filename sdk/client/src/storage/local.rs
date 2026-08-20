@@ -7,12 +7,13 @@ use tx_planner::SpendableNote;
 use types::{
     ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
     OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+    UserNotesPage,
 };
 
 use super::{
     Storage, map_build_params, map_user_keys, operational_feed_from_storage,
     pool_notes_from_storage, portfolio_balances_from_storage, recipient_lookup_from_storage,
-    spendable_notes_from_storage, user_notes_from_storage,
+    spendable_notes_from_storage, user_notes_page_from_storage,
 };
 use crate::{
     core::process_local_state,
@@ -106,12 +107,14 @@ impl Storage for LocalStorage {
         portfolio_balances_from_storage(&self.storage(), user_address, config)
     }
 
-    async fn list_user_notes(
+    async fn list_user_notes_page(
         &self,
         user_address: &str,
+        offset: u32,
         limit: u32,
-    ) -> Result<Vec<UserNoteSummary>, Error> {
-        user_notes_from_storage(&self.storage(), user_address, limit)
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error> {
+        user_notes_page_from_storage(&self.storage(), user_address, offset, limit, spent)
     }
 
     async fn operational_feed(
