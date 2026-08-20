@@ -11,9 +11,12 @@ This directory contains the Groth16 key material used by the testnet deployment.
 ## Witness graphs (`*.graph.bin`)
 
 Native and browser witness generation uses committed `circom-witness-rs` operation
-graphs (not Circom WASM / Wasmer). Regenerate with `make witness-graphs`.
+graphs (not Circom WASM / Wasmer). Regenerate with `make circuits GRAPHS=1`, then
+copy the `*.graph.bin` files from `target/circuits-artifacts/` into this
+directory to update the committed artifacts.
 The Circom CLI must match `circuits/circom.lock` (pinned to the same release as
-the Rust circom crates used for R1CS).
+the Rust circom crates used for R1CS), and graph generation requires a C++
+toolchain.
 
 Committed for all production stems: `policy_tx_2_2`, `policy_tx_2_2_{A,B,AB}`,
 and `selectiveDisclosure_{1..4}`.
