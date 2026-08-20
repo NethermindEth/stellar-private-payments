@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Account as NativeAccount,
     types::{EncryptionPublicKey, NotePublicKey},
 };

@@ -3,14 +3,14 @@
 
 use anyhow::Result;
 use serde::Serialize;
-use stellar_private_payments_sdk::state::CURRENT_DISCLAIMER_TEXT_MD;
+use stellar_private_payments::state::CURRENT_DISCLAIMER_TEXT_MD;
 
 use crate::{config::CliConfig, output};
 
 #[tracing::instrument(
     name = "cmd_disclaimer",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new())
+    fields(correlation_id = %stellar_private_payments::types::correlation_id_or_new())
 )]
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     let accepted = match &config.account {

@@ -37,9 +37,9 @@ pub struct BabyJubJubPoint {
 
 /// A single note's Global View Key ciphertext: ephemeral key `R` and the
 /// three masked field elements. Field names mirror
-/// `sdk/types::GlobalViewKeyCiphertext` (no code sharing is possible since
-/// this crate is `#![no_std]`), keeping future `contract_state.rs`/indexer
-/// mapping mechanical.
+/// `stellar_private_payments::types::GlobalViewKeyCiphertext` (no code sharing
+/// is possible since this crate is `#![no_std]`), keeping future
+/// `contract_state.rs`/indexer mapping mechanical.
 #[contracttype]
 #[derive(Clone)]
 pub struct GvkCiphertext {

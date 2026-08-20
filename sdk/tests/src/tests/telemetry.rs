@@ -4,7 +4,7 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
-use stellar_private_payments_sdk::types::NoteAmount;
+use stellar_private_payments::types::NoteAmount;
 use tracing_subscriber::layer::SubscriberExt;
 
 #[derive(Clone, Default)]
@@ -45,8 +45,7 @@ fn test_ring_buffer_has_no_secrets_and_redacts_sensitive() {
 
     // Run within thread-local subscriber context to capture output reliably
     tracing::subscriber::with_default(subscriber, || {
-        let sensitive_amount =
-            stellar_private_payments_sdk::types::Sensitive(NoteAmount::from(5u128));
+        let sensitive_amount = stellar_private_payments::types::Sensitive(NoteAmount::from(5u128));
         tracing::info!(amount = ?sensitive_amount, "deposit started");
     });
 

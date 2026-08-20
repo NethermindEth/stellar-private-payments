@@ -1,6 +1,6 @@
 //! Wasm binding for the native bootnode retention probe.
 
-use stellar_private_payments_sdk::{bootnode_required, chain::RpcClient};
+use stellar_private_payments::{bootnode_required, chain::RpcClient};
 use wasm_bindgen::prelude::*;
 
 use crate::{deployment::deployment_config, storage::Storage as WasmStorage};

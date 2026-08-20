@@ -3,8 +3,8 @@
 //! Provides merkle tree operations for use in ZK circuits. These functions
 //! match the Circom circuit implementations and produce identical roots/proofs.
 //! Duplicated copy of SDK prover Merkle tree logic
-//! (`sdk/prover/src/merkle.rs`). Bit-identical synchronization is enforced at
-//! production depth 10 (1024 leaves) by
+//! (`sdk/native/src/zk/merkle.rs`). Bit-identical synchronization is enforced
+//! at production depth 10 (1024 leaves) by
 //! `e2e-tests/src/tests/coherence/merkle.rs`.
 
 use alloc::vec::Vec;

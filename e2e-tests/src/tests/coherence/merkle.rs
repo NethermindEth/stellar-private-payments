@@ -3,7 +3,7 @@
 
 use ark_bn254::Fr as Scalar;
 use circuits::core::merkle as circuits_merkle;
-use prover::merkle as prover_merkle;
+use stellar_private_payments::zk::merkle as prover_merkle;
 
 #[test]
 fn merkle_helpers_match_prover() {

@@ -23,8 +23,11 @@ use circuits::test::utils::{
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
-use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
-use types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey};
+use stellar_private_payments::{
+    planner::{SpendSession, SpendTarget, SpendableNote, Transact},
+    types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey},
+};
+
 
 const USER_SKEY: u64 = 1001;
 const POOL_ADDRESS: &str = "POOL";

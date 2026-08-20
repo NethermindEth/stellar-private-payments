@@ -30,7 +30,7 @@ jobs:
       - name: Build circuit artifacts
         run: cargo build -p circuits
       - name: Build examples
-        run: cargo build --examples -p stellar-private-payments-sdk
+        run: cargo build --examples -p stellar-private-payments
       - name: Build
         run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests

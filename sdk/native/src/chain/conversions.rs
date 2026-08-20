@@ -1,0 +1,386 @@
+use crate::{
+    chain::rpc::Error,
+    types::{BabyJubJubPoint, ContractEvent, Field, U256},
+};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use core::ops::Shl;
+use std::{collections::HashMap, convert::TryInto};
+use stellar_strkey::ed25519;
+use stellar_xdr::{self as xdr, Int256Parts, ReadXdr, WriteXdr};
+
+impl From<crate::chain::rpc::Event> for ContractEvent {
+    fn from(val: crate::chain::rpc::Event) -> Self {
+        let crate::chain::rpc::Event {
+            id,
+            ledger,
+            contract_id,
+            topic,
+            value,
+            ..
+        } = val;
+        ContractEvent {
+            id,
+            ledger,
+            contract_id,
+            topics: topic,
+            value,
+        }
+    }
+}
+
+/// Helper to convert ScVal Address to G... or C... string
+pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
+    if let xdr::ScVal::Address(addr) = val {
+        match addr {
+            xdr::ScAddress::Account(account_id) => {
+                // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant -> Uint256
+                let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(bytes)) = &account_id.0;
+                Ok(ed25519::PublicKey(*bytes).to_string().as_str().to_string())
+            }
+            xdr::ScAddress::Contract(contract_id) => {
+                let bytes = contract_id.0.0;
+                Ok(stellar_strkey::Contract(bytes)
+                    .to_string()
+                    .as_str()
+                    .to_string())
+            }
+            // Handling MuxedAccount, ClaimableBalance, and LiquidityPool
+            _ => Err(Error::UnexpectedScVal(format!(
+                "Unsupported Address type: {addr:?}"
+            ))),
+        }
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+/// Helper to convert ScVal Bytes to a `Vec<u8>`
+pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
+    if let xdr::ScVal::Bytes(sc_bytes) = val {
+        Ok(sc_bytes.0.to_vec())
+    } else {
+        Err(Error::UnexpectedScVal(format!(
+            "Expected ScVal::Bytes, found: {val:?}"
+        )))
+    }
+}
+
+/// Encodes an `ScVal` as lowercase hex.
+pub fn scval_to_hex(scval: &xdr::ScVal) -> Result<String, Error> {
+    let bytes = scval
+        .to_xdr(xdr::Limits::none())
+        .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Encodes an `ScVal` as base64, the format expected by Soroban RPC topic
+/// filters.
+pub fn scval_to_base64(scval: &xdr::ScVal) -> Result<String, Error> {
+    let bytes = scval
+        .to_xdr(xdr::Limits::none())
+        .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
+    Ok(STANDARD.encode(&bytes))
+}
+
+/// Encodes a BN254 field element as Soroban `ScVal::U256`.
+pub fn field_to_scval_u256(v: Field) -> xdr::ScVal {
+    let be = v.to_be_bytes();
+
+    let hi_hi = u64::from_be_bytes(be[0..8].try_into().expect("U256 hi_hi slice"));
+    let hi_lo = u64::from_be_bytes(be[8..16].try_into().expect("U256 hi_lo slice"));
+    let lo_hi = u64::from_be_bytes(be[16..24].try_into().expect("U256 lo_lo slice"));
+    let lo_lo = u64::from_be_bytes(be[24..32].try_into().expect("U256 lo_lo slice"));
+
+    xdr::ScVal::U256(xdr::UInt256Parts {
+        hi_hi,
+        hi_lo,
+        lo_hi,
+        lo_lo,
+    })
+}
+
+/// Encodes `i128` as Soroban `ScVal::I256` (two's-complement XDR layout).
+pub fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
+    let hi = if n < 0 { -1i64 } else { 0i64 };
+    let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
+    let bytes = n.to_be_bytes();
+    let lo_hi = u64::from_be_bytes(bytes[0..8].try_into().expect("i128 lo_hi slice"));
+    let lo_lo = u64::from_be_bytes(bytes[8..16].try_into().expect("i128 lo_lo slice"));
+    xdr::ScVal::I256(Int256Parts {
+        hi_hi: hi,
+        hi_lo,
+        lo_hi,
+        lo_lo,
+    })
+}
+
+/// Encodes bytes as Soroban `ScVal::Bytes`.
+pub fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Error> {
+    Ok(xdr::ScVal::Bytes(
+        bytes
+            .as_ref()
+            .to_vec()
+            .try_into()
+            .map_err(|_| Error::UnexpectedScVal("bytes too long for ScVal::Bytes".into()))?,
+    ))
+}
+
+/// Helper to convert Soroban `U256` parts into a `crate::types::U256`.
+pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
+    if let xdr::ScVal::U256(parts) = val {
+        // Soroban encodes U256 as 4x u64 limbs, big-endian by limb significance.
+        // Reconstruct as: hi_hi<<192 + hi_lo<<128 + lo_hi<<64 + lo_lo.
+        let hi_hi = U256::from(parts.hi_hi);
+        let hi_lo = U256::from(parts.hi_lo);
+        let lo_hi = U256::from(parts.lo_hi);
+        let lo_lo = U256::from(parts.lo_lo);
+
+        let mut out = Shl::shl(hi_hi, 192);
+        out = out
+            .checked_add(Shl::shl(hi_lo, 128))
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (hi_lo)".into()))?;
+        out = out
+            .checked_add(Shl::shl(lo_hi, 64))
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (lo_hi)".into()))?;
+        out = out
+            .checked_add(lo_lo)
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (lo_lo)".into()))?;
+        Ok(out)
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+pub fn scval_to_u32(val: &xdr::ScVal) -> Result<u32, Error> {
+    if let xdr::ScVal::U32(n) = val {
+        Ok(*n)
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+pub fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
+    if let xdr::ScVal::U64(n) = val {
+        Ok(*n)
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
+    if let xdr::ScVal::Bool(n) = val {
+        Ok(*n)
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+/// Decode pool ASP policy flags from contract storage.
+pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFlags, Error> {
+    if let xdr::ScVal::U32(bits) = val {
+        return crate::types::PolicyFlags::from_bits(*bits)
+            .map_err(|e| Error::UnexpectedScVal(e.to_string()));
+    }
+    Err(Error::UnexpectedScVal(format!("{val:?}")))
+}
+
+/// Decode a `pool-gvk::gvk::BabyJubJubPoint` (`{ x: U256, y: U256 }`) from
+/// contract storage. Soroban encodes a plain-field `#[contracttype]` struct
+/// as `ScVal::Map` with `ScVal::Symbol` field names.
+pub fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJubPoint, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "BabyJubJubPoint: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut x = None;
+    let mut y = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "x" => x = Some(scval_to_u256(val)?),
+            "y" => y = Some(scval_to_u256(val)?),
+            _ => {}
+        }
+    }
+
+    let x = x.ok_or_else(|| Error::UnexpectedScVal("BabyJubJubPoint missing field: x".into()))?;
+    let y = y.ok_or_else(|| Error::UnexpectedScVal("BabyJubJubPoint missing field: y".into()))?;
+
+    Ok(BabyJubJubPoint {
+        x: Field::try_from_u256(x)
+            .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.x: {e}")))?,
+        y: Field::try_from_u256(y)
+            .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.y: {e}")))?,
+    })
+}
+
+#[derive(Debug)]
+pub struct ParsedContractEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
+    pub id: String,
+    // Sequence number of the ledger in which this event was emitted
+    pub ledger: u32,
+    // StrKey representation of the contract address that emitted this event.
+    pub contract_id: String,
+    // The name of the event, snake_case. It is topic[0].
+    pub name: String,
+    pub topics: Vec<xdr::ScVal>,
+    // Mapping field name - value
+    pub values: HashMap<String, xdr::ScVal>,
+}
+
+pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
+    let ContractEvent {
+        id,
+        ledger,
+        contract_id,
+        topics,
+        value,
+    } = event;
+
+    let mut iter = topics.iter();
+    let first = iter.next().ok_or(xdr::Error::Invalid)?;
+
+    let topics: Vec<xdr::ScVal> = iter
+        .map(|s| xdr::ScVal::from_xdr_base64(s, xdr::Limits::none()))
+        .collect::<Result<_, _>>()?;
+
+    let name = match xdr::ScVal::from_xdr_base64(first, xdr::Limits::none())? {
+        xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+        _ => {
+            return Err(Error::UnexpectedScVal(
+                "the first topic of an event should be a symbol".into(),
+            ));
+        }
+    };
+
+    let data = xdr::ScVal::from_xdr_base64(value, xdr::Limits::none())?;
+
+    let mut values = HashMap::new();
+
+    // https://docs.rs/soroban-sdk/latest/soroban_sdk/attr.contractevent.html
+    match data {
+        xdr::ScVal::Map(Some(map)) => {
+            for xdr::ScMapEntry { key, val } in map.iter() {
+                let field_name = match key {
+                    xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+                    _ => {
+                        return Err(Error::UnexpectedScVal(format!(
+                            "event data field name should be a symbol: {key:?}"
+                        )));
+                    }
+                };
+                values.insert(field_name, val.clone());
+            }
+        }
+        xdr::ScVal::Void => {}
+        _ => {
+            return Err(Error::UnexpectedScVal(
+                "an event data format should be a map".into(),
+            ));
+        }
+    };
+
+    Ok(ParsedContractEvent {
+        id,
+        ledger,
+        contract_id,
+        name,
+        topics,
+        values,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Field, U256};
+
+    #[test]
+    fn field_u256_scval_roundtrip() {
+        let field = Field(U256::from(0xDEAD_BEEF_u64));
+        let sc = field_to_scval_u256(field);
+        let back = scval_to_u256(&sc).expect("decode u256");
+        assert_eq!(back, field.0);
+    }
+
+    #[test]
+    fn nullifier_u256_topic_base64_roundtrip() {
+        // Sample nullifier (a BN254 field element).
+        let nullifier = Field(U256::from(0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF_u128));
+
+        // Encode as the U256 ScVal the pool contract emits in NewNullifierEvent.
+        let scval = field_to_scval_u256(nullifier);
+        let b64 = scval_to_base64(&scval).expect("encode nullifier to base64");
+
+        // Decode the base64 back to bytes and parse as ScVal.
+        let bytes = STANDARD.decode(b64).expect("valid base64");
+        let parsed =
+            xdr::ScVal::from_xdr(bytes, xdr::Limits::none()).expect("parse base64 as ScVal");
+
+        // Round-trip back to the original nullifier.
+        let roundtripped = scval_to_u256(&parsed).expect("decode parsed u256");
+        assert_eq!(roundtripped, nullifier.0);
+    }
+
+    fn baby_jub_jub_point_scval(x: xdr::ScVal, y: xdr::ScVal) -> xdr::ScVal {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let entries = xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: sym("x"),
+                    val: x,
+                },
+                xdr::ScMapEntry {
+                    key: sym("y"),
+                    val: y,
+                },
+            ]
+            .try_into()
+            .expect("map entries"),
+        );
+        xdr::ScVal::Map(Some(entries))
+    }
+
+    #[test]
+    fn baby_jub_jub_point_decodes_x_and_y() {
+        let x = Field(U256::from(7u64));
+        let y = Field(U256::from(11u64));
+        let scval = baby_jub_jub_point_scval(field_to_scval_u256(x), field_to_scval_u256(y));
+
+        let point = scval_to_baby_jub_jub_point(&scval).expect("decode BabyJubJubPoint");
+
+        assert_eq!(point.x, x);
+        assert_eq!(point.y, y);
+    }
+
+    #[test]
+    fn baby_jub_jub_point_rejects_missing_field() {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let entries = xdr::ScMap(
+            vec![xdr::ScMapEntry {
+                key: sym("x"),
+                val: field_to_scval_u256(Field(U256::from(1u64))),
+            }]
+            .try_into()
+            .expect("map entries"),
+        );
+        let scval = xdr::ScVal::Map(Some(entries));
+
+        let err = scval_to_baby_jub_jub_point(&scval).expect_err("missing y must be rejected");
+        assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+
+    #[test]
+    fn baby_jub_jub_point_rejects_non_map_scval() {
+        let err = scval_to_baby_jub_jub_point(&xdr::ScVal::Void)
+            .expect_err("non-map ScVal must be rejected");
+        assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+}
