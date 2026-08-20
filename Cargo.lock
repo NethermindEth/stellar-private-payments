@@ -850,16 +850,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
 dependencies = [
- "bit-vec 0.6.3",
-]
-
-[[package]]
-name = "bit-set"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
-dependencies = [
- "bit-vec 0.8.0",
+ "bit-vec",
 ]
 
 [[package]]
@@ -867,12 +858,6 @@ name = "bit-vec"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
-
-[[package]]
-name = "bit-vec"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
@@ -1204,7 +1189,6 @@ dependencies = [
  "regex",
  "serde_json",
  "type_analysis",
- "types",
  "wast",
  "zkhash",
 ]
@@ -2240,24 +2224,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "disclosure"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-groth16",
- "ark-serialize 0.6.0",
- "circuit-keys",
- "hex",
- "prover",
- "serde_json",
- "sha2 0.11.0",
- "tracing",
- "types",
- "web-time",
-]
-
-[[package]]
 name = "displaydoc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2313,12 +2279,9 @@ dependencies = [
  "contract-types",
  "num-bigint",
  "pool",
- "prover",
  "soroban-sdk",
  "soroban-utils",
- "tx-planner",
- "types",
- "witness",
+ "stellar-private-payments",
  "zkhash",
 ]
 
@@ -3653,7 +3616,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a1cbf952127589f2851ab2046af368fd20645491bb4b376f04b7f94d7a9837b"
 dependencies = [
  "ascii-canvas",
- "bit-set 0.5.3",
+ "bit-set",
  "diff",
  "ena",
  "is-terminal",
@@ -4640,42 +4603,13 @@ version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
- "bit-set 0.8.0",
- "bit-vec 0.8.0",
  "bitflags 2.13.1",
  "num-traits",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax 0.8.11",
- "rusty-fork",
- "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "prover"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "ark-groth16",
- "ark-poly 0.6.0",
- "ark-relations",
- "ark-serialize 0.6.0",
- "ark-snark",
- "ark-std 0.6.0",
- "crypto_secretbox",
- "getrandom 0.2.17",
- "rayon",
- "serde",
- "sha2 0.11.0",
- "tracing",
- "types",
- "web-time",
- "x25519-dalek",
- "zkhash",
 ]
 
 [[package]]
@@ -4704,12 +4638,6 @@ version = "0.1.0"
 dependencies = [
  "soroban-sdk",
 ]
-
-[[package]]
-name = "quick-error"
-version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quinn"
@@ -4946,18 +4874,18 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216e8f773d7923bcba9ceb86a86c93cabb3903a11872fc3f138c49630e50b96d"
+checksum = "7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9283685feec7d69af75fb0e858d5e7378f33fe4fc699383b2916ab9273e03c"
+checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5335,18 +5263,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "rusty-fork"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
-dependencies = [
- "fnv",
- "quick-error",
- "tempfile",
- "wait-timeout",
-]
-
-[[package]]
 name = "ruzstd"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5436,10 +5352,9 @@ dependencies = [
  "anyhow",
  "rusqlite",
  "serde_json",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "tracing",
  "tracing-subscriber",
- "types",
 ]
 
 [[package]]
@@ -6037,44 +5952,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "state"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hex",
- "prover",
- "rusqlite",
- "rusqlite_migration",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "stellar",
- "stellar-xdr",
- "tracing",
- "types",
-]
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "stellar"
+name = "stellar-private-payments"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-groth16",
+ "ark-poly 0.6.0",
+ "ark-relations",
+ "ark-serialize 0.6.0",
+ "ark-snark",
+ "ark-std 0.6.0",
  "async-trait",
  "base64",
+ "circom-witness-rs",
+ "circuit-keys",
  "contract-types",
+ "crypto_secretbox",
  "ed25519-dalek",
  "futures",
+ "futures-timer",
+ "getrandom 0.2.17",
  "gloo-timers",
+ "hex",
  "http",
  "pool",
  "public-key-registry",
+ "rayon",
  "reqwest",
+ "ruint",
+ "rusqlite",
+ "rusqlite_migration",
  "serde",
  "serde-aux",
  "serde_json",
@@ -6084,9 +5999,16 @@ dependencies = [
  "stellar-strkey 0.0.18",
  "stellar-xdr",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
- "types",
+ "tracing-subscriber",
+ "uint 0.10.1",
  "wasm-bindgen-test",
+ "web-time",
+ "wiremock",
+ "x25519-dalek",
+ "zeroize",
+ "zkhash",
 ]
 
 [[package]]
@@ -6100,42 +6022,15 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "toml",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
- "types",
 ]
 
 [[package]]
-name = "stellar-private-payments-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "disclosure",
- "futures",
- "futures-timer",
- "gloo-timers",
- "prover",
- "reqwest",
- "serde",
- "serde_json",
- "state",
- "stellar",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tx-planner",
- "types",
- "wiremock",
- "witness",
-]
-
-[[package]]
-name = "stellar-private-payments-sdk-web"
+name = "stellar-private-payments-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -6152,11 +6047,10 @@ dependencies = [
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
@@ -6728,15 +6622,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8464ec13c3691491391d9fce00f6416c9a48e46972f72d7865688be2080192c9"
 
 [[package]]
-name = "tx-planner"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.20",
- "tracing",
- "types",
-]
-
-[[package]]
 name = "type_analysis"
 version = "2.2.3"
 source = "git+https://github.com/iden3/circom?tag=v2.2.3#ad44e915a12bb047b05745c2884aad9cc8326bc6"
@@ -6751,22 +6636,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "types"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "getrandom 0.2.17",
- "hex",
- "rusqlite",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
- "uint 0.10.1",
- "zeroize",
-]
 
 [[package]]
 name = "ucd-trie"
@@ -6911,15 +6780,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "wait-timeout"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -7558,24 +7418,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "witness"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "circom-witness-rs",
- "hex",
- "proptest",
- "ruint",
- "serde_json",
- "sha2 0.11.0",
- "tracing",
- "types",
- "web-time",
-]
 
 [[package]]
 name = "writeable"

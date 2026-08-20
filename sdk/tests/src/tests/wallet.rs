@@ -1,11 +1,11 @@
 //! Wallet reads through
-//! [`stellar_private_payments_sdk::blocking::PrivatePool`].
+//! [`stellar_private_payments::blocking::PrivatePool`].
 
 use crate::{
     pool::{test_account, test_pool},
     seed::seeded_user_public_keys,
 };
-use stellar_private_payments_sdk::types::NoteAmount;
+use stellar_private_payments::types::NoteAmount;
 
 const POOL_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 

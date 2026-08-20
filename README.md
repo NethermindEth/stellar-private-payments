@@ -112,7 +112,7 @@ or the latest prerelease
 curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --pre
 ```
 
-CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/client).
+CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/native).
 
 ## Limitations
 

@@ -6,16 +6,9 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
-    "sdk/client",
-    "sdk/disclosure",
-    "sdk/prover",
-    "sdk/state",
-    "sdk/stellar",
+    "sdk/native",
     "sdk/tests",
-    "sdk/tx-planner",
-    "sdk/types",
     "sdk/web",
-    "sdk/witness",
     "tools/ceremony-cli",
 ]
 exclude = ["tools/bootnode"]
@@ -29,7 +22,6 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-
 # external
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] }
@@ -63,7 +55,6 @@ clap = { version = "4.6.3", default-features = false, features = [
 ] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
-disclosure = { path = "sdk/disclosure" }
 futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
@@ -75,8 +66,6 @@ num-bigint = { version = "0.4.8", default-features = false, features = ["serde"]
 num-integer = { version = "0.1.46", default-features = false }
 pool = { path = "contracts/pool" }
 pool-core = { path = "contracts/pool-core" }
-proptest = "1"
-prover = { path = "sdk/prover" }
 public-key-registry = { path = "contracts/public-key-registry" }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 ruint = { version = "1.20", default-features = false, features = ["num-bigint"] } # match circom-witness-rs
@@ -89,17 +78,12 @@ soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] 
 soroban-utils = { path = "contracts/soroban-utils" }
 sqlite-wasm-rs = { version = "0.5.5", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
-state = { path = "sdk/state" }
-stellar = { path = "sdk/stellar" }
-stellar-private-payments-sdk = { path = "sdk/client" }
-stellar-xdr = { version = "27.0.0", features = ["base64", "std", "alloc"] }
+stellar-private-payments = { path = "sdk/native" }
 thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }
 tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
-tx-planner = { path = "sdk/tx-planner" }
-types = { path = "sdk/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
@@ -107,7 +91,6 @@ wasm-bindgen-test = { version = "0.3", default-features = false, features = ["st
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
 web-time = "1"
 wiremock = "0.6"
-witness = { path = "sdk/witness" }
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
 zkhash = { path = "poseidon2" }
 

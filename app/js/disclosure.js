@@ -14,7 +14,7 @@ import { onEnter } from './ui/keys.js';
 // Canonical constants
 // ---------------------------------------------------------------------------
 
-// Source of truth: sdk/disclosure/src/lib.rs (test: vk_hash_matches_committed_keys)
+// Source of truth: sdk/native/src/zk/disclosure/mod.rs (test: vk_hash_matches_committed_keys)
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_1:
     '0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107',

@@ -10,7 +10,7 @@ const DEFAULT_LIMIT: u32 = 5;
 #[tracing::instrument(
     name = "cmd_feed",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new(), limit = ?limit)
+    fields(correlation_id = %stellar_private_payments::types::correlation_id_or_new(), limit = ?limit)
 )]
 pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT);

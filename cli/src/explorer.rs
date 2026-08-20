@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use stellar_private_payments_sdk::state::{APP_SETTING_EXPLORER, SqliteStorage};
+use stellar_private_payments::state::{APP_SETTING_EXPLORER, SqliteStorage};
 
 pub const DEFAULT_EXPLORER_BASE_URL: &str = "https://stellar.expert/explorer/testnet";
 

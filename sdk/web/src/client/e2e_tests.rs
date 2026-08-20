@@ -20,7 +20,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use js_sys::{Function, Object, Reflect};
-use stellar_private_payments_sdk::chain::{
+use stellar_private_payments::chain::{
     Limits, LocalSigner as ChainLocalSigner, ReadXdr, TransactionEnvelope, WriteXdr,
 };
 use wasm_bindgen::{JsValue, closure::Closure};

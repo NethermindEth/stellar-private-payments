@@ -9,9 +9,9 @@ import path from 'node:path';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const required = [
-  'dist/stellar_private_payments_sdk_web.js',
-  'dist/stellar_private_payments_sdk_web_bg.wasm',
-  'dist/stellar_private_payments_sdk_web.d.ts',
+  'dist/stellar_private_payments_web.js',
+  'dist/stellar_private_payments_web_bg.wasm',
+  'dist/stellar_private_payments_web.d.ts',
   'dist/workers/storage-worker.js',
   'dist/workers/prover-worker.js',
   'dist/circuits/policy_tx_2_2.graph.bin',
