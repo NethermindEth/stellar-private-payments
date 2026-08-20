@@ -120,7 +120,7 @@ test page loads these assets cross-origin.
 
 Configuration is read at **compile time** via `option_env!`
 (`E2E_ACCOUNT_A_ADDRESS`, `E2E_ACCOUNT_A_SECRET`, `E2E_ACCOUNT_B_ADDRESS`,
-`E2E_RPC_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`). `sdk/web/build.rs`
+`E2E_RPC_URL`, `E2E_BOOTNODE_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`). `sdk/web/build.rs`
 declares `rerun-if-env-changed` for each, so editing the env file rebuilds the
 test binary on the next run.
 

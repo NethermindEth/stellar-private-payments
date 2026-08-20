@@ -13,6 +13,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 NETWORK="testnet"
 RPC_URL="https://soroban-testnet.stellar.org"
+# E2E infrastructure may use an archive RPC. This is intentionally distinct
+# from product defaults: browser/CLI users choose a bootnode during onboarding.
+BOOTNODE_URL="${E2E_BOOTNODE_URL:-https://bootnode.dev-nethermind.xyz}"
 FRIENDBOT_URL="https://friendbot.stellar.org"
 POOL_CONTRACT=""
 EXPLORER_URL="https://stellar.expert/explorer/testnet"
@@ -215,7 +218,7 @@ onboard_account() {
         --network "$NETWORK" \
         --data-dir "$DATA_DIR" \
         --stellar-config-dir "$DATA_DIR/stellar" \
-        onboard --accept --register --no-bootnode --explorer-url "$EXPLORER_URL" 2>"$err_file"; then
+        onboard --accept --register --bootnode-url "$BOOTNODE_URL" --explorer-url "$EXPLORER_URL" 2>"$err_file"; then
       rm -f "$err_file"
       return 0
     fi
@@ -411,6 +414,7 @@ write_env_file() {
 # Contains $NETWORK secret keys. This file is git-ignored.
 E2E_NETWORK=$NETWORK
 E2E_RPC_URL=$RPC_URL
+E2E_BOOTNODE_URL=$BOOTNODE_URL
 E2E_POOL_CONTRACT=$POOL_CONTRACT
 E2E_ACCOUNT_A_ALIAS=${E2E_ACCOUNT_A_ALIAS:-$ALIAS_A}
 E2E_ACCOUNT_A_ADDRESS=$addr_a

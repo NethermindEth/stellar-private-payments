@@ -72,6 +72,8 @@ jobs:
       # friendbot-funded as the faucet and distributes XLM to B), so no
       # persistent secrets or key imports are needed.
       - name: Provision test accounts
+        env:
+          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
           bash deployments/scripts/e2e-accounts-setup.sh --ephemeral --accounts a,b
           set -a
@@ -96,6 +98,7 @@ jobs:
       - name: Run browser e2e tests
         env:
           E2E_STATIC_ORIGIN: http://127.0.0.1:8099
+          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
