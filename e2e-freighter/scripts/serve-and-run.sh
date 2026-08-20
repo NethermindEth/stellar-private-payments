@@ -60,16 +60,20 @@ SERVER_PGID=""
 # child, and killing make alone orphans trunk still holding the port. The
 # group is created below with setsid precisely so this can find it.
 stop_server() {
-  [ -n "$SERVER_PGID" ] || return 0
-  step "stopping the app server (pgid $SERVER_PGID)"
-  kill -TERM "-$SERVER_PGID" 2>/dev/null || true
+  local server_pgid="$SERVER_PGID"
+  # Clear this before signalling anything. If the process-group lookup was
+  # wrong, or CI delivers TERM while this trap is running, the EXIT/TERM trap
+  # must not recursively try to stop the same group.
+  SERVER_PGID=""
+  [ -n "$server_pgid" ] || return 0
+  step "stopping the app server (pgid $server_pgid)"
+  kill -TERM "-$server_pgid" 2>/dev/null || true
   for _ in $(seq 1 50); do
-    kill -0 "-$SERVER_PGID" 2>/dev/null || { SERVER_PGID=""; return 0; }
+    kill -0 "-$server_pgid" 2>/dev/null || return 0
     sleep 0.1
   done
   step "server did not exit on TERM — sending KILL"
-  kill -KILL "-$SERVER_PGID" 2>/dev/null || true
-  SERVER_PGID=""
+  kill -KILL "-$server_pgid" 2>/dev/null || true
 }
 
 # EXIT covers the normal and failing paths; INT/TERM cover Ctrl-C and a
@@ -108,6 +112,15 @@ else
     sleep 0.2
   done
   [ -n "$SERVER_PGID" ] || die "could not determine the server's process group"
+  CONTROLLER_PGID="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')"
+  if [ "$SERVER_PGID" = "$CONTROLLER_PGID" ]; then
+    # A group signal would also hit this wrapper, re-enter its TERM/EXIT traps,
+    # and turn ordinary cleanup into an endless signal loop. Stop only the
+    # direct child and fail with an actionable diagnostic instead.
+    SERVER_PGID=""
+    kill -TERM "$SERVE_PID" 2>/dev/null || true
+    die "the app server shares this wrapper's process group; refusing unsafe group cleanup"
+  fi
 
   step "waiting up to ${READY_TIMEOUT}s for $LOCAL_URL (a cold build takes minutes)"
   deadline=$(( $(date +%s) + READY_TIMEOUT ))
