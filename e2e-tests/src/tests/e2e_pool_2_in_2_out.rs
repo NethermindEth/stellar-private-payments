@@ -1,9 +1,9 @@
 //! End-to-end tests for the Pool contract with real Groth16 proofs.
 //!
 //! Every case is 2 inputs and 2 outputs. The witness comes from the committed
-//! `*.graph.bin` graph, the proof from the `prover` crate, and the verification
-//! from the pool contract. That is the pipeline the CLI, the SDK and the
-//! browser use.
+//! `*.graph.bin` graph, the proof from `stellar_private_payments::zk::prover`,
+//! and the verification from the pool contract. That is the pipeline the CLI,
+//! the SDK and the browser use.
 use super::utils::{
     DeployedContracts, LEVELS, NonMembership, POOL_ZERO_LEAF, TRANSACT_STEMS,
     build_membership_trees, build_policy_inputs, bytes32_to_bigint, deploy_contracts,
@@ -11,6 +11,7 @@ use super::utils::{
     u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
+use ark_bn254::Fr as Scalar;
 use circuits::test::utils::{
     circom_tester::Inputs,
     general::scalar_to_bigint,
@@ -23,8 +24,7 @@ use pool::{Error, ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{
     Address, Bytes, I256, InvokeError, U256, Vec as SorobanVec, testutils::Address as _,
 };
-use types::PolicyFlags;
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use stellar_private_payments::types::PolicyFlags;
 
 /// Result of `PoolContractClient::try_transact`.
 ///

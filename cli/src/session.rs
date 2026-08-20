@@ -6,7 +6,7 @@ use crate::{
     stellar_cli::StellarNetwork,
 };
 use anyhow::Result;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Handle, LocalProver, LocalStorage, Prover, Signer, TransferRecipient,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
@@ -30,13 +30,19 @@ impl ClientSession {
         let storage_path = config.db_path().to_string_lossy().into_owned();
         let storage =
             LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+        let bootnode_setting = storage
+            .storage()
+            .get_bootnode_setting()
+            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+        let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
+            .then_some(bootnode_setting.url);
 
         let client = if readonly {
             Client::init_readonly(
                 network.rpc_url.clone(),
                 storage,
                 config.deployment.clone(),
-                None,
+                bootnode_url,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
@@ -50,7 +56,7 @@ impl ClientSession {
                 storage,
                 prover,
                 config.deployment.clone(),
-                None,
+                bootnode_url,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
@@ -86,7 +92,7 @@ impl ClientSession {
     pub fn operational_feed(
         &self,
         limit: u32,
-    ) -> Result<Vec<stellar_private_payments_sdk::OperationalFeedItem>> {
+    ) -> Result<Vec<stellar_private_payments::OperationalFeedItem>> {
         self.client
             .operational_feed(limit)
             .map_err(|e| anyhow::anyhow!("operational feed: {e}"))
@@ -102,7 +108,7 @@ impl ClientSession {
     /// Register this account's public keys on the deployment-wide registry.
     pub fn register_public_keys(
         &self,
-    ) -> Result<stellar_private_payments_sdk::types::TransactionResult> {
+    ) -> Result<stellar_private_payments::types::TransactionResult> {
         log::info!("Registering public keys");
         self.account
             .register_public_keys(None, None)
@@ -222,7 +228,7 @@ pub fn parse_transfer_recipient(
 #[cfg(test)]
 mod tests {
     use super::parse_amount;
-    use stellar_private_payments_sdk::types::NoteAmount;
+    use stellar_private_payments::types::NoteAmount;
 
     #[test]
     fn parses_token_units_with_decimals() {

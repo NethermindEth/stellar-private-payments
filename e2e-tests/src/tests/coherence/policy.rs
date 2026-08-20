@@ -1,7 +1,7 @@
 //! SDK `PolicyFlags` must match on-chain `pool::policy` encoding and semantics.
 
 use pool::policy;
-use types::{PolicyFlag, PolicyFlags};
+use stellar_private_payments::types::{PolicyFlag, PolicyFlags};
 
 #[test]
 fn policy_flag_bits_match_contract_constants() {

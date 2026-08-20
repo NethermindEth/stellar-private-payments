@@ -5,14 +5,14 @@ on:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
-      - "sdk/types/**"
+      - "sdk/native/**"
       - "deployments/testnet/deployments.json"
       - ".github/workflows/bootnode-push-jfrog-dev.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
-      - "sdk/types/**"
+      - "sdk/native/**"
       - "deployments/testnet/deployments.json"
       - ".github/workflows/bootnode-push-jfrog-dev.yml"
   workflow_dispatch:

@@ -9,7 +9,7 @@ import init, {
   set_log_level,
   dump_recent_logs,
   debugLogsEnabled,
-} from '../dist/stellar_private_payments_sdk_web.js';
+} from '../dist/stellar_private_payments_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
@@ -27,7 +27,7 @@ async function openStorage(options = {}) {
 /**
  * Probe whether the wallet RPC needs a historical-sync bootnode.
  * @param {string} rpcUrl
- * @param {import('../dist/stellar_private_payments_sdk_web.js').Storage} storage
+ * @param {import('../dist/stellar_private_payments_web.js').Storage} storage
  * @returns {Promise<boolean>}
  */
 async function bootnodeRequired(rpcUrl, storage) {
@@ -134,4 +134,4 @@ export const Client = {
 };
 export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export { configureTelemetry, set_log_level, dump_recent_logs, debugLogsEnabled };
-export { default } from '../dist/stellar_private_payments_sdk_web.js';
+export { default } from '../dist/stellar_private_payments_web.js';

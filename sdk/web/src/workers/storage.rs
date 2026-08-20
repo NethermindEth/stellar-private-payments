@@ -11,20 +11,20 @@ use gloo_worker::{
     oneshot::{OneshotBridge, oneshot},
 };
 use std::cell::RefCell;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     BuildDisclosureInputs, BuildTransactParams, Error, SpendableNote, Storage, TransactRequest,
     build_disclosure_inputs, build_transact_params,
     chain::ContractDataStorage,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
-    tx::{
-        crypto::asp_membership_leaf,
-        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
-        flows::TransactParams,
-    },
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
         OperationalFeedItem, PortfolioBalance, RecipientLookup, Sensitive, SyncMetadata,
         UserNoteSummary,
+    },
+    zk::{
+        crypto::asp_membership_leaf,
+        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
+        flows::TransactParams,
     },
 };
 use tracing::Instrument;
@@ -479,7 +479,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::ConfigureTelemetry(config) => {
             let _ = crate::telemetry::set_log_level(&config.level);
-            stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+            stellar_private_payments::types::set_reveal_sensitive(config.reveal_sensitive);
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DumpLogs => {

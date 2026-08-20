@@ -107,5 +107,5 @@ jobs:
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
           bash sdk/web/scripts/e2e-browser-test.sh \
-            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-sdk-web \
+            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
             -- --include-ignored

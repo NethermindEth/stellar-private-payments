@@ -8,9 +8,9 @@ mod tests {
 
     use crate::test::utils::circom_tester::{CircuitKeys, Inputs, prove_and_verify_with_keys};
     use anyhow::{Context, Result};
+    use ark_bn254::Fr as Scalar;
     use num_bigint::BigInt;
     use std::path::PathBuf;
-    use zkhash::fields::bn256::FpBN256 as Scalar;
 
     /// Run a Merkle proof test case
     ///

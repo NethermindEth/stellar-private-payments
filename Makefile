@@ -94,7 +94,7 @@ sdk-web-build:
 
 .PHONY: sdk-web-build-debug
 sdk-web-build-debug:
-	@echo "Building stellar-private-payments-sdk-web with debug logs (release-with-logs)..."
+	@echo "Building stellar-private-payments-web with debug logs (release-with-logs)..."
 	@WASM_PROFILE=release-with-logs npm run build --prefix sdk/web
 	@echo "release-with-logs" > sdk/web/.trunk-wasm-profile
 

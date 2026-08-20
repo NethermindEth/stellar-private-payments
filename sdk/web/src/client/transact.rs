@@ -2,10 +2,10 @@
 
 use serde::Deserialize;
 use std::str::FromStr;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Transact,
-    tx::flows::N_OUTPUTS,
     types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey},
+    zk::flows::N_OUTPUTS,
 };
 use wasm_bindgen::{JsError, JsValue};
 

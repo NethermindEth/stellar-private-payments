@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use serde::Serialize;
-use stellar_private_payments_sdk::types::AssetDescriptor;
+use stellar_private_payments::types::AssetDescriptor;
 
 use crate::{
     config::{CliConfig, validate_pool},
@@ -54,7 +54,7 @@ struct Overview {
 #[tracing::instrument(
     name = "cmd_overview",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new())
+    fields(correlation_id = %stellar_private_payments::types::correlation_id_or_new())
 )]
 pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
     let account = config.require_account()?;

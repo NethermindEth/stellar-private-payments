@@ -9,29 +9,27 @@ use crate::test::utils::general::{
     poseidon2_compression as poseidon2_compression_bn256, poseidon2_hash2 as poseidon2_hash2_bn256,
 };
 use anyhow::{Result, anyhow};
+use ark_bn254::Fr;
+use ark_ff::{BigInteger, PrimeField};
 use num_bigint::{BigInt, BigUint};
 use num_integer::Integer;
 use std::{collections::HashMap, ops::Shr};
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField},
-    fields::bn256::FpBN256,
-};
 /// Reduce a num_bigint::BigInt modulo the BN256 field modulus and convert to
-/// FpBN256. Circom circuits operate inside the BN256 scalar field, so every
+/// Fr. Circom circuits operate inside the BN256 scalar field, so every
 /// BigInt we hash must be reduced.
-fn big_int_to_fp(x: &BigInt) -> FpBN256 {
+fn big_int_to_fp(x: &BigInt) -> Fr {
     // Get the field modulus as a num_bigint::BigInt
-    let modulus_bytes = FpBN256::MODULUS.to_bytes_be();
+    let modulus_bytes = Fr::MODULUS.to_bytes_be();
     let modulus_bigint = BigInt::from_bytes_be(num_bigint::Sign::Plus, &modulus_bytes);
 
     // Floor-mod reduce into [0, modulus)
     let reduced = x.mod_floor(&modulus_bigint);
 
-    // Convert non-negative BigInt to BigUint, then into FpBN256
+    // Convert non-negative BigInt to BigUint, then into Fr
     let (_sign, bytes) = reduced.to_bytes_be();
     let as_biguint = BigUint::from_bytes_be(&bytes);
 
-    FpBN256::from(as_biguint)
+    Fr::from(as_biguint)
 }
 
 /// Poseidon2 hash of two field elements using optimized compression mode
@@ -74,15 +72,15 @@ pub fn poseidon2_compression_sparse(left: &BigInt, right: &BigInt) -> BigInt {
 pub fn poseidon2_hash3_sparse(key: &BigInt, value: &BigInt) -> BigInt {
     let key_fp = big_int_to_fp(key);
     let value_fp = big_int_to_fp(value);
-    let one_fp = FpBN256::from(1u64);
+    let one_fp = Fr::from(1u64);
 
     let result = poseidon2_hash2_bn256(key_fp, value_fp, Some(one_fp));
 
     fp_bn256_to_big_int(&result)
 }
 
-/// Convert FpBN256 to BigInt
-fn fp_bn256_to_big_int(fp: &FpBN256) -> BigInt {
+/// Convert Fr to BigInt
+fn fp_bn256_to_big_int(fp: &Fr) -> BigInt {
     let bytes = fp.into_bigint().to_bytes_be();
     BigInt::from_bytes_be(num_bigint::Sign::Plus, &bytes)
 }
@@ -1019,28 +1017,17 @@ mod tests {
 
     #[test]
     fn test_hash_direct() {
-        use zkhash::{
-            fields::bn256::FpBN256,
-            poseidon2::{
-                poseidon2::Poseidon2,
-                poseidon2_instance_bn256::{POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3},
-            },
-        };
+        use ark_bn254::Fr as Scalar;
+        use taceo_poseidon2::bn254::{t2, t3};
         let hash_result = poseidon2_hash3_sparse(&BigInt::from(0u32), &BigInt::from(1u32));
         let hash_result2 = poseidon2_compression_sparse(&BigInt::from(0u32), &BigInt::from(1u32));
 
-        type Scalar = FpBN256;
         // T = 2
-        let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-        let input: Vec<Scalar> = vec![Scalar::from(0u64), Scalar::from(1u64)];
-        let perm = poseidon2.permutation(&input);
-
+        let perm = t2::permutation(&[Scalar::from(0u64), Scalar::from(1u64)]);
         assert_eq!(perm[0].to_string(), hash_result2.to_string());
 
         // T = 3
-        let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
-        let input: Vec<Scalar> = vec![Scalar::from(0u64), Scalar::from(1u64), Scalar::from(1u64)];
-        let perm = poseidon2.permutation(&input);
+        let perm = t3::permutation(&[Scalar::from(0u64), Scalar::from(1u64), Scalar::from(1u64)]);
         assert_eq!(perm[0].to_string(), hash_result.to_string());
     }
 }

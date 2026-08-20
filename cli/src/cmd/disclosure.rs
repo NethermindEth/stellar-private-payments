@@ -4,10 +4,10 @@ use std::{path::Path, str::FromStr};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     DisclosureRequest,
     disclosure::find_circuit,
-    types::{DisclosureReceipt, DisclosureVerificationReport, Field},
+    types::{DisclosureReceipt, DisclosureVerificationReport, Field, correlation_id_or_new},
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -20,7 +20,7 @@ use crate::{
 #[tracing::instrument(
     name = "cmd_disclosure_generate",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new(), commitment_count = commitments.len())
+    fields(correlation_id = %correlation_id_or_new(), commitment_count = commitments.len())
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn generate(
@@ -45,7 +45,7 @@ pub fn generate(
         .collect::<Result<Vec<_>>>()?;
     let context_nonce = match nonce {
         Some(raw) => Field::from_str(raw).context("invalid --nonce")?,
-        None => stellar_private_payments_sdk::tx::encryption::generate_random_blinding()
+        None => stellar_private_payments::zk::encryption::generate_random_blinding()
             .context("generate disclosure nonce")?,
     };
 
@@ -79,7 +79,7 @@ fn current_issued_at() -> Result<String> {
 #[tracing::instrument(
     name = "cmd_disclosure_verify",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new())
+    fields(correlation_id = %correlation_id_or_new())
 )]
 pub fn verify(
     config: &CliConfig,
@@ -97,7 +97,7 @@ pub fn verify(
 
     let network = config.resolve_network()?;
     let prover = disclosure_prover(config)?;
-    let report = stellar_private_payments_sdk::blocking::verify_disclosure_receipt(
+    let report = stellar_private_payments::blocking::verify_disclosure_receipt(
         &network.rpc_url,
         config.deployment.clone(),
         &prover,

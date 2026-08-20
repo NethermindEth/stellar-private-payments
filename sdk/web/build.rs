@@ -3,7 +3,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
 };
-use types::PolicyFlags;
+use stellar_private_payments::types::PolicyFlags;
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -85,7 +85,7 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir
-            .join("../../sdk/types/src/policy_tx.rs")
+            .join("../../sdk/native/src/types/policy_tx.rs")
             .display()
     );
 

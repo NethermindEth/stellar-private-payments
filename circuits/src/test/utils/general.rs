@@ -1,16 +1,8 @@
+use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, PrimeField};
 use num_bigint::{BigInt, BigUint};
 use std::{ops::AddAssign, path::PathBuf};
-use zkhash::poseidon2::{
-    poseidon2::Poseidon2,
-    poseidon2_instance_bn256::{
-        POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
-    },
-};
-
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField},
-    fields::bn256::FpBN256 as Scalar,
-};
+use taceo_poseidon2::bn254::{t2, t3, t4};
 
 /// Poseidon2 hash of two field elements using optimized compression mode
 ///
@@ -23,8 +15,7 @@ use zkhash::{
 ///
 /// Returns the first element of the permutation result after adding the inputs.
 pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let mut perm = h.permutation(&[left, right]);
+    let mut perm = t2::permutation(&[left, right]);
     perm[0].add_assign(&left);
     perm[1].add_assign(&right);
     perm[0] // By default, we truncate to one element
@@ -45,13 +36,7 @@ pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 ///
 /// Returns the first lane (state\[0\]) of the permutation result.
 pub fn poseidon2_hash2(a: Scalar, b: Scalar, dom_sep: Option<Scalar>) -> Scalar {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
-    let perm: Vec<Scalar>;
-    if let Some(dom_sep) = dom_sep {
-        perm = h.permutation(&[a, b, dom_sep]);
-    } else {
-        perm = h.permutation(&[a, b, Scalar::from(0)]);
-    }
+    let perm = t3::permutation(&[a, b, dom_sep.unwrap_or_else(|| Scalar::from(0))]);
     perm[0]
 }
 
@@ -71,13 +56,7 @@ pub fn poseidon2_hash2(a: Scalar, b: Scalar, dom_sep: Option<Scalar>) -> Scalar 
 ///
 /// Returns the first element (state\[0\]) of the permutation result.
 pub fn poseidon2_hash3(a: Scalar, b: Scalar, c: Scalar, dom_sep: Option<Scalar>) -> Scalar {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
-    let perm: Vec<Scalar>;
-    if let Some(dom_sep) = dom_sep {
-        perm = h.permutation(&[a, b, c, dom_sep]);
-    } else {
-        perm = h.permutation(&[a, b, c, Scalar::from(0)]);
-    }
+    let perm = t4::permutation(&[a, b, c, dom_sep.unwrap_or_else(|| Scalar::from(0))]);
     perm[0]
 }
 

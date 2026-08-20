@@ -112,7 +112,7 @@ or the latest prerelease
 curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --pre
 ```
 
-CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/client).
+CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/native).
 
 ## Limitations
 
@@ -152,7 +152,3 @@ The maintainers of this repository provide the source code "as is" and assume no
 Please check [the issues](https://github.com/NethermindEth/stellar-private-payments/issues).
 If you're an external contributor, please check the issues with the label `contributors-friendly`.
 See also [Contributing](./CONTRIBUTING.md).
-
-## Credit
-
-Credit goes to Horizen Labs for their [Poseidon2 implementation](https://github.com/HorizenLabs/poseidon2), which is integrated into this repository.
