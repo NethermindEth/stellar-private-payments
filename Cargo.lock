@@ -1205,8 +1205,6 @@ dependencies = [
  "num-integer",
  "serde_json",
  "taceo-poseidon2",
- "type_analysis",
- "wast",
 ]
 
 [[package]]
