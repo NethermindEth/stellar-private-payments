@@ -135,7 +135,7 @@ The circuit compiler (`tools/circuit-compiler`, via `make circuits`) also honors
 - **`--tests`** (`make circuits TESTS=1`): Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
 For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
 - **`--regen-keys`** (`make circuits REGEN_KEYS=1`): Forces the generation of new verification keys. R1CS compilation uses Circom `--O2`.
-- **`--graphs`** (`make circuits GRAPHS=1`): Regenerates `*.graph.bin` witness graphs after compiling the circuits. Requires the Circom CLI version in `circuits/circom.lock` and a C++ toolchain. Graphs are written next to R1CS/WASM under `target/circuits-artifacts/` (or `--out`).
+- **`--graphs`** (`make circuits GRAPHS=1`): Regenerates `*.graph.bin` witness graphs after compiling. Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain. Graphs land in `target/circuits-artifacts/`; copy them into `deployments/testnet/circuit_keys/` to update committed artifacts.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash

@@ -42,7 +42,7 @@ build-debug:
 .PHONY: circuits
 circuits:
 	@echo "Building circuits (this may take a while)..."
-	cargo run -p circuit-compiler --release -- compile \
+	cargo run -p circuit-compiler --bin circuit-compiler --release -- compile \
 		--circuits $(CURDIR)/circuits \
 		--out $(CURDIR)/target/circuits-artifacts $(if $(TESTS),--tests) $(if $(REGEN_KEYS),--regen-keys) $(if $(GRAPHS),--graphs)
 
