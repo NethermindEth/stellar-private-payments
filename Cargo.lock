@@ -4616,31 +4616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prover"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "ark-groth16",
- "ark-poly 0.6.0",
- "ark-relations",
- "ark-serialize 0.6.0",
- "ark-snark",
- "ark-std 0.6.0",
- "crypto_secretbox",
- "getrandom 0.2.17",
- "rayon",
- "serde",
- "sha2 0.11.0",
- "taceo-poseidon2",
- "tracing",
- "types",
- "web-time",
- "x25519-dalek",
-]
-
-[[package]]
 name = "ptr_meta"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6026,6 +6001,7 @@ dependencies = [
  "soroban-sdk",
  "stellar-strkey 0.0.18",
  "stellar-xdr",
+ "taceo-poseidon2",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

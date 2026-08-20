@@ -35,7 +35,6 @@ tracing = { workspace = true, features = ["attributes"] }
 uint = { workspace = true }
 web-time = { workspace = true }
 zeroize = { workspace = true }
-zkhash = { workspace = true }
 
 # Arkworks ZK proving
 ark-bn254 = { workspace = true }
@@ -48,6 +47,7 @@ ark-snark = { workspace = true }
 ark-std = { workspace = true }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 ruint = { workspace = true }
+taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

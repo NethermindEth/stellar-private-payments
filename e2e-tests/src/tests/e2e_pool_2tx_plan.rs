@@ -28,7 +28,6 @@ use stellar_private_payments::{
     types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey},
 };
 
-
 const USER_SKEY: u64 = 1001;
 const POOL_ADDRESS: &str = "POOL";
 

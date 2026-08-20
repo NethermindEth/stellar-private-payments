@@ -347,7 +347,6 @@ impl MerklePrefixTreeBuilt {
 mod tests {
     use super::*;
     use crate::zk::serialization::scalar_to_bytes;
-    use alloc::vec;
     use ark_bn254::Fr as Scalar;
     use ark_ff::{BigInteger, PrimeField, Zero};
 

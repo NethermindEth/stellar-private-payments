@@ -9,9 +9,8 @@ use crate::{
 use anyhow::{Result, anyhow};
 use ark_bn254::Fr as Scalar;
 use core::ops::Add;
+use std::vec::Vec;
 use taceo_poseidon2::bn254::{t2, t3, t4};
-use std::{vec, vec::Vec};
-
 
 // Useful constants
 /// BN256 modulus as Big Endian bytes
