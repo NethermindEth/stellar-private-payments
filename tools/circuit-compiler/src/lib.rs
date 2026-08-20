@@ -878,11 +878,16 @@ fn regenerate_witness_graphs(
         circom_witness_rs::generate::build_witness()
             .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
 
-        // circom-witness-rs writes `graph.bin` into the process cwd / package dir.
+        // circom-witness-rs typically writes `graph.bin` into the process cwd.
         let tool_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let candidates = [out_dir.join("graph.bin"), tool_dir.join("graph.bin")];
+        let mut candidates = vec![
+            env::current_dir().ok().map(|d| d.join("graph.bin")),
+            Some(out_dir.join("graph.bin")),
+            Some(tool_dir.join("graph.bin")),
+        ];
         let src = candidates
-            .into_iter()
+            .drain(..)
+            .flatten()
             .find(|p| p.is_file())
             .ok_or_else(|| anyhow!("expected circom-witness-rs to write graph.bin; not found"))?;
         let dst = circuits_dir

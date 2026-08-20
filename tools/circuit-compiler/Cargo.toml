@@ -3,7 +3,7 @@ name = "circuit-compiler"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-license.workspace = true
+license = "GPL-3.0"
 publish = false
 
 [lib]

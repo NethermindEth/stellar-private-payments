@@ -62,7 +62,9 @@ WITNESS_GRAPH_STEMS := \
 .PHONY: circomlib-hints
 circomlib-hints:
 	@echo "Applying circomlib black-box hints..."
-	@CIRCOMLIB_HINTS_ONLY=1 cargo run -p circuit-compiler -- compile
+	@CIRCOMLIB_HINTS_ONLY=1 cargo run -p circuit-compiler -- compile \
+		--circuits $(CURDIR)/circuits \
+		--out $(CURDIR)/target/circuits-artifacts
 	@grep -q "function bbf_inv" circuits/src/circomlib/circuits/comparators.circom || \
 		{ echo "circomlib hints missing after priming build"; exit 1; }
 
@@ -79,7 +81,9 @@ witness-graphs: circomlib-hints
 		cargo clean -p circom-witness-rs >/dev/null; \
 		CIRCOM_LIBRARY_PATH="$(CURDIR)/circuits/src" \
 		WITNESS_CPP="$(CURDIR)/circuits/src/$$entry" \
-		cargo run -p circuit-compiler --features regen-graph -- compile || exit 1; \
+		cargo run -p circuit-compiler --features regen-graph -- compile \
+			--circuits $(CURDIR)/circuits \
+			--out $(CURDIR)/target/circuits-artifacts || exit 1; \
 	done
 	@echo "Done. Graphs in deployments/testnet/circuit_keys/"
 
