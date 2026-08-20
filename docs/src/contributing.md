@@ -38,14 +38,9 @@ stellar-private-payments/
 │   ├── index.html              # Main web application entry (includes the Disclosure view)
 │   └── admin.html              # Admin entry
 ├── sdk/                        # Platform-agnostic Rust SDK crates
+│   ├── native/                 # Rust SDK (`stellar-private-payments`)
 │   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
-│   ├── disclosure/             # Selective disclosure
-│   ├── prover/                 # Proving flows
-│   ├── state/                  # Storage and indexer
-│   ├── stellar/                # Stellar/Soroban client
-│   ├── tx-planner/             # Transaction planning
-│   ├── types/                  # Shared types
-│   └── witness/                # Witness generation
+│   └── tests/                  # SDK integration tests
 ├── circuits/                   # Circom ZK circuits
 │   ├── src/
 │   │   ├── core/               # Rust circuit helpers (Merkle, ...)

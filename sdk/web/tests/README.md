@@ -49,7 +49,7 @@ checks without creating, and `--force` recreates.
 
 No ASP membership registration and no admin secret are required: the target pool
 carries `policyFlags: ["blocklist"]`, so membership proofs are not needed (they
-are gated on the `Allowlist` flag — `sdk/types/src/policy_tx.rs`; the pool's
+are gated on the `Allowlist` flag — `sdk/native/src/types/policy_tx.rs`; the pool's
 flags are in `deployments/testnet/deployments.json`).
 
 ## Running the tests
@@ -57,7 +57,7 @@ flags are in `deployments/testnet/deployments.json`).
 Run through the wrapper. Nothing needs sourcing first:
 
 ```bash
-sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-sdk-web -- --include-ignored
+sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web -- --include-ignored
 ```
 
 `--include-ignored` is required. These e2e tests are `#[ignore]`d by default
@@ -70,7 +70,7 @@ Run the suite **unfiltered** as shown above; the tests are designed to run in
 one page. To iterate on a single test while debugging, append a filter:
 
 ```bash
-sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-sdk-web e2e_deposit_halts_at_signing -- --include-ignored --nocapture
+sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web e2e_deposit_halts_at_signing -- --include-ignored --nocapture
 ```
 
 [`../scripts/e2e-browser-test.sh`](../scripts/e2e-browser-test.sh) owns the run

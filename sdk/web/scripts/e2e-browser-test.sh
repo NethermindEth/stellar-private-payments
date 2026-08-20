@@ -64,11 +64,11 @@ Environment:
 Examples:
   sdk/web/scripts/e2e-browser-test.sh \
     cargo test --target wasm32-unknown-unknown \
-      -p stellar-private-payments-sdk-web e2e_smoke_client_construction
+      -p stellar-private-payments-web e2e_smoke_client_construction
 
   E2E_STATIC_ORIGIN=http://127.0.0.1:8123 \
     sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown \
-      -p stellar-private-payments-sdk-web e2e_
+      -p stellar-private-payments-web e2e_
 USAGE
 }
 

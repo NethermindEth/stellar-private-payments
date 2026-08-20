@@ -114,7 +114,7 @@ pub fn default_wallet_path() -> String {
     "./spp-example-wallet.sqlite".to_string()
 }
 
-/// Directory containing `Cargo.toml` for the `sdk/client` crate.
+/// Directory containing `Cargo.toml` for the `sdk/native` crate.
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }

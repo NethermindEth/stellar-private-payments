@@ -341,7 +341,7 @@ Run order for a full demo:
 > remainder spent waiting for the ledger to close. If one of these runs takes
 > substantially longer, suspect the build rather than the prover —
 > `cargo run` performs build work before the example starts, and `--quiet`
-> hides it. Run `cargo build --release -p stellar-private-payments-sdk
+> hides it. Run `cargo build --release -p stellar-private-payments
 > --examples` first to separate build time from run time.
 
 > **`withdraw` and `SPP_RECIPIENT_ADDRESS`:** the run order above exports
@@ -430,8 +430,8 @@ needs the missing history. This is specifically a first-run problem.
 > by matching substrings in the error text (`sync gap`, `retention`,
 > `unsupported filters`, `bootnode indexer`) in
 > `common::is_retention_gap_error`. That is deliberate, not an oversight. The
-> robust alternative is a dedicated error variant in the SDK, but `sdk/client`
-> is consumed by `cli`, `sdk/tests`, and `sdk/web`, so the typed-error change
+> robust alternative is a dedicated error variant in the SDK, but
+> `stellar-private-payments` is consumed by `cli`, `sdk/tests`, and `sdk/web`, so the typed-error change
 > was kept out of scope here. If you add a retention-gap error type to the SDK,
 > switch these detectors to match on it.
 
