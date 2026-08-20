@@ -27,13 +27,19 @@ impl ClientSession {
         let storage_path = config.db_path().to_string_lossy().into_owned();
         let storage =
             LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+        let bootnode_setting = storage
+            .storage()
+            .get_bootnode_setting()
+            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+        let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
+            .then_some(bootnode_setting.url);
 
         let client = if readonly {
             Client::init_readonly(
                 network.rpc_url.clone(),
                 storage,
                 config.deployment.clone(),
-                None,
+                bootnode_url,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
@@ -47,7 +53,7 @@ impl ClientSession {
                 storage,
                 prover,
                 config.deployment.clone(),
-                None,
+                bootnode_url,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
