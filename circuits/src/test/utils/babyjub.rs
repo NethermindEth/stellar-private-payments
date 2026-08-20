@@ -6,11 +6,9 @@
 // Finite-field arithmetic cannot overflow, adding here because of clippy
 #![allow(clippy::arithmetic_side_effects)]
 
+use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, Field, One, PrimeField, Zero};
 use core::str::FromStr;
-use zkhash::{
-    ark_ff::{BigInteger, Field, One, PrimeField, Zero},
-    fields::bn256::FpBN256 as Scalar,
-};
 
 /// The circomlib Baby JubJub generator `BASE8` (prime-order subgroup).
 const BASE8_X: &str =

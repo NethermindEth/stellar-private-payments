@@ -44,7 +44,7 @@ jobs:
             cargo_args: "--lib -p stellar-private-payments -p stellar-private-payments-web"
           - group: contracts-light
             miri_flags: "-Zmiri-strict-provenance"
-            cargo_args: "--lib -p contract-types -p soroban-utils -p public-key-registry -p circuit-keys -p e2e-tests -p zkhash"
+            cargo_args: "--lib -p contract-types -p soroban-utils -p public-key-registry -p circuit-keys -p e2e-tests"
           - group: circom-groth16-verifier
             miri_flags: "-Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks"
             cargo_args: "--lib -p circom-groth16-verifier"

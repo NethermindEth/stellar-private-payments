@@ -8,11 +8,9 @@
 //! `e2e-tests/src/tests/coherence/merkle.rs`.
 
 use alloc::vec::Vec;
+use ark_bn254::Fr as Scalar;
 use core::ops::Add;
-use zkhash::{
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
-};
+use taceo_poseidon2::bn254::t2;
 
 /// Poseidon2 compression for merkle tree nodes
 ///
@@ -20,10 +18,8 @@ use zkhash::{
 /// This matches the feed-forward compression used in Circom circuits.
 #[inline]
 pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let input = [left, right];
-    let perm = poseidon2.permutation(&input);
-    perm[0].add(input[0])
+    let perm = t2::permutation(&[left, right]);
+    perm[0].add(left)
 }
 
 /// Build a Merkle root from a full list of leaves

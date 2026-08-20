@@ -152,7 +152,3 @@ The maintainers of this repository provide the source code "as is" and assume no
 Please check [the issues](https://github.com/NethermindEth/stellar-private-payments/issues).
 If you're an external contributor, please check the issues with the label `contributors-friendly`.
 See also [Contributing](./CONTRIBUTING.md).
-
-## Credit
-
-Credit goes to Horizen Labs for their [Poseidon2 implementation](https://github.com/HorizenLabs/poseidon2), which is integrated into this repository.

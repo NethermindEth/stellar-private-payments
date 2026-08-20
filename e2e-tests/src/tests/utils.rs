@@ -29,10 +29,8 @@ use stellar_private_payments::{
 
 use soroban_utils::utils::MockToken;
 
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField, Zero},
-    fields::bn256::FpBN256 as Scalar,
-};
+use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, PrimeField, Zero};
 
 /// Number of levels in the pool's commitment Merkle tree
 pub const LEVELS: usize = 10;

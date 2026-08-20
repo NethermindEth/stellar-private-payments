@@ -10,6 +10,8 @@ use super::utils::{
     u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
+use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, PrimeField};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
 use circuits::test::utils::{
@@ -24,10 +26,6 @@ use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils:
 use stellar_private_payments::{
     planner::{SpendSession, SpendTarget, SpendableNote, Transact},
     types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey},
-};
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField},
-    fields::bn256::FpBN256 as Scalar,
 };
 
 const USER_SKEY: u64 = 1001;

@@ -7,17 +7,10 @@ use crate::{
     zk::serialization::{bytes_to_scalar, scalar_to_bytes},
 };
 use anyhow::{Result, anyhow};
+use ark_bn254::Fr as Scalar;
 use core::ops::Add;
-use std::{vec, vec::Vec};
-use zkhash::{
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{
-        poseidon2::Poseidon2,
-        poseidon2_instance_bn256::{
-            POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
-        },
-    },
-};
+use std::vec::Vec;
+use taceo_poseidon2::bn254::{t2, t3, t4};
 
 // Useful constants
 /// BN256 modulus as Big Endian bytes
@@ -37,12 +30,7 @@ pub const ZERO_LEAF_BYTES: [u8; 32] = [
 /// This is the core hash function used throughout the crate for merkle trees
 /// and other cryptographic operations.
 pub(crate) fn poseidon2_hash2_internal(a: Scalar, b: Scalar, domain: Option<Scalar>) -> Scalar {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
-    let input = match domain {
-        Some(d) => vec![a, b, d],
-        None => vec![a, b, Scalar::from(0u64)],
-    };
-    let perm = poseidon2.permutation(&input);
+    let perm = t3::permutation(&[a, b, domain.unwrap_or_else(|| Scalar::from(0u64))]);
     perm[0]
 }
 
@@ -55,12 +43,7 @@ pub(crate) fn poseidon2_hash3_internal(
     c: Scalar,
     domain: Option<Scalar>,
 ) -> Scalar {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
-    let input = match domain {
-        Some(d) => vec![a, b, c, d],
-        None => vec![a, b, c, Scalar::from(0u64)],
-    };
-    let perm = poseidon2.permutation(&input);
+    let perm = t4::permutation(&[a, b, c, domain.unwrap_or_else(|| Scalar::from(0u64))]);
     perm[0]
 }
 
@@ -68,11 +51,9 @@ pub(crate) fn poseidon2_hash3_internal(
 ///
 /// Used for internal nodes in merkle trees.
 pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let input = [left, right];
-    let perm = poseidon2.permutation(&input);
+    let perm = t2::permutation(&[left, right]);
     // Feed-forward: add inputs back to permutation output
-    perm[0].add(input[0])
+    perm[0].add(left)
 }
 
 /// Poseidon2 hash with 2 inputs and domain separation

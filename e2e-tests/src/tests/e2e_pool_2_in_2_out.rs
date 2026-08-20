@@ -11,6 +11,7 @@ use super::utils::{
     u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
+use ark_bn254::Fr as Scalar;
 use circuits::test::utils::{
     circom_tester::Inputs,
     general::scalar_to_bigint,
@@ -24,7 +25,6 @@ use soroban_sdk::{
     Address, Bytes, I256, InvokeError, U256, Vec as SorobanVec, testutils::Address as _,
 };
 use stellar_private_payments::types::PolicyFlags;
-use zkhash::fields::bn256::FpBN256 as Scalar;
 
 /// Result of `PoolContractClient::try_transact`.
 ///
