@@ -1,0 +1,79 @@
+name: Circuit bundle
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "deployments/testnet/circuits.json"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "deployments/testnet/circuits.json"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  package:
+    name: Verify, pack, publish
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Build circuit artifacts
+        run: make circuits
+
+      - name: Verify circuit artifact hashes
+        run: sh deployments/scripts/circuit-artifacts.sh verify
+
+      - name: Pack circuits.tar.gz
+        run: |
+          set -eu
+          PACK="$(mktemp -d)"
+          sh deployments/scripts/circuit-artifacts.sh pack "$PACK"
+          mkdir -p out
+          tar -C "$PACK" -czf out/circuits.tar.gz .
+          sha256sum "out/circuits.tar.gz" | sed "s| out/| |" > out/circuits.tar.gz.sha256
+
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: circuits
+          path: out/*
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="circuits-v$(jq -r '.version' deployments/testnet/circuits.json)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists"
+            exit 0
+          fi
+          gh release create "$tag" \
+            out/circuits.tar.gz \
+            out/circuits.tar.gz.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "$tag"
