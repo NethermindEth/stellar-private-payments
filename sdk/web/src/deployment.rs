@@ -1,4 +1,4 @@
-use stellar_private_payments_sdk::types::ContractConfig;
+use stellar_private_payments::types::ContractConfig;
 use wasm_bindgen::JsError;
 
 pub(crate) fn deployment_config() -> Result<&'static ContractConfig, JsError> {

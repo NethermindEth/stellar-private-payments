@@ -1,0 +1,91 @@
+[package]
+name = "stellar-private-payments"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Stellar Private Payments Rust SDK"
+build = "build.rs"
+
+[lib]
+name = "stellar_private_payments"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+circom-witness-rs = { workspace = true }
+ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
+futures = { workspace = true, features = ["executor"] }
+getrandom = { workspace = true }
+hex = { workspace = true }
+http = "1.4.2"
+reqwest = { workspace = true }
+rusqlite_migration = { version = "2.6.0", default-features = false }
+serde = { workspace = true }
+serde-aux = "4.7.0"
+serde_json = { workspace = true, features = ["alloc"] }
+sha2 = { workspace = true }
+sha3 = { version = "0.11", default-features = false }
+stellar-strkey = "0.0.18"
+stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+uint = { workspace = true }
+web-time = { workspace = true }
+zeroize = { workspace = true }
+zkhash = { workspace = true }
+
+# Arkworks ZK proving
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
+ark-poly = { workspace = true }
+ark-relations = { workspace = true }
+ark-serialize = { workspace = true }
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+ruint = { workspace = true }
+x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ark-ff = { workspace = true, features = ["parallel"] }
+ark-groth16 = { workspace = true, features = ["parallel"] }
+ark-poly = { workspace = true, features = ["parallel"] }
+ark-std = { workspace = true, features = ["parallel"] }
+futures-timer = "3"
+getrandom = { workspace = true, features = ["std"] }
+rayon = { version = "1.10", default-features = false }
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+gloo-timers = { workspace = true }
+rusqlite = { workspace = true }
+
+[build-dependencies]
+hex = { workspace = true }
+sha2 = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+circuit-keys = { workspace = true }
+contract-types = { workspace = true }
+pool = { workspace = true }
+public-key-registry = { workspace = true }
+reqwest = { workspace = true, features = ["rustls"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+wiremock = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+rusqlite = { workspace = true }
+wasm-bindgen-test = { workspace = true }
+
+[lints]
+workspace = true

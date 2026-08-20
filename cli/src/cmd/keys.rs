@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use serde::Serialize;
+use stellar_private_payments::types::correlation_id_or_new;
 
 use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
@@ -10,7 +11,7 @@ use crate::{config::CliConfig, onboard, output, session::ClientSession};
 #[tracing::instrument(
     name = "cmd_keys_show",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new())
+    fields(correlation_id = %correlation_id_or_new())
 )]
 pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;
@@ -50,7 +51,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
 #[tracing::instrument(
     name = "cmd_keys_asp_secret",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new())
+    fields(correlation_id = %correlation_id_or_new())
 )]
 pub fn asp_secret(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;

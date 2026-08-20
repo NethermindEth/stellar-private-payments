@@ -17,14 +17,15 @@ use circuits::test::utils::{
 };
 use num_bigint::{BigInt, BigUint};
 use pool::{PoolContract, PoolContractClient};
-use prover::prover::Prover;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, U256,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
-use types::PolicyFlags;
-use witness::WitnessCalculator;
+use stellar_private_payments::{
+    types::PolicyFlags,
+    zk::{prover::Prover, witness::WitnessCalculator},
+};
 
 use soroban_utils::utils::MockToken;
 
@@ -530,8 +531,9 @@ pub fn build_policy_inputs(
 /// Generate a Groth16 proof for a transaction from the committed witness graph
 ///
 /// Builds the circuit inputs, computes the witness with
-/// `witness::WitnessCalculator`, then proves and verifies with the `prover`
-/// crate. This is the pipeline the CLI and the SDK use.
+/// `stellar_private_payments::zk::witness::WitnessCalculator`, then proves and
+/// verifies with `stellar_private_payments::zk::prover::Prover`. This is the
+/// pipeline the CLI and the SDK use.
 ///
 /// # Arguments
 ///
@@ -679,7 +681,7 @@ pub fn bigint_to_u256(env: &Env, value: &BigInt) -> U256 {
 
 /// Convert the uncompressed proof bytes into the Soroban proof type.
 ///
-/// The `prover` crate already writes Soroban point ordering: `x || y` for G1,
+/// The SDK prover already writes Soroban point ordering: `x || y` for G1,
 /// and `c1 || c0` per coordinate for G2.
 pub fn wrap_groth16_proof(env: &Env, result: ProofResult) -> Groth16Proof {
     let bytes = &result.proof_uncompressed;

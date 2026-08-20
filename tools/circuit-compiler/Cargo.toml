@@ -22,7 +22,6 @@ regen-graph = ["dep:circom-witness-rs"]
 [dependencies]
 # workspace
 circuit-keys = { workspace = true }
-types = { workspace = true }
 
 # external
 anyhow = { workspace = true }

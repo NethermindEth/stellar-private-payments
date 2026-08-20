@@ -1,4 +1,4 @@
-//! Browser SDK — wasm-bindgen bindings over [`stellar_private_payments_sdk`].
+//! Browser SDK — wasm-bindgen bindings over [`stellar_private_payments`].
 //!
 //! Connect with [`Client`], then [`Client::account`], then [`Account::pool`].
 
@@ -51,13 +51,13 @@ pub(crate) fn wasm_start() {
 /// ```
 #[wasm_bindgen(js_name = configureTelemetry)]
 pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
-    use stellar_private_payments_sdk::types::TelemetryConfig;
+    use stellar_private_payments::types::TelemetryConfig;
 
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct JsTelemetryConfig {
         level: Option<String>,
-        sink: Option<stellar_private_payments_sdk::types::TelemetrySink>,
+        sink: Option<stellar_private_payments::types::TelemetrySink>,
         ring_buffer_bytes: Option<usize>,
         reveal_sensitive: Option<bool>,
     }
@@ -86,7 +86,7 @@ pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
     if crate::telemetry::is_telemetry_initialized() {
         // Already initialized: dynamically update runtime settings.
         let _ = crate::telemetry::set_log_level(&final_config.level);
-        stellar_private_payments_sdk::types::set_reveal_sensitive(final_config.reveal_sensitive);
+        stellar_private_payments::types::set_reveal_sensitive(final_config.reveal_sensitive);
     } else {
         crate::telemetry::init_telemetry(Some(final_config));
         crate::telemetry::install_panic_hook();

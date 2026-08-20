@@ -28,7 +28,6 @@ use std::{
     string::ToString,
 };
 use type_analysis::check_types::check_types;
-use types::PolicyFlags;
 
 const CURVE_ID: &str = "bn128";
 
@@ -57,7 +56,13 @@ fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bo
 }
 
 fn groth16_key_circuits() -> Vec<String> {
-    let mut circuits = PolicyFlags::all_stems();
+    // Keep in sync with `stellar_private_payments::types::PolicyFlags::all_stems`.
+    let mut circuits = vec![
+        "policy_tx_2_2".to_owned(),
+        "policy_tx_2_2_A".to_owned(),
+        "policy_tx_2_2_B".to_owned(),
+        "policy_tx_2_2_AB".to_owned(),
+    ];
     circuits.extend(
         SELECTIVE_DISCLOSURE_CIRCUITS
             .iter()
@@ -813,6 +818,7 @@ fn get_circomlib(circuits_dir: &Path, src_dir: &Path) -> Result<()> {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
     }
 
+    inject_black_box_hints(&circomlib_path)?;
     Ok(())
 }
 

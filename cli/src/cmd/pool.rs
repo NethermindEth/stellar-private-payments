@@ -2,7 +2,10 @@
 //! contract id and requires a ready account.
 
 use anyhow::Result;
-use stellar_private_payments_sdk::{Error, types::TransactionResult};
+use stellar_private_payments::{
+    Error,
+    types::{Sensitive, TransactionResult, correlation_id_or_new},
+};
 
 use crate::{
     config::{CliConfig, validate_pool},
@@ -14,7 +17,7 @@ use crate::{
 fn open_pool(
     config: &CliConfig,
     pool: &str,
-) -> Result<stellar_private_payments_sdk::blocking::PrivatePool> {
+) -> Result<stellar_private_payments::blocking::PrivatePool> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     validate_pool(pool, &config.deployment)?;
@@ -25,7 +28,7 @@ fn open_pool(
 #[tracing::instrument(
     name = "cmd_deposit",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount))
+    fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount))
 )]
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
     let pool = open_pool(config, pool)?;
@@ -44,7 +47,7 @@ pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Resu
 #[tracing::instrument(
     name = "cmd_transfer",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount), recipient = ?types::Sensitive(&to))
+    fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount), recipient = ?Sensitive(&to))
 )]
 pub fn transfer(
     config: &CliConfig,
@@ -67,7 +70,7 @@ pub fn transfer(
 #[tracing::instrument(
     name = "cmd_withdraw",
     skip_all,
-    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount), recipient = ?types::Sensitive(&to))
+    fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount), recipient = ?Sensitive(&to))
 )]
 pub fn withdraw(
     config: &CliConfig,

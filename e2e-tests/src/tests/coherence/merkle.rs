@@ -2,7 +2,7 @@
 //! Coherence test guarded at production depth 10 (1024 leaves).
 
 use circuits::core::merkle as circuits_merkle;
-use prover::merkle as prover_merkle;
+use stellar_private_payments::zk::merkle as prover_merkle;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[test]

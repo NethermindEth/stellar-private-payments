@@ -9,9 +9,9 @@
 use std::io::Write;
 
 use anyhow::{Context, Result, bail};
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
-    tx::encryption::{
+    zk::encryption::{
         KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
     },
 };

@@ -11,7 +11,7 @@ mod transact;
 use std::{rc::Rc, str::FromStr};
 
 use serde::Deserialize;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
@@ -38,7 +38,7 @@ pub use account::Account;
 pub use pool::PrivatePool;
 
 pub(crate) fn pool_err(error: Error) -> JsError {
-    use stellar_private_payments_sdk::types::AspMembershipSync;
+    use stellar_private_payments::types::AspMembershipSync;
 
     let cause = match &error {
         Error::PlanExecution(plan) => plan.cause(),
@@ -131,9 +131,8 @@ impl Client {
                 .as_module(true)
                 .spawn(&prover_worker_url),
         );
-        let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
-            Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
-        );
+        let prover_handle: Handle<dyn stellar_private_payments::Prover> =
+            Handle::from_box(Box::new(prover.clone()) as Box<dyn stellar_private_payments::Prover>);
 
         let inner = NativeClient::init(
             rpc_url,
@@ -207,7 +206,7 @@ impl Client {
             self.ensure_prover().await?;
 
             if !self.user_keys_exist(&user_address).await? {
-                let message = stellar_private_payments_sdk::KEY_DERIVATION_MESSAGE.to_string();
+                let message = stellar_private_payments::KEY_DERIVATION_MESSAGE.to_string();
                 let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
                 let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
                 self.derive_save_user_keys(user_address.clone(), signature)
@@ -380,10 +379,8 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
-        let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
-            wallet_signer,
-        )
-            as Box<dyn stellar_private_payments_sdk::Signer>);
+        let signer: Handle<dyn stellar_private_payments::Signer> =
+            Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
         self.inner.account(user_address, signer).map_err(pool_err)
     }
 

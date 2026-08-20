@@ -5,9 +5,9 @@ pub mod seed;
 ///
 /// This is intended for integration tests so that failures emit an execution
 /// trace even when captured by the test harness. Includes
-/// [`types::CorrelationIdLayer`] so `correlation_id_or_new()` correctly
-/// inherits an ambient ID within a test. Subsequent calls are ignored if a
-/// subscriber is already installed.
+/// [`stellar_private_payments::types::CorrelationIdLayer`] so
+/// `correlation_id_or_new()` correctly inherits an ambient ID within a test.
+/// Subsequent calls are ignored if a subscriber is already installed.
 pub fn init_test_tracing() {
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -18,7 +18,7 @@ pub fn init_test_tracing() {
     let _ = tracing_subscriber::registry()
         .with(filter)
         .with(fmt_layer)
-        .with(types::CorrelationIdLayer)
+        .with(stellar_private_payments::types::CorrelationIdLayer)
         .try_init();
 }
 
