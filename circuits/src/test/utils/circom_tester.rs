@@ -84,8 +84,8 @@ impl From<Vec<Fr>> for InputValue {
 /// Example:
 ///
 /// ```
-/// use circuits::test::utils::circom_tester::{Inputs, SignalKey};
 /// use ark_bn254::Fr;
+/// use circuits::test::utils::circom_tester::{Inputs, SignalKey};
 /// let mut inputs = Inputs::new();
 /// inputs.set("root", Fr::from(5));
 /// inputs.set_key(&SignalKey::new("arr").idx(0), Fr::from(10));

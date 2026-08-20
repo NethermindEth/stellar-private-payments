@@ -45,7 +45,6 @@ asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.91", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circom-witness-rs = { version = "0.3.0", default-features = false }
 circuit-keys = { path = "circuit-keys" }
