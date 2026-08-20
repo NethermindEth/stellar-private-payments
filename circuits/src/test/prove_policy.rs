@@ -16,15 +16,14 @@ mod tests {
         },
     };
     use anyhow::{Context, Result, ensure};
-    use ark_bn254::Fr;
-    use ark_ff::{BigInteger, PrimeField};
+    use ark_bn254::Fr as Scalar;
+    use ark_ff::Zero;
     use num_bigint::BigInt;
     use std::{
         convert::TryInto,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
     };
-    use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
     const LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
@@ -1527,10 +1526,6 @@ mod tests {
     }
 
     // Policy transaction + Global View Key
-    fn fr_to_scalar(fr: Fr) -> Scalar {
-        Scalar::from_le_bytes_mod_order(&fr.into_bigint().to_bytes_le())
-    }
-
     /// One policy + GVK entry point and the witness layout it expects.
     #[derive(Clone, Copy)]
     struct PolicyGvkCircuit {
@@ -1631,11 +1626,7 @@ mod tests {
         let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)?;
         assert!(res.verified, "{} proof did not verify", circuit.stem);
 
-        let publics: Vec<Scalar> = res
-            .public_inputs
-            .iter()
-            .map(|fr| fr_to_scalar(*fr))
-            .collect();
+        let publics: Vec<Scalar> = res.public_inputs.clone();
 
         Ok(PolicyGvkProof {
             stem: circuit.stem,

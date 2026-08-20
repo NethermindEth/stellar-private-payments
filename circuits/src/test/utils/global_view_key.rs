@@ -11,10 +11,8 @@
 // Finite-field arithmetic cannot overflow. Adding here because of clippy warnings
 #![allow(clippy::arithmetic_side_effects)]
 
-use zkhash::{
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_4},
-};
+use ark_bn254::Fr as Scalar;
+use taceo_poseidon2::bn254::t4;
 
 use super::{
     babyjub::{Point, base8, mul8, point_from_coords, point_to_coords, scalar_mul},
@@ -97,8 +95,7 @@ pub fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Point {
 /// the capacity and never exposed.
 pub fn keystream(s: Point) -> [Scalar; 3] {
     let (sx, sy) = point_to_coords(s);
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
-    let perm = h.permutation(&[sx, sy, Scalar::from(0u64), Scalar::from(DOM_KDF)]);
+    let perm = t4::permutation(&[sx, sy, Scalar::from(0u64), Scalar::from(DOM_KDF)]);
     [perm[0], perm[1], perm[2]]
 }
 

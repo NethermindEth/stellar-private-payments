@@ -7,12 +7,12 @@ use super::{
 };
 use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Result, ensure};
+use ark_bn254::Fr as Scalar;
 use num_bigint::BigInt;
 use std::{
     panic::{self, AssertUnwindSafe},
     path::PathBuf,
 };
-use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[derive(Clone, Debug)]
 /// Description of a note spent by the tested transaction.

@@ -8,12 +8,12 @@ mod tests {
         transaction::{commitment, nullifier, prepopulated_leaves},
     };
     use anyhow::{Context, Result};
+    use ark_bn254::Fr as Scalar;
     use num_bigint::BigInt;
     use std::{
         panic::{self, AssertUnwindSafe},
         path::Path,
     };
-    use zkhash::fields::bn256::FpBN256 as Scalar;
 
     /// Returns `true` when the prover produced a verifying proof for the given
     /// inputs. Any other outcome (a returned `Err`, a `verified == false`

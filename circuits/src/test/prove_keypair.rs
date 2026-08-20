@@ -6,8 +6,8 @@ mod tests {
         keypair::{derive_public_key, sign},
     };
     use anyhow::{Context, Result};
+    use ark_bn254::Fr as Scalar;
     use std::path::PathBuf;
-    use zkhash::fields::bn256::FpBN256 as Scalar;
 
     /// Run a keypair test case
     ///

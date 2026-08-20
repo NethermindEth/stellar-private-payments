@@ -1,9 +1,9 @@
 //! Circuits merkle helpers must stay bit-identical to the SDK prover copy.
 //! Coherence test guarded at production depth 10 (1024 leaves).
 
+use ark_bn254::Fr as Scalar;
 use circuits::core::merkle as circuits_merkle;
 use stellar_private_payments::zk::merkle as prover_merkle;
-use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[test]
 fn merkle_helpers_match_prover() {

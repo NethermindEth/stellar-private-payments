@@ -1,4 +1,4 @@
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use ark_bn254::Fr as Scalar;
 
 use super::general::poseidon2_hash3;
 

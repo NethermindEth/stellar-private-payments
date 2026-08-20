@@ -9,7 +9,8 @@ mod tests {
         transaction_case::{InputNote, OutputNote, TxCase, prove_transaction_case},
     };
     use anyhow::{Context, Result};
-    use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
+    use ark_bn254::Fr as Scalar;
+    use ark_ff::Zero;
 
     #[test]
     #[ignore]

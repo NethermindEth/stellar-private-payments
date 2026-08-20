@@ -1,14 +1,12 @@
 #![cfg(test)]
 
 use super::*;
+use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
-use zkhash::{
-    ark_ff::{BigInteger, Fp256, PrimeField},
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
-};
+use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -499,14 +497,13 @@ fn test_permissionless_insert_updates_root() {
 /// Poseidon2 compression function (same as in
 /// circuits/src/test/utils/general.rs)
 fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let mut perm = h.permutation(&[left, right]);
+    let mut perm = t2::permutation(&[left, right]);
     perm[0] = perm[0].add(left);
     perm[1] = perm[1].add(right);
     perm[0] // By default, we truncate to one element
 }
 
-/// Convert Soroban U256 to off-chain Scalar FpBN256
+/// Convert Soroban U256 to an off-chain BN254 Scalar
 fn u256_to_scalar(_env: &Env, u256: &U256) -> Scalar {
     // Convert U256 to bytes (big-endian)
     let bytes: Bytes = u256.to_be_bytes();
@@ -516,8 +513,8 @@ fn u256_to_scalar(_env: &Env, u256: &U256) -> Scalar {
     // Convert bytes to BigUint
     let biguint = BigUint::from_bytes_be(&bytes_array);
 
-    // Convert BigUint to FpBN256
-    Fp256::from(biguint)
+    // Convert BigUint to Scalar
+    Scalar::from(biguint)
 }
 
 #[test]

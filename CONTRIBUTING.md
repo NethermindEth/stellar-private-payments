@@ -66,7 +66,6 @@ stellar-private-payments/
 │   ├── public-key-registry/    # On-chain public key registry
 │   ├── soroban-utils/          # Shared utilities (Poseidon2, etc.)
 │   └── types/                  # Shared contract types
-├── poseidon2/                  # Poseidon2 hash implementation
 ├── tools/                      # Auxiliary tools
 │   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
 │   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)

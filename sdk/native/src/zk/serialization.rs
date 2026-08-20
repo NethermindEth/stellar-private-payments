@@ -4,14 +4,14 @@
 //! All byte arrays use Little-Endian format (as expected by Arkworks).
 use crate::types::Field;
 use anyhow::{Result, anyhow};
-use ark_bn254::Fr;
+use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, Field as IField, PrimeField};
 use core::ops::{Add, Mul};
-use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::zk::types::FIELD_SIZE;
 
-fn bytes_to_prime_field<F: PrimeField>(bytes: &[u8]) -> Result<F> {
+/// Convert Little-Endian bytes to a BN254 scalar
+pub fn bytes_to_scalar(bytes: &[u8]) -> Result<Scalar> {
     if bytes.len() != FIELD_SIZE {
         return Err(anyhow!(
             "Expected {} bytes, got {}",
@@ -19,14 +19,15 @@ fn bytes_to_prime_field<F: PrimeField>(bytes: &[u8]) -> Result<F> {
             bytes.len()
         ));
     }
-    Ok(F::from_le_bytes_mod_order(bytes))
+    Ok(Scalar::from_le_bytes_mod_order(bytes))
 }
 
-fn prime_field_to_bytes<F: PrimeField>(f: &F) -> Vec<u8> {
-    let src = f.into_bigint().to_bytes_le();
+/// Convert a BN254 scalar to Little-Endian bytes
+pub fn scalar_to_bytes(scalar: &Scalar) -> Vec<u8> {
+    let src = scalar.into_bigint().to_bytes_le();
     if src.len() > FIELD_SIZE {
         panic!(
-            "PrimeField element serialized to {} bytes, expected <= {}",
+            "Scalar serialized to {} bytes, expected <= {}",
             src.len(),
             FIELD_SIZE
         );
@@ -37,39 +38,19 @@ fn prime_field_to_bytes<F: PrimeField>(f: &F) -> Vec<u8> {
     out
 }
 
-/// Convert Little-Endian bytes to Arkworks Fr field element
-pub fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
-    bytes_to_prime_field(bytes)
-}
-
-/// Convert Arkworks Fr field element to Little-Endian bytes
-pub fn fr_to_bytes(fr: &Fr) -> Vec<u8> {
-    prime_field_to_bytes(fr)
-}
-
-/// Convert Little-Endian bytes to zkhash Scalar
-pub fn bytes_to_scalar(bytes: &[u8]) -> Result<Scalar> {
-    bytes_to_prime_field(bytes)
-}
-
-/// Convert zkhash Scalar to Little-Endian bytes
-pub fn scalar_to_bytes(scalar: &Scalar) -> Vec<u8> {
-    prime_field_to_bytes(scalar)
-}
-
-/// Convert a zkhash Field element to a Scalar (Little-Endian).
+/// Convert an app `Field` to a Scalar (Little-Endian).
 pub fn field_to_scalar(field: &Field) -> Scalar {
     Scalar::from_le_bytes_mod_order(&field.to_le_bytes())
 }
 
-/// Convert a Scalar to a zkhash Field element (Little-Endian).
+/// Convert a Scalar to an app `Field` (Little-Endian).
 pub fn scalar_to_field(scalar: &Scalar) -> Field {
     let le = scalar_to_bytes(scalar);
     let le: [u8; 32] = le.try_into().expect("scalar bytes length");
     Field::try_from_le_bytes(le).expect("scalar to field conversion")
 }
 
-/// Convert zkhash Scalar to hex string (for JS BigInt)
+/// Convert a Scalar to hex string (for JS BigInt)
 pub fn scalar_to_hex(scalar: &Scalar) -> String {
     let bytes = scalar_to_bytes(scalar);
     // Convert to big-endian hex for human readability
@@ -80,7 +61,7 @@ pub fn scalar_to_hex(scalar: &Scalar) -> String {
     hex
 }
 
-/// Convert hex string to zkhash Scalar
+/// Convert hex string to a Scalar
 pub fn hex_to_scalar(hex: &str) -> Result<Scalar> {
     let hex = hex.strip_prefix("0x").unwrap_or(hex);
 
@@ -106,7 +87,7 @@ pub fn hex_to_scalar(hex: &str) -> Result<Scalar> {
     Ok(Scalar::from_le_bytes_mod_order(&bytes))
 }
 
-/// Parse witness bytes into vector of Fr elements
+/// Parse witness bytes into vector of field elements
 ///
 /// Witness bytes are Little-Endian, 32 bytes per element
 pub fn parse_witness(witness_bytes: &[u8]) -> Result<Vec<u8>> {
@@ -172,14 +153,6 @@ mod tests {
     use std::string::String;
 
     #[test]
-    fn fr_roundtrip_bytes() {
-        let original = Fr::from(123u64);
-        let bytes = fr_to_bytes(&original);
-        let parsed = bytes_to_fr(&bytes).expect("bytes_to_fr failed");
-        assert_eq!(parsed, original);
-    }
-
-    #[test]
     fn scalar_roundtrip_bytes() {
         let original = Scalar::from(123u64);
         let bytes = scalar_to_bytes(&original);
@@ -193,12 +166,6 @@ mod tests {
         let hex = scalar_to_hex(&original);
         let parsed = hex_to_scalar(&hex).expect("hex_to_scalar failed");
         assert_eq!(scalar_to_bytes(&parsed), scalar_to_bytes(&original));
-    }
-
-    #[test]
-    fn bytes_to_fr_rejects_wrong_len() {
-        assert!(bytes_to_fr(&[0u8; 31]).is_err());
-        assert!(bytes_to_fr(&[0u8; 33]).is_err());
     }
 
     #[test]

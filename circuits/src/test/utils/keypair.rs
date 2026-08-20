@@ -1,4 +1,5 @@
-use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
+use ark_bn254::Fr as Scalar;
+use ark_ff::Zero;
 
 use super::general::{poseidon2_hash2, poseidon2_hash3};
 

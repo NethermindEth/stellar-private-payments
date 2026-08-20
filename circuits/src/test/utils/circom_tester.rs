@@ -8,7 +8,6 @@ use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use num_bigint::BigInt;
 use std::{collections::HashMap, fmt, fmt::Display, fs::File, io::BufReader, path::Path};
-use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[derive(Clone, Debug)]
 pub struct SignalKey(String);
@@ -61,20 +60,20 @@ impl From<Vec<BigInt>> for InputValue {
     }
 }
 
-impl From<Scalar> for InputValue {
-    fn from(value: Scalar) -> Self {
+impl From<Fr> for InputValue {
+    fn from(value: Fr) -> Self {
         InputValue::Single(scalar_to_bigint(value))
     }
 }
 
-impl From<&Scalar> for InputValue {
-    fn from(value: &Scalar) -> Self {
+impl From<&Fr> for InputValue {
+    fn from(value: &Fr) -> Self {
         InputValue::Single(scalar_to_bigint(*value))
     }
 }
 
-impl From<Vec<Scalar>> for InputValue {
-    fn from(values: Vec<Scalar>) -> Self {
+impl From<Vec<Fr>> for InputValue {
+    fn from(values: Vec<Fr>) -> Self {
         InputValue::Array(values.into_iter().map(scalar_to_bigint).collect())
     }
 }
@@ -85,11 +84,11 @@ impl From<Vec<Scalar>> for InputValue {
 /// Example:
 ///
 /// ```
+/// use ark_bn254::Fr;
 /// use circuits::test::utils::circom_tester::{Inputs, SignalKey};
-/// use zkhash::fields::bn256::FpBN256 as Scalar;
 /// let mut inputs = Inputs::new();
-/// inputs.set("root", Scalar::from(5));
-/// inputs.set_key(&SignalKey::new("arr").idx(0), Scalar::from(10));
+/// inputs.set("root", Fr::from(5));
+/// inputs.set_key(&SignalKey::new("arr").idx(0), Fr::from(10));
 /// ```
 #[derive(Default)]
 pub struct Inputs {
