@@ -3,7 +3,9 @@
 // deposit to ensure no failure left the app in a poisoned state.
 
 import { createLogger } from '../src/logger.mjs';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { promisify } from 'node:util';
 import { assert } from '../src/assert.mjs';
 import { waitForSyncedLedger } from '../src/indexer.mjs';
 import {
@@ -21,6 +23,31 @@ import { expectNoFreighterApproval } from '../src/wallet.mjs';
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const execFileAsync = promisify(execFile);
+// ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]). This is the persistent
+// contract-data key used by both pool contract variants.
+const MAXIMUM_DEPOSIT_KEY_XDR = 'AAAAEAAAAAEAAAABAAAADwAAABRNYXhpbXVtRGVwb3NpdEFtb3VudA==';
+const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+
+async function readMaximumDepositAmount(poolContractId, rpcUrl) {
+  const { stdout } = await execFileAsync('stellar', [
+    'contract', 'read',
+    '--id', poolContractId,
+    '--key-xdr', MAXIMUM_DEPOSIT_KEY_XDR,
+    '--rpc-url', rpcUrl,
+    '--network-passphrase', TESTNET_PASSPHRASE,
+    '--output', 'json',
+  ]);
+  const match = stdout.match(/""u256"":\s*""(\d+)""/);
+  if (!match) throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
+  return BigInt(match[1]);
+}
+
+function stroopsToDecimal(stroops) {
+  const whole = stroops / 10_000_000n;
+  const fraction = String(stroops % 10_000_000n).padStart(7, '0');
+  return `${whole}.${fraction}`;
+}
 
 function crc16Xmodem(bytes) {
   let crc = 0;
@@ -71,7 +98,7 @@ async function assertNoApproval(context, label) {
 }
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '11-failure-modes';
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
   const recipient = process.env.E2E_ACCOUNT_D_ADDRESS;
@@ -140,20 +167,34 @@ export async function run(helpers) {
   await page.locator('#transfer-address').fill('');
   await waitForRecipientLookupReset(page);
 
-  // (4) 150 XLM exceeds the deployed pool's 100 XLM cap. Simulation rejects
-  // it before a wallet approval can be requested.
+  // (4) Read the deployed pool's live cap and exceed it by one stroop.
+  // Deployment parameters can change independently of this test branch; a
+  // hard-coded amount can silently become valid and open a wallet approval.
+  const poolContractId = process.env.E2E_POOL_CONTRACT;
+  assert(poolContractId, 'E2E_POOL_CONTRACT is not set');
+  const maximumDeposit = await readMaximumDepositAmount(poolContractId, rpcUrl);
+  const aboveMaximumDeposit = stroopsToDecimal(maximumDeposit + 1n);
   await gotoMoveFlow(page, 'deposit');
-  await page.locator('#deposit-amount').fill('150');
+  await page.locator('#deposit-amount').fill(aboveMaximumDeposit);
   await page.locator('#btn-deposit').click();
   await confirmOperation(page, 'Confirm deposit');
-  const aboveCap = await waitForToast(page, {
-    origin: 'deposit',
-    predicate: (toast) => /transaction simulation failed/i.test(toast.message),
-    timeoutMs: 20_000,
-  });
+  const aboveCapOutcome = await Promise.race([
+    waitForToast(page, {
+      origin: 'deposit',
+      predicate: (toast) => /transaction simulation failed/i.test(toast.message),
+      timeoutMs: 20_000,
+    }).then((toast) => ({ toast })),
+    waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 20_000 })
+      .then((approval) => ({ approval })),
+  ]);
+  assert(
+    aboveCapOutcome.toast,
+    `above-max deposit unexpectedly reached Freighter approval (${aboveCapOutcome.approval?.kind || 'unknown'})`,
+  );
+  const aboveCap = aboveCapOutcome.toast;
   await assertNoApproval(context, 'above-max deposit');
   await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
-  log.info('(4) above max-deposit:', aboveCap.message);
+  log.info(`(4) above max-deposit (${aboveMaximumDeposit} XLM):`, aboveCap.message);
 
   const recovery = await deposit(helpers, { logTag, amount: '0.01', rpcUrl });
   assert(recovery.transactionHash !== baseline.transactionHash, 'recovery deposit somehow reused the baseline transaction hash');
