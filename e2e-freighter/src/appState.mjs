@@ -9,6 +9,7 @@ export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
 export const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
 export const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
+export const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
 
 export async function readWalletState(page) {
   return (await page.locator('body').getAttribute(WALLET_STATE_ATTRIBUTE).catch(() => null)) || 'unknown';
@@ -22,12 +23,21 @@ export async function isOnboardingWizardVisible(page) {
   return page.locator(ONBOARDING_MODAL_SELECTOR).isVisible().catch(() => false);
 }
 
+// A missing-history check happens before `runOnboardingWizard()`. The app
+// deliberately blocks there until the user accepts a bootnode, so callers
+// waiting only for the onboarding modal would otherwise time out with the
+// lifecycle pinned at `connecting`.
+export async function isBootnodeConsentVisible(page) {
+  return page.locator(BOOTNODE_CONSENT_MODAL_SELECTOR).isVisible().catch(() => false);
+}
+
 export async function readAppLifecycle(page) {
-  const [walletState, onboardingVisible] = await Promise.all([
+  const [walletState, onboardingVisible, bootnodeConsentVisible] = await Promise.all([
     readWalletState(page),
     isOnboardingWizardVisible(page),
+    isBootnodeConsentVisible(page),
   ]);
-  return { walletState, onboardingVisible };
+  return { walletState, onboardingVisible, bootnodeConsentVisible };
 }
 
 /**

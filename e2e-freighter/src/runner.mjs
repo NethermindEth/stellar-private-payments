@@ -15,6 +15,7 @@ import { requireAppUrl } from './env.mjs';
 import { waitForCondition } from './waits.mjs';
 import {
   APP_RUNTIME_READY_TIMEOUT_MS,
+  isBootnodeConsentVisible,
   isOnboardingWizardVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
@@ -41,6 +42,7 @@ export {
 
 export {
   APP_RUNTIME_READY_TIMEOUT_MS,
+  isBootnodeConsentVisible,
   isOnboardingWizardVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
@@ -132,14 +134,38 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
 
-  // Onboarding may appear before the runtime becomes usable.
+  // A missing-history check can require explicit bootnode consent before the
+  // onboarding wizard is shown. Treat both modals as an intentional paused
+  // connect state instead of timing out while `Wallet.connect()` is blocked.
   await waitForCondition({
-    operation: 'app:connect-or-onboarding',
+    operation: 'app:connect-or-setup-modal',
     timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
     observe: () => readAppLifecycle(page),
-    isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
+    isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
+      walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
   });
+
+  if (await isBootnodeConsentVisible(page)) {
+    log.info('connectApp: bootnode consent is open — accepting the configured default');
+    await page.getByRole('button', { name: 'Use bootnode', exact: true }).click();
+    await waitForCondition({
+      operation: 'app:bootnode-consent-close',
+      timeoutMs: 10_000,
+      intervalMs: 100,
+      observe: () => isBootnodeConsentVisible(page),
+      isReady: (visible) => !visible,
+    });
+
+    // The app continues into onboarding only after it persists the consent.
+    await waitForCondition({
+      operation: 'app:bootnode-consent-continue',
+      timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
+      intervalMs: 100,
+      observe: () => readAppLifecycle(page),
+      isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
+    });
+  }
 
   // The caller completes onboarding before continuing with the scenario.
   if (await isOnboardingWizardVisible(page)) {

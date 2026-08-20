@@ -21,6 +21,9 @@ function fakePage(snapshots) {
           },
         };
       }
+      if (selector === '#bootnode-consent-modal') {
+        return { async isVisible() { return next().bootnodeConsentVisible || false; } };
+      }
       assert.equal(selector, '#onboarding-modal');
       return { async isVisible() { return next().onboardingVisible; } };
     },
@@ -35,7 +38,18 @@ const instantWait = () => {
 test('readAppLifecycle reports both observations, defaulting a missing marker', async () => {
   assert.deepEqual(
     await readAppLifecycle(fakePage([{ walletState: null, onboardingVisible: false }])),
-    { walletState: 'unknown', onboardingVisible: false },
+    { walletState: 'unknown', onboardingVisible: false, bootnodeConsentVisible: false },
+  );
+});
+
+test('readAppLifecycle reports the pre-onboarding bootnode consent', async () => {
+  assert.deepEqual(
+    await readAppLifecycle(fakePage([{
+      walletState: 'connecting',
+      onboardingVisible: false,
+      bootnodeConsentVisible: true,
+    }])),
+    { walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: true },
   );
 });
 
@@ -90,7 +104,9 @@ test('a lifecycle that never advances still reports a timeout with its last stat
     waitForWalletRuntimeReady(page, { timeoutMs: 300, waitOptions: instantWait() }),
     (error) => {
       assert.equal(error.name, 'WaitTimeoutError');
-      assert.deepEqual(error.lastObservedState, { walletState: 'connecting', onboardingVisible: false });
+      assert.deepEqual(error.lastObservedState, {
+        walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: false,
+      });
       return true;
     },
   );
