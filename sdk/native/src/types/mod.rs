@@ -410,7 +410,6 @@ impl_key_serde_hex!(EncryptionPublicKey);
 impl_key_serde_hex!(NotePrivateKey);
 impl_key_serde_hex!(NotePublicKey);
 
-#[cfg(feature = "rusqlite")]
 mod rusqlite_key_impls {
     use super::{EncryptionPrivateKey, EncryptionPublicKey, NotePrivateKey, NotePublicKey};
     use rusqlite::types::{

@@ -3,7 +3,7 @@
 //! These wrappers exist to:
 //! - make signed vs unsigned intent explicit (`ExtAmount` vs `NoteAmount`)
 //! - provide a single place for conversions into the circuit field (`Field`)
-//! - support serde and (optionally) rusqlite storage conversions
+//! - support serde and rusqlite storage conversions
 
 use core::{
     fmt,
@@ -744,7 +744,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "rusqlite")]
     #[test]
     fn rusqlite_conversions_work() -> Result<()> {
         use rusqlite::types::{FromSql, ToSql, Value, ValueRef};
@@ -776,11 +775,8 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rusqlite")]
 mod rusqlite_impls {
     //! Rusqlite conversions for amount and field types.
-    //!
-    //! These are feature-gated to avoid pulling rusqlite into WASM builds.
 
     use super::{ExtAmount, Field, NoteAmount};
     use rusqlite::types::{

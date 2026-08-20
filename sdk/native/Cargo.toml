@@ -11,11 +11,6 @@ build = "build.rs"
 [lib]
 name = "stellar_private_payments"
 
-[features]
-default = ["rusqlite"]
-# Kept for source compatibility with former types crate cfgs; always enabled in this fat crate.
-rusqlite = []
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
