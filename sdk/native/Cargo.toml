@@ -57,8 +57,11 @@ ark-poly = { workspace = true, features = ["parallel"] }
 ark-std = { workspace = true, features = ["parallel"] }
 futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 rayon = { version = "1.10", default-features = false }
+reqwest = { workspace = true, features = ["rustls"] }
 rusqlite = { workspace = true, features = ["bundled"] }
+tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
