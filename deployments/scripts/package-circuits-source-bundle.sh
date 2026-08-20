@@ -77,19 +77,16 @@ cp -R circuits/src/ <REPO_ROOT>/circuits/src/
 At minimum, ensure:
 \`<REPO_ROOT>/circuits/src/circomlib\` matches revision: $LOCK_SHA
 
-3) From the repository root, build R1CS artifacts and regenerate witness graphs.
-   Requires Circom CLI matching \`circuits/circom.lock\` and a C++ toolchain for
-   graphs:
+3) From the repository root, rebuild R1CS and witness graphs:
 
 \`\`\`
-make circuits
-make witness-graphs
+make circuits GRAPHS=1
 \`\`\`
 
-R1CS files land under \`target/circuits-artifacts/\`. Graph files
-(\`*.graph.bin\`) are written to \`deployments/testnet/circuit_keys/\`. The web
-SDK staging script (\`sdk/web/scripts/stage-circuits-dist.sh\`) copies both into
-\`dist/circuits/\` for redistribution.
+R1CS and \`*.graph.bin\` land under \`target/circuits-artifacts/\`. Copy graphs
+into \`deployments/testnet/circuit_keys/\` before restaging. The web SDK
+staging script copies R1CS from artifacts and graphs/keys from
+\`circuit_keys/\` into \`dist/circuits/\`.
 EOF
 
 mkdir -p "$TMP_DIR/src/licenses"
