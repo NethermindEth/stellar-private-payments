@@ -46,6 +46,14 @@ circuits:
 		--circuits $(CURDIR)/circuits \
 		--out $(CURDIR)/target/circuits-artifacts $(if $(TESTS),--tests) $(if $(REGEN_KEYS),--regen-keys) $(if $(GRAPHS),--graphs)
 
+.PHONY: circuits-lock
+circuits-lock: circuits
+	sh $(CURDIR)/deployments/scripts/circuit-artifacts.sh lock $(VERSION)
+
+.PHONY: circuits-verify
+circuits-verify: circuits
+	sh $(CURDIR)/deployments/scripts/circuit-artifacts.sh verify
+
 # Both targets record the built profile in sdk/web/.trunk-wasm-profile so a
 # subsequent `trunk serve`/`trunk build` (which `serve`/`build` invoke) sees a
 # matching marker and skips its own redundant rebuild.
