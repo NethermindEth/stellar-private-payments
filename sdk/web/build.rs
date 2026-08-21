@@ -69,6 +69,7 @@ fn main() {
     for var in [
         "E2E_STATIC_ORIGIN",
         "E2E_RPC_URL",
+        "E2E_BOOTNODE_URL",
         "E2E_POOL_CONTRACT",
         "E2E_ACCOUNT_A_ADDRESS",
         "E2E_ACCOUNT_B_ADDRESS",

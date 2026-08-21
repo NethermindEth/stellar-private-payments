@@ -61,6 +61,9 @@ impl Indexer {
                     .storage
                     .set_oldest_ledger(result.oldest_ledger)
                     .await?;
+                self.state
+                    .oldest_ledger
+                    .store(result.oldest_ledger, Ordering::Relaxed);
             }
 
             let cursor_out = result.cursor.clone();

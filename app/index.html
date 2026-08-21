@@ -35,7 +35,7 @@
 
     <link data-trunk rel="copy-dir" href="assets/" />
 </head>
-<body class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
+<body data-wallet-state="disconnected" class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950">
         Skip to main content
     </a>
@@ -55,10 +55,10 @@
 
                 <div class="flex flex-col gap-3 md:flex-row md:items-center">
                     <nav class="flex flex-wrap gap-2" aria-label="Primary views">
-                        <button type="button" data-view="dashboard" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Overview</button>
-                        <button type="button" data-view="move-funds" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Move Funds</button>
-                        <button type="button" data-view="advanced" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
-                        <button type="button" data-view="disclosure" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Disclosure</button>
+                        <button type="button" data-view="dashboard" data-testid="nav-dashboard" data-state="active" aria-current="page" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Overview</button>
+                        <button type="button" data-view="move-funds" data-testid="nav-move-funds" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Move Funds</button>
+                        <button type="button" data-view="advanced" data-testid="nav-advanced" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
+                        <button type="button" data-view="disclosure" data-testid="nav-disclosure" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Disclosure</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -84,7 +84,7 @@
         </header>
 
         <main id="main-content" class="flex-1">
-            <section class="view-panel" data-view-panel="dashboard">
+            <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active" aria-hidden="false">
                 <div class="space-y-6">
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
@@ -98,7 +98,7 @@
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="move-funds">
+            <section class="view-panel hidden" data-view-panel="move-funds" data-testid="view-move-funds" data-state="inactive" aria-hidden="true">
                 <div class="grid gap-6">
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -119,9 +119,9 @@
                         </div>
 
                         <div class="mt-8 flex flex-wrap gap-2">
-                            <button type="button" data-move-flow="deposit" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
-                            <button type="button" data-move-flow="transfer" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
-                            <button type="button" data-move-flow="withdraw" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
+                            <button type="button" data-move-flow="deposit" data-testid="move-flow-deposit" data-state="active" aria-pressed="true" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
+                            <button type="button" data-move-flow="transfer" data-testid="move-flow-transfer" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
+                            <button type="button" data-move-flow="withdraw" data-testid="move-flow-withdraw" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
                             <button type="button" id="move-funds-history" aria-label="History of operations" title="History of operations" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
                                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <circle cx="12" cy="12" r="9"/>
@@ -131,7 +131,7 @@
                         </div>
 
                         <div class="mt-8 space-y-6">
-                            <section class="move-flow-panel" data-move-panel="deposit">
+                            <section class="move-flow-panel" data-move-panel="deposit" data-testid="move-panel-deposit" data-state="active" aria-hidden="false">
                                 <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
                                     <div class="flex items-start justify-between gap-4">
                                         <div>
@@ -148,7 +148,7 @@
                                 </div>
                             </section>
 
-                            <section class="move-flow-panel hidden" data-move-panel="transfer">
+                            <section class="move-flow-panel hidden" data-move-panel="transfer" data-testid="move-panel-transfer" data-state="inactive" aria-hidden="true">
                                 <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
                                     <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Transfer</p>
                                     <h3 class="mt-2 text-xl font-semibold text-white">Send private funds by Stellar address</h3>
@@ -185,7 +185,7 @@
                                 </div>
                             </section>
 
-                            <section class="move-flow-panel hidden" data-move-panel="withdraw">
+                            <section class="move-flow-panel hidden" data-move-panel="withdraw" data-testid="move-panel-withdraw" data-state="inactive" aria-hidden="true">
                                 <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
                                     <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Withdraw</p>
                                     <h3 class="mt-2 text-xl font-semibold text-white">Release funds back to a public Stellar address</h3>
@@ -210,7 +210,7 @@
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="advanced">
+            <section class="view-panel hidden" data-view-panel="advanced" data-testid="view-advanced" data-state="inactive" aria-hidden="true">
                 <div class="grid gap-6 xl:grid-cols-[minmax(380px,0.92fr)_minmax(0,1.08fr)]">
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -243,7 +243,7 @@
                                             <th class="px-3 py-3 font-medium text-right">Actions</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="advanced-notes-tbody"></tbody>
+                                    <tbody id="advanced-notes-tbody" data-testid="advanced-notes-table" data-state="idle" data-refresh-sequence="0" data-note-count="0"></tbody>
                                 </table>
                             </div>
                             <div id="advanced-notes-empty" class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-500">No notes available for the current filter.</div>
@@ -289,7 +289,7 @@
                             </div>
                         </div>
 
-                        <button id="btn-advanced-transact" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
+                        <button id="btn-advanced-transact" data-testid="advanced-transact-submit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
                             <span class="btn-text">Execute Advanced Transaction</span>
                             <span class="btn-loading hidden"></span>
                         </button>
@@ -297,7 +297,7 @@
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="disclosure">
+            <section class="view-panel hidden" data-view-panel="disclosure" data-testid="view-disclosure" data-state="inactive" aria-hidden="true">
                 <div class="space-y-6">
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <div class="flex flex-col gap-4">
@@ -309,13 +309,13 @@
                         </div>
                         <div class="mt-8 space-y-6">
                             <!-- Generate Section -->
-                            <section id="disclosure-generate" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="generate-heading">
+                            <section id="disclosure-generate" data-testid="disclosure-generate" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="generate-heading">
                                 <h2 id="generate-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Generate Disclosure Receipt</h2>
                                 <!-- Rendered by disclosure.js -->
                             </section>
 
                             <!-- Verify Section -->
-                            <section id="disclosure-verify" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="verify-heading">
+                            <section id="disclosure-verify" data-testid="disclosure-verify" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="verify-heading">
                                 <h2 id="verify-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Verify Disclosure Receipt</h2>
                                 <!-- Rendered by disclosure.js -->
                             </section>
@@ -632,7 +632,7 @@
     </template>
 
     <template id="tpl-note-row">
-        <tr class="border-t border-white/8 align-top text-slate-200">
+        <tr data-testid="advanced-note" class="border-t border-white/8 align-top text-slate-200">
             <td class="px-3 py-3 text-sm">
                 <span class="note-token block font-medium text-white"></span>
                 <span class="note-pool mt-1 block font-mono text-[11px] text-slate-500"></span>
@@ -645,7 +645,7 @@
             <td class="px-3 py-3"><span class="note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100"></span></td>
             <td class="px-3 py-3">
                 <div class="flex flex-nowrap justify-end gap-0.5">
-                    <button type="button" class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                    <button type="button" data-testid="advanced-note-use" class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
                     <button type="button" class="note-copy rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
                     <button type="button" class="note-disclose rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" data-view="disclosure" title="Selective disclosure">Disclose</button>
                 </div>
@@ -662,12 +662,12 @@
     </template>
 
     <template id="tpl-output-row">
-        <div class="advanced-output-row rounded-2xl border border-white/8 bg-ink-950/80 p-4">
+        <div data-testid="advanced-output" class="advanced-output-row rounded-2xl border border-white/8 bg-ink-950/80 p-4">
             <div>
                 <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Stellar Address</label>
-                <input type="text" class="output-address mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="Leave blank for connected wallet" autocomplete="off" spellcheck="false">
+                <input data-testid="advanced-output-address" type="text" class="output-address mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="Leave blank for connected wallet" autocomplete="off" spellcheck="false">
             </div>
-            <p class="lookup-status mt-3 text-sm text-cyan-100"></p>
+            <p data-testid="advanced-output-lookup-status" class="lookup-status mt-3 text-sm text-cyan-100"></p>
             <p class="lookup-warning mt-2 text-sm text-amber-200"></p>
             <div class="manual-fields mt-4 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
                 <div>
@@ -681,7 +681,7 @@
             </div>
             <div class="mt-4">
                 <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Private Output Amount</label>
-                <input type="text" class="output-amount mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="0.0" inputmode="decimal" autocomplete="off" spellcheck="false">
+                <input data-testid="advanced-output-amount" type="text" class="output-amount mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="0.0" inputmode="decimal" autocomplete="off" spellcheck="false">
             </div>
         </div>
     </template>
@@ -709,11 +709,11 @@
     <div id="toast-container" class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-3"></div>
 
     <template id="tpl-toast">
-        <div class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
+        <div data-testid="toast" class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
             <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300"></div>
             <div class="min-w-0 flex-1">
-                <p class="toast-message break-words"></p>
-                <a class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4" target="_blank" rel="noreferrer">Open explorer</a>
+                <p class="toast-message break-words" data-testid="toast-message"></p>
+                <a class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4" data-testid="toast-link" target="_blank" rel="noreferrer">Open explorer</a>
             </div>
         </div>
     </template>

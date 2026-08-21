@@ -75,17 +75,26 @@ impl BootnodeRpc {
             return Err(retention_handoff(cutoff_ledger));
         }
 
-        if let Some(cursor) = parsed.cursor.as_deref() {
+        let stored_oldest = self.state.oldest_ledger.load(Ordering::Relaxed);
+        let oldest_ledger = if stored_oldest > 0 {
+            stored_oldest
+        } else {
+            self.state.min_deployment_ledger
+        };
+
+        let events = if let Some(cursor) = parsed.cursor.as_deref() {
             if parse_genesis_cursor(cursor).is_some() {
                 counter!("bootnode_handoffs_total").increment(1);
                 return Err(retention_handoff(cutoff_ledger));
             }
-            let cursor_ledger = self
+
+            let (cursor_ledger, events) = self
                 .state
                 .storage
-                .event_ledger(cursor)
+                .page_events_cursor(cursor, cutoff_ledger, limit)
                 .await
                 .map_err(internal_error)?;
+
             let Some(cursor_ledger) = cursor_ledger else {
                 return Err(invalid_params("invalid cursor"));
             };
@@ -93,42 +102,31 @@ impl BootnodeRpc {
                 counter!("bootnode_handoffs_total").increment(1);
                 return Err(retention_handoff(cutoff_ledger));
             }
-        }
+            if events.is_empty() {
+                counter!("bootnode_handoffs_total").increment(1);
+                return Err(retention_handoff(cutoff_ledger));
+            }
 
-        let indexer = self
-            .state
-            .storage
-            .load_indexer_state()
-            .await
-            .map_err(internal_error)?;
-        let oldest_ledger = if indexer.oldest_ledger > 0 {
-            indexer.oldest_ledger
-        } else {
-            self.state.min_deployment_ledger
-        };
-
-        let events = if let Some(cursor) = parsed.cursor.as_deref() {
-            self.state
-                .storage
-                .page_events(None, Some(cursor), cutoff_ledger, limit)
-                .await
-                .map_err(internal_error)?
+            counter!("bootnode_cache_hits_total").increment(1);
+            return Ok(build_response(
+                events,
+                None,
+                parsed.cursor.as_deref(),
+                tip,
+                oldest_ledger,
+            ));
         } else {
             let start_ledger = parsed
                 .start_ledger
                 .unwrap_or(self.state.min_deployment_ledger);
             self.state
                 .storage
-                .page_events(Some(start_ledger), None, cutoff_ledger, limit)
+                .page_events_ledger(start_ledger, cutoff_ledger, limit)
                 .await
                 .map_err(internal_error)?
         };
 
         if events.is_empty() {
-            if parsed.cursor.is_some() {
-                counter!("bootnode_handoffs_total").increment(1);
-                return Err(retention_handoff(cutoff_ledger));
-            }
             counter!("bootnode_empty_pages_total").increment(1);
             return Ok(build_response(
                 events,

@@ -100,6 +100,15 @@ struct Cli {
     /// Trace sampling ratio (0.0..=1.0).
     #[arg(long, env = "BOOTNODE_OTEL_SAMPLE_RATIO", default_value_t = 0.05)]
     otel_sample_ratio: f64,
+
+    /// On startup, delete DB rows for deployment namespaces other than this
+    /// bootnode's.
+    #[arg(
+        long,
+        env = "BOOTNODE_DELETE_OTHER_DEPLOYMENTS",
+        default_value_t = true
+    )]
+    delete_other_deployments: bool,
 }
 
 impl Cli {
@@ -174,6 +183,7 @@ impl Cli {
             rate_limit_burst: self.rate_limit_burst,
             otel,
             initial_ledger_tip: 0,
+            delete_other_deployments: self.delete_other_deployments,
         }
     }
 
@@ -183,6 +193,7 @@ impl Cli {
             &self.database_url,
             self.db_max_connections as usize,
             deployment_id,
+            self.delete_other_deployments,
         )
         .await?;
         backend.init().await?;

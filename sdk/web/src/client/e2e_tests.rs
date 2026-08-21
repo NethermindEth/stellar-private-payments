@@ -45,6 +45,11 @@ const RPC_URL: &str = match option_env!("E2E_RPC_URL") {
     None => "https://soroban-testnet.stellar.org",
 };
 
+/// Optional archive RPC used when the public RPC no longer retains deployment
+/// history. This is test-only configuration; production callers choose their
+/// bootnode explicitly.
+const BOOTNODE_URL: Option<&str> = option_env!("E2E_BOOTNODE_URL");
+
 /// Native XLM pool. `policyFlags: ["blocklist"]`, so no ASP membership leaf is
 /// required.
 const POOL_CONTRACT: &str = match option_env!("E2E_POOL_CONTRACT") {
@@ -153,9 +158,14 @@ async fn open_test_storage() -> Storage {
 /// Build a `Client` with a blob-wrapped prover worker.
 async fn build_test_client(storage: &Storage) -> Client {
     let prover_url = blob_worker_url("prover-worker.js").await;
-    Client::new(RPC_URL.to_string(), storage, prover_url, None)
-        .await
-        .expect("client construction must succeed")
+    Client::new(
+        RPC_URL.to_string(),
+        storage,
+        prover_url,
+        BOOTNODE_URL.map(str::to_owned),
+    )
+    .await
+    .expect("client construction must succeed")
 }
 
 /// Stub wallet signer that halts flows at the signing boundary.

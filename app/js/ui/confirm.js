@@ -33,10 +33,12 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm' } = {
         const panel = document.createElement('div');
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('data-testid', 'confirm-dialog');
         panel.className = 'w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]';
 
         const heading = document.createElement('h2');
         heading.className = 'text-xl font-semibold tracking-tight text-white';
+        heading.setAttribute('data-testid', 'confirm-dialog-title');
         heading.textContent = title;
         panel.appendChild(heading);
 
@@ -64,11 +66,13 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm' } = {
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100';
+        cancelBtn.setAttribute('data-testid', 'confirm-dialog-cancel');
         cancelBtn.textContent = 'Cancel';
 
         const confirmBtn = document.createElement('button');
         confirmBtn.type = 'button';
         confirmBtn.className = 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110';
+        confirmBtn.setAttribute('data-testid', 'confirm-dialog-confirm');
         confirmBtn.textContent = confirmLabel;
 
         actions.append(cancelBtn, confirmBtn);

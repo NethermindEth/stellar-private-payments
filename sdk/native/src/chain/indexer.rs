@@ -134,6 +134,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                     tracing::debug!(
                         "[INDEXER] local sync (start_ledger={start_ledger}) is ahead of RPC events tip (newest={newest}); waiting for RPC to catch up"
                     );
+                    tracing::info!("[INDEXER] synced to ledger {progress_ledger}");
                     return Ok(false);
                 }
                 Err(e) => return Err(e.into()),
@@ -181,6 +182,7 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             cursor = Some(new_cursor);
             if at_events_tip {
+                tracing::info!("[INDEXER] synced to ledger {progress_ledger}");
                 return Ok(false);
             }
             may_have_more = true;
