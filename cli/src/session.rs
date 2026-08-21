@@ -4,9 +4,9 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments::{
-    Handle, LocalProver, LocalStorage, Prover, Signer, TransferRecipient,
+    Handle, LocalProver, LocalStorage, Prover, Signer,
     blocking::{Account as SdkAccount, Client, PrivatePool},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
+    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
@@ -74,7 +74,7 @@ impl ClientSession {
     pub fn operational_feed(
         &self,
         limit: u32,
-    ) -> Result<Vec<stellar_private_payments::OperationalFeedItem>> {
+    ) -> Result<Vec<stellar_private_payments::types::OperationalFeedItem>> {
         self.client
             .operational_feed(limit)
             .map_err(|e| anyhow::anyhow!("operational feed: {e}"))

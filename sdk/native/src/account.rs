@@ -5,10 +5,10 @@ use crate::types::{
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage,
+    Error, Handle, PrivatePool, Prover, Signer, Storage,
     chain::RpcClient,
     sync::{SyncHandle, catch_up, confirm_tx},
-    types::TransactionResult,
+    types::{PrivatePoolConfig, TransactionResult},
 };
 
 /// Stellar account session

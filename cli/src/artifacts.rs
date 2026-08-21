@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use stellar_private_payments::{ProverArtifacts, types::PolicyFlags};
+use stellar_private_payments::types::{PolicyFlags, ProverArtifacts};
 
 use crate::config::default_data_dir;
 

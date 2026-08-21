@@ -4,7 +4,5 @@ mod execute;
 mod plan;
 
 pub use execute::{SpendSession, SpendSessionError, SpendTarget, Transact};
-pub use plan::{
-    CombinationResult, PlanError, PlannedStep, SpendableNote, StepAction, StepNote,
-    TRANSACTION_LIMIT, TransactionPlan, find_combination, plan,
-};
+pub use plan::SpendableNote;
+pub(crate) use plan::{PlanError, plan};

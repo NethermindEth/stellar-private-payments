@@ -54,7 +54,7 @@ impl SyncMode {
 /// Shared sync handle: optional historical-sync bootnode, plus a wake / mode
 /// handle for Client / Account / Pool.
 #[derive(Clone)]
-pub struct SyncHandle {
+pub(crate) struct SyncHandle {
     bootnode_url: Option<String>,
     pub(crate) kick: Handle<SyncKick>,
 }

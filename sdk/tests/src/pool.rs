@@ -4,9 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use stellar_private_payments::{
-    Handle, LocalProver, LocalSigner, LocalStorage, Signer, TransferRecipient,
+    Handle, LocalProver, LocalSigner, LocalStorage, Signer,
     blocking::{Account, Client, PrivatePool},
-    types::{ContractConfig, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, PolicyFlags},
+    types::{
+        ContractConfig, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, PolicyFlags,
+        TransferRecipient,
+    },
 };
 
 use crate::seed::{self, POOL_MERKLE_LEVELS};
@@ -125,11 +128,11 @@ fn cargo_profile() -> &'static str {
     }
 }
 
-fn test_prover_artifacts() -> Result<stellar_private_payments::ProverArtifacts> {
+fn test_prover_artifacts() -> Result<stellar_private_payments::types::ProverArtifacts> {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let circuits = repo.join("target/circuits-artifacts").join(cargo_profile());
     let keys = repo.join("deployments/testnet/circuit_keys");
-    Ok(stellar_private_payments::ProverArtifacts {
+    Ok(stellar_private_payments::types::ProverArtifacts {
         proving_key: std::fs::read(keys.join("policy_tx_2_2_AB_proving_key.bin"))?,
         circuit_graph: std::fs::read(keys.join("policy_tx_2_2_AB.graph.bin"))?,
         circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,

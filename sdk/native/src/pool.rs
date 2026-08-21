@@ -8,9 +8,9 @@ use crate::{
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    PoolCore, PreparedTransaction,
+    PreparedTransaction,
     chain::RpcClient,
-    core::{pool_transact_input, transact_step_for_plan},
+    core::{PoolCore, pool_transact_input, transact_step_for_plan},
     correlation::correlation_id_or_new,
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,

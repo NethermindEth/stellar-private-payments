@@ -9,8 +9,8 @@ pub struct CorrelatedRequest<T> {
 }
 
 pub use stellar_private_payments::{
-    DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
-    TransactRequest,
+    disclosure::{DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams},
+    transact::{PreparedProverTx, TransactRequest},
 };
 
 use stellar_private_payments::{

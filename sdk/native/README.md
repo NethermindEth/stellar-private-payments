@@ -18,8 +18,8 @@ Client (deployment: sync, operational_feed, recipient_lookup)
 
 ```rust
 use stellar_private_payments::{
-    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, ProverArtifacts,
-    types::{ContractConfig, PolicyFlags},
+    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+    types::{ContractConfig, PolicyFlags, ProverArtifacts},
 };
 
 let deployment: ContractConfig = /* load from deployments/ */;
@@ -59,7 +59,7 @@ For balance, portfolio, notes, and sync without transact proving:
 let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 ```
 
-The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
+The SDK does not read circuit files from disk — callers supply `types::ProverArtifacts` (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
 
 ## Examples
 
@@ -162,14 +162,14 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | `Account` | Wallet session bound to one Stellar address |
 | `PrivatePool` | Pool-scoped transact operations |
 | `LocalStorage` | SQLite-backed `Storage` implementation |
-| `PortfolioBalance` | Per-pool balance + note count |
-| `RecipientLookup` | Registry lookup for private transfers |
+| `types::PortfolioBalance` | Per-pool balance + note count |
+| `types::RecipientLookup` | Registry lookup for private transfers |
 
 ### Privacy keys
 
 | API | Role |
 |-----|------|
-| `KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
 | `Account::user_public_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
 | `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |
