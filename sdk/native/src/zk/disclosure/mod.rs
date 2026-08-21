@@ -13,8 +13,9 @@ use crate::{
     },
     zk::prover::{Prover, verify_proof},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use sha2::{Digest, Sha256};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use web_time::Instant;
 
 /// Domain prefix for `ext_context_hash` derivation.
@@ -362,6 +363,39 @@ pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
         SELECTIVE_DISCLOSURE_2_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_2),
         SELECTIVE_DISCLOSURE_3_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_3),
         SELECTIVE_DISCLOSURE_4_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_4),
+        _ => None,
+    }
+}
+
+/// Returns the current UTC time for receipt issuance.
+///
+/// # Returns
+/// Returns the formatted `issuedAt` value for a [`DisclosureReceipt`].
+pub fn current_issued_at() -> Result<String> {
+    let since_epoch = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?;
+    let nanosecs = i64::try_from(since_epoch.as_secs())
+        .context("system clock is out of range for a timestamp")?;
+    OffsetDateTime::from_unix_timestamp(nanosecs)
+        .context("system clock is out of range for a timestamp")?
+        .format(&Rfc3339)
+        .context("failed to format receipt issuance timestamp")
+}
+
+/// Finds a registered disclosure circuit by note count.
+///
+/// # Arguments
+/// * `notes` - Number of notes to be disclosed.
+///
+/// # Returns
+/// Returns the registered circuit accepting `notes` note(s), when one exists.
+pub fn find_circuit_by_notes(notes: u32) -> Option<&'static RegisteredCircuit> {
+    match notes {
+        SELECTIVE_DISCLOSURE_1_N_NOTES => Some(&SELECTIVE_DISCLOSURE_1),
+        SELECTIVE_DISCLOSURE_2_N_NOTES => Some(&SELECTIVE_DISCLOSURE_2),
+        SELECTIVE_DISCLOSURE_3_N_NOTES => Some(&SELECTIVE_DISCLOSURE_3),
+        SELECTIVE_DISCLOSURE_4_N_NOTES => Some(&SELECTIVE_DISCLOSURE_4),
         _ => None,
     }
 }

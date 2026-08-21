@@ -7,25 +7,23 @@ use crate::{
 
 use super::{Prover, ProverEngine};
 use crate::{
-    disclosure::{DisclosureProveParams, RegisteredCircuit, validate_registered_receipt},
+    disclosure::{
+        DisclosureProveParams, RegisteredCircuit, find_circuit_by_notes,
+        validate_registered_receipt,
+    },
     error::Error,
     transact::PreparedProverTx,
     types::ProverArtifacts,
 };
 
-struct DisclosureEngine {
-    circuit: &'static RegisteredCircuit,
-    prover: ProverEngine,
-}
-
 /// In-process Groth16 prover for pool transact and selective-disclosure
 /// circuits.
 ///
 /// Transact engines are keyed by [`PolicyFlags`]. Disclosure engines are keyed
-/// by the number of notes accepted by their registered circuit.
+/// by their registered circuit name.
 pub struct LocalProver {
     transact: RefCell<HashMap<PolicyFlags, ProverEngine>>,
-    disclosure: RefCell<HashMap<u32, DisclosureEngine>>,
+    disclosure: RefCell<HashMap<&'static str, ProverEngine>>,
 }
 
 impl LocalProver {
@@ -80,19 +78,10 @@ impl LocalProver {
                 &bundle.circuit_r1cs,
             )
             .map_err(|e| Error::Other(format!("init prover for {}: {e:#}", circuit.name)))?;
-            if disclosure
-                .insert(
-                    circuit.n_notes,
-                    DisclosureEngine {
-                        circuit,
-                        prover: engine,
-                    },
-                )
-                .is_some()
-            {
+            if disclosure.insert(circuit.name, engine).is_some() {
                 return Err(Error::Other(format!(
-                    "duplicate disclosure circuit for {} note(s)",
-                    circuit.n_notes
+                    "duplicate disclosure circuit for {}",
+                    circuit.name
                 )));
             }
         }
@@ -130,15 +119,20 @@ impl Prover for LocalProver {
     ) -> Result<DisclosureReceipt, Error> {
         let note_count = u32::try_from(params.notes.len())
             .map_err(|_| Error::Other("disclosure note count out of range".into()))?;
-        let mut disclosure = self.disclosure.borrow_mut();
-        let engine = disclosure.get_mut(&note_count).ok_or_else(|| {
+        let circuit = find_circuit_by_notes(note_count).ok_or_else(|| {
             Error::Other(format!(
-                "no disclosure prover configured for {note_count} note(s)"
+                "no disclosure circuit registered for {note_count} note(s)"
+            ))
+        })?;
+        let mut disclosure = self.disclosure.borrow_mut();
+        let engine = disclosure.get_mut(circuit.name).ok_or_else(|| {
+            Error::Other(format!(
+                "no disclosure prover configured for {}",
+                circuit.name
             ))
         })?;
         engine
-            .prover
-            .prove_disclosure(params, engine.circuit)
+            .prove_disclosure(params, circuit)
             .map_err(|e| Error::Other(format!("prove disclosure: {e:#}")))
     }
 
@@ -150,20 +144,13 @@ impl Prover for LocalProver {
         let circuit = validate_registered_receipt(receipt, expected_vk_hash)
             .map_err(|e| Error::Other(format!("validate disclosure receipt: {e:#}")))?;
         let disclosure = self.disclosure.borrow();
-        let engine = disclosure.get(&circuit.n_notes).ok_or_else(|| {
+        let engine = disclosure.get(circuit.name).ok_or_else(|| {
             Error::Other(format!(
-                "no disclosure verifier configured for {} note(s)",
-                circuit.n_notes
+                "no disclosure verifier configured for {}",
+                circuit.name
             ))
         })?;
-        if engine.circuit.name != circuit.name {
-            return Err(Error::Other(format!(
-                "configured disclosure circuit mismatch: expected {}, got {}",
-                circuit.name, engine.circuit.name
-            )));
-        }
         engine
-            .prover
             .verify_disclosure(receipt, expected_vk_hash)
             .map_err(|e| Error::Other(format!("verify disclosure proof: {e:#}")))
     }

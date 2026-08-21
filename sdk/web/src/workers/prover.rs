@@ -595,10 +595,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     amounts,
                 },
                 proof_compressed_hex,
-                issued_at: js_sys::Date::new_0()
-                    .to_iso_string()
-                    .as_string()
-                    .ok_or_else(|| anyhow::anyhow!("failed to get current ISO date"))?,
+                issued_at: disclosure::current_issued_at()?,
             };
 
             ProverWorkerResponse::Disclosure(receipt)

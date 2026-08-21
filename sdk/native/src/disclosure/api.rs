@@ -30,7 +30,6 @@ pub struct DisclosureRequest {
     pub authority_identity_payload_hex: String,
     pub purpose: String,
     pub context_nonce: Field,
-    pub issued_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +60,6 @@ pub struct DisclosureInputs {
 pub struct DisclosureProveParams {
     pub notes: Vec<DisclosureInputs>,
     pub context: DisclosureContext,
-    pub issued_at: String,
 }
 
 pub enum BuildDisclosureInputs {

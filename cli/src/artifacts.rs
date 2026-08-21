@@ -141,10 +141,19 @@ fn default_circuits_dir() -> PathBuf {
 mod tests {
     use super::*;
 
+    fn artifacts_type() -> &'static str {
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    }
+
     #[test]
     fn loads_all_registered_disclosure_artifacts() -> Result<()> {
-        let circuits =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/circuits-artifacts/release");
+        let circuits = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/circuits-artifacts")
+            .join(artifacts_type());
         let artifacts = load_disclosure_artifacts(Some(&circuits))?;
 
         assert_eq!(artifacts.len(), 4);

@@ -86,7 +86,6 @@ impl ProverEngine {
             );
         }
 
-        let issued_at = params.issued_at;
         let context = params.context;
         let ext_context_hash = crate::zk::disclosure::derive_ext_context_hash(&context)?;
         let roots = params.notes.iter().map(|input| input.root).collect();
@@ -134,7 +133,7 @@ impl ProverEngine {
                 amounts: artifacts.amounts,
             },
             proof_compressed_hex: format!("0x{}", hex::encode(proved.proof_compressed)),
-            issued_at,
+            issued_at: crate::zk::disclosure::current_issued_at()?,
         })
     }
 

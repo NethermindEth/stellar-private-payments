@@ -9,7 +9,6 @@ use stellar_private_payments::{
     disclosure::find_circuit,
     types::{DisclosureReceipt, DisclosureVerificationReport, Field, correlation_id_or_new},
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     config::{CliConfig, validate_pool},
@@ -60,7 +59,6 @@ pub fn generate(
             authority_identity_payload_hex: authority_identity.to_string(),
             purpose: purpose.to_string(),
             context_nonce,
-            issued_at: current_issued_at()?,
         })
         .map_err(|e| anyhow::anyhow!("generate disclosure receipt: {e}"))?
         .ok_or_else(|| {
@@ -68,12 +66,6 @@ pub fn generate(
         })?;
 
     write_receipt(&receipt, receipt_output, json)
-}
-
-fn current_issued_at() -> Result<String> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .context("disclosure issuance timestamp")
 }
 
 #[tracing::instrument(
