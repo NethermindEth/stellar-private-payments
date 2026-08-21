@@ -18,15 +18,16 @@ Client (deployment: sync, operational_feed, recipient_lookup)
 
 ```rust
 use stellar_private_payments::{
-    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, ProverArtifacts,
-    types::{ContractConfig, PolicyFlags},
+    CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+    types::ContractConfig,
 };
 
 let deployment: ContractConfig = /* load from deployments/ */;
 let storage = LocalStorage::open("wallet.sqlite")?;
 
-// Load circuit bytes from your host environment, then wire a prover:
-let artifacts: Vec<(PolicyFlags, ProverArtifacts)> = /* CircuitStore::ensure, or files */;
+let store = CircuitStore::open("./circuits");
+store.ensure_blocking()?;
+let artifacts = store.transact_artifacts()?;
 let prover = Handle::from_box(
     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 );
@@ -59,7 +60,11 @@ For balance, portfolio, notes, and sync without transact proving:
 let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 ```
 
-The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). Download a hashed GitHub release with `CircuitStore::ensure`, or load files yourself. The CLI uses its data directory; browser apps use worker-backed provers.
+The native SDK ships an embedded circuit lockfile and downloads the matching
+GitHub release with [`CircuitStore`] (native targets only). Call
+`ensure` / `ensure_blocking`, then pass the returned [`ProverArtifacts`] to
+[`LocalProver`], or supply a custom [`Prover`]. The CLI and browser SDK load
+artifacts from their own paths.
 
 ## Examples
 
@@ -158,6 +163,7 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | `Account` | Wallet session bound to one Stellar address |
 | `PrivatePool` | Pool-scoped transact operations |
 | `LocalStorage` | SQLite-backed `Storage` implementation |
+| `CircuitStore` | Download and verify circuit artifacts (native only) |
 | `PortfolioBalance` | Per-pool balance + note count |
 | `RecipientLookup` | Registry lookup for private transfers |
 

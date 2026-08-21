@@ -5,10 +5,12 @@ on:
     branches: ["main"]
     paths:
       - "deployments/testnet/circuits.json"
+      - "sdk/native/circuits.json"
   pull_request:
     branches: ["main"]
     paths:
       - "deployments/testnet/circuits.json"
+      - "sdk/native/circuits.json"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
