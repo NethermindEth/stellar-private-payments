@@ -150,6 +150,14 @@ mod store {
             }
         }
 
+        pub fn ensure_blocking(&self) -> Result<(), Error> {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| Error::other(e.to_string()))?
+                .block_on(self.ensure())
+        }
+
         pub fn artifacts(&self, stem: &str) -> Result<ProverArtifacts, Error> {
             let lock = circuit_lock()?;
             let hashes = lock.circuits.get(stem).ok_or_else(|| {
