@@ -151,11 +151,7 @@ mod store {
         }
 
         pub fn ensure_blocking(&self) -> Result<(), Error> {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| Error::other(e.to_string()))?
-                .block_on(self.ensure())
+            crate::blocking::runtime::block_on(self.ensure())
         }
 
         pub fn artifacts(&self, stem: &str) -> Result<ProverArtifacts, Error> {
