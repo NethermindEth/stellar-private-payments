@@ -5,15 +5,7 @@ The source code in this directory is licensed under the *Apache 2.0*, consistent
 
 ## Dependencies and Exceptions
 
-### 1. Circuit Compiler (`tools/circuit-compiler`)
-
-Circuit artifact compilation lives in `tools/circuit-compiler` (crate license **GPL-3.0**) because it links `https://github.com/iden3/circom` (GPLv3).
-
-* *Status:* That tool is subject to *GPLv3* due to these linkings, and is used strictly as a build-time tool.
-
-* *No Contamination:* The compiler is not compiled into the final project binaries or artifacts. Its *GPLv3* licensing does not extend to this crate's main source code or the generated build artifacts.
-
-### 2. Circom Circuits (files with `.circom` extension)
+### Circom Circuits (files with `.circom` extension)
 
 The circuit files in this directory import templates from `circomlib`, which is licensed under *LGPLv3*.
 
@@ -22,5 +14,7 @@ The circuit files in this directory import templates from `circomlib`, which is 
 * *Combined Works:* When these circuits are compiled (into `.r1cs` and `.wasm` files), the resulting artifacts effectively statically link against `circomlib`. Any distribution of these compiled artifacts must comply with *LGPLv3* terms (which primarily requires allowing the user to re-link/re-compile with a modified version of `circomlib`). The build process puts these files into a distribution directory `dist` (not included in the version control).
 
 * *Compatibility:* Linking *Apache 2.0* source code with an *LGPLv3* library is a legally supported configuration.
+
+Circuit compilation itself is performed by `tools/circuit-compiler` (GPLv3); see `tools/circuit-compiler/LICENSE`.
 
 See the root `LICENSE` and `circuits/COPYING` files for the full license texts.

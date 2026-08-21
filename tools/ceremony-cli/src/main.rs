@@ -414,13 +414,12 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-/// Default name of the compiled circuit as produced and verified by `cargo
-/// build -p circuits --release`.
+/// Default name of the compiled circuit produced by `make circuits`.
 const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2_AB.r1cs";
 
 /// Resolves the `--circuit` argument. If the user supplied an explicit path it
 /// is validated and returned. Otherwise we auto-discover the compiled `.r1cs`
-/// from the Cargo build output.
+/// from `target/circuits-artifacts/`.
 fn resolve_circuits(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         return resolve_snarkjs_circuit_path(path);
