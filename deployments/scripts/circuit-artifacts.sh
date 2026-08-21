@@ -149,7 +149,7 @@ write_lock() {
     printf '    "commit": "%s",\n' "$commit"
     printf '    "circom": "%s",\n' "$(trim_file "$ROOT/circuits/circom.lock")"
     printf '    "circomlib": "%s",\n' "$(trim_file "$ROOT/circuits/circomlib.lock")"
-    printf '    "circomWitnessRs": "%s"\n' "$witness"
+    printf '    "circom-witness-rs": "%s"\n' "$witness"
     printf '  }'
     for stem in $STEMS; do
       printf ',\n'
@@ -172,7 +172,7 @@ verify_lock() {
   check_meta repository "$GITHUB_REPO" || failed=1
   check_meta circom "$(trim_file "$ROOT/circuits/circom.lock")" || failed=1
   check_meta circomlib "$(trim_file "$ROOT/circuits/circomlib.lock")" || failed=1
-  check_meta circomWitnessRs "$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
+  check_meta circom-witness-rs "$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
   commit="$(json_field meta commit)"
   if ! is_git_commit "$commit"; then
     echo "missing or invalid meta.commit in $LOCK" >&2
