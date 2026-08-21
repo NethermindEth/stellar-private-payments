@@ -23,11 +23,8 @@ const DISCLOSURE_STEMS: [&str; 4] = [
     SELECTIVE_DISCLOSURE_4_CIRCUIT,
 ];
 
-/// Checked-in `deployments/testnet/circuits.json`.
-pub const CIRCUITS_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../deployments/testnet/circuits.json"
-));
+/// Embedded circuit lockfile (crate-local `circuits.json`).
+pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits.json"));
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CircuitMeta {
