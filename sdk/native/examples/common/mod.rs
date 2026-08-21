@@ -29,7 +29,7 @@
 
 #![allow(dead_code)] // shared module: each helper is used by some example
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use stellar_private_payments::{
     CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
@@ -122,16 +122,6 @@ pub fn default_deployment_path() -> PathBuf {
     manifest_dir().join("../../deployments/testnet/deployments.json")
 }
 
-/// Default directory containing committed `{stem}_proving_key.bin` files.
-pub fn default_circuit_keys_dir() -> PathBuf {
-    manifest_dir().join("../../deployments/testnet/circuit_keys")
-}
-
-/// Default directory containing `{stem}.wasm` / `{stem}.r1cs` build outputs.
-pub fn default_circuit_artifacts_dir() -> PathBuf {
-    manifest_dir().join("../../target/circuits-artifacts")
-}
-
 /// Load the deployment config from `SPP_DEPLOYMENT_JSON` or the default testnet
 /// file.
 pub fn load_contract_config() -> Result<ContractConfig, String> {
@@ -165,38 +155,16 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 
 /// Read proving key, graph, and r1cs for `pool`'s policy flags.
 ///
-/// Downloads the hashed GitHub release into `./circuits` when needed. If that
-/// fails, falls back to in-repo `make circuits` outputs.
+/// Downloads the hashed GitHub release into `./circuits` when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let stem = pool.policy_flags.circuit_stem();
     let store = CircuitStore::open("./circuits");
-    match store.ensure_blocking() {
-        Ok(()) => store
-            .artifacts(&stem)
-            .map_err(|e| format!("circuit artifacts: {e}")),
-        Err(download_err) => read_repo_artifacts(&stem).map_err(|local_err| {
-            format!(
-                "circuit artifacts: download failed ({download_err}); \
-                 local files missing ({local_err})"
-            )
-        }),
-    }
-}
-
-fn read_repo_artifacts(stem: &str) -> Result<ProverArtifacts, String> {
-    let keys = default_circuit_keys_dir();
-    let artifacts = default_circuit_artifacts_dir();
-    let proving_key_path = keys.join(format!("{stem}_proving_key.bin"));
-    let graph_path = keys.join(format!("{stem}.graph.bin"));
-    let r1cs_path = artifacts.join(format!("{stem}.r1cs"));
-    let read = |path: &Path, what: &str| {
-        std::fs::read(path).map_err(|e| format!("read {what} {}: {e}", path.display()))
-    };
-    Ok(ProverArtifacts {
-        proving_key: read(&proving_key_path, "proving key")?,
-        circuit_graph: read(&graph_path, "circuit graph")?,
-        circuit_r1cs: read(&r1cs_path, "circuit r1cs")?,
-    })
+    store
+        .ensure_blocking()
+        .map_err(|e| format!("circuit artifacts: {e}"))?;
+    store
+        .artifacts(&stem)
+        .map_err(|e| format!("circuit artifacts: {e}"))
 }
 
 /// Build a read-only client (sync, balance, notes, portfolio, estimates).
