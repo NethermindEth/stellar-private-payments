@@ -14,8 +14,6 @@
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
-//! | `SPP_CIRCUIT_KEYS_DIR` | `<manifest>/../../deployments/testnet/circuit_keys` | transact examples |
-//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts` | transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
@@ -34,7 +32,7 @@
 use std::path::{Path, PathBuf};
 
 use stellar_private_payments::{
-    Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
+    CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{AssetDescriptor, ContractConfig, NoteAmount, PoolConfigEntry, ProverArtifacts},
@@ -165,52 +163,39 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
     }
 }
 
-/// Read the proving key, witness graph, and r1cs for `pool`'s policy flags.
+/// Read proving key, graph, and r1cs for `pool`'s policy flags.
 ///
-/// The proving key and witness graph are read from `SPP_CIRCUIT_KEYS_DIR`;
-/// r1cs from `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that
-/// points at `make circuits`; other I/O errors (e.g.
-/// permissions) are reported without rebuild advice.
+/// Downloads the hashed GitHub release into `./circuits` when needed. If that
+/// fails, falls back to in-repo `make circuits` outputs.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
-    let keys_dir = env_or(
-        "SPP_CIRCUIT_KEYS_DIR",
-        default_circuit_keys_dir().to_string_lossy().into_owned(),
-    );
-    let artifacts_dir = env_or(
-        "SPP_CIRCUIT_ARTIFACTS_DIR",
-        default_circuit_artifacts_dir()
-            .to_string_lossy()
-            .into_owned(),
-    );
     let stem = pool.policy_flags.circuit_stem();
+    let store = CircuitStore::open("./circuits");
+    match store.ensure_blocking() {
+        Ok(()) => store
+            .artifacts(&stem)
+            .map_err(|e| format!("circuit artifacts: {e}")),
+        Err(download_err) => read_repo_artifacts(&stem).map_err(|local_err| {
+            format!(
+                "circuit artifacts: download failed ({download_err}); \
+                 local files missing ({local_err})"
+            )
+        }),
+    }
+}
 
-    let proving_key_path = Path::new(&keys_dir).join(format!("{stem}_proving_key.bin"));
-    let graph_path = Path::new(&keys_dir).join(format!("{stem}.graph.bin"));
-    let r1cs_path = Path::new(&artifacts_dir).join(format!("{stem}.r1cs"));
-
-    // Only genuinely missing files get the rebuild hint; unreadable-but-present
-    // files surface the raw I/O error so the advice stays accurate.
-    let read_artifact = |path: &Path, what: &str| {
-        std::fs::read(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!(
-                    "read {what} {path:?}: {e}\n\
-                     Run `make circuits` to generate circuit keys and artifacts."
-                )
-            } else {
-                format!("read {what} {path:?}: {e}")
-            }
-        })
+fn read_repo_artifacts(stem: &str) -> Result<ProverArtifacts, String> {
+    let keys = default_circuit_keys_dir();
+    let artifacts = default_circuit_artifacts_dir();
+    let proving_key_path = keys.join(format!("{stem}_proving_key.bin"));
+    let graph_path = keys.join(format!("{stem}.graph.bin"));
+    let r1cs_path = artifacts.join(format!("{stem}.r1cs"));
+    let read = |path: &Path, what: &str| {
+        std::fs::read(path).map_err(|e| format!("read {what} {}: {e}", path.display()))
     };
-
-    let proving_key = read_artifact(&proving_key_path, "proving key")?;
-    let circuit_graph = read_artifact(&graph_path, "circuit graph")?;
-    let circuit_r1cs = read_artifact(&r1cs_path, "circuit r1cs")?;
-
     Ok(ProverArtifacts {
-        proving_key,
-        circuit_graph,
-        circuit_r1cs,
+        proving_key: read(&proving_key_path, "proving key")?,
+        circuit_graph: read(&graph_path, "circuit graph")?,
+        circuit_r1cs: read(&r1cs_path, "circuit r1cs")?,
     })
 }
 
