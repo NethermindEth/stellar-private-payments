@@ -3,25 +3,8 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
-use crate::{
-    error::Error,
-    types::{
-        PolicyFlags, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
-        SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
-        SELECTIVE_DISCLOSURE_4_CIRCUIT,
-    },
-};
-
-const KINDS: [&str; 3] = ["r1cs", "graph.bin", "proving_key.bin"];
-
-const DISCLOSURE_STEMS: [&str; 4] = [
-    SELECTIVE_DISCLOSURE_1_CIRCUIT,
-    SELECTIVE_DISCLOSURE_2_CIRCUIT,
-    SELECTIVE_DISCLOSURE_3_CIRCUIT,
-    SELECTIVE_DISCLOSURE_4_CIRCUIT,
-];
+use crate::error::Error;
 
 /// Embedded circuit lockfile (crate-local `circuits.json`).
 pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits.json"));
@@ -54,18 +37,8 @@ pub struct CircuitLockfile {
     pub circuits: BTreeMap<String, CircuitHashes>,
 }
 
-impl CircuitHashes {
-    fn hash(&self, kind: &str) -> Option<&str> {
-        match kind {
-            "r1cs" => Some(self.r1cs.as_str()),
-            "graph.bin" => Some(self.graph.as_str()),
-            "proving_key.bin" => Some(self.proving_key.as_str()),
-            _ => None,
-        }
-    }
-}
-
 impl CircuitLockfile {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn release_url(&self) -> String {
         format!(
             "https://github.com/{}/releases/download/circuits-v{}/circuits.tar.gz",
@@ -79,19 +52,6 @@ pub fn circuit_lock() -> Result<CircuitLockfile, Error> {
         .map_err(|e| Error::other(format!("parse embedded circuits.json: {e}")))
 }
 
-fn file_name(stem: &str, kind: &str) -> String {
-    match kind {
-        "r1cs" => format!("{stem}.r1cs"),
-        "graph.bin" => format!("{stem}.graph.bin"),
-        "proving_key.bin" => format!("{stem}_proving_key.bin"),
-        _ => format!("{stem}.{kind}"),
-    }
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 mod store {
     use std::{
@@ -102,12 +62,24 @@ mod store {
     };
 
     use flate2::read::GzDecoder;
+    use sha2::{Digest, Sha256};
     use tar::Archive;
 
-    use super::{
-        CircuitHashes, CircuitLockfile, DISCLOSURE_STEMS, Error, KINDS, PolicyFlags,
-        ProverArtifacts, circuit_lock, file_name, sha256_hex,
+    use super::{CircuitHashes, CircuitLockfile, Error, circuit_lock};
+    use crate::types::{
+        PolicyFlags, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
+        SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
+
+    const DISCLOSURE_STEMS: [&str; 4] = [
+        SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        SELECTIVE_DISCLOSURE_3_CIRCUIT,
+        SELECTIVE_DISCLOSURE_4_CIRCUIT,
+    ];
+
+    const KINDS: [&str; 3] = ["r1cs", "graph.bin", "proving_key.bin"];
 
     pub struct CircuitStore {
         dir: PathBuf,
@@ -187,14 +159,31 @@ mod store {
         }
     }
 
+    fn file_name(stem: &str, kind: &str) -> String {
+        match kind {
+            "r1cs" => format!("{stem}.r1cs"),
+            "graph.bin" => format!("{stem}.graph.bin"),
+            "proving_key.bin" => format!("{stem}_proving_key.bin"),
+            _ => format!("{stem}.{kind}"),
+        }
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        hex::encode(Sha256::digest(bytes))
+    }
+
     fn files_ok(dir: &Path, stem: &str, hashes: &CircuitHashes) -> bool {
         KINDS.iter().all(|kind| {
             let Ok(bytes) = fs::read(dir.join(file_name(stem, kind))) else {
                 return false;
             };
-            hashes
-                .hash(kind)
-                .is_some_and(|want| sha256_hex(&bytes) == want)
+            let want = match *kind {
+                "r1cs" => hashes.r1cs.as_str(),
+                "graph.bin" => hashes.graph.as_str(),
+                "proving_key.bin" => hashes.proving_key.as_str(),
+                _ => return false,
+            };
+            sha256_hex(&bytes) == want
         })
     }
 
@@ -278,6 +267,17 @@ pub use store::CircuitStore;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{
+        PolicyFlags, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_4_CIRCUIT,
+    };
+
+    const DISCLOSURE_STEMS: [&str; 4] = [
+        SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        SELECTIVE_DISCLOSURE_3_CIRCUIT,
+        SELECTIVE_DISCLOSURE_4_CIRCUIT,
+    ];
 
     #[test]
     fn lockfile_covers_transact_and_disclosure() {
