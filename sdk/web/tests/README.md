@@ -69,8 +69,8 @@ checks without creating, and `--force` recreates.
 CI does none of this: the `e2e-webclient.yml` workflow runs the script with
 `--ephemeral --accounts a,b`, which generates fresh keypairs on the runner
 every run — the first account is friendbot-funded as a faucet and distributes
-XLM to the second in one multi-operation transaction — so no account secrets
-are stored anywhere.
+XLM to the second in one multi-operation transaction. No GitHub secrets or
+environments are involved.
 
 No ASP membership registration and no admin secret are required: the target pool
 carries `policyFlags: ["blocklist"]`, so membership proofs are not needed (they
