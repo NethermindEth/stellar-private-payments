@@ -22,11 +22,10 @@ permissions:
 jobs:
   e2e-freighter:
     name: Freighter e2e
-    # Fork PRs must not run this job: it reads the e2e-testnet environment's
-    # secrets. Same guard as e2e-webclient.yml.
+    # Fork PRs must not run this job: untrusted code must not drive live
+    # testnet provisioning. Same guard as e2e-webclient.yml.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    environment: e2e-testnet
     timeout-minutes: 75
     steps:
       - name: Checkout source code
@@ -121,11 +120,12 @@ jobs:
           set -a
           . deployments/testnet/.e2e-accounts.env
           set +a
-          # These mask freshly-generated secrets so they never leak in logs.
+          # Mask generated keys and password so they never leak in logs.
           echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_D_SECRET"
+          echo "::add-mask::$E2E_FREIGHTER_PASSWORD"
           {
             echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
             echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
@@ -136,6 +136,7 @@ jobs:
             echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
             echo "E2E_ACCOUNT_D_SECRET=$E2E_ACCOUNT_D_SECRET"
             echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
+            echo "E2E_FREIGHTER_PASSWORD=$E2E_FREIGHTER_PASSWORD"
           } >> "$GITHUB_ENV"
 
 
@@ -147,11 +148,10 @@ jobs:
       # locally: it builds+serves the app on :8000, exports APP_URL, and stops
       # the server afterwards. Without it provisioning dies with
       # "APP_URL is not set".
-      # E2E_ACCOUNT_C_SECRET/ADDRESS come from the Provision step above; only
-      # the CI-only wallet password is a secret here.
+      # E2E_ACCOUNT_* and E2E_FREIGHTER_PASSWORD come from the Provision step
+      # above via $GITHUB_ENV (generated fresh per run).
       - name: Generate Freighter profile snapshot
         env:
-          E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
           # Cold `make serve` (circuits + wasm SDK) takes longer than the
           # default 900s on a fresh runner, same as the test step below.
           E2E_SERVE_TIMEOUT: "1800"
@@ -172,16 +172,13 @@ jobs:
       # `make freighter-e2e` uses locally, so CI and a developer's machine
       # exercise identical wiring.
       #
-      # run-all.sh runs scripts/e2e-preflight.sh --check --suite freighter once
-      # before the tests. The account vars were exported to $GITHUB_ENV by the
-      # Provision step above (no .e2e-accounts.env is committed), so the
-      # preflight's env-file checks SKIP when CI is detected while
-      # env.vars.required still verifies against the environment for real, and
-      # chain.accounts.* now runs for real — they were registered moments ago.
+      # run-all.sh runs e2e-preflight.sh --check --suite freighter once before
+      # the tests. In CI, env-file and chain.accounts.* checks SKIP (vars come
+      # from $GITHUB_ENV; registration was verified during provisioning).
+      # env.vars.required and artifact checks still run.
       - name: Run Freighter tests
         env:
           APPROVE: auto
-          E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
           # A cold CI build (circuits + wasm SDK) is slower than a warm local one.
           E2E_SERVE_TIMEOUT: "1800"
         run: bash e2e-freighter/scripts/serve-and-run.sh ${{ steps.select.outputs.tests }}
