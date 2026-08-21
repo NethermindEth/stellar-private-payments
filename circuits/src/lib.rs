@@ -1,6 +1,7 @@
 //! Circuits crate
 //!
-//! Provides core utilities for ZK circuits and test tooling.
+//! Circom sources live under `src/**/*.circom`. Artifact compilation is
+//! `tools/circuit-compiler`.
 //!
 //! The `core` module is always available and `no_std` compatible (for frontend
 //! WASM compatibility).

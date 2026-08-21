@@ -31,7 +31,7 @@ From the repository root:
 make install
 
 # Build circuits (required the first time)
-make circuits-build
+make circuits
 
 # Build WASM modules and serve
 make serve

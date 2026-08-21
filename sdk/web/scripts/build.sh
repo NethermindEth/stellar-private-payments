@@ -23,10 +23,8 @@ WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
 WASM_OUT_NAME="stellar_private_payments_web"
 
 echo "==> Building circuit artifacts (if needed)..."
-# Circuit artifacts are profile-independent and are only published for release
-# (and debug test circuits). Always use the release circuit artifacts.
-if [[ ! -d "$ROOT/target/circuits-artifacts/release" ]]; then
-  cargo build -p circuits --release
+if [[ ! -d "$ROOT/target/circuits-artifacts" ]]; then
+  make circuits
 fi
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."

@@ -7,7 +7,7 @@ deployment by default.
 The examples use a shared environment-variable contract defined in
 [`common/mod.rs`](./common/mod.rs). All transact examples (`deposit`,
 `transfer`, `withdraw`) must be run in **release mode** so they resolve circuit
-artifacts from `target/circuits-artifacts/release`.
+artifacts from `target/circuits-artifacts`.
 
 ## Table of contents
 
@@ -97,11 +97,11 @@ so they need the compiled proving keys and circuit artifacts. Always build in
 release mode:
 
 ```bash
-cargo build -p circuits --release
+make circuits
 ```
 
 This writes wasm and r1cs artifacts under
-`target/circuits-artifacts/release/` and uses the committed proving keys in
+`target/circuits-artifacts/` and uses the committed proving keys in
 `deployments/testnet/circuit_keys/`.
 
 ## Onboard the wallets
@@ -252,7 +252,7 @@ required by most examples; everything else has a sensible default.
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
 | `SPP_CIRCUIT_KEYS_DIR` | `deployments/testnet/circuit_keys` | `deposit`, `transfer`, `withdraw` |
-| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts/release` in release builds | `deposit`, `transfer`, `withdraw` |
+| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts` | `deposit`, `transfer`, `withdraw` |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
@@ -375,13 +375,13 @@ Run `spp onboard --account <alias> --accept` for the account you are using.
 If a transact example prints:
 
 ```text
-Run `cargo build -p circuits` to generate circuit keys and artifacts.
+Run `make circuits` to generate circuit keys and artifacts.
 ```
 
 Run:
 
 ```bash
-cargo build -p circuits --release
+make circuits
 ```
 
 ### Retention gap / sync gap — the deployment expires after ~7 days

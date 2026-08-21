@@ -2,7 +2,7 @@
 set -e
 
 echo "⚠️ Some tests are ignored because they take a long time"
-echo "⚠️ you can run them with ('BUILD_TESTS=1 cargo test -p circuits -- --ignored') "
+echo "⚠️ you can run them with ('make circuits TESTS=1 && cargo test -p circuits -- --ignored') "
 
 # Dependency sorting
 if ! cargo sort --workspace -g --check; then
@@ -48,7 +48,7 @@ if ! cargo clippy --all-targets -- -D warnings; then
 fi
 
 # Tests
-if ! BUILD_TESTS=1 cargo test --workspace --verbose; then
+if ! cargo test --workspace --verbose; then
     echo "❌ Test failures detected"
     exit 6
 fi

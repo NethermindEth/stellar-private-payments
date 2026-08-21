@@ -30,7 +30,7 @@ would make those note public keys public inputs. Always use a wrapper entry poin
 
 ## Policy transact keys (`policy_tx_2_2*`)
 
-**All circuits stems are locally generated** (`REGEN_KEYS=1 cargo build -p circuits`).
+**All circuits stems are locally generated** (`make circuits REGEN_KEYS=1`).
 None of the committed `policy_tx_2_2_*` key pairs in this directory were produced by a
 trusted ceremony on the current R1CS.
 

@@ -4,8 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
-PROFILE="release"
-CIRCUITS_OUT="$ROOT/target/circuits-artifacts/$PROFILE"
+CIRCUITS_OUT="$ROOT/target/circuits-artifacts"
 KEYS_DIR="$ROOT/deployments/testnet/circuit_keys"
 DIST="$WEB/dist"
 
@@ -34,11 +33,7 @@ if [[ "${STAGE_CIRCUITS_DIST_SOURCE_ONLY:-}" == "1" ]]; then
 fi
 
 if [[ ! -d "$CIRCUITS_OUT" ]]; then
-  if [[ "$PROFILE" == "release" ]]; then
-    echo "error: missing $CIRCUITS_OUT — run cargo build -p circuits --release" >&2
-  else
-    echo "error: missing $CIRCUITS_OUT — run cargo build -p circuits --profile $PROFILE" >&2
-  fi
+  echo "error: missing $CIRCUITS_OUT — run make circuits" >&2
   exit 1
 fi
 
