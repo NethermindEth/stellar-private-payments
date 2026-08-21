@@ -5,7 +5,7 @@
     "commit": "ac2881ee3a66c0859c0cab17c67f805855123865",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
-    "circomWitnessRs": "0.3.0"
+    "circom-witness-rs": "0.3.0"
   },
   "policy_tx_2_2": {
     "setup": "local",

@@ -32,7 +32,7 @@ pub struct CircuitMeta {
     pub commit: String,
     pub circom: String,
     pub circomlib: String,
-    #[serde(rename = "circomWitnessRs")]
+    #[serde(rename = "circom-witness-rs")]
     pub circom_witness_rs: String,
 }
 
