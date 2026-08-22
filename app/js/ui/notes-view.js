@@ -145,6 +145,7 @@ export function createNoteRow(note, opts = {}) {
     onToggle,
     showBadge = true,
     actions = [],
+    testId,
   } = opts;
 
   const symbol = symbolOpt || note.tokenLabel || 'Token';
@@ -161,12 +162,15 @@ export function createNoteRow(note, opts = {}) {
     }`,
   );
   if (note.id) row.dataset.noteId = note.id;
+  if (testId) row.dataset.testid = testId;
+  row.dataset.noteState = note.spent ? 'spent' : 'unspent';
 
   // Left cluster: optional checkbox + commitment / meta line.
   const leftItems = [];
   if (selectable) {
     const checkbox = el('input', 'accent-brand-500');
     checkbox.type = 'checkbox';
+    if (testId) checkbox.dataset.testid = `${testId}-select`;
     checkbox.checked = selected;
     if (disabled) checkbox.disabled = true;
     checkbox.addEventListener('change', () => onToggle?.(note, checkbox.checked));

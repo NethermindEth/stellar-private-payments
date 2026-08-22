@@ -54,6 +54,7 @@ pub(crate) struct AppState {
     pub(crate) storage: Arc<dyn Storage>,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
+    pub(crate) oldest_ledger: Arc<AtomicU32>,
     pub(crate) archive_ready: Arc<AtomicBool>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
@@ -94,6 +95,7 @@ impl Bootnode {
             state: AppState {
                 upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
                 ledger_tip: Arc::new(AtomicU32::new(ledger_tip)),
+                oldest_ledger: Arc::new(AtomicU32::new(indexer.oldest_ledger)),
                 archive_ready: Arc::new(AtomicBool::new(indexer.archive_ready)),
                 cfg,
                 storage,

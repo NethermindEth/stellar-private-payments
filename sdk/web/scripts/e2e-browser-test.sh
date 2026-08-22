@@ -49,6 +49,8 @@ Runs <command> with everything the sdk/web browser e2e tests need:
   3. The server is polled for readiness before <command> starts.
   4. E2E_STATIC_ORIGIN and any loaded account material are exported.
   5. CHROMEDRIVER is resolved from PATH when unset.
+  6. scripts/e2e-preflight.sh --check --suite sdk has passed.
+     E2E_SKIP_PREFLIGHT=1 bypasses it.
 
 An already-running server on that origin is reused and left running. A server
 started by this script is stopped on exit.
@@ -57,6 +59,7 @@ Environment:
   E2E_ENV_FILE               Account material to export (default
                              deployments/testnet/.e2e-accounts.env). Missing
                              file is not an error.
+  E2E_SKIP_PREFLIGHT         Set to 1 to bypass scripts/e2e-preflight.sh
   E2E_STATIC_ORIGIN          Origin to serve assets on (default http://127.0.0.1:8099)
   CHROMEDRIVER               Path to chromedriver (default: from PATH)
   WASM_BINDGEN_TEST_TIMEOUT  Per-test timeout in seconds (default 600)
@@ -177,6 +180,10 @@ cleanup() {
 trap cleanup EXIT
 
 main() {
+  if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
+    bash "$ROOT/scripts/e2e-preflight.sh" --check --suite sdk || exit 1
+  fi
+
   ensure_dist
 
   if serves_assets; then

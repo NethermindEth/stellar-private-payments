@@ -69,6 +69,8 @@ stellar-private-payments/
 ├── tools/                      # Auxiliary tools
 │   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
 │   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
+├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
+├── e2e-freighter/              # Real-Freighter browser e2e suite (see e2e-freighter/README.md)
 ├── e2e-tests/                  # End-to-end integration tests
 ├── deployments/                # Deployment scripts, testnet config, legal notices
 ├── docs/                       # Project documentation (mdBook source)
@@ -215,6 +217,32 @@ The E2E tests generate real Groth16 proofs and verify them, locally, using contr
 ```bash
 cargo test -p e2e-tests
 ```
+
+### Browser E2E preflight
+
+The two browser e2e suites — the pre-signing SDK wasm tests and the
+real-Freighter tests in `e2e-freighter/` (see `e2e-freighter/README.md`) —
+share one preflight, `scripts/e2e-preflight.sh`. Their entry points
+(`sdk/web/scripts/e2e-browser-test.sh`, `e2e-freighter/scripts/run-all.sh`,
+`e2e-freighter/scripts/run-e2e.sh`) run it automatically before every
+invocation; `scripts/e2e-setup.sh` is `--fix --suite all`.
+
+- `--check` (default) verifies only, never mutates anything; `--fix` also
+  runs the safe auto-heal action for anything missing.
+- `--suite sdk|freighter|all` restricts which checks run (default `all`).
+- Exit codes: `0` everything the selected suite needs is present, `1` at
+  least one requirement is missing and wasn't healed in this mode, `2`
+  usage error.
+- `E2E_SKIP_PREFLIGHT=1` bypasses it entirely from any entry point.
+- `E2E_SKIP_NETWORK_CHECKS=1` skips reachability and chain-state verifications.
+- Every filesystem location it inspects has a path-override env var for
+  debugging: `E2E_ENV_FILE`, `E2E_SNAPSHOT_FILE`, `E2E_VENDOR_DIR`,
+  `E2E_CIRCUITS_OUT_DIR`, `E2E_SDK_DIST_DIR`, `E2E_SPP_PATH`, plus the pre-existing
+  `E2E_CHROMIUM_PATH` / `E2E_PROFILE_TMPDIR` / `CHROMEDRIVER`.
+
+See `e2e-freighter/README.md` for the per-distro install instructions its
+remediation messages point at, and `scripts/e2e-preflight.sh --help` for
+the full flag list.
 
 ## Code quality assurance
 

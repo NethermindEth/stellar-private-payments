@@ -142,12 +142,21 @@ export const Toast = {
         const friendlyMessage = friendlyErrorMessage(message);
         msgEl.textContent = String(friendlyMessage ?? '');
         msgEl.title = String(friendlyMessage ?? '');
+        toast.dataset.status = type;
+        toast.dataset.state = 'visible';
 
         const dot = type === 'info' ? 'bg-slate-300' : type === 'error' ? 'bg-rose-400' : 'bg-cyan-300';
         const border = type === 'info' ? 'border-slate-400/40' : type === 'error' ? 'border-rose-400/40' : 'border-cyan-400/40';
         icon?.classList.remove('bg-cyan-300');
         icon?.classList.add(dot);
         toast.classList.add(border);
+
+        if (opts.origin) {
+            toast.setAttribute('data-toast-origin', opts.origin);
+        }
+        if (opts.transactionHash) {
+            toast.dataset.transactionHash = opts.transactionHash;
+        }
 
         if (opts.linkUrl && link) {
             link.href = opts.linkUrl;
@@ -158,6 +167,7 @@ export const Toast = {
         container.appendChild(toast);
 
         setTimeout(() => {
+            toast.dataset.state = 'dismissing';
             toast.style.opacity = '0';
             toast.style.transform = 'translateY(8px)';
             setTimeout(() => toast.remove(), 200);

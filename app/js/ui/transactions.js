@@ -53,6 +53,8 @@ function requireWallet() {
 function setLoading(button, loading, label = 'Submitting…') {
     if (!button) return;
     button.disabled = loading;
+    button.dataset.status = loading ? 'submitting' : 'idle';
+    if (!loading) delete button.dataset.progress;
     button.querySelector('.btn-text')?.classList.toggle('hidden', loading);
     const loadingEl = button.querySelector('.btn-loading');
     if (loadingEl) {
@@ -71,6 +73,8 @@ function bindTxProgress(button, flow) {
         if (!loadingEl) return;
         loadingEl.classList.remove('hidden');
         loadingEl.textContent = detail.message;
+        button.dataset.status = 'submitting';
+        button.dataset.progress = detail.message;
     };
     window.addEventListener(TX_PROGRESS_EVENT, handler);
     return () => window.removeEventListener(TX_PROGRESS_EVENT, handler);
@@ -351,7 +355,7 @@ export const Transactions = {
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
-            Toast.show('Note added to advanced transact', 'success');
+            Toast.show('Note added to advanced transact', 'success', 4000, { origin: 'advanced' });
         });
     },
 
@@ -378,7 +382,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
             } finally {
                 setLoading(button, false);
             }
@@ -439,7 +443,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error', 7000, { origin: 'transfer' });
             } finally {
                 setLoading(button, false);
             }
@@ -449,7 +453,7 @@ export const Transactions = {
             const value = transferAddress.value.trim();
             if (!value) return;
             if (!StrKey.isValidEd25519PublicKey(value)) {
-                Toast.show('Invalid Stellar address', 'error');
+                Toast.show('Invalid Stellar address', 'error', 4000, { origin: 'transfer' });
                 return;
             }
             // The `input` handler above already looked this address up at 56 chars;
@@ -501,7 +505,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error', 7000, { origin: 'withdraw' });
             } finally {
                 setLoading(button, false);
             }
@@ -510,7 +514,7 @@ export const Transactions = {
         onEnter(withdrawRecipientInput, () => {
             const value = withdrawRecipientInput.value.trim();
             if (value && !StrKey.isValidEd25519PublicKey(value)) {
-                Toast.show('Invalid Stellar address', 'error');
+                Toast.show('Invalid Stellar address', 'error', 4000, { origin: 'withdraw' });
                 return;
             }
             withdrawAmountInput?.focus();
@@ -591,7 +595,7 @@ export const Transactions = {
                     document.getElementById('advanced-public-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });
             } finally {
                 setLoading(button, false);
             }
@@ -600,33 +604,35 @@ export const Transactions = {
 
     // Returns true when a real submission happened, so callers can clear their form only on success.
     showExecuteResult(result, label = 'Transaction') {
+        const origin = { Deposit: 'deposit', Transfer: 'transfer', Withdrawal: 'withdraw', 'Advanced transaction': 'advanced' }[label] || 'transaction';
         if (result?.status === 'aspNotReady') {
             Toast.show(
                 'Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.',
                 'error',
                 8000,
+                { origin },
             );
             return false;
         }
         if (result?.status === 'failed') {
             if (Array.isArray(result.hashes) && result.hashes.length) {
-                this.showSubmittedToasts(result.hashes, label);
+                this.showSubmittedToasts(result.hashes, label, origin);
             }
-            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000);
+            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000, { origin });
             return false;
         }
         if (result?.status === 'ok') {
-            return this.showSubmittedToasts(result.hashes, label);
+            return this.showSubmittedToasts(result.hashes, label, origin);
         }
         const hashes = txResultsToHashes(result);
         if (hashes?.length) {
-            return this.showSubmittedToasts(hashes, label);
+            return this.showSubmittedToasts(hashes, label, origin);
         }
-        Toast.show(`${label} failed`, 'error');
+        Toast.show(`${label} failed`, 'error', 4000, { origin });
         return false;
     },
 
-    showSubmittedToasts(hashes, label = 'Transaction') {
+    showSubmittedToasts(hashes, label = 'Transaction', origin = 'transaction') {
         if (!Array.isArray(hashes) || !hashes.length) return false;
         const lastHash = hashes[hashes.length - 1];
         const message = hashes.length === 1
@@ -635,6 +641,8 @@ export const Transactions = {
         Toast.show(message, 'success', 7000, {
             linkUrl: Utils.explorerTxUrl(lastHash),
             linkAriaLabel: 'Open transaction in explorer',
+            origin,
+            transactionHash: lastHash,
         });
         for (const txHash of hashes) {
             App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));

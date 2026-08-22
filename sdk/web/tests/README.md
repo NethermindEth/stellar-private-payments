@@ -32,20 +32,45 @@ artifacts lying around.
 
 Everything else is handled by the wrapper script described below.
 
+The preflight the wrapper runs checks all of the above and reports precisely
+what is missing, so you rarely need to diagnose a prerequisite by hand:
+
+```bash
+scripts/e2e-preflight.sh --check --suite sdk   # verify only, mutates nothing
+scripts/e2e-setup.sh                           # --fix --suite all: auto-heal what it safely can
+```
+
+The order matters and the wrapper gets it right: the env file is exported
+first, so the preflight can verify the values are *coherent* — notably that
+`E2E_POOL_CONTRACT` matches `deployments/testnet/deployments.json` — rather
+than merely present.
+
 ## Account provisioning
 
-The tests need two funded testnet accounts registered in the public-key
-registry. Provision them once:
+This suite uses accounts **A** (the account under test) and **B** (the transfer
+recipient), both funded on testnet and registered in the public-key registry.
+Provision them once:
 
 ```bash
 deployments/scripts/e2e-accounts-setup.sh
 ```
 
-This creates two keypairs, funds them via friendbot (with backoff), derives
+The script provisions **four** accounts, not two: the Freighter browser suite
+additionally needs C (the wallet imported into its browser profile) and D (its
+registered transfer recipient). C and D are harmless here — this suite never
+reads them.
+
+It creates the keypairs, funds them via friendbot (with backoff), derives
 privacy keys and registers public keys on-chain, then writes
 `deployments/testnet/.e2e-accounts.env` (mode 600, git-ignored — **it contains
 secret keys**). Re-running verifies instead of re-provisioning; `--verify`
 checks without creating, and `--force` recreates.
+
+CI does none of this: the `e2e-webclient.yml` workflow runs the script with
+`--ephemeral --accounts a,b`, which generates fresh keypairs on the runner
+every run — the first account is friendbot-funded as a faucet and distributes
+XLM to the second in one multi-operation transaction — so no account secrets
+are stored anywhere.
 
 No ASP membership registration and no admin secret are required: the target pool
 carries `policyFlags: ["blocklist"]`, so membership proofs are not needed (they
@@ -75,7 +100,9 @@ sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -
 
 [`../scripts/e2e-browser-test.sh`](../scripts/e2e-browser-test.sh) owns the run
 lifecycle: it exports `deployments/testnet/.e2e-accounts.env` (override with
-`E2E_ENV_FILE`; a missing file is not an error), builds `sdk/web/dist` when
+`E2E_ENV_FILE`; a missing file is not an error), runs
+[`scripts/e2e-preflight.sh`](../../../scripts/e2e-preflight.sh) `--check --suite
+sdk` (bypass with `E2E_SKIP_PREFLIGHT=1`), builds `sdk/web/dist` when
 missing, serves it with CORS headers on `E2E_STATIC_ORIGIN` (default
 `http://127.0.0.1:8099`), waits for readiness, resolves `CHROMEDRIVER` from
 `PATH` when unset, and raises `WASM_BINDGEN_TEST_TIMEOUT` to 600s — the
@@ -93,7 +120,7 @@ test page loads these assets cross-origin.
 
 Configuration is read at **compile time** via `option_env!`
 (`E2E_ACCOUNT_A_ADDRESS`, `E2E_ACCOUNT_A_SECRET`, `E2E_ACCOUNT_B_ADDRESS`,
-`E2E_RPC_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`). `sdk/web/build.rs`
+`E2E_RPC_URL`, `E2E_BOOTNODE_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`). `sdk/web/build.rs`
 declares `rerun-if-env-changed` for each, so editing the env file rebuilds the
 test binary on the next run.
 

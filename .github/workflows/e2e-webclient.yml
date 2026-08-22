@@ -68,23 +68,18 @@ jobs:
           cargo build -p circuits
           cargo build -p circuits --release
 
-      - name: Import persistent test account keys
-        env:
-          E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
-          E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
-        run: |
-          CONFIG_DIR="deployments/scripts/.e2e-wallet-testnet/stellar"
-          mkdir -p "$CONFIG_DIR/identity"
-          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_A_SECRET" > "$CONFIG_DIR/identity/spp-e2e-a.toml"
-          printf 'secret_key = "%s"\n' "$E2E_ACCOUNT_B_SECRET" > "$CONFIG_DIR/identity/spp-e2e-b.toml"
-          chmod 600 "$CONFIG_DIR/identity/spp-e2e-a.toml" "$CONFIG_DIR/identity/spp-e2e-b.toml"
-
+      # Both test accounts are generated fresh per run (account A is
+      # friendbot-funded as the faucet and distributes XLM to B), so no
+      # persistent secrets or key imports are needed.
       - name: Provision test accounts
+        env:
+          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
-          bash deployments/scripts/e2e-accounts-setup.sh
+          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral --accounts a,b
           set -a
           . deployments/testnet/.e2e-accounts.env
           set +a
+          # Mask freshly-generated secrets so they never leak in logs.
           echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
           {
@@ -103,6 +98,7 @@ jobs:
       - name: Run browser e2e tests
         env:
           E2E_STATIC_ORIGIN: http://127.0.0.1:8099
+          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }

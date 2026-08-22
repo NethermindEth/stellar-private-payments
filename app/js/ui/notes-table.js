@@ -15,6 +15,24 @@ export const NotesTable = {
     filter: 'all',
     _timer: null,
     _refreshing: false,
+    _refreshSequence: 0,
+
+    publishReadiness(state) {
+        const count = App.state.notes.length;
+        const detail = {
+            refreshSequence: this._refreshSequence,
+            count,
+            state,
+        };
+        const tbody = document.getElementById('advanced-notes-tbody');
+        if (tbody) {
+            tbody.dataset.state = state;
+            tbody.dataset.refreshSequence = String(detail.refreshSequence);
+            tbody.dataset.noteCount = String(count);
+        }
+        document.dispatchEvent(new CustomEvent('notes:readiness', { detail }));
+        App.events.dispatchEvent(new CustomEvent('notes:updated', { detail }));
+    },
 
     init() {
         document.querySelectorAll('[data-note-filter]').forEach(btn => {
@@ -35,6 +53,7 @@ export const NotesTable = {
             this.stopPolling();
             App.state.notes = [];
             this.render();
+            this.publishReadiness('idle');
         });
         App.events.addEventListener('pool:config', () => this.render());
         App.events.addEventListener('pool:selected', () => this.render());
@@ -56,6 +75,7 @@ export const NotesTable = {
     async refreshOnce() {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
+        this.publishReadiness('refreshing');
         try {
             const list = await client().account().userNotes(200);
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
@@ -66,8 +86,10 @@ export const NotesTable = {
                 spent: !!note.spent,
             }));
             this.render();
-            App.events.dispatchEvent(new CustomEvent('notes:updated'));
+            this._refreshSequence += 1;
+            this.publishReadiness('ready');
         } catch (error) {
+            this.publishReadiness('error');
             console.warn('[NotesTable] refresh failed:', error);
             Toast.show('Failed to refresh notes', 'info');
         } finally {
