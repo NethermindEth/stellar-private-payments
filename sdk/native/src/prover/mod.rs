@@ -9,7 +9,10 @@ pub use noop::NoopProver;
 use crate::{
     chain::hash_ext_data_offchain,
     zk::{
-        flows::{TransactArtifacts, TransactParams, transact},
+        flows::{
+            DisclosureNote, SelectiveDisclosureParams, TransactArtifacts, TransactParams,
+            selective_disclosure, transact,
+        },
         prover::Prover as Groth16Prover,
         witness::WitnessCalculator,
     },
@@ -17,10 +20,10 @@ use crate::{
 use anyhow::{Context, Result};
 
 use crate::{
-    disclosure::DisclosureProveParams,
+    disclosure::{DisclosureProveParams, RegisteredCircuit},
     error::Error,
     transact::{PreparedProverTx, PreparedTxPublic},
-    types::DisclosureReceipt,
+    types::{DISCLOSURE_RECEIPT_VERSION, DisclosurePublicInputs, DisclosureReceipt},
 };
 
 /// In-process Groth16 prover for transact circuits.
@@ -66,6 +69,81 @@ impl ProverEngine {
     pub fn prove_transact(&mut self, params: TransactParams) -> Result<PreparedProverTx> {
         let artifacts = transact(params, hash_ext_data_offchain)?;
         self.prove(artifacts)
+    }
+
+    pub(crate) fn prove_disclosure(
+        &mut self,
+        params: DisclosureProveParams,
+        circuit: &'static RegisteredCircuit,
+    ) -> Result<DisclosureReceipt> {
+        let note_count = u32::try_from(params.notes.len())
+            .context("disclosure note count does not fit in u32")?;
+        if note_count != circuit.n_notes {
+            anyhow::bail!(
+                "disclosure circuit {} expects {} note(s), got {note_count}",
+                circuit.name,
+                circuit.n_notes
+            );
+        }
+
+        let context = params.context;
+        let ext_context_hash = crate::zk::disclosure::derive_ext_context_hash(&context)?;
+        let roots = params.notes.iter().map(|input| input.root).collect();
+        let note_commitments = params
+            .notes
+            .iter()
+            .map(|input| input.note_commitment)
+            .collect();
+        let notes = params
+            .notes
+            .into_iter()
+            .map(|input| DisclosureNote {
+                root: input.root,
+                note_commitment: input.note_commitment,
+                note_amount: input.note_amount,
+                note_private_key: input.note_private_key,
+                note_blinding: input.note_blinding,
+                merkle_path_indices: input.merkle_path_indices,
+                merkle_path_elements: input.merkle_path_elements,
+            })
+            .collect();
+
+        let artifacts = selective_disclosure(SelectiveDisclosureParams {
+            notes,
+            ext_context_hash,
+        })?;
+        let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
+        let witness_bytes = self
+            .witness
+            .compute_witness(&circuit_inputs_json)
+            .context("disclosure witness calculation failed")?;
+        let proved =
+            crate::zk::disclosure::prove_receipt_proof_with_prover(&self.prover, &witness_bytes)?;
+        let vk_hash = crate::zk::disclosure::vk_hash_hex(&self.prover.get_verifying_key()?);
+
+        Ok(DisclosureReceipt {
+            version: DISCLOSURE_RECEIPT_VERSION,
+            circuit: circuit.receipt_metadata(&vk_hash),
+            context,
+            public_inputs: DisclosurePublicInputs {
+                roots,
+                note_commitments,
+                ext_context_hash,
+                nullifiers: artifacts.nullifiers,
+                amounts: artifacts.amounts,
+            },
+            proof_compressed_hex: format!("0x{}", hex::encode(proved.proof_compressed)),
+            issued_at: crate::zk::disclosure::current_issued_at()?,
+        })
+    }
+
+    pub(crate) fn verify_disclosure(
+        &self,
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<bool> {
+        let vk_bytes = self.prover.get_verifying_key()?;
+        crate::zk::disclosure::verify_receipt_proof(receipt, &vk_bytes, expected_vk_hash)
     }
 
     fn prove(&mut self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {

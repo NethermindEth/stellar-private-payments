@@ -31,6 +31,7 @@ sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.18"
 stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
 thiserror = { workspace = true }
+time = { workspace = true }
 tracing = { workspace = true, features = ["attributes"] }
 uint = { workspace = true }
 web-time = { workspace = true }
