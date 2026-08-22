@@ -375,9 +375,9 @@ pub fn current_issued_at() -> Result<String> {
     let since_epoch = web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
         .context("system clock is before the Unix epoch")?;
-    let nanosecs = i64::try_from(since_epoch.as_secs())
+    let secs = i64::try_from(since_epoch.as_secs())
         .context("system clock is out of range for a timestamp")?;
-    OffsetDateTime::from_unix_timestamp(nanosecs)
+    OffsetDateTime::from_unix_timestamp(secs)
         .context("system clock is out of range for a timestamp")?
         .format(&Rfc3339)
         .context("failed to format receipt issuance timestamp")

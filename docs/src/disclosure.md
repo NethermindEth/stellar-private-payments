@@ -92,7 +92,7 @@ spp disclosure generate CPOOL… \
   --output receipt.json
 ```
 
-Omit `--output`, or pass `--output -`, to write the receipt JSON to standard
+Omit `--output`, to write the receipt JSON to standard
 output. Repeat `--commitment` to disclose two, three, or four notes in one
 receipt.
 
