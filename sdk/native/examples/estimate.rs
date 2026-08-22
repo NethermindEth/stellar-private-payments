@@ -20,7 +20,7 @@
 
 mod common;
 
-use stellar_private_payments::{Error, TransferRecipient};
+use stellar_private_payments::{Error, types::TransferRecipient};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::init_tracing()?;
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_plan_cursor(plan: &stellar_private_payments::PreparedTransactionPlan) {
+fn print_plan_cursor(plan: &stellar_private_payments::plan::PreparedTransactionPlan) {
     println!("  total transactions: {}", plan.tx_count());
     println!("  current transaction: {}", plan.current_tx());
     println!("  is complete: {}", plan.is_complete());

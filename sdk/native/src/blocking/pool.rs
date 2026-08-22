@@ -6,8 +6,9 @@ use crate::{
 };
 
 use crate::{
-    PreparedTransaction, PreparedTransactionPlan,
+    PreparedTransaction,
     error::Error,
+    plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
     storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
@@ -129,7 +130,7 @@ impl PrivatePool {
 
     pub fn disclose(
         &self,
-        req: crate::DisclosureRequest,
+        req: crate::disclosure::DisclosureRequest,
     ) -> Result<Option<crate::types::DisclosureReceipt>, Error> {
         block_on(self.inner.disclose(req))
     }

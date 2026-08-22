@@ -9,7 +9,7 @@ use std::collections::HashSet;
 const PAGE_SIZE: usize = 1000;
 const MAX_PAGES_PER_ROUND: usize = 10;
 
-pub struct Indexer<S: ContractDataStorage> {
+pub(crate) struct Indexer<S: ContractDataStorage> {
     client: Client,
     storage: S,
     contract_ids: Vec<String>,

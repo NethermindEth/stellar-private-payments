@@ -3,26 +3,26 @@
 mod combination;
 mod error;
 
-pub use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
+pub(crate) use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
 pub use error::PlanError;
 
 use crate::types::{Field, NoteAmount, Sensitive, correlation_id_or_new};
 
 /// Full plan: one or more on-chain `transact` calls (2-in / 2-out each).
 #[derive(Clone, Debug)]
-pub struct TransactionPlan {
+pub(crate) struct TransactionPlan {
     steps: Vec<PlannedStep>,
 }
 
 /// One on-chain `transact` (at most 2 real inputs after padding).
 #[derive(Clone, Debug)]
-pub struct PlannedStep {
+pub(crate) struct PlannedStep {
     pub inputs: (StepNote, Option<StepNote>),
     pub action: StepAction,
 }
 
 #[derive(Clone, Debug)]
-pub enum StepAction {
+pub(crate) enum StepAction {
     /// Merge two notes into one.
     Consolidate { output: NoteAmount },
     /// Final plan spend step.
@@ -41,7 +41,7 @@ pub struct SpendableNote {
 
 /// One row in the wallet index (planner step input only).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StepNote {
+pub(crate) struct StepNote {
     /// Stable id (matches DB / UI note id).
     ///
     /// If `None` then the note does not exist at the time of planning.
@@ -54,10 +54,6 @@ impl TransactionPlan {
         self.steps.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.steps.is_empty()
-    }
-
     fn assemble(steps: Vec<PlannedStep>) -> Option<Self> {
         match steps.last() {
             Some(PlannedStep {
@@ -68,7 +64,7 @@ impl TransactionPlan {
         }
     }
 
-    /// Last step in the plan.
+    #[cfg(test)]
     pub fn final_step(&self) -> &PlannedStep {
         self.steps
             .last()
@@ -109,7 +105,7 @@ fn combo_tier(combo: &CombinationResult) -> &'static str {
 
 /// Build a plan from unspent notes and a target spend amount.
 #[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount), note_count = notes.len()))]
-pub fn plan(
+pub(crate) fn plan(
     amount: NoteAmount,
     notes: &[SpendableNote],
 ) -> std::result::Result<TransactionPlan, PlanError> {

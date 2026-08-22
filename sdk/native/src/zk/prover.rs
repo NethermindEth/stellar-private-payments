@@ -591,21 +591,6 @@ impl Prover {
     }
 }
 
-/// Standalone function to convert compressed proof to Soroban format.
-///
-/// Input: compressed proof [A || B || C]
-/// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
-/// G2 points use Soroban-compatible c1||c0 ordering.
-#[tracing::instrument(
-    name = "convert_proof_to_soroban",
-    skip_all,
-    fields(correlation_id = %correlation_id_or_new(), proof_len = proof_bytes.len())
-)]
-pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>> {
-    let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-        .map_err(|e| anyhow!("Failed to deserialize proof: {}", e))?;
-    Ok(proof_to_uncompressed_bytes(&proof))
-}
 /// Standalone verification function
 #[tracing::instrument(
     name = "verify_proof",

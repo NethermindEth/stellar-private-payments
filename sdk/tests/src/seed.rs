@@ -5,12 +5,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use stellar_private_payments::{
-    TransactChainContext,
     state::SqliteStorage,
     types::{
         AspNonMembershipProof, ContractEvent, ContractsEventData, Field, KeyDerivationSignature,
         LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyFlags, SMT_DEPTH,
-        SyncMetadata,
+        SyncMetadata, TransactChainContext,
     },
     zk::{crypto, encryption, merkle::MerklePrefixTree},
 };

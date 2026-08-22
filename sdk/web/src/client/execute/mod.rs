@@ -5,7 +5,8 @@ mod progress;
 use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
 use stellar_private_payments::{
-    Error, PlanExecutionError, PreparedTransactionPlan,
+    Error, PlanExecutionError,
+    plan::PreparedTransactionPlan,
     types::{AspMembershipSync, TransactionResult},
 };
 use wasm_bindgen::{JsError, JsValue};

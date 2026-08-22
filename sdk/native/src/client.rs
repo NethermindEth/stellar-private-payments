@@ -1,9 +1,10 @@
 use crate::types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
+    Account, Error, Handle, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
     correlation::correlation_id_or_new,
+    prover::NoopProver,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
 

@@ -2,7 +2,7 @@ use super::{SqliteStorage, events_parsers::parse_event};
 use crate::types::ProcessedEvent;
 use anyhow::Result;
 
-pub fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
+pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
     let mut unprocessed = storage.get_unprocessed_events(limit)?;
     if unprocessed.is_empty() {
         return Ok(false);
@@ -42,7 +42,7 @@ pub fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
 ///
 /// This scans pool commitments for decryptable outputs (per account) and
 /// reconciles pool nullifiers against locally-computed expected nullifiers.
-pub fn process_notes(
+pub(crate) fn process_notes(
     storage: &mut SqliteStorage,
     limit: u32,
     derive: &mut super::storage::DeriveNoteFn<'_>,

@@ -2,7 +2,10 @@
 
 pub use crate::{
     types::DisclosureContext,
-    zk::disclosure::{vk_hash_hex, *},
+    zk::disclosure::{
+        derive_ext_context_hash, prove_receipt_proof, prove_receipt_proof_with_prover,
+        validate_registered_receipt, verify_receipt_proof, vk_hash_hex,
+    },
 };
 
 use crate::{
