@@ -92,7 +92,7 @@ spp disclosure generate CPOOL… \
   --output receipt.json
 ```
 
-Omit `--output`, to write the receipt JSON to standard
+Omit `--output` to write the receipt JSON to standard
 output. Repeat `--commitment` to disclose two, three, or four notes in one
 receipt.
 
@@ -132,8 +132,7 @@ for root and nullifier status.
 spp disclosure verify receipt.json
 ```
 
-Pass `-` instead of a file name to read the receipt from standard input. Use
-`--expected-vk-hash 0x…` together with alternate artifacts supplied through
+Use `--expected-vk-hash 0x…` together with alternate artifacts supplied through
 `--circuits-dir` when verifying against a deliberately different disclosure
 key. Use `--require-unspent` when spent notes must make the command fail.
 
@@ -147,7 +146,7 @@ key. Use `--require-unspent` when spent notes must make the command fail.
 | `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
-| `sdk/disclosure/src/lib.rs` | `RegisteredCircuit::canonical_vk_hash` used by the CLI |
+| `sdk/native/src/zk/disclosure/mod.rs` | `RegisteredCircuit::canonical_vk_hash` used by the CLI |
 
 The verifier **must not** trust the `vkHash` value embedded inside the receipt itself. The canonical hash must come from an out-of-band source such as the table above.
 
