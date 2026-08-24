@@ -2,8 +2,8 @@
 //!
 //! Data structures + serialization for the off-chain memo a pool
 //! administrator uses to audit notes, mirroring the in-circuit encryption in
-//! `circuits/src/globalViewKey.circom`. No encryption/decryption logic lives
-//! here. See `circuits/src/test/utils/global_view_key.rs` for that.
+//! `circuits/src/globalViewKey.circom`. Encryption and decryption live in
+//! [`crate::zk::gvk`].
 
 use super::{Field, PolicyFlags};
 use anyhow::{Result, anyhow};
@@ -18,7 +18,7 @@ pub const GLOBAL_VIEW_KEY_MEMO_VERSION: u32 = 1;
 /// represented with the existing [`Field`] type. This struct does not
 /// validate that `(x, y)` lies on the curve; that check requires curve
 /// arithmetic this crate does not depend on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BabyJubJubPoint {
     pub x: Field,
