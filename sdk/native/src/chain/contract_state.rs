@@ -113,7 +113,7 @@ impl StateFetcher {
     /// otherwise surface much later as audit data nobody can decrypt.
     fn verify_gvk_config(
         pool: &crate::types::PoolConfigEntry,
-        chain_admin_view_key: Option<BabyJubJubPoint>,
+        chain_admin_view_key: Option<&BabyJubJubPoint>,
         chain_gvk_mode: Option<u32>,
     ) -> Result<()> {
         let pool_id = &pool.pool_contract_id;
@@ -146,7 +146,7 @@ impl StateFetcher {
         // The authority key is optional in config even for a GVK pool; verify
         // it only when it is declared, since an absent one pins nothing.
         if let Some(configured) = pool.gvk_authority_pub_key.as_ref()
-            && Some(configured) != chain_admin_view_key.as_ref()
+            && Some(configured) != chain_admin_view_key
         {
             return Err(anyhow!(
                 "pool {pool_id} GVK authority key mismatch: config says {configured:?}, chain says {chain_admin_view_key:?}"
@@ -355,7 +355,7 @@ impl StateFetcher {
                     "maximum_deposit_amount",
                 )?);
                 let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
-                Self::verify_gvk_config(pool, gvk_admin_view_key, gvk_mode)?;
+                Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
 
                 let pool_info = PoolInfo {
                     ledger: base_latest_ledger,
@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn gvk_config_accepts_a_matching_pool_gvk_deployment() {
         let pool = pool_entry(GvkMode::Traceable, Some(point(7, 11)));
-        StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), Some(2))
+        StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), Some(2))
             .expect("pool-gvk deployment agrees");
     }
 
@@ -985,7 +985,7 @@ mod tests {
     #[test]
     fn gvk_config_accepts_a_gvk_pool_without_a_configured_authority_key() {
         let pool = pool_entry(GvkMode::ViewOnly, None);
-        StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), Some(1))
+        StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), Some(1))
             .expect("undeclared authority key is not verified");
     }
 
@@ -1000,7 +1000,7 @@ mod tests {
     #[test]
     fn gvk_config_rejects_config_off_against_a_pool_gvk_deployment() {
         let pool = pool_entry(GvkMode::Off, None);
-        let err = StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), Some(1))
+        let err = StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), Some(1))
             .expect_err("config says Off, chain is GVK");
         assert!(format!("{err:#}").contains("GVK mode mismatch"), "{err:#}");
     }
@@ -1008,7 +1008,7 @@ mod tests {
     #[test]
     fn gvk_config_rejects_a_mode_disagreement() {
         let pool = pool_entry(GvkMode::ViewOnly, Some(point(7, 11)));
-        let err = StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), Some(2))
+        let err = StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), Some(2))
             .expect_err("view-only config against a traceable pool");
         assert!(format!("{err:#}").contains("GVK mode mismatch"), "{err:#}");
     }
@@ -1016,7 +1016,7 @@ mod tests {
     #[test]
     fn gvk_config_rejects_an_authority_key_disagreement() {
         let pool = pool_entry(GvkMode::Traceable, Some(point(7, 11)));
-        let err = StateFetcher::verify_gvk_config(&pool, Some(point(7, 12)), Some(2))
+        let err = StateFetcher::verify_gvk_config(&pool, Some(&point(7, 12)), Some(2))
             .expect_err("configured key differs from the deployed one");
         assert!(
             format!("{err:#}").contains("GVK authority key mismatch"),
@@ -1028,7 +1028,7 @@ mod tests {
     fn gvk_config_rejects_partial_on_chain_state() {
         let pool = pool_entry(GvkMode::Traceable, Some(point(7, 11)));
 
-        let err = StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), None)
+        let err = StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), None)
             .expect_err("AdminViewKey without GvkMode");
         assert!(format!("{err:#}").contains("no GvkMode"), "{err:#}");
 
@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn gvk_config_rejects_an_unknown_on_chain_mode() {
         let pool = pool_entry(GvkMode::Traceable, Some(point(7, 11)));
-        let err = StateFetcher::verify_gvk_config(&pool, Some(point(7, 11)), Some(99))
+        let err = StateFetcher::verify_gvk_config(&pool, Some(&point(7, 11)), Some(99))
             .expect_err("unknown mode value");
         assert!(
             format!("{err:#}").contains("unknown on-chain GVK mode"),
