@@ -1321,3 +1321,41 @@ fn transact_reports_unknown_root_before_later_checks() {
         .expect_err("an unknown root must be refused whatever else is wrong");
     assert_eq!(err, Ok(Error::UnknownRoot));
 }
+
+/// `ext_amount == 0` is neither a deposit nor a withdrawal, and it is accepted.
+///
+/// The deposit branch in `transact` is strictly greater than zero, so a
+/// zero-value transaction skips the maximum-deposit bound entirely — this pool
+/// is registered with a maximum of zero and the transaction still gets past it.
+/// `calculate_public_amount` then maps zero to zero, which matches the proof,
+/// so the amount checks pass too and the transaction is refused only by the
+/// verifier.
+///
+/// The error that surfaces is `NotAuthorized` rather than `InvalidProof`:
+/// `Groth16Error::MalformedPublicInputs` is 1, the same numeric code as this
+/// contract's `NotAuthorized`, so the verifier's error is remapped at the
+/// contract boundary. Nothing is unsound about it, but it is pinned here so
+/// that separating the codes is a deliberate change.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 0), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE4);
+    assert_eq!(ext.ext_amount, I256::from_i32(&env, 0));
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof still fails verification");
+    assert_ne!(
+        err,
+        Ok(Error::WrongExtAmount),
+        "a zero-value transaction must not be treated as a deposit"
+    );
+    assert_eq!(err, Ok(Error::NotAuthorized));
+}
