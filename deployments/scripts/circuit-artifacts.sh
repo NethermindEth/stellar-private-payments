@@ -141,6 +141,21 @@ write_lock() {
   [ -n "$witness" ] || { echo "could not read circom-witness-rs version from Cargo.toml" >&2; exit 1; }
   commit="$(git -C "$ROOT" rev-parse HEAD)"
   is_git_commit "$commit" || { echo "could not read git commit at $ROOT" >&2; exit 1; }
+  circuits=""
+  for stem in $STEMS; do
+    circuits="${circuits}$(printf ',
+  "%s": {
+    "setup": "%s",
+    "r1cs": "%s",
+    "graph.bin": "%s",
+    "proving_key.bin": "%s"
+  }' \
+      "$stem" \
+      "$(stem_setup "$stem")" \
+      "$(sha256_file "$(file_for "$stem" r1cs)")" \
+      "$(sha256_file "$(file_for "$stem" graph.bin)")" \
+      "$(sha256_file "$(file_for "$stem" proving_key.bin)")")"
+  done
   {
     printf '{\n'
     printf '  "version": "%s",\n' "$version"
@@ -151,15 +166,7 @@ write_lock() {
     printf '    "circomlib": "%s",\n' "$(trim_file "$ROOT/circuits/circomlib.lock")"
     printf '    "circom-witness-rs": "%s"\n' "$witness"
     printf '  }'
-    for stem in $STEMS; do
-      printf ',\n'
-      printf '  "%s": {\n' "$stem"
-      printf '    "setup": "%s",\n' "$(stem_setup "$stem")"
-      printf '    "r1cs": "%s",\n' "$(sha256_file "$(file_for "$stem" r1cs)")"
-      printf '    "graph.bin": "%s",\n' "$(sha256_file "$(file_for "$stem" graph.bin)")"
-      printf '    "proving_key.bin": "%s"\n' "$(sha256_file "$(file_for "$stem" proving_key.bin)")"
-      printf '  }'
-    done
+    printf '%s' "$circuits"
     printf '\n}\n'
   } >"$LOCK"
   echo "wrote $LOCK (version $version)"
