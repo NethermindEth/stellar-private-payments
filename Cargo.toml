@@ -9,6 +9,7 @@ members = [
     "sdk/tests",
     "sdk/web",
     "tools/ceremony-cli",
+    "tools/circuit-compiler",
 ]
 exclude = ["tools/bootnode"]
 resolver = "3"

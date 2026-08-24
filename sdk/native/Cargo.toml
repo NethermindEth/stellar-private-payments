@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 

@@ -54,7 +54,7 @@ struct Cli {
 
     /// Directory with policy_tx_2_2[_{A,B,AB}].{graph.bin,r1cs}
     /// and selectiveDisclosure_{1,2,3,4}.{graph.bin,r1cs}
-    /// (default: target/circuits-artifacts/release in debug builds,
+    /// (default: target/circuits-artifacts in debug builds,
     /// data_dir/circuits otherwise)
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,

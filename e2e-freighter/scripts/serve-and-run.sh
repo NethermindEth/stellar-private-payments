@@ -101,25 +101,30 @@ else
   if command -v setsid >/dev/null 2>&1; then
     setsid make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
   else
-    perl -e 'setpgrp 0,0; exec @ARGV' make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+    perl -e 'setpgrp(0,0) or die "setpgrp: $!"; exec @ARGV' make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
   fi
   SERVE_PID=$!
-  # The process group may not be available immediately after startup.
-  SERVER_PGID=""
-  for _ in 1 2 3 4 5; do
-    SERVER_PGID="$(ps -o pgid= -p "$SERVE_PID" 2>/dev/null | tr -d ' ')"
-    [ -n "$SERVER_PGID" ] && break
-    sleep 0.2
-  done
-  [ -n "$SERVER_PGID" ] || die "could not determine the server's process group"
+  # The child keeps this wrapper's process group from fork(2) until it is
+  # scheduled and setsid/setpgrp runs in it, so an immediate ps can read the
+  # old pgid. Poll until the pgid settles into a group of its own instead of
+  # racing that window (observed on loaded CI runners, e.g. under xvfb-run).
   CONTROLLER_PGID="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')"
-  if [ "$SERVER_PGID" = "$CONTROLLER_PGID" ]; then
-    # A group signal would also hit this wrapper, re-enter its TERM/EXIT traps,
-    # and turn ordinary cleanup into an endless signal loop. Stop only the
-    # direct child and fail with an actionable diagnostic instead.
-    SERVER_PGID=""
+  SERVER_PGID=""
+  for _ in $(seq 1 50); do
+    pgid="$(ps -o pgid= -p "$SERVE_PID" 2>/dev/null | tr -d ' ')"
+    if [ -n "$pgid" ] && [ "$pgid" != "$CONTROLLER_PGID" ]; then
+      SERVER_PGID="$pgid"
+      break
+    fi
+    kill -0 "$SERVE_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  if [ -z "$SERVER_PGID" ]; then
+    # Never signal by group here: the group may still be this wrapper's.
     kill -TERM "$SERVE_PID" 2>/dev/null || true
-    die "the app server shares this wrapper's process group; refusing unsafe group cleanup"
+    echo "--- last 40 lines of $SERVE_LOG ---" >&2
+    tail -n 40 "$SERVE_LOG" >&2
+    die "the app server did not move into its own process group (setsid/setpgrp failed)"
   fi
 
   step "waiting up to ${READY_TIMEOUT}s for $LOCAL_URL (a cold build takes minutes)"

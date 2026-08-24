@@ -25,7 +25,7 @@ repo-specific deployment key formats directly.
 ## Prerequisites
 
 - `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
-- Compiled circuit (`.r1cs`). If `--circuit` is omitted the CLI auto-discovers the compiled `policy_tx_2_2_AB.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
+- Compiled circuit (`.r1cs`). If `--circuit` is omitted the CLI auto-discovers the compiled `policy_tx_2_2_AB.r1cs` from `target/circuits-artifacts/`. Run `make circuits` to compile.
 - A compatible Powers of Tau (`.ptau`) file (see below).
 
 ## Powers of Tau
@@ -56,7 +56,7 @@ The coordinator initializes the ceremony and finalizes outputs.
 ### 1) Build and prepare
 
 ```bash
-cargo build -p circuits --release           # compile circuit → produces .r1cs
+make circuits           # compile circuit → produces .r1cs
 cargo install --path tools/ceremony-cli    # install CLI to ~/.cargo/bin/
 
 # Download ptau (~72 MB)
@@ -133,7 +133,7 @@ Why this step exists:
 - the app prover also needs `policy_tx_2_2_AB_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
-Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `circuits/build.rs`.
+Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `tools/circuit-compiler`.
 
 ---
 
@@ -145,7 +145,7 @@ Each contributor receives an input `.zkey` and produces a new `.zkey`.
 
 ```bash
 # One-time setup
-cargo build -p circuits --release           # compile circuit (for verification)
+make circuits           # compile circuit (for verification)
 cargo install --path tools/ceremony-cli    # install CLI to ~/.cargo/bin/
 
 # Download ptau (~72 MB, if not provided by coordinator)

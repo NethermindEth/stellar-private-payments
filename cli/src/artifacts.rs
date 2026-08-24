@@ -118,7 +118,7 @@ fn read_circuit_graph(circuits: &Path, stem: &str) -> Result<Vec<u8>> {
     let committed = committed_circuit_keys_dir().join(format!("{stem}.graph.bin"));
     std::fs::read(&committed).with_context(|| {
         format!(
-            "read {stem} witness graph from {} or {} (run `make witness-graphs`)",
+            "read {stem} witness graph from {} or {} (run `make circuits GRAPHS=1` and copy into circuit_keys)",
             runtime.display(),
             committed.display(),
         )
@@ -131,7 +131,7 @@ fn committed_circuit_keys_dir() -> PathBuf {
 
 fn default_circuits_dir() -> PathBuf {
     if cfg!(debug_assertions) {
-        PathBuf::from("target/circuits-artifacts/release")
+        PathBuf::from("target/circuits-artifacts")
     } else {
         default_data_dir().join("circuits")
     }

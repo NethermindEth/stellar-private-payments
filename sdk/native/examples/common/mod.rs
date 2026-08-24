@@ -15,7 +15,7 @@
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
 //! | `SPP_CIRCUIT_KEYS_DIR` | `<manifest>/../../deployments/testnet/circuit_keys` | transact examples |
-//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts/{debug\|release}` | transact examples |
+//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts` | transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
@@ -131,14 +131,7 @@ pub fn default_circuit_keys_dir() -> PathBuf {
 
 /// Default directory containing `{stem}.wasm` / `{stem}.r1cs` build outputs.
 pub fn default_circuit_artifacts_dir() -> PathBuf {
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    manifest_dir()
-        .join("../../target/circuits-artifacts")
-        .join(profile)
+    manifest_dir().join("../../target/circuits-artifacts")
 }
 
 /// Load the deployment config from `SPP_DEPLOYMENT_JSON` or the default testnet
@@ -176,7 +169,7 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 ///
 /// The proving key and witness graph are read from `SPP_CIRCUIT_KEYS_DIR`;
 /// r1cs from `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that
-/// points at `cargo build -p circuits --release`; other I/O errors (e.g.
+/// points at `make circuits`; other I/O errors (e.g.
 /// permissions) are reported without rebuild advice.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let keys_dir = env_or(
@@ -202,7 +195,7 @@ pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts
             if e.kind() == std::io::ErrorKind::NotFound {
                 format!(
                     "read {what} {path:?}: {e}\n\
-                     Run `cargo build -p circuits --release` to generate circuit keys and artifacts."
+                     Run `make circuits` to generate circuit keys and artifacts."
                 )
             } else {
                 format!("read {what} {path:?}: {e}")

@@ -329,24 +329,16 @@ gh workflow run e2e-freighter.yml --repo <OWNER/REPO>
 
 Overlapping runs are safe: each run provisions its own ephemeral testnet
 accounts (`--ephemeral`), so two runs cannot spend each other's notes and
-no `concurrency` group is needed. Fork PRs never run this job (it reads
-the protected environment's secrets).
+no `concurrency` group is needed. Fork PRs never run this job (untrusted
+code must not drive live testnet provisioning).
 
-### Environment and secrets
+### CI credentials
 
-The Freighter workflow requires the protected `e2e-testnet` environment,
-which provides exactly one secret:
-
-- `E2E_FREIGHTER_PASSWORD` — password the generated Freighter profile is
-  created with and unlocked with (CI-only; the local setup script
-  generates one that satisfies Freighter's
-  uppercase/lowercase/digit rules)
-
-No account secrets exist in CI. The account addresses, secrets, and the
-pool contract id are exported to `$GITHUB_ENV` by the account-provisioning
-step at run time (the pool is whatever `deployments.json` currently
-names). The webclient workflow uses the same `e2e-testnet` environment
-with the same single secret.
+No GitHub secrets or environments. Each run generates ephemeral testnet
+accounts and an `E2E_FREIGHTER_PASSWORD` (Freighter wallet unlock;
+uppercase/lowercase/digit). All values are masked with `::add-mask::` and
+exported to `$GITHUB_ENV` by the provisioning step (the pool is whatever
+`deployments.json` currently names).
 
 ### Account provisioning in CI
 
@@ -358,8 +350,8 @@ is assumed from pre-seeded state:
    on the runner, the first account is friendbot-funded as a faucet and
    distributes XLM to the rest in a single multi-operation transaction,
    and every account is onboarded and registered against whatever pool
-   `deployments.json` currently names. The generated secrets are masked
-   with `::add-mask::` and exported via `$GITHUB_ENV`.
+   `deployments.json` currently names. Generated keys and the Freighter
+   password are masked with `::add-mask::` and exported via `$GITHUB_ENV`.
 2. **Generate Freighter profile snapshot** — `setup.sh` runs through
    `serve-and-run.sh --` (the `--` form), which builds+serves the app on
    :8000, exports `APP_URL`, and stops the server afterwards. The
@@ -367,17 +359,15 @@ is assumed from pre-seeded state:
    dies with "APP_URL is not set". `xvfb-run` provides the virtual
    display for setup's headed steps.
 
-Because the accounts are registered moments before the tests run, the
-preflight's `chain.accounts.*` checks execute for real instead of
-skipping. The env-file checks do skip (no `.e2e-accounts.env` is
-committed; the vars arrive via `$GITHUB_ENV`), while `env.vars.required`
-still verifies against the environment for real.
+In CI, preflight skips env-file and `chain.accounts.*` checks (vars come
+from `$GITHUB_ENV`; registration was verified during provisioning). It
+still runs `env.vars.required` and artifact checks.
 
 ### Gating
 
 The pre-signing suite gates every push and PR to main, validating the
 checked-out commit's SDK code. The Freighter smoke gate runs on the same
-events and validates the checked-out app plus environment/state health.
+events and validates the checked-out app plus runtime state health.
 The full Freighter suite does not gate and runs manually against a locally
 built app.
 
