@@ -1197,3 +1197,127 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
          duplicate inside one call passes it and is left to the circuit"
     );
 }
+
+/// Number of root history slots the pool keeps. Rotating this many times
+/// evicts a root that was valid when it was recorded.
+const ROOT_HISTORY_SIZE: u32 = 90;
+
+/// Inserts two leaves through the pool's Merkle module, rotating the root
+/// history by one slot. Used to age a root out of history without needing a
+/// real proof for each intermediate transaction.
+fn rotate_root(env: &Env, pool_id: &Address, left: u32, right: u32) {
+    env.as_contract(pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            env,
+            U256::from_u32(env, left),
+            U256::from_u32(env, right),
+        )
+        .unwrap_or_else(|err| panic!("expected root rotation to succeed: {err:?}"));
+    });
+}
+
+/// A root the pool has never recorded must be refused as `UnknownRoot`.
+///
+/// Everything else in the proof is well formed here — the ext hash matches and
+/// the public amount is right — so the only reason to refuse is the root. The
+/// existing `transact_rejects_unknown_root` also mismatches the ext hash and
+/// asserts only `is_err()`, so it does not pin which check fired.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_root_never_inserted() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    proof.root = U256::from_u32(&env, 0xFF);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a root the pool never recorded must be refused");
+    assert_eq!(err, Ok(Error::UnknownRoot));
+}
+
+/// A root that was valid when it was recorded but has since been pushed out of
+/// the history ring must be refused as `UnknownRoot` too.
+///
+/// This is the stale-proof case: a proof built against a real pool state that
+/// arrives too late. `pool_is_known_root_returns_false_for_evicted_root` pins
+/// the helper; this pins that the transact path acts on it.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+)]
+fn transact_rejects_evicted_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    rotate_root(&env, &pool_id, 1, 2);
+    let evicted_root = pool.get_root();
+    assert!(
+        pool.is_known_root(&evicted_root),
+        "the root must start out known, otherwise this test proves nothing"
+    );
+
+    for i in 0..ROOT_HISTORY_SIZE {
+        let left = i
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(3))
+            .unwrap_or_else(|| panic!("left leaf value overflow"));
+        let right = left
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("right leaf value overflow"));
+        rotate_root(&env, &pool_id, left, right);
+    }
+
+    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE2);
+    proof.root = evicted_root;
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a root evicted from history must be refused");
+    assert_eq!(err, Ok(Error::UnknownRoot));
+}
+
+/// The root check runs before the nullifier and ext hash checks, so a
+/// transaction that is wrong in all three ways is reported as `UnknownRoot`.
+///
+/// Ordering is worth pinning because the caller only ever sees the first
+/// failure. If the root check moved below the nullifier check, a stale proof
+/// would be reported as a double spend.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_reports_unknown_root_before_later_checks() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xE3;
+    // Presence of the key is the spent flag, the same shape `mark_spent` writes.
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().set(
+            &crate::pool::DataKey::Nullifier(U256::from_u32(&env, nullifier)),
+            &(),
+        );
+    });
+
+    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    proof.root = U256::from_u32(&env, 0xFF);
+    proof.ext_data_hash = mk_bytesn32(&env, 0x99);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("an unknown root must be refused whatever else is wrong");
+    assert_eq!(err, Ok(Error::UnknownRoot));
+}
