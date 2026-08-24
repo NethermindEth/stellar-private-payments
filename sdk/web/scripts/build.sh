@@ -24,7 +24,7 @@ WASM_OUT_NAME="stellar_private_payments_web"
 
 echo "==> Building circuit artifacts (if needed)..."
 if [[ ! -d "$ROOT/target/circuits-artifacts" ]]; then
-  make circuits
+  make -C "$ROOT" circuits
 fi
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
