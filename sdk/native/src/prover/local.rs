@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use crate::{
-    types::{DisclosureReceipt, PolicyFlags},
+    types::{CircuitStem, DisclosureReceipt},
     zk::flows::TransactParams,
 };
 
@@ -19,15 +19,15 @@ use crate::{
 /// In-process Groth16 prover for pool transact and selective-disclosure
 /// circuits.
 ///
-/// Transact engines are keyed by [`PolicyFlags`]. Disclosure engines are keyed
+/// Transact engines are keyed by [`CircuitStem`]. Disclosure engines are keyed
 /// by their registered circuit name.
 pub struct LocalProver {
-    transact: RefCell<HashMap<PolicyFlags, ProverEngine>>,
+    transact: RefCell<HashMap<CircuitStem, ProverEngine>>,
     disclosure: RefCell<HashMap<&'static str, ProverEngine>>,
 }
 
 impl LocalProver {
-    pub fn from_artifacts(artifacts: &[(PolicyFlags, ProverArtifacts)]) -> Result<Self, Error> {
+    pub fn from_artifacts(artifacts: &[(CircuitStem, ProverArtifacts)]) -> Result<Self, Error> {
         if artifacts.is_empty() {
             return Err(Error::Other(
                 "at least one transact circuit is required".into(),
@@ -48,7 +48,7 @@ impl LocalProver {
     }
 
     pub fn from_all_artifacts(
-        transact_artifacts: &[(PolicyFlags, ProverArtifacts)],
+        transact_artifacts: &[(CircuitStem, ProverArtifacts)],
         disclosure_artifacts: &[(&'static RegisteredCircuit, ProverArtifacts)],
     ) -> Result<Self, Error> {
         if transact_artifacts.is_empty() && disclosure_artifacts.is_empty() {
@@ -56,16 +56,16 @@ impl LocalProver {
         }
 
         let mut transact = HashMap::with_capacity(transact_artifacts.len());
-        for (flags, bundle) in transact_artifacts {
+        for (stem, bundle) in transact_artifacts {
             let engine = ProverEngine::new(
                 &bundle.proving_key,
                 &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
-            .map_err(|e| Error::Other(format!("init prover for {flags:?}: {e:#}")))?;
-            if transact.insert(*flags, engine).is_some() {
+            .map_err(|e| Error::Other(format!("init prover for {stem}: {e:#}")))?;
+            if transact.insert(*stem, engine).is_some() {
                 return Err(Error::Other(format!(
-                    "duplicate transact circuit for policy flags {flags:?}"
+                    "duplicate transact circuit for {stem}"
                 )));
             }
         }
@@ -93,15 +93,11 @@ impl LocalProver {
     }
 
     pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
-        let flags = params.policy_flags;
+        let stem = CircuitStem::transact(params.policy_flags, params.gvk_mode);
         self.transact
             .borrow_mut()
-            .get_mut(&flags)
-            .ok_or_else(|| {
-                Error::Other(format!(
-                    "no transact prover configured for policy flags {flags:?}"
-                ))
-            })?
+            .get_mut(&stem)
+            .ok_or_else(|| Error::Other(format!("no transact prover configured for {stem}")))?
             .prove_transact(params)
             .map_err(|e| Error::Other(format!("prove: {e:#}")))
     }

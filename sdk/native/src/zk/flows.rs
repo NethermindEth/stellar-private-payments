@@ -3,13 +3,19 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use crate::types::{
-    AspMembershipProof, AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field,
-    NoteAmount, NotePrivateKey, NotePublicKey, PolicyFlags,
+    AspMembershipProof, AspNonMembershipProof, BabyJubJubPoint, EncryptionPublicKey, ExtAmount,
+    ExtData, Field, GlobalViewKeyCiphertext, GvkMode, NoteAmount, NotePrivateKey, NotePublicKey,
+    PolicyFlags, U256,
 };
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::zk::{crypto, encryption, serialization::field_bytes_to_hex, types::CircuitInputs};
+use crate::zk::{
+    crypto, encryption,
+    gvk::{GvkNote, generate_gvk_salt},
+    serialization::field_bytes_to_hex,
+    types::CircuitInputs,
+};
 
 /// Number of input note slots supported by the current circuit.
 pub const N_INPUTS: usize = 2;
@@ -86,6 +92,10 @@ pub struct PreparedTx {
     pub asp_membership_root: Field,
     /// ASP non-membership root used for the circuit public inputs.
     pub asp_non_membership_root: Field,
+    /// Per-output GVK ciphertexts when the pool uses Global View Key mode.
+    pub output_gvk_ciphertexts: Option<[GlobalViewKeyCiphertext; N_OUTPUTS]>,
+    /// Per-input GVK ciphertexts in traceable mode.
+    pub input_gvk_ciphertexts: Option<Vec<GlobalViewKeyCiphertext>>,
 }
 
 /// Full output of `transact()` and the wrapper flows.
@@ -146,6 +156,11 @@ pub struct TransactParams {
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
     pub policy_flags: PolicyFlags,
+
+    /// Global View Key mode for this pool.
+    pub gvk_mode: GvkMode,
+    /// Admin view key `D` when `gvk_mode != GvkMode::Off`.
+    pub admin_view_key: Option<BabyJubJubPoint>,
 }
 
 /// Parameters for a deposit transaction.
@@ -180,6 +195,11 @@ pub struct DepositParams {
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
     pub policy_flags: PolicyFlags,
+
+    /// Global View Key mode for this pool.
+    pub gvk_mode: GvkMode,
+    /// Admin view key `D` when `gvk_mode != GvkMode::Off`.
+    pub admin_view_key: Option<BabyJubJubPoint>,
 }
 
 /// Parameters for a withdrawal transaction.
@@ -221,6 +241,11 @@ pub struct WithdrawParams {
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
     pub policy_flags: PolicyFlags,
+
+    /// Global View Key mode for this pool.
+    pub gvk_mode: GvkMode,
+    /// Admin view key `D` when `gvk_mode != GvkMode::Off`.
+    pub admin_view_key: Option<BabyJubJubPoint>,
 }
 
 /// Parameters for a private transfer transaction.
@@ -258,6 +283,11 @@ pub struct TransferParams {
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
     pub policy_flags: PolicyFlags,
+
+    /// Global View Key mode for this pool.
+    pub gvk_mode: GvkMode,
+    /// Admin view key `D` when `gvk_mode != GvkMode::Off`.
+    pub admin_view_key: Option<BabyJubJubPoint>,
 }
 
 /// Deposit flow
@@ -277,6 +307,8 @@ where
         tree_depth,
         smt_depth,
         policy_flags,
+        gvk_mode,
+        admin_view_key,
     } = params;
 
     transact(
@@ -293,6 +325,8 @@ where
             tree_depth,
             smt_depth,
             policy_flags,
+            gvk_mode,
+            admin_view_key,
         },
         hash_ext_data,
     )
@@ -316,6 +350,8 @@ where
         tree_depth,
         smt_depth,
         policy_flags,
+        gvk_mode,
+        admin_view_key,
     } = params;
 
     let input_total = sum_note_amounts_inputs(&inputs)?;
@@ -371,6 +407,8 @@ where
             tree_depth,
             smt_depth,
             policy_flags,
+            gvk_mode,
+            admin_view_key,
         },
         hash_ext_data,
     )
@@ -393,6 +431,8 @@ where
         tree_depth,
         smt_depth,
         policy_flags,
+        gvk_mode,
+        admin_view_key,
     } = params;
 
     transact(
@@ -409,6 +449,8 @@ where
             tree_depth,
             smt_depth,
             policy_flags,
+            gvk_mode,
+            admin_view_key,
         },
         hash_ext_data,
     )
@@ -437,6 +479,8 @@ where
         tree_depth,
         smt_depth,
         policy_flags,
+        gvk_mode,
+        admin_view_key,
     } = params;
 
     if tree_depth == 0 {
@@ -789,6 +833,45 @@ where
         }
     }
 
+    let mut in_gvk_salts: Option<[Field; N_INPUTS]> = None;
+    let mut out_gvk_salts: Option<[Field; N_OUTPUTS]> = None;
+    if gvk_mode != GvkMode::Off {
+        let admin = admin_view_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("admin_view_key is required when gvk_mode is {gvk_mode:?}"))?;
+        let mut in_salts = [Field::ZERO; N_INPUTS];
+        let mut out_salts = [Field::ZERO; N_OUTPUTS];
+        for salt in &mut in_salts {
+            *salt = generate_gvk_salt()?;
+        }
+        for salt in &mut out_salts {
+            *salt = generate_gvk_salt()?;
+        }
+        circuit.set_array(
+            "inSalt",
+            in_salts
+                .iter()
+                .map(field_to_circuit_hex)
+                .collect::<Result<Vec<_>>>()?,
+        );
+        circuit.set_array(
+            "outSalt",
+            out_salts
+                .iter()
+                .map(field_to_circuit_hex)
+                .collect::<Result<Vec<_>>>()?,
+        );
+        circuit.set_array(
+            "D",
+            vec![
+                field_to_circuit_hex(&admin.x)?,
+                field_to_circuit_hex(&admin.y)?,
+            ],
+        );
+        in_gvk_salts = Some(in_salts);
+        out_gvk_salts = Some(out_salts);
+    }
+
     // Build extData with per-output encrypted note data.
     let ext_data = ExtData {
         recipient: ext_recipient,
@@ -799,6 +882,40 @@ where
 
     let ext_data_hash_be = hash_ext_data(&ext_data)?;
     circuit.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
+    if gvk_mode != GvkMode::Off {
+        circuit.set_single("nonce", &be32_to_0x_hex(&ext_data_hash_be));
+    }
+
+    let (output_gvk_ciphertexts, input_gvk_ciphertexts) = if gvk_mode == GvkMode::Off {
+        (None, None)
+    } else {
+        let admin = admin_view_key.as_ref().expect("validated above");
+        let nonce = Field(U256::from_big_endian(&ext_data_hash_be));
+        let (outputs, inputs) = build_transact_gvk_ciphertexts(
+            gvk_mode,
+            admin,
+            &nonce,
+            &sender_note_pubkey,
+            &input_slots,
+            &output_slots,
+            in_gvk_salts.as_ref().expect("salts"),
+            out_gvk_salts.as_ref().expect("salts"),
+        )?;
+        let output_arr: [GlobalViewKeyCiphertext; N_OUTPUTS] =
+            outputs.try_into().map_err(|v: Vec<_>| {
+                anyhow!(
+                    "expected {} output GVK ciphertexts, got {}",
+                    N_OUTPUTS,
+                    v.len()
+                )
+            })?;
+        let input_vec = if gvk_mode == GvkMode::Traceable {
+            Some(inputs)
+        } else {
+            None
+        };
+        (Some(output_arr), input_vec)
+    };
 
     Ok(TransactArtifacts {
         circuit_inputs: circuit,
@@ -817,8 +934,54 @@ where
                 .as_ref()
                 .map(|proof| proof.root)
                 .unwrap_or(Field::ZERO),
+            output_gvk_ciphertexts,
+            input_gvk_ciphertexts,
         },
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_transact_gvk_ciphertexts(
+    gvk_mode: GvkMode,
+    admin: &BabyJubJubPoint,
+    nonce: &Field,
+    sender_note_pubkey: &[u8; 32],
+    input_slots: &[TransactInputNote],
+    output_slots: &[TransactOutput],
+    in_salts: &[Field; N_INPUTS],
+    out_salts: &[Field; N_OUTPUTS],
+) -> Result<(Vec<GlobalViewKeyCiphertext>, Vec<GlobalViewKeyCiphertext>)> {
+    let input_pk = Field::try_from_le_bytes(*sender_note_pubkey)?;
+    let mut outputs = Vec::with_capacity(N_OUTPUTS);
+    for (k, out) in output_slots.iter().enumerate() {
+        let recipient_note_pubkey: [u8; 32] = out
+            .recipient_note_pubkey
+            .as_ref()
+            .map(|key| *key.as_ref())
+            .unwrap_or(*sender_note_pubkey);
+        let note = GvkNote {
+            pk: Field::try_from_le_bytes(recipient_note_pubkey)?,
+            amount: note_amount_to_field(&out.amount),
+            blinding: out.blinding,
+            salt: out_salts[k],
+        };
+        outputs.push(note.encrypt(admin, nonce, N_INPUTS.saturating_add(k))?);
+    }
+
+    let mut inputs = Vec::with_capacity(N_INPUTS);
+    if gvk_mode == GvkMode::Traceable {
+        for (k, inp) in input_slots.iter().enumerate() {
+            let note = GvkNote {
+                pk: input_pk,
+                amount: note_amount_to_field(&inp.amount),
+                blinding: inp.blinding,
+                salt: in_salts[k],
+            };
+            inputs.push(note.encrypt(admin, nonce, k)?);
+        }
+    }
+
+    Ok((outputs, inputs))
 }
 
 fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
@@ -1108,6 +1271,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1177,6 +1342,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1221,6 +1388,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::EMPTY,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1267,6 +1436,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1313,6 +1484,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1345,6 +1518,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1377,6 +1552,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1415,6 +1592,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1468,6 +1647,8 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1507,11 +1688,203 @@ mod tests {
                 tree_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
             },
             |_| Ok([0u8; 32]),
         );
 
         assert!(res.is_ok());
+    }
+
+    fn test_admin_key() -> BabyJubJubPoint {
+        BabyJubJubPoint::from_priv_scalar(
+            &Field::try_from_le_bytes([0x11; 32]).expect("admin scalar"),
+        )
+    }
+
+    fn fixed_ext_data_hash(_ext: &ExtData) -> Result<[u8; 32]> {
+        Ok([0xAA; 32])
+    }
+
+    fn gvk_signal_single<'a>(signals: &'a CircuitInputs, name: &str) -> &'a str {
+        match signals
+            .signals
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+        {
+            InputValue::Single(s) => s.as_str(),
+            _ => panic!("{name} should be a single value"),
+        }
+    }
+
+    fn gvk_signal_array_len(signals: &CircuitInputs, name: &str) -> usize {
+        match signals
+            .signals
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+        {
+            InputValue::Array(v) => v.len(),
+            _ => panic!("{name} should be an array"),
+        }
+    }
+
+    fn assert_no_gvk_witness(signals: &CircuitInputs) {
+        for key in ["D", "nonce", "inSalt", "outSalt"] {
+            assert!(
+                !signals.signals.contains_key(key),
+                "{key} should be absent when GVK is off"
+            );
+        }
+    }
+
+    #[test]
+    fn gvk_off_no_inputs() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let artifacts = deposit(
+            DepositParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                amount: ExtAmount::from(10),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(tree_depth_usize)),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
+                tree_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            fixed_ext_data_hash,
+        )
+        .expect("deposit builds");
+
+        assert_no_gvk_witness(&artifacts.circuit_inputs);
+        assert!(artifacts.prepared.output_gvk_ciphertexts.is_none());
+        assert!(artifacts.prepared.input_gvk_ciphertexts.is_none());
+    }
+
+    #[test]
+    fn gvk_viewonly_sets_inputs_and_output_ciphertexts() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let artifacts = deposit(
+            DepositParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                amount: ExtAmount::from(10),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(tree_depth_usize)),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
+                tree_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::ViewOnly,
+                admin_view_key: Some(test_admin_key()),
+            },
+            fixed_ext_data_hash,
+        )
+        .expect("viewonly deposit builds");
+
+        let signals = &artifacts.circuit_inputs;
+        assert_eq!(gvk_signal_array_len(signals, "D"), 2);
+        assert_eq!(gvk_signal_array_len(signals, "inSalt"), N_INPUTS);
+        assert_eq!(gvk_signal_array_len(signals, "outSalt"), N_OUTPUTS);
+        assert_eq!(
+            gvk_signal_single(signals, "nonce"),
+            gvk_signal_single(signals, "extDataHash"),
+            "nonce must equal extDataHash"
+        );
+
+        let outputs = artifacts
+            .prepared
+            .output_gvk_ciphertexts
+            .expect("viewonly deposit should carry output ciphertexts");
+        assert_eq!(outputs.len(), N_OUTPUTS);
+        assert!(artifacts.prepared.input_gvk_ciphertexts.is_none());
+    }
+
+    #[test]
+    fn gvk_traceable_sets_inputs_and_both_ciphertexts() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let input = TransactInputNote {
+            amount: NoteAmount::from(10),
+            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
+            merkle_path_indices: Field::ZERO,
+        };
+        let out = TransactOutput {
+            amount: NoteAmount::from(10),
+            blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
+            recipient_note_pubkey: None,
+            recipient_encryption_pubkey: None,
+        };
+
+        let artifacts = transfer(
+            TransferParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                inputs: vec![input],
+                outputs: vec![out],
+                membership_proof: Some(zero_membership(tree_depth_usize)),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
+                tree_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Traceable,
+                admin_view_key: Some(test_admin_key()),
+            },
+            fixed_ext_data_hash,
+        )
+        .expect("traceable transfer builds");
+
+        let signals = &artifacts.circuit_inputs;
+        assert_eq!(gvk_signal_array_len(signals, "D"), 2);
+        assert_eq!(gvk_signal_array_len(signals, "inSalt"), N_INPUTS);
+        assert_eq!(gvk_signal_array_len(signals, "outSalt"), N_OUTPUTS);
+        assert_eq!(
+            gvk_signal_single(signals, "nonce"),
+            gvk_signal_single(signals, "extDataHash")
+        );
+
+        let outputs = artifacts
+            .prepared
+            .output_gvk_ciphertexts
+            .expect("traceable transfer should carry output ciphertexts");
+        assert_eq!(outputs.len(), N_OUTPUTS);
+
+        let inputs = artifacts
+            .prepared
+            .input_gvk_ciphertexts
+            .expect("traceable transfer should carry input ciphertexts");
+        assert_eq!(inputs.len(), N_INPUTS);
     }
 
     #[test]

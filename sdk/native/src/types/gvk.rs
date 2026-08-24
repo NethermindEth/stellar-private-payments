@@ -136,7 +136,7 @@ impl GlobalViewKeyMemo {
 ///
 /// Orthogonal to [`PolicyFlags`] rather than a bit on it: view-only and
 /// traceable are mutually exclusive (unlike allowlist/blocklist, which can be
-/// combined). See [`gvk_circuit_stem`] for how the two combine.
+/// combined). See [`CircuitStem`] for how the two combine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GvkMode {
@@ -151,24 +151,6 @@ pub enum GvkMode {
 }
 
 impl GvkMode {
-    /// Word used in circuit stems for this mode. `None` for [`GvkMode::Off`],
-    /// which contributes no suffix at all (see [`gvk_circuit_stem`]).
-    fn stem_word(self) -> Option<&'static str> {
-        match self {
-            GvkMode::Off => None,
-            GvkMode::ViewOnly => Some("viewonly"),
-            GvkMode::Traceable => Some("traceable"),
-        }
-    }
-
-    fn from_stem_word(word: &str) -> Result<Self> {
-        match word {
-            "viewonly" => Ok(GvkMode::ViewOnly),
-            "traceable" => Ok(GvkMode::Traceable),
-            _ => Err(anyhow!("Unknown GVK circuit mode word: {word}")),
-        }
-    }
-
     /// Value stored under `pool-gvk`'s `DataKey::GvkMode`, matching
     /// `pool_gvk::gvk::{VIEW_ONLY, TRACEABLE}`. `None` for [`GvkMode::Off`],
     /// which has no on-chain discriminant at all: a `contracts/pool`
@@ -197,70 +179,23 @@ impl GvkMode {
     }
 }
 
-/// Circuit artifact stem prefix for GVK-composed policy-transact circuits,
-/// e.g. `policy_tx_gvk_2_2_A_viewonly`.
-const POLICY_TX_GVK_2_2: &str = "policy_tx_gvk_2_2";
-
-/// Composes [`PolicyFlags`] and [`GvkMode`] into a circuit artifact stem.
+/// Composes [`PolicyFlags`] and [`GvkMode`] into a circuit artifact file stem.
 ///
-/// `GvkMode::Off` maps to `policy_flags.circuit_stem()` unchanged.
-///  Non-GVK pools are untouched by this function.
-/// `ViewOnly`/`Traceable` produce one of the 8 stems registered in
-/// `tools/circuit-compiler` as `POLICY_GLOBAL_VIEW_KEY_CIRCUITS`, of the shape
-/// `policy_tx_gvk_2_2[_{A|B|AB}]_{viewonly|traceable}`.
+/// Prefer [`CircuitStem::transact`] and [`ToString`].
 pub fn gvk_circuit_stem(policy_flags: PolicyFlags, gvk_mode: GvkMode) -> String {
-    let Some(mode_word) = gvk_mode.stem_word() else {
-        return policy_flags.circuit_stem();
-    };
-
-    let suffix = policy_flags.circuit_suffix();
-    if suffix.is_empty() {
-        format!("{POLICY_TX_GVK_2_2}_{mode_word}")
-    } else {
-        format!("{POLICY_TX_GVK_2_2}_{suffix}_{mode_word}")
-    }
+    super::CircuitStem::transact(policy_flags, gvk_mode).to_string()
 }
 
-/// Parses a GVK circuit stem produced by [`gvk_circuit_stem`] back into its
-/// [`PolicyFlags`]/[`GvkMode`] components.
+/// Parses a GVK circuit stem back into its components.
 ///
-/// Only accepts stems with a GVK mode word. Use [`PolicyFlags::from_stem`]
-/// for plain (non-GVK) stems.
+/// Only accepts stems with a GVK mode word. Prefer [`CircuitStem::from_string`]
+/// for plain (non-GVK) stems too.
 pub fn parse_gvk_circuit_stem(stem: &str) -> Result<(PolicyFlags, GvkMode)> {
-    let rest = stem
-        .strip_prefix(POLICY_TX_GVK_2_2)
-        .ok_or_else(|| anyhow!("Not a GVK policy transact stem: {stem}"))?;
-
-    let (suffix, mode_word) = match rest.strip_prefix('_') {
-        Some(rest) => match rest.split_once('_') {
-            Some((suffix, mode_word)) => (suffix, mode_word),
-            None => ("", rest),
-        },
-        None => return Err(anyhow!("Not a GVK policy transact stem: {stem}")),
-    };
-
-    let mode = GvkMode::from_stem_word(mode_word)?;
-    let flags = if suffix.is_empty() {
-        PolicyFlags::EMPTY
-    } else {
-        PolicyFlags::from_stem(&format!("policy_tx_2_2_{suffix}"))?
-    };
-
-    Ok((flags, mode))
-}
-
-/// All 8 GVK circuit stems registered in `tools/circuit-compiler` as
-/// `POLICY_GLOBAL_VIEW_KEY_CIRCUITS`: every [`PolicyFlags`] combination
-/// crossed with [`GvkMode::ViewOnly`] and [`GvkMode::Traceable`].
-pub fn all_gvk_circuit_stems() -> Vec<String> {
-    PolicyFlags::all_flags()
-        .into_iter()
-        .flat_map(|flags| {
-            [GvkMode::ViewOnly, GvkMode::Traceable]
-                .into_iter()
-                .map(move |mode| gvk_circuit_stem(flags, mode))
-        })
-        .collect()
+    let parsed = super::CircuitStem::from_string(stem)?;
+    if parsed.gvk_mode == GvkMode::Off {
+        return Err(anyhow!("not a GVK policy transact stem: {stem}"));
+    }
+    Ok((parsed.policy_flags, parsed.gvk_mode))
 }
 
 #[cfg(test)]
@@ -428,48 +363,6 @@ mod tests {
         let memo = traceable_memo();
 
         assert!(memo.validate(3, 2).is_err());
-    }
-
-    #[test]
-    fn gvk_off_matches_plain_policy_stem_for_all_flag_combos() {
-        for flags in crate::types::PolicyFlags::all_flags() {
-            assert_eq!(gvk_circuit_stem(flags, GvkMode::Off), flags.circuit_stem());
-        }
-    }
-
-    #[test]
-    fn gvk_circuit_stem_matches_known_stems_and_round_trips() {
-        let expected = [
-            "policy_tx_gvk_2_2_viewonly",
-            "policy_tx_gvk_2_2_traceable",
-            "policy_tx_gvk_2_2_A_viewonly",
-            "policy_tx_gvk_2_2_A_traceable",
-            "policy_tx_gvk_2_2_B_viewonly",
-            "policy_tx_gvk_2_2_B_traceable",
-            "policy_tx_gvk_2_2_AB_viewonly",
-            "policy_tx_gvk_2_2_AB_traceable",
-        ];
-
-        let stems = all_gvk_circuit_stems();
-        assert_eq!(
-            stems, expected,
-            "stems must match tools/circuit-compiler exactly"
-        );
-
-        for stem in &stems {
-            let (flags, mode) = parse_gvk_circuit_stem(stem).expect("parse known stem");
-            assert_eq!(gvk_circuit_stem(flags, mode), *stem);
-        }
-    }
-
-    #[test]
-    fn parse_gvk_circuit_stem_rejects_non_gvk_stem() {
-        assert!(parse_gvk_circuit_stem("policy_tx_2_2_A").is_err());
-    }
-
-    #[test]
-    fn parse_gvk_circuit_stem_rejects_unknown_mode_word() {
-        assert!(parse_gvk_circuit_stem("policy_tx_gvk_2_2_A_bogus").is_err());
     }
 }
 

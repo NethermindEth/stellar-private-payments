@@ -1,6 +1,7 @@
 use crate::{
     chain::{
         ParsedContractEvent, parse_event_metadata, scval_to_address_string, scval_to_bytes,
+        scval_to_global_view_key_ciphertext, scval_to_optional_global_view_key_ciphertext,
         scval_to_u32, scval_to_u64, scval_to_u256,
     },
     types::{
@@ -13,24 +14,6 @@ use anyhow::{Result, anyhow};
 /// Field name emitted by `contracts/pool-gvk`'s pool events, carrying the
 /// admin-decryptable ciphertext of the note.
 const GVK_CIPHERTEXT_FIELD: &str = "gvk_ciphertext";
-
-/// Warn when a pool event carries GVK data this SDK does not yet decode.
-///
-/// `pool-gvk` reuses `pool`'s event names and adds `gvk_ciphertext`. Event
-/// data is a name-keyed map, so the extra field decodes harmlessly and the
-/// parsers below simply ignore it — but ignoring it silently means a GVK pool
-/// can be indexed with its audit data quietly discarded. This makes that
-/// visible until the field is actually consumed.
-fn warn_unconsumed_gvk_ciphertext(parsed: &ParsedContractEvent) {
-    if parsed.values.contains_key(GVK_CIPHERTEXT_FIELD) {
-        tracing::warn!(
-            "event `{}` id {} from contract {} carries a `{GVK_CIPHERTEXT_FIELD}` field that is not yet parsed; GVK data is being dropped",
-            parsed.name,
-            parsed.id,
-            parsed.contract_id,
-        );
-    }
-}
 
 pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
     let parsed = parse_event_metadata(event)?;
@@ -71,15 +54,27 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 //     pub nullifier: U256,
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
-    warn_unconsumed_gvk_ciphertext(&parsed);
     let ParsedContractEvent {
-        id, name, topics, ..
+        id,
+        name,
+        topics,
+        values,
+        ..
     } = parsed;
     let nullifier_scval = topics
         .first()
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have a nullifier topic value"))?;
     let nullifier = Field::try_from_u256(scval_to_u256(nullifier_scval)?)?;
-    Ok(NewNullifierEvent { id, nullifier })
+    let gvk_ciphertext = match values.get(GVK_CIPHERTEXT_FIELD) {
+        None => None,
+        Some(val) => scval_to_optional_global_view_key_ciphertext(val)
+            .map_err(|e| anyhow!("event `{name}` id {id}: {e}"))?,
+    };
+    Ok(NewNullifierEvent {
+        id,
+        nullifier,
+        gvk_ciphertext,
+    })
 }
 
 // #[contractevent]
@@ -94,7 +89,6 @@ fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifier
 //     pub encrypted_output: Bytes,
 // }
 fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitmentEvent> {
-    warn_unconsumed_gvk_ciphertext(&parsed);
     let ParsedContractEvent {
         id,
         name,
@@ -114,11 +108,19 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
         .get("encrypted_output")
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have an encrypted_output value"))?;
     let encrypted_output = scval_to_bytes(encrypted_output_scval)?;
+    let gvk_ciphertext = values
+        .get(GVK_CIPHERTEXT_FIELD)
+        .map(|val| {
+            scval_to_global_view_key_ciphertext(val)
+                .map_err(|e| anyhow!("event `{name}` id {id}: {e}"))
+        })
+        .transpose()?;
     Ok(NewCommitmentEvent {
         id,
         commitment,
         index,
         encrypted_output,
+        gvk_ciphertext,
     })
 }
 
@@ -286,6 +288,7 @@ fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
 #[cfg(test)]
 mod gvk_passthrough_tests {
     use super::*;
+    use crate::types::{Field, U256};
     use stellar_xdr::{self as xdr, WriteXdr};
 
     fn b64(val: &xdr::ScVal) -> String {
@@ -439,6 +442,10 @@ mod gvk_passthrough_tests {
         assert_eq!(with.commitment, without.commitment);
         assert_eq!(with.index, without.index);
         assert_eq!(with.encrypted_output, without.encrypted_output);
+        assert!(without.gvk_ciphertext.is_none());
+        let ct = with.gvk_ciphertext.expect("gvk ciphertext");
+        assert_eq!(ct.c1, Field(U256::from(1)));
+        assert_eq!(ct.r.x, Field(U256::from(11)));
     }
 
     #[test]
@@ -455,5 +462,8 @@ mod gvk_passthrough_tests {
         };
 
         assert_eq!(with.nullifier, without.nullifier);
+        assert!(without.gvk_ciphertext.is_none());
+        let ct = with.gvk_ciphertext.expect("gvk ciphertext");
+        assert_eq!(ct.c2, Field(U256::from(2)));
     }
 }

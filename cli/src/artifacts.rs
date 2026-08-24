@@ -7,7 +7,7 @@ use stellar_private_payments::{
         RegisteredCircuit, SELECTIVE_DISCLOSURE_1, SELECTIVE_DISCLOSURE_2, SELECTIVE_DISCLOSURE_3,
         SELECTIVE_DISCLOSURE_4,
     },
-    types::PolicyFlags,
+    types::CircuitStem,
 };
 
 use crate::config::default_data_dir;
@@ -21,12 +21,11 @@ const DISCLOSURE_CIRCUITS: [&RegisteredCircuit; 4] = [
 
 pub fn load_transact_artifacts(
     circuits_dir: Option<&Path>,
-) -> Result<Vec<(PolicyFlags, ProverArtifacts)>> {
-    PolicyFlags::all_flags()
+) -> Result<Vec<(CircuitStem, ProverArtifacts)>> {
+    CircuitStem::all_transact_stems()
         .into_iter()
-        .map(|flags| {
-            load_transact_artifacts_for_policy(circuits_dir, flags)
-                .map(|artifacts| (flags, artifacts))
+        .map(|stem| {
+            load_transact_artifacts_for_stem(circuits_dir, stem).map(|artifacts| (stem, artifacts))
         })
         .collect()
 }
@@ -59,20 +58,26 @@ pub fn load_disclosure_artifacts_for_circuit(
     })
 }
 
-pub fn load_transact_artifacts_for_policy(
+pub fn load_transact_artifacts_for_stem(
     circuits_dir: Option<&Path>,
-    policy_flags: PolicyFlags,
+    stem: CircuitStem,
 ) -> Result<ProverArtifacts> {
     let circuits = circuits_dir
         .map(PathBuf::from)
         .unwrap_or_else(default_circuits_dir);
-    let stem = policy_flags.circuit_stem();
+    let stem_str = stem.to_string();
 
     Ok(ProverArtifacts {
-        proving_key: read_proving_key(&circuits, &stem)?,
-        circuit_graph: read_circuit_graph(&circuits, &stem)?,
-        circuit_r1cs: std::fs::read(circuits.join(format!("{stem}.r1cs")))
-            .with_context(|| format!("read {}", circuits.join(format!("{stem}.r1cs")).display()))?,
+        proving_key: read_proving_key(&circuits, &stem_str)?,
+        circuit_graph: read_circuit_graph(&circuits, &stem_str)?,
+        circuit_r1cs: std::fs::read(circuits.join(format!("{stem_str}.r1cs"))).with_context(
+            || {
+                format!(
+                    "read {}",
+                    circuits.join(format!("{stem_str}.r1cs")).display()
+                )
+            },
+        )?,
     })
 }
 

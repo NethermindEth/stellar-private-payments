@@ -158,13 +158,13 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 /// Uses in-repo `target/circuits-artifacts` (same dir as `make circuits`).
 /// Downloads the hashed GitHub release there when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
-    let stem = pool.policy_flags.circuit_stem();
+    let stem = pool.circuit_stem();
     let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"));
     store
         .ensure_blocking()
         .map_err(|e| format!("circuit artifacts: {e}"))?;
     store
-        .artifacts(&stem)
+        .artifacts(&stem.to_string())
         .map_err(|e| format!("circuit artifacts: {e}"))
 }
 
@@ -187,7 +187,7 @@ pub fn build_client_for_pool(
     let rpc_url = env_or("SPP_RPC_URL", "https://soroban-testnet.stellar.org");
     let artifacts = read_artifacts_for_pool(pool)?;
     let prover = Handle::from_box(Box::new(
-        LocalProver::from_artifacts(&[(pool.policy_flags, artifacts)])
+        LocalProver::from_artifacts(&[(pool.circuit_stem(), artifacts)])
             .map_err(|e| format!("init local prover: {e}"))?,
     ) as Box<dyn Prover>);
     Client::init(&rpc_url, storage, prover, config, bootnode_url())

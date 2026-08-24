@@ -1,6 +1,6 @@
 use crate::{
     chain::rpc::Error,
-    types::{BabyJubJubPoint, ContractEvent, Field, U256},
+    types::{BabyJubJubPoint, ContractEvent, Field, GlobalViewKeyCiphertext, U256},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use core::ops::Shl;
@@ -216,6 +216,66 @@ pub fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJubPoint, 
         y: Field::try_from_u256(y)
             .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.y: {e}")))?,
     })
+}
+
+/// Decode a `pool-gvk::gvk::GvkCiphertext` from an event or proof field.
+pub fn scval_to_global_view_key_ciphertext(
+    val: &xdr::ScVal,
+) -> Result<GlobalViewKeyCiphertext, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "GlobalViewKeyCiphertext: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut r = None;
+    let mut c1 = None;
+    let mut c2 = None;
+    let mut c3 = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "r" => r = Some(scval_to_baby_jub_jub_point(val)?),
+            "c1" => c1 = Some(scval_to_u256(val)?),
+            "c2" => c2 = Some(scval_to_u256(val)?),
+            "c3" => c3 = Some(scval_to_u256(val)?),
+            _ => {}
+        }
+    }
+
+    let r =
+        r.ok_or_else(|| Error::UnexpectedScVal("GlobalViewKeyCiphertext missing field: r".into()))?;
+    let c1 = c1.ok_or_else(|| {
+        Error::UnexpectedScVal("GlobalViewKeyCiphertext missing field: c1".into())
+    })?;
+    let c2 = c2.ok_or_else(|| {
+        Error::UnexpectedScVal("GlobalViewKeyCiphertext missing field: c2".into())
+    })?;
+    let c3 = c3.ok_or_else(|| {
+        Error::UnexpectedScVal("GlobalViewKeyCiphertext missing field: c3".into())
+    })?;
+
+    Ok(GlobalViewKeyCiphertext {
+        r,
+        c1: Field::try_from_u256(c1)
+            .map_err(|e| Error::UnexpectedScVal(format!("GlobalViewKeyCiphertext.c1: {e}")))?,
+        c2: Field::try_from_u256(c2)
+            .map_err(|e| Error::UnexpectedScVal(format!("GlobalViewKeyCiphertext.c2: {e}")))?,
+        c3: Field::try_from_u256(c3)
+            .map_err(|e| Error::UnexpectedScVal(format!("GlobalViewKeyCiphertext.c3: {e}")))?,
+    })
+}
+
+/// Decode an optional GVK ciphertext (`ScVal::Void` maps to `None`).
+pub fn scval_to_optional_global_view_key_ciphertext(
+    val: &xdr::ScVal,
+) -> Result<Option<GlobalViewKeyCiphertext>, Error> {
+    if matches!(val, xdr::ScVal::Void) {
+        return Ok(None);
+    }
+    scval_to_global_view_key_ciphertext(val).map(Some)
 }
 
 #[derive(Debug)]

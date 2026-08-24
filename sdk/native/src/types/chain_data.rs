@@ -1,4 +1,7 @@
-use super::{BabyJubJubPoint, EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
+use super::{
+    BabyJubJubPoint, EncryptionPublicKey, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode,
+    NotePublicKey, PolicyFlags,
+};
 use serde::{Deserialize, Serialize};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
@@ -134,6 +137,8 @@ pub struct TransactChainContext {
     pub asp_membership_ledger: u32,
     pub non_membership_proof: Option<AspNonMembershipProof>,
     pub policy_flags: PolicyFlags,
+    pub gvk_mode: GvkMode,
+    pub admin_view_key: Option<BabyJubJubPoint>,
 }
 
 pub fn transact_chain_context_from_state(
@@ -163,6 +168,8 @@ pub fn transact_chain_context_from_state(
         asp_membership_ledger: data.asp_membership.ledger,
         non_membership_proof,
         policy_flags: pool.policy_flags,
+        gvk_mode: GvkMode::from_on_chain_value(pool.gvk_mode)?,
+        admin_view_key: pool.admin_view_key,
     })
 }
 
@@ -229,6 +236,10 @@ pub struct NewNullifierEvent {
     pub id: String,
     /// The nullifier that was spent (BN254 field element).
     pub nullifier: Field,
+    /// Admin-decryptable ciphertext for the spent input note. Present on
+    /// traceable `pool-gvk` deployments only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gvk_ciphertext: Option<GlobalViewKeyCiphertext>,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -245,6 +256,10 @@ pub struct NewCommitmentEvent {
     pub index: u32,
     /// Encrypted output data (decryptable by the recipient)
     pub encrypted_output: Vec<u8>,
+    /// Admin-decryptable ciphertext for this output note. Present on
+    /// `pool-gvk` deployments only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gvk_ciphertext: Option<GlobalViewKeyCiphertext>,
 }
 
 /// New pubkey pairs in the pool

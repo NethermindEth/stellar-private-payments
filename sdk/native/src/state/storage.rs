@@ -1682,6 +1682,7 @@ mod tests {
             commitment,
             index: 3,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         // Scan commitments -> user_notes.
@@ -1740,6 +1741,7 @@ mod tests {
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
             id: "evt-null".to_string(),
             nullifier,
+            gvk_ciphertext: None,
         }])?;
 
         assert!(storage.reconcile_nullifiers(100)?);
@@ -2229,6 +2231,7 @@ mod tests {
             commitment,
             index: 3,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         let mut derive = |account: &AccountKeys,
@@ -2304,6 +2307,7 @@ mod tests {
             commitment,
             index: 3,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         let mut derive = |account: &AccountKeys,
@@ -2348,6 +2352,7 @@ mod tests {
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
             id: "evt-null".to_string(),
             nullifier,
+            gvk_ciphertext: None,
         }])?;
         storage.reconcile_nullifiers(100)?;
 
@@ -2395,6 +2400,7 @@ mod tests {
             commitment,
             index: 0,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         let mut derive = |account: &AccountKeys,
@@ -2473,6 +2479,7 @@ mod tests {
             commitment,
             index: 3,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         let mut derive = |account: &AccountKeys,
@@ -2547,6 +2554,7 @@ mod tests {
             commitment,
             index: 3,
             encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: None,
         }])?;
 
         let mut derive = |account: &AccountKeys,
@@ -2591,6 +2599,7 @@ mod tests {
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
             id: "evt-null".to_string(),
             nullifier,
+            gvk_ciphertext: None,
         }])?;
         storage.reconcile_nullifiers(100)?;
 
@@ -2635,18 +2644,21 @@ mod tests {
                 commitment: leaf0,
                 index: 0,
                 encrypted_output: vec![],
+                gvk_ciphertext: None,
             },
             NewCommitmentEvent {
                 id: "evt-1".to_string(),
                 commitment: leaf1,
                 index: 1,
                 encrypted_output: vec![],
+                gvk_ciphertext: None,
             },
             NewCommitmentEvent {
                 id: "evt-2".to_string(),
                 commitment: leaf2,
                 index: 2,
                 encrypted_output: vec![],
+                gvk_ciphertext: None,
             },
         ])?;
 
@@ -2677,12 +2689,14 @@ mod tests {
                 commitment: leaf0,
                 index: 0,
                 encrypted_output: vec![],
+                gvk_ciphertext: None,
             },
             NewCommitmentEvent {
                 id: "evt-2".to_string(),
                 commitment: leaf2,
                 index: 2,
                 encrypted_output: vec![],
+                gvk_ciphertext: None,
             },
         ])?;
 

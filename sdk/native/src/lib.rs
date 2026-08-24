@@ -7,7 +7,7 @@
 //! ```no_run
 //! use stellar_private_payments::{
 //!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
-//!     types::ContractConfig,
+//!     types::{CircuitStem, ContractConfig, PolicyFlags},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -15,9 +15,13 @@
 //!
 //! let store = CircuitStore::open("./circuits");
 //! store.ensure_blocking()?;
-//! let artifacts = store.transact_artifacts()?;
+//! let stem = CircuitStem::transact(
+//!     PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+//!     Default::default(),
+//! );
+//! let artifacts = store.artifacts(&stem.to_string())?;
 //! let prover = Handle::from_box(
-//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
+//!     Box::new(LocalProver::from_artifacts(&[(stem, artifacts)])?) as Box<dyn Prover>,
 //! );
 //! let signer = Handle::from_box(
 //!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)

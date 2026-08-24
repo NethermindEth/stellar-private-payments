@@ -178,6 +178,8 @@ impl ProverEngine {
             ext_data_hash_be: p.ext_data_hash_be,
             asp_membership_root: p.asp_membership_root,
             asp_non_membership_root: p.asp_non_membership_root,
+            output_gvk_ciphertexts: p.output_gvk_ciphertexts,
+            input_gvk_ciphertexts: p.input_gvk_ciphertexts,
         };
 
         Ok(PreparedProverTx {

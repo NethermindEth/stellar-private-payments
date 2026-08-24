@@ -14,8 +14,8 @@ use stellar_xdr::{self as xdr, ReadXdr};
 
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
-    ContractsStateData, ExtAmount, Field, GvkMode, NotePublicKey, PoolInfo, SMT_DEPTH,
-    TransactChainContext, U256, transact_chain_context_from_state,
+    ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NotePublicKey,
+    PoolInfo, SMT_DEPTH, TransactChainContext, U256, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -51,6 +51,8 @@ pub struct OnchainProofPublicInputs {
     pub ext_data_hash_be: [u8; 32],
     pub asp_membership_root: Field,
     pub asp_non_membership_root: Field,
+    pub output_gvk_ciphertexts: Option<[GlobalViewKeyCiphertext; 2]>,
+    pub input_gvk_ciphertexts: Option<Vec<GlobalViewKeyCiphertext>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

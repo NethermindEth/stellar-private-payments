@@ -1,5 +1,6 @@
 mod amounts;
 mod chain_data;
+mod circuit_stem;
 mod client;
 mod correlation;
 mod disclosure;
@@ -10,6 +11,7 @@ mod policy_tx;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
+pub use circuit_stem::CircuitStem;
 pub use client::*;
 pub use correlation::*;
 pub use disclosure::*;
@@ -313,6 +315,10 @@ impl PoolConfigEntry {
             AssetDescriptor::Classic { code, .. } => code.clone(),
             AssetDescriptor::Contract { symbol, .. } => symbol.clone(),
         }
+    }
+
+    pub fn circuit_stem(&self) -> CircuitStem {
+        CircuitStem::transact(self.policy_flags, self.gvk_mode)
     }
 }
 

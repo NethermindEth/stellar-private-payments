@@ -6000,6 +6000,7 @@ dependencies = [
  "hex",
  "http",
  "pool",
+ "pool-gvk",
  "public-key-registry",
  "rayon",
  "reqwest",

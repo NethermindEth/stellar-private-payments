@@ -7,7 +7,8 @@ use stellar_xdr::{self as xdr};
 use super::{
     contract_state::{OnchainProofPublicInputs, PreparedSorobanTx, StateFetcher},
     soroban_encode::{
-        BASE_FEE, pool_ext_data_to_scval, pool_proof_to_scval, register_account_to_scval,
+        BASE_FEE, pool_ext_data_to_scval, pool_gvk_proof_to_scval, pool_proof_to_scval,
+        register_account_to_scval,
     },
 };
 
@@ -29,17 +30,36 @@ impl StateFetcher {
         source_account: &str,
     ) -> Result<PreparedSorobanTx> {
         self.enabled_pool_for(pool_contract_id)?;
-        let proof_scval = pool_proof_to_scval(
-            &input.proof_uncompressed,
-            input.public.root,
-            &input.public.input_nullifiers,
-            input.public.output_commitment0,
-            input.public.output_commitment1,
-            input.public.public_amount,
-            input.public.ext_data_hash_be,
-            input.public.asp_membership_root,
-            input.public.asp_non_membership_root,
-        )?;
+        let proof_scval = if let Some(output_gvk_ciphertexts) = &input.public.output_gvk_ciphertexts
+        {
+            let input_gvk_ciphertexts =
+                input.public.input_gvk_ciphertexts.as_deref().unwrap_or(&[]);
+            pool_gvk_proof_to_scval(
+                &input.proof_uncompressed,
+                input.public.root,
+                &input.public.input_nullifiers,
+                input.public.output_commitment0,
+                input.public.output_commitment1,
+                input.public.public_amount,
+                input.public.ext_data_hash_be,
+                input.public.asp_membership_root,
+                input.public.asp_non_membership_root,
+                output_gvk_ciphertexts,
+                input_gvk_ciphertexts,
+            )?
+        } else {
+            pool_proof_to_scval(
+                &input.proof_uncompressed,
+                input.public.root,
+                &input.public.input_nullifiers,
+                input.public.output_commitment0,
+                input.public.output_commitment1,
+                input.public.public_amount,
+                input.public.ext_data_hash_be,
+                input.public.asp_membership_root,
+                input.public.asp_non_membership_root,
+            )?
+        };
         let ext_scval = pool_ext_data_to_scval(&input.ext_data)?;
         let sender_scval = xdr::ScVal::Address(
             source_account
@@ -295,6 +315,8 @@ mod tests {
             ext_data_hash_be: [0u8; 32],
             asp_membership_root: crate::types::Field(crate::types::U256::from(7)),
             asp_non_membership_root: crate::types::Field(crate::types::U256::from(8)),
+            output_gvk_ciphertexts: None,
+            input_gvk_ciphertexts: None,
         };
 
         let proof_scval = pool_proof_to_scval(
