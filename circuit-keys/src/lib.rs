@@ -1,8 +1,8 @@
 //! Shared helpers for emitting Groth16 key material in the repo-specific
 //! formats used by deployments and tests.
 //!
-//! This crate centralizes serialization/encoding so that `circuits/build.rs`
-//! and `tools/ceremony-cli` produce identical outputs.
+//! This crate centralizes serialization/encoding so that
+//! `tools/circuit-compiler` and `tools/ceremony-cli` produce identical outputs.
 
 use anyhow::{Context, Result, anyhow};
 use ark_bn254::{Bn254, Fq, Fq2, g1::G1Affine, g2::G2Affine};

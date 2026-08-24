@@ -26,7 +26,7 @@ pub struct DefaultsSection {
 }
 
 const DEFAULT_DATA_DIR_TEMPLATE: &str = "~/.local/share/stellar-private-payments";
-const DEBUG_CIRCUITS_DIR_TEMPLATE: &str = "target/circuits-artifacts/release";
+const DEBUG_CIRCUITS_DIR_TEMPLATE: &str = "target/circuits-artifacts";
 
 fn config_template(debug_build: bool) -> String {
     let circuits_dir = if debug_build {
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn debug_template_keeps_repo_circuits_dir() {
         let template = config_template(true);
-        assert!(template.contains(r#"# circuits_dir = "target/circuits-artifacts/release""#));
+        assert!(template.contains(r#"# circuits_dir = "target/circuits-artifacts""#));
     }
 
     #[test]
@@ -122,6 +122,6 @@ mod tests {
             template
                 .contains(r#"# circuits_dir = "~/.local/share/stellar-private-payments/circuits""#)
         );
-        assert!(!template.contains(r#"target/circuits-artifacts/release"#));
+        assert!(!template.contains(r#"target/circuits-artifacts"#));
     }
 }

@@ -489,20 +489,16 @@ check_chain_accounts_registered() {
   run_chain_verify_once; _STATUS="$CHAIN_VERIFY_STATUS"; _DETAIL="public-key registry (delegated to a single e2e-accounts-setup.sh --verify pass for A/B/C/D): $CHAIN_VERIFY_DETAIL"; }
 
 # --- artifacts ---
-check_circuits_profile() {
-  local profile="$1" out_dir name missing=(); load_circuit_artifacts
+check_artifact_circuits() {
+  local out_dir name missing=(); load_circuit_artifacts
   if [ "${#CIRCUIT_ARTIFACTS_CACHE[@]}" -eq 0 ]; then _STATUS="MISSING"; _DETAIL="could not read CIRCUIT_ARTIFACTS from sdk/web/scripts/stage-circuits-dist.sh"; return; fi
-  out_dir="$(circuits_out_base)/$profile"
+  out_dir="$(circuits_out_base)"
   if [ ! -d "$out_dir" ]; then _STATUS="MISSING"; _DETAIL="$out_dir does not exist"; return; fi
   for name in "${CIRCUIT_ARTIFACTS_CACHE[@]}"; do case "$name" in *.r1cs) [ -f "$out_dir/$name" ] || missing+=("$name") ;; esac; done
   if [ "${#missing[@]}" -eq 0 ]; then _STATUS="OK"; _DETAIL="$out_dir holds all required .r1cs files"
   else _STATUS="MISSING"; _DETAIL="$out_dir missing: $(IFS=,; echo "${missing[*]}")"; fi; }
 
-check_artifact_circuits_debug() { check_circuits_profile debug; }
-check_artifact_circuits_release() { check_circuits_profile release; }
-
-heal_circuits_debug() { step "building debug circuit artifacts"; ( cd "$REPO_ROOT" && cargo build -p circuits ); }
-heal_circuits_release() { step "building release circuit artifacts"; ( cd "$REPO_ROOT" && cargo build -p circuits --release ); }
+heal_circuits() { step "building circuit artifacts"; ( cd "$REPO_ROOT" && make circuits ); }
 
 check_artifact_circuit_keys() {
   local keys_dir name stem missing=(); load_circuit_artifacts
@@ -523,15 +519,15 @@ check_artifact_sdk_dist_circuits() {
   if [ -d "$circuits_dir" ] && [ -n "$(ls -A "$circuits_dir" 2>/dev/null)" ]; then _STATUS="OK"; _DETAIL="$circuits_dir is populated"; else _STATUS="MISSING"; _DETAIL="$circuits_dir missing or empty"; fi; }
 
 check_artifact_sdk_dist_freshness() {
-  local dist_circuits release_dir newest_dist newest_release dist_epoch release_epoch
-  dist_circuits="$(sdk_dist_base)/circuits"; release_dir="$(circuits_out_base)/release"
-  if [ ! -d "$dist_circuits" ] || [ ! -d "$release_dir" ]; then _STATUS="OK"; _DETAIL="cannot compare freshness (dist/circuits or the release artifacts dir is missing)"; return; fi
+  local dist_circuits circuits_dir newest_dist newest_circuits dist_epoch circuits_epoch
+  dist_circuits="$(sdk_dist_base)/circuits"; circuits_dir="$(circuits_out_base)"
+  if [ ! -d "$dist_circuits" ] || [ ! -d "$circuits_dir" ]; then _STATUS="OK"; _DETAIL="cannot compare freshness (dist/circuits or the circuit artifacts dir is missing)"; return; fi
   newest_dist="$(find "$dist_circuits" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -n1)"
-  newest_release="$(find "$release_dir" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -n1)"
-  if [ -z "$newest_dist" ] || [ -z "$newest_release" ]; then _STATUS="OK"; _DETAIL="cannot compare freshness (no files found)"; return; fi
-  dist_epoch="${newest_dist%.*}"; release_epoch="${newest_release%.*}"
-  if [ "$dist_epoch" -lt "$release_epoch" ]; then _STATUS="OK"; _DETAIL="stale: dist/circuits is older than the newest release circuit artifact — run 'npm run build --prefix sdk/web' to refresh"
-  else _STATUS="OK"; _DETAIL="dist/circuits is at least as new as the release circuit artifacts"; fi; }
+  newest_circuits="$(find "$circuits_dir" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -n1)"
+  if [ -z "$newest_dist" ] || [ -z "$newest_circuits" ]; then _STATUS="OK"; _DETAIL="cannot compare freshness (no files found)"; return; fi
+  dist_epoch="${newest_dist%.*}"; circuits_epoch="${newest_circuits%.*}"
+  if [ "$dist_epoch" -lt "$circuits_epoch" ]; then _STATUS="OK"; _DETAIL="stale: dist/circuits is older than the newest circuit artifact — run 'npm run build --prefix sdk/web' to refresh"
+  else _STATUS="OK"; _DETAIL="dist/circuits is at least as new as the circuit artifacts"; fi; }
 
 # --- freighter ---
 check_freighter_node_modules() {
@@ -724,8 +720,7 @@ group_chain() {
 
 group_artifacts() {
   echo "-- artifacts --"
-  run_check artifact.circuits.debug sdk check_artifact_circuits_debug heal_circuits_debug "cargo build -p circuits"
-  run_check artifact.circuits.release sdk check_artifact_circuits_release heal_circuits_release "cargo build -p circuits --release"
+  run_check artifact.circuits sdk check_artifact_circuits heal_circuits "make circuits"
   run_check artifact.circuit_keys sdk check_artifact_circuit_keys "" "These files are committed to git under deployments/testnet/circuit_keys — re-clone or 'git checkout -- deployments/testnet/circuit_keys' rather than rebuilding."
   run_check artifact.sdk_dist.workers sdk check_artifact_sdk_dist_workers heal_sdk_dist "npm ci --prefix sdk/web && npm run build --prefix sdk/web"
   run_check artifact.sdk_dist.circuits sdk check_artifact_sdk_dist_circuits heal_sdk_dist "npm ci --prefix sdk/web && npm run build --prefix sdk/web"

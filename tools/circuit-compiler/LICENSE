@@ -1,0 +1,13 @@
+# Licensing
+
+`circuit-compiler` is licensed under **GPL-3.0** because it links
+[`iden3/circom`](https://github.com/iden3/circom) (GPLv3).
+
+* *Status:* The compiler is a build-time tool only.
+
+* *No Contamination:* It is not compiled into the project's runtime binaries or
+  distributed application artifacts. Its GPLv3 terms do not extend to the
+  Apache-2.0 source in `circuits/` or the generated `.r1cs`/key artifacts
+  themselves (those are governed separately; see `circuits/LICENSE`).
+
+See `circuits/COPYING` for the full GPL-3.0 license text.

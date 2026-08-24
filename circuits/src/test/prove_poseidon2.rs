@@ -110,17 +110,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_poseidon2_compression() -> Result<()> {
-        // === PATH SETUP ===
-        let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-        let wasm = out_dir.join("wasm/poseidon2_compress_js/poseidon2_compress.wasm");
-        let r1cs = out_dir.join("poseidon2_compress.r1cs");
-
-        if !wasm.exists() {
-            return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-        }
-        if !r1cs.exists() {
-            return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-        }
+        let (wasm, r1cs) = load_artifacts("poseidon2_compress")?;
 
         // === TEST MATRIX ===
         let cases: &[(u64, u64)] = &[

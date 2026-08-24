@@ -82,11 +82,11 @@ At minimum, ensure:
    graphs:
 
 \`\`\`
-cargo build -p circuits --release
+make circuits
 make witness-graphs
 \`\`\`
 
-R1CS files land under \`target/circuits-artifacts/release/\`. Graph files
+R1CS files land under \`target/circuits-artifacts/\`. Graph files
 (\`*.graph.bin\`) are written to \`deployments/testnet/circuit_keys/\`. The web
 SDK staging script (\`sdk/web/scripts/stage-circuits-dist.sh\`) copies both into
 \`dist/circuits/\` for redistribution.

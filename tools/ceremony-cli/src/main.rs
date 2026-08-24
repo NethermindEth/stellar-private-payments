@@ -414,13 +414,12 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-/// Default name of the compiled circuit as produced and verified by `cargo
-/// build -p circuits --release`.
+/// Default name of the compiled circuit produced by `make circuits`.
 const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2_AB.r1cs";
 
 /// Resolves the `--circuit` argument. If the user supplied an explicit path it
 /// is validated and returned. Otherwise we auto-discover the compiled `.r1cs`
-/// from the Cargo build output.
+/// from `target/circuits-artifacts/`.
 fn resolve_circuits(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         return resolve_snarkjs_circuit_path(path);
@@ -431,8 +430,7 @@ fn resolve_circuits(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     Ok(discovered)
 }
 
-/// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs`
-/// file and returns the best match (release profile preferred, then newest).
+/// Searches `target/circuits-artifacts/` for a compiled `.r1cs` file.
 fn discover_r1cs(name: &str) -> Result<PathBuf> {
     // Walk up from CWD to find the workspace root (contains Cargo.lock).
     let mut root = std::env::current_dir().context("failed to determine current directory")?;
@@ -448,40 +446,15 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
         }
     }
 
-    let pattern = root.join(format!("target/*/build/circuits-*/out/circuits/{name}"));
-    let pattern_str = pattern.to_string_lossy();
-    let mut candidates: Vec<PathBuf> = glob::glob(&pattern_str)
-        .with_context(|| format!("invalid glob pattern: {pattern_str}"))?
-        .filter_map(|entry| entry.ok())
-        .filter(|p| p.is_file())
-        .collect();
-
-    if candidates.is_empty() {
-        bail!(
-            "no compiled circuit `{name}` found.\n\
-             Run `cargo build -p circuits --release` first, or pass --circuits <path> explicitly."
-        );
+    let path = root.join("target/circuits-artifacts").join(name);
+    if path.is_file() {
+        return Ok(path);
     }
 
-    // Prefer release profile, then most recently modified.
-    candidates.sort_by(|a, b| {
-        let is_release = |p: &Path| p.components().any(|c| c.as_os_str() == "release");
-        let mtime = |p: &Path| {
-            p.metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        };
-        match (is_release(a), is_release(b)) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => mtime(b).cmp(&mtime(a)),
-        }
-    });
-
-    candidates
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("unexpected empty candidate list"))
+    bail!(
+        "no compiled circuit `{name}` found.\n\
+         Run `make circuits` first, or pass --circuits <path> explicitly."
+    )
 }
 
 /// Generates contribution entropy with OS CSPRNG and returns hex-encoded

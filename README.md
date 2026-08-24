@@ -134,7 +134,7 @@ This repository contains **source code** provided under a mixed license structur
 
 Most of the source code is licensed under the Apache License, Version 2.0. See `LICENSE` for details.
 
-The exception is `circuits/build.rs` which is licensed separately under the GNU Lesser General Public License v3.0. See `circuits/LICENSE` for details.
+The exception is `tools/circuit-compiler` which is licensed separately under the GNU General Public License v3.0 (it links iden3 Circom). See `tools/circuit-compiler/LICENSE` for details.
 
 ### Responsibility of Deployers
 

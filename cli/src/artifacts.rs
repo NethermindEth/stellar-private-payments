@@ -79,7 +79,7 @@ fn committed_circuit_keys_dir() -> PathBuf {
 
 fn default_circuits_dir() -> PathBuf {
     if cfg!(debug_assertions) {
-        PathBuf::from("target/circuits-artifacts/release")
+        PathBuf::from("target/circuits-artifacts")
     } else {
         default_data_dir().join("circuits")
     }

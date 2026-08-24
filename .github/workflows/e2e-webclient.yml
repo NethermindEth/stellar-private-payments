@@ -15,7 +15,6 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
     runs-on: ubuntu-latest
-    environment: e2e-testnet
     steps:
       - name: Checkout source code
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
@@ -65,8 +64,7 @@ jobs:
 
       - name: Build circuit artifacts
         run: |
-          cargo build -p circuits
-          cargo build -p circuits --release
+          make circuits
 
       # Both test accounts are generated fresh per run (account A is
       # friendbot-funded as the faucet and distributes XLM to B), so no
