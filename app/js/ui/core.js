@@ -2,6 +2,7 @@
  * Core UI utilities and shared state.
  */
 
+import { StrKey } from '@stellar/stellar-sdk';
 import { friendlyErrorMessage } from '../facade-errors.js';
 
 const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
@@ -97,23 +98,28 @@ export const Utils = {
     },
 
     explorerTxUrl(hash) {
+        if (!/^[0-9a-f]{64}$/i.test(hash)) return '#';
         return `${this.explorerBaseUrl()}/tx/${hash}`;
     },
 
     explorerLedgerUrl(ledger) {
+        if (!/^\d+$/.test(String(ledger))) return '#';
         return `${this.explorerBaseUrl()}/ledger/${ledger}`;
     },
 
     explorerAddressUrl(address) {
+        if (!StrKey.isValidEd25519PublicKey(address)) return '#';
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
     explorerContractUrl(contractId) {
+        if (!StrKey.isValidContract(contractId)) return '#';
         return `${this.explorerBaseUrl()}/contract/${contractId}`;
     },
 
     explorerContractStorageUrl(contractId) {
-        return `${this.explorerContractUrl(contractId)}/storage`;
+        const base = this.explorerContractUrl(contractId);
+        return base === '#' ? '#' : `${base}/storage`;
     },
 
     async copyToClipboard(text) {
