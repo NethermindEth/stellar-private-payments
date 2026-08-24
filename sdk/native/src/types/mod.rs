@@ -1,3 +1,4 @@
+mod address;
 mod amounts;
 mod chain_data;
 mod client;
@@ -7,6 +8,7 @@ mod ext_data;
 mod gvk;
 mod logging;
 mod policy_tx;
+pub use address::*;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;

@@ -1,6 +1,6 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
-use crate::types::ExtData;
+use crate::types::{ExtData, SignerAddress};
 use anyhow::{Result, anyhow};
 use stellar_xdr::{self as xdr};
 
@@ -22,12 +22,18 @@ pub struct PoolTransactInput {
 impl StateFetcher {
     /// Simulates `transact` and returns unsigned XDR + auth entries for the
     /// wallet.
+    /// `source_account` is typed rather than a bare string on purpose: it
+    /// becomes the contract's `sender` argument, the account whose sequence
+    /// number is read, and the transaction envelope's source. Passing the
+    /// note owner here would silently undo the split, and this is the one
+    /// site where that mistake was previously possible.
     pub async fn prepare_pool_transact(
         &self,
         pool_contract_id: &str,
         input: &PoolTransactInput,
-        source_account: &str,
+        source_account: &SignerAddress,
     ) -> Result<PreparedSorobanTx> {
+        let source_account = source_account.as_str();
         self.enabled_pool_for(pool_contract_id)?;
         let proof_scval = pool_proof_to_scval(
             &input.proof_uncompressed,

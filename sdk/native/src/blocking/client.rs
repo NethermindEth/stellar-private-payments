@@ -1,6 +1,6 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use crate::types::{ContractConfig, OperationalFeedItem, RecipientLookup};
+use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     BackgroundSync, Error, Handle, Prover, Signer, chain::StateFetcher,
@@ -72,7 +72,7 @@ impl Client {
 
     pub fn account(
         &self,
-        user_address: impl Into<String>,
+        user_address: impl Into<NoteOwnerAddress>,
         signer: Handle<dyn Signer>,
     ) -> Result<Account, Error> {
         Ok(Account::from_inner(

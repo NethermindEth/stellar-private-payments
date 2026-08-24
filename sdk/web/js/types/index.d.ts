@@ -36,7 +36,10 @@ export type {
 
 /** Wallet session returned by {@link Client.account}. */
 export interface Account {
+  /** The account that owns the notes. */
   readonly userAddress: string;
+  /** The account that signs and pays; equal to `userAddress` by default. */
+  readonly signerAddress: string;
   portfolio(): Promise<unknown>;
   userPublicKeys(): Promise<unknown>;
   aspSecret(): Promise<string>;

@@ -49,6 +49,9 @@ function wrapAccount(wasmAccount) {
     get userAddress() {
       return wasmAccount.userAddress;
     },
+    get signerAddress() {
+      return wasmAccount.signerAddress;
+    },
     portfolio: () => wasmAccount.portfolio(),
     userPublicKeys: () => wasmAccount.userPublicKeys(),
     aspSecret: () => wasmAccount.aspSecret(),
@@ -75,10 +78,24 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
+      // The signing account defaults to the note owner, which is what this
+      // call did before the two were separable. Note the fallback above: when
+      // `userAddress` is omitted it is resolved from `signer.getPublicKey()`,
+      // so the note owner is derived from the signer. That is fine only while
+      // the two are the same account; a caller passing `signerAddress` without
+      // `userAddress` would otherwise silently make the signer the owner.
+      if (options.signerAddress && !options.userAddress) {
+        throw new Error(
+          'options.userAddress is required when options.signerAddress is supplied',
+        );
+      }
+      const signerAddress = options.signerAddress ?? userAddress;
+
       const wasmAccount = await wasmClient.account(
         {
           ...options,
           userAddress,
+          signerAddress,
         },
         signer,
       );

@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("Lower SPP_AMOUNT_STROOPS or deposit more to see a spend plan.");
         } else {
-            let recipient = TransferRecipient::from(account.user_address());
+            let recipient = TransferRecipient::from(account.user_address().as_str());
             let transfer_plan = pool.prepare_transfer(&notes, recipient, amount)?;
             print_plan_cursor(&transfer_plan);
         }

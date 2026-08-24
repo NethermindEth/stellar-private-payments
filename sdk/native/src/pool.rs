@@ -96,7 +96,10 @@ impl<S: Storage> PrivatePool<S> {
     pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .notes(&self.config.pool_contract_id, &self.config.user_address)
+            .notes(
+                &self.config.pool_contract_id,
+                self.config.user_address.as_str(),
+            )
             .await
     }
 
@@ -187,7 +190,7 @@ impl<S: Storage> PrivatePool<S> {
                 .map_err(|e| Error::Other(format!("invalid pool merkle_next_index: {e}")))?;
 
             let inputs_req = DisclosureInputsRequest {
-                user_address: self.config.user_address.clone(),
+                user_address: self.config.user_address.as_str().to_string(),
                 pool_address: self.config.pool_contract_id.clone(),
                 selected_commitments: selected_commitments.clone(),
                 pool_root: Some(pool_root),
@@ -250,7 +253,11 @@ impl<S: Storage> PrivatePool<S> {
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
                 &pool_transact_input(prepared),
-                &chain_config.user_address,
+                // The one call site where the note-owner identity used to
+                // leak into the on-chain roles. It now takes the signing
+                // address, which becomes the contract's `sender`, the
+                // sequence-number lookup and the envelope source.
+                &chain_config.signer_address,
             )
             .await
             .map_err(|e| Error::Other(format!("simulate transaction: {e:#}")))?;
@@ -263,7 +270,10 @@ impl<S: Storage> PrivatePool<S> {
     pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
+            .spendable_notes(
+                &self.config.pool_contract_id,
+                self.config.user_address.as_str(),
+            )
             .await
     }
 
@@ -368,7 +378,7 @@ impl<S: Storage> PrivatePool<S> {
         };
         let req = transact_request_from_step(
             &step,
-            &self.config.user_address,
+            self.config.user_address.as_str(),
             &self.config.pool_contract_id,
             &chain,
         );
@@ -383,13 +393,13 @@ impl<S: Storage> PrivatePool<S> {
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {
         let (note_pub, _) = self
             .storage
-            .user_public_keys(&self.config.user_address)
+            .user_public_keys(self.config.user_address.as_str())
             .await?;
         self.fetcher
             .transact_chain_context(
                 &self.config.pool_contract_id,
                 &note_pub,
-                &self.config.user_address,
+                self.config.user_address.as_str(),
             )
             .await
             .map_err(|e| Error::Other(format!("fetch chain context: {e:#}")))
@@ -454,7 +464,7 @@ impl<S: Storage> PrivatePool<S> {
     async fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, Error> {
         let (note_pub, enc_pub) = self
             .storage
-            .user_public_keys(&self.config.user_address)
+            .user_public_keys(self.config.user_address.as_str())
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }

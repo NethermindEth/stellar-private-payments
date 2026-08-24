@@ -58,7 +58,10 @@ impl ClientSession {
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
         let sdk_account = client
-            .account(&account.address, alias_signer(config, account, network))
+            .account(
+                account.address.as_str(),
+                alias_signer(config, account, network),
+            )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
         Ok(Self {

@@ -30,6 +30,7 @@ let wasmReady = false;
 let currentRpcUrl = null;
 let currentBootnodeUrl = null;
 let boundUserAddress = null;
+let boundSignerAddress = null;
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
@@ -61,10 +62,18 @@ function wrapSdkClient(sdk) {
             sdk.stopBackgroundSync();
         },
         async openAccount(
-            { networkPassphrase, userAddress },
+            { networkPassphrase, userAddress, signerAddress },
             signer = new FreighterSigner(),
         ) {
-            if (boundUserAddress === userAddress && boundAccount) {
+            const effectiveSigner = signerAddress ?? userAddress;
+            // Keyed on both identities: a session bound to one signing
+            // account must never be handed back for another, which a
+            // cache keyed on the note owner alone would do silently.
+            if (
+                boundUserAddress === userAddress &&
+                boundSignerAddress === effectiveSigner &&
+                boundAccount
+            ) {
                 return boundAccount;
             }
 
@@ -72,10 +81,12 @@ function wrapSdkClient(sdk) {
                 {
                     networkPassphrase,
                     userAddress,
+                    signerAddress: effectiveSigner,
                 },
                 signer,
             );
             boundUserAddress = userAddress;
+            boundSignerAddress = effectiveSigner;
             return boundAccount;
         },
         account() {
@@ -115,6 +126,7 @@ export function disposeClient() {
     wrappedClient = null;
     boundAccount = null;
     boundUserAddress = null;
+    boundSignerAddress = null;
 }
 
 /**
