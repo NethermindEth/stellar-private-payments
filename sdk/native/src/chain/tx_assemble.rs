@@ -55,8 +55,9 @@ impl SimulateTransactionResponse {
 
     /// Fails if the simulation response contains a top-level error string.
     ///
-    /// `config` lets the failing contract id be resolved to a concrete contract so
-    /// the numeric code can be named; pass `None` when no deployment is in scope.
+    /// `config` lets the failing contract id be resolved to a concrete contract
+    /// so the numeric code can be named; pass `None` when no deployment is
+    /// in scope.
     pub fn ensure_success(&self, config: Option<&crate::types::ContractConfig>) -> Result<()> {
         if let Some(err) = &self.error {
             return match crate::chain::contract_error::translate(err, config) {

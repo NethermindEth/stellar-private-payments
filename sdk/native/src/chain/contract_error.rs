@@ -66,10 +66,15 @@ impl std::fmt::Display for ContractErrorInfo {
                 self.code,
                 kind.as_str()
             ),
-            (Some(kind), _, _) => {
-                write!(f, "unrecognized {} contract error #{}", kind.as_str(), self.code)
+            (Some(kind), ..) => {
+                write!(
+                    f,
+                    "unrecognized {} contract error #{}",
+                    kind.as_str(),
+                    self.code
+                )
             }
-            (None, _, _) => match &self.contract_id {
+            (None, ..) => match &self.contract_id {
                 Some(contract_id) => write!(f, "contract error #{} from {contract_id}", self.code),
                 None => write!(f, "contract error #{}", self.code),
             },
@@ -88,16 +93,32 @@ type CodeEntry = (u32, &'static str, &'static str);
 
 /// Mirrors the `Error` enum in `contracts/pool/src/pool.rs`.
 const POOL_CODES: &[CodeEntry] = &[
-    (1, "NotAuthorized", "The caller is not authorized to perform this operation."),
+    (
+        1,
+        "NotAuthorized",
+        "The caller is not authorized to perform this operation.",
+    ),
     (
         2,
         "MerkleTreeFull",
         "This pool is full: its Merkle tree has reached capacity and cannot accept new \
          commitments. Retrying will not help — a new pool must be deployed.",
     ),
-    (3, "AlreadyInitialized", "The contract has already been initialized."),
-    (4, "WrongLevels", "The configured Merkle tree depth is invalid (must be 1-32)."),
-    (5, "NextIndexNotEven", "Internal pool error: the next leaf index is not even."),
+    (
+        3,
+        "AlreadyInitialized",
+        "The contract has already been initialized.",
+    ),
+    (
+        4,
+        "WrongLevels",
+        "The configured Merkle tree depth is invalid (must be 1-32).",
+    ),
+    (
+        5,
+        "NextIndexNotEven",
+        "Internal pool error: the next leaf index is not even.",
+    ),
     (
         6,
         "WrongExtAmount",
@@ -121,15 +142,27 @@ const POOL_CODES: &[CodeEntry] = &[
         "One of these notes has already been spent. Sync your notes and retry with different \
          inputs.",
     ),
-    (10, "WrongExtHash", "The external data hash does not match the transaction data."),
-    (11, "NotInitialized", "The contract has not been initialized."),
+    (
+        10,
+        "WrongExtHash",
+        "The external data hash does not match the transaction data.",
+    ),
+    (
+        11,
+        "NotInitialized",
+        "The contract has not been initialized.",
+    ),
     (12, "Overflow", "Arithmetic overflow in the contract."),
     (
         13,
         "NonCanonicalPublicInput",
         "A public input is not canonical in the BN254 scalar field.",
     ),
-    (14, "InvalidPolicyFlags", "Unsupported ASP policy flag bits."),
+    (
+        14,
+        "InvalidPolicyFlags",
+        "Unsupported ASP policy flag bits.",
+    ),
 ];
 
 /// (code, name, message) for the 3 codes `contracts/pool-gvk` adds on top of
@@ -151,19 +184,47 @@ const POOL_GVK_EXTRA_CODES: &[CodeEntry] = &[
 
 /// Mirrors the `Error` enum in `contracts/asp-membership/src/lib.rs`.
 const ASP_MEMBERSHIP_CODES: &[CodeEntry] = &[
-    (1, "NotAuthorized", "The caller is not authorized to perform this operation."),
+    (
+        1,
+        "NotAuthorized",
+        "The caller is not authorized to perform this operation.",
+    ),
     (2, "MerkleTreeFull", "The ASP membership tree is full."),
-    (3, "WrongLevels", "The configured Merkle tree depth is invalid."),
-    (4, "NotInitialized", "The ASP membership contract has not been initialized."),
+    (
+        3,
+        "WrongLevels",
+        "The configured Merkle tree depth is invalid.",
+    ),
+    (
+        4,
+        "NotInitialized",
+        "The ASP membership contract has not been initialized.",
+    ),
     (5, "Overflow", "Arithmetic overflow in the contract."),
 ];
 
 /// Mirrors the `Error` enum in `contracts/asp-non-membership/src/lib.rs`.
 const ASP_NON_MEMBERSHIP_CODES: &[CodeEntry] = &[
-    (1, "NotAuthorized", "The caller is not authorized to perform this operation."),
-    (2, "KeyNotFound", "The key was not found in the ASP non-membership tree."),
-    (3, "KeyAlreadyExists", "The key already exists in the ASP non-membership tree."),
-    (4, "InvalidProof", "ASP non-membership proof verification failed."),
+    (
+        1,
+        "NotAuthorized",
+        "The caller is not authorized to perform this operation.",
+    ),
+    (
+        2,
+        "KeyNotFound",
+        "The key was not found in the ASP non-membership tree.",
+    ),
+    (
+        3,
+        "KeyAlreadyExists",
+        "The key already exists in the ASP non-membership tree.",
+    ),
+    (
+        4,
+        "InvalidProof",
+        "ASP non-membership proof verification failed.",
+    ),
     (
         5,
         "NotInitialized",
@@ -174,7 +235,11 @@ const ASP_NON_MEMBERSHIP_CODES: &[CodeEntry] = &[
 
 /// Mirrors the `Groth16Error` enum in `contracts/types/src/lib.rs`.
 const GROTH16_VERIFIER_CODES: &[CodeEntry] = &[
-    (0, "InvalidProof", "The proof did not satisfy the pairing check."),
+    (
+        0,
+        "InvalidProof",
+        "The proof did not satisfy the pairing check.",
+    ),
     (
         1,
         "MalformedPublicInputs",
@@ -189,7 +254,7 @@ const GROTH16_VERIFIER_CODES: &[CodeEntry] = &[
 /// shares with [`ContractKind::Pool`] — then falls back to
 /// [`POOL_GVK_EXTRA_CODES`], so the shared codes are written out once.
 fn describe(kind: ContractKind, code: u32) -> Option<(&'static str, &'static str)> {
-    let hit = |table: &[CodeEntry]| table.iter().copied().find(|(c, _, _)| *c == code);
+    let hit = |table: &[CodeEntry]| table.iter().copied().find(|(c, ..)| *c == code);
     let (_, name, message) = match kind {
         ContractKind::Pool => hit(POOL_CODES),
         ContractKind::PoolGvk => hit(POOL_CODES).or_else(|| hit(POOL_GVK_EXTRA_CODES)),
@@ -210,7 +275,9 @@ fn parse_code(raw: &str) -> Option<u32> {
     let rest = rest.trim_start_matches(' ');
     let rest = rest.strip_prefix('#')?;
 
-    let digits_len = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    let digits_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
     let (digits, after) = rest.split_at(digits_len);
     if digits.is_empty() || !after.starts_with(')') {
         return None;
@@ -232,8 +299,15 @@ fn parse_contract_id(raw: &str) -> Option<String> {
         .or_else(|| raw.lines().find(|line| line.contains("contract:")))?;
 
     let after = chosen.split("contract:").nth(1)?;
-    let id: String = after.chars().take_while(char::is_ascii_alphanumeric).collect();
-    if id.starts_with('C') && id.len() == 56 { Some(id) } else { None }
+    let id: String = after
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect();
+    if id.starts_with('C') && id.len() == 56 {
+        Some(id)
+    } else {
+        None
+    }
 }
 
 /// Recovers a bare (unresolved) contract error from RPC simulation error
@@ -324,7 +398,10 @@ Event log (newest first):
         assert!(as_pool.message.expect("resolved").contains("pool is full"));
 
         let mut as_asp_non_membership = parse_contract_error(ISSUE_417_ERROR_TEXT).expect("parses");
-        resolve(&mut as_asp_non_membership, Some(ContractKind::AspNonMembership));
+        resolve(
+            &mut as_asp_non_membership,
+            Some(ContractKind::AspNonMembership),
+        );
         assert_eq!(as_asp_non_membership.name, Some("KeyNotFound"));
     }
 
@@ -332,13 +409,19 @@ Event log (newest first):
     fn groth16_verifier_code_zero_is_invalid_proof() {
         assert_eq!(
             describe(ContractKind::Groth16Verifier, 0),
-            Some(("InvalidProof", "The proof did not satisfy the pairing check."))
+            Some((
+                "InvalidProof",
+                "The proof did not satisfy the pairing check."
+            ))
         );
     }
 
     #[test]
     fn pool_gvk_checks_the_shared_table_before_its_own_extra_codes() {
-        assert_eq!(describe(ContractKind::PoolGvk, 7), describe(ContractKind::Pool, 7));
+        assert_eq!(
+            describe(ContractKind::PoolGvk, 7),
+            describe(ContractKind::Pool, 7)
+        );
         assert_eq!(
             describe(ContractKind::PoolGvk, 15),
             Some(("InvalidGvkMode", "Unsupported global view key mode."))

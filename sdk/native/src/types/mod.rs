@@ -10,13 +10,13 @@ mod gvk;
 mod logging;
 mod policy_tx;
 pub use address::*;
+use crate::chain::ContractKind;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
 pub use circuit_stem::CircuitStem;
 pub use client::*;
 pub use correlation::*;
-use crate::chain::ContractKind;
 pub use disclosure::*;
 pub use ext_data::*;
 pub use gvk::*;
@@ -396,7 +396,11 @@ impl ContractConfig {
     /// can still return an error (e.g. for a transaction built before it was
     /// disabled).
     pub fn classify_contract(&self, contract_id: &str) -> Option<ContractKind> {
-        if let Some(pool) = self.pools.iter().find(|p| p.pool_contract_id == contract_id) {
+        if let Some(pool) = self
+            .pools
+            .iter()
+            .find(|p| p.pool_contract_id == contract_id)
+        {
             return Some(if pool.gvk_mode == GvkMode::Off {
                 ContractKind::Pool
             } else {
