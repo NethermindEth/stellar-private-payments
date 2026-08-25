@@ -122,12 +122,18 @@ pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result
     let storage =
         LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
     let prover = Handle::from_box(Box::new(disclosure_prover(config)?) as Box<dyn Prover>);
+    let bootnode_setting = storage
+        .storage()
+        .get_bootnode_setting()
+        .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+    let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
+        .then_some(bootnode_setting.url);
     Client::init(
         network.rpc_url.clone(),
         storage,
         prover,
         config.deployment.clone(),
-        None,
+        bootnode_url,
     )
     .map_err(|e| anyhow::anyhow!("init disclosure client: {e}"))
 }
