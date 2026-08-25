@@ -110,19 +110,7 @@ fn read_artifact_file(circuits: &Path, file_name: &str) -> Result<Vec<u8>> {
 
 /// Read a circom-witness-rs graph for the given circuit stem.
 fn read_circuit_graph(circuits: &Path, stem: &str) -> Result<Vec<u8>> {
-    let runtime = circuits.join(format!("{stem}.graph.bin"));
-    if runtime.exists() {
-        return std::fs::read(&runtime).with_context(|| format!("read {}", runtime.display()));
-    }
-
-    let committed = committed_circuit_keys_dir().join(format!("{stem}.graph.bin"));
-    std::fs::read(&committed).with_context(|| {
-        format!(
-            "read {stem} witness graph from {} or {} (run `make circuits GRAPHS=1` and copy into circuit_keys)",
-            runtime.display(),
-            committed.display(),
-        )
-    })
+    read_artifact_file(circuits, &format!("{stem}.graph.bin"))
 }
 
 fn committed_circuit_keys_dir() -> PathBuf {
