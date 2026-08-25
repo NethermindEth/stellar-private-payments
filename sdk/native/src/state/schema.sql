@@ -81,6 +81,8 @@ CREATE INDEX idx_keypairs_account_id_id ON keypairs(account_id, id);
 CREATE TABLE pool_nullifiers (
     id INTEGER PRIMARY KEY,
     nullifier BLOB NOT NULL UNIQUE CHECK (length(nullifier) = 32),
+    -- JSON-serialized Global View Key ciphertext for traceable-mode spent inputs (nullable).
+    gvk_ciphertext TEXT,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this nullifier.
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
@@ -91,11 +93,13 @@ CREATE TABLE pool_nullifiers (
 -- Each commitment carries:
 -- - `leaf_index`: index in the pool Merkle tree.
 -- - `encrypted_output`: encrypted note output intended for recipients.
+-- - `gvk_ciphertext`: JSON-serialized Global View Key ciphertext for admin audit (nullable).
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
     commitment BLOB NOT NULL UNIQUE CHECK (length(commitment) = 32),
     leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
+    gvk_ciphertext TEXT,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this commitment.
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
