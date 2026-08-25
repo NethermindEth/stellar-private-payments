@@ -155,10 +155,11 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 
 /// Read proving key, graph, and r1cs for `pool`'s policy flags.
 ///
-/// Downloads the hashed GitHub release into `./circuits` when needed.
+/// Uses in-repo `target/circuits-artifacts` (same dir as `make circuits`).
+/// Downloads the hashed GitHub release there when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let stem = pool.policy_flags.circuit_stem();
-    let store = CircuitStore::open("./circuits");
+    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"));
     store
         .ensure_blocking()
         .map_err(|e| format!("circuit artifacts: {e}"))?;

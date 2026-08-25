@@ -92,9 +92,10 @@ curl "https://friendbot.stellar.org/?addr=<BOB_ADDRESS>"
 
 ## Circuit artifacts
 
-`deposit`, `transfer`, and `withdraw` download a hashed GitHub release into
-`./circuits` on first run. No extra environment variables. In-repo `make circuits`
-outputs are used only if that download fails.
+`deposit`, `transfer`, and `withdraw` use `target/circuits-artifacts` (the same
+directory as `make circuits`). On first run they download a hashed GitHub
+release there if the artifacts are not already present. No extra environment
+variables.
 
 ## Onboard the wallets
 
@@ -362,9 +363,8 @@ Run `spp onboard --account <alias> --accept` for the account you are using.
 
 ### Missing circuit artifacts
 
-The examples download into `./circuits`. If that fails, they look for in-repo
-`make circuits` outputs. Check network access to GitHub Releases, or run
-`make circuits`.
+The examples download into `target/circuits-artifacts`. If that fails, run
+`make circuits` or check network access to GitHub Releases.
 
 ### Retention gap / sync gap — the deployment expires after ~7 days
 

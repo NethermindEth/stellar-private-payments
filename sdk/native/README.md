@@ -71,7 +71,7 @@ artifacts from their own paths.
 The `examples/` directory demonstrates the blocking SDK API surface. Each example uses the shared `examples/common` bootstrap and exits 0 with instructions when a prerequisite is missing.
 
 All examples run in **release mode**. Transact examples download circuit artifacts
-into `./circuits` on first run (`CircuitStore`); no extra env vars.
+into `target/circuits-artifacts` on first run (`CircuitStore`); no extra env vars.
 
 | Example | What it shows | Run |
 |---------|---------------|-----|
@@ -109,7 +109,7 @@ See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup 
 ### Prerequisites
 
 - The examples target the checked-in **testnet** deployment by default.
-- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. They download a hashed release into `./circuits`.
+- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. They download a hashed release into `target/circuits-artifacts`.
 - Transact examples need a **funded, onboarded** testnet account: onboard the wallet (for example with the `spp` CLI) and ensure the account holds the pool asset.
 - **Allowlist pools require ASP membership.** The default testnet pool (native XLM) carries only the `blocklist` flag and needs no membership setup. The second testnet pool (EURC) adds the `allowlist` flag; before a wallet can `deposit` or `transfer` through it, the pool admin must insert each participant's ASP membership leaf into the `asp_membership` contract. Without it those examples fail even though the account is funded, onboarded, and circuit-ready. See [ASP membership for allowlist pools](examples/SETUP.md#asp-membership-for-allowlist-pools).
 - These prerequisite classes print a skip message and exit 0 rather than failing: a missing `STELLAR_SECRET_KEY`, a wallet without privacy keys, missing circuit artifacts, and an RPC retention gap. Other misconfiguration — an unreadable `SPP_DEPLOYMENT_JSON`, an unopenable `SPP_WALLET_PATH`, or a `SPP_POOL_CONTRACT_ID` that is not in the deployment config — surfaces as a hard error, because those paths propagate rather than exiting early.

@@ -2,8 +2,8 @@
 //!
 //! This example builds a real zero-knowledge proof and submits a transaction to
 //! the Stellar testnet, so it is slower than the read-only examples. Make sure
-//! the wallet is funded. Circuit artifacts download into `./circuits` on first
-//! run.
+//! the wallet is funded. Circuit artifacts download into
+//! `target/circuits-artifacts` on first run.
 //!
 //! Run:
 //!   cargo run --release --example deposit
