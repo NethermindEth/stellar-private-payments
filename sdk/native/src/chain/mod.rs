@@ -1,3 +1,4 @@
+mod contract_error;
 mod contract_state;
 mod conversions;
 mod ext_data_hash;
@@ -9,6 +10,7 @@ mod submit;
 mod tx_assemble;
 mod tx_prepare;
 
+pub use contract_error::{ContractErrorInfo, ContractKind, parse_contract_error, translate};
 pub use contract_state::{PreparedSorobanTx, StateFetcher};
 pub use indexer::ContractDataStorage;
 pub use rpc::{Client, Client as RpcClient};
