@@ -94,7 +94,14 @@ export const Utils = {
     },
 
     explorerBaseUrl() {
-        return App.state.settings.explorerBaseUrl || DEFAULT_EXPLORER_BASE_URL;
+        const configured = App.state.settings.explorerBaseUrl;
+        if (!configured) return DEFAULT_EXPLORER_BASE_URL;
+        try {
+            const protocol = new URL(configured).protocol;
+            return (protocol === 'http:' || protocol === 'https:') ? configured : DEFAULT_EXPLORER_BASE_URL;
+        } catch {
+            return DEFAULT_EXPLORER_BASE_URL;
+        }
     },
 
     explorerTxUrl(hash) {
