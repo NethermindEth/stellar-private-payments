@@ -1,9 +1,10 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
-    EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
-    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
-    PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
+    EncryptionPrivateKey, EncryptionPublicKey, Field, GlobalViewKeyCiphertext, LeafAddedEvent,
+    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
+    OperationalFeedItem, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
+    UserOperation,
 };
 use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
@@ -52,6 +53,7 @@ pub struct PoolCommitmentRow {
     pub commitment: Field,
     pub leaf_index: u32,
     pub encrypted_output: Vec<u8>,
+    pub gvk_ciphertext: Option<crate::types::GlobalViewKeyCiphertext>,
 }
 
 #[derive(Debug, Clone)]
@@ -903,13 +905,17 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_nullifiers (nullifier, event_id)
-                    VALUES (?1, ?2)
+                "INSERT INTO pool_nullifiers (nullifier, event_id, gvk_ciphertext)
+                    VALUES (?1, ?2, ?3)
                     ON CONFLICT(nullifier) DO NOTHING",
             )?;
 
             for event in events {
-                stmt.execute(params![event.nullifier, event.id])?;
+                stmt.execute(params![
+                    event.nullifier,
+                    event.id,
+                    encode_optional_gvk_ciphertext(event.gvk_ciphertext.as_ref())?,
+                ])?;
             }
         }
         tx.commit()?;
@@ -921,8 +927,8 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id)
-                    VALUES (?1, ?2, ?3, ?4)
+                "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
+                    VALUES (?1, ?2, ?3, ?4, ?5)
                     ON CONFLICT(commitment) DO NOTHING",
             )?;
 
@@ -931,12 +937,77 @@ impl Storage {
                     event.commitment,
                     event.index,
                     event.encrypted_output,
-                    event.id
+                    event.id,
+                    encode_optional_gvk_ciphertext(event.gvk_ciphertext.as_ref())?,
                 ])?;
             }
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Output-note GVK ciphertexts stored for `pool_contract_id`.
+    pub fn list_pool_gvk_commitment_ciphertexts(
+        &self,
+        pool_contract_id: i64,
+    ) -> Result<Vec<(Field, GlobalViewKeyCiphertext)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.commitment, c.gvk_ciphertext
+             FROM pool_commitments c
+             JOIN raw_contract_events r ON r.id = c.event_id
+             WHERE r.contract_id = ?1 AND c.gvk_ciphertext IS NOT NULL
+             ORDER BY c.id ASC",
+        )?;
+        let rows = stmt.query_map(params![pool_contract_id], |row| {
+            let commitment: Field = row.get(0)?;
+            let encoded: String = row.get(1)?;
+            Ok((commitment, encoded))
+        })?;
+        rows.map(|row| {
+            let (commitment, encoded) = row?;
+            let ciphertext = decode_gvk_ciphertext(&encoded)?;
+            Ok((commitment, ciphertext))
+        })
+        .collect()
+    }
+
+    /// Spent-input GVK ciphertexts stored for `pool_contract_id` (traceable
+    /// pools).
+    pub fn list_pool_gvk_nullifier_ciphertexts(
+        &self,
+        pool_contract_id: i64,
+    ) -> Result<Vec<(Field, GlobalViewKeyCiphertext)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT n.nullifier, n.gvk_ciphertext
+             FROM pool_nullifiers n
+             JOIN raw_contract_events r ON r.id = n.event_id
+             WHERE r.contract_id = ?1 AND n.gvk_ciphertext IS NOT NULL
+             ORDER BY n.id ASC",
+        )?;
+        let rows = stmt.query_map(params![pool_contract_id], |row| {
+            let nullifier: Field = row.get(0)?;
+            let encoded: String = row.get(1)?;
+            Ok((nullifier, encoded))
+        })?;
+        rows.map(|row| {
+            let (nullifier, encoded) = row?;
+            let ciphertext = decode_gvk_ciphertext(&encoded)?;
+            Ok((nullifier, ciphertext))
+        })
+        .collect()
+    }
+
+    /// Every pool commitment hash, for GVK nullifier audit candidate lookup.
+    pub fn list_pool_commitment_hashes(&self, pool_contract_id: i64) -> Result<Vec<Field>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.commitment
+             FROM pool_commitments c
+             JOIN raw_contract_events r ON r.id = c.event_id
+             WHERE r.contract_id = ?1
+             ORDER BY c.id ASC",
+        )?;
+        let rows = stmt.query_map(params![pool_contract_id], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     /// Batch upsert for Public Keys (Address owner and BLOB keys)
@@ -1351,6 +1422,7 @@ impl Storage {
                                     commitment,
                                     leaf_index,
                                     encrypted_output,
+                                    gvk_ciphertext: None,
                                 })
                             },
                         )?;
@@ -1609,6 +1681,19 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<crate::types::PublicK
         note_key: row.get(2)?,
         ledger: col_u32(row.get::<_, i64>(3)?, 3)?,
     })
+}
+
+fn encode_optional_gvk_ciphertext(
+    ciphertext: Option<&GlobalViewKeyCiphertext>,
+) -> Result<Option<String>> {
+    match ciphertext {
+        None => Ok(None),
+        Some(ct) => Ok(Some(serde_json::to_string(ct)?)),
+    }
+}
+
+fn decode_gvk_ciphertext(encoded: &str) -> Result<GlobalViewKeyCiphertext> {
+    serde_json::from_str(encoded).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -2704,6 +2789,64 @@ mod tests {
             .get_pool_commitment_leaves_ordered("CPOOL")
             .expect_err("gap should error");
         assert!(err.to_string().contains("gap/out-of-order"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn gvk_ciphertext_persists_and_audits() -> Result<()> {
+        use crate::{
+            gvk::audit_pool_output_notes,
+            types::BabyJubJubPoint,
+            zk::gvk::{GvkNote, generate_gvk_nonce},
+        };
+
+        let mut storage = Storage::connect_in_memory()?;
+        let d_priv = Field(crate::types::U256::from(0xAD00));
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let note = GvkNote::new(
+            Field(crate::types::U256::from(0xBEEF)),
+            NoteAmount::from(99u128),
+            Field(crate::types::U256::from(0x1234)),
+            Field(crate::types::U256::from(5)),
+        );
+        let ct = note.encrypt(&admin, &generate_gvk_nonce()?, 0)?;
+
+        let commitment_le = crypto::compute_commitment(
+            &note.amount.to_le_bytes(),
+            &note.pk.to_le_bytes(),
+            &note.blinding.to_le_bytes(),
+        )?;
+        let commitment = Field::try_from_le_bytes(
+            commitment_le
+                .as_slice()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("commitment hash is not 32 bytes"))?,
+        )?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-gvk")],
+            cursor: "cur-gvk".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-gvk".to_string(),
+            commitment,
+            index: 0,
+            encrypted_output: vec![],
+            gvk_ciphertext: Some(ct),
+        }])?;
+
+        let pool_contract_id: i64 = storage.conn.query_row(
+            "SELECT contract_id FROM contracts WHERE address = ?1",
+            params!["CPOOL"],
+            |row| row.get(0),
+        )?;
+
+        let audited = audit_pool_output_notes(&d_priv, &storage, pool_contract_id)?;
+        assert_eq!(audited.len(), 1);
+        assert_eq!(audited[0].note.amount(), NoteAmount::from(99u128));
+        assert_eq!(audited[0].commitment, commitment);
 
         Ok(())
     }
