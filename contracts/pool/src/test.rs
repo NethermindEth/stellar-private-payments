@@ -1164,7 +1164,15 @@ fn transact_rejects_zeroed_proof() {
 /// by the circuit (`transaction.circom` constrains it), and the contract relies
 /// on that rather than re-checking independently. The test is written to fail
 /// if that reliance ever changes, in either direction.
+///
+/// Ignored under Miri, matching every other `transact_*` test in this file. The
+/// abort is Stacked-Borrows UB inside the host's own error path, not in this
+/// contract, and it is what turned the nightly `pool` group red after #485.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "Stacked Borrows UB in the host error path, not in this contract"
+)]
 fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
