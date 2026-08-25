@@ -5,6 +5,7 @@ edition.workspace = true
 repository.workspace = true
 license = "GPL-3.0"
 publish = false
+default-run = "circuit-compiler"
 
 [lib]
 name = "circuit_compiler"
@@ -14,10 +15,15 @@ path = "src/lib.rs"
 name = "circuit-compiler"
 path = "bin/compiler.rs"
 
+[[bin]]
+name = "circuit-witness-graph-generator"
+path = "bin/witness-graph-generator.rs"
+required-features = ["witness-graph"]
+
 [features]
 default = []
-# Enables circom-witness-rs C++ graph generation (`make witness-graphs`).
-regen-graph = ["dep:circom-witness-rs"]
+# Enables the circom-witness-rs C++ witness-graph-generator binary.
+witness-graph = ["dep:circom-witness-rs"]
 
 [dependencies]
 # workspace

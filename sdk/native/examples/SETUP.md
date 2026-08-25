@@ -6,15 +6,15 @@ deployment by default.
 
 The examples use a shared environment-variable contract defined in
 [`common/mod.rs`](./common/mod.rs). All transact examples (`deposit`,
-`transfer`, `withdraw`) must be run in **release mode** so they resolve circuit
-artifacts from `target/circuits-artifacts`.
+`transfer`, `withdraw`) must be run in **release mode**. Circuit artifacts
+download automatically (see [Circuit artifacts](#circuit-artifacts)).
 
 ## Table of contents
 
 1. [Prerequisites](#prerequisites)
 2. [Create two testnet accounts](#create-two-testnet-accounts)
 3. [Fund the accounts](#fund-the-accounts)
-4. [Build circuit artifacts](#build-circuit-artifacts)
+4. [Circuit artifacts](#circuit-artifacts)
 5. [Onboard the wallets](#onboard-the-wallets)
 6. [Local bootnode](#local-bootnode)
 7. [ASP membership for allowlist pools](#asp-membership-for-allowlist-pools) (EURC pool only — skip for the default XLM pool)
@@ -90,19 +90,12 @@ curl "https://friendbot.stellar.org/?addr=<ALICE_ADDRESS>"
 curl "https://friendbot.stellar.org/?addr=<BOB_ADDRESS>"
 ```
 
-## Build circuit artifacts
+## Circuit artifacts
 
-The `deposit`, `transfer`, and `withdraw` examples build zero-knowledge proofs,
-so they need the compiled proving keys and circuit artifacts. Always build in
-release mode:
-
-```bash
-make circuits
-```
-
-This writes wasm and r1cs artifacts under
-`target/circuits-artifacts/` and uses the committed proving keys in
-`deployments/testnet/circuit_keys/`.
+`deposit`, `transfer`, and `withdraw` use `target/circuits-artifacts` (the same
+directory as `make circuits`). On first run they download a hashed GitHub
+release there if the artifacts are not already present. No extra environment
+variables.
 
 ## Onboard the wallets
 
@@ -251,8 +244,6 @@ required by most examples; everything else has a sensible default.
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_CIRCUIT_KEYS_DIR` | `deployments/testnet/circuit_keys` | `deposit`, `transfer`, `withdraw` |
-| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts` | `deposit`, `transfer`, `withdraw` |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
@@ -372,17 +363,8 @@ Run `spp onboard --account <alias> --accept` for the account you are using.
 
 ### Missing circuit artifacts
 
-If a transact example prints:
-
-```text
-Run `make circuits` to generate circuit keys and artifacts.
-```
-
-Run:
-
-```bash
-make circuits
-```
+The examples download into `target/circuits-artifacts`. If that fails, run
+`make circuits` or check network access to GitHub Releases.
 
 ### Retention gap / sync gap — the deployment expires after ~7 days
 

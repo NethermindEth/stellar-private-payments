@@ -4,7 +4,7 @@ Selective disclosure lets a privacy-pool note owner prove ownership of one or mo
 
 The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash for the circuit named in the receipt.
 
-> **Scope**: This page documents the disclosure receipt format, the **Disclosure** view in the main app, and the three-check verification semantics. Circuit and cryptography details are in the [API Reference](./api.md) and crate-level rustdocs.
+> **Scope**: This page documents the disclosure receipt format, the **Disclosure** view in the main app, the `spp disclosure` CLI commands, and the four-check verification semantics. Circuit and cryptography details are in the [API Reference](./api.md) and crate-level rustdocs.
 
 ---
 
@@ -32,7 +32,9 @@ A receipt is a JSON object with the following schema:
   "publicInputs": {
     "roots": ["0x…"],
     "noteCommitments": ["0x…"],
-    "extContextHash": "0x…"
+    "extContextHash": "0x…",
+    "nullifiers": ["0x…"],
+    "amounts": ["10000000"]
   },
   "proofCompressedHex": "0x…",
   "issuedAt": "2026-06-10T12:00:00Z"
@@ -45,7 +47,7 @@ A receipt is a JSON object with the following schema:
 |---|---|
 | `circuit` | Metadata binding the proof to a specific registered circuit and verifying key. |
 | `context` | Human-readable authority, purpose, and nonce bound into `extContextHash`. |
-| `publicInputs` | Values the proof commits to: the Merkle roots, the note commitments, and the hashed context. |
+| `publicInputs` | Values the proof commits to: the Merkle roots, the note commitments, the hashed context, note nullifiers, and disclosed amounts. |
 | `proofCompressedHex` | A 128-byte compressed Groth16 proof (BN254) encoded as `0x`-prefixed hex. |
 | `issuedAt` | ISO-8601 timestamp when the receipt was created. |
 
@@ -75,6 +77,25 @@ Note owners generate receipts through the **Disclosure** view in the main app, r
 6. Wait for the progress indicator to advance through sync, witness construction, and proving.
 7. Download the receipt JSON.
 
+### Generating from the CLI
+
+The CLI uses the same local wallet database and native Rust SDK as the other
+`spp` commands. Pass one `--commitment` for each note to disclose, up to four.
+
+```bash
+spp disclosure generate CPOOL… \
+  --account alice \
+  --commitment 0x<note-commitment> \
+  --authority-label "KYC Provider" \
+  --authority-identity 0x<identity-payload> \
+  --purpose identity-verification \
+  --output receipt.json
+```
+
+Omit `--output` to write the receipt JSON to standard
+output. Repeat `--commitment` to disclose two, three, or four notes in one
+receipt.
+
 ### Preselection via URL
 A per-row **Disclose** button in the main app's notes table (Advanced tab → Actions column) links to:
 
@@ -100,6 +121,21 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 4. Confirm the **Expected VK hash** field. It defaults to the canonical hash published in this documentation and in `deployments/testnet/circuit_keys/README.md`. Authorities who pin a different key can click **Override** and paste their own hash.
 5. Click **Verify Receipt**.
 
+### Verifying from the CLI
+
+Verification does not require `--account` or a wallet signer. The CLI pins the
+canonical verifying-key hash for the circuit named by the receipt, loads the
+matching bundled circuit artifacts, and queries the configured Stellar network
+for root and nullifier status.
+
+```bash
+spp disclosure verify receipt.json
+```
+
+Use `--expected-vk-hash 0x…` together with alternate artifacts supplied through
+`--circuits-dir` when verifying against a deliberately different disclosure
+key. Use `--require-unspent` when spent notes must make the command fail.
+
 ### Canonical `vk_hash` values
 
 | Circuit | Canonical `vk_hash` |
@@ -110,6 +146,7 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 | `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
+| `sdk/native/src/zk/disclosure/mod.rs` | `RegisteredCircuit::canonical_vk_hash` used by the CLI |
 
 The verifier **must not** trust the `vkHash` value embedded inside the receipt itself. The canonical hash must come from an out-of-band source such as the table above.
 
@@ -140,11 +177,12 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 4. Confirm the **Expected VK hash** field matches the canonical hash for the receipt's `circuit.name`. If you pin a different disclosure key, click **Override** and enter your hash.
 5. Review the receipt context summary to ensure it describes the attestation you requested.
 6. Click **Verify Receipt**.
-7. Read the three independent checks:
+7. Read the four independent checks:
    - **Proof valid** — the cryptography is correct.
    - **Context valid** — the authority/purpose/nonce context was not altered.
    - **Root fresh** — the note's root is still in the pool's on-chain history.
-8. Trust the receipt **only when all three checks are green** and the **Fully verified** badge appears.
+   - **Nullifiers unspent** — none of the disclosed notes have been spent since the receipt was issued.
+8. Trust the receipt **only when all four checks are green** and the **Fully verified** badge appears.
 
 ### Interpreting partial failures
 
@@ -153,25 +191,28 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 | Proof green, Context red | The proof is mathematically valid, but the context was tampered with after generation. | Reject the receipt and ask the owner to regenerate it with the correct context. |
 | Proof green, Context green, Root red | The proof and context are intact, but the receipt is stale (root rolled out of history) or points to the wrong pool. | Ask the owner to generate a fresh receipt against the current pool root. |
 | Proof red | The proof is forged, corrupted, or verified against the wrong key. | Reject the receipt and confirm the expected VK hash. |
+| Proof, Context, Root green; Unspent amber | The receipt is cryptographically sound, but at least one disclosed note has since been spent. | A policy decision, not a validity failure. Accept if you only needed proof of past ownership; request a fresh receipt if current holdings matter. |
 | Any check "could not be completed" | Network or RPC failure prevented that check. | Retry; do not treat inconclusive checks as passes. |
 
 ---
 
-## The Three Verification Checks
+## The Four Verification Checks
 
-A receipt is trustworthy **only when all three checks pass**. Each check can fail independently, and each failure has a distinct meaning.
+A receipt is trustworthy **only when all four checks pass**. Each check can fail independently, and each failure has a distinct meaning.
 
 | Check | What it means | Pass wording | Failure meaning |
 |---|---|---|---|
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
 | **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
 | **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
+| **Nullifiers unspent** | No nullifier in the receipt appears in the pool's spent-nullifier history (`is_nullifier_spent`). Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers appear in the pool's spent-nullifier event history." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
 
 ### Interpretation
 
-- **All three green** → The receipt is fully verified and trustworthy. A green badge is shown.
+- **All four green** → The receipt is fully verified and trustworthy. A green badge is shown.
 - **Proof green, Context red** → The proof is mathematically valid but the context was tampered with. Do not trust the authority/purpose claims.
-- **Proof green, Context green, Root red** → The proof and context are intact but the note may have been spent or the pool state has moved on. The receipt is outdated.
+- **Proof green, Context green, Root red** → The proof and context are intact but the pool state has moved on and the root is no longer in history. The receipt is outdated.
+- **Proof, Context, Root green; Unspent amber** → The receipt is cryptographically valid and the notes were owned when it was issued, but at least one has since been spent.
 - **Any single check inconclusive due to network error** → The check renders as "could not be completed", never as a pass. Retry or verify under better network conditions.
 
 ---

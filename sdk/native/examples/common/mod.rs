@@ -14,8 +14,6 @@
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
-//! | `SPP_CIRCUIT_KEYS_DIR` | `<manifest>/../../deployments/testnet/circuit_keys` | transact examples |
-//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts` | transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
@@ -31,10 +29,10 @@
 
 #![allow(dead_code)] // shared module: each helper is used by some example
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use stellar_private_payments::{
-    Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
+    CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{AssetDescriptor, ContractConfig, NoteAmount, PoolConfigEntry, ProverArtifacts},
@@ -124,16 +122,6 @@ pub fn default_deployment_path() -> PathBuf {
     manifest_dir().join("../../deployments/testnet/deployments.json")
 }
 
-/// Default directory containing committed `{stem}_proving_key.bin` files.
-pub fn default_circuit_keys_dir() -> PathBuf {
-    manifest_dir().join("../../deployments/testnet/circuit_keys")
-}
-
-/// Default directory containing `{stem}.wasm` / `{stem}.r1cs` build outputs.
-pub fn default_circuit_artifacts_dir() -> PathBuf {
-    manifest_dir().join("../../target/circuits-artifacts")
-}
-
 /// Load the deployment config from `SPP_DEPLOYMENT_JSON` or the default testnet
 /// file.
 pub fn load_contract_config() -> Result<ContractConfig, String> {
@@ -165,53 +153,19 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
     }
 }
 
-/// Read the proving key, witness graph, and r1cs for `pool`'s policy flags.
+/// Read proving key, graph, and r1cs for `pool`'s policy flags.
 ///
-/// The proving key and witness graph are read from `SPP_CIRCUIT_KEYS_DIR`;
-/// r1cs from `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that
-/// points at `make circuits`; other I/O errors (e.g.
-/// permissions) are reported without rebuild advice.
+/// Uses in-repo `target/circuits-artifacts` (same dir as `make circuits`).
+/// Downloads the hashed GitHub release there when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
-    let keys_dir = env_or(
-        "SPP_CIRCUIT_KEYS_DIR",
-        default_circuit_keys_dir().to_string_lossy().into_owned(),
-    );
-    let artifacts_dir = env_or(
-        "SPP_CIRCUIT_ARTIFACTS_DIR",
-        default_circuit_artifacts_dir()
-            .to_string_lossy()
-            .into_owned(),
-    );
     let stem = pool.policy_flags.circuit_stem();
-
-    let proving_key_path = Path::new(&keys_dir).join(format!("{stem}_proving_key.bin"));
-    let graph_path = Path::new(&keys_dir).join(format!("{stem}.graph.bin"));
-    let r1cs_path = Path::new(&artifacts_dir).join(format!("{stem}.r1cs"));
-
-    // Only genuinely missing files get the rebuild hint; unreadable-but-present
-    // files surface the raw I/O error so the advice stays accurate.
-    let read_artifact = |path: &Path, what: &str| {
-        std::fs::read(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!(
-                    "read {what} {path:?}: {e}\n\
-                     Run `make circuits` to generate circuit keys and artifacts."
-                )
-            } else {
-                format!("read {what} {path:?}: {e}")
-            }
-        })
-    };
-
-    let proving_key = read_artifact(&proving_key_path, "proving key")?;
-    let circuit_graph = read_artifact(&graph_path, "circuit graph")?;
-    let circuit_r1cs = read_artifact(&r1cs_path, "circuit r1cs")?;
-
-    Ok(ProverArtifacts {
-        proving_key,
-        circuit_graph,
-        circuit_r1cs,
-    })
+    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"));
+    store
+        .ensure_blocking()
+        .map_err(|e| format!("circuit artifacts: {e}"))?;
+    store
+        .artifacts(&stem)
+        .map_err(|e| format!("circuit artifacts: {e}"))
 }
 
 /// Build a read-only client (sync, balance, notes, portfolio, estimates).

@@ -18,15 +18,16 @@ Client (deployment: sync, operational_feed, recipient_lookup)
 
 ```rust
 use stellar_private_payments::{
-    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, ProverArtifacts,
-    types::{ContractConfig, PolicyFlags},
+    CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+    types::ContractConfig,
 };
 
 let deployment: ContractConfig = /* load from deployments/ */;
 let storage = LocalStorage::open("wallet.sqlite")?;
 
-// Load circuit bytes from your host environment, then wire a prover:
-let artifacts: Vec<(PolicyFlags, ProverArtifacts)> = /* read from disk or embed */;
+let store = CircuitStore::open("./circuits");
+store.ensure_blocking()?;
+let artifacts = store.transact_artifacts()?;
 let prover = Handle::from_box(
     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 );
@@ -59,14 +60,18 @@ For balance, portfolio, notes, and sync without transact proving:
 let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 ```
 
-The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
+The native SDK ships an embedded circuit lockfile and downloads the matching
+GitHub release with [`CircuitStore`] (native targets only). Call
+`ensure` / `ensure_blocking`, then pass the returned [`ProverArtifacts`] to
+[`LocalProver`], or supply a custom [`Prover`]. The CLI and browser SDK load
+artifacts from their own paths.
 
 ## Examples
 
 The `examples/` directory demonstrates the blocking SDK API surface. Each example uses the shared `examples/common` bootstrap and exits 0 with instructions when a prerequisite is missing.
 
-All examples run in **release mode**. The transact examples resolve circuit
-artifacts from `target/circuits-artifacts` (populated by `make circuits`).
+All examples run in **release mode**. Transact examples download circuit artifacts
+into `target/circuits-artifacts` on first run (`CircuitStore`); no extra env vars.
 
 | Example | What it shows | Run |
 |---------|---------------|-----|
@@ -86,8 +91,6 @@ See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup 
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_CIRCUIT_KEYS_DIR` | `deployments/testnet/circuit_keys` | `deposit`, `transfer`, `withdraw` |
-| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts` | `deposit`, `transfer`, `withdraw` |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples (set to an empty string to disable the fallback) |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
@@ -106,7 +109,7 @@ See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup 
 ### Prerequisites
 
 - The examples target the checked-in **testnet** deployment by default.
-- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. Build them first with `make circuits`.
+- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. They download a hashed release into `target/circuits-artifacts`.
 - Transact examples need a **funded, onboarded** testnet account: onboard the wallet (for example with the `spp` CLI) and ensure the account holds the pool asset.
 - **Allowlist pools require ASP membership.** The default testnet pool (native XLM) carries only the `blocklist` flag and needs no membership setup. The second testnet pool (EURC) adds the `allowlist` flag; before a wallet can `deposit` or `transfer` through it, the pool admin must insert each participant's ASP membership leaf into the `asp_membership` contract. Without it those examples fail even though the account is funded, onboarded, and circuit-ready. See [ASP membership for allowlist pools](examples/SETUP.md#asp-membership-for-allowlist-pools).
 - These prerequisite classes print a skip message and exit 0 rather than failing: a missing `STELLAR_SECRET_KEY`, a wallet without privacy keys, missing circuit artifacts, and an RPC retention gap. Other misconfiguration — an unreadable `SPP_DEPLOYMENT_JSON`, an unopenable `SPP_WALLET_PATH`, or a `SPP_POOL_CONTRACT_ID` that is not in the deployment config — surfaces as a hard error, because those paths propagate rather than exiting early.
@@ -160,6 +163,7 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | `Account` | Wallet session bound to one Stellar address |
 | `PrivatePool` | Pool-scoped transact operations |
 | `LocalStorage` | SQLite-backed `Storage` implementation |
+| `CircuitStore` | Download and verify circuit artifacts (native only) |
 | `PortfolioBalance` | Per-pool balance + note count |
 | `RecipientLookup` | Registry lookup for private transfers |
 

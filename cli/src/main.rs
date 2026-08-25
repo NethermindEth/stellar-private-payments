@@ -53,6 +53,7 @@ struct Cli {
     stellar_config_dir: Option<PathBuf>,
 
     /// Directory with policy_tx_2_2[_{A,B,AB}].{graph.bin,r1cs}
+    /// and selectiveDisclosure_{1,2,3,4}.{graph.bin,r1cs}
     /// (default: target/circuits-artifacts in debug builds,
     /// data_dir/circuits otherwise)
     #[arg(long, global = true)]
@@ -156,10 +157,52 @@ enum Commands {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Generate or verify selective-disclosure receipts
+    Disclosure {
+        #[command(subcommand)]
+        command: DisclosureCommands,
+    },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
     /// Show the license / distribution notice
     License,
+}
+
+#[derive(Debug, Subcommand)]
+enum DisclosureCommands {
+    /// Prove ownership of 1–4 selected notes and write a receipt
+    Generate {
+        pool: String,
+        /// Note commitment to disclose
+        #[arg(long = "commitment", required = true, action = clap::ArgAction::Append)]
+        commitments: Vec<String>,
+        /// Authority name
+        #[arg(long)]
+        authority_label: String,
+        /// Authority identity payload
+        #[arg(long)]
+        authority_identity: String,
+        /// Purpose bound into the disclosure proof
+        #[arg(long)]
+        purpose: String,
+        /// Field nonce
+        #[arg(long)]
+        nonce: Option<String>,
+        /// Receipt JSON path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Verify a receipt's proof, context, roots, and nullifier status
+    Verify {
+        /// Receipt JSON path
+        receipt: PathBuf,
+        /// Override the canonical verifying-key hash pinned by the CLI
+        #[arg(long)]
+        expected_vk_hash: Option<String>,
+        /// Return failure when any disclosed note has already been spent
+        #[arg(long)]
+        require_unspent: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -263,6 +306,40 @@ fn main() -> Result<()> {
         Commands::Withdraw { pool, amount, to } => {
             cmd::pool::withdraw(&config, &pool, &amount, to.as_deref(), json)
         }
+        Commands::Disclosure {
+            command: disclosure,
+        } => match disclosure {
+            DisclosureCommands::Generate {
+                pool,
+                commitments,
+                authority_label,
+                authority_identity,
+                purpose,
+                nonce,
+                output,
+            } => cmd::disclosure::generate(
+                &config,
+                &pool,
+                &commitments,
+                &authority_label,
+                &authority_identity,
+                &purpose,
+                nonce.as_deref(),
+                output.as_deref(),
+                json,
+            ),
+            DisclosureCommands::Verify {
+                receipt,
+                expected_vk_hash,
+                require_unspent,
+            } => cmd::disclosure::verify(
+                &config,
+                &receipt,
+                expected_vk_hash.as_deref(),
+                require_unspent,
+                json,
+            ),
+        },
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),
     }

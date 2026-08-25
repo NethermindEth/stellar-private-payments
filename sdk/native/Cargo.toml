@@ -21,7 +21,6 @@ futures = { workspace = true, features = ["executor"] }
 getrandom = { workspace = true }
 hex = { workspace = true }
 http = "1.4.2"
-reqwest = { workspace = true }
 rusqlite_migration = { version = "2.6.0", default-features = false }
 serde = { workspace = true }
 serde-aux = "4.7.0"
@@ -31,6 +30,7 @@ sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.18"
 stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
 thiserror = { workspace = true }
+time = { workspace = true }
 tracing = { workspace = true, features = ["attributes"] }
 uint = { workspace = true }
 web-time = { workspace = true }
@@ -57,14 +57,18 @@ ark-poly = { workspace = true, features = ["parallel"] }
 ark-std = { workspace = true, features = ["parallel"] }
 futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 rayon = { version = "1.10", default-features = false }
+reqwest = { workspace = true, features = ["rustls"] }
 rusqlite = { workspace = true, features = ["bundled"] }
+tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
 gloo-timers = { workspace = true }
+reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]

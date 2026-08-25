@@ -40,7 +40,7 @@ if ! typos; then
     exit 4
 fi
 
-# Linting (--all-features would enable regen-graph, whose build script requires
+# Linting (--all-features would enable witness-graph, whose build script requires
 # WITNESS_CPP; mirror .github/workflows/linter.yml with an explicit list)
 if ! cargo clippy --all-targets -- -D warnings; then
     echo "❌ Clippy violations (check warnings above)"
