@@ -211,7 +211,7 @@ The build script (`sdk/web/scripts/build.sh`) optimizes every shipped circuit wi
   ```
 - The optimization cache lives under `target/tmp/witness-opt-cache/` and is keyed by the actual `wasm-opt` version, the cargo profile, and the enabled feature flags. It is safe to delete at any time.
 
-CI publishes from `main` when `version` in this file is new on the registry (see `.github/workflows/npm-release.yml`).
+CI publishes from `main` when `version` in `package.json` is bumped (see `.github/workflows/release.yml`).
 
 ## npm install (app developers)
 
