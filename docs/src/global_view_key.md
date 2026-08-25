@@ -12,9 +12,9 @@ are cheap) with Poseidon2 as the KDF. This avoids the foreign-field arithmetic
 that verifying an off-circuit X25519 ciphertext would require.
 
 > **Scope**: This page documents the circuits and the cryptographic scheme.
-> Contract deployment of `D`, emitting `R/c1/c2/c3` on-chain, and admin
-> decryption tooling are follow-ups and are not part of these circuits. The Rust
-> reference implementation used by the tests lives in
+> Contract deployment of `D`, emitting `R/c1/c2/c3` on-chain, and the SDK admin
+> audit helpers (`sdk/native/src/gvk/`, `sdk/native/src/zk/gvk.rs`)
+> are implemented separately. The Rust reference used by circuit tests lives in
 > `circuits/src/test/utils/global_view_key.rs`.
 
 ---

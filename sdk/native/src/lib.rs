@@ -49,6 +49,7 @@
 pub mod chain;
 pub mod circuits;
 pub mod disclosure;
+pub mod gvk;
 pub mod planner;
 pub mod state;
 pub mod types;
@@ -83,6 +84,10 @@ pub use disclosure::{
     DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
 };
 pub use error::{Error, PlanExecutionError};
+pub use gvk::{
+    audit_commitment_event, audit_nullifier_event, audit_pool_output_notes,
+    audit_pool_spent_input_notes,
+};
 pub use handle::Handle;
 pub use plan::PreparedTransactionPlan;
 pub use planner::{SpendTarget, SpendableNote, Transact};
@@ -101,7 +106,11 @@ pub use types::{
     ProverArtifacts, RecipientLookup, SignedTransaction, TransactChainContext, TransactionResult,
     TransferRecipient, UserNoteSummary,
 };
-pub use zk::{encryption::KEY_DERIVATION_MESSAGE, prover::convert_proof_to_soroban};
+pub use zk::{
+    encryption::KEY_DERIVATION_MESSAGE,
+    gvk::{GvkAuditedNote, GvkRecoveredNote},
+    prover::convert_proof_to_soroban,
+};
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).
 pub type PreparedTransaction = PreparedProverTx;
