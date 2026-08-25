@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ARTIFACTS="$ROOT/target/circuits-artifacts"
 KEYS="$ROOT/deployments/testnet/circuit_keys"
 LOCK="$ROOT/deployments/testnet/circuits.json"
+CRATE_LOCK="$ROOT/sdk/native/circuits.json"
 GITHUB_REPO="NethermindEth/stellar-private-payments"
 KINDS="r1cs graph.bin proving_key.bin"
 
@@ -169,11 +170,18 @@ write_lock() {
     printf '%s' "$circuits"
     printf '\n}\n'
   } >"$LOCK"
-  echo "wrote $LOCK (version $version)"
+  cp "$LOCK" "$CRATE_LOCK"
+  echo "wrote $LOCK and $CRATE_LOCK (version $version)"
 }
 
 verify_lock() {
   [ -f "$LOCK" ] || { echo "missing $LOCK" >&2; exit 1; }
+  [ -f "$CRATE_LOCK" ] || { echo "missing $CRATE_LOCK" >&2; exit 1; }
+  if [ "$(sha256_file "$LOCK")" != "$(sha256_file "$CRATE_LOCK")" ]; then
+    echo "$CRATE_LOCK does not match $LOCK" >&2
+    echo "run: make circuits-lock" >&2
+    exit 1
+  fi
   version="$(normalize_version "$(json_version)")" || exit 1
   failed=0
   check_meta repository "$GITHUB_REPO" || failed=1

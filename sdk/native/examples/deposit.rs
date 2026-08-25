@@ -2,8 +2,8 @@
 //!
 //! This example builds a real zero-knowledge proof and submits a transaction to
 //! the Stellar testnet, so it is slower than the read-only examples. Make sure
-//! the wallet account is funded with the pool asset (XLM for the default pool)
-//! and that circuit artifacts have been generated.
+//! the wallet is funded. Circuit artifacts download into
+//! `target/circuits-artifacts` on first run.
 //!
 //! Run:
 //!   cargo run --release --example deposit
@@ -20,11 +20,6 @@
 //!
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
-//!   SPP_CIRCUIT_KEYS_DIR      default: deployments/testnet/circuit_keys
-//!
-//!   SPP_CIRCUIT_ARTIFACTS_DIR default:
-//! target/circuits-artifacts
-//!
 //!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
 //!
 //!   SPP_VERBOSE_PLAN          default: unset; set to "1" for step-by-step logs
@@ -38,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (client, account, pool, _config, pool_config) = match common::init_transact_session() {
         Ok(session) => session,
-        Err(e) if e.contains("make circuits") => {
+        Err(e) if e.contains("circuit artifacts") => {
             eprintln!("Skipping: {e}");
             std::process::exit(0);
         }

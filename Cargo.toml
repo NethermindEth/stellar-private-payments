@@ -80,6 +80,7 @@ sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 stellar-private-payments = { path = "sdk/native" }
 taceo-poseidon2 = { version = "0.3", default-features = false, features = ["bn254", "t2", "t3", "t4"] }
 thiserror = { version = "2", default-features = false }
+time = { version = "0.3.54", default-features = false, features = ["formatting", "std"] }
 tokio = { version = "1", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }
 tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }

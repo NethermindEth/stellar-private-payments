@@ -23,11 +23,6 @@
 //!
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
-//!   SPP_CIRCUIT_KEYS_DIR      default: deployments/testnet/circuit_keys
-//!
-//!   SPP_CIRCUIT_ARTIFACTS_DIR default:
-//! target/circuits-artifacts
-//!
 //!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
 
 mod common;
@@ -39,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (_client, account, pool, _config, pool_config) = match common::init_transact_session() {
         Ok(session) => session,
-        Err(e) if e.contains("make circuits") => {
+        Err(e) if e.contains("circuit artifacts") => {
             eprintln!("Skipping: {e}");
             std::process::exit(0);
         }

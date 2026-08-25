@@ -6,16 +6,18 @@
 //!
 //! ```no_run
 //! use stellar_private_payments::{
-//!     Client, Handle, LocalProver, LocalSigner, LocalStorage,
-//!     types::{ContractConfig, NoteAmount, PolicyFlags, ProverArtifacts, TransferRecipient},
+//!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+//!     types::{ContractConfig, NoteAmount},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = LocalStorage::open("wallet.sqlite")?;
-//! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
+//!
+//! let store = CircuitStore::open("./circuits");
+//! store.ensure_blocking()?;
+//! let artifacts = store.transact_artifacts()?;
 //! let prover = Handle::from_box(
-//!     Box::new(LocalProver::from_artifacts(&[(PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST, artifacts)])?)
-//!         as Box<dyn stellar_private_payments::Prover>,
+//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 //! );
 //! let signer = Handle::from_box(
 //!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
@@ -33,8 +35,6 @@
 //! let pool = account.pool("CA2TZ...")?;
 //!
 //! pool.deposit(10_000_000u128.into()).await?;
-//! pool.transfer("G...", 5_000_000u128.into()).await?;
-//! pool.withdraw(3_000_000u128.into(), "G...").await?;
 //! let balance = pool.balance().await?;
 //! # Ok(())
 //! # }
@@ -43,6 +43,7 @@
 #![deny(unsafe_code)]
 
 pub mod chain;
+pub mod circuits;
 pub mod disclosure;
 pub mod plan;
 pub mod planner;
@@ -68,6 +69,9 @@ mod storage;
 mod sync;
 
 pub use account::Account;
+#[cfg(not(target_arch = "wasm32"))]
+pub use circuits::CircuitStore;
+pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
 pub use client::Client;
 pub use error::{Error, PlanExecutionError};
 pub use handle::Handle;

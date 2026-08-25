@@ -1,5 +1,8 @@
 use crate::{
-    account::Account, artifacts::load_transact_artifacts, config::CliConfig, signer::AliasSigner,
+    account::Account,
+    artifacts::{load_disclosure_artifacts, load_transact_artifacts},
+    config::CliConfig,
+    signer::AliasSigner,
     stellar_cli::StellarNetwork,
 };
 use anyhow::Result;
@@ -67,6 +70,21 @@ impl ClientSession {
         })
     }
 
+    pub fn new_disclosure(
+        config: &CliConfig,
+        account: &Account,
+        network: &StellarNetwork,
+    ) -> Result<Self> {
+        let client = disclosure_client(config, network)?;
+        let sdk_account = client
+            .account(&account.address, alias_signer(config, account, network))
+            .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
+        Ok(Self {
+            client,
+            account: sdk_account,
+        })
+    }
+
     pub fn account(&self) -> &SdkAccount {
         &self.account
     }
@@ -96,6 +114,35 @@ impl ClientSession {
             .register_public_keys(None, None)
             .map_err(|e| anyhow::anyhow!("register public keys: {e}"))
     }
+}
+
+/// A disclosure only client.
+pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
+    let storage_path = config.db_path().to_string_lossy().into_owned();
+    let storage =
+        LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+    let prover = Handle::from_box(Box::new(disclosure_prover(config)?) as Box<dyn Prover>);
+    let bootnode_setting = storage
+        .storage()
+        .get_bootnode_setting()
+        .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+    let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
+        .then_some(bootnode_setting.url);
+    Client::init(
+        network.rpc_url.clone(),
+        storage,
+        prover,
+        config.deployment.clone(),
+        bootnode_url,
+    )
+    .map_err(|e| anyhow::anyhow!("init disclosure client: {e}"))
+}
+
+/// A native prover with all registered selective-disclosure circuits.
+pub fn disclosure_prover(config: &CliConfig) -> Result<LocalProver> {
+    let artifacts = load_disclosure_artifacts(Some(config.circuits_dir_path().as_path()))?;
+    LocalProver::from_disclosure_artifacts(&artifacts)
+        .map_err(|e| anyhow::anyhow!("init disclosure prover: {e}"))
 }
 
 fn alias_signer(
