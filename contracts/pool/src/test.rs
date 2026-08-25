@@ -1119,14 +1119,10 @@ fn transact_accepts_deposit_at_maximum_bound() {
 
 /// An all-zero proof must be refused with a clean error rather than panicking.
 ///
-/// It is refused, but note what the caller actually receives. `verify_proof`
-/// calls the verifier contract, and `Groth16Error::MalformedPublicInputs` is 1,
-/// which is the same numeric code as this contract's `Error::NotAuthorized`.
-/// The cross-contract error therefore surfaces at the pool boundary as an
-/// authorization failure. Nothing is unsound about it, but the error a caller
-/// sees does not describe what happened, and no existing test reached the
-/// verifier so nothing pinned it. This test pins it, and will fail if the codes
-/// are ever separated, which is the point.
+/// The points are all-zero but not empty, so the `is_empty` guard does not
+/// catch them and the proof reaches the verifier, which refuses it. The caller
+/// sees `InvalidProof`, the pool's own error, rather than whichever
+/// `Groth16Error` the verifier happened to raise.
 #[test]
 fn transact_rejects_zeroed_proof() {
     let env = test_env();
@@ -1154,8 +1150,8 @@ fn transact_rejects_zeroed_proof() {
         .expect_err("a zeroed proof must be refused");
     assert_eq!(
         err,
-        Ok(Error::NotAuthorized),
-        "current behaviour: the verifier's error code 1 is read as the pool's error code 1"
+        Ok(Error::InvalidProof),
+        "a proof the verifier refuses must be reported as InvalidProof"
     );
 }
 
@@ -1331,11 +1327,9 @@ fn transact_reports_unknown_root_before_later_checks() {
 /// so the amount checks pass too and the transaction is refused only by the
 /// verifier.
 ///
-/// The error that surfaces is `NotAuthorized` rather than `InvalidProof`:
-/// `Groth16Error::MalformedPublicInputs` is 1, the same numeric code as this
-/// contract's `NotAuthorized`, so the verifier's error is remapped at the
-/// contract boundary. Nothing is unsound about it, but it is pinned here so
-/// that separating the codes is a deliberate change.
+/// The error that surfaces is therefore `InvalidProof` and nothing earlier,
+/// which is what makes this a statement about the deposit bound rather than
+/// about the proof.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
@@ -1357,5 +1351,59 @@ fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
         Ok(Error::WrongExtAmount),
         "a zero-value transaction must not be treated as a deposit"
     );
-    assert_eq!(err, Ok(Error::NotAuthorized));
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
+/// A proof the verifier refuses must reach the caller as the pool's own
+/// `InvalidProof`, never as one of the verifier's error codes.
+///
+/// The two contracts carry separate `#[contracterror]` enums, both
+/// `#[repr(u32)]`, and the codes collide: `Groth16Error::MalformedPublicInputs`
+/// is 1 and `Error::NotAuthorized` is 1, `Groth16Error::MalformedProof` is 2
+/// and `Error::MerkleTreeFull` is 2. `verify_proof` used to call the verifier
+/// without `try_`, so a rejection trapped out of the pool frame carrying the
+/// verifier's raw code and the caller decoded it against the pool's enum. A
+/// refused proof was reported as an authorization failure, which is both wrong
+/// and the more alarming of the two readings.
+///
+/// The fixture is built so that `InvalidProof` can only have come from the
+/// verifier. `internal_transact` has three other sources of it and each is
+/// excluded here:
+///
+/// - the two ASP-root comparisons are skipped, because the pool is registered
+///   with policy flags 0 and both are behind `requires_*_proofs`;
+/// - the `is_empty` guard in `verify_proof` does not fire, because the mock
+///   proof carries non-zero points, asserted below.
+///
+/// Everything before proof verification is made to pass: the root is the pool's
+/// live root, the nullifier is unspent, the ext hash is computed from the ext
+/// data, and the public amount is zero for a zero-value transaction. So the
+/// verifier is the only thing left that can refuse this transaction.
+#[test]
+fn transact_reports_verifier_rejection_as_invalid_proof() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // Policy flags 0: neither ASP root is compared, so neither can produce the
+    // InvalidProof this test asserts.
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    // Authorization is mocked, so NotAuthorized cannot be a genuine answer.
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE5);
+    assert!(
+        !proof.proof.is_empty(),
+        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
+    );
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a proof the verifier refuses must be refused by the pool");
+    assert_eq!(
+        err,
+        Ok(Error::InvalidProof),
+        "a verifier rejection must be reported as the pool's InvalidProof, not as the \
+         NotAuthorized that Groth16Error::MalformedPublicInputs shares a code with"
+    );
 }
