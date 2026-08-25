@@ -1032,3 +1032,168 @@ fn test_pool_events_exact_shapes() {
     let expected_nullifier = NewNullifierEvent { nullifier }.to_xdr(&env, &contract_id);
     assert_eq!(events.events()[1], expected_nullifier);
 }
+
+/// Marks a nullifier as spent directly in pool storage, mirroring what a
+/// successful `transact` does in step 6. Used to reach the replay path without
+/// needing a real Groth16 proof for the first spend.
+fn mark_nullifier_spent(env: &Env, pool_id: &Address, nullifier: &U256) {
+    env.as_contract(pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&crate::pool::DataKey::Nullifier(nullifier.clone()), &());
+    });
+}
+
+/// Replay: a nullifier that is already spent must be refused, and refused for
+/// that reason rather than falling through to proof verification.
+#[test]
+fn transact_rejects_replay_of_spent_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xC0FFEE;
+    mark_nullifier_spent(&env, &pool_id, &U256::from_u32(&env, nullifier));
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("spent nullifier must be refused");
+    assert_eq!(err, Ok(Error::AlreadySpentNullifier));
+}
+
+/// A deposit above the configured maximum is refused before any token moves,
+/// so the check cannot be bypassed by an unfunded sender.
+#[test]
+fn transact_rejects_deposit_above_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let max = 1000u32;
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, max), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD1);
+    // try_from rather than `as`: the boundary is the whole point of this test, so a
+    // value that did not fit i32 must fail loudly instead of wrapping into a
+    // negative deposit.
+    let above_max = i32::try_from(max + 1).expect("max + 1 must fit i32");
+    let over = mk_ext_data(&env, Address::generate(&env), above_max);
+
+    let err = pool
+        .try_transact(&proof, &over, &Address::generate(&env))
+        .expect_err("deposit above the maximum must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
+}
+
+/// A deposit exactly at the maximum is not rejected by the bound itself. It
+/// still fails later on the mock proof, which is what pins the boundary as
+/// inclusive rather than off by one.
+#[test]
+fn transact_accepts_deposit_at_maximum_bound() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let max = 1000u32;
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, max), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD2);
+    let at_max = i32::try_from(max).expect("max must fit i32");
+    let at = mk_ext_data(&env, Address::generate(&env), at_max);
+
+    let err = pool
+        .try_transact(&proof, &at, &Address::generate(&env))
+        .expect_err("the mock proof still fails verification");
+    assert_ne!(
+        err,
+        Ok(Error::WrongExtAmount),
+        "a deposit equal to the maximum must not be rejected by the bound"
+    );
+}
+
+/// An all-zero proof must be refused with a clean error rather than panicking.
+///
+/// It is refused, but note what the caller actually receives. `verify_proof`
+/// calls the verifier contract, and `Groth16Error::MalformedPublicInputs` is 1,
+/// which is the same numeric code as this contract's `Error::NotAuthorized`.
+/// The cross-contract error therefore surfaces at the pool boundary as an
+/// authorization failure. Nothing is unsound about it, but the error a caller
+/// sees does not describe what happened, and no existing test reached the
+/// verifier so nothing pinned it. This test pins it, and will fail if the codes
+/// are ever separated, which is the point.
+#[test]
+fn transact_rejects_zeroed_proof() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    proof.proof = Groth16Proof {
+        a: G1Affine::from_array(&env, &[0u8; 64]),
+        b: G2Affine::from_array(&env, &[0u8; 128]),
+        c: G1Affine::from_array(&env, &[0u8; 64]),
+    };
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a zeroed proof must be refused");
+    assert_eq!(
+        err,
+        Ok(Error::NotAuthorized),
+        "current behaviour: the verifier's error code 1 is read as the pool's error code 1"
+    );
+}
+
+/// Two identical nullifiers inside one transaction are NOT caught by the
+/// contract's spent-check, because that check only compares each nullifier
+/// against stored state, never against the others in the same call. The
+/// duplicate therefore reaches proof verification and is refused there.
+///
+/// This pins the current division of labour: pairwise distinctness is enforced
+/// by the circuit (`transaction.circom` constrains it), and the contract relies
+/// on that rather than re-checking independently. The test is written to fail
+/// if that reliance ever changes, in either direction.
+#[test]
+fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let dup = U256::from_u32(&env, 0xDEAD);
+    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xDEAD);
+    proof.input_nullifiers.push_back(dup);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_ne!(
+        err,
+        Ok(Error::AlreadySpentNullifier),
+        "the spent-check compares each nullifier against stored state only, so a \
+         duplicate inside one call passes it and is left to the circuit"
+    );
+}
