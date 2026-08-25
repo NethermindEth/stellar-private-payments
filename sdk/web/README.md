@@ -136,6 +136,9 @@ Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance`
 | `transact(config)` | Low-level pool transact |
 | `disclose(config)` | Selective disclosure (`selectedCommitments` 1..=4); may return `null` if ASP registration is needed |
 | `verifyDisclosure(receipt, expectedVkHash)` | Verify a disclosure receipt in this pool session |
+| `audit(globalViewPrivateKeyHex)` | Open a {@link GvkAudit} cursor (pool-gvk deployments only) |
+
+`GvkAudit.nextTx()` yields decrypted outputs, inputs (traceable pools), and nullifiers per on-chain `transact`, or `null` when exhausted.
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 

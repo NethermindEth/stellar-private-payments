@@ -10,6 +10,7 @@ import type {
   VerifyDisclosureOptions,
 } from './options.js';
 import type { DisclosureVerificationReport } from './disclosure.js';
+import type { GvkTxAudit } from './gvk.js';
 import type { Storage } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
@@ -95,3 +96,15 @@ export declare const Client: {
   new(options: ClientNewOptions): Promise<Client>;
   contractConfig(): unknown;
 };
+
+export type { GvkAuditedNote, GvkRecoveredNote, GvkTxAudit } from './gvk.js';
+
+/** Admin audit cursor returned by {@link PrivatePool.audit}. */
+export interface GvkAudit {
+  nextTx(): Promise<GvkTxAudit | null>;
+}
+
+/** Per-pool session — wasm class with typed {@link GvkAudit audit}. */
+export interface PrivatePool {
+  audit(globalViewPrivateKeyHex: string): Promise<GvkAudit>;
+}

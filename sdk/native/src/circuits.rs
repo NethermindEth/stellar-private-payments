@@ -3,11 +3,32 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 
 /// Embedded circuit lockfile (crate-local `circuits.json`).
 pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits.json"));
+
+/// Kind of circuit artifact named in [`CircuitHashes`] and on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtifactKind {
+    R1cs,
+    Graph,
+    ProvingKey,
+}
+
+impl ArtifactKind {
+    pub const ALL: [Self; 3] = [Self::R1cs, Self::Graph, Self::ProvingKey];
+
+    pub fn as_extension(self) -> &'static str {
+        match self {
+            Self::R1cs => ".r1cs",
+            Self::Graph => ".graph.bin",
+            Self::ProvingKey => "_proving_key.bin",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CircuitMeta {
@@ -27,6 +48,16 @@ pub struct CircuitHashes {
     pub graph: String,
     #[serde(rename = "proving_key.bin")]
     pub proving_key: String,
+}
+
+impl CircuitHashes {
+    pub fn expected_hash(&self, kind: ArtifactKind) -> &str {
+        match kind {
+            ArtifactKind::R1cs => self.r1cs.as_str(),
+            ArtifactKind::Graph => self.graph.as_str(),
+            ArtifactKind::ProvingKey => self.proving_key.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +83,53 @@ pub fn circuit_lock() -> Result<CircuitLockfile, Error> {
         .map_err(|e| Error::other(format!("parse embedded circuits.json: {e}")))
 }
 
+/// On-disk / fetch filename for a circuit artifact.
+pub fn artifact_file_name(stem: &str, kind: ArtifactKind) -> String {
+    format!("{stem}{}", kind.as_extension())
+}
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn decode_sha256_hex(hex_str: &str) -> Result<[u8; 32], Error> {
+    let bytes = hex::decode(hex_str)
+        .map_err(|e| Error::other(format!("invalid sha256 hex {hex_str}: {e}")))?;
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| Error::other(format!("sha256 hex must be 32 bytes, got {}", v.len())))
+}
+
+/// Look up expected hashes for `stem` in the embedded lockfile.
+pub fn circuit_hashes(stem: &str) -> Result<CircuitHashes, Error> {
+    let lock = circuit_lock()?;
+    lock.circuits
+        .get(stem)
+        .cloned()
+        .ok_or_else(|| Error::other(format!("stem {stem} is not in embedded circuits.json")))
+}
+
+/// Verify `bytes` against the embedded lockfile entry for `stem` + `kind`.
+pub fn verify_artifact_bytes(stem: &str, kind: ArtifactKind, bytes: &[u8]) -> Result<(), Error> {
+    let hashes = circuit_hashes(stem)?;
+    let want = hashes.expected_hash(kind);
+    let got = sha256_hex(bytes);
+    if got != want {
+        return Err(Error::other(format!(
+            "hash mismatch for {}: want {want} got {got}",
+            artifact_file_name(stem, kind)
+        )));
+    }
+    Ok(())
+}
+
+/// Expected SHA256 digest for `stem` + `kind`, decoded from the lockfile hex
+/// string.
+pub fn artifact_sha256_bytes(stem: &str, kind: ArtifactKind) -> Result<[u8; 32], Error> {
+    let hashes = circuit_hashes(stem)?;
+    decode_sha256_hex(hashes.expected_hash(kind))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod store {
     use std::{
@@ -62,10 +140,12 @@ mod store {
     };
 
     use flate2::read::GzDecoder;
-    use sha2::{Digest, Sha256};
     use tar::Archive;
 
-    use super::{CircuitHashes, CircuitLockfile, Error, circuit_lock};
+    use super::{
+        ArtifactKind, CircuitLockfile, Error, artifact_file_name, circuit_lock,
+        verify_artifact_bytes,
+    };
     use crate::types::{
         CircuitStem, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
@@ -78,8 +158,6 @@ mod store {
         SELECTIVE_DISCLOSURE_3_CIRCUIT,
         SELECTIVE_DISCLOSURE_4_CIRCUIT,
     ];
-
-    const KINDS: [&str; 3] = ["r1cs", "graph.bin", "proving_key.bin"];
 
     pub struct CircuitStore {
         dir: PathBuf,
@@ -127,11 +205,7 @@ mod store {
         }
 
         pub fn artifacts(&self, stem: &str) -> Result<ProverArtifacts, Error> {
-            let lock = circuit_lock()?;
-            let hashes = lock.circuits.get(stem).ok_or_else(|| {
-                Error::other(format!("stem {stem} is not in embedded circuits.json"))
-            })?;
-            read_artifacts(&self.dir, stem, hashes)
+            read_artifacts(&self.dir, stem)
         }
 
         pub fn transact_artifacts(&self) -> Result<Vec<(CircuitStem, ProverArtifacts)>, Error> {
@@ -155,68 +229,39 @@ mod store {
         fn ready(&self, lock: &CircuitLockfile) -> bool {
             lock.circuits
                 .iter()
-                .all(|(stem, hashes)| files_ok(&self.dir, stem, hashes))
+                .all(|(stem, _hashes)| files_ok(&self.dir, stem))
         }
     }
 
-    fn file_name(stem: &str, kind: &str) -> String {
-        match kind {
-            "r1cs" => format!("{stem}.r1cs"),
-            "graph.bin" => format!("{stem}.graph.bin"),
-            "proving_key.bin" => format!("{stem}_proving_key.bin"),
-            _ => format!("{stem}.{kind}"),
-        }
-    }
-
-    fn sha256_hex(bytes: &[u8]) -> String {
-        hex::encode(Sha256::digest(bytes))
-    }
-
-    fn files_ok(dir: &Path, stem: &str, hashes: &CircuitHashes) -> bool {
-        KINDS.iter().all(|kind| {
-            let Ok(bytes) = fs::read(dir.join(file_name(stem, kind))) else {
+    fn files_ok(dir: &Path, stem: &str) -> bool {
+        ArtifactKind::ALL.iter().all(|&kind| {
+            let Ok(bytes) = fs::read(dir.join(artifact_file_name(stem, kind))) else {
                 return false;
             };
-            let want = match *kind {
-                "r1cs" => hashes.r1cs.as_str(),
-                "graph.bin" => hashes.graph.as_str(),
-                "proving_key.bin" => hashes.proving_key.as_str(),
-                _ => return false,
-            };
-            sha256_hex(&bytes) == want
+            verify_artifact_bytes(stem, kind, &bytes).is_ok()
         })
     }
 
-    fn read_artifacts(
-        dir: &Path,
-        stem: &str,
-        hashes: &CircuitHashes,
-    ) -> Result<ProverArtifacts, Error> {
-        let read = |kind: &str, want: &str| -> Result<Vec<u8>, Error> {
-            let path = dir.join(file_name(stem, kind));
+    fn read_artifacts(dir: &Path, stem: &str) -> Result<ProverArtifacts, Error> {
+        let read = |kind: ArtifactKind| -> Result<Vec<u8>, Error> {
+            let path = dir.join(artifact_file_name(stem, kind));
             let bytes = fs::read(&path)
                 .map_err(|e| Error::other(format!("read {}: {e}", path.display())))?;
-            let got = sha256_hex(&bytes);
-            if got != want {
-                return Err(Error::other(format!(
-                    "hash mismatch {}: want {want} got {got}",
-                    path.display()
-                )));
-            }
+            verify_artifact_bytes(stem, kind, &bytes)?;
             Ok(bytes)
         };
         Ok(ProverArtifacts {
-            proving_key: read("proving_key.bin", &hashes.proving_key)?,
-            circuit_graph: read("graph.bin", &hashes.graph)?,
-            circuit_r1cs: read("r1cs", &hashes.r1cs)?,
+            proving_key: read(ArtifactKind::ProvingKey)?,
+            circuit_graph: read(ArtifactKind::Graph)?,
+            circuit_r1cs: read(ArtifactKind::R1cs)?,
         })
     }
 
     fn allowed_names(lock: &CircuitLockfile) -> HashSet<String> {
         let mut names = HashSet::from(["circuits.json".to_string()]);
         for stem in lock.circuits.keys() {
-            for kind in KINDS {
-                names.insert(file_name(stem, kind));
+            for kind in ArtifactKind::ALL {
+                names.insert(artifact_file_name(stem, kind));
             }
         }
         names
@@ -290,5 +335,24 @@ mod tests {
         for stem in DISCLOSURE_STEMS {
             assert!(lock.circuits.contains_key(stem), "missing {stem}");
         }
+    }
+
+    #[test]
+    fn artifact_kind_extensions() {
+        assert_eq!(ArtifactKind::R1cs.as_extension(), ".r1cs");
+        assert_eq!(ArtifactKind::Graph.as_extension(), ".graph.bin");
+        assert_eq!(ArtifactKind::ProvingKey.as_extension(), "_proving_key.bin");
+    }
+
+    #[test]
+    fn artifact_file_names_match_store_layout() {
+        assert_eq!(
+            artifact_file_name("policy_tx_2_2", ArtifactKind::ProvingKey),
+            "policy_tx_2_2_proving_key.bin"
+        );
+        assert_eq!(
+            artifact_file_name("policy_tx_2_2_gvk_V", ArtifactKind::Graph),
+            "policy_tx_2_2_gvk_V.graph.bin"
+        );
     }
 }

@@ -14,6 +14,7 @@ pub use stellar_private_payments::{
 };
 
 use stellar_private_payments::{
+    gvk::GvkEvent,
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
@@ -118,6 +119,12 @@ pub enum StorageWorkerRequest {
     DeriveASPleaf(AdminASPRequest),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
+    ListPoolGvkEvents {
+        pool_contract_id: String,
+        after: Option<(u32, String)>,
+        limit: u32,
+    },
+    ListPoolCommitmentHashes(String),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -141,6 +148,8 @@ pub enum StorageWorkerResponse {
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
     Logs(String),
+    PoolGvkEvents(Vec<GvkEvent>),
+    PoolCommitmentHashes(Vec<Field>),
 }
 
 #[allow(clippy::large_enum_variant)]

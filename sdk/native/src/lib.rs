@@ -76,7 +76,10 @@ mod transact;
 pub use account::Account;
 #[cfg(not(target_arch = "wasm32"))]
 pub use circuits::CircuitStore;
-pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
+pub use circuits::{
+    ArtifactKind, CIRCUITS_JSON, CircuitLockfile, artifact_file_name, artifact_sha256_bytes,
+    circuit_hashes, circuit_lock, sha256_hex, verify_artifact_bytes,
+};
 pub use client::Client;
 pub use core::PoolCore;
 pub use disclosure::{

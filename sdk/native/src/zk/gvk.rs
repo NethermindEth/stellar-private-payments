@@ -23,6 +23,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow, bail};
 use ark_bn254::Fr as Scalar;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use taceo_poseidon2::bn254::t4;
 
@@ -44,7 +45,8 @@ pub struct GvkNote {
 }
 
 /// The subset of note secrets an admin recovers by decryption.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GvkRecoveredNote {
     pub pk: Field,
     pub amount: Field,
@@ -99,7 +101,8 @@ impl GvkNote {
 }
 
 /// Admin-recovered note secrets verified against an on-chain commitment.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GvkAuditedNote {
     pub note: GvkRecoveredNote,
     pub commitment: Field,

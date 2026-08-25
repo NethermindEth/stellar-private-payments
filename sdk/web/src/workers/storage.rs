@@ -494,6 +494,21 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 }
             })?
         }
+        StorageWorkerRequest::ListPoolGvkEvents {
+            pool_contract_id,
+            after,
+            limit,
+        } => {
+            tracing::trace!("[{WORKER_NAME}] list pool gvk events for {pool_contract_id}");
+            let events =
+                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
+            StorageWorkerResponse::PoolGvkEvents(events)
+        }
+        StorageWorkerRequest::ListPoolCommitmentHashes(pool_contract_id) => {
+            tracing::trace!("[{WORKER_NAME}] list pool commitment hashes for {pool_contract_id}");
+            let hashes = with_storage!(s => s.list_pool_commitment_hashes(&pool_contract_id)?)?;
+            StorageWorkerResponse::PoolCommitmentHashes(hashes)
+        }
     };
     Ok(resp)
 }
@@ -936,22 +951,46 @@ impl Storage for StorageBridge {
 
     async fn list_pool_gvk_events(
         &self,
-        _pool_contract_id: &str,
-        _after: Option<(u32, String)>,
-        _limit: u32,
+        pool_contract_id: &str,
+        after: Option<(u32, String)>,
+        limit: u32,
     ) -> Result<Vec<stellar_private_payments::gvk::GvkEvent>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        match self
+            .call(
+                StorageWorkerRequest::ListPoolGvkEvents {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    after,
+                    limit,
+                },
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolGvkEvents(events)) => Ok(events),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response listing pool gvk events: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn list_pool_commitment_hashes(
         &self,
-        _pool_contract_id: &str,
+        pool_contract_id: &str,
     ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        match self
+            .call(
+                StorageWorkerRequest::ListPoolCommitmentHashes(pool_contract_id.to_string()),
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolCommitmentHashes(hashes)) => Ok(hashes),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response listing pool commitment hashes: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 }
 

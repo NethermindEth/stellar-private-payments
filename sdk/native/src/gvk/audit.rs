@@ -16,7 +16,8 @@ pub(crate) const TOID_LEN: usize = 19;
 const ROW_BATCH: u32 = 256;
 
 /// Decrypted notes and public nullifiers for one private `transact` call
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GvkTxAudit {
     pub ledger: u32,
     pub outputs: Vec<GvkAuditedNote>,
