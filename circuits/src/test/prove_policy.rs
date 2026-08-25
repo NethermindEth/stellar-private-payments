@@ -1534,7 +1534,7 @@ mod tests {
         encrypt_inputs: bool,
     }
 
-    /// A test run (verified) for `policy_tx_gvk_2_2*`, shared by every test
+    /// A test run (verified) for `policy_tx_2_2*_gvk_*`, shared by every test
     /// below that needs its public signals.
     /// 2 inputs (50 + 30) and 2 outputs (60 + 20)
     struct PolicyGvkProof {
@@ -1552,7 +1552,7 @@ mod tests {
         publics: Vec<Scalar>,
     }
 
-    /// Prove a `policy_tx_gvk_2_2*` circuit for the fixed scenario described
+    /// Prove a `policy_tx_2_2*_gvk_*` circuit for the fixed scenario described
     /// on [`PolicyGvkProof`] and assert it verifies.
     #[allow(clippy::arithmetic_side_effects)]
     fn prove_policy_gvk_case(circuit: PolicyGvkCircuit) -> Result<PolicyGvkProof> {
@@ -1708,7 +1708,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_open_viewonly() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_viewonly",
+            stem: "policy_tx_2_2_gvk_V",
             asp: PolicyAspWitness::None,
             encrypt_inputs: false,
         })
@@ -1718,7 +1718,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_open_traceable() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_traceable",
+            stem: "policy_tx_2_2_gvk_T",
             asp: PolicyAspWitness::None,
             encrypt_inputs: true,
         })
@@ -1728,7 +1728,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_allowlist_viewonly() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_A_viewonly",
+            stem: "policy_tx_2_2_A_gvk_V",
             asp: PolicyAspWitness::Membership,
             encrypt_inputs: false,
         })
@@ -1738,7 +1738,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_allowlist_traceable() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_A_traceable",
+            stem: "policy_tx_2_2_A_gvk_T",
             asp: PolicyAspWitness::Membership,
             encrypt_inputs: true,
         })
@@ -1748,7 +1748,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_blocklist_viewonly() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_B_viewonly",
+            stem: "policy_tx_2_2_B_gvk_V",
             asp: PolicyAspWitness::NonMembership,
             encrypt_inputs: false,
         })
@@ -1758,7 +1758,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_blocklist_traceable() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_B_traceable",
+            stem: "policy_tx_2_2_B_gvk_T",
             asp: PolicyAspWitness::NonMembership,
             encrypt_inputs: true,
         })
@@ -1768,7 +1768,7 @@ mod tests {
     #[ignore]
     fn policy_gvk_both_viewonly() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_AB_viewonly",
+            stem: "policy_tx_2_2_AB_gvk_V",
             asp: PolicyAspWitness::Both,
             encrypt_inputs: false,
         })
@@ -1778,13 +1778,13 @@ mod tests {
     #[ignore]
     fn policy_gvk_both_traceable() -> Result<()> {
         run_policy_gvk(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_AB_traceable",
+            stem: "policy_tx_2_2_AB_gvk_T",
             asp: PolicyAspWitness::Both,
             encrypt_inputs: true,
         })
     }
 
-    /// Pins the exact order in which `policy_tx_gvk_2_2_viewonly`/`_traceable`
+    /// Pins the exact order in which `policy_tx_2_2_gvk_V`/`_T`
     /// expose their public signals.
     /// INPUT signals (`D`, `nonce`, `root`, `publicAmount`, `extDataHash`,
     /// `inputNullifier[]`, `outputCommitment[]`). Unlike `run_policy_gvk`
@@ -1864,9 +1864,9 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn policy_tx_gvk_2_2_viewonly_public_input_order() -> Result<()> {
+    fn policy_tx_2_2_gvk_viewonly_public_input_order() -> Result<()> {
         run_policy_gvk_public_input_order(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_viewonly",
+            stem: "policy_tx_2_2_gvk_V",
             asp: PolicyAspWitness::None,
             encrypt_inputs: false,
         })
@@ -1874,9 +1874,9 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn policy_tx_gvk_2_2_traceable_public_input_order() -> Result<()> {
+    fn policy_tx_2_2_gvk_traceable_public_input_order() -> Result<()> {
         run_policy_gvk_public_input_order(PolicyGvkCircuit {
-            stem: "policy_tx_gvk_2_2_traceable",
+            stem: "policy_tx_2_2_gvk_T",
             asp: PolicyAspWitness::None,
             encrypt_inputs: true,
         })

@@ -1,16 +1,16 @@
 //! Pool `transact` circuit artifact identity.
 
-use super::{GvkMode, POLICY_TX_2_2, PolicyFlags};
+use super::{GvkMode, PolicyFlags};
 use anyhow::{Result, anyhow};
 use core::{fmt, str::FromStr};
 
-const POLICY_TX_GVK_2_2: &str = "policy_tx_gvk_2_2";
+const GVK_STEM_SUFFIX: &str = "_gvk_";
 
 /// Identifies a circuit artifact.
 ///
 /// Combines [`PolicyFlags`] with [`GvkMode`]. Non-GVK pools use plain
 /// `policy_tx_2_2[_AB]` stems; GVK pools use
-/// `policy_tx_gvk_2_2[_AB]_{viewonly|traceable}`.
+/// `policy_tx_2_2[_AB]_gvk_{V|T}` (`V` = view-only, `T` = traceable).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CircuitStem {
     pub policy_flags: PolicyFlags,
@@ -27,10 +27,9 @@ impl CircuitStem {
 
     /// Parse a stem string back into its components.
     pub fn from_string(stem: &str) -> Result<Self> {
-        if stem.starts_with(POLICY_TX_GVK_2_2) {
-            let (policy_flags, gvk_mode) = parse_gvk_stem(stem)?;
+        if let Some((policy_stem, gvk_mode)) = parse_gvk_suffix(stem) {
             Ok(Self {
-                policy_flags,
+                policy_flags: PolicyFlags::from_stem(policy_stem)?,
                 gvk_mode,
             })
         } else {
@@ -70,53 +69,31 @@ impl fmt::Display for CircuitStem {
 }
 
 fn compose_stem_string(policy_flags: PolicyFlags, gvk_mode: GvkMode) -> String {
+    let base = policy_flags.circuit_stem();
     let Some(mode_word) = gvk_stem_word(gvk_mode) else {
-        return policy_flags.circuit_stem();
+        return base;
     };
-
-    let suffix = policy_flags.circuit_suffix();
-    if suffix.is_empty() {
-        format!("{POLICY_TX_GVK_2_2}_{mode_word}")
-    } else {
-        format!("{POLICY_TX_GVK_2_2}_{suffix}_{mode_word}")
-    }
+    format!("{base}{GVK_STEM_SUFFIX}{mode_word}")
 }
 
-fn parse_gvk_stem(stem: &str) -> Result<(PolicyFlags, GvkMode)> {
-    let rest = stem
-        .strip_prefix(POLICY_TX_GVK_2_2)
-        .ok_or_else(|| anyhow!("not a GVK policy transact stem: {stem}"))?;
-
-    let (suffix, mode_word) = match rest.strip_prefix('_') {
-        Some(rest) => match rest.split_once('_') {
-            Some((suffix, mode_word)) => (suffix, mode_word),
-            None => ("", rest),
-        },
-        None => return Err(anyhow!("not a GVK policy transact stem: {stem}")),
-    };
-
-    let gvk_mode = gvk_mode_from_stem_word(mode_word)?;
-    let policy_flags = if suffix.is_empty() {
-        PolicyFlags::EMPTY
-    } else {
-        PolicyFlags::from_stem(&format!("{POLICY_TX_2_2}_{suffix}"))?
-    };
-
-    Ok((policy_flags, gvk_mode))
+fn parse_gvk_suffix(stem: &str) -> Option<(&str, GvkMode)> {
+    let (base, mode_word) = stem.rsplit_once(GVK_STEM_SUFFIX)?;
+    let gvk_mode = gvk_mode_from_stem_word(mode_word).ok()?;
+    Some((base, gvk_mode))
 }
 
 fn gvk_stem_word(mode: GvkMode) -> Option<&'static str> {
     match mode {
         GvkMode::Off => None,
-        GvkMode::ViewOnly => Some("viewonly"),
-        GvkMode::Traceable => Some("traceable"),
+        GvkMode::ViewOnly => Some("V"),
+        GvkMode::Traceable => Some("T"),
     }
 }
 
 fn gvk_mode_from_stem_word(word: &str) -> Result<GvkMode> {
     match word {
-        "viewonly" => Ok(GvkMode::ViewOnly),
-        "traceable" => Ok(GvkMode::Traceable),
+        "V" => Ok(GvkMode::ViewOnly),
+        "T" => Ok(GvkMode::Traceable),
         _ => Err(anyhow!("unknown GVK circuit mode word: {word}")),
     }
 }
@@ -129,17 +106,17 @@ mod tests {
     fn all_transact_stems_match_registry_and_round_trip() {
         let expected = [
             "policy_tx_2_2",
-            "policy_tx_gvk_2_2_viewonly",
-            "policy_tx_gvk_2_2_traceable",
+            "policy_tx_2_2_gvk_V",
+            "policy_tx_2_2_gvk_T",
             "policy_tx_2_2_A",
-            "policy_tx_gvk_2_2_A_viewonly",
-            "policy_tx_gvk_2_2_A_traceable",
+            "policy_tx_2_2_A_gvk_V",
+            "policy_tx_2_2_A_gvk_T",
             "policy_tx_2_2_B",
-            "policy_tx_gvk_2_2_B_viewonly",
-            "policy_tx_gvk_2_2_B_traceable",
+            "policy_tx_2_2_B_gvk_V",
+            "policy_tx_2_2_B_gvk_T",
             "policy_tx_2_2_AB",
-            "policy_tx_gvk_2_2_AB_viewonly",
-            "policy_tx_gvk_2_2_AB_traceable",
+            "policy_tx_2_2_AB_gvk_V",
+            "policy_tx_2_2_AB_gvk_T",
         ];
 
         let stems: Vec<_> = CircuitStem::all_transact_stems()
@@ -156,6 +133,6 @@ mod tests {
 
     #[test]
     fn parse_rejects_unknown_gvk_mode_word() {
-        assert!(CircuitStem::from_string("policy_tx_gvk_2_2_A_bogus").is_err());
+        assert!(CircuitStem::from_string("policy_tx_2_2_A_gvk_bogus").is_err());
     }
 }

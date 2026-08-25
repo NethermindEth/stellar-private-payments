@@ -6,6 +6,8 @@ This directory contains the Groth16 key material used by the testnet deployment.
 - `policy_tx_2_2_A` — allowlist-only pools (`PolicyFlags::ALLOWLIST`).
 - `policy_tx_2_2_B` — blocklist-only pools (`PolicyFlags::BLOCKLIST`).
 - `policy_tx_2_2_AB` — allowlist + blocklist pools (`PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST`).
+- `policy_tx_2_2_gvk_{V,T}` — GVK-enabled unrestricted pools (`GvkMode::ViewOnly` / `GvkMode::Traceable`; `V` / `T`).
+- `policy_tx_2_2_{A,B,AB}_gvk_{V,T}` — GVK-enabled pools for each ASP policy variant.
 - `selectiveDisclosure_{1,2,3,4}_*` — off-chain selective-disclosure receipt circuits.
 
 ## Witness graphs (`*.graph.bin`)
@@ -20,7 +22,7 @@ the Rust circom crates used for R1CS), and graph generation requires a C++
 toolchain.
 
 Committed for all production stems: `policy_tx_2_2`, `policy_tx_2_2_{A,B,AB}`,
-and `selectiveDisclosure_{1..4}`.
+`policy_tx_2_2_*_gvk_*`, and `selectiveDisclosure_{1..4}`.
 
 Policy entry points (`policy_tx_2_2*.circom`) compose a shared base transact circuit
 (`policyTransaction.circom`) with optional ASP modules (`aspMembership.circom`,
@@ -32,7 +34,7 @@ subcomponent they remain private, but promoting `PolicyTransaction` to `componen
 would make those note public keys public inputs. Always use a wrapper entry point
 (`policy_tx_2_2*.circom` / `policyTransactionOpen.circom`, etc.).
 
-## Policy transact keys (`policy_tx_2_2*`)
+## Policy transact keys (`policy_tx_2_2*`, `policy_tx_2_2*_gvk_*`)
 
 **All circuits stems are locally generated** (`make circuits REGEN_KEYS=1`).
 None of the committed `policy_tx_2_2_*` key pairs in this directory were produced by a

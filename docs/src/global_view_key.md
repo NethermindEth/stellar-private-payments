@@ -34,10 +34,10 @@ available in both modes:
 
 | Policy config | View-only entry | Traceable entry |
 |---|---|---|
-| Open (no ASP proofs) | `policy_tx_gvk_2_2_viewonly` | `policy_tx_gvk_2_2_traceable` |
-| Allowlist | `policy_tx_gvk_2_2_A_viewonly` | `policy_tx_gvk_2_2_A_traceable` |
-| Blocklist | `policy_tx_gvk_2_2_B_viewonly` | `policy_tx_gvk_2_2_B_traceable` |
-| Allowlist + Blocklist | `policy_tx_gvk_2_2_AB_viewonly` | `policy_tx_gvk_2_2_AB_traceable` |
+| Open (no ASP proofs) | `policy_tx_2_2_gvk_V` | `policy_tx_2_2_gvk_T` |
+| Allowlist | `policy_tx_2_2_A_gvk_V` | `policy_tx_2_2_A_gvk_T` |
+| Blocklist | `policy_tx_2_2_B_gvk_V` | `policy_tx_2_2_B_gvk_T` |
+| Allowlist + Blocklist | `policy_tx_2_2_AB_gvk_V` | `policy_tx_2_2_AB_gvk_T` |
 
 All entry points are 2-in/2-out. An output note's ciphertext is identical in
 both modes (outputs are always encrypted at `idx = nIns + k`), so switching
@@ -49,7 +49,7 @@ modes never changes what an output memo looks like.
 |---|---|
 | `globalViewKey.circom` | `GlobalViewKeyEncryption()` (single-note primitive), `GlobalViewKey(nNotes)` (flat batch, used by the test circuits) and `GvkNotes(nIns, nOuts, encryptInputs)` (grouped batch used by the policy wrappers). |
 | `policyTransaction{Open,Allowlist,Blocklist,Both}Gvk.circom` | Policy transaction + GVK wrappers: each instantiates the `PolicyTransaction` core, its ASP module(s) and `GvkNotes`, feeding the encryptors the same note signals the transaction constrains (input public keys are reused from the core, not recomputed). |
-| `policy_tx_gvk_2_2*` | The 8 entry points listed above. |
+| `policy_tx_2_2*_gvk_*` | The 8 entry points listed above. |
 | `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `--tests`). |
 
 `D` and `nonce` are public inputs; the note plaintexts stay private and

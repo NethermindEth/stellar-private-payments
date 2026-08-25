@@ -1,8 +1,8 @@
 {
-  "version": "0.1",
+  "version": "0.2",
   "meta": {
     "repository": "NethermindEth/stellar-private-payments",
-    "commit": "29af05b06fbf87c0e855723f6e21dd9815696106",
+    "commit": "adee1b95da7e1e62974c81f052e7aef3bac858df",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
     "circom-witness-rs": "0.3.0"
@@ -30,6 +30,54 @@
     "r1cs": "41c32a5df5bcf7a4f9df98c3e3f0c927ffbc1688a971a538ace026438825c845",
     "graph.bin": "bcb516bb19d255b7640de567782fcb9b7f92bd850bf5ba7a23d4d02345580bb2",
     "proving_key.bin": "497347b77b1c5bfa68d0fc7f0636928c959499aef559d6bbd1494d2d5b9481e6"
+  },
+  "policy_tx_2_2_gvk_V": {
+    "setup": "local",
+    "r1cs": "dec5287eb8ede7d9ecab5742dcd733b285d867d7f44a3f8e92f559794460e44e",
+    "graph.bin": "a7984bd94024315fc61742fdb5b9ea1aad70897fd68508ed8ff352f3a250d712",
+    "proving_key.bin": "9fed30da079ba1c9abd3a25780f02a1f95459dd08a4b1d2b190de384bd83021f"
+  },
+  "policy_tx_2_2_gvk_T": {
+    "setup": "local",
+    "r1cs": "1b376209aefd405e8773ec24a23cabab36eb790e993cb97c55098d3dcd6a49b2",
+    "graph.bin": "898bf5f08328ea532ecf29a455b30703fb9ecc17b59abf9cff6e5286b38732f4",
+    "proving_key.bin": "67767a80d543b790cb648c34631a41558c4b1f7e0881a207dd07fe067539d245"
+  },
+  "policy_tx_2_2_A_gvk_V": {
+    "setup": "local",
+    "r1cs": "d8a494af712f9cd2b30a92e4fa88f185d4c59d8b5635a5ff9a0aee135309781c",
+    "graph.bin": "0c8ec3a2e5907d004bb6dae6803f057bda228e1e02b15b6d965012dd6495b2c8",
+    "proving_key.bin": "976fe1ecdb61681c3c0163768fae061e0699ccf1550cbc6f6e775255f561cff6"
+  },
+  "policy_tx_2_2_A_gvk_T": {
+    "setup": "local",
+    "r1cs": "5560479ba3d242de0e60c5b973ccf5aff9300b6291412abf651532d3881e01f6",
+    "graph.bin": "b533bcb1f55490c2ff1751e37d8c13ece7c268a0937b3e39786a42ee37538f9d",
+    "proving_key.bin": "2c97123561ed52ac97718c1235f6cd8df7feed79678a6a38381d4e0c66764050"
+  },
+  "policy_tx_2_2_B_gvk_V": {
+    "setup": "local",
+    "r1cs": "879bc5b5c89bed7edc2c32505d3243a3ee0427aba296ee3b5bfccb0f010cfe1f",
+    "graph.bin": "a89d3abb03a668de9eb0f1023e12e8f1209d7ead8249886e3fc96720de52e630",
+    "proving_key.bin": "c053a1c75845f83a801a38b9c9affa5b06eb3a43b6e71b4562470db807ffcd55"
+  },
+  "policy_tx_2_2_B_gvk_T": {
+    "setup": "local",
+    "r1cs": "94d7b3ce41e7f4e18b360b9d48c2ca1985ec94c2e49970275906a5a00244d715",
+    "graph.bin": "e79124f36f3c833982e1f2558e0e0785a77186b329066147582d9d35bcb16175",
+    "proving_key.bin": "9f171833540066279557eae9fff12be75ef4d1e397d907216dd64acfbb33e876"
+  },
+  "policy_tx_2_2_AB_gvk_V": {
+    "setup": "local",
+    "r1cs": "5413ee67ef4e6274d5618ce27e19d371e6ecc0ab4399027c39a404278a51841b",
+    "graph.bin": "3b1774ac532e0de7148f547650e23d181cff6dea0f68075b5091bdd54b8f3611",
+    "proving_key.bin": "59f67700acaed3d06840e2368edefe9477fa94b84dfd57568d07f1aaa5a36c36"
+  },
+  "policy_tx_2_2_AB_gvk_T": {
+    "setup": "local",
+    "r1cs": "e7d8dd6961e380c268ce51fd36c1e85064da60014ff5c696e056dfd9ae149dc1",
+    "graph.bin": "8c5531836f8b968703ded07db053ce9d217cff7538105240193e619a47a1dfec",
+    "proving_key.bin": "88e115fc56d8431a8049bfbed74a5b3e1cd38bc014ee660f4cdec5c1b5b9aaf8"
   },
   "selectiveDisclosure_1": {
     "setup": "local",
