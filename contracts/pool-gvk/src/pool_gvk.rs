@@ -494,7 +494,7 @@ impl PoolGvkContract {
     /// Verify a zero-knowledge proof.
     ///
     /// Public inputs are assembled in the order measured (not merely
-    /// source-read) off `policy_tx_gvk_2_2_viewonly`/`_traceable`: the GVK
+    /// source-read) off `policy_tx_2_2_gvk_V`/`_T`: the GVK
     /// ciphertext tail (an *output* signal) comes first, then the declared
     /// public inputs `D, nonce, root, publicAmount, extDataHash,
     /// inputNullifier[], outputCommitment[]`, then any ASP roots for the A/B/

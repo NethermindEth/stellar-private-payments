@@ -67,7 +67,7 @@ mod store {
 
     use super::{CircuitHashes, CircuitLockfile, Error, circuit_lock};
     use crate::types::{
-        CircuitStem, GvkMode, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        CircuitStem, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
         SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
@@ -137,7 +137,6 @@ mod store {
         pub fn transact_artifacts(&self) -> Result<Vec<(CircuitStem, ProverArtifacts)>, Error> {
             CircuitStem::all_transact_stems()
                 .into_iter()
-                .filter(|stem| stem.gvk_mode == GvkMode::Off)
                 .map(|stem| {
                     self.artifacts(&stem.to_string())
                         .map(|artifacts| (stem, artifacts))
@@ -269,7 +268,7 @@ pub use store::CircuitStore;
 mod tests {
     use super::*;
     use crate::types::{
-        CircuitStem, GvkMode, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        CircuitStem, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
         SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
 
@@ -285,9 +284,6 @@ mod tests {
         let lock = circuit_lock().expect("parse embedded circuits.json");
         assert!(!lock.version.is_empty());
         for stem in CircuitStem::all_transact_stems() {
-            if stem.gvk_mode != GvkMode::Off {
-                continue;
-            }
             let stem_str = stem.to_string();
             assert!(lock.circuits.contains_key(&stem_str), "missing {stem_str}");
         }

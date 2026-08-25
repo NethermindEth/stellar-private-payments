@@ -42,14 +42,14 @@ const SELECTIVE_DISCLOSURE_CIRCUITS: &[&str] = &[
 /// Policy transaction circuits combined with Global View Key encryption. Each
 /// of the 4 ASP policy configs is offered in view-only and traceable modes.
 const POLICY_GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
-    "policy_tx_gvk_2_2_viewonly",
-    "policy_tx_gvk_2_2_traceable",
-    "policy_tx_gvk_2_2_A_viewonly",
-    "policy_tx_gvk_2_2_A_traceable",
-    "policy_tx_gvk_2_2_B_viewonly",
-    "policy_tx_gvk_2_2_B_traceable",
-    "policy_tx_gvk_2_2_AB_viewonly",
-    "policy_tx_gvk_2_2_AB_traceable",
+    "policy_tx_2_2_gvk_V",
+    "policy_tx_2_2_gvk_T",
+    "policy_tx_2_2_A_gvk_V",
+    "policy_tx_2_2_A_gvk_T",
+    "policy_tx_2_2_B_gvk_V",
+    "policy_tx_2_2_B_gvk_T",
+    "policy_tx_2_2_AB_gvk_V",
+    "policy_tx_2_2_AB_gvk_T",
 ];
 
 fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bool {

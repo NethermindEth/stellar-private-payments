@@ -6,7 +6,7 @@ use stellar_private_payments::{
         RegisteredCircuit, SELECTIVE_DISCLOSURE_1, SELECTIVE_DISCLOSURE_2, SELECTIVE_DISCLOSURE_3,
         SELECTIVE_DISCLOSURE_4,
     },
-    types::{CircuitStem, GvkMode, ProverArtifacts},
+    types::{CircuitStem, ProverArtifacts},
 };
 
 use crate::config::default_data_dir;
@@ -23,7 +23,6 @@ pub fn load_transact_artifacts(
 ) -> Result<Vec<(CircuitStem, ProverArtifacts)>> {
     CircuitStem::all_transact_stems()
         .into_iter()
-        .filter(|stem| stem.gvk_mode == GvkMode::Off)
         .map(|stem| {
             load_transact_artifacts_for_stem(circuits_dir, stem).map(|artifacts| (stem, artifacts))
         })
