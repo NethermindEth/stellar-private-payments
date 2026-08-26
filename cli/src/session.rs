@@ -80,7 +80,10 @@ impl ClientSession {
     ) -> Result<Self> {
         let client = disclosure_client(config, network)?;
         let sdk_account = client
-            .account(&account.address, alias_signer(config, account, network))
+            .account(
+                account.address.as_str(),
+                alias_signer(config, account, network),
+            )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
         Ok(Self {
             client,
