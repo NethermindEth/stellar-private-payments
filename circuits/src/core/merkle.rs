@@ -76,11 +76,9 @@ pub fn empty_subtree_roots(depth: usize) -> Vec<Scalar> {
 
 /// Merkle tree over an append-only prefix of leaves at a fixed depth
 ///
-/// Every index from `leaves.len()` up to `2^depth` holds the zero leaf, so
-/// building costs `O(leaves.len() * depth)` instead of `O(2^depth)`. Roots and
-/// proofs match [`merkle_root`] and [`merkle_proof`] over the equivalent dense
-/// tree, and match the pool and ASP membership contracts, which grow the same
-/// way from the same zero leaf.
+/// Indices from `leaves.len()` up to `2^depth` hold the zero leaf, so building
+/// costs `O(leaves.len() * depth)` instead of `O(2^depth)`. Roots and proofs
+/// match [`merkle_root`] and [`merkle_proof`] over the dense equivalent.
 pub struct PrefixTree {
     depth: usize,
     /// Empty-subtree value per level, as returned by [`empty_subtree_roots`].
@@ -320,4 +318,3 @@ mod tests {
         }
     }
 }
-

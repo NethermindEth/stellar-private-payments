@@ -49,9 +49,8 @@ pub const SMT_LEVELS: usize = 10;
 
 /// Leaves seeded into the pool and ASP membership trees before a case runs.
 ///
-/// Both trees are append-only, so a note only ever sits below this index and
-/// `transact` appends its outputs at it. Every `leaf_index` a case picks must
-/// stay inside it.
+/// Every `leaf_index` a case picks must stay inside it; `transact` appends its
+/// outputs at it.
 pub const LEAF_PREFIX: usize = 64;
 
 /// Maximum deposit amount allowed per transaction

@@ -1314,8 +1314,7 @@ mod tests {
         assert!(artifacts.prepared.asp_non_membership_root.is_zero());
     }
 
-    /// The ASP membership tree is sized independently of the pool tree, so a
-    /// proof cut to the pool depth must be rejected.
+    /// A membership proof cut to the pool depth must be rejected.
     #[test]
     fn allowlist_transact_rejects_membership_proof_sized_to_the_pool_depth() {
         let tree_depth: u32 = 10;

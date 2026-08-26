@@ -133,11 +133,8 @@ pub fn prepopulated_leaves(
 
 /// Build the filled prefix of a Merkle tree
 ///
-/// Every position in `0..prefix_len` gets a random commitment except the
-/// `exclude_indices`, which keep the zero leaf for the caller to overwrite with
-/// its own notes. Positions past `prefix_len` are implicitly the zero leaf, so
-/// the result feeds [`PrefixTree`](super::merkle_tree::PrefixTree) directly and
-/// costs nothing extra as the tree depth grows.
+/// Every position in `0..prefix_len` gets a random commitment except
+/// `exclude_indices`, which keep the zero leaf for the caller to overwrite.
 ///
 /// # Arguments
 ///
@@ -148,11 +145,7 @@ pub fn prepopulated_leaves(
 /// # Panics
 ///
 /// Panics if any excluded index falls outside the prefix.
-pub fn prepopulated_prefix(
-    seed: u64,
-    exclude_indices: &[usize],
-    prefix_len: usize,
-) -> Vec<Scalar> {
+pub fn prepopulated_prefix(seed: u64, exclude_indices: &[usize], prefix_len: usize) -> Vec<Scalar> {
     assert!(
         exclude_indices.iter().all(|&idx| idx < prefix_len),
         "exclude_indices must fall inside a prefix of {prefix_len} leaves",

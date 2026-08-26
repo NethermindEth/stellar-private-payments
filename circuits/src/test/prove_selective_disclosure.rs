@@ -39,8 +39,7 @@ mod tests {
 
     /// Leaves seeded into the pool tree before a case runs.
     ///
-    /// The pool is append-only, so every `leaf_index` a note picks must stay
-    /// inside it.
+    /// Every `leaf_index` a note picks must stay inside it.
     const LEAF_PREFIX: usize = 64;
 
     /// Note material for a single selective-disclosure proof.

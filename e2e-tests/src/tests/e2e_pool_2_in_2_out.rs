@@ -5,10 +5,9 @@
 //! and the verification from the pool contract. That is the pipeline the CLI,
 //! the SDK and the browser use.
 use super::utils::{
-    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, TRANSACT_STEMS,
-    build_membership_trees, build_policy_inputs, bytes32_to_bigint, deploy_contracts,
-    generate_proof, prove_with_graph, scalar_to_u256, sync_contract_state, test_env,
-    wrap_groth16_proof,
+    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, TRANSACT_STEMS, build_membership_trees,
+    build_policy_inputs, bytes32_to_bigint, deploy_contracts, generate_proof, prove_with_graph,
+    scalar_to_u256, sync_contract_state, test_env, wrap_groth16_proof,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;

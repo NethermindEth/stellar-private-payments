@@ -5,9 +5,9 @@
 //! .bin` operation graph, the same artifact the CLI and the SDK load.
 
 use super::utils::{
-    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint,
-    deploy_contracts, generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, test_env,
-    u256_to_scalar, wrap_groth16_proof,
+    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, build_membership_trees,
+    bytes32_to_bigint, deploy_contracts, generate_proof, non_membership_overrides_from_pubs,
+    scalar_to_u256, test_env, u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -370,8 +370,7 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
         note.set_in_tree(&mut leaves);
     }
 
-    // `transact` appends each consolidate output pair past the seeded prefix,
-    // so reserve those slots at the zero leaf the pool grows from.
+    // Reserve the slots `transact` appends each consolidate output pair into.
     let reserved_leaves = session.len().checked_mul(2).expect("reserved leaf count");
     let first_merge_leaf_index = leaves.len();
     leaves.resize(

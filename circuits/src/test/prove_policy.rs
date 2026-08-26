@@ -35,7 +35,6 @@ mod tests {
 
     /// Leaves seeded into the pool and ASP membership trees before a case runs.
     ///
-    /// Both trees are append-only, so a note only ever sits below this index.
     /// Every `leaf_index` a case picks must stay inside it.
     const LEAF_PREFIX: usize = 64;
 
@@ -1426,7 +1425,6 @@ mod tests {
             }
 
             const N_ITERS: usize = 20;
-
 
             let mut rng: u128 = 0xA9_5EED_1337_D3AD_B33Fu128;
 

@@ -1,7 +1,6 @@
 //! Circuits merkle helpers must stay bit-identical to the SDK prover copy.
-//! The dense comparison runs over a full depth-10 tree, which is about hash
-//! equivalence rather than the production depth; `prefix_tree_matches_prover`
-//! covers the padded path the pool actually uses.
+//! Dense helpers are compared over a full depth-10 tree, padded ones over a
+//! depth-20 prefix.
 
 use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
@@ -17,7 +16,6 @@ fn scalar_to_field(s: Scalar) -> Field {
 
 #[test]
 fn merkle_helpers_match_prover() {
-    // A full depth-10 tree keeps the dense comparison cheap.
     let leaves: Vec<Scalar> = (0..1024).map(Scalar::from).collect();
 
     assert_eq!(
@@ -46,8 +44,6 @@ fn merkle_helpers_match_prover() {
     );
 }
 
-/// The padded path is what production runs: both trees are append-only, so a
-/// depth-20 tree is always a short prefix over empty subtrees.
 #[test]
 fn prefix_tree_matches_prover() {
     const DEPTH: usize = 20;
@@ -88,19 +84,16 @@ fn prefix_tree_matches_prover() {
     }
 }
 
-/// An empty pool must hash to the same root on both sides, since that is the
-/// root a freshly deployed pool reports.
+/// The root a freshly deployed pool reports.
 #[test]
 fn empty_prefix_tree_matches_prover() {
     const DEPTH: usize = 20;
 
     let tree = circuits_merkle::PrefixTree::new(&[], DEPTH);
-    let prover = prover_merkle::MerklePrefixTree::new(
-        u32::try_from(DEPTH).expect("depth fits in u32"),
-        &[],
-    )
-    .expect("prover prefix tree")
-    .into_built();
+    let prover =
+        prover_merkle::MerklePrefixTree::new(u32::try_from(DEPTH).expect("depth fits in u32"), &[])
+            .expect("prover prefix tree")
+            .into_built();
 
     assert_eq!(
         scalar_to_field(tree.root()),
