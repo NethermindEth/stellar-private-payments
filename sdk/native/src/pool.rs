@@ -259,7 +259,7 @@ impl<S: Storage> PrivatePool<S> {
         Ok(())
     }
 
-    pub fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit<S>, Error> {
+    pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit<S>, Error> {
         let pool = self
             .config
             .contract_config
@@ -271,6 +271,7 @@ impl<S: Storage> PrivatePool<S> {
                 self.config.pool_contract_id
             )));
         }
+        self.ensure_synced().await?;
 
         let storage = self.storage.fork()?;
         let pool_contract_id = self.config.pool_contract_id.clone();

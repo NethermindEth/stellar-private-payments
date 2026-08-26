@@ -196,7 +196,7 @@ pub trait Storage: crate::chain::ContractDataStorage {
     async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error>;
 
     /// Pool-gvk events in `(ledger, event_id)` order.
-    fn list_pool_gvk_events(
+    async fn list_pool_gvk_events(
         &self,
         pool_contract_id: &str,
         after: Option<(u32, String)>,
@@ -204,5 +204,8 @@ pub trait Storage: crate::chain::ContractDataStorage {
     ) -> Result<Vec<GvkEvent>, Error>;
 
     /// Every pool commitment hash, for traceable nullifier audit.
-    fn list_pool_commitment_hashes(&self, pool_contract_id: &str) -> Result<Vec<Field>, Error>;
+    async fn list_pool_commitment_hashes(
+        &self,
+        pool_contract_id: &str,
+    ) -> Result<Vec<Field>, Error>;
 }

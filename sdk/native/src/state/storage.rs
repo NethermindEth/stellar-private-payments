@@ -2822,8 +2822,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn gvk_ciphertext_persists_and_audits() -> Result<()> {
+    #[tokio::test]
+    async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
         use crate::{
             storage::LocalStorage,
             types::BabyJubJubPoint,
@@ -2882,7 +2882,7 @@ mod tests {
         let local = LocalStorage::open(path.to_str().expect("temp path utf-8"))
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut audit = crate::gvk::GvkAudit::new(local, "CPOOL", d_priv);
-        let tx = audit.next_tx()?.expect("one tx");
+        let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(99u128));
         assert_eq!(tx.outputs[0].commitment, commitment);

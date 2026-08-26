@@ -65,30 +65,29 @@ impl<S: Storage> GvkAudit<S> {
     }
 
     /// Fetch and audit the next transaction, or `None` when exhausted.
-    pub fn next_tx(&mut self) -> Result<Option<GvkTxAudit>> {
+    pub async fn next_tx(&mut self) -> Result<Option<GvkTxAudit>> {
         loop {
             if let Some(group) = self.complete.pop_front() {
-                return Ok(Some(self.audit_group(group)?));
+                return Ok(Some(self.audit_group(group).await?));
             }
 
             if self.exhausted {
-                return self
-                    .pending
-                    .take()
-                    .map(|group| self.audit_group(group))
-                    .transpose();
+                return match self.pending.take() {
+                    Some(group) => Ok(Some(self.audit_group(group).await?)),
+                    None => Ok(None),
+                };
             }
 
-            self.load_batch()?;
+            self.load_batch().await?;
         }
     }
 
-    fn load_batch(&mut self) -> Result<()> {
-        let events = self.storage.list_pool_gvk_events(
-            &self.pool_contract_id,
-            self.after.clone(),
-            ROW_BATCH,
-        )?;
+    async fn load_batch(&mut self) -> Result<()> {
+        let events = self
+            .storage
+            .list_pool_gvk_events(&self.pool_contract_id, self.after.clone(), ROW_BATCH)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         if events.len() < ROW_BATCH as usize {
             self.exhausted = true;
         }
@@ -118,7 +117,7 @@ impl<S: Storage> GvkAudit<S> {
         Ok(())
     }
 
-    fn audit_group(&mut self, group: TxGroup) -> Result<GvkTxAudit> {
+    async fn audit_group(&mut self, group: TxGroup) -> Result<GvkTxAudit> {
         let mut audited_outputs = Vec::new();
         for (commitment, ciphertext) in group.outputs {
             if let Some(note) = ciphertext.decrypt_audited_for_commitment(&self.d_priv, &commitment)
@@ -133,7 +132,7 @@ impl<S: Storage> GvkAudit<S> {
             nullifiers.push(nullifier);
             if let Some(ct) = ciphertext {
                 let d_priv = self.d_priv;
-                let candidates = self.commitment_candidates()?;
+                let candidates = self.commitment_candidates().await?;
                 if let Some(note) = try_decrypt_against_commitment_set(&d_priv, &ct, candidates) {
                     audited_inputs.push(note);
                 }
@@ -148,11 +147,13 @@ impl<S: Storage> GvkAudit<S> {
         })
     }
 
-    fn commitment_candidates(&mut self) -> Result<&HashSet<Field>> {
+    async fn commitment_candidates(&mut self) -> Result<&HashSet<Field>> {
         if self.commitment_candidates.is_none() {
             let set = self
                 .storage
-                .list_pool_commitment_hashes(&self.pool_contract_id)?
+                .list_pool_commitment_hashes(&self.pool_contract_id)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
                 .into_iter()
                 .collect();
             self.commitment_candidates = Some(set);
@@ -382,8 +383,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn cursor_audits_output_note() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn cursor_audits_output_note() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("output")?;
         let d_priv = field(0xA11CE);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
@@ -413,19 +414,19 @@ mod tests {
         })?;
 
         let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
-        let tx = audit.next_tx()?.expect("one tx");
+        let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(5_000_000u128));
         assert!(tx.inputs.is_empty());
         assert!(tx.nullifiers.is_empty());
-        assert_eq!(audit.next_tx()?, None);
+        assert_eq!(audit.next_tx().await?, None);
 
         let _ = std::fs::remove_file(path);
         Ok(())
     }
 
-    #[test]
-    fn cursor_audits_traceable_input() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn cursor_audits_traceable_input() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("traceable")?;
         let d_priv = field(0x510);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
@@ -482,7 +483,7 @@ mod tests {
         })?;
 
         let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
-        let tx = audit.next_tx()?.expect("transact tx");
+        let tx = audit.next_tx().await?.expect("transact tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.inputs.len(), 1);
         assert_eq!(tx.inputs[0].commitment, spent_commitment);

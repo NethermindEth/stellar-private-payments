@@ -196,7 +196,7 @@ impl Storage for LocalStorage {
             .map_err(|e| Error::Other(e.to_string()))
     }
 
-    fn list_pool_gvk_events(
+    async fn list_pool_gvk_events(
         &self,
         pool_contract_id: &str,
         after: Option<(u32, String)>,
@@ -207,7 +207,10 @@ impl Storage for LocalStorage {
             .map_err(|e| Error::Other(e.to_string()))
     }
 
-    fn list_pool_commitment_hashes(&self, pool_contract_id: &str) -> Result<Vec<Field>, Error> {
+    async fn list_pool_commitment_hashes(
+        &self,
+        pool_contract_id: &str,
+    ) -> Result<Vec<Field>, Error> {
         self.storage()
             .list_pool_commitment_hashes(pool_contract_id)
             .map_err(|e| Error::Other(e.to_string()))

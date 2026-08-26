@@ -934,7 +934,7 @@ impl Storage for StorageBridge {
         }
     }
 
-    fn list_pool_gvk_events(
+    async fn list_pool_gvk_events(
         &self,
         _pool_contract_id: &str,
         _after: Option<(u32, String)>,
@@ -945,7 +945,7 @@ impl Storage for StorageBridge {
         ))
     }
 
-    fn list_pool_commitment_hashes(
+    async fn list_pool_commitment_hashes(
         &self,
         _pool_contract_id: &str,
     ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
