@@ -168,7 +168,7 @@ pub fn try_decrypt_against_commitment_set(
     audited_from_recovered_in_set(recovered, candidate_commitments)
 }
 
-fn commitment_field_for_recovered(recovered: &GvkRecoveredNote) -> Option<Field> {
+pub(crate) fn commitment_field_for_recovered(recovered: &GvkRecoveredNote) -> Option<Field> {
     if recovered.amount().is_zero() {
         return None;
     }

@@ -949,64 +949,90 @@ impl Storage {
         Ok(())
     }
 
-    /// Output-note GVK ciphertexts stored for `pool_contract_id`.
-    pub fn list_pool_gvk_commitment_ciphertexts(
+    /// Flat pool GVK events in `(ledger, event_id)` order.
+    pub fn list_pool_gvk_events(
         &self,
-        pool_contract_id: i64,
-    ) -> Result<Vec<(Field, GlobalViewKeyCiphertext)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT c.commitment, c.gvk_ciphertext
-             FROM pool_commitments c
-             JOIN raw_contract_events r ON r.id = c.event_id
-             WHERE r.contract_id = ?1 AND c.gvk_ciphertext IS NOT NULL
-             ORDER BY c.id ASC",
+        pool_contract_id: &str,
+        after: Option<(u32, String)>,
+        limit: u32,
+    ) -> Result<Vec<crate::gvk::GvkEvent>> {
+        let sql = "SELECT ledger, id, kind, field, gvk_ciphertext FROM (
+                SELECT r.ledger, r.id, 0 AS kind, c.commitment AS field, c.gvk_ciphertext
+                FROM pool_commitments c
+                JOIN raw_contract_events r ON r.id = c.event_id
+                JOIN contracts pool ON pool.contract_id = r.contract_id
+                WHERE pool.address = ?1 AND c.gvk_ciphertext IS NOT NULL
+                UNION ALL
+                SELECT r.ledger, r.id, 1 AS kind, n.nullifier AS field, n.gvk_ciphertext
+                FROM pool_nullifiers n
+                JOIN raw_contract_events r ON r.id = n.event_id
+                JOIN contracts pool ON pool.contract_id = r.contract_id
+                WHERE pool.address = ?1
+            )
+            WHERE (?2 IS NULL OR ledger > ?3 OR (ledger = ?3 AND id > ?4))
+            ORDER BY ledger ASC, id ASC
+            LIMIT ?5";
+
+        let (after_ledger, after_id) = match after {
+            Some((ledger, id)) => (Some(ledger), Some(id)),
+            None => (None, None),
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(
+            params![
+                pool_contract_id,
+                after_ledger.map(|_| 1i32),
+                after_ledger,
+                after_id,
+                limit,
+            ],
+            |row| {
+                let ledger: u32 = row.get(0)?;
+                let event_id: String = row.get(1)?;
+                let kind: i32 = row.get(2)?;
+                let field: Field = row.get(3)?;
+                let encoded: Option<String> = row.get(4)?;
+                Ok((ledger, event_id, kind, field, encoded))
+            },
         )?;
-        let rows = stmt.query_map(params![pool_contract_id], |row| {
-            let commitment: Field = row.get(0)?;
-            let encoded: String = row.get(1)?;
-            Ok((commitment, encoded))
-        })?;
+
         rows.map(|row| {
-            let (commitment, encoded) = row?;
-            let ciphertext = decode_gvk_ciphertext(&encoded)?;
-            Ok((commitment, ciphertext))
+            let (ledger, event_id, kind, field, encoded) = row?;
+            let gvk_ciphertext = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
+            match kind {
+                0 => {
+                    let encoded = encoded.ok_or_else(|| {
+                        anyhow!("commitment row missing gvk_ciphertext after filter")
+                    })?;
+                    Ok(crate::gvk::GvkEvent::Commitment {
+                        ledger,
+                        event_id,
+                        commitment: field,
+                        gvk_ciphertext: decode_gvk_ciphertext(&encoded)?,
+                    })
+                }
+                1 => Ok(crate::gvk::GvkEvent::Nullifier {
+                    ledger,
+                    event_id,
+                    nullifier: field,
+                    gvk_ciphertext,
+                }),
+                other => Err(anyhow!("unknown pool GVK event kind: {other}")),
+            }
         })
         .collect()
     }
 
-    /// Spent-input GVK ciphertexts stored for `pool_contract_id` (traceable
-    /// pools).
-    pub fn list_pool_gvk_nullifier_ciphertexts(
-        &self,
-        pool_contract_id: i64,
-    ) -> Result<Vec<(Field, GlobalViewKeyCiphertext)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT n.nullifier, n.gvk_ciphertext
-             FROM pool_nullifiers n
-             JOIN raw_contract_events r ON r.id = n.event_id
-             WHERE r.contract_id = ?1 AND n.gvk_ciphertext IS NOT NULL
-             ORDER BY n.id ASC",
-        )?;
-        let rows = stmt.query_map(params![pool_contract_id], |row| {
-            let nullifier: Field = row.get(0)?;
-            let encoded: String = row.get(1)?;
-            Ok((nullifier, encoded))
-        })?;
-        rows.map(|row| {
-            let (nullifier, encoded) = row?;
-            let ciphertext = decode_gvk_ciphertext(&encoded)?;
-            Ok((nullifier, ciphertext))
-        })
-        .collect()
-    }
-
-    /// Every pool commitment hash, for GVK nullifier audit candidate lookup.
-    pub fn list_pool_commitment_hashes(&self, pool_contract_id: i64) -> Result<Vec<Field>> {
+    /// Every pool commitment hash, for traceable nullifier audit within a
+    /// cursor.
+    pub fn list_pool_commitment_hashes(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.commitment
              FROM pool_commitments c
              JOIN raw_contract_events r ON r.id = c.event_id
-             WHERE r.contract_id = ?1
+             JOIN contracts pool ON pool.contract_id = r.contract_id
+             WHERE pool.address = ?1
              ORDER BY c.id ASC",
         )?;
         let rows = stmt.query_map(params![pool_contract_id], |row| row.get(0))?;
@@ -2799,12 +2825,20 @@ mod tests {
     #[test]
     fn gvk_ciphertext_persists_and_audits() -> Result<()> {
         use crate::{
-            gvk::audit_pool_output_notes,
+            storage::LocalStorage,
             types::BabyJubJubPoint,
             zk::gvk::{GvkNote, generate_gvk_nonce},
         };
 
-        let mut storage = Storage::connect_in_memory()?;
+        let path = std::env::temp_dir().join(format!(
+            "spp-gvk-storage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let mut storage = Storage::connect_file(&path)?;
         let d_priv = Field(crate::types::U256::from(0xAD00));
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
         let note = GvkNote::new(
@@ -2827,30 +2861,33 @@ mod tests {
                 .map_err(|_| anyhow::anyhow!("commitment hash is not 32 bytes"))?,
         )?;
 
+        let event_id = "0000000000000000004-0000000000";
         storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-gvk")],
+            events: vec![dummy_event(event_id)],
             cursor: "cur-gvk".to_string(),
             latest_ledger: 1,
         })?;
         storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-gvk".to_string(),
+            id: event_id.to_string(),
             commitment,
             index: 0,
             encrypted_output: vec![],
             gvk_ciphertext: Some(ct),
         }])?;
+        drop(storage);
 
-        let pool_contract_id: i64 = storage.conn.query_row(
-            "SELECT contract_id FROM contracts WHERE address = ?1",
-            params!["CPOOL"],
-            |row| row.get(0),
-        )?;
+        let rows = Storage::connect_file(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
+        assert_eq!(rows.len(), 1);
 
-        let audited = audit_pool_output_notes(&d_priv, &storage, pool_contract_id)?;
-        assert_eq!(audited.len(), 1);
-        assert_eq!(audited[0].note.amount(), NoteAmount::from(99u128));
-        assert_eq!(audited[0].commitment, commitment);
+        let local = LocalStorage::open(path.to_str().expect("temp path utf-8"))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut audit = crate::gvk::GvkAudit::new(local, "CPOOL", d_priv);
+        let tx = audit.next_tx()?.expect("one tx");
+        assert_eq!(tx.outputs.len(), 1);
+        assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(99u128));
+        assert_eq!(tx.outputs[0].commitment, commitment);
 
+        let _ = std::fs::remove_file(path);
         Ok(())
     }
 }

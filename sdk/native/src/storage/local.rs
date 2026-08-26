@@ -195,4 +195,21 @@ impl Storage for LocalStorage {
             .clamp_last_fully_indexed_ledger(max_ledger)
             .map_err(|e| Error::Other(e.to_string()))
     }
+
+    fn list_pool_gvk_events(
+        &self,
+        pool_contract_id: &str,
+        after: Option<(u32, String)>,
+        limit: u32,
+    ) -> Result<Vec<crate::gvk::GvkEvent>, Error> {
+        self.storage()
+            .list_pool_gvk_events(pool_contract_id, after, limit)
+            .map_err(|e| Error::Other(e.to_string()))
+    }
+
+    fn list_pool_commitment_hashes(&self, pool_contract_id: &str) -> Result<Vec<Field>, Error> {
+        self.storage()
+            .list_pool_commitment_hashes(pool_contract_id)
+            .map_err(|e| Error::Other(e.to_string()))
+    }
 }

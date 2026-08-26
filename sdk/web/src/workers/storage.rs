@@ -933,6 +933,26 @@ impl Storage for StorageBridge {
             Err(e) => Err(Error::Other(e.to_string())),
         }
     }
+
+    fn list_pool_gvk_events(
+        &self,
+        _pool_contract_id: &str,
+        _after: Option<(u32, String)>,
+        _limit: u32,
+    ) -> Result<Vec<stellar_private_payments::gvk::GvkEvent>, Error> {
+        Err(Error::Other(
+            "GVK audit requires native LocalStorage".into(),
+        ))
+    }
+
+    fn list_pool_commitment_hashes(
+        &self,
+        _pool_contract_id: &str,
+    ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
+        Err(Error::Other(
+            "GVK audit requires native LocalStorage".into(),
+        ))
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -84,10 +84,7 @@ pub use disclosure::{
     DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
 };
 pub use error::{Error, PlanExecutionError};
-pub use gvk::{
-    audit_commitment_event, audit_nullifier_event, audit_pool_output_notes,
-    audit_pool_spent_input_notes,
-};
+pub use gvk::{GvkAudit, GvkTxAudit, audit_commitment_event, audit_nullifier_event};
 pub use handle::Handle;
 pub use plan::PreparedTransactionPlan;
 pub use planner::{SpendTarget, SpendableNote, Transact};

@@ -1,7 +1,10 @@
-//! Global View Key admin audit helpers (indexed pool events + storage).
+//! Admin-side Global View Key audit over indexed pool events.
 //!
-//! Cryptographic primitives live in [`crate::zk::gvk`].
+//! Primary API: [`GvkAudit`]. Cryptographic primitives live in
+//! [`crate::zk::gvk`].
 
 mod audit;
+mod event;
 
-pub use audit::*;
+pub use audit::{GvkAudit, GvkTxAudit, audit_commitment_event, audit_nullifier_event};
+pub use event::GvkEvent;
