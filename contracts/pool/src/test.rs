@@ -10,6 +10,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
+    token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
@@ -43,6 +44,16 @@ fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
 
 fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
+}
+
+/// A real asset contract with `holder` funded. `MockToken` reports zero for
+/// everyone and moves nothing, so a balance assertion against it would pass
+/// whatever the pool did.
+fn register_funded_token(env: &Env, holder: &Address, amount: i128) -> Address {
+    let token = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let address = token.address();
+    StellarAssetClient::new(env, &address).mint(holder, &amount);
+    address
 }
 
 /// Create a mock Groth16 proof for testing
@@ -1155,19 +1166,9 @@ fn transact_rejects_zeroed_proof() {
     );
 }
 
-/// Two identical nullifiers inside one transaction are NOT caught by the
-/// contract's spent-check, because that check only compares each nullifier
-/// against stored state, never against the others in the same call. The
-/// duplicate therefore reaches proof verification and is refused there.
-///
-/// This pins the current division of labour: pairwise distinctness is enforced
-/// by the circuit (`transaction.circom` constrains it), and the contract relies
-/// on that rather than re-checking independently. The test is written to fail
-/// if that reliance ever changes, in either direction.
-///
-/// Ignored under Miri, matching every other `transact_*` test in this file. The
-/// abort is Stacked-Borrows UB inside the host's own error path, not in this
-/// contract, and it is what turned the nightly `pool` group red after #485.
+/// The spent-check only compares each nullifier against stored state, so a
+/// duplicate inside one call passes it and is left to the circuit, which
+/// constrains pairwise distinctness.
 #[test]
 #[cfg_attr(
     miri,
@@ -1221,11 +1222,8 @@ fn rotate_root(env: &Env, pool_id: &Address, left: u32, right: u32) {
 }
 
 /// A root the pool has never recorded must be refused as `UnknownRoot`.
-///
-/// Everything else in the proof is well formed here — the ext hash matches and
-/// the public amount is right — so the only reason to refuse is the root. The
-/// existing `transact_rejects_unknown_root` also mismatches the ext hash and
-/// asserts only `is_err()`, so it does not pin which check fired.
+/// Everything else in the proof is well formed, so the root is the only reason
+/// left to refuse.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_root_never_inserted() {
@@ -1245,12 +1243,8 @@ fn transact_rejects_root_never_inserted() {
     assert_eq!(err, Ok(Error::UnknownRoot));
 }
 
-/// A root that was valid when it was recorded but has since been pushed out of
-/// the history ring must be refused as `UnknownRoot` too.
-///
-/// This is the stale-proof case: a proof built against a real pool state that
-/// arrives too late. `pool_is_known_root_returns_false_for_evicted_root` pins
-/// the helper; this pins that the transact path acts on it.
+/// A root pushed out of the history ring must be refused too. This is the
+/// stale-proof case: built against real pool state, arriving too late.
 #[test]
 #[cfg_attr(
     miri,
@@ -1291,12 +1285,8 @@ fn transact_rejects_evicted_root() {
     assert_eq!(err, Ok(Error::UnknownRoot));
 }
 
-/// The root check runs before the nullifier and ext hash checks, so a
-/// transaction that is wrong in all three ways is reported as `UnknownRoot`.
-///
-/// Ordering is worth pinning because the caller only ever sees the first
-/// failure. If the root check moved below the nullifier check, a stale proof
-/// would be reported as a double spend.
+/// The root check runs first, so a transaction wrong in all three ways is
+/// reported as `UnknownRoot`. The caller only ever sees the first failure.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_reports_unknown_root_before_later_checks() {
@@ -1326,18 +1316,9 @@ fn transact_reports_unknown_root_before_later_checks() {
     assert_eq!(err, Ok(Error::UnknownRoot));
 }
 
-/// `ext_amount == 0` is neither a deposit nor a withdrawal, and it is accepted.
-///
-/// The deposit branch in `transact` is strictly greater than zero, so a
-/// zero-value transaction skips the maximum-deposit bound entirely — this pool
-/// is registered with a maximum of zero and the transaction still gets past it.
-/// `calculate_public_amount` then maps zero to zero, which matches the proof,
-/// so the amount checks pass too and the transaction is refused only by the
-/// verifier.
-///
-/// The error that surfaces is therefore `InvalidProof` and nothing earlier,
-/// which is what makes this a statement about the deposit bound rather than
-/// about the proof.
+/// The deposit branch is strictly greater than zero, so `ext_amount == 0`
+/// skips the maximum-deposit bound even when that maximum is zero, and the
+/// transaction is refused only by the verifier.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
@@ -1362,31 +1343,9 @@ fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
     assert_eq!(err, Ok(Error::InvalidProof));
 }
 
-/// A proof the verifier refuses must reach the caller as the pool's own
-/// `InvalidProof`, never as one of the verifier's error codes.
-///
-/// The two contracts carry separate `#[contracterror]` enums, both
-/// `#[repr(u32)]`, and the codes collide: `Groth16Error::MalformedPublicInputs`
-/// is 1 and `Error::NotAuthorized` is 1, `Groth16Error::MalformedProof` is 2
-/// and `Error::MerkleTreeFull` is 2. `verify_proof` used to call the verifier
-/// without `try_`, so a rejection trapped out of the pool frame carrying the
-/// verifier's raw code and the caller decoded it against the pool's enum. A
-/// refused proof was reported as an authorization failure, which is both wrong
-/// and the more alarming of the two readings.
-///
-/// The fixture is built so that `InvalidProof` can only have come from the
-/// verifier. `internal_transact` has three other sources of it and each is
-/// excluded here:
-///
-/// - the two ASP-root comparisons are skipped, because the pool is registered
-///   with policy flags 0 and both are behind `requires_*_proofs`;
-/// - the `is_empty` guard in `verify_proof` does not fire, because the mock
-///   proof carries non-zero points, asserted below.
-///
-/// Everything before proof verification is made to pass: the root is the pool's
-/// live root, the nullifier is unspent, the ext hash is computed from the ext
-/// data, and the public amount is zero for a zero-value transaction. So the
-/// verifier is the only thing left that can refuse this transaction.
+/// A verifier rejection must reach the caller as the pool's own `InvalidProof`.
+/// The two enums are both `#[repr(u32)]` and their codes collide, so an
+/// untrapped rejection used to surface as `NotAuthorized`.
 #[test]
 fn transact_reports_verifier_rejection_as_invalid_proof() {
     let env = test_env();
@@ -1413,5 +1372,59 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as the pool's InvalidProof, not as the \
          NotAuthorized that Groth16Error::MalformedPublicInputs shares a code with"
+    );
+}
+
+/// A deposit whose proof the verifier refuses must revert whole. `transact`
+/// moves the tokens before `internal_transact` checks anything, so the sender
+/// keeps their balance only if the failed call is rolled back.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 10_000i128;
+    setup.token = register_funded_token(&env, &sender, funded);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+    let (mut proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE6);
+    // Everything before verification must pass, or the revert being asserted
+    // would be an earlier check rather than the verifier.
+    proof.ext_data_hash = compute_ext_hash(&env, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    assert_eq!(token.balance(&sender), funded);
+    assert_eq!(token.balance(&pool_id), 0);
+
+    let err = pool
+        .try_transact(&proof, &deposit, &sender)
+        .expect_err("a deposit carrying a proof the verifier refuses must be refused");
+    assert_eq!(
+        err,
+        Ok(Error::InvalidProof),
+        "the deposit bound must not answer first, or the transfer is never reached"
+    );
+    assert_eq!(
+        token.balance(&sender),
+        funded,
+        "a refused deposit must not debit the sender"
+    );
+    assert_eq!(
+        token.balance(&pool_id),
+        0,
+        "a refused deposit must not credit the pool"
     );
 }
