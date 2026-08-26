@@ -5,10 +5,10 @@
 //! and the verification from the pool contract. That is the pipeline the CLI,
 //! the SDK and the browser use.
 use super::utils::{
-    DeployedContracts, LEVELS, NonMembership, POOL_ZERO_LEAF, TRANSACT_STEMS,
+    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, TRANSACT_STEMS,
     build_membership_trees, build_policy_inputs, bytes32_to_bigint, deploy_contracts,
     generate_proof, prove_with_graph, scalar_to_u256, sync_contract_state, test_env,
-    u256_to_scalar, wrap_groth16_proof,
+    wrap_groth16_proof,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -16,7 +16,7 @@ use circuits::test::utils::{
     circom_tester::Inputs,
     general::scalar_to_bigint,
     keypair::derive_public_key,
-    transaction::{commitment, prepopulated_leaves},
+    transaction::{commitment, prepopulated_prefix},
     transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
 use contract_types::Groth16Error;
@@ -105,20 +105,12 @@ fn transact_fixture(
         ],
     );
 
-    // Pool state. The last leaf pair stays empty, so the tree is not full.
-    let mut leaves = prepopulated_leaves(
-        LEVELS,
+    // Pool state. `transact` appends its two outputs past this prefix.
+    let mut leaves = prepopulated_prefix(
         0xDEAD_BEEFu64,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-        24,
+        LEAF_PREFIX,
     );
-    let zero = U256::from_be_bytes(&env, &Bytes::from_array(&env, &POOL_ZERO_LEAF));
-    let last_pair = leaves
-        .len()
-        .checked_sub(2)
-        .expect("pool needs at least two leaves");
-    leaves[last_pair] = u256_to_scalar(&zero);
-    leaves[last_pair.checked_add(1).expect("last leaf index")] = u256_to_scalar(&zero);
 
     let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
     let keys = case
@@ -298,11 +290,10 @@ fn all_transact_graphs_prove_and_verify() -> Result<()> {
         ],
     );
 
-    let leaves = prepopulated_leaves(
-        LEVELS,
+    let leaves = prepopulated_prefix(
         0xDEAD_BEEFu64,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-        24,
+        LEAF_PREFIX,
     );
     let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
     let keys = case

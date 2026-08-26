@@ -2,11 +2,11 @@ use super::{
     circom_tester::prove_and_verify,
     general::scalar_to_bigint,
     keypair::{derive_public_key, sign},
-    merkle_tree::{merkle_proof, merkle_root},
+    merkle_tree::PrefixTree,
     transaction::{commitment, nullifier},
 };
 use crate::test::utils::circom_tester::Inputs;
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use ark_bn254::Fr as Scalar;
 use num_bigint::BigInt;
 use std::{
@@ -64,14 +64,13 @@ pub struct TransactionWitness {
 /// # Arguments
 ///
 /// * `case` - Transaction case containing input and output notes
-/// * `leaves` - Initial leaves vector (will be modified with commitments)
-/// * `expected_levels` - Expected number of levels in the Merkle tree
+/// * `leaves` - Filled leaf prefix (will be modified with commitments)
+/// * `expected_levels` - Depth of the Merkle tree
 ///
 /// # Returns
 ///
 /// Returns `Ok(TransactionWitness)` containing the root, public keys,
-/// nullifiers, path indices, and flattened path elements, or an error if the
-/// tree depth doesn't match expectations.
+/// nullifiers, path indices, and flattened path elements.
 pub fn prepare_transaction_witness(
     case: &TxCase,
     mut leaves: Vec<Scalar>,
@@ -88,18 +87,15 @@ pub fn prepare_transaction_witness(
         leaves[note.leaf_index] = cm;
     }
 
-    let root = merkle_root(leaves.clone());
+    let tree = PrefixTree::new(&leaves, expected_levels);
+    let root = tree.root();
     let mut path_indices = Vec::with_capacity(case.inputs.len());
     let mut path_elements_flat =
         Vec::with_capacity(expected_levels.saturating_mul(case.inputs.len()));
     let mut nullifiers = Vec::with_capacity(case.inputs.len());
 
     for (i, note) in case.inputs.iter().enumerate() {
-        let (siblings, path_idx_u64, depth) = merkle_proof(&leaves, note.leaf_index);
-        ensure!(
-            depth == expected_levels,
-            "unexpected depth for input {i}, expected {expected_levels}, got {depth}"
-        );
+        let (siblings, path_idx_u64) = tree.proof(note.leaf_index);
 
         // Flatten sibling nodes into the format the Circom tester expects.
         path_elements_flat.extend(siblings.into_iter().map(scalar_to_bigint));

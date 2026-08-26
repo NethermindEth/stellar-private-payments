@@ -2,8 +2,16 @@
 //! Coherence test guarded at production depth 10 (1024 leaves).
 
 use ark_bn254::Fr as Scalar;
+use ark_ff::{BigInteger, PrimeField};
 use circuits::core::merkle as circuits_merkle;
-use stellar_private_payments::zk::merkle as prover_merkle;
+use stellar_private_payments::{types::Field, zk::merkle as prover_merkle};
+
+fn scalar_to_field(s: Scalar) -> Field {
+    let bytes = s.into_bigint().to_bytes_be();
+    let mut buf = [0u8; 32];
+    buf.copy_from_slice(&bytes);
+    Field::try_from_be_bytes(buf).expect("valid field element")
+}
 
 #[test]
 fn merkle_helpers_match_prover() {
@@ -33,5 +41,68 @@ fn merkle_helpers_match_prover() {
         circuits_merkle::poseidon2_compression(a, b),
         prover_merkle::poseidon2_compression(a, b),
         "poseidon2_compression diverged"
+    );
+}
+
+/// The padded path is what production runs: both trees are append-only, so a
+/// depth-20 tree is always a short prefix over empty subtrees.
+#[test]
+fn prefix_tree_matches_prover() {
+    const DEPTH: usize = 20;
+
+    let leaves: Vec<Scalar> = (1..=37).map(Scalar::from).collect();
+    let fields: Vec<Field> = leaves.iter().copied().map(scalar_to_field).collect();
+
+    let tree = circuits_merkle::PrefixTree::new(&leaves, DEPTH);
+    let prover = prover_merkle::MerklePrefixTree::new(
+        u32::try_from(DEPTH).expect("depth fits in u32"),
+        &fields,
+    )
+    .expect("prover prefix tree")
+    .into_built();
+
+    assert_eq!(
+        scalar_to_field(tree.root()),
+        prover.root().expect("prover root"),
+        "prefix root diverged between circuits copy and prover at depth {DEPTH}"
+    );
+
+    for idx in [0usize, 1, 2, 17, 36] {
+        let (path, indices) = tree.proof(idx);
+        let expected = prover
+            .proof(u32::try_from(idx).expect("index fits in u32"))
+            .expect("prover proof");
+
+        assert_eq!(
+            path.into_iter().map(scalar_to_field).collect::<Vec<_>>(),
+            expected.path_elements(),
+            "path elements diverged at idx={idx}"
+        );
+        assert_eq!(
+            scalar_to_field(Scalar::from(indices)),
+            expected.path_indices(),
+            "path indices diverged at idx={idx}"
+        );
+    }
+}
+
+/// An empty pool must hash to the same root on both sides, since that is the
+/// root a freshly deployed pool reports.
+#[test]
+fn empty_prefix_tree_matches_prover() {
+    const DEPTH: usize = 20;
+
+    let tree = circuits_merkle::PrefixTree::new(&[], DEPTH);
+    let prover = prover_merkle::MerklePrefixTree::new(
+        u32::try_from(DEPTH).expect("depth fits in u32"),
+        &[],
+    )
+    .expect("prover prefix tree")
+    .into_built();
+
+    assert_eq!(
+        scalar_to_field(tree.root()),
+        prover.root().expect("prover root"),
+        "empty-tree root diverged at depth {DEPTH}"
     );
 }
