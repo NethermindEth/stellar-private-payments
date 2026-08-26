@@ -1,11 +1,12 @@
 pragma circom 2.2.2;
 
 // Allowlist policy transaction: base transact + ASP allowlist module.
+// levels sizes the pool commitment tree, aspLevels the ASP membership tree.
 
 include "./policyTransaction.circom";
 include "./aspMembership.circom";
 
-template PolicyTransactionAllowlist(nIns, nOuts, nMembershipProofs, levels) {
+template PolicyTransactionAllowlist(nIns, nOuts, nMembershipProofs, levels, aspLevels) {
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
@@ -13,7 +14,7 @@ template PolicyTransactionAllowlist(nIns, nOuts, nMembershipProofs, levels) {
     signal input outputCommitment[nOuts];
     signal input membershipRoots[nIns][nMembershipProofs];
 
-    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs];
+    input MembershipProof(aspLevels) membershipProofs[nIns][nMembershipProofs];
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
     signal input inBlinding[nIns];
@@ -44,7 +45,7 @@ template PolicyTransactionAllowlist(nIns, nOuts, nMembershipProofs, levels) {
         core.outBlinding[tx] <== outBlinding[tx];
     }
 
-    component membership = AspMembership(nIns, nMembershipProofs, levels);
+    component membership = AspMembership(nIns, nMembershipProofs, aspLevels);
     for (var tx = 0; tx < nIns; tx++) {
         membership.inPublicKey[tx] <== core.inPublicKey[tx];
         for (var i = 0; i < nMembershipProofs; i++) {
@@ -52,7 +53,7 @@ template PolicyTransactionAllowlist(nIns, nOuts, nMembershipProofs, levels) {
             membership.membershipProofs[tx][i].leaf <== membershipProofs[tx][i].leaf;
             membership.membershipProofs[tx][i].blinding <== membershipProofs[tx][i].blinding;
             membership.membershipProofs[tx][i].pathIndices <== membershipProofs[tx][i].pathIndices;
-            for (var j = 0; j < levels; j++) {
+            for (var j = 0; j < aspLevels; j++) {
                 membership.membershipProofs[tx][i].pathElements[j] <== membershipProofs[tx][i].pathElements[j];
             }
         }

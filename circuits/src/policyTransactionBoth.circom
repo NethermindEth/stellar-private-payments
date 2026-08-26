@@ -1,12 +1,14 @@
 pragma circom 2.2.2;
 
 // Both policy transaction: base transact + allowlist + blocklist modules.
+// levels sizes the pool commitment tree, aspLevels the ASP membership tree,
+// smtLevels the ASP blocklist sparse tree.
 
 include "./policyTransaction.circom";
 include "./aspMembership.circom";
 include "./aspNonMembership.circom";
 
-template PolicyTransactionBoth(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
+template PolicyTransactionBoth(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, aspLevels, smtLevels) {
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
@@ -15,7 +17,7 @@ template PolicyTransactionBoth(nIns, nOuts, nMembershipProofs, nNonMembershipPro
     signal input membershipRoots[nIns][nMembershipProofs];
     signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
-    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs];
+    input MembershipProof(aspLevels) membershipProofs[nIns][nMembershipProofs];
     input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
@@ -47,7 +49,7 @@ template PolicyTransactionBoth(nIns, nOuts, nMembershipProofs, nNonMembershipPro
         core.outBlinding[tx] <== outBlinding[tx];
     }
 
-    component membership = AspMembership(nIns, nMembershipProofs, levels);
+    component membership = AspMembership(nIns, nMembershipProofs, aspLevels);
     component nonMembership = AspNonMembership(nIns, nNonMembershipProofs, smtLevels);
     for (var tx = 0; tx < nIns; tx++) {
         membership.inPublicKey[tx] <== core.inPublicKey[tx];
@@ -57,7 +59,7 @@ template PolicyTransactionBoth(nIns, nOuts, nMembershipProofs, nNonMembershipPro
             membership.membershipProofs[tx][i].leaf <== membershipProofs[tx][i].leaf;
             membership.membershipProofs[tx][i].blinding <== membershipProofs[tx][i].blinding;
             membership.membershipProofs[tx][i].pathIndices <== membershipProofs[tx][i].pathIndices;
-            for (var j = 0; j < levels; j++) {
+            for (var j = 0; j < aspLevels; j++) {
                 membership.membershipProofs[tx][i].pathElements[j] <== membershipProofs[tx][i].pathElements[j];
             }
         }
