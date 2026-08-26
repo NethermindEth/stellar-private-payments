@@ -133,7 +133,7 @@ assert_not_contains() {
 # ---------------------------------------------------------------------------
 # Suite-exclusivity check lists
 # ---------------------------------------------------------------------------
-SDK_ONLY_IDS="tool.cargo tool.rust-toolchain tool.wasm32-target tool.wasm-bindgen-cli tool.chromedriver env.pool.matches_deployments env.compiletime.exported artifact.circuits.debug artifact.circuits.release artifact.circuit_keys artifact.sdk_dist.workers artifact.sdk_dist.circuits artifact.sdk_dist.freshness"
+SDK_ONLY_IDS="tool.cargo tool.rust-toolchain tool.wasm32-target tool.wasm-bindgen-cli tool.chromedriver env.pool.matches_deployments env.compiletime.exported artifact.circuits artifact.circuit_keys artifact.sdk_dist.workers artifact.sdk_dist.circuits artifact.sdk_dist.freshness"
 FREIGHTER_ONLY_IDS="tool.tar tool.unzip tool.chromium tool.trunk tool.xvfb freighter.node_modules freighter.playwright freighter.ffmpeg freighter.extension.pinned freighter.snapshot.exists freighter.snapshot.integrity freighter.onboarding browser.chromium.resolved browser.profile_tmpdir browser.display browser.app_url"
 
 # ---------------------------------------------------------------------------
@@ -200,8 +200,7 @@ export CI=1
 export E2E_CIRCUITS_OUT_DIR="$TMP_ROOT/no-circuits"
 export E2E_SDK_DIST_DIR="$TMP_ROOT/no-dist"
 run_preflight --check --suite sdk
-assert_missing artifact.circuits.debug
-assert_missing artifact.circuits.release
+assert_missing artifact.circuits
 assert_missing artifact.sdk_dist.workers
 assert_missing artifact.sdk_dist.circuits
 assert_exit "artifact.* fault" 1 "$STATUS"

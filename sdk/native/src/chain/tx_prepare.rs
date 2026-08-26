@@ -13,7 +13,7 @@ use super::{
 
 /// Prover output needed to prepare a pool `transact` invocation.
 #[derive(Debug, Clone)]
-pub struct PoolTransactInput {
+pub(crate) struct PoolTransactInput {
     pub proof_uncompressed: Vec<u8>,
     pub ext_data: ExtData,
     pub public: OnchainProofPublicInputs,
@@ -22,12 +22,7 @@ pub struct PoolTransactInput {
 impl StateFetcher {
     /// Simulates `transact` and returns unsigned XDR + auth entries for the
     /// wallet.
-    /// `source_account` is typed rather than a bare string on purpose: it
-    /// becomes the contract's `sender` argument, the account whose sequence
-    /// number is read, and the transaction envelope's source. Passing the
-    /// note owner here would silently undo the split, and this is the one
-    /// site where that mistake was previously possible.
-    pub async fn prepare_pool_transact(
+    pub(crate) async fn prepare_pool_transact(
         &self,
         pool_contract_id: &str,
         input: &PoolTransactInput,

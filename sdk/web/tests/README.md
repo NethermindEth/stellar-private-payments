@@ -16,19 +16,13 @@ access).
   runners ship both preinstalled.
 - **Node.js** — the worker JS and circuit artifacts are served from
   `sdk/web/dist`, built via `npm`.
-- **Circuit artifacts**, built once, in **both** profiles:
+- **Circuit artifacts**, built once:
 
 ```bash
-cargo build -p circuits
-cargo build -p circuits --release
+make circuits
 ```
 
-Both are needed. `sdk/web/build.rs` reads the debug artifacts
-(`target/circuits-artifacts/debug`) to compile the debug test binary, and the
-release artifacts feed the `sdk/web` npm dist that the prover fetches at
-runtime. Building only `--release` fails the test compile on a fresh checkout —
-easy to miss locally, where earlier builds have usually left the debug
-artifacts lying around.
+`sdk/web/build.rs` and the npm dist both read from `target/circuits-artifacts/`.
 
 Everything else is handled by the wrapper script described below.
 

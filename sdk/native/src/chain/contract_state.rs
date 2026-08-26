@@ -42,7 +42,7 @@ struct ParsedFindResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OnchainProofPublicInputs {
+pub(crate) struct OnchainProofPublicInputs {
     pub root: Field,
     pub input_nullifiers: [Field; 2],
     pub output_commitment0: Field,

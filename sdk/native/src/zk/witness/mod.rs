@@ -69,7 +69,7 @@ impl WitnessCalculator {
 
 /// Black-box hint functions bound at graph-evaluation time, mirroring the
 /// `bbf_*` hints injected into circomlib during graph generation
-/// (`inject_black_box_hints` in `circuits/build.rs`). These implement the
+/// (`inject_black_box_hints` in `tools/circuit-compiler`). These implement the
 /// non-quadratic (`<--`) assignments the graph cannot express directly.
 fn circomlib_black_box_functions() -> HashMap<String, BlackBoxFunction> {
     let mut bbfs: HashMap<String, BlackBoxFunction> = HashMap::new();

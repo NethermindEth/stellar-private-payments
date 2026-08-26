@@ -29,7 +29,7 @@ impl From<crate::chain::rpc::Event> for ContractEvent {
 }
 
 /// Helper to convert ScVal Address to G... or C... string
-pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
+pub(crate) fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::Address(addr) = val {
         match addr {
             xdr::ScAddress::Account(account_id) => {
@@ -55,7 +55,7 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
 }
 
 /// Helper to convert ScVal Bytes to a `Vec<u8>`
-pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
+pub(crate) fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
     if let xdr::ScVal::Bytes(sc_bytes) = val {
         Ok(sc_bytes.0.to_vec())
     } else {
@@ -66,7 +66,8 @@ pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
 }
 
 /// Encodes an `ScVal` as lowercase hex.
-pub fn scval_to_hex(scval: &xdr::ScVal) -> Result<String, Error> {
+#[allow(dead_code)]
+pub(crate) fn scval_to_hex(scval: &xdr::ScVal) -> Result<String, Error> {
     let bytes = scval
         .to_xdr(xdr::Limits::none())
         .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
@@ -75,7 +76,8 @@ pub fn scval_to_hex(scval: &xdr::ScVal) -> Result<String, Error> {
 
 /// Encodes an `ScVal` as base64, the format expected by Soroban RPC topic
 /// filters.
-pub fn scval_to_base64(scval: &xdr::ScVal) -> Result<String, Error> {
+#[allow(dead_code)]
+pub(crate) fn scval_to_base64(scval: &xdr::ScVal) -> Result<String, Error> {
     let bytes = scval
         .to_xdr(xdr::Limits::none())
         .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
@@ -83,7 +85,7 @@ pub fn scval_to_base64(scval: &xdr::ScVal) -> Result<String, Error> {
 }
 
 /// Encodes a BN254 field element as Soroban `ScVal::U256`.
-pub fn field_to_scval_u256(v: Field) -> xdr::ScVal {
+pub(crate) fn field_to_scval_u256(v: Field) -> xdr::ScVal {
     let be = v.to_be_bytes();
 
     let hi_hi = u64::from_be_bytes(be[0..8].try_into().expect("U256 hi_hi slice"));
@@ -100,7 +102,7 @@ pub fn field_to_scval_u256(v: Field) -> xdr::ScVal {
 }
 
 /// Encodes `i128` as Soroban `ScVal::I256` (two's-complement XDR layout).
-pub fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
+pub(crate) fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
     let hi = if n < 0 { -1i64 } else { 0i64 };
     let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
     let bytes = n.to_be_bytes();
@@ -115,7 +117,7 @@ pub fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
 }
 
 /// Encodes bytes as Soroban `ScVal::Bytes`.
-pub fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Error> {
+pub(crate) fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Error> {
     Ok(xdr::ScVal::Bytes(
         bytes
             .as_ref()
@@ -126,7 +128,7 @@ pub fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Error> {
 }
 
 /// Helper to convert Soroban `U256` parts into a `crate::types::U256`.
-pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
+pub(crate) fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
     if let xdr::ScVal::U256(parts) = val {
         // Soroban encodes U256 as 4x u64 limbs, big-endian by limb significance.
         // Reconstruct as: hi_hi<<192 + hi_lo<<128 + lo_hi<<64 + lo_lo.
@@ -151,7 +153,7 @@ pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
     }
 }
 
-pub fn scval_to_u32(val: &xdr::ScVal) -> Result<u32, Error> {
+pub(crate) fn scval_to_u32(val: &xdr::ScVal) -> Result<u32, Error> {
     if let xdr::ScVal::U32(n) = val {
         Ok(*n)
     } else {
@@ -159,7 +161,7 @@ pub fn scval_to_u32(val: &xdr::ScVal) -> Result<u32, Error> {
     }
 }
 
-pub fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
+pub(crate) fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
     if let xdr::ScVal::U64(n) = val {
         Ok(*n)
     } else {
@@ -167,7 +169,7 @@ pub fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
     }
 }
 
-pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
+pub(crate) fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     if let xdr::ScVal::Bool(n) = val {
         Ok(*n)
     } else {
@@ -176,7 +178,7 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
 }
 
 /// Decode pool ASP policy flags from contract storage.
-pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFlags, Error> {
+pub(crate) fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFlags, Error> {
     if let xdr::ScVal::U32(bits) = val {
         return crate::types::PolicyFlags::from_bits(*bits)
             .map_err(|e| Error::UnexpectedScVal(e.to_string()));
@@ -187,7 +189,7 @@ pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFla
 /// Decode a `pool-gvk::gvk::BabyJubJubPoint` (`{ x: U256, y: U256 }`) from
 /// contract storage. Soroban encodes a plain-field `#[contracttype]` struct
 /// as `ScVal::Map` with `ScVal::Symbol` field names.
-pub fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJubPoint, Error> {
+pub(crate) fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJubPoint, Error> {
     let xdr::ScVal::Map(Some(map)) = val else {
         return Err(Error::UnexpectedScVal(format!(
             "BabyJubJubPoint: expected ScVal::Map, found: {val:?}"
@@ -219,12 +221,13 @@ pub fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJubPoint, 
 }
 
 #[derive(Debug)]
-pub struct ParsedContractEvent {
+pub(crate) struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
     // hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
+    #[allow(dead_code)]
     pub ledger: u32,
     // StrKey representation of the contract address that emitted this event.
     pub contract_id: String,
@@ -235,7 +238,7 @@ pub struct ParsedContractEvent {
     pub values: HashMap<String, xdr::ScVal>,
 }
 
-pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
+pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
     let ContractEvent {
         id,
         ledger,

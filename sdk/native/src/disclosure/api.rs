@@ -2,7 +2,12 @@
 
 pub use crate::{
     types::DisclosureContext,
-    zk::disclosure::{vk_hash_hex, *},
+    zk::disclosure::{
+        RegisteredCircuit, SELECTIVE_DISCLOSURE_1, SELECTIVE_DISCLOSURE_2, SELECTIVE_DISCLOSURE_3,
+        SELECTIVE_DISCLOSURE_4, current_issued_at, derive_ext_context_hash, find_circuit,
+        find_circuit_by_notes, prove_receipt_proof, prove_receipt_proof_with_prover,
+        validate_registered_receipt, verify_receipt_proof, vk_hash_hex,
+    },
 };
 
 use crate::{

@@ -93,7 +93,7 @@ jobs:
           path: target/tmp/binaryen/binaryen-version_131
           key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
 
-      # circuits/build.rs regenerates a fresh Groth16 trusted-setup keypair for
+      # circuit-compiler regenerates a fresh Groth16 trusted-setup keypair for
       # every circuit (~7 minutes) whenever testdata/ lacks them — and
       # testdata/ is NOT restored by rust-cache (it lives outside target/).
       # Seed it from the committed keys instead (same as webclient).
@@ -103,13 +103,10 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
-      # Both profiles: make serve (via serve-and-run.sh below) serves the
-      # release artifacts, and spp builds from the debug profile. Building
-      # explicitly here keeps the served-app cold build short.
+      # Artifacts land in target/circuits-artifacts/ (same path make serve and
+      # spp read). Building explicitly here keeps the served-app cold build short.
       - name: Build circuit artifacts
-        run: |
-          cargo build -p circuits
-          cargo build -p circuits --release
+        run: make circuits
 
       # All four testnet accounts are generated fresh per run (account A is
       # friendbot-funded as the faucet and distributes XLM to B/C/D), so no

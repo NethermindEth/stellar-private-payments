@@ -82,7 +82,7 @@ pub enum BuildTransactParams {
     MembershipSync(AspMembershipSync),
 }
 
-pub fn transact_request_from_step(
+pub(crate) fn transact_request_from_step(
     step: &Transact,
     user_address: &str,
     pool_address: &str,
@@ -187,7 +187,7 @@ pub fn build_transact_params(
     })))
 }
 
-pub fn load_user_key_material(
+pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field)> {
@@ -289,7 +289,7 @@ fn build_pool_inputs(
     Ok(Ok(out))
 }
 
-pub fn build_validated_pool_tree(
+pub(crate) fn build_validated_pool_tree(
     storage: &SqliteStorage,
     pool_address: &str,
     pool_next_index: u32,

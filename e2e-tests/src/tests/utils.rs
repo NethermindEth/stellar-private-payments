@@ -111,7 +111,7 @@ pub fn committed_graph_path(stem: &str) -> std::path::PathBuf {
 
 /// Path of the locally generated Groth16 proving key for a circuit.
 ///
-/// `circuits/build.rs` writes these into `testdata/`, together with the
+/// `tools/circuit-compiler` writes these into `testdata/`, together with the
 /// verification key that the verifier contract embeds.
 pub fn proving_key_path(stem: &str) -> std::path::PathBuf {
     workspace_root().join(format!("testdata/{stem}_proving_key.bin"))
