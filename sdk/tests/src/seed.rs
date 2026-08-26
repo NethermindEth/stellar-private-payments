@@ -305,6 +305,7 @@ fn chain_snapshot_from_storage(
         pool_root,
         pool_next_index,
         pool_merkle_levels: POOL_MERKLE_LEVELS,
+        asp_membership_levels: POOL_MERKLE_LEVELS,
         asp_membership_root,
         asp_membership_contract_id: asp_membership_contract_id.to_string(),
         asp_membership_ledger: TEST_LEDGER,
