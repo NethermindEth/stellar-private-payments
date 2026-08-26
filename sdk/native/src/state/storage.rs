@@ -18,7 +18,10 @@ pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
+const MIGRATION_ARRAY: &[M] = &[
+    M::up(include_str!("schema.sql")),
+    M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
+];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {

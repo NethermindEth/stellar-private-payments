@@ -18,7 +18,7 @@ const GVK_CIPHERTEXT_FIELD: &str = "gvk_ciphertext";
 pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
     let parsed = parse_event_metadata(event)?;
     let ev = match parsed.name.as_str() {
-        // Pool events contracts/pool/src/pool.rs
+        // Pool events contracts/pool/src/pool.rs (pool-gvk adds `gvk_ciphertext`)
         "new_nullifier_event" | "NewNullifierEvent" => {
             ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?)
         }
@@ -52,6 +52,8 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 //     /// The nullifier that was spent
 //     #[topic]
 //     pub nullifier: U256,
+//     /// GVK ciphertext of the spent input (`pool-gvk`, TRACEABLE only)
+//     pub gvk_ciphertext: Option<GvkCiphertext>,
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
     let ParsedContractEvent {
@@ -87,6 +89,8 @@ fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifier
 //     pub index: u32,
 //     /// Encrypted output data (decryptable by the recipient)
 //     pub encrypted_output: Bytes,
+//     /// GVK ciphertext of this output note (`pool-gvk` only)
+//     pub gvk_ciphertext: GvkCiphertext,
 // }
 fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitmentEvent> {
     let ParsedContractEvent {
