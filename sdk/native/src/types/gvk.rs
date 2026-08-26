@@ -179,6 +179,44 @@ impl GvkMode {
     }
 }
 
+/// Operator-stored GVK admin authority key material (local wallet setting)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GvkAuthoritySetting {
+    /// Admin authority scalar `d`.
+    pub private_key: Field,
+    pub public_key: BabyJubJubPoint,
+}
+
+impl GvkAuthoritySetting {
+    /// Generate a fresh authority keypair for pool-gvk deployments.
+    pub fn generate() -> Result<Self> {
+        use crate::zk::encryption::generate_random_blinding;
+
+        let private_key = generate_random_blinding()?;
+        let public_key = BabyJubJubPoint::from_priv_scalar(&private_key);
+        Ok(Self {
+            private_key,
+            public_key,
+        })
+    }
+
+    /// Re-derive the public point and check it matches the stored copy.
+    pub fn validate_consistency(&self) -> Result<()> {
+        let derived = BabyJubJubPoint::from_priv_scalar(&self.private_key);
+        if derived != self.public_key {
+            return Err(anyhow!(
+                "GVK authority setting: stored public key does not match private key"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn matches_config(&self, configured: &BabyJubJubPoint) -> bool {
+        self.public_key == *configured
+    }
+}
+
 /// Composes [`PolicyFlags`] and [`GvkMode`] into a circuit artifact file stem.
 ///
 /// Prefer [`CircuitStem::transact`] and [`ToString`].
@@ -393,5 +431,19 @@ mod on_chain_mode_tests {
         assert!(GvkMode::from_on_chain_value(Some(0)).is_err());
         assert!(GvkMode::from_on_chain_value(Some(3)).is_err());
         assert!(GvkMode::from_on_chain_value(Some(u32::MAX)).is_err());
+    }
+
+    #[test]
+    fn gvk_authority_setting_generate_round_trips() -> Result<()> {
+        let setting = GvkAuthoritySetting::generate()?;
+        setting.validate_consistency()?;
+        let json = serde_json::to_string(&setting)?;
+        let parsed: GvkAuthoritySetting = serde_json::from_str(&json)?;
+        assert_eq!(parsed, setting);
+        assert_eq!(
+            BabyJubJubPoint::from_priv_scalar(&parsed.private_key),
+            parsed.public_key
+        );
+        Ok(())
     }
 }

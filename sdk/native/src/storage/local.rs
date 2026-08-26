@@ -5,8 +5,9 @@ use crate::{
     planner::SpendableNote,
     state::{SqliteStorage, StoredUserKeys},
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, GvkAuthoritySetting,
+        NotePublicKey, OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata,
+        UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -46,6 +47,18 @@ impl LocalStorage {
 
     pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
         self.db.borrow_mut()
+    }
+
+    pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>, Error> {
+        self.storage()
+            .get_gvk_authority_setting()
+            .map_err(|e| Error::Other(format!("read GVK authority setting: {e:#}")))
+    }
+
+    pub fn set_gvk_authority_setting(&self, setting: &GvkAuthoritySetting) -> Result<(), Error> {
+        self.storage_mut()
+            .set_gvk_authority_setting(setting)
+            .map_err(|e| Error::Other(format!("write GVK authority setting: {e:#}")))
     }
 }
 

@@ -102,9 +102,9 @@ pub use transact::{
     transact_request_from_step,
 };
 pub use types::{
-    Estimate, OperationalFeedItem, PolicyFlags, PortfolioBalance, PrivatePoolConfig,
-    ProverArtifacts, RecipientLookup, SignedTransaction, TransactChainContext, TransactionResult,
-    TransferRecipient, UserNoteSummary,
+    Estimate, GvkAuthoritySetting, GvkMode, OperationalFeedItem, PolicyFlags, PortfolioBalance,
+    PrivatePoolConfig, ProverArtifacts, RecipientLookup, SignedTransaction, TransactChainContext,
+    TransactionResult, TransferRecipient, UserNoteSummary,
 };
 pub use zk::{
     encryption::KEY_DERIVATION_MESSAGE,
