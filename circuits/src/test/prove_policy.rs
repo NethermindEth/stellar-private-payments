@@ -24,7 +24,12 @@ mod tests {
         path::PathBuf,
     };
 
-    const LEVELS: usize = 10;
+    /// Depth of the pool commitment tree.
+    const LEVELS: usize = 20;
+    /// Depth of the ASP membership (allowlist) tree.
+    const ASP_LEVELS: usize = 10;
+    /// Depth of the ASP non-membership (blocklist) sparse tree.
+    const SMT_LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
 
@@ -107,7 +112,7 @@ mod tests {
 
     fn default_non_membership_proof_builder(key: &BigInt, pubs: &[Scalar]) -> SMTProof {
         let overrides = non_membership_overrides_from_pubs(pubs);
-        prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+        prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -248,7 +253,7 @@ mod tests {
                 frozen_leaves[tree.index] = leaf;
             }
 
-            let membership_tree = PrefixTree::new(&frozen_leaves, LEVELS);
+            let membership_tree = PrefixTree::new(&frozen_leaves, ASP_LEVELS);
             let root_scalar = membership_tree.root();
 
             for i in 0..n_inputs {
@@ -1096,7 +1101,7 @@ mod tests {
                 &keys,
                 |key, pubs| {
                     let overrides = non_membership_overrides_from_pubs(pubs);
-                    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
                 },
                 asp,
                 None::<fn(&mut Inputs)>,
@@ -1235,7 +1240,7 @@ mod tests {
                             .idx(0)
                             .field(field)
                     };
-                    let zeros: Vec<BigInt> = (0..LEVELS).map(|_| BigInt::from(0u32)).collect();
+                    let zeros: Vec<BigInt> = (0..ASP_LEVELS).map(|_| BigInt::from(0u32)).collect();
                     inputs.set_key(&key("pathElements"), zeros);
                 }),
             );
@@ -1389,7 +1394,7 @@ mod tests {
                         ),
                     ];
 
-                    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
                 },
                 asp,
                 None::<fn(&mut Inputs)>,
@@ -1499,7 +1504,7 @@ mod tests {
                     0xFEED_FACEu64 ^ ((j as u64) << 40) ^ leaves_seed
                 });
 
-                // Keys strictly in 0..(1<<LEVELS)
+                // Keys strictly in 0..(1<<SMT_LEVELS)
                 let keys = default_non_membership_keys(&case);
 
                 run_case(wasm, r1cs, &case, leaves, Scalar::from(0u64), &membership_trees, &keys, asp, None::<fn(&mut Inputs)>).with_context(|| {

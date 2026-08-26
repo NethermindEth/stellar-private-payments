@@ -59,8 +59,8 @@ Examples:
     --deployer alice \
     --pool blocklist:native:CB... \
     --pool allowlist-blocklist:contract:CC... \
-    --asp-levels 8 \
-    --pool-levels 8 \
+    --asp-levels 10 \
+    --pool-levels 20 \
     --max-deposit 1000000000
 
   # Same policy on every pool via --policy-flags
@@ -69,8 +69,8 @@ Examples:
     --policy-flags blocklist \
     --pool native:CB... \
     --pool classic:USDC:G...:CD... \
-    --asp-levels 8 \
-    --pool-levels 8 \
+    --asp-levels 10 \
+    --pool-levels 20 \
     --max-deposit 1000000000
 
 Notes:

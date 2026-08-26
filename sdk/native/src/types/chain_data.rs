@@ -349,12 +349,12 @@ mod pool_info_gvk_tests {
             verifier: "CVERIFIER".to_string(),
             aspmembership: "CASPM".to_string(),
             aspnonmembership: "CASPN".to_string(),
-            merkle_levels: 10,
+            merkle_levels: 20,
             merkle_current_root_index: Some(3),
             merkle_next_index: "6".to_string(),
             maximum_deposit_amount: ExtAmount::from(1_000i128),
             merkle_root: Some(Field(U256::from(7))),
-            merkle_capacity: 1024,
+            merkle_capacity: 1_048_576,
             total_commitments: "6".to_string(),
             policy_flags: PolicyFlags::EMPTY,
             admin_view_key: Some(BabyJubJubPoint {
@@ -385,7 +385,7 @@ mod pool_info_gvk_tests {
         assert!(decoded.admin_view_key.is_none());
         assert!(decoded.gvk_mode.is_none());
         assert_eq!(decoded.contract_id, "CPOOL");
-        assert_eq!(decoded.merkle_levels, 10);
+        assert_eq!(decoded.merkle_levels, 20);
     }
 
     #[test]

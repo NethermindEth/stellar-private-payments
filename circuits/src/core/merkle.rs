@@ -4,8 +4,8 @@
 //! match the Circom circuit implementations and produce identical roots/proofs.
 //! Duplicated copy of SDK prover Merkle tree logic
 //! (`sdk/native/src/zk/merkle.rs`). Bit-identical synchronization is enforced
-//! at production depth 10 (1024 leaves) by
-//! `e2e-tests/src/tests/coherence/merkle.rs`.
+//! by `e2e-tests/src/tests/coherence/merkle.rs`, over both a full tree and the
+//! padded prefix the pool actually holds.
 
 use alloc::vec::Vec;
 use ark_bn254::Fr as Scalar;

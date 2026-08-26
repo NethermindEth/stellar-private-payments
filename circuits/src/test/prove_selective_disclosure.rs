@@ -34,7 +34,7 @@ mod tests {
         matches!(outcome, Ok(Ok(ref res)) if res.verified)
     }
 
-    const LEVELS: usize = 10;
+    const LEVELS: usize = 20;
     const EXT_CONTEXT_HASH: u64 = 0xC0FFEE_u64;
 
     /// Leaves seeded into the pool tree before a case runs.

@@ -1,5 +1,7 @@
 //! Circuits merkle helpers must stay bit-identical to the SDK prover copy.
-//! Coherence test guarded at production depth 10 (1024 leaves).
+//! The dense comparison runs over a full depth-10 tree, which is about hash
+//! equivalence rather than the production depth; `prefix_tree_matches_prover`
+//! covers the padded path the pool actually uses.
 
 use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
@@ -15,21 +17,21 @@ fn scalar_to_field(s: Scalar) -> Field {
 
 #[test]
 fn merkle_helpers_match_prover() {
-    // Production Merkle tree depth is 10 (1024 leaves).
+    // A full depth-10 tree keeps the dense comparison cheap.
     let leaves: Vec<Scalar> = (0..1024).map(Scalar::from).collect();
 
     assert_eq!(
         circuits_merkle::merkle_root(leaves.clone()),
         prover_merkle::merkle_root(leaves.clone()),
-        "merkle_root diverged between circuits copy and prover at depth 10 (1024 leaves)"
+        "merkle_root diverged between circuits copy and prover over a full depth-10 tree"
     );
 
-    // Test proof generation across representative leaf indices at full depth 10
+    // Proof generation across representative leaf indices of the full tree
     let test_indices = [0, 1, 7, 511, 512, 1023];
     for idx in test_indices {
         let (c_path, c_indices, c_levels) = circuits_merkle::merkle_proof(&leaves, idx);
         let (p_path, p_indices, p_levels) = prover_merkle::merkle_proof_internal(&leaves, idx);
-        assert_eq!(c_levels, 10, "expected production depth 10 at idx={idx}");
+        assert_eq!(c_levels, 10, "expected a full depth-10 tree at idx={idx}");
         assert_eq!(c_levels, p_levels, "levels diverged at idx={idx}");
         assert_eq!(c_indices, p_indices, "path indices diverged at idx={idx}");
         assert_eq!(c_path, p_path, "path elements diverged at idx={idx}");

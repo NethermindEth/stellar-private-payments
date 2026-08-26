@@ -17,7 +17,7 @@ A receipt is a JSON object with the following schema:
   "version": 1,
   "circuit": {
     "name": "selectiveDisclosure_2",
-    "levels": 10,
+    "levels": 20,
     "nNotes": 2,
     "vkHash": "0x937c4ee647d7747f90ec6eff0dcc67f4b00772e8239a87a973267ff15f2dd327"
   },

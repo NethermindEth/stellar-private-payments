@@ -33,7 +33,7 @@ use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField, Zero};
 
 /// Number of levels in the pool's commitment Merkle tree
-pub const LEVELS: usize = 10;
+pub const LEVELS: usize = 20;
 
 /// Number of membership proofs required per input
 pub const N_MEM_PROOFS: usize = 1;
@@ -42,7 +42,10 @@ pub const N_MEM_PROOFS: usize = 1;
 pub const N_NON_PROOFS: usize = 1;
 
 /// Number of levels in the ASP membership Merkle tree
-pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
+pub const ASP_MEMBERSHIP_LEVELS: usize = 10;
+
+/// Number of levels in the ASP non-membership sparse Merkle tree
+pub const SMT_LEVELS: usize = 10;
 
 /// Leaves seeded into the pool and ASP membership trees before a case runs.
 ///
@@ -202,7 +205,13 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
 
     let verifier_address = env.register(CircomGroth16Verifier, ());
 
-    let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
+    let asp_membership = env.register(
+        ASPMembership,
+        (
+            admin.clone(),
+            u32::try_from(ASP_MEMBERSHIP_LEVELS).expect("ASP_MEMBERSHIP_LEVELS fits in u32"),
+        ),
+    );
 
     let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
 
@@ -428,7 +437,7 @@ pub fn build_policy_inputs(
             frozen_leaves[tree.index] = leaf;
         }
 
-        let membership_tree = PrefixTree::new(&frozen_leaves, LEVELS);
+        let membership_tree = PrefixTree::new(&frozen_leaves, ASP_MEMBERSHIP_LEVELS);
         let root_scalar = membership_tree.root();
 
         for i in 0..n_inputs {
@@ -465,7 +474,7 @@ pub fn build_policy_inputs(
             let proof = prepare_smt_proof_with_overrides(
                 &non_membership[i].key_non_inclusion,
                 &overrides,
-                LEVELS,
+                SMT_LEVELS,
             );
 
             nmp_key[i].push(scalar_to_bigint(pubs[i]));
