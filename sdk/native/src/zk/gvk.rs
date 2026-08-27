@@ -126,8 +126,7 @@ impl GlobalViewKeyMemo {
     ///
     /// `n_input_slots` is the circuit's input slot count (currently `2`), used
     /// to compute the per-note encryption index for outputs (`idx =
-    /// n_input_slots + k`). Input `k` uses `idx = k` and is encrypted only in
-    /// traceable mode.
+    /// n_input_slots + k`).
     pub fn build(
         gvk_mode: GvkMode,
         admin_pub_key: BabyJubJubPoint,
