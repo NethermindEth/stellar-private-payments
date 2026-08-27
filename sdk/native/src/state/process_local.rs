@@ -1,8 +1,9 @@
 use crate::{error::Error, zk::notes::try_decrypt_and_derive_user_note};
 
 use super::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, SqliteStorage, process_events,
-    process_notes,
+    SqliteStorage,
+    processor::{process_events, process_notes},
+    storage::{AccountKeys, DerivedUserNoteRow, PoolCommitmentRow},
 };
 
 const PROCESS_FETCH_LIMIT: u32 = 50;
@@ -26,8 +27,8 @@ fn derive_user_note(
     row: &PoolCommitmentRow,
 ) -> anyhow::Result<Option<DerivedUserNoteRow>> {
     let opt = try_decrypt_and_derive_user_note(
-        &account.note_keypair,
-        &account.encryption_keypair.private,
+        &account.keys.note_keypair,
+        &account.keys.encryption_keypair.private,
         &row.commitment,
         row.leaf_index,
         &row.encrypted_output,

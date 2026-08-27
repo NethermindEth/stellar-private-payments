@@ -3,9 +3,10 @@ use crate::types::{
 };
 
 use crate::{
-    Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
+    Account, Error, Handle, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
     correlation::correlation_id_or_new,
+    prover::NoopProver,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
 
@@ -135,15 +136,6 @@ impl<S: Storage> Client<S> {
     }
 
     /// Create an [`Account`] session.
-    ///
-    /// Both identities are named explicitly. They must currently be the same
-    /// account: nothing downstream honours a signer that differs from the
-    /// owner — the envelope source, the pool contract's `sender` and the
-    /// auth-entry signer are all built from the owner — so a divergent pair
-    /// is refused with [`Error::SignerIsNotNoteOwner`] rather than quietly
-    /// collapsed to the owner. Callers that want them equal say so by
-    /// building both from the same string, which is visible in review; see
-    /// the type docs on [`SignerAddress`].
     #[tracing::instrument(
         name = "client_account",
         skip_all,

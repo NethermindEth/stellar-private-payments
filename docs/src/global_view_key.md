@@ -50,7 +50,7 @@ modes never changes what an output memo looks like.
 | `globalViewKey.circom` | `GlobalViewKeyEncryption()` (single-note primitive), `GlobalViewKey(nNotes)` (flat batch, used by the test circuits) and `GvkNotes(nIns, nOuts, encryptInputs)` (grouped batch used by the policy wrappers). |
 | `policyTransaction{Open,Allowlist,Blocklist,Both}Gvk.circom` | Policy transaction + GVK wrappers: each instantiates the `PolicyTransaction` core, its ASP module(s) and `GvkNotes`, feeding the encryptors the same note signals the transaction constrains (input public keys are reused from the core, not recomputed). |
 | `policy_tx_gvk_2_2*` | The 8 entry points listed above. |
-| `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `BUILD_TESTS=1`). |
+| `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `--tests`). |
 
 `D` and `nonce` are public inputs; the note plaintexts stay private and
 `R, c1, c2, c3` are public outputs.
@@ -140,6 +140,6 @@ by the round-trip tests.
 ## Key material provenance
 
 The proving/verifying keys for the GVK circuits are locally generated (see
-`REGEN_KEYS=1 BUILD_TESTS=1 cargo build`) and land in the gitignored `testdata/`.
+`make circuits TESTS=1 REGEN_KEYS=1`) and land in the gitignored `testdata/`.
 As with the other circuits, a trusted ceremony would be required before any
 mainnet deployment.

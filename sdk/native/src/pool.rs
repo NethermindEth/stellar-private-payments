@@ -8,9 +8,9 @@ use crate::{
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    PoolCore, PreparedTransaction,
+    PreparedTransaction,
     chain::RpcClient,
-    core::{pool_transact_input, transact_step_for_plan},
+    core::{PoolCore, pool_transact_input, transact_step_for_plan},
     correlation::correlation_id_or_new,
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
@@ -253,9 +253,7 @@ impl<S: Storage> PrivatePool<S> {
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
                 &pool_transact_input(prepared),
-                // The one call site where the note-owner identity used to
-                // leak into the on-chain roles. It now takes the signing
-                // address, which becomes the contract's `sender`, the
+                // The signing address becomes the contract's `sender`, the
                 // sequence-number lookup and the envelope source.
                 &chain_config.signer_address,
             )

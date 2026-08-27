@@ -1,56 +1,25 @@
 //! Distinct types for the two account identities a spend involves.
 //!
-//! Until these existed, one `String` served three jobs at once: it selected
-//! the notes and key material of the account that *owns* them, it became the
-//! pool contract's `sender` argument, and it was the transaction envelope's
-//! source account. Those are two different identities — the note owner and
-//! the signer — and nothing in the type system could tell them apart, so
-//! nothing could catch one being passed where the other belonged.
-//!
-//! `PROPOSALS.md` P-01 (decided 2026-08-24) separates them: the note owner
-//! stays A, and a distinct signing account B signs the transaction, sources
-//! the envelope and pays the fee. These two types are how that separation is
-//! *verified* rather than merely intended — a site labelled wrongly during
-//! the split fails to compile instead of silently signing as the wrong
-//! account.
-//!
-//! **There is deliberately no conversion between them.** See the note on
-//! [`SignerAddress`].
+//! There is deliberately no conversion between them: see [`SignerAddress`].
 
 use core::fmt;
 
-/// The account that owns the notes — **A** in the issue's vocabulary.
+/// The account that owns the notes.
 ///
 /// Selects notes and key material from storage, and feeds proof inputs. It
 /// never appears in a transaction envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NoteOwnerAddress(String);
 
-/// The account that signs and pays — **B** in the issue's vocabulary.
+/// The account that signs and pays.
 ///
 /// Becomes the pool contract's `sender` argument, the account whose sequence
 /// number is read, the transaction envelope's source, and the address a
 /// wallet is asked to sign with. It has no relationship to any note.
 ///
-/// # Why there is no conversion to or from [`NoteOwnerAddress`]
-///
-/// An `impl From<NoteOwnerAddress> for SignerAddress` would be convenient and
-/// would defeat the purpose of both types. The compiler's inability to
-/// convert is the mechanism that proves each call site was classified
-/// correctly; a conversion turns every mislabelled site back into something
-/// that compiles and fails silently at runtime, signing as the note owner
-/// while the caller believed otherwise. Callers that legitimately want both
-/// to be the same account say so explicitly by constructing each from the
-/// same string, which is visible in review.
-///
-/// For the same reason neither type implements `From<String>` or
-/// `From<&str>`. Those made the crossing available in two hops rather than
-/// one — `SignerAddress::from(owner.as_str())`, or any parameter typed
-/// `impl Into<SignerAddress>` handed an owner-derived string — in a `.into()`
-/// that named neither type and so left a reviewer nothing to look for.
-/// [`Self::new`] is the only constructor, which forces the destination type
-/// to be written down wherever a crossing happens. The absence of all four
-/// impls is asserted by tests in this module, not merely intended.
+/// There is deliberately no conversion to or from [`NoteOwnerAddress`]: the
+/// compiler's refusal is what keeps each call site classified. A caller that
+/// wants both to be the same account constructs each from the same string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignerAddress(String);
 

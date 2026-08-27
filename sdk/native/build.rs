@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 fn main() {
     println!("cargo:rerun-if-changed=src/state/disclaimer.md");
+    println!("cargo:rerun-if-changed=circuits.json");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let disclaimer_path = manifest_dir.join("src").join("state").join("disclaimer.md");
@@ -19,7 +20,7 @@ fn main() {
     let out = out_dir.join("disclaimer_hash.rs");
 
     let contents = format!(
-        "pub const CURRENT_DISCLAIMER_HASH_HEX: &str = \"{}\";\n",
+        "pub(crate) const CURRENT_DISCLAIMER_HASH_HEX: &str = \"{}\";\n",
         hex
     );
     fs::write(out, contents).expect("write generated disclaimer_hash.rs");

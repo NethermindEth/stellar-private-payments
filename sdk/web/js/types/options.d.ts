@@ -25,9 +25,8 @@ export interface AccountOptions {
   userAddress?: string;
   /**
    * The account that signs the transaction, sources its envelope and pays the
-   * fee. Defaults to `userAddress`. Supplying it requires `userAddress` to be
-   * supplied too, since otherwise the note owner would be resolved from the
-   * signer and the two identities would collapse back into one.
+   * fee. Defaults to `userAddress`, and requires `userAddress` to be supplied —
+   * otherwise the note owner is resolved from the signer.
    */
   signerAddress?: string;
 }

@@ -23,10 +23,10 @@ impl ProverArtifacts {
 /// Per-pool session config (deployment, pool contract, the two identities).
 ///
 /// `user_address` owns the notes; `signer_address` signs the transaction,
-/// sources its envelope and pays the fee. They are distinct types so that
-/// passing one where the other belongs cannot compile — see
-/// [`crate::types::SignerAddress`]. Today every caller sets them to the same
-/// account, so behaviour is unchanged; letting them differ is a later change.
+/// sources its envelope and pays the fee. Distinct types so that passing one
+/// where the other belongs cannot compile — see
+/// [`crate::types::SignerAddress`]. Every caller currently sets them to the
+/// same account.
 #[derive(Debug, Clone)]
 pub struct PrivatePoolConfig {
     pub contract_config: ContractConfig,
@@ -137,10 +137,8 @@ mod split_tests {
         }
     }
 
-    /// The two identities stay apart once they differ. Written so that
-    /// crossing the fields — assigning the note owner into `signer_address`
-    /// as every construction site did before the split — fails here rather
-    /// than silently signing as the wrong account.
+    /// Crossing the fields must fail rather than silently sign as the wrong
+    /// account.
     #[test]
     fn distinct_identities_are_kept_distinct() {
         let cfg = config(OWNER, SIGNER);
@@ -149,17 +147,15 @@ mod split_tests {
         assert_ne!(cfg.user_address.as_str(), cfg.signer_address.as_str());
     }
 
-    /// The default this change ships with: both set to the note owner, which
-    /// is exactly the pre-split behaviour and must keep working.
+    /// Both set to the note owner is legitimate.
     #[test]
     fn same_account_for_both_is_legitimate() {
         let cfg = config(OWNER, OWNER);
         assert_eq!(cfg.user_address.as_str(), cfg.signer_address.as_str());
     }
 
-    /// Validation covers both identities, not just the one that existed
-    /// before. An empty signing address would otherwise reach the chain layer
-    /// and fail there instead of here.
+    /// An empty signing address must fail validation rather than reach the
+    /// chain layer.
     #[test]
     fn validate_requires_both_addresses() {
         let missing_signer = config(OWNER, "");

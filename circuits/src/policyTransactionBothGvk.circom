@@ -4,13 +4,15 @@ pragma circom 2.2.2;
 // Base transact + ASP allowlist + blocklist modules, plus in-circuit GVK
 // encryption of note secrets under the authority key D. encryptInputs toggles
 // view-only (outputs only) vs traceable (inputs + outputs).
+// levels sizes the pool commitment tree, aspLevels the ASP membership tree,
+// smtLevels the ASP blocklist sparse tree.
 
 include "./policyTransaction.circom";
 include "./aspMembership.circom";
 include "./aspNonMembership.circom";
 include "./globalViewKey.circom";
 
-template PolicyTransactionBothGvk(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels, encryptInputs) {
+template PolicyTransactionBothGvk(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, aspLevels, smtLevels, encryptInputs) {
     /** PUBLIC INPUTS (Global View Key) **/
     signal input D[2];
     signal input nonce;
@@ -24,7 +26,7 @@ template PolicyTransactionBothGvk(nIns, nOuts, nMembershipProofs, nNonMembership
     signal input membershipRoots[nIns][nMembershipProofs];
     signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
-    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs];
+    input MembershipProof(aspLevels) membershipProofs[nIns][nMembershipProofs];
     input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
@@ -67,7 +69,7 @@ template PolicyTransactionBothGvk(nIns, nOuts, nMembershipProofs, nNonMembership
         core.outBlinding[tx] <== outBlinding[tx];
     }
 
-    component membership = AspMembership(nIns, nMembershipProofs, levels);
+    component membership = AspMembership(nIns, nMembershipProofs, aspLevels);
     component nonMembership = AspNonMembership(nIns, nNonMembershipProofs, smtLevels);
     for (var tx = 0; tx < nIns; tx++) {
         membership.inPublicKey[tx] <== core.inPublicKey[tx];
@@ -77,7 +79,7 @@ template PolicyTransactionBothGvk(nIns, nOuts, nMembershipProofs, nNonMembership
             membership.membershipProofs[tx][i].leaf <== membershipProofs[tx][i].leaf;
             membership.membershipProofs[tx][i].blinding <== membershipProofs[tx][i].blinding;
             membership.membershipProofs[tx][i].pathIndices <== membershipProofs[tx][i].pathIndices;
-            for (var j = 0; j < levels; j++) {
+            for (var j = 0; j < aspLevels; j++) {
                 membership.membershipProofs[tx][i].pathElements[j] <== membershipProofs[tx][i].pathElements[j];
             }
         }

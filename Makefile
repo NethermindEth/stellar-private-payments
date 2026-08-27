@@ -2,7 +2,9 @@
 # change where serve, build, and clean write/read compiled assets.
 DIST_DIR ?= dist
 PUBLIC_URL ?= /
-BUILD_TESTS ?=
+TESTS ?=
+REGEN_KEYS ?=
+GRAPHS ?=
 RELEASE ?=
 # LOGS=1 builds the WASM SDK with verbose diagnostic logging enabled
 # (WASM_PROFILE=release-with-logs) instead of the quiet, privacy-first default.
@@ -37,51 +39,20 @@ build: install $(if $(LOGS),sdk-web-build-debug,sdk-web-build)
 build-debug:
 	@$(MAKE) build LOGS=1
 
-.PHONY: circuits-build
-circuits-build:
+.PHONY: circuits
+circuits:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
+	cargo run -p circuit-compiler --bin circuit-compiler --release -- compile \
+		--circuits $(CURDIR)/circuits \
+		--out $(CURDIR)/target/circuits-artifacts $(if $(TESTS),--tests) $(if $(REGEN_KEYS),--regen-keys) $(if $(GRAPHS),--graphs)
 
-# Production stems for circom-witness-rs graph regen (keep in sync with SDK).
-WITNESS_GRAPH_STEMS := \
-	policy_tx_2_2.circom \
-	policy_tx_2_2_A.circom \
-	policy_tx_2_2_B.circom \
-	policy_tx_2_2_AB.circom \
-	selectiveDisclosure_1.circom \
-	selectiveDisclosure_2.circom \
-	selectiveDisclosure_3.circom \
-	selectiveDisclosure_4.circom
+.PHONY: circuits-lock
+circuits-lock: circuits
+	sh $(CURDIR)/deployments/scripts/circuit-artifacts.sh lock $(VERSION)
 
-# Vendors circomlib and injects the black-box hints the graph
-# runtime needs. Cargo runs the
-# circom-witness-rs build script before
-# circuits/build.rs, so the hints have to be on disk before the loop below
-# starts. The timestamp keeps cargo from treating the build script as fresh and
-# replaying a cached run.
-.PHONY: circomlib-hints
-circomlib-hints:
-	@echo "Applying circomlib black-box hints..."
-	@CIRCOMLIB_HINTS_ONLY=$$(date +%s) cargo build -p circuits
-	@grep -q "function bbf_inv" circuits/src/circomlib/circuits/comparators.circom || \
-		{ echo "circomlib hints missing after priming build"; exit 1; }
-
-# Regenerates committed circom-witness-rs graphs under
-# deployments/testnet/circuit_keys/*.graph.bin. Requires Circom CLI matching
-# circuits/circom.lock and a C++ toolchain. One stem per cargo build (single-
-# circuit circom-witness-rs); clean between stems so WITNESS_CPP is re-read.
-.PHONY: witness-graphs
-witness-graphs: circomlib-hints
-	@echo "Regenerating witness graphs (Circom $$(tr -d '[:space:]' < circuits/circom.lock))..."
-	@for entry in $(WITNESS_GRAPH_STEMS); do \
-		stem=$${entry%.circom}; \
-		echo "===== $$stem ====="; \
-		cargo clean -p circom-witness-rs >/dev/null; \
-		CIRCOM_LIBRARY_PATH="$(CURDIR)/circuits/src" \
-		WITNESS_CPP="$(CURDIR)/circuits/src/$$entry" \
-		cargo build -p circuits --features regen-graph || exit 1; \
-	done
-	@echo "Done. Graphs in deployments/testnet/circuit_keys/"
+.PHONY: circuits-verify
+circuits-verify: circuits
+	sh $(CURDIR)/deployments/scripts/circuit-artifacts.sh verify
 
 # Both targets record the built profile in sdk/web/.trunk-wasm-profile so a
 # subsequent `trunk serve`/`trunk build` (which `serve`/`build` invoke) sees a

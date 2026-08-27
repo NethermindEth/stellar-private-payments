@@ -3,7 +3,8 @@
 use std::rc::Rc;
 
 use stellar_private_payments::{
-    DisclosureRequest, PrivatePool as NativePrivatePool,
+    PrivatePool as NativePrivatePool,
+    disclosure::DisclosureRequest,
     types::{DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };
 use wasm_bindgen::prelude::*;

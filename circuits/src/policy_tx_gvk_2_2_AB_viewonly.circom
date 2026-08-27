@@ -3,4 +3,4 @@ pragma circom 2.2.2;
 // 2 inputs, 2 outputs; only the output notes are encrypted under D.
 include "./policyTransactionBothGvk.circom";
 
-component main {public [D, nonce, root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = PolicyTransactionBothGvk(2, 2, 1, 1, 10, 10, 0);
+component main {public [D, nonce, root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = PolicyTransactionBothGvk(2, 2, 1, 1, 20, 10, 10, 0);

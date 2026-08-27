@@ -46,11 +46,9 @@ pub struct DisclaimerState {
 }
 
 #[derive(Debug, Clone)]
-pub struct AccountKeys {
+pub(crate) struct AccountKeys {
     pub account_id: i64,
-    pub note_keypair: NoteKeyPair,
-    pub encryption_keypair: EncryptionKeyPair,
-    pub membership_blinding: Field,
+    pub keys: StoredUserKeys,
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +59,7 @@ pub struct StoredUserKeys {
 }
 
 #[derive(Debug, Clone)]
-pub struct PoolCommitmentRow {
+pub(crate) struct PoolCommitmentRow {
     pub commitment_id: i64,
     pub commitment: Field,
     pub leaf_index: u32,
@@ -69,13 +67,13 @@ pub struct PoolCommitmentRow {
 }
 
 #[derive(Debug, Clone)]
-pub struct DerivedUserNoteRow {
+pub(crate) struct DerivedUserNoteRow {
     pub amount: NoteAmount,
     pub blinding: Field,
     pub expected_nullifier: Field,
 }
 
-pub type DeriveNoteFn<'a> =
+pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 /// Whether a migration failure is migration 2 refusing an ambiguous database.
@@ -279,25 +277,24 @@ impl Storage {
 
         let mut rows = statement
             .query_map(params![address], |row| {
-                    let enc_priv: EncryptionPrivateKey = row.get(0)?;
-                    let enc_pub: EncryptionPublicKey = row.get(1)?;
-                    let note_priv: NotePrivateKey = row.get(2)?;
-                    let note_pub: NotePublicKey = row.get(3)?;
-                    let membership_blinding: Field = row.get(4)?;
+                let enc_priv: EncryptionPrivateKey = row.get(0)?;
+                let enc_pub: EncryptionPublicKey = row.get(1)?;
+                let note_priv: NotePrivateKey = row.get(2)?;
+                let note_pub: NotePublicKey = row.get(3)?;
+                let membership_blinding: Field = row.get(4)?;
 
-                    Ok(StoredUserKeys {
-                        note_keypair: NoteKeyPair {
-                            private: note_priv,
-                            public: note_pub,
-                        },
-                        encryption_keypair: EncryptionKeyPair {
-                            private: enc_priv,
-                            public: enc_pub,
-                        },
-                        membership_blinding,
-                    })
-                },
-            )
+                Ok(StoredUserKeys {
+                    note_keypair: NoteKeyPair {
+                        private: note_priv,
+                        public: note_pub,
+                    },
+                    encryption_keypair: EncryptionKeyPair {
+                        private: enc_priv,
+                        public: enc_pub,
+                    },
+                    membership_blinding,
+                })
+            })
             // Account addresses are Tier-1: this file wraps them in
             // Sensitive() at the lookup sites below, and this one must match.
             .context(format!(
@@ -1330,15 +1327,17 @@ impl Storage {
 
             Ok(AccountKeys {
                 account_id,
-                note_keypair: NoteKeyPair {
-                    private: note_priv,
-                    public: note_pub,
+                keys: StoredUserKeys {
+                    note_keypair: NoteKeyPair {
+                        private: note_priv,
+                        public: note_pub,
+                    },
+                    encryption_keypair: EncryptionKeyPair {
+                        private: enc_priv,
+                        public: enc_pub,
+                    },
+                    membership_blinding,
                 },
-                encryption_keypair: EncryptionKeyPair {
-                    private: enc_priv,
-                    public: enc_pub,
-                },
-                membership_blinding,
             })
         })?;
 
@@ -1352,7 +1351,7 @@ impl Storage {
     /// Scan pool commitments and insert decryptable notes into `user_notes`.
     ///
     /// Progress is tracked per-account in `account_commitment_scan`.
-    pub fn scan_commitments_for_user_notes(
+    pub(crate) fn scan_commitments_for_user_notes(
         &mut self,
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
@@ -1806,8 +1805,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2070,8 +2069,7 @@ mod tests {
             .to_latest(&mut conn)
             .expect("identical duplicates must not block the migration");
 
-        let rows: i64 =
-            conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
+        let rows: i64 = conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
         assert_eq!(rows, 1, "the identical duplicate must have been collapsed");
         Ok(())
     }
@@ -2091,8 +2089,7 @@ mod tests {
         );
 
         // Nothing destroyed: the rows remain for inspection or support.
-        let rows: i64 =
-            conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
+        let rows: i64 = conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
         assert_eq!(rows, 2, "a refused migration must not delete key material");
         Ok(())
     }
@@ -2130,7 +2127,9 @@ mod tests {
             .get_user_keys("GTESTACCOUNT")
             .expect_err("an ambiguous account must not yield a row");
         assert!(
-            error.to_string().contains("more than one set of privacy keys"),
+            error
+                .to_string()
+                .contains("more than one set of privacy keys"),
             "the reader must name the ambiguity: {error}"
         );
         Ok(())
@@ -2538,8 +2537,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2613,8 +2612,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2704,8 +2703,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2782,8 +2781,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2856,8 +2855,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,

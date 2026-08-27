@@ -7,9 +7,9 @@ mod tests {
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
         keypair::derive_public_key,
-        merkle_tree::{merkle_proof, merkle_root},
+        merkle_tree::PrefixTree,
         sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
-        transaction::{commitment, prepopulated_leaves},
+        transaction::{commitment, prepopulated_prefix},
         transaction_case::{
             InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
             prepare_transaction_witness,
@@ -20,17 +20,26 @@ mod tests {
     use ark_ff::Zero;
     use num_bigint::BigInt;
     use std::{
-        convert::TryInto,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
     };
 
-    const LEVELS: usize = 10;
+    /// Depth of the pool commitment tree.
+    const LEVELS: usize = 20;
+    /// Depth of the ASP membership (allowlist) tree.
+    const ASP_LEVELS: usize = 10;
+    /// Depth of the ASP non-membership (blocklist) sparse tree.
+    const SMT_LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
 
+    /// Leaves seeded into the pool and ASP membership trees before a case runs.
+    ///
+    /// Every `leaf_index` a case picks must stay inside it.
+    const LEAF_PREFIX: usize = 64;
+
     pub struct MembershipTree {
-        pub leaves: [Scalar; 1 << LEVELS],
+        pub leaves: Vec<Scalar>,
         pub index: usize,
         pub blinding: Scalar,
     }
@@ -48,14 +57,11 @@ mod tests {
 
         for j in 0..N_MEM_PROOFS {
             let seed_j = seed_fn(j);
-            let base_mem_leaves_j = prepopulated_leaves(LEVELS, seed_j, &[], 24);
+            let base_mem_leaves_j = prepopulated_prefix(seed_j, &[], LEAF_PREFIX);
 
             for input in &case.inputs {
                 membership_trees.push(MembershipTree {
-                    leaves: base_mem_leaves_j
-                        .clone()
-                        .try_into()
-                        .expect("Failed to convert into list"),
+                    leaves: base_mem_leaves_j.clone(),
                     index: input.leaf_index,
                     blinding: Scalar::zero(),
                 });
@@ -105,7 +111,7 @@ mod tests {
 
     fn default_non_membership_proof_builder(key: &BigInt, pubs: &[Scalar]) -> SMTProof {
         let overrides = non_membership_overrides_from_pubs(pubs);
-        prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+        prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -231,7 +237,7 @@ mod tests {
             let base_idx = j
                 .checked_mul(n_inputs)
                 .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
-            let mut frozen_leaves = membership_trees[base_idx].leaves;
+            let mut frozen_leaves = membership_trees[base_idx].leaves.clone();
 
             for (k, &pk_scalar) in pubs.iter().enumerate() {
                 let index = k
@@ -246,7 +252,8 @@ mod tests {
                 frozen_leaves[tree.index] = leaf;
             }
 
-            let root_scalar = merkle_root(frozen_leaves.to_vec().clone());
+            let membership_tree = PrefixTree::new(&frozen_leaves, ASP_LEVELS);
+            let root_scalar = membership_tree.root();
 
             for i in 0..n_inputs {
                 let idx = i
@@ -258,8 +265,7 @@ mod tests {
                 let pk_scalar = pubs[i];
                 let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
 
-                let (siblings, path_idx_u64, depth) = merkle_proof(&frozen_leaves, t.index);
-                assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
+                let (siblings, path_idx_u64) = membership_tree.proof(t.index);
 
                 mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
                 mp_blinding[i].push(scalar_to_bigint(t.blinding));
@@ -529,11 +535,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xDEAD_BEEFu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -590,11 +595,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xFACEu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -652,11 +656,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xC0FFEEu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -717,11 +720,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xBEEFu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -756,7 +758,7 @@ mod tests {
             let chain_idx = 13usize;
 
             let mut leaves =
-                prepopulated_leaves(LEVELS, 0xC0DEC0DEu64, &[0, tx1_real_idx, chain_idx], 24);
+                prepopulated_prefix(0xC0DEC0DEu64, &[0, tx1_real_idx, chain_idx], LEAF_PREFIX);
 
             // --- TX1 ---
             let tx1_input_real = InputNote {
@@ -798,7 +800,7 @@ mod tests {
                 wasm,
                 r1cs,
                 &tx1,
-                prepopulated_leaves(LEVELS, 0xC0DEC0DEu64, &[0, tx1_real_idx, chain_idx], 24),
+                prepopulated_prefix(0xC0DEC0DEu64, &[0, tx1_real_idx, chain_idx], LEAF_PREFIX),
                 Scalar::from(0u64),
                 &mt1,
                 &keys,
@@ -894,11 +896,10 @@ mod tests {
             );
 
             let deposit = Scalar::from(12u64);
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xD3AD0517u64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x5555_AAAAu64);
@@ -954,11 +955,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xC0FFEEu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
             let neg_spend = Scalar::zero() - spend;
 
@@ -1017,11 +1017,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xC0FFEEu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
             let neg_sum = Scalar::zero() - sum_in;
 
@@ -1081,11 +1080,10 @@ mod tests {
                 vec![out_real, out_dummy],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xC0FFEEu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0xFEFE_FEF1u64);
@@ -1102,7 +1100,7 @@ mod tests {
                 &keys,
                 |key, pubs| {
                     let overrides = non_membership_overrides_from_pubs(pubs);
-                    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
                 },
                 asp,
                 None::<fn(&mut Inputs)>,
@@ -1144,11 +1142,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xCAFE_BE5Eu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             // Normal membership trees (blinding = 0)
@@ -1215,11 +1212,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xFACE_FEEDu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x3333_4444u64);
@@ -1243,7 +1239,7 @@ mod tests {
                             .idx(0)
                             .field(field)
                     };
-                    let zeros: Vec<BigInt> = (0..LEVELS).map(|_| BigInt::from(0u32)).collect();
+                    let zeros: Vec<BigInt> = (0..ASP_LEVELS).map(|_| BigInt::from(0u32)).collect();
                     inputs.set_key(&key("pathElements"), zeros);
                 }),
             );
@@ -1285,11 +1281,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xDEAD_BEEFu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x5555_6666u64);
@@ -1353,11 +1348,10 @@ mod tests {
                 ],
             );
 
-            let leaves = prepopulated_leaves(
-                LEVELS,
+            let leaves = prepopulated_prefix(
                 0xDEAD_BEEFu64,
                 &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                24,
+                LEAF_PREFIX,
             );
 
             let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -1399,7 +1393,7 @@ mod tests {
                         ),
                     ];
 
-                    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
                 },
                 asp,
                 None::<fn(&mut Inputs)>,
@@ -1432,7 +1426,6 @@ mod tests {
 
             const N_ITERS: usize = 20;
 
-            const N: usize = 1 << LEVELS;
             let mut rng: u128 = 0xA9_5EED_1337_D3AD_B33Fu128;
 
             for _ in 0..N_ITERS {
@@ -1440,7 +1433,7 @@ mod tests {
 
                 // pick real index != 0
                 let real_idx = {
-                    let mut idx = usize::try_from(next_u64(&mut rng))? % N;
+                    let mut idx = usize::try_from(next_u64(&mut rng))? % LEAF_PREFIX;
                     if idx == 0 {
                         idx = 1;
                     }
@@ -1448,7 +1441,7 @@ mod tests {
                 };
 
                 let leaves_seed = next_u64(&mut rng);
-                let leaves = prepopulated_leaves(LEVELS, leaves_seed, &[0, real_idx], 24);
+                let leaves = prepopulated_prefix(leaves_seed, &[0, real_idx], LEAF_PREFIX);
 
                 let in0_dummy = InputNote {
                     leaf_index: 0,
@@ -1509,7 +1502,7 @@ mod tests {
                     0xFEED_FACEu64 ^ ((j as u64) << 40) ^ leaves_seed
                 });
 
-                // Keys strictly in 0..(1<<LEVELS)
+                // Keys strictly in 0..(1<<SMT_LEVELS)
                 let keys = default_non_membership_keys(&case);
 
                 run_case(wasm, r1cs, &case, leaves, Scalar::from(0u64), &membership_trees, &keys, asp, None::<fn(&mut Inputs)>).with_context(|| {
@@ -1602,7 +1595,7 @@ mod tests {
             .collect();
 
         let case = TxCase::new(in_notes.clone(), out_notes.clone());
-        let leaves = prepopulated_leaves(LEVELS, 0xABCDu64, &[3, 8], 20);
+        let leaves = prepopulated_prefix(0xABCDu64, &[3, 8], LEAF_PREFIX);
         let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
         let non_membership = default_non_membership_keys(&case);
 

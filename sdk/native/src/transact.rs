@@ -37,6 +37,7 @@ pub struct TransactRequest {
     pub out_recipient_encryption_pubkeys: [Option<EncryptionPublicKey>; N_OUTPUTS],
     pub smt_depth: u32,
     pub tree_depth: u32,
+    pub asp_depth: u32,
     pub non_membership_proof: Option<AspNonMembershipProof>,
     pub policy_flags: PolicyFlags,
 }
@@ -82,7 +83,7 @@ pub enum BuildTransactParams {
     MembershipSync(AspMembershipSync),
 }
 
-pub fn transact_request_from_step(
+pub(crate) fn transact_request_from_step(
     step: &Transact,
     user_address: &str,
     pool_address: &str,
@@ -104,6 +105,7 @@ pub fn transact_request_from_step(
         out_recipient_encryption_pubkeys: step.out_recipient_encryption_pubkeys.clone(),
         smt_depth: SMT_DEPTH,
         tree_depth: chain.pool_merkle_levels,
+        asp_depth: chain.asp_membership_levels,
         non_membership_proof: chain.non_membership_proof.clone(),
         policy_flags: chain.policy_flags,
     }
@@ -128,7 +130,7 @@ pub fn build_transact_params(
             membership_blinding,
             req.aspmem_root,
             req.aspmem_ledger,
-            req.tree_depth,
+            req.asp_depth,
         )? {
             Ok(proof) => Some(proof),
             Err(status) => return Ok(BuildTransactParams::MembershipSync(status)),
@@ -182,12 +184,13 @@ pub fn build_transact_params(
         membership_proof,
         non_membership_proof: req.non_membership_proof.clone(),
         tree_depth: req.tree_depth,
+        asp_depth: req.asp_depth,
         smt_depth: req.smt_depth,
         policy_flags: req.policy_flags,
     })))
 }
 
-pub fn load_user_key_material(
+pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field)> {
@@ -220,7 +223,7 @@ fn build_membership_proof(
     membership_blinding: Field,
     aspmem_root: Field,
     aspmem_ledger: u32,
-    tree_depth: u32,
+    asp_depth: u32,
 ) -> Result<Result<AspMembershipProof, AspMembershipSync>> {
     let user_leaf = asp_membership_leaf(note_pubkey, &membership_blinding)?;
     let user_leaf_index = match storage.check_asp_membership_precondition(
@@ -236,7 +239,7 @@ fn build_membership_proof(
     let asp_membership_merkle_tree_leaves =
         storage.get_all_asp_membership_leaves_ordered(aspmem_contract_id)?;
     let aspmembership_tree =
-        MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
+        MerklePrefixTree::new(asp_depth, &asp_membership_merkle_tree_leaves)?.into_built();
     let MerkleProof {
         path_indices,
         path_elements,
@@ -295,7 +298,7 @@ fn build_pool_inputs(
     Ok(Ok(out))
 }
 
-pub fn build_validated_pool_tree(
+pub(crate) fn build_validated_pool_tree(
     storage: &SqliteStorage,
     pool_address: &str,
     pool_next_index: u32,

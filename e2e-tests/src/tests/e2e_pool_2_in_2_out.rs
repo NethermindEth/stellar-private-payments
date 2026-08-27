@@ -5,10 +5,9 @@
 //! and the verification from the pool contract. That is the pipeline the CLI,
 //! the SDK and the browser use.
 use super::utils::{
-    DeployedContracts, LEVELS, NonMembership, POOL_ZERO_LEAF, TRANSACT_STEMS,
-    build_membership_trees, build_policy_inputs, bytes32_to_bigint, deploy_contracts,
-    generate_proof, prove_with_graph, scalar_to_u256, sync_contract_state, test_env,
-    u256_to_scalar, wrap_groth16_proof,
+    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, TRANSACT_STEMS, build_membership_trees,
+    build_policy_inputs, bytes32_to_bigint, deploy_contracts, generate_proof, prove_with_graph,
+    scalar_to_u256, sync_contract_state, test_env, wrap_groth16_proof,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -16,7 +15,7 @@ use circuits::test::utils::{
     circom_tester::Inputs,
     general::scalar_to_bigint,
     keypair::derive_public_key,
-    transaction::{commitment, prepopulated_leaves},
+    transaction::{commitment, prepopulated_prefix},
     transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
 use contract_types::Groth16Error;
@@ -105,20 +104,12 @@ fn transact_fixture(
         ],
     );
 
-    // Pool state. The last leaf pair stays empty, so the tree is not full.
-    let mut leaves = prepopulated_leaves(
-        LEVELS,
+    // Pool state. `transact` appends its two outputs past this prefix.
+    let mut leaves = prepopulated_prefix(
         0xDEAD_BEEFu64,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-        24,
+        LEAF_PREFIX,
     );
-    let zero = U256::from_be_bytes(&env, &Bytes::from_array(&env, &POOL_ZERO_LEAF));
-    let last_pair = leaves
-        .len()
-        .checked_sub(2)
-        .expect("pool needs at least two leaves");
-    leaves[last_pair] = u256_to_scalar(&zero);
-    leaves[last_pair.checked_add(1).expect("last leaf index")] = u256_to_scalar(&zero);
 
     let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
     let keys = case
@@ -237,9 +228,13 @@ fn transact_deposit_succeeds() -> Result<()> {
 ///
 /// The pool checks the root, the nullifiers, the external data hash and the
 /// public amount itself. It does not check the output commitments, so a changed
-/// commitment goes to the Groth16 verifier contract. The pairing check fails
-/// there, so the verifier answers `Groth16Error::InvalidProof` and the whole
-/// pool call fails with that code.
+/// commitment goes to the Groth16 verifier contract, where the pairing check
+/// fails.
+///
+/// What the caller gets back is the pool's own `Error::InvalidProof`, not the
+/// verifier's `Groth16Error`. The two enums are separate and their codes do not
+/// line up — `Groth16Error::InvalidProof` is 0, which is not a pool error code
+/// at all — so the pool catches the call and answers for itself.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_tampered_output_commitment() -> Result<()> {
@@ -254,8 +249,12 @@ fn transact_rejects_tampered_output_commitment() -> Result<()> {
 
     let outcome = fixture.transact();
     assert!(
-        matches!(outcome, Err(Err(InvokeError::Contract(code))) if code == Groth16Error::InvalidProof as u32),
-        "expected the verifier to reject a tampered output commitment, got {outcome:?}"
+        !matches!(outcome, Err(Err(InvokeError::Contract(code))) if code == Groth16Error::InvalidProof as u32),
+        "the verifier's raw error code must not cross the pool boundary, got {outcome:?}"
+    );
+    assert!(
+        matches!(outcome, Err(Ok(Error::InvalidProof))),
+        "expected the pool's own InvalidProof for a tampered output commitment, got {outcome:?}"
     );
     Ok(())
 }
@@ -298,11 +297,10 @@ fn all_transact_graphs_prove_and_verify() -> Result<()> {
         ],
     );
 
-    let leaves = prepopulated_leaves(
-        LEVELS,
+    let leaves = prepopulated_prefix(
         0xDEAD_BEEFu64,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-        24,
+        LEAF_PREFIX,
     );
     let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
     let keys = case

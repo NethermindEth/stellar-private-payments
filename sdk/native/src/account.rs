@@ -6,10 +6,10 @@ use crate::types::{
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage,
+    Error, Handle, PrivatePool, Prover, Signer, Storage,
     chain::RpcClient,
     sync::{SyncHandle, catch_up, confirm_tx},
-    types::TransactionResult,
+    types::{PrivatePoolConfig, TransactionResult},
 };
 
 /// Stellar account session
@@ -27,10 +27,8 @@ pub struct Account<S: Storage> {
 }
 
 impl<S: Storage> Account<S> {
-    // Eight arguments rather than seven because the note-owner and signing
-    // identities are now separate values. Bundling them into a struct would
-    // trade one lint for an indirection at the only call sites that construct
-    // an Account, both of which name every field explicitly.
+    // Bundling these into a struct would trade the lint for an indirection at
+    // the only two call sites, both of which name every field explicitly.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rpc: RpcClient,
@@ -59,14 +57,8 @@ impl<S: Storage> Account<S> {
         &self.user_address
     }
 
-    /// The account that signs and pays.
-    ///
-    /// Always equal in value to [`Self::user_address`]: the only constructor
-    /// is [`crate::Client::account`], which refuses a divergent pair with
-    /// [`crate::Error::SignerIsNotNoteOwner`]. It stays a distinct type, and
-    /// a distinct accessor, because that is what will carry the difference
-    /// once divergence is supported — and because the type prevents a signing
-    /// site from being fed the owner by accident in the meantime.
+    /// The account that signs and pays. A distinct type from
+    /// [`Self::user_address`] so the two cannot be confused.
     pub fn signer_address(&self) -> &SignerAddress {
         &self.signer_address
     }
@@ -169,11 +161,9 @@ impl<S: Storage> Account<S> {
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
         let prepared = fetcher
-            // Registration is left on the note-owner address deliberately:
-            // this value is both the registry key and the transaction source,
-            // and which it should be once the two identities can differ is an
-            // open question no ISSUE.md requirement settles. Keeping it here
-            // preserves today's behaviour exactly.
+            // Registration uses the note-owner address, which is both the
+            // registry key and the transaction source. Which it should be when
+            // the two identities differ is unsettled.
             .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
             .await
             .map_err(|e| Error::Other(format!("prepare register: {e:#}")))?;

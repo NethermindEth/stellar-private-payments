@@ -68,7 +68,7 @@ jobs:
             ${{ runner.os }}-cargo-miri-
 
       - name: Generate circuit testdata
-        run: BUILD_TESTS=1 cargo build -p circuits
+        run: make circuits TESTS=1
 
       - name: Install Miri
         run: |

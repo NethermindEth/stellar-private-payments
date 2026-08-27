@@ -64,8 +64,7 @@ jobs:
 
       - name: Build circuit artifacts
         run: |
-          cargo build -p circuits
-          cargo build -p circuits --release
+          make circuits
 
       # Both test accounts are generated fresh per run (account A is
       # friendbot-funded as the faucet and distributes XLM to B), so no

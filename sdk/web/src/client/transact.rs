@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use std::str::FromStr;
 use stellar_private_payments::{
-    Transact,
+    planner::Transact,
     types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey},
     zk::flows::N_OUTPUTS,
 };

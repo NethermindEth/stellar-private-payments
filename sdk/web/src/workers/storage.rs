@@ -12,10 +12,12 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments::{
-    BuildDisclosureInputs, BuildTransactParams, Error, SpendableNote, Storage, TransactRequest,
-    build_disclosure_inputs, build_transact_params,
+    Error, Storage,
     chain::ContractDataStorage,
+    disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
+    planner::SpendableNote,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
+    transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
         OperationalFeedItem, PortfolioBalance, RecipientLookup, Sensitive, SyncMetadata,
@@ -1075,10 +1077,9 @@ mod session_binding_tests {
         // access, not merely available as a free function. Storage is not
         // initialized in this test process, so reaching it would produce
         // "storage is not initialized" instead.
-        let err = futures::executor::block_on(router(StorageWorkerRequest::AspSecret(
-            OWNER.to_string(),
-        )))
-        .expect_err("an unbound ASP secret read is refused");
+        let err =
+            futures::executor::block_on(router(StorageWorkerRequest::AspSecret(OWNER.to_string())))
+                .expect_err("an unbound ASP secret read is refused");
         assert!(
             err.to_string().contains("no wallet session is bound"),
             "the read must be refused by the session guard, not by storage: {err}"

@@ -322,7 +322,10 @@ impl PoolContract {
     ///
     /// # Returns
     ///
-    /// Returns `true` if the proof is valid, `false` otherwise
+    /// Returns `true` if the proof is valid, and `Err(Error::InvalidProof)` if
+    /// the verifier refuses it. The verifier never answers `false`: every
+    /// rejection is a `Groth16Error`, so that error is translated here rather
+    /// than allowed to cross the contract boundary raw.
     fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
         // Check proof is not empty
         if proof.proof.is_empty() {
@@ -374,9 +377,18 @@ impl PoolContract {
             }
         }
 
-        let is_valid = client.verify(&proof.proof, &public_inputs);
-
-        Ok(is_valid)
+        // `try_verify`, not `verify`. `Groth16Error` and this contract's
+        // `Error` are separate `#[repr(u32)]` enums whose codes overlap:
+        // `MalformedPublicInputs` is 1 and so is `NotAuthorized`,
+        // `MalformedProof` is 2 and so is `MerkleTreeFull`. A plain `verify`
+        // lets a verifier rejection trap out of this frame carrying the
+        // verifier's own code, and the caller reads that code against the
+        // pool's enum — a refused proof arrives as an authorization failure.
+        // Catching the call here keeps the pool's errors the pool's own.
+        match client.try_verify(&proof.proof, &public_inputs) {
+            Ok(Ok(is_valid)) => Ok(is_valid),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Hash external data using Keccak256

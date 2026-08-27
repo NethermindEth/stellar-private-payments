@@ -4,8 +4,9 @@
 //!
 //! `circuits` crate keeps a duplicated copy of this logic
 //! (`circuits/src/core/merkle.rs`), so we can avoid inter-dependency.
-//! Bit-identical synchronization is enforced at production depth 10
-//! (1024 leaves) by `e2e-tests/src/tests/coherence/merkle.rs`.
+//! Bit-identical synchronization is enforced by
+//! `e2e-tests/src/tests/coherence/merkle.rs`, over both a full tree and the
+//! padded prefix the pool actually holds.
 
 use core::ops::Add;
 

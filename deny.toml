@@ -15,7 +15,10 @@ targets = [
 ]
 all-features = true
 no-default-features = false
-exclude = ["circuits"] # GPL-3.0 circom dependencies are used as a tool in a build script, and are not linked in any of the artefacts
+exclude = [
+    "circuits",
+    "circuit-compiler",
+] # GPL-3.0 circom dependencies are used as a tool in building, and are not linked in any of the artefacts
 
 [output]
 feature-depth = 1

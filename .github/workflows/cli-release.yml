@@ -49,7 +49,7 @@ jobs:
           cp deployments/testnet/circuit_keys/*.json testdata/
 
       - name: Build circuits (release) — produces r1cs
-        run: cargo build -p circuits --release
+        run: make circuits
 
       - name: Assemble dist
         run: |
@@ -63,7 +63,7 @@ jobs:
           rm -f "$STAGING/DISCLAIMER.txt"
 
           # Compiled circuit artifacts + proving keys / witness graphs the CLI loads.
-          CIRCUITS="target/circuits-artifacts/release"
+          CIRCUITS="target/circuits-artifacts"
           KEYS="deployments/testnet/circuit_keys"
           for stem in policy_tx_2_2 policy_tx_2_2_A policy_tx_2_2_B policy_tx_2_2_AB \
                       selectiveDisclosure_1; do
@@ -123,14 +123,14 @@ jobs:
         shell: bash
         run: |
           set -eu
-          # Check out circomlib at the locked rev so circuits/build.rs skips fetching.
+          # Check out circomlib at the locked rev so tools/circuit-compiler skips fetching.
           LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
           if [ ! -d circuits/src/circomlib/.git ]; then
             git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
           fi
           git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
           git -C circuits/src/circomlib checkout --detach FETCH_HEAD
-          # Canonical keys so build.rs does not run a (random) trusted setup.
+          # Canonical keys so circuit-compiler does not run a (random) trusted setup.
           mkdir -p testdata
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/

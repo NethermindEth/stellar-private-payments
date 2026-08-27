@@ -15,11 +15,11 @@ use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
+    disclosure::verify_disclosure_receipt,
     types::{
         DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress, NotePublicKey,
         SignerAddress,
     },
-    verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -96,14 +96,7 @@ pub struct Client {
 struct AccountOptions {
     network_passphrase: String,
     user_address: Option<String>,
-    /// The account that signs and pays. Optional, and defaults to
-    /// `user_address` so existing callers are unaffected.
-    ///
-    /// Supplying a *different* account is accepted by deserialization and
-    /// then refused: key derivation refuses it in
-    /// [`ensure_derivation_identity`], and opening the session refuses it in
-    /// the native client. The field stays because it is where the eventual
-    /// split will be expressed; it is not yet a working feature.
+    /// The account that signs and pays. Optional; defaults to `user_address`.
     signer_address: Option<String>,
 }
 
@@ -228,8 +221,7 @@ impl Client {
         with_correlation_id(new_correlation_id(), async {
             let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
             let user_address = resolve_user_address(&signer, opts.user_address).await?;
-            // Defaults to the note owner, which keeps behaviour identical to
-            // before the split. The wallet is asked to sign with this account.
+            // Defaults to the note owner. The wallet signs with this account.
             let signer_address =
                 SignerAddress::new(opts.signer_address.unwrap_or_else(|| user_address.clone()));
             let wallet_signer = WalletSigner::new(signer, opts.network_passphrase, signer_address)?;
@@ -277,7 +269,8 @@ impl Client {
             // one account's privacy keys from another account's
             // signature. See ensure_derivation_identity.
             ensure_derivation_identity(&user_address, wallet_signer.signer_address())?;
-            let message = stellar_private_payments::KEY_DERIVATION_MESSAGE.to_string();
+            let message =
+                stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
             let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
             let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
             self.derive_save_user_keys(user_address.clone(), signature)
@@ -458,10 +451,9 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
-        // Read back off the signer rather than from AccountOptions: this is
-        // the address the wallet will actually be asked to sign with, so it
-        // is the one the native client must validate. Passing the option
-        // through separately would let the check and the request drift.
+        // Read back off the signer rather than from AccountOptions: this is the
+        // address the wallet will actually be asked to sign with, so it is the
+        // one the native client must validate.
         let signer_address = wallet_signer.signer_address().clone();
         let signer: Handle<dyn stellar_private_payments::Signer> =
             Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
