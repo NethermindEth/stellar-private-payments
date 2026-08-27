@@ -167,6 +167,9 @@ pub struct UserNoteSummary {
     pub created_at_ledger: u32,
     /// Whether the note has been spent (nullifier observed).
     pub spent: bool,
+    /// Admin audit ciphertext from the commitment event, if the pool emits GVK
+    /// data.
+    pub gvk_ciphertext: Option<GlobalViewKeyCiphertext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -464,7 +464,8 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -484,6 +485,7 @@ impl Storage {
             let created_at_ledger_i64: i64 = row.get(4)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
             let spent_i64: i64 = row.get(5)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 6)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -492,6 +494,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                gvk_ciphertext,
             })
         })?;
 
@@ -515,7 +518,8 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -533,6 +537,7 @@ impl Storage {
             let created_at_ledger_i64: i64 = row.get(3)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
             let spent_i64: i64 = row.get(4)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -541,6 +546,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                gvk_ciphertext,
             })
         })?;
 
@@ -563,7 +569,8 @@ impl Storage {
                 pool.address,
                 n.amount,
                 c.leaf_index,
-                r.ledger
+                r.ledger,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -581,6 +588,7 @@ impl Storage {
             let leaf_index = col_u32(leaf_index_i64, 3)?;
             let created_at_ledger_i64: i64 = row.get(4)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -589,6 +597,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: false,
+                gvk_ciphertext,
             })
         })?;
 
@@ -1723,6 +1732,19 @@ fn encode_optional_gvk_ciphertext(
 
 fn decode_gvk_ciphertext(encoded: &str) -> Result<GlobalViewKeyCiphertext> {
     serde_json::from_str(encoded).map_err(Into::into)
+}
+
+fn optional_gvk_ciphertext_col(
+    row: &rusqlite::Row<'_>,
+    idx: usize,
+) -> rusqlite::Result<Option<GlobalViewKeyCiphertext>> {
+    let encoded: Option<String> = row.get(idx)?;
+    match encoded {
+        None => Ok(None),
+        Some(encoded) => decode_gvk_ciphertext(&encoded).map(Some).map_err(|e| {
+            rusqlite::Error::InvalidParameterName(format!("gvk_ciphertext[{idx}]: {e:#}"))
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -2872,8 +2894,41 @@ mod tests {
             commitment,
             index: 0,
             encrypted_output: vec![],
-            gvk_ciphertext: Some(ct),
+            gvk_ciphertext: Some(ct.clone()),
         }])?;
+
+        storage.conn.execute(
+            "INSERT INTO accounts (address) VALUES (?1)",
+            params!["GUSER"],
+        )?;
+        let account_id: i64 = storage.conn.query_row(
+            "SELECT id FROM accounts WHERE address = ?1",
+            params!["GUSER"],
+            |row| row.get(0),
+        )?;
+        let commitment_id: i64 = storage.conn.query_row(
+            "SELECT id FROM pool_commitments WHERE commitment = ?1",
+            params![commitment],
+            |row| row.get(0),
+        )?;
+        storage.conn.execute(
+            "INSERT INTO user_notes (
+                id, account_id, commitment_id, nullifier_id,
+                expected_nullifier, blinding, amount
+             ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
+            params![
+                commitment,
+                account_id,
+                commitment_id,
+                Field(crate::types::U256::from(1)),
+                Field(crate::types::U256::from(2)),
+                NoteAmount::from(99u128).to_string(),
+            ],
+        )?;
+        let notes = storage.list_pool_user_notes("CPOOL", "GUSER")?;
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].gvk_ciphertext.as_ref(), Some(&ct));
+
         drop(storage);
 
         let rows = Storage::connect_file(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
