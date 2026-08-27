@@ -18,6 +18,7 @@ fn field(value: u64) -> Field {
 fn gvk_encrypt_matches_circuit_reference() {
     let d_priv = Scalar::from(987_654_321u64);
     let d = admin_public_key(d_priv);
+    // codeql[rust/hard-coded-cryptographic-value]
     let nonce = Scalar::from(42u64);
     let idx = Scalar::from(0u64);
 
