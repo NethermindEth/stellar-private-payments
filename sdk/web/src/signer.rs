@@ -21,11 +21,9 @@ const SIGN_METHODS: &[&str] = &["signMessage", "signTransaction", "signAuthEntry
 pub struct WalletSigner {
     signer: JsValue,
     network_passphrase: String,
-    /// The account this signer asks the wallet to sign with. A
-    /// [`SignerAddress`] rather than a bare string because every use below is
-    /// a signing role: the requested `address` passed to the wallet, the auth
-    /// entries selected for signing, and the public key embedded in the
-    /// address credential.
+    /// The account this signer asks the wallet to sign with: the requested
+    /// `address`, the auth entries selected for signing, and the public key
+    /// embedded in the address credential.
     signer_address: SignerAddress,
 }
 

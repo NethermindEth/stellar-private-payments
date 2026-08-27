@@ -77,9 +77,7 @@ pub struct Client {
 struct AccountOptions {
     network_passphrase: String,
     user_address: Option<String>,
-    /// The account that signs and pays. Optional, and defaults to
-    /// `user_address` so existing callers are unaffected. Nothing in the app
-    /// sets it to a different account yet; that is a later change.
+    /// The account that signs and pays. Optional; defaults to `user_address`.
     signer_address: Option<String>,
 }
 
@@ -204,8 +202,7 @@ impl Client {
         with_correlation_id(new_correlation_id(), async {
             let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
             let user_address = resolve_user_address(&signer, opts.user_address).await?;
-            // Defaults to the note owner, which keeps behaviour identical to
-            // before the split. The wallet is asked to sign with this account.
+            // Defaults to the note owner. The wallet signs with this account.
             let signer_address =
                 SignerAddress::new(opts.signer_address.unwrap_or_else(|| user_address.clone()));
             let wallet_signer = WalletSigner::new(signer, opts.network_passphrase, signer_address)?;

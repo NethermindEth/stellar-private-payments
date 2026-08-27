@@ -148,7 +148,7 @@ impl<S: Storage> Client<S> {
     ) -> Result<Account<S>, Error> {
         let user_address = user_address.into();
         // The signing account is the note owner until a caller can choose
-        // otherwise, which keeps behaviour identical to before the split.
+        // otherwise.
         let signer_address = SignerAddress::new(user_address.as_str());
         Ok(Account::new(
             self.rpc.clone(),

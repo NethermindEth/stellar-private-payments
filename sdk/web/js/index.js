@@ -78,12 +78,9 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
-      // The signing account defaults to the note owner, which is what this
-      // call did before the two were separable. Note the fallback above: when
-      // `userAddress` is omitted it is resolved from `signer.getPublicKey()`,
-      // so the note owner is derived from the signer. That is fine only while
-      // the two are the same account; a caller passing `signerAddress` without
-      // `userAddress` would otherwise silently make the signer the owner.
+      // An omitted `userAddress` is resolved from `signer.getPublicKey()`
+      // above, so passing `signerAddress` without `userAddress` would silently
+      // make the signer the note owner.
       if (options.signerAddress && !options.userAddress) {
         throw new Error(
           'options.userAddress is required when options.signerAddress is supplied',
