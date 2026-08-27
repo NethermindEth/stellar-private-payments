@@ -31,16 +31,8 @@ use stellar_private_payments::{
 };
 use tracing::Instrument;
 use wasm_bindgen::JsError;
-use wasm_bindgen_futures::spawn_local;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
-
-#[derive(Clone, Debug)]
-enum InitState {
-    Pending,
-    Ready,
-    Failed(String),
-}
 
 fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
@@ -61,7 +53,6 @@ thread_local! {
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
-    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
 
 fn init_transact_prover(
@@ -275,68 +266,30 @@ async fn uncompressed_pk_bytes(
     .await
 }
 
-async fn load_circuit_artifacts() -> Result<(), JsError> {
-    let transact_ready = TRANSACT_PROVERS.with(|s| {
-        crate::artifact_hashes::POLICY_TRANSACT_CIRCUIT_STEMS
-            .iter()
-            .all(|stem| s.borrow().contains_key(*stem))
-    });
-    let all_ready = transact_ready
-        && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow().iter().all(|c| c.is_some()))
-        && DISCLOSURE_PROVERS.with(|s| s.borrow().iter().all(|p| p.is_some()));
-    if all_ready {
+async fn ensure_transact_prover(stem: &str) -> Result<(), JsError> {
+    if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
         return Ok(());
     }
 
-    let to_load: Vec<(&str, &[u8])> = crate::artifact_hashes::POLICY_TRANSACT_CIRCUIT_STEMS
-        .iter()
-        .filter_map(|&stem| {
-            if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
-                return None;
-            }
-            crate::artifact_hashes::bundled_policy_proving_key(stem)
-                .map(|proving_key| (stem, proving_key))
-        })
-        .collect();
+    let bundled_pk = crate::artifact_hashes::bundled_policy_proving_key(stem)
+        .ok_or_else(|| JsError::new(&format!("no bundled proving key for {stem}")))?;
 
-    if !to_load.is_empty() {
-        let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
-            futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
-                let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
-                    .ok_or_else(|| {
-                        JsError::new(&format!("unsupported transact circuit stem: {stem}"))
-                    })?;
-                let graph = fetch_circuit_file_verified(
-                    &format!("{stem}.graph.bin"),
-                    hashes.graph_len,
-                    hashes.graph_sha256,
-                )
-                .await?;
-                let r1cs = fetch_circuit_file_verified(
-                    &format!("{stem}.r1cs"),
-                    hashes.r1cs_len,
-                    hashes.r1cs_sha256,
-                )
-                .await?;
-                Ok::<_, JsError>((graph, r1cs))
-            }))
-            .await?;
+    let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
+        .ok_or_else(|| JsError::new(&format!("unsupported transact circuit stem: {stem}")))?;
 
-        let mut loaded = Vec::with_capacity(to_load.len());
-        for (&(stem, proving_key), (graph_bytes, r1cs_bytes)) in
-            to_load.iter().zip(transact_artifacts.iter())
-        {
-            let prover = build_transact_prover(stem, proving_key, graph_bytes, r1cs_bytes).await?;
-            loaded.push((stem.to_owned(), prover));
-        }
+    let graph_name = format!("{stem}.graph.bin");
+    let r1cs_name = format!("{stem}.r1cs");
 
-        TRANSACT_PROVERS.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            for (stem, prover) in loaded {
-                borrow.insert(stem, prover);
-            }
-        });
-    }
+    let (graph_bytes, r1cs_bytes) = try_join!(
+        fetch_circuit_file_verified(&graph_name, hashes.graph_len, hashes.graph_sha256,),
+        fetch_circuit_file_verified(&r1cs_name, hashes.r1cs_len, hashes.r1cs_sha256,),
+    )?;
+
+    let engine = build_transact_prover(stem, bundled_pk, &graph_bytes, &r1cs_bytes).await?;
+
+    TRANSACT_PROVERS.with(|cell| {
+        cell.borrow_mut().insert(stem.to_owned(), engine);
+    });
 
     Ok(())
 }
@@ -406,34 +359,9 @@ pub fn worker_main() {
         let _guard = worker_span.enter();
         crate::telemetry::init_telemetry(None);
         crate::telemetry::install_panic_hook();
-        tracing::debug!("[{WORKER_NAME}] starting...");
+        tracing::debug!("[{WORKER_NAME}] ready");
     }
     ProverWorker::registrar().register();
-    spawn_local(
-        async move {
-            if let Err(e) = init().await {
-                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
-            }
-        }
-        .instrument(worker_span),
-    );
-}
-
-async fn init() -> Result<(), JsError> {
-    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
-
-    match load_circuit_artifacts().await {
-        Ok(()) => {
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-            tracing::debug!("[{WORKER_NAME}] initialized");
-            Ok(())
-        }
-        Err(e) => {
-            let msg = format!("{e:?}");
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
-            Err(e)
-        }
-    }
 }
 
 #[oneshot]
@@ -460,26 +388,15 @@ pub(crate) async fn ProverWorker(
 pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerResponse> {
     let resp = match req {
         ProverWorkerRequest::Ping => {
-            tracing::trace!("[{WORKER_NAME}] ping");
-            loop {
-                match INIT_STATE.with(|s| s.borrow().clone()) {
-                    InitState::Ready => {
-                        tracing::trace!("[{WORKER_NAME}] pong");
-                        return Ok(ProverWorkerResponse::Pong);
-                    }
-                    InitState::Failed(msg) => {
-                        tracing::debug!("[{WORKER_NAME}] ping -> init failed");
-                        return Ok(ProverWorkerResponse::Error(msg));
-                    }
-                    InitState::Pending => {}
-                }
-
-                TimeoutFuture::new(50).await;
-            }
+            tracing::trace!("[{WORKER_NAME}] ping/pong");
+            ProverWorkerResponse::Pong
         }
         ProverWorkerRequest::Transact(params) => {
             tracing::debug!("[{WORKER_NAME}] transact");
             let stem = params.policy_flags.circuit_stem();
+            ensure_transact_prover(&stem)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
                 let engine = borrow.get_mut(&stem).ok_or_else(|| {
@@ -684,16 +601,6 @@ impl ProverBridge {
         match resp {
             ProverWorkerResponse::Error(e) => Err(anyhow!(e)),
             other => Ok(other),
-        }
-    }
-
-    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self
-            .call(ProverWorkerRequest::Ping, PROVE_TIMEOUT_MS)
-            .await?
-        {
-            ProverWorkerResponse::Pong => Ok(()),
-            other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }
 }
