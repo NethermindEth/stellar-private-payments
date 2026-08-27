@@ -180,7 +180,7 @@ Mixed-policy example:
 ./deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
@@ -194,7 +194,7 @@ For testnet purposes
   --deployer <identity> \
   --policy-flags blocklist \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool native:$(stellar contract id asset --asset native --network testnet) \
   --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
@@ -207,7 +207,7 @@ Allowlist + blocklist pool:
   --deployer <identity> \
   --policy-flags allowlist-blocklist \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```

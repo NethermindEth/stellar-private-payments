@@ -1,6 +1,6 @@
 use ark_bn254::Fr as Scalar;
 
-use super::general::poseidon2_hash3;
+use super::{general::poseidon2_hash3, merkle_tree::zero_leaf};
 
 /// Compute a commitment using Poseidon2 hash
 ///
@@ -129,4 +129,36 @@ pub fn prepopulated_leaves(
     }
 
     leaves
+}
+
+/// Build the filled prefix of a Merkle tree
+///
+/// Every position in `0..prefix_len` gets a random commitment except
+/// `exclude_indices`, which keep the zero leaf for the caller to overwrite.
+///
+/// # Arguments
+///
+/// * `seed` - Seed value for the random number generator
+/// * `exclude_indices` - Indices to leave at the zero leaf
+/// * `prefix_len` - Number of leaves the tree holds
+///
+/// # Panics
+///
+/// Panics if any excluded index falls outside the prefix.
+pub fn prepopulated_prefix(seed: u64, exclude_indices: &[usize], prefix_len: usize) -> Vec<Scalar> {
+    assert!(
+        exclude_indices.iter().all(|&idx| idx < prefix_len),
+        "exclude_indices must fall inside a prefix of {prefix_len} leaves",
+    );
+
+    let mut rng = Rng64::new(seed);
+    (0..prefix_len)
+        .map(|idx| {
+            if exclude_indices.contains(&idx) {
+                zero_leaf()
+            } else {
+                rand_commitment(&mut rng)
+            }
+        })
+        .collect()
 }

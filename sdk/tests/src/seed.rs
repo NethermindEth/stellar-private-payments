@@ -14,7 +14,8 @@ use stellar_private_payments::{
     zk::{crypto, encryption, merkle::MerklePrefixTree},
 };
 
-pub const POOL_MERKLE_LEVELS: u32 = 10;
+pub const POOL_MERKLE_LEVELS: u32 = 20;
+pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 pub const TEST_NETWORK: &str = "test";
 const TEST_LEDGER: u32 = 1;
 
@@ -121,7 +122,7 @@ pub fn seed_prove_wallet(
     }
 
     let asp_membership_root = MerklePrefixTree::new(
-        POOL_MERKLE_LEVELS,
+        ASP_MEMBERSHIP_LEVELS,
         std::slice::from_ref(&user_membership_leaf),
     )?
     .into_built()
@@ -297,7 +298,7 @@ fn chain_snapshot_from_storage(
     let pool_next_index = u32::try_from(pool_leaves.len()).context("pool leaf count")?;
 
     let asp_leaves = storage.get_all_asp_membership_leaves_ordered(asp_membership_contract_id)?;
-    let asp_membership_root = MerklePrefixTree::new(POOL_MERKLE_LEVELS, &asp_leaves)?
+    let asp_membership_root = MerklePrefixTree::new(ASP_MEMBERSHIP_LEVELS, &asp_leaves)?
         .into_built()
         .root()?;
 
@@ -305,6 +306,7 @@ fn chain_snapshot_from_storage(
         pool_root,
         pool_next_index,
         pool_merkle_levels: POOL_MERKLE_LEVELS,
+        asp_membership_levels: ASP_MEMBERSHIP_LEVELS,
         asp_membership_root,
         asp_membership_contract_id: asp_membership_contract_id.to_string(),
         asp_membership_ledger: TEST_LEDGER,

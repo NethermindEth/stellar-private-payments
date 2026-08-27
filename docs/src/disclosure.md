@@ -17,7 +17,7 @@ A receipt is a JSON object with the following schema:
   "version": 1,
   "circuit": {
     "name": "selectiveDisclosure_2",
-    "levels": 10,
+    "levels": 20,
     "nNotes": 2,
     "vkHash": "0x937c4ee647d7747f90ec6eff0dcc67f4b00772e8239a87a973267ff15f2dd327"
   },
@@ -140,10 +140,10 @@ key. Use `--require-unspent` when spent notes must make the command fail.
 
 | Circuit | Canonical `vk_hash` |
 |---|---|
-| `selectiveDisclosure_1` | `0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107` |
-| `selectiveDisclosure_2` | `0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd` |
-| `selectiveDisclosure_3` | `0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f` |
-| `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
+| `selectiveDisclosure_1` | `0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2` |
+| `selectiveDisclosure_2` | `0xc057dc17d370429a81a9e0fb1a81d7e7d7dd1af8ca373639db9a651c1a8d3464` |
+| `selectiveDisclosure_3` | `0x20a0ec3d1b71c3f9978234116dd1f25c8a6711e5fcfdf37da181d6c0edf79a69` |
+| `selectiveDisclosure_4` | `0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
 | `sdk/native/src/zk/disclosure/mod.rs` | `RegisteredCircuit::canonical_vk_hash` used by the CLI |

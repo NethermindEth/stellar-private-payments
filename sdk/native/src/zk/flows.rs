@@ -142,6 +142,8 @@ pub struct TransactParams {
 
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -176,6 +178,8 @@ pub struct DepositParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -217,6 +221,8 @@ pub struct WithdrawParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -254,6 +260,8 @@ pub struct TransferParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -275,6 +283,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
     } = params;
@@ -291,6 +300,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
         },
@@ -314,6 +324,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
     } = params;
@@ -369,6 +380,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
         },
@@ -391,6 +403,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
     } = params;
@@ -407,6 +420,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
         },
@@ -435,6 +449,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
     } = params;
@@ -442,12 +457,16 @@ where
     if tree_depth == 0 {
         return Err(anyhow!("tree_depth must be > 0"));
     }
+    if asp_depth == 0 {
+        return Err(anyhow!("asp_depth must be > 0"));
+    }
     if smt_depth == 0 {
         return Err(anyhow!("smt_depth must be > 0"));
     }
 
     let tree_depth_usize =
         usize::try_from(tree_depth).map_err(|_| anyhow!("tree_depth too large"))?;
+    let asp_depth_usize = usize::try_from(asp_depth).map_err(|_| anyhow!("asp_depth too large"))?;
     let smt_depth_usize = usize::try_from(smt_depth).map_err(|_| anyhow!("smt_depth too large"))?;
 
     // Validate ASP proof shapes and policy consistency early.
@@ -463,10 +482,10 @@ where
             ));
         }
         (true, Some(proof)) => {
-            if proof.path_elements.len() != tree_depth_usize {
+            if proof.path_elements.len() != asp_depth_usize {
                 return Err(anyhow!(
                     "membership_proof.path_elements length mismatch: expected {}, got {}",
-                    tree_depth,
+                    asp_depth,
                     proof.path_elements.len()
                 ));
             }
@@ -1082,8 +1101,9 @@ mod tests {
     #[test]
     fn deposit_pads_inputs_and_outputs() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1103,9 +1123,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
@@ -1155,6 +1176,7 @@ mod tests {
     #[test]
     fn blocklist_transact_omits_membership_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
@@ -1175,6 +1197,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::BLOCKLIST,
             },
@@ -1200,6 +1223,7 @@ mod tests {
     #[test]
     fn open_transact_omits_asp_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
 
         let artifacts = transact(
@@ -1219,6 +1243,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::EMPTY,
             },
@@ -1245,8 +1270,9 @@ mod tests {
     #[test]
     fn allowlist_transact_omits_blocklist_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
 
         let artifacts = transact(
             TransactParams {
@@ -1262,9 +1288,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST,
             },
@@ -1287,42 +1314,11 @@ mod tests {
         assert!(artifacts.prepared.asp_non_membership_root.is_zero());
     }
 
+    /// A membership proof cut to the pool depth must be rejected.
     #[test]
-    fn blocklist_transact_rejects_membership_proof() {
+    fn allowlist_transact_rejects_membership_proof_sized_to_the_pool_depth() {
         let tree_depth: u32 = 10;
-        let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
-        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
-
-        let res = transact(
-            TransactParams {
-                priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
-                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
-                ext_recipient: "POOL".into(),
-                ext_amount: ExtAmount::from(10),
-                inputs: Vec::new(),
-                outputs: vec![TransactOutput {
-                    amount: NoteAmount::from(10),
-                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
-                    recipient_note_pubkey: None,
-                    recipient_encryption_pubkey: None,
-                }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
-                tree_depth,
-                smt_depth,
-                policy_flags: PolicyFlags::BLOCKLIST,
-            },
-            |_| Ok([0u8; 32]),
-        );
-
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn both_transact_requires_non_membership_proof() {
-        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
 
@@ -1343,6 +1339,80 @@ mod tests {
                 membership_proof: Some(zero_membership(tree_depth_usize)),
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::ALLOWLIST,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        let err = res.expect_err("membership proof at the pool depth must be rejected");
+        assert!(
+            err.to_string().contains("path_elements length mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn blocklist_transact_rejects_membership_proof() {
+        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
+        let smt_depth: u32 = 10;
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(asp_depth_usize)),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
+                tree_depth,
+                asp_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::BLOCKLIST,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn both_transact_requires_non_membership_proof() {
+        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
+        let smt_depth: u32 = 10;
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
+
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(asp_depth_usize)),
+                non_membership_proof: None,
+                tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
@@ -1355,6 +1425,7 @@ mod tests {
     #[test]
     fn both_transact_requires_membership_proof() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
@@ -1375,6 +1446,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
@@ -1387,8 +1459,10 @@ mod tests {
     #[test]
     fn withdraw_auto_builds_change_outputs() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1410,9 +1484,10 @@ mod tests {
                 withdraw_amount: ExtAmount::from(7),
                 inputs: vec![input],
                 outputs: None,
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
@@ -1435,8 +1510,10 @@ mod tests {
     #[test]
     fn transfer_requires_balanced_equation() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1463,9 +1540,10 @@ mod tests {
                 pool_address: "POOL".into(),
                 inputs: vec![input],
                 outputs: vec![out],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
@@ -1478,8 +1556,10 @@ mod tests {
     #[test]
     fn withdraw_splits_change_when_exceeds_note_amount_max() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1502,9 +1582,10 @@ mod tests {
                 withdraw_amount: ExtAmount::ONE,
                 inputs: vec![input0],
                 outputs: None,
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             },
