@@ -70,15 +70,39 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   return page;
 }
 
-export async function switchFreighterAccount(context, accountName) {
+export async function switchFreighterAccount(context, accountName, {
+  timeoutMs = 10_000,
+  waitOptions = {},
+} = {}) {
   const page = await extensionHomePage(context);
   const accountButton = page.locator('[data-testid="account-view-account-name"]');
-  await accountButton.waitFor({ state: 'visible', timeout: 10_000 });
+  await accountButton.waitFor({ state: 'visible', timeout: timeoutMs });
   await accountButton.click({ force: true });
 
   const row = page.locator('.detail-name', { hasText: accountName }).first();
-  await row.waitFor({ state: 'visible', timeout: 10_000 });
+  await row.waitFor({ state: 'visible', timeout: timeoutMs });
   await row.click({ force: true });
+
+  // The row click closes the dropdown, but committing the new active account
+  // (Freighter's own redux store + its extension-storage write) is
+  // asynchronous — a caller that reads the header text, or a fresh page that
+  // re-navigates to the extension, immediately after the click can still
+  // observe whichever account was active before this call. Wait for this
+  // page's own header to confirm the switch actually landed before handing
+  // the page back, rather than leaving every caller to guess a settle delay.
+  await waitForCondition({
+    operation: `freighter:switch-account:${accountName}`,
+    timeoutMs,
+    intervalMs: 100,
+    ...waitOptions,
+    observe: async () => ({ active: (await accountButton.innerText().catch(() => '')).trim() }),
+    isReady: ({ active }) => active === accountName,
+  }).catch((error) => {
+    throw new Error(
+      `switchFreighterAccount: '${accountName}' row was clicked but the account header never confirmed ` +
+      `the switch. ${error.message}`,
+    );
+  });
   return page;
 }
 

@@ -17,8 +17,22 @@ pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
+const MIGRATION_ARRAY: &[M] = &[
+    M::up(include_str!("schema.sql")),
+    M::up(include_str!("schema_002_keypairs_unique.sql")),
+];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
+
+/// Explains the one migration failure a user can actually be sitting on.
+///
+/// Migration 2 refuses to choose between two different sets of privacy keys
+/// filed under one account. The raw failure is a bare SQLite uniqueness error
+/// naming an index, which tells the user nothing about what happened to their
+/// wallet or what is at stake.
+const AMBIGUOUS_KEYPAIRS_HELP: &str = "This wallet's local database holds two different sets of \
+     privacy keys for the same account, so it cannot tell which one your notes were encrypted \
+     under. Nothing has been deleted. Choosing for you could permanently hide the notes under the \
+     other set, so the database is left as it is for inspection or support.";
 
 pub struct Storage {
     conn: Connection,
@@ -64,6 +78,18 @@ pub struct DerivedUserNoteRow {
 pub type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
+/// Whether a migration failure is migration 2 refusing an ambiguous database.
+///
+/// Matched on the message rather than a typed variant because
+/// `rusqlite_migration` wraps the underlying `rusqlite` error and SQLite
+/// reports a failed `CREATE UNIQUE INDEX` as a constraint violation naming the
+/// table and column, not the index. Both spellings are accepted so this keeps
+/// working if that ever changes; a miss only costs the friendlier message.
+fn is_keypairs_uniqueness_failure(error: &rusqlite_migration::Error) -> bool {
+    let message = error.to_string();
+    message.contains("keypairs.account_id") || message.contains("idx_keypairs_account_unique")
+}
+
 impl Storage {
     pub fn connect() -> Result<Self> {
         Self::connect_file(DB_NAME)
@@ -78,7 +104,15 @@ impl Storage {
     }
 
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
-        MIGRATIONS.to_latest(&mut conn)?;
+        MIGRATIONS.to_latest(&mut conn).map_err(|e| {
+            // Only migration 2's unique index can fail on real user data, and
+            // only for the ambiguous case it deliberately refuses to resolve.
+            if is_keypairs_uniqueness_failure(&e) {
+                anyhow!("{AMBIGUOUS_KEYPAIRS_HELP} (underlying error: {e})")
+            } else {
+                anyhow!(e)
+            }
+        })?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self { conn })
     }
@@ -214,9 +248,22 @@ impl Storage {
             .unwrap_or_default())
     }
 
+    /// The account's derived key material, or `None` if it has never been
+    /// derived on this device.
+    ///
+    /// Returns an error rather than a row when an account somehow has more
+    /// than one. Migration 2's unique index makes that unreachable through
+    /// normal use, so this is the backstop for a database that predates it,
+    /// was modified externally, or was restored from a partial copy. The old
+    /// `ORDER BY id DESC LIMIT 1` turned exactly that state into a silent
+    /// choice, and the notes under the row it did not pick simply stopped
+    /// being found.
     pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
-        self.conn
-            .query_row(
+        // LIMIT 2 rather than 1: enough to detect ambiguity, and no ORDER BY,
+        // so nothing here can depend on which row happens to be newer.
+        let mut statement = self
+            .conn
+            .prepare(
                 "SELECT
                 encryption_private_key,
                 encryption_public_key,
@@ -226,10 +273,12 @@ impl Storage {
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
                 WHERE accounts.address = ?1
-                ORDER BY keypairs.id DESC
-                LIMIT 1",
-                params![address],
-                |row| {
+                LIMIT 2",
+            )
+            .context("failed to prepare user keys query")?;
+
+        let mut rows = statement
+            .query_map(params![address], |row| {
                     let enc_priv: EncryptionPrivateKey = row.get(0)?;
                     let enc_pub: EncryptionPublicKey = row.get(1)?;
                     let note_priv: NotePrivateKey = row.get(2)?;
@@ -249,10 +298,37 @@ impl Storage {
                     })
                 },
             )
-            .optional()
-            .context(format!("Failed to fetch keys for account: {}", address))
+            // Account addresses are Tier-1: this file wraps them in
+            // Sensitive() at the lookup sites below, and this one must match.
+            .context(format!(
+                "Failed to fetch keys for account: {}",
+                crate::types::Sensitive(address)
+            ))?;
+
+        let Some(first) = rows.next().transpose()? else {
+            return Ok(None);
+        };
+        if rows.next().transpose()?.is_some() {
+            return Err(anyhow!(
+                "the local database holds more than one set of privacy keys for this account, \
+                 so the right one cannot be determined; nothing has been changed"
+            ));
+        }
+        Ok(Some(first))
     }
 
+    /// Store the account's derived key material.
+    ///
+    /// Idempotent, not a replace. Derivation is deterministic in the wallet
+    /// signature, so identical material means a repeated onboarding and
+    /// succeeds; *different* material is refused, because notes already in the
+    /// database are encrypted under the stored keys and overwriting them makes
+    /// those notes unreadable while the wallet still looks healthy.
+    ///
+    /// The comparison runs in SQL against the same bound parameters the insert
+    /// would use, so stored and candidate values cannot disagree over encoding.
+    /// The unique index added by migration 2 is the backstop for two racing
+    /// derivations that both see an empty table.
     pub fn save_encryption_and_note_keypairs(
         &mut self,
         account_address: &str,
@@ -267,30 +343,71 @@ impl Storage {
 
         let account_id = Self::get_or_create_account(&tx, account_address)?;
 
-        tx.execute(
-            "INSERT INTO keypairs (
-                encryption_private_key,
-                encryption_public_key,
-                note_private_key,
-                note_public_key,
-                membership_blinding,
-                account_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                &encryption_keypair.private,
-                &encryption_keypair.public,
-                &note_keypair.private,
-                &note_keypair.public,
-                membership_blinding,
-                account_id,
-            ],
-        )
-        .context("failed to insert keypairs")?;
+        let stored_matches: Option<bool> = tx
+            .query_row(
+                "SELECT
+                    encryption_private_key = ?2
+                    AND encryption_public_key = ?3
+                    AND note_private_key = ?4
+                    AND note_public_key = ?5
+                    AND membership_blinding = ?6
+                 FROM keypairs
+                 WHERE account_id = ?1",
+                params![
+                    account_id,
+                    &encryption_keypair.private,
+                    &encryption_keypair.public,
+                    &note_keypair.private,
+                    &note_keypair.public,
+                    membership_blinding,
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("failed to compare stored keypairs")?;
+
+        match stored_matches {
+            Some(true) => {
+                tracing::debug!(
+                    "[STORAGE] keypairs for the account {} are already stored and unchanged",
+                    crate::types::Sensitive(&account_address)
+                );
+            }
+            Some(false) => {
+                return Err(anyhow!(
+                    "different privacy keys are already stored for this account. Replacing them \
+                     would make every note encrypted under the existing keys permanently \
+                     unreadable, so nothing has been changed."
+                ));
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO keypairs (
+                        encryption_private_key,
+                        encryption_public_key,
+                        note_private_key,
+                        note_public_key,
+                        membership_blinding,
+                        account_id
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        &encryption_keypair.private,
+                        &encryption_keypair.public,
+                        &note_keypair.private,
+                        &note_keypair.public,
+                        membership_blinding,
+                        account_id,
+                    ],
+                )
+                .context("failed to insert keypairs")?;
+                tracing::debug!(
+                    "[STORAGE] saved new keypairs for the account {}",
+                    crate::types::Sensitive(&account_address)
+                );
+            }
+        }
+
         tx.commit().context("failed to commit transaction")?;
-        tracing::debug!(
-            "[STORAGE] saved new keypairs for the account {}",
-            crate::types::Sensitive(&account_address)
-        );
         Ok(())
     }
 
@@ -1862,8 +1979,14 @@ mod tests {
         Ok(())
     }
 
+    /// Replaces `get_user_keys_returns_latest_keypair`, which asserted the
+    /// old shadowing behaviour as intended: it derived twice with two different
+    /// signatures and required the reader to return the *second*. That is
+    /// exactly the silent shadowing this migration removes - the notes
+    /// encrypted under the first set were still in the database and had simply
+    /// stopped being findable.
     #[test]
-    fn get_user_keys_returns_latest_keypair() -> Result<()> {
+    fn rederiving_different_keys_is_refused_rather_than_shadowing() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
 
         let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
@@ -1883,22 +2006,202 @@ mod tests {
             &enc_keypair_1,
             &membership_blinding_1,
         )?;
+
+        let error = storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair_2,
+                &enc_keypair_2,
+                &membership_blinding_2,
+            )
+            .expect_err("a second, different derivation must be refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("unreadable"),
+            "the refusal must state what replacing would cost, not just that it failed: {message}"
+        );
+
+        // The refusal must also leave the first derivation intact and
+        // readable: a guard that rejected the write but corrupted the row it
+        // was protecting would be worse than the defect.
+        let keys = storage
+            .get_user_keys("GTESTACCOUNT")?
+            .expect("the original keypairs must survive the refused write");
+        assert_eq!(keys.note_keypair.public.0, note_keypair_1.public.0);
+        assert_eq!(keys.encryption_keypair.public.0, enc_keypair_1.public.0);
+        assert_eq!(
+            keys.membership_blinding.to_le_bytes(),
+            membership_blinding_1.to_le_bytes()
+        );
+
+        Ok(())
+    }
+
+    /// Builds a database at migration 1, the shape every existing user is on,
+    /// then inserts key rows directly. Going around the application-level
+    /// check is the point: it reproduces the pre-migration state exactly.
+    fn v1_database_with_keypair_rows(rows: &[(&[u8], u8)]) -> Result<Connection> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 1)?;
+        conn.execute(
+            "INSERT INTO accounts (id, address) VALUES (1, 'GTESTACCOUNT')",
+            [],
+        )?;
+        for (blob, blinding) in rows {
+            conn.execute(
+                "INSERT INTO keypairs (
+                    encryption_private_key, encryption_public_key,
+                    note_private_key, note_public_key,
+                    membership_blinding, account_id
+                 ) VALUES (?1, ?1, ?1, ?1, ?2, 1)",
+                params![blob, [*blinding; 32]],
+            )?;
+        }
+        Ok(conn)
+    }
+
+    /// The safe half of the migration question: identical duplicate rows carry
+    /// no information beyond the first, so collapsing them loses nothing and
+    /// the database opens normally.
+    #[test]
+    fn migration_collapses_byte_identical_duplicate_keypairs() -> Result<()> {
+        let mut conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[4u8; 32], 4)])?;
+        MIGRATIONS
+            .to_latest(&mut conn)
+            .expect("identical duplicates must not block the migration");
+
+        let rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
+        assert_eq!(rows, 1, "the identical duplicate must have been collapsed");
+        Ok(())
+    }
+
+    /// The ambiguous half, and the case the migration deliberately refuses to
+    /// resolve. Two *different* key sets under one account mean notes may
+    /// exist under either; choosing would silently hide one set forever.
+    #[test]
+    fn migration_refuses_a_database_with_conflicting_keypairs() -> Result<()> {
+        let mut conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+        let error = MIGRATIONS
+            .to_latest(&mut conn)
+            .expect_err("conflicting key material must not be silently resolved");
+        assert!(
+            is_keypairs_uniqueness_failure(&error),
+            "the failure must be recognised so connect() can explain it, got: {error}"
+        );
+
+        // Nothing destroyed: the rows remain for inspection or support.
+        let rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM keypairs", [], |row| row.get(0))?;
+        assert_eq!(rows, 2, "a refused migration must not delete key material");
+        Ok(())
+    }
+
+    /// The failure a user would actually see. A bare SQLite uniqueness error
+    /// naming an index says nothing about their wallet; this asserts the
+    /// explanation survives all the way out of connect().
+    #[test]
+    fn connect_explains_a_conflicting_keypairs_database() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+        // Not expect_err: Storage holds a Connection and is not Debug.
+        let error = match Storage::connect_with_connection(conn) {
+            Ok(_) => panic!("opening an ambiguous database must fail"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("two different sets") && message.contains("Nothing has been deleted"),
+            "the user-facing error must say what happened and that data is intact: {message}"
+        );
+        Ok(())
+    }
+
+    /// The reader's backstop. Migration 2 makes this state unreachable through
+    /// normal use, so the Storage is assembled directly from a version-1
+    /// connection - the only way to hold an ambiguous database open. Without
+    /// this branch the reader would fall back to whichever row SQLite returned
+    /// first, which is the silent choice the old ORDER BY made.
+    #[test]
+    fn reading_an_ambiguous_account_errors_rather_than_choosing() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+        let storage = Storage { conn };
+
+        let error = storage
+            .get_user_keys("GTESTACCOUNT")
+            .expect_err("an ambiguous account must not yield a row");
+        assert!(
+            error.to_string().contains("more than one set of privacy keys"),
+            "the reader must name the ambiguity: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_derivation_stores_and_reads_back() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        let signature = KeyDerivationSignature(vec![7u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+
+        assert!(storage.get_user_keys("GTESTACCOUNT")?.is_none());
+
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
-            &note_keypair_2,
-            &enc_keypair_2,
-            &membership_blinding_2,
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
         )?;
 
         let keys = storage
             .get_user_keys("GTESTACCOUNT")?
             .expect("expected keypairs to exist");
-        assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
-        assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
+        assert_eq!(keys.note_keypair.public.0, note_keypair.public.0);
+        assert_eq!(keys.encryption_keypair.public.0, enc_keypair.public.0);
         assert_eq!(
             keys.membership_blinding.to_le_bytes(),
-            membership_blinding_2.to_le_bytes()
+            membership_blinding.to_le_bytes()
         );
+
+        Ok(())
+    }
+
+    /// Re-deriving with the *same* signature is what a repeated onboarding
+    /// produces. Derivation is deterministic, so it yields byte-identical key
+    /// material and must succeed as a no-op - refusing it would turn a
+    /// harmless retry into an error with no user-visible remedy.
+    #[test]
+    fn rederiving_identical_keys_is_an_idempotent_no_op() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        let signature = KeyDerivationSignature(vec![9u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+
+        for _ in 0..3 {
+            storage.save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )?;
+        }
+
+        let rows: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM keypairs
+             JOIN accounts ON keypairs.account_id = accounts.id
+             WHERE accounts.address = ?1",
+            params!["GTESTACCOUNT"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(rows, 1, "repeated identical derivation must not add rows");
+
+        let keys = storage
+            .get_user_keys("GTESTACCOUNT")?
+            .expect("expected keypairs to exist");
+        assert_eq!(keys.note_keypair.public.0, note_keypair.public.0);
 
         Ok(())
     }

@@ -52,6 +52,11 @@ impl WalletSigner {
         })
     }
 
+    /// The account this signer asks the wallet to sign with.
+    pub(crate) fn signer_address(&self) -> &SignerAddress {
+        &self.signer_address
+    }
+
     pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
         self.call("signMessage", &[message.into()]).await
     }
@@ -129,7 +134,24 @@ impl WalletSigner {
             .await
             .map_err(|e| wallet_js_error(method, "failed", e))?;
 
-        normalize_sign_result(method, result)
+        let (value, signer_address) = normalize_sign_result(method, result)?;
+        // `signer_address` is absent only for the bare-string result
+        // convention (a custom signer with nothing to check); every SEP-0043
+        // wallet (Freighter included) always sets it, and a mismatch there
+        // means the wallet signed with an account other than the one
+        // `wallet_opts()` asked for above — the signature is not
+        // attributable to the requested identity and must not be accepted
+        // silently.
+        if let Some(actual) = signer_address
+            && actual != self.signer_address.as_str()
+        {
+            return Err(signer_address_mismatch_error(
+                method,
+                self.signer_address.as_str(),
+                &actual,
+            ));
+        }
+        Ok(value)
     }
 }
 
@@ -161,15 +183,69 @@ fn wallet_js_error(method: &str, stage: &str, rejection: JsValue) -> JsError {
     err
 }
 
-/// SEP-0043 user-rejection error code.
-const SEP43_USER_REJECTED_CODE: f64 = -4.0;
+/// SEP-0043 user-rejection error code. `pub(crate)` so client/mod.rs's
+/// `pool_err` can set the same code when it rebuilds a JsError from
+/// `Error::UserRejected`, keeping the wasm boundary's rejection code in one
+/// place rather than two independently-defined constants that could drift.
+pub(crate) const SEP43_USER_REJECTED_CODE: f64 = -4.0;
+
+/// Marker field [`signer_address_mismatch_error`] sets on the JsError it
+/// builds, so [`wallet_sign_error`] can recognize the condition without
+/// relying on message wording (the same reason `code: -4` marks a rejection).
+const SIGNER_ADDRESS_MISMATCH_MARKER: &str = "signerAddressMismatch";
+
+/// Build the error a wallet's signature is rejected with when it reports
+/// signing for a different account than [`WalletSigner::wallet_opts`] asked
+/// for. Marked so [`wallet_sign_error`] maps it to
+/// [`Error::SignerAddressMismatch`] rather than the generic fallback, and
+/// deliberately does not set `code: -4` — this is not a user rejection and
+/// must not be classified as one by the app's cancellation handling (see
+/// [`wallet_js_error`]).
+fn signer_address_mismatch_error(method: &str, requested: &str, actual: &str) -> JsError {
+    let err = JsError::new(&format!(
+        "signer.{method}: wallet signed with {actual}, but {requested} was requested"
+    ));
+    let value = JsValue::from(err.clone());
+    let _ = Reflect::set(
+        &value,
+        &JsValue::from_str(SIGNER_ADDRESS_MISMATCH_MARKER),
+        &JsValue::TRUE,
+    );
+    let _ = Reflect::set(
+        &value,
+        &JsValue::from_str("requestedAddress"),
+        &JsValue::from_str(requested),
+    );
+    let _ = Reflect::set(
+        &value,
+        &JsValue::from_str("actualAddress"),
+        &JsValue::from_str(actual),
+    );
+    err
+}
 
 /// Convert a JS signer error into an SDK [`Error`]. A SEP-0043 user rejection
 /// (`code: -4`, copied onto the error by [`wallet_js_error`]) becomes
 /// [`Error::UserRejected`] so it survives the wasm/JS boundary without relying
-/// on message wording; everything else keeps the previous debug formatting.
+/// on message wording; a signer-address mismatch (marked by
+/// [`signer_address_mismatch_error`]) becomes [`Error::SignerAddressMismatch`]
+/// for the same reason; everything else keeps the previous debug formatting.
 fn wallet_sign_error(error: JsError) -> Error {
     let value = JsValue::from(error.clone());
+    let is_mismatch = Reflect::get(&value, &JsValue::from_str(SIGNER_ADDRESS_MISMATCH_MARKER))
+        .map(|marker| marker.is_truthy())
+        .unwrap_or(false);
+    if is_mismatch {
+        let requested = Reflect::get(&value, &JsValue::from_str("requestedAddress"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        let actual = Reflect::get(&value, &JsValue::from_str("actualAddress"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        return Error::SignerAddressMismatch { requested, actual };
+    }
     let code = Reflect::get(&value, &JsValue::from_str("code"))
         .ok()
         .and_then(|code| code.as_f64());
@@ -184,9 +260,15 @@ fn wallet_sign_error(error: JsError) -> Error {
     }
 }
 
-fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsError> {
+/// Extract the signed value and, when present, the `signerAddress` the
+/// wallet reports it signed with. Absent only for the legacy bare-string
+/// result convention (no object to read a `signerAddress` field off of).
+fn normalize_sign_result(
+    method: &str,
+    result: JsValue,
+) -> Result<(String, Option<String>), JsError> {
     if let Some(s) = result.as_string() {
-        return Ok(s);
+        return Ok((s, None));
     }
 
     let field = match method {
@@ -202,9 +284,15 @@ fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsErro
 
     let value = Reflect::get(&result, &JsValue::from_str(field))
         .map_err(|e| JsError::new(&format!("signer.{method}: missing {field}: {e:?}")))?;
-    value
+    let value = value
         .as_string()
-        .ok_or_else(|| JsError::new(&format!("signer.{method}: {field} must be a string")))
+        .ok_or_else(|| JsError::new(&format!("signer.{method}: {field} must be a string")))?;
+
+    let signer_address = Reflect::get(&result, &JsValue::from_str("signerAddress"))
+        .ok()
+        .and_then(|v| v.as_string());
+
+    Ok((value, signer_address))
 }
 
 #[async_trait::async_trait(?Send)]
@@ -452,5 +540,80 @@ mod spike_tests {
             96,
             "128 hex chars decode as base64, not as hex"
         );
+    }
+
+    /// A different valid-looking address than [`ADDRESS`], standing in for
+    /// the account a wallet might actually be active on when the app asked
+    /// it to sign as [`ADDRESS`].
+    const OTHER_ADDRESS: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBWHF";
+
+    /// Build a signer whose `signMessage` resolves immediately with the given
+    /// `signerAddress`, mirroring exactly what a real SEP-0043 wallet's
+    /// `signTransaction`/`signAuthEntry`/`signMessage` response shape looks
+    /// like (a `{ signedMessage, signerAddress }` object — see
+    /// `@stellar/freighter-api`'s type declarations, which mark
+    /// `signerAddress` as always present). This is the realistic injection
+    /// boundary for the mismatch: `WalletSigner::call()` reads `signerAddress`
+    /// off exactly this kind of resolved value, so a stub returning a
+    /// different one here exercises the same code path a wallet reporting a
+    /// wrong active account would.
+    fn signer_reporting(signer_address: &str) -> JsValue {
+        let signer = Object::new();
+        let body = format!(
+            "return Promise.resolve({{ signedMessage: {:?}, signerAddress: {signer_address:?} }});",
+            STUB_SIGNATURE_B64
+        );
+        Reflect::set(
+            &signer,
+            &JsValue::from_str("signMessage"),
+            &Function::new_no_args(&body),
+        )
+        .unwrap();
+        for method in SIGN_METHODS.iter().filter(|m| **m != "signMessage") {
+            Reflect::set(&signer, &JsValue::from_str(method), &pending_method()).unwrap();
+        }
+        signer.into()
+    }
+
+    #[wasm_bindgen_test]
+    async fn spike_matching_signer_address_is_accepted() {
+        let wallet_signer = new_signer(signer_reporting(ADDRESS)).unwrap();
+        let sig = wallet_signer
+            .sign_wallet_message("hello")
+            .await
+            .expect("a signerAddress matching the request must be accepted");
+        assert_eq!(sig, STUB_SIGNATURE_B64);
+    }
+
+    #[wasm_bindgen_test]
+    async fn spike_mismatching_signer_address_is_rejected() {
+        let wallet_signer = new_signer(signer_reporting(OTHER_ADDRESS)).unwrap();
+        let error = wallet_signer
+            .sign_wallet_message("hello")
+            .await
+            .expect_err("a signerAddress other than the requested one must be rejected");
+
+        let value = JsValue::from(error.clone());
+        assert!(
+            Reflect::get(&value, &JsValue::from_str(SIGNER_ADDRESS_MISMATCH_MARKER))
+                .unwrap()
+                .is_truthy(),
+            "the rejection must be marked as a signer-address mismatch, not a generic failure"
+        );
+        assert!(
+            Reflect::get(&value, &JsValue::from_str("code"))
+                .unwrap()
+                .as_f64()
+                != Some(SEP43_USER_REJECTED_CODE),
+            "a signer-address mismatch must not be classified as a user rejection"
+        );
+
+        match wallet_sign_error(error) {
+            Error::SignerAddressMismatch { requested, actual } => {
+                assert_eq!(requested, ADDRESS);
+                assert_eq!(actual, OTHER_ADDRESS);
+            }
+            other => panic!("expected Error::SignerAddressMismatch, got {other:?}"),
+        }
     }
 }

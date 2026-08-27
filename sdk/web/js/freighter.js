@@ -7,6 +7,7 @@ import {
   signMessage,
   signTransaction,
 } from '@stellar/freighter-api';
+import { verifySignerAddress, assertSignedValue } from './signer-guard.js';
 
 /**
  * Freighter wallet adapter for {@link Client.account}.
@@ -24,6 +25,7 @@ export class FreighterSigner {
       throw new Error('Freighter not detected. Install from https://www.freighter.app/');
     }
     const allowed = await isAllowed();
+    if (allowed?.error) throwFreighterError(allowed.error, 'Failed to check Freighter allow-list');
     if (!allowed?.isAllowed) {
       const set = await setAllowed();
       if (set?.error) throwFreighterError(set.error, 'Freighter access could not be granted');
@@ -44,7 +46,8 @@ export class FreighterSigner {
     await this.ensureReady();
     const { signedTxXdr, signerAddress, error } = await signTransaction(xdr, opts);
     if (error) throwFreighterError(error, 'Transaction signing failed');
-    if (!signedTxXdr) throw new Error('No signed transaction returned');
+    assertSignedValue('No signed transaction returned', signedTxXdr);
+    verifySignerAddress('Transaction signing', opts.address, signerAddress);
     return { signedTxXdr, signerAddress };
   }
 
@@ -52,7 +55,8 @@ export class FreighterSigner {
     await this.ensureReady();
     const { signedAuthEntry, signerAddress, error } = await signAuthEntry(xdr, opts);
     if (error) throwFreighterError(error, 'Auth entry signing failed');
-    if (!signedAuthEntry) throw new Error('No signed auth entry returned');
+    assertSignedValue('No signed auth entry returned', signedAuthEntry);
+    verifySignerAddress('Auth entry signing', opts.address, signerAddress);
     return { signedAuthEntry, signerAddress };
   }
 
@@ -60,7 +64,8 @@ export class FreighterSigner {
     await this.ensureReady();
     const { signedMessage, signerAddress, error } = await signMessage(message, opts ?? {});
     if (error) throwFreighterError(error, 'Message signing failed');
-    if (!signedMessage) throw new Error('No signature returned');
+    assertSignedValue('No signature returned', signedMessage);
+    verifySignerAddress('Message signing', opts?.address, signerAddress);
     return { signedMessage: String(signedMessage), signerAddress };
   }
 }

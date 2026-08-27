@@ -45,6 +45,7 @@ export {
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
   readAppLifecycle,
+  readKeyBinding,
   waitForWalletRuntimeReady,
 } from './appState.mjs';
 

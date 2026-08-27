@@ -55,6 +55,31 @@ thread_local! {
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    /// The account whose wallet session the client has opened.
+    ///
+    /// Held in the worker isolate rather than on the main thread: document
+    /// script cannot touch it directly, and the only way to change it is
+    /// `BindSession`, which the raw RPC surface refuses.
+    static BOUND_SESSION: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Refuse a key-material request that is not for the bound account.
+///
+/// A failure, not a fallback — serving whichever account is bound would answer
+/// about a different account without saying so. Neither address appears in the
+/// error: naming the bound one would disclose the open session to a caller that
+/// guessed, and the message reaches logs.
+fn ensure_session_binding(address: &str) -> Result<()> {
+    let bound = BOUND_SESSION.with(|session| session.borrow().clone());
+    match bound {
+        Some(bound) if bound == address => Ok(()),
+        Some(_) => Err(anyhow!(
+            "refused: this account's privacy keys are not available to the open wallet session"
+        )),
+        None => Err(anyhow!(
+            "refused: no wallet session is bound to this storage worker"
+        )),
+    }
 }
 
 macro_rules! with_storage {
@@ -252,6 +277,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
+            // Before the derivation, not after: a refusal must cost no key
+            // material being computed from a signature we are about to reject.
+            ensure_session_binding(&address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] deriving and saving user keys for the account {}",
                 Sensitive(&address)
@@ -326,6 +354,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }))
         }
         StorageWorkerRequest::AspSecret(address) => {
+            ensure_session_binding(&address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
@@ -454,6 +483,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::OperationalFeed(list)
         }
         StorageWorkerRequest::DisclosureInputs(req) => {
+            // Returns note_private_key and note_blinding for req.user_address,
+            // so it is gated exactly as the ASP secret read is.
+            ensure_session_binding(&req.user_address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] build selective disclosure inputs for {}",
                 Sensitive(&req.user_address)
@@ -482,10 +514,33 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             stellar_private_payments::types::set_reveal_sensitive(config.reveal_sensitive);
             StorageWorkerResponse::Saved
         }
+        StorageWorkerRequest::BindSession(address) => {
+            tracing::debug!(
+                "[{WORKER_NAME}] binding storage session to the account {}",
+                Sensitive(&address)
+            );
+            // Last write wins, so that switching accounts rebinds rather than
+            // requiring a teardown. The client sends this only after its own
+            // identity checks have passed; the worker's job is to make the
+            // bound account the *only* one servable, not to adjudicate which
+            // account the session should be for.
+            BOUND_SESSION.with(|session| *session.borrow_mut() = Some(address));
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::UnbindSession => {
+            tracing::debug!("[{WORKER_NAME}] releasing the bound storage session");
+            // Revokes the capability and leaves the data alone. Wiping the
+            // local database on disconnect is a separate, irreversible
+            // product decision that is not this crate's to take.
+            BOUND_SESSION.with(|session| *session.borrow_mut() = None);
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::DumpLogs => {
             StorageWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
         }
         StorageWorkerRequest::Transact(req) => {
+            // Builds the prover witness from the same key material.
+            ensure_session_binding(&req.user_address)?;
             tracing::trace!("[{WORKER_NAME}] transact");
             with_storage_mut!(storage => match build_transact_params(storage, &req)? {
                 BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
@@ -932,6 +987,144 @@ impl Storage for StorageBridge {
             ))),
             Err(e) => Err(Error::Other(e.to_string())),
         }
+    }
+}
+
+/// Acceptance tests for the session-binding capability guard.
+///
+/// Each `#[test]` runs on its own thread, so `BOUND_SESSION` starts empty in
+/// every one of them and no test can observe another's binding.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod session_binding_tests {
+    use super::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const OTHER: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    fn bind(address: &str) {
+        futures::executor::block_on(router(StorageWorkerRequest::BindSession(
+            address.to_string(),
+        )))
+        .expect("binding a session succeeds");
+    }
+
+    fn unbind() {
+        futures::executor::block_on(router(StorageWorkerRequest::UnbindSession))
+            .expect("releasing a session succeeds");
+    }
+
+    #[test]
+    fn nothing_is_served_before_a_session_is_bound() {
+        let err = ensure_session_binding(OWNER).expect_err("no session is bound yet");
+        assert!(
+            err.to_string().contains("no wallet session is bound"),
+            "the refusal must say the worker has no session, not that the              account is wrong: {err}"
+        );
+    }
+
+    #[test]
+    fn the_bound_account_is_served() {
+        bind(OWNER);
+        assert!(ensure_session_binding(OWNER).is_ok());
+    }
+
+    #[test]
+    fn another_account_is_refused_while_one_is_bound() {
+        bind(OWNER);
+        let err = ensure_session_binding(OTHER).expect_err("only the bound account is servable");
+        assert!(
+            !err.to_string().contains(OWNER) && !err.to_string().contains(OTHER),
+            "a refusal must not disclose either address: {err}"
+        );
+    }
+
+    #[test]
+    fn the_comparison_is_exact() {
+        // Guards against a later "helpful" relaxation to trimmed, prefix or
+        // case-insensitive matching. Strkeys are exact, and a near-match here
+        // would serve one account's key material to another.
+        bind(OWNER);
+        assert!(ensure_session_binding(&OWNER.to_ascii_lowercase()).is_err());
+        assert!(ensure_session_binding(&format!(" {OWNER}")).is_err());
+        assert!(ensure_session_binding(&OWNER[..OWNER.len() - 1]).is_err());
+        assert!(ensure_session_binding("").is_err());
+    }
+
+    #[test]
+    fn rebinding_moves_the_capability_rather_than_widening_it() {
+        // Account switching must not accumulate servable accounts.
+        bind(OWNER);
+        bind(OTHER);
+        assert!(ensure_session_binding(OTHER).is_ok());
+        assert!(
+            ensure_session_binding(OWNER).is_err(),
+            "the previously bound account must stop being servable"
+        );
+    }
+
+    #[test]
+    fn releasing_revokes_the_capability() {
+        bind(OWNER);
+        unbind();
+        assert!(ensure_session_binding(OWNER).is_err());
+    }
+
+    #[test]
+    fn the_asp_secret_read_is_gated_before_storage_is_touched() {
+        // Proves the guard is wired into the router ahead of the database
+        // access, not merely available as a free function. Storage is not
+        // initialized in this test process, so reaching it would produce
+        // "storage is not initialized" instead.
+        let err = futures::executor::block_on(router(StorageWorkerRequest::AspSecret(
+            OWNER.to_string(),
+        )))
+        .expect_err("an unbound ASP secret read is refused");
+        assert!(
+            err.to_string().contains("no wallet session is bound"),
+            "the read must be refused by the session guard, not by storage: {err}"
+        );
+    }
+
+    #[test]
+    fn the_disclosure_input_build_is_gated() {
+        // DisclosureInputs returns note_private_key and note_blinding, so an
+        // ungated build discloses strictly more than the ASP secret read does.
+        //
+        // Transact is gated by the identical one-line call on its own arm and
+        // is not stubbed here: TransactRequest has eighteen fields, several of
+        // them prover types, and the stub would be more fixture than test.
+        // Its classification is covered in protocol.rs.
+        let err = futures::executor::block_on(router(StorageWorkerRequest::DisclosureInputs(
+            DisclosureInputsRequest {
+                user_address: OWNER.to_string(),
+                pool_address: "CPOOL".to_string(),
+                selected_commitments: Vec::new(),
+                pool_root: None,
+                pool_next_index: 0,
+                tree_depth: 20,
+            },
+        )))
+        .expect_err("an unbound disclosure input build is refused");
+        assert!(
+            err.to_string().contains("no wallet session is bound"),
+            "the build must be refused by the session guard, not by storage: {err}"
+        );
+    }
+
+    #[test]
+    fn the_key_write_is_gated_before_any_derivation() {
+        // Same reasoning for the write path: a refusal must cost no key
+        // material derived from a signature that is about to be rejected.
+        let err = futures::executor::block_on(router(StorageWorkerRequest::DeriveSaveUserKeys(
+            OWNER.to_string(),
+            stellar_private_payments::types::KeyDerivationSignature(vec![0u8; 64]),
+            "Test Network".to_string(),
+        )))
+        .expect_err("an unbound key write is refused");
+        assert!(
+            err.to_string().contains("no wallet session is bound"),
+            "the write must be refused by the session guard: {err}"
+        );
     }
 }
 

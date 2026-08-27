@@ -61,8 +61,9 @@ CREATE TABLE accounts (
 
 -- Derived key material for an account.
 --
--- There may be multiple rows per account (e.g. re-derivation); the application typically uses
--- the latest row (max(id)) per account.
+-- Exactly one row per account. Migration 2 adds the unique index that enforces it; this table is
+-- left as migration 1 wrote it so that a database created today and one migrated from an older
+-- version end up with identical schemas.
 CREATE TABLE keypairs (
     id INTEGER PRIMARY KEY,
     encryption_private_key BLOB NOT NULL,

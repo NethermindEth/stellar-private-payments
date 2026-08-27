@@ -7,7 +7,10 @@
 //! ```no_run
 //! use stellar_private_payments::{
 //!     Client, Handle, LocalProver, LocalSigner, LocalStorage, ProverArtifacts,
-//!     types::{ContractConfig, NoteAmount, PolicyFlags, TransferRecipient},
+//!     types::{
+//!         ContractConfig, NoteAmount, NoteOwnerAddress, PolicyFlags, SignerAddress,
+//!         TransferRecipient,
+//!     },
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -29,7 +32,14 @@
 //!     deployment,
 //!     None,
 //! )?;
-//! let account = client.account("G...", signer)?;
+//! // Note owner, then signing account. They must currently be the same
+//! // account, and each is wrapped explicitly — there is no conversion from
+//! // a bare string, so neither identity can be adopted by accident.
+//! let account = client.account(
+//!     NoteOwnerAddress::new("G..."),
+//!     SignerAddress::new("G..."),
+//!     signer,
+//! )?;
 //! let pool = account.pool("CA2TZ...")?;
 //!
 //! pool.deposit(10_000_000u128.into()).await?;

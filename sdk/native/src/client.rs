@@ -135,6 +135,15 @@ impl<S: Storage> Client<S> {
     }
 
     /// Create an [`Account`] session.
+    ///
+    /// Both identities are named explicitly. They must currently be the same
+    /// account: nothing downstream honours a signer that differs from the
+    /// owner — the envelope source, the pool contract's `sender` and the
+    /// auth-entry signer are all built from the owner — so a divergent pair
+    /// is refused with [`Error::SignerIsNotNoteOwner`] rather than quietly
+    /// collapsed to the owner. Callers that want them equal say so by
+    /// building both from the same string, which is visible in review; see
+    /// the type docs on [`SignerAddress`].
     #[tracing::instrument(
         name = "client_account",
         skip_all,
@@ -142,13 +151,11 @@ impl<S: Storage> Client<S> {
     )]
     pub fn account(
         &self,
-        user_address: impl Into<NoteOwnerAddress>,
+        user_address: NoteOwnerAddress,
+        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
-        let user_address = user_address.into();
-        // The signing account is the note owner until a caller can choose
-        // otherwise, which keeps behaviour identical to before the split.
-        let signer_address = SignerAddress::new(user_address.as_str());
+        ensure_signer_is_note_owner(&user_address, &signer_address)?;
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,
@@ -171,5 +178,89 @@ impl<S: Storage> Client<S> {
         self.sync
             .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
             .await
+    }
+}
+
+/// Reject a session whose signing account is not the note owner.
+///
+/// The two are separate types, but nothing downstream honours them differing:
+/// the envelope source, the pool contract's `sender`, the sequence number and
+/// the auth entries are all built from the owner. A divergent pair would ask a
+/// wallet to sign, as B, a transaction assembled for A — so it is refused
+/// rather than collapsed to the owner.
+///
+/// A free function so it can be unit-tested without an RPC endpoint, storage
+/// or a prover.
+fn ensure_signer_is_note_owner(
+    user_address: &NoteOwnerAddress,
+    signer_address: &SignerAddress,
+) -> Result<(), Error> {
+    if signer_address.as_str() == user_address.as_str() {
+        return Ok(());
+    }
+    Err(Error::SignerIsNotNoteOwner {
+        owner: user_address.as_str().to_string(),
+        signer: signer_address.as_str().to_string(),
+    })
+}
+
+#[cfg(test)]
+mod signer_is_note_owner_tests {
+    use super::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    #[test]
+    fn the_owner_signing_for_itself_is_accepted() {
+        // Every caller in the workspace today: the CLI, the examples, the
+        // fixtures and the browser SDK all pass the same address twice.
+        let result =
+            ensure_signer_is_note_owner(&NoteOwnerAddress::new(OWNER), &SignerAddress::new(OWNER));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn a_delegate_signing_for_the_owner_is_refused() {
+        let error = ensure_signer_is_note_owner(
+            &NoteOwnerAddress::new(OWNER),
+            &SignerAddress::new(DELEGATE),
+        )
+        .expect_err("a signer that is not the note owner must not open a session");
+
+        match &error {
+            Error::SignerIsNotNoteOwner { owner, signer } => {
+                assert_eq!(owner, OWNER);
+                assert_eq!(signer, DELEGATE);
+            }
+            other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
+        }
+
+        // The message must name both, so an operator reading a log can see
+        // which pair was rejected without reaching for a debugger.
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(OWNER) && rendered.contains(DELEGATE),
+            "refusal must name both identities: {rendered}"
+        );
+    }
+
+    #[test]
+    fn the_comparison_is_exact() {
+        // Guards against anyone later relaxing this to a case-insensitive or
+        // trimmed match. Strkeys are already canonical; near-misses are
+        // different accounts, not the same one spelled differently.
+        let owner = NoteOwnerAddress::new(OWNER);
+        for near_miss in [
+            OWNER.to_ascii_lowercase(),
+            format!(" {OWNER}"),
+            String::new(),
+        ] {
+            assert!(
+                ensure_signer_is_note_owner(&owner, &SignerAddress::new(near_miss.as_str()))
+                    .is_err(),
+                "near-miss signer {near_miss:?} must be refused"
+            );
+        }
     }
 }

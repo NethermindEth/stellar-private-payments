@@ -17,6 +17,12 @@ const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
 /// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
 const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
 
+/// Names no address, on purpose: the caller already knows the one it sent, and
+/// an address in a rejection is one more place for it to be logged.
+const RAW_SURFACE_REFUSAL: &str = "this storage operation is not available over the raw RPC surface: \
+     reading or writing an account's privacy keys requires a wallet session opened through \
+     Client.account(), which binds the storage worker to that account";
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenOptions {
@@ -96,6 +102,20 @@ impl Storage {
     /// Raw storage-worker RPC. Request/response shapes match the worker
     /// protocol (externally tagged enums, e.g. `{ "DisclaimerState": "G..."
     /// }`).
+    ///
+    /// # Refused requests
+    ///
+    /// Requests that read or write an account's private key material are not
+    /// available here, and neither is changing which account they serve - see
+    /// [`StorageWorkerRequest::requires_bound_session`]. This surface takes
+    /// the account as an argument, so anything reachable through it is
+    /// addressable by any script on the page that names an address. Key
+    /// material is reachable only through [`crate::Client::account`], which
+    /// binds the worker to the account whose wallet session it opened.
+    ///
+    /// The refusal is deliberately not conditional on *which* address is
+    /// named: a check of the form "is this the right address?" would still
+    /// leave the address a caller-supplied parameter, which is the defect.
     #[wasm_bindgen(js_name = call)]
     pub async fn call(
         &self,
@@ -103,6 +123,9 @@ impl Storage {
         timeout_ms: Option<u32>,
     ) -> Result<JsValue, JsError> {
         let req: StorageWorkerRequest = serde_wasm_bindgen::from_value(request)?;
+        if req.requires_bound_session() {
+            return Err(JsError::new(RAW_SURFACE_REFUSAL));
+        }
         let timeout = timeout_ms.unwrap_or(DEFAULT_CALL_TIMEOUT_MS);
         let resp = self
             .bridge

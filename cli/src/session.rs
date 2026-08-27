@@ -6,7 +6,7 @@ use anyhow::Result;
 use stellar_private_payments::{
     Handle, LocalProver, LocalStorage, Prover, Signer, TransferRecipient,
     blocking::{Account as SdkAccount, Client, PrivatePool},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
+    types::{EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, SignerAddress},
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
@@ -57,9 +57,14 @@ impl ClientSession {
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
+        // The CLI signs with the alias's own key, so the note owner and the
+        // signing account are the same address. Each is wrapped explicitly —
+        // the SDK takes the two identities as distinct types precisely so
+        // that conflating them has to be written out, as it is here.
         let sdk_account = client
             .account(
-                account.address.as_str(),
+                NoteOwnerAddress::new(account.address.as_str()),
+                SignerAddress::new(account.address.as_str()),
                 alias_signer(config, account, network),
             )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;

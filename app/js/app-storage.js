@@ -5,6 +5,36 @@
 
 const SETTING_EXPLORER = 'explorer';
 const SETTING_BOOTNODE_CONFIG = 'bootnode_config';
+const SETTING_TELEMETRY_CONFIG = 'telemetry_config';
+
+// A setting is account-scoped if its value can reveal something about the
+// account it is applied under; global if it is a presentation preference that
+// is the same for everyone.
+//
+// bootnode_config: its operator sees which account is syncing, so sharing one
+// endpoint across accounts links them.
+// telemetry_config: revealSensitive un-redacts this account's amounts and
+// addresses, and level decides how much of its activity is kept.
+// explorer: public infrastructure, identical for every account.
+const ACCOUNT_SCOPED_SETTINGS = new Set([SETTING_BOOTNODE_CONFIG, SETTING_TELEMETRY_CONFIG]);
+
+/**
+ * Storage key for a setting under a given account.
+ *
+ * Scoped settings are namespaced by address and require one — falling back to
+ * the unscoped key is the inheritance this prevents. Legacy unscoped values are
+ * not migrated: they belonged to whichever account was active when they were
+ * written, so each account reconfirms its endpoint once.
+ */
+function settingKey(key, address) {
+    if (!ACCOUNT_SCOPED_SETTINGS.has(key)) return key;
+    if (typeof address !== 'string' || address.length === 0) {
+        throw new Error(`Setting "${key}" is account-scoped and requires an address`);
+    }
+    return `${key}::${address}`;
+}
+
+export { ACCOUNT_SCOPED_SETTINGS, SETTING_BOOTNODE_CONFIG, SETTING_TELEMETRY_CONFIG, SETTING_EXPLORER, settingKey };
 
 /** Suggested archive URL when none is stored yet (wizard + sync-gap consent). */
 export const DEFAULT_BOOTNODE_URL = 'https://bootnode.dev-nethermind.xyz';
@@ -38,17 +68,26 @@ export class AppStorage {
         return storageCall(this.#storage, request, timeoutMs);
     }
 
-    async getSetting(key) {
-        const response = await this.#call({ GetSetting: key });
+    /**
+     * @param {string} key
+     * @param {string} [address] - required for account-scoped keys (see settingKey).
+     */
+    async getSetting(key, address) {
+        const response = await this.#call({ GetSetting: settingKey(key, address) });
         const raw = response.Setting;
         if (raw == null) return null;
         return JSON.parse(raw);
     }
 
-    async setSetting(key, value) {
+    /**
+     * @param {string} key
+     * @param {unknown} value
+     * @param {string} [address] - required for account-scoped keys (see settingKey).
+     */
+    async setSetting(key, value, address) {
         await this.#call({
             SetSetting: {
-                key,
+                key: settingKey(key, address),
                 value_json: JSON.stringify(value),
             },
         });
@@ -58,12 +97,20 @@ export class AppStorage {
         return this.getSetting(SETTING_EXPLORER);
     }
 
-    async getBootnodeConfig() {
-        return this.getSetting(SETTING_BOOTNODE_CONFIG);
+    async getBootnodeConfig(address) {
+        return this.getSetting(SETTING_BOOTNODE_CONFIG, address);
     }
 
-    async setBootnodeConfig(url) {
-        await this.setSetting(SETTING_BOOTNODE_CONFIG, { enabled: true, url });
+    async setBootnodeConfig(url, address) {
+        await this.setSetting(SETTING_BOOTNODE_CONFIG, { enabled: true, url }, address);
+    }
+
+    async getTelemetryConfig(address) {
+        return this.getSetting(SETTING_TELEMETRY_CONFIG, address);
+    }
+
+    async setTelemetryConfig(config, address) {
+        await this.setSetting(SETTING_TELEMETRY_CONFIG, config, address);
     }
 
     async getDisclaimerState(address) {
@@ -102,8 +149,15 @@ export class AppStorage {
         return response.Operations ?? [];
     }
 
-    async getStoredBootnodeUrl() {
-        const config = await this.getBootnodeConfig();
+    /**
+     * The configured archive URL for `address`, or undefined.
+     *
+     * Unlike getBootnodeConfig this tolerates a missing address: pre-connect
+     * callers have no account yet, and the answer there is "none configured".
+     */
+    async getStoredBootnodeUrl(address) {
+        if (!address) return undefined;
+        const config = await this.getBootnodeConfig(address);
         if (config?.enabled && config.url) {
             return config.url;
         }

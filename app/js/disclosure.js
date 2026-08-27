@@ -155,7 +155,21 @@ async function loadNotes() {
       createdAtLedger: n.createdAtLedger ?? 0,
     }));
 
-    // Apply query-param preselection if present
+    // An in-app "view receipt" click that arrived before the notes
+    // loaded. Consumed once, then forgotten -- a second load must not
+    // resurrect a selection the user has since navigated away from.
+    if (pendingNoteSelection) {
+      const target = normalizeCommitment(pendingNoteSelection);
+      pendingNoteSelection = null;
+      const match = state.notes.find((n) => normalizeCommitment(n.id) === target);
+      if (match) state.selectedNotes = [match];
+    }
+
+    // Apply query-param preselection if present. Still read from BOTH the
+    // query string and the hash: the app no longer WRITES a commitment to
+    // either, but a user who deliberately constructs or shares such a link is
+    // making their own disclosure decision, and that is the receipt-sharing
+    // flow this view exists to serve.
     const query = parseQueryParams();
     if (query.commitments && query.commitments.length > 0) {
       const targets = query.commitments.map(normalizeCommitment);
@@ -178,6 +192,12 @@ async function loadNotes() {
     if (generateContainer) mountGenerate(generateContainer);
   }
 }
+
+// Set when the dashboard asks for a note this view has not loaded yet.
+// Deliberately a module-level variable and not App.state, sessionStorage or the
+// URL: a note commitment identifies a specific payment, and the point of the
+// fix is that it exists only for the moment between the click and the load.
+let pendingNoteSelection = null;
 
 // ---------------------------------------------------------------------------
 // Query params
@@ -1448,7 +1468,15 @@ export async function initDisclosure() {
     if (matches.length > 0) {
       state.selectedNotes = [matches[0]];
       if (generateContainer) mountGenerate(generateContainer);
+      return;
     }
+    // The dashboard can raise this before this view has loaded its own
+    // note list, in which case there is nothing to match against yet. That
+    // race is why the commitment used to be written into the URL fragment --
+    // loadNotes() would pick it back up from there. Hold it in memory instead:
+    // it survives the race and dies with the tab, rather than persisting in
+    // session history, browser sync and the omnibox.
+    pendingNoteSelection = noteId;
   });
 
   if (App.state.wallet.connected) {

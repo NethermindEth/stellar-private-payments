@@ -295,6 +295,9 @@ a tight loop.
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
 | `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, and the pool deposit cap, then complete a successful recovery deposit. |
+| `tests/12-account-switch-onboarding.mjs` | Begin onboarding as the profile's not-yet-onboarded account, switch the active Freighter account mid-wizard, and assert the derived privacy keys belong to the account the user switched to. |
+| `tests/13-admin-hardening.mjs` | Verify the admin page initializes, reads contract state, connects a real testnet wallet, masks and clears the ASP secret after a failed submission, and disconnects/clears it after an account switch. The provisioned accounts are not the deployed administrator, so this does not claim a successful privileged write. |
+| `tests/14-unreadable-wallet-main-app.mjs` | Switch to a Freighter account that has not granted this origin and assert the app ends the session and restores the connect control, rather than staying connected under the previous account. |
 
 ## CI
 

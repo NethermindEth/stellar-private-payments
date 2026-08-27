@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readAppLifecycle, waitForWalletRuntimeReady } from '../../src/appState.mjs';
+import { readAppLifecycle, readKeyBinding, waitForWalletRuntimeReady } from '../../src/appState.mjs';
 
 // Fake page over the two observations appState makes: body's lifecycle
 // attribute and the onboarding modal's visibility. Each entry is one poll.
@@ -26,6 +26,24 @@ function fakePage(snapshots) {
       }
       assert.equal(selector, '#onboarding-modal');
       return { async isVisible() { return next().onboardingVisible; } };
+    },
+  };
+}
+
+// readKeyBinding only reads three settings-drawer elements' textContent, so
+// the fake models exactly those (plus an "unexpected selector" guard so a
+// future change to appState.mjs that reads something else fails loudly here
+// instead of silently returning undefined).
+function fakeKeyBindingPage({ address, notePublicKey, encryptionPublicKey }) {
+  const values = {
+    '#settings-wallet-address': address,
+    '#settings-note-key': notePublicKey,
+    '#settings-enc-key': encryptionPublicKey,
+  };
+  return {
+    locator(selector) {
+      if (!(selector in values)) throw new Error(`unexpected selector '${selector}'`);
+      return { async textContent() { return values[selector]; } };
     },
   };
 }
@@ -110,4 +128,46 @@ test('a lifecycle that never advances still reports a timeout with its last stat
       return true;
     },
   );
+});
+
+test('readKeyBinding reports the address and keys the settings drawer currently shows', async () => {
+  const page = fakeKeyBindingPage({
+    address: 'GCDVNXYDKDJZ3TQFVEZ7Y6XYDCXTZFY6E5J3XCZKQJKZ6XYDCXTZFY6E',
+    notePublicKey: '0xabc123',
+    encryptionPublicKey: '0xdef456',
+  });
+
+  assert.deepEqual(await readKeyBinding(page), {
+    address: 'GCDVNXYDKDJZ3TQFVEZ7Y6XYDCXTZFY6E5J3XCZKQJKZ6XYDCXTZFY6E',
+    notePublicKey: '0xabc123',
+    encryptionPublicKey: '0xdef456',
+  });
+});
+
+test('readKeyBinding reports null fields while disconnected (each element still shows its placeholder)', async () => {
+  const page = fakeKeyBindingPage({
+    address: 'Not connected',
+    notePublicKey: '—',
+    encryptionPublicKey: '—',
+  });
+
+  assert.deepEqual(await readKeyBinding(page), {
+    address: null,
+    notePublicKey: null,
+    encryptionPublicKey: null,
+  });
+});
+
+test('readKeyBinding trims whitespace and tolerates a missing element', async () => {
+  const page = fakeKeyBindingPage({
+    address: '  GABCDEF...  \n',
+    notePublicKey: null, // locator().textContent() resolves null for a detached/missing element
+    encryptionPublicKey: '0xdef456',
+  });
+
+  assert.deepEqual(await readKeyBinding(page), {
+    address: 'GABCDEF...',
+    notePublicKey: null,
+    encryptionPublicKey: '0xdef456',
+  });
 });

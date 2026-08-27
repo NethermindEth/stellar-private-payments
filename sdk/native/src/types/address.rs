@@ -42,6 +42,15 @@ pub struct NoteOwnerAddress(String);
 /// while the caller believed otherwise. Callers that legitimately want both
 /// to be the same account say so explicitly by constructing each from the
 /// same string, which is visible in review.
+///
+/// For the same reason neither type implements `From<String>` or
+/// `From<&str>`. Those made the crossing available in two hops rather than
+/// one — `SignerAddress::from(owner.as_str())`, or any parameter typed
+/// `impl Into<SignerAddress>` handed an owner-derived string — in a `.into()`
+/// that named neither type and so left a reviewer nothing to look for.
+/// [`Self::new`] is the only constructor, which forces the destination type
+/// to be written down wherever a crossing happens. The absence of all four
+/// impls is asserted by tests in this module, not merely intended.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignerAddress(String);
 
@@ -77,17 +86,11 @@ macro_rules! address_newtype {
             }
         }
 
-        impl From<String> for $t {
-            fn from(address: String) -> Self {
-                Self(address)
-            }
-        }
-
-        impl From<&str> for $t {
-            fn from(address: &str) -> Self {
-                Self(address.to_string())
-            }
-        }
+        // Deliberately NO `From<String>` or `From<&str>`. With both types
+        // convertible from a string, an owner-derived value could become a
+        // SignerAddress through an unremarkable `.into()` naming neither type.
+        // `new` being the only constructor means every crossing writes the
+        // destination type down at the site where it happens.
 
         impl AsRef<str> for $t {
             fn as_ref(&self) -> &str {
@@ -116,14 +119,78 @@ mod tests {
         assert!(NoteOwnerAddress::new("").is_empty());
     }
 
-    /// The two types are equal-valued but not interchangeable. This test
-    /// documents the intent; the guarantee is enforced by the absence of any
-    /// `From` impl between them, which a compile-fail test cannot express
-    /// without a trybuild dependency this workspace does not carry.
+    /// Detects whether `T: From<F>` holds, on stable, with no dependency.
+    ///
+    /// Inherent associated items take priority over trait ones, so
+    /// `ConversionProbe::<F, T>::EXISTS` resolves to the inherent `true` when
+    /// the `T: From<F>` bound is satisfiable and falls back to the trait's
+    /// `false` when it is not.
+    ///
+    /// This is what turns the invariant from a comment into a check. The
+    /// test this replaced asserted only that the two types hold equal
+    /// strings — it conceded in its own doc comment that the real guarantee
+    /// was unenforced and would need a `trybuild` dev-dependency. It does
+    /// not: nothing was added to Cargo.toml.
+    struct ConversionProbe<F, T>(core::marker::PhantomData<(F, T)>);
+
+    trait NoConversion {
+        const EXISTS: bool = false;
+    }
+
+    impl<F, T> NoConversion for ConversionProbe<F, T> {}
+
+    impl<F, T: From<F>> ConversionProbe<F, T> {
+        const EXISTS: bool = true;
+    }
+
+    // The assertions below are `const _: ()` rather than `#[test]` bodies on
+    // purpose. `EXISTS` is resolved during type-checking, so a violation can
+    // be caught when the crate is *built* rather than when someone remembers
+    // to run the suite — reinstating any of these impls fails compilation,
+    // which is the same enforcement a trybuild compile-fail test would give
+    // and the reason no dev-dependency was added for one. It also keeps
+    // clippy::assertions_on_constants quiet without an allow: these really
+    // are constants, and saying so in the syntax is more honest than
+    // suppressing the lint that noticed it.
+
+    // Guards the guards: a probe that silently stopped resolving would make
+    // every assertion below vacuously true, which is the failure mode that
+    // matters most for a test whose whole job is to catch a future edit.
+    const _: () = assert!(
+        ConversionProbe::<&str, String>::EXISTS,
+        "probe is broken: it fails to see String: From<&str>"
+    );
+
+    // The invariant the whole split rests on. A `From` impl either way would
+    // let a mislabelled call site compile and then sign as the wrong account
+    // at runtime, which is precisely what these two types exist to prevent.
+    const _: () = assert!(
+        !ConversionProbe::<NoteOwnerAddress, SignerAddress>::EXISTS,
+        "a note owner must not convert into a signing account"
+    );
+    const _: () = assert!(
+        !ConversionProbe::<SignerAddress, NoteOwnerAddress>::EXISTS,
+        "a signing account must not convert into a note owner"
+    );
+
+    // `From<String>`/`From<&str>` were how the two types leaked into each
+    // other without either being named: `owner.as_str()` handed to anything
+    // taking `impl Into<SignerAddress>` crossed the boundary in a `.into()`
+    // that mentioned neither type. `new` is now the only constructor, so a
+    // crossing has to write its destination down.
+    const _: () = assert!(!ConversionProbe::<String, NoteOwnerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<&str, NoteOwnerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<String, SignerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<&str, SignerAddress>::EXISTS);
+
     #[test]
-    fn same_string_yields_two_unrelated_values() {
+    fn crossing_deliberately_still_works_and_names_the_target_type() {
+        // Refusing the implicit path must not refuse the legitimate one:
+        // while the two are in fact the same account, callers do need to
+        // build both from one string. That is allowed — it just cannot be
+        // done without saying which type is being built.
         let owner = NoteOwnerAddress::new(ADDR);
-        let signer = SignerAddress::new(ADDR);
+        let signer = SignerAddress::new(owner.as_str());
         assert_eq!(owner.as_str(), signer.as_str());
     }
 }

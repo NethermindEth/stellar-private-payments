@@ -119,7 +119,16 @@ impl TryFrom<ExtAmount> for NoteAmount {
 
     fn try_from(value: ExtAmount) -> Result<Self> {
         let v =
-            u128::try_from(value.0).map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
+            u128::try_from(value.0).map_err(|_| {
+                // An amount is Tier-1 exactly like an address -- pool.rs
+                // wraps every amount it logs. This conversion error
+                // propagates to the same toast/ring-buffer sinks, so a raw
+                // value here leaks precisely what Sensitive() exists to hide.
+                anyhow!(
+                    "NoteAmount out of range: {}",
+                    crate::types::Sensitive(value.0)
+                )
+            })?;
         Ok(NoteAmount(v))
     }
 }

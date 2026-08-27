@@ -21,6 +21,11 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import {
+    requireNoteOwner,
+    sessionMatchesCache,
+    createSessionGeneration,
+} from './account-session-guard.js';
 
 let storageHandle = null;
 let appStorageInstance = null;
@@ -31,6 +36,10 @@ let currentRpcUrl = null;
 let currentBootnodeUrl = null;
 let boundUserAddress = null;
 let boundSignerAddress = null;
+// Every openAccount that reaches the SDK claims a token. A call whose token
+// is no longer current when it returns was superseded while it was in
+// flight, and must not write its result over the newer session's.
+const openAccountGeneration = createSessionGeneration();
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
@@ -61,23 +70,39 @@ function wrapSdkClient(sdk) {
         stopBackgroundSync() {
             sdk.stopBackgroundSync();
         },
+        /**
+         * Revoke the storage worker's session binding. The local database is
+         * untouched, so reconnecting restores the session.
+         */
+        async releaseStorageSession() {
+            await sdk.releaseStorageSession();
+        },
         async openAccount(
             { networkPassphrase, userAddress, signerAddress },
             signer = new FreighterSigner(),
         ) {
+            // Without this the SDK falls back to signer.getPublicKey() and
+            // adopts whichever account the wallet has active, and the cache
+            // below would be keyed on null.
+            requireNoteOwner(userAddress);
             const effectiveSigner = signerAddress ?? userAddress;
             // Keyed on both identities: a session bound to one signing
             // account must never be handed back for another, which a
             // cache keyed on the note owner alone would do silently.
             if (
-                boundUserAddress === userAddress &&
-                boundSignerAddress === effectiveSigner &&
-                boundAccount
+                boundAccount &&
+                sessionMatchesCache(
+                    { userAddress: boundUserAddress, signerAddress: boundSignerAddress },
+                    { userAddress, signerAddress: effectiveSigner },
+                )
             ) {
                 return boundAccount;
             }
 
-            boundAccount = await sdk.account(
+            // Compared at the point of the cache WRITE, not before the call:
+            // an abandoned open can resolve last and overwrite a newer session.
+            const generation = openAccountGeneration.begin();
+            const account = await sdk.account(
                 {
                     networkPassphrase,
                     userAddress,
@@ -85,6 +110,14 @@ function wrapSdkClient(sdk) {
                 },
                 signer,
             );
+            if (!openAccountGeneration.isCurrent(generation)) {
+                const error = new Error(
+                    'Account session superseded: another account was opened while this one was still opening.',
+                );
+                error.code = 'SESSION_SUPERSEDED';
+                throw error;
+            }
+            boundAccount = account;
             boundUserAddress = userAddress;
             boundSignerAddress = effectiveSigner;
             return boundAccount;
@@ -116,10 +149,38 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
     return wrapSdkClient(sdk);
 }
 
-/** Stop background sync and drop the in-memory client/account (e.g. disconnect or rebuild). */
+/**
+ * Stop background sync and drop the in-memory client/account (e.g. disconnect
+ * or rebuild).
+ *
+ * Note what dropping the client does *not* do: the storage worker's session
+ * binding lives in the worker isolate, which outlives every Client built
+ * against it. Releasing it is `wrappedClient.releaseStorageSession()`, and it
+ * is what revokes the worker's capability to serve this account's privacy
+ * keys - see the TODO in the body.
+ *
+ * The release is deliberately not awaited. Awaiting it would close the window
+ * between this returning and the worker actually unbinding, but disposeClient
+ * is synchronous and called from navigation.js's disconnect() - which the
+ * account watcher drives - and twice from initializeRuntime(). Making it async
+ * perturbs teardown ordering that the account-rebinding work already tuned, to
+ * close a gap that needs a retained Account reference to exploit.
+ *
+ * Both guards around it are load-bearing: `catch` for a synchronous throw from
+ * an already-dropped client, `.catch()` for a rejection arriving after
+ * teardown. Either escaping would skip the invalidate() below, which is what
+ * stops a superseded open from repopulating the cache.
+ */
 export function disposeClient() {
     try {
         wrappedClient?.stopBackgroundSync?.();
+    } catch {
+        // Client may already be tearing down.
+    }
+    try {
+        // Revokes the worker's capability to serve this account's key
+        // material, including to retained Account references (see above).
+        void wrappedClient?.releaseStorageSession?.()?.catch(() => {});
     } catch {
         // Client may already be tearing down.
     }
@@ -127,6 +188,9 @@ export function disposeClient() {
     boundAccount = null;
     boundUserAddress = null;
     boundSignerAddress = null;
+    // A teardown supersedes anything still opening, or that call would
+    // repopulate the cache moments after it was cleared.
+    openAccountGeneration.invalidate();
 }
 
 /**
@@ -162,7 +226,7 @@ export async function bootnodeRequired(rpcUrl) {
  * @param {string} rpcUrl
  * @param {{ bootnodeUrl?: string|null }} [options]
  */
-export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
+export async function initializeRuntime(rpcUrl, { bootnodeUrl, address } = {}) {
     await ensureStorage();
 
     if (currentRpcUrl !== rpcUrl) {
@@ -173,7 +237,10 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
 
     let resolvedBootnode = bootnodeUrl;
     if (resolvedBootnode === undefined && appStorageInstance) {
-        resolvedBootnode = await appStorageInstance.getStoredBootnodeUrl();
+        // The stored bootnode is account-scoped. Without an address there
+        // is no account whose endpoint this could be, so the fallback yields
+        // undefined rather than reaching for whatever was stored globally.
+        resolvedBootnode = await appStorageInstance.getStoredBootnodeUrl(address);
     }
 
     if (

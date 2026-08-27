@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Provision and snapshot a Freighter profile for e2e tests.
 #
-# Usage: provision.sh [--snapshot|--restore|--verify] [--force] [--add-account]
+# Usage: provision.sh [--snapshot|--restore|--verify] [--force] [--add-account] [--active-account=A|B]
 #
 #   --snapshot       Tar the working profile into profile-snapshot.tar.gz (default)
 #   --restore        Restore the snapshot into a fresh temp dir, print path on stdout
 #   --verify         Verify the snapshot without rebuilding
 #   --force          Rebuild the profile even if one verifies fine
 #   --add-account    Also import account B (E2E_ACCOUNT_D_SECRET) during provisioning
+#   --active-account=A|B  Which account is active when the profile is snapshotted
+#                    (default: A). Requires --add-account when set to B.
 #
 # Merges the former snapshot-profile.sh, prepare-profile.sh, and the
 # provisioning orchestration from setup.sh into a single script.
@@ -25,6 +27,7 @@ PROFILE_DIR="$PKG_ROOT/.chrome-profile"
 MODE="snapshot"
 FORCE=0
 ADD_ACCOUNT_FLAG=""
+ACTIVE_ACCOUNT_FLAG=""
 VERIFY_FLAG=""
 
 usage() {
@@ -39,13 +42,17 @@ Options:
   --verify         Verify the snapshot without rebuilding
   --force          Rebuild the profile even if one verifies fine
   --add-account    Also import account B (E2E_ACCOUNT_D_SECRET) during provisioning
+  --active-account=A|B  Which account is active when the profile is snapshotted
+                   (default: A). Requires --add-account when set to B.
   -h, --help       Show this help
 
 Examples:
-  provision.sh                         # provision + snapshot
-  provision.sh --restore               # restore snapshot to temp dir
-  provision.sh --verify                # verify existing snapshot
-  provision.sh --force                 # rebuild from scratch
+  provision.sh                                        # provision + snapshot
+  provision.sh --add-account                           # two accounts, A active at snapshot
+  provision.sh --add-account --active-account=B         # two accounts, B active at snapshot
+  provision.sh --restore                               # restore snapshot to temp dir
+  provision.sh --verify                                 # verify existing snapshot
+  provision.sh --force                                  # rebuild from scratch
 USAGE
 }
 
@@ -56,6 +63,7 @@ while [ $# -gt 0 ]; do
     --verify) MODE="verify"; shift ;;
     --force) FORCE=1; shift ;;
     --add-account) ADD_ACCOUNT_FLAG="--add-account"; shift ;;
+    --active-account=*) ACTIVE_ACCOUNT_FLAG="$1"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument '$1'" ;;
   esac
@@ -86,13 +94,19 @@ case "$MODE" in
     step "clearing any existing profile: $PROFILE_DIR"
     rm -rf "$PROFILE_DIR"
 
+    # Remove singleton lock files left behind if a previous Chrome run crashed.
+    # These are not part of the snapshot (they are excluded by tar), but when
+    # provisioning rebuilds the live profile they can persist on disk and make
+    # Chrome think the profile is already open in another tab.
+    rm -f "$PROFILE_DIR/SingletonLock" "$PROFILE_DIR/SingletonSocket" "$PROFILE_DIR/SingletonCookie"
+
     # Provision the profile
     step "provisioning the Freighter profile"
-    # $ADD_ACCOUNT_FLAG is intentionally unquoted: when empty it must expand to
-    # no argument at all, whereas "$ADD_ACCOUNT_FLAG" would pass an empty string
-    # as a positional argument.
+    # $ADD_ACCOUNT_FLAG and $ACTIVE_ACCOUNT_FLAG are intentionally unquoted:
+    # when empty they must expand to no argument at all, whereas quoting them
+    # would pass an empty string as a positional argument.
     # shellcheck disable=SC2086
-    node "$SCRIPT_DIR/provision.mjs" $ADD_ACCOUNT_FLAG
+    node "$SCRIPT_DIR/provision.mjs" $ADD_ACCOUNT_FLAG $ACTIVE_ACCOUNT_FLAG
 
     # Snapshot the profile.
     #

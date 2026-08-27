@@ -59,8 +59,14 @@ impl<S: Storage> Account<S> {
         &self.user_address
     }
 
-    /// The account that signs and pays. Equal to [`Self::user_address`]'s
-    /// value today; a distinct type so it cannot be confused with it.
+    /// The account that signs and pays.
+    ///
+    /// Always equal in value to [`Self::user_address`]: the only constructor
+    /// is [`crate::Client::account`], which refuses a divergent pair with
+    /// [`crate::Error::SignerIsNotNoteOwner`]. It stays a distinct type, and
+    /// a distinct accessor, because that is what will carry the difference
+    /// once divergence is supported — and because the type prevents a signing
+    /// site from being fed the owner by accident in the meantime.
     pub fn signer_address(&self) -> &SignerAddress {
         &self.signer_address
     }

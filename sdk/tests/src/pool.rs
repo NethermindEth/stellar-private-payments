@@ -6,7 +6,10 @@ use anyhow::Result;
 use stellar_private_payments::{
     Handle, LocalProver, LocalSigner, LocalStorage, Signer, TransferRecipient,
     blocking::{Account, Client, PrivatePool},
-    types::{ContractConfig, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, PolicyFlags},
+    types::{
+        ContractConfig, EncryptionPublicKey, Field, NoteAmount, NoteOwnerAddress, NotePublicKey,
+        PolicyFlags, SignerAddress,
+    },
 };
 
 use crate::seed::{self, POOL_MERKLE_LEVELS};
@@ -89,7 +92,13 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     {
         let _ = client.background_sync()?;
     }
-    let account = client.account(USER_ADDRESS, test_signer()?)?;
+    // The fixture's single test account both owns the notes and signs.
+    // Each identity is wrapped explicitly from that one constant.
+    let account = client.account(
+        NoteOwnerAddress::new(USER_ADDRESS),
+        SignerAddress::new(USER_ADDRESS),
+        test_signer()?,
+    )?;
 
     Ok((client, account))
 }

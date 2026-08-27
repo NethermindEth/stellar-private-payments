@@ -55,8 +55,13 @@ impl Account {
         self.inner.user_address().to_string()
     }
 
-    /// The account that signs and pays. Equal to [`Self::user_address`] until
-    /// a caller supplies a different `signerAddress`.
+    /// The account that signs and pays.
+    ///
+    /// Always equal to [`Self::user_address`]. Supplying a `signerAddress`
+    /// that differs from `userAddress` does not produce a session reporting
+    /// the divergence — it fails to open, because nothing downstream honours
+    /// the difference. This getter therefore never reports an address the
+    /// rest of the stack will not actually use.
     #[wasm_bindgen(getter, js_name = signerAddress)]
     pub fn signer_address(&self) -> String {
         self.inner.signer_address().to_string()

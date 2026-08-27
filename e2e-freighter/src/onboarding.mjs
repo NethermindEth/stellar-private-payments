@@ -27,7 +27,28 @@ const WIZARD_BUTTON_PRIORITY = [
   'Continue', // the storage step's own follow-on panel after a successful request
 ];
 
-export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding' }) {
+export async function driveWizard(page, context, {
+  waitForFreighterApproval,
+  approveOrWatch,
+  logTag = 'onboarding',
+  // Optional mid-wizard hook: called with `{ step, choice, buttons }` right
+  // before the chosen button is clicked, so a test can act on the app or
+  // the Freighter extension at a specific, named point in the wizard (e.g.
+  // switch the active Freighter account right before "Derive and store
+  // keys" is clicked) without driveWizard itself knowing why. Every
+  // existing caller omits it, so `onStep` stays `undefined` and this is a
+  // no-op — default behaviour is unchanged.
+  onStep,
+  // Whether to wait for the app's post-onboarding runtime readiness before
+  // returning. Defaults to true, which is what every scenario that goes on
+  // to transact needs. A test that deliberately leaves the app in a state it
+  // is expected NOT to settle into `ready` from — e.g. finishing onboarding
+  // while the active Freighter account differs from the one the app
+  // connected as, which makes the app's own account watcher disconnect
+  // within one poll tick — must opt out, or it races the disconnect and
+  // fails with a readiness timeout instead of its own assertion.
+  waitForRuntimeReady = true,
+}) {
   const log = createLogger(`${logTag}/wizard`);
   for (let step = 0; step < 10; step += 1) {
     // The modal remains in the DOM and may appear after asynchronous storage
@@ -47,6 +68,10 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       }
       if (await modalHidden()) {
         log.debug('wizard finished after', step, 'step(s)');
+        if (!waitForRuntimeReady) {
+          log.debug('skipping the runtime-readiness wait at the caller\'s request');
+          return;
+        }
         // Wait until account and pool initialization complete.
         const lifecycle = await waitForWalletRuntimeReady(page);
         log.debug('wallet runtime ready:', lifecycle.walletState);
@@ -85,6 +110,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     if (!choice) throw new Error(`${logTag}: no recognized button among [${buttons.map((b) => b.text).join(', ')}]`);
 
     const previousButtonText = buttons.map((button) => button.text).join('|');
+    if (onStep) await onStep({ step, choice, buttons });
     log.debug('step', step, 'clicking', choice);
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 

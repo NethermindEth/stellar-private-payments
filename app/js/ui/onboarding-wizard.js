@@ -2,7 +2,9 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
-import { Utils, Toast } from './core.js';
+import { App, Utils, Toast } from './core.js';
+import { createRebindTracker } from '../onboarding-rebind.js';
+import { beginPoolOp, endPoolOp } from './pool.js';
 import {
     hasNotificationSupport,
     getNotificationsPrompted,
@@ -255,29 +257,54 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
+// notePublicKey/encryptionPublicKey were deliberately dropped from this
+// signature: the bound account now reads its own keys, so accepting them here would
+// only re-open the door to registering a value the caller happened to hold.
+async function registerNow({ address, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
     await client().openAccount({ networkPassphrase, userAddress: address }, signer);
-    return client().account().registerPublicKeys({
-        notePublicKeyHex: notePublicKey,
-        encryptionPublicKeyHex: encryptionPublicKey,
-    });
+    // Matches the beginPoolOp/endPoolOp wrapping on the Settings registration
+    // action (navigation.js), so both sites that sign and submit
+    // registerPublicKeys are visible to hasInFlightPoolOps(). This call runs
+    // while walletState is 'connecting' or 'binding', where the watcher's
+    // disconnect branch is not reachable for an account change -- but a
+    // NETWORK change during onboarding calls disconnect() unconditionally with
+    // no drain at all.
+    beginPoolOp();
+    try {
+        // See navigation.js. The bound account reads its own keys from
+        // storage rather than being handed values from the wizard's closure,
+        // which during a mid-wizard re-bind may belong to the account the user
+        // switched AWAY from.
+        return await client().account().registerPublicKeys();
+    } finally {
+        endPoolOp();
+    }
 }
 
-export async function runOnboardingWizard({
-    address,
-    networkPassphrase,
-    bootnodeRequired = false,
-    signer = new FreighterSigner(),
-} = {}) {
-    if (!address) throw new Error('Wallet address required for onboarding');
+// Thrown (via waitForStep's reject) when the live wallet account changes
+// while a step is in flight, so the outer loop in runOnboardingWizard can
+// replan against the account the user actually switched to instead of
+// finishing a step's write under the account that was active when it
+// started.
+class AccountRebindSignal extends Error {
+    constructor(address) {
+        super('Onboarding account changed mid-step');
+        this.name = 'AccountRebindSignal';
+        this.address = address;
+    }
+}
 
+async function computeStepPlan(address, { bootnodeRequired }) {
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
     const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
-    const bootnodeSetting = await storage.getBootnodeConfig();
+    // Scoped to the address this plan is being computed for. On a
+    // mid-wizard re-bind the plan is recomputed with the new address, so the
+    // bootnode shown is the one belonging to the account the user switched to.
+    const bootnodeSetting = await storage.getBootnodeConfig(address);
     const registryLookup = await client().recipientLookup(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
@@ -286,9 +313,16 @@ export async function runOnboardingWizard({
     const needsStorageStep = storageAvailable && (!persisted || !storagePrompted);
     const needsNotificationStep = notificationStepNeeded();
 
+    // A missing bootnode record does not mean the user was never asked: the
+    // record is per-account, so an already-onboarded account simply has none.
+    // Gate on completed onboarding instead. A new account still gets the step,
+    // and a real sync gap still forces it via bootnodeRequired.
+    const hasCompletedOnboarding = !!disclaimerState?.accepted && keysExist;
+    const retentionNeverAsked = !bootnodeSetting && !hasCompletedOnboarding;
+
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
-        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
+        ...(needsNotificationStep || retentionNeverAsked || bootnodeRequired ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
@@ -297,27 +331,6 @@ export async function runOnboardingWizard({
         // user is unregistered — skip it rather than falsely suggesting registration.
         ...((!registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
     ].flat();
-
-    // Registration is optional (also available later from Settings), so it must
-    // not, on its own, reopen onboarding on reload. Only required steps
-    // (disclaimer, durable storage, keys, retention) should trigger the modal —
-    // e.g. it keeps reappearing while permanent storage hasn't been granted.
-    const hasRequiredStep = steps.some(step => step !== 'registration');
-    if (!hasRequiredStep) {
-        return;
-    }
-
-    showModal();
-
-    let cancelled = false;
-    let closeHandler = null;
-    const cancelOnboarding = () => {
-        cancelled = true;
-        closeHandler?.();
-        hideModal();
-    };
-    const closeBtn = document.getElementById('onboarding-close-btn');
-    closeBtn.onclick = cancelOnboarding;
 
     const state = {
         keys: keysExist
@@ -331,9 +344,84 @@ export async function runOnboardingWizard({
         registered: !!registryLookup?.entry,
     };
 
-    STEP_ORDER.forEach(stepId => {
-        setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
-    });
+    return { steps, state, disclaimerState, persisted };
+}
+
+// Registration is optional (also available later from Settings), so it must
+// not, on its own, reopen onboarding on reload. Only required steps
+// (disclaimer, durable storage, keys, retention) should trigger the modal —
+// e.g. it keeps reappearing while permanent storage hasn't been granted.
+const hasRequiredStep = (steps) => steps.some(step => step !== 'registration');
+
+export async function runOnboardingWizard({
+    address: initialAddress,
+    networkPassphrase,
+    bootnodeRequired = false,
+    signer = new FreighterSigner(),
+} = {}) {
+    if (!initialAddress) throw new Error('Wallet address required for onboarding');
+
+    let address = initialAddress;
+    // Computed inside the replan loop, after subscribing to
+    // wallet:account-rebind — computeStepPlan awaits a network lookup, so a
+    // switch during it would otherwise go unseen.
+    let plan = null;
+
+    let cancelled = false;
+    let closeHandler = null;
+    let rebindHandler = null;
+    // Owns which account onboarding is for and which switch is still
+    // outstanding. See app/js/onboarding-rebind.js for why the rules live
+    // there rather than as loose variables mutated inline.
+    const rebind = createRebindTracker(address);
+    let modalShown = false;
+    const showModalOnce = () => {
+        if (modalShown) return;
+        modalShown = true;
+        showModal();
+    };
+    const cancelOnboarding = () => {
+        cancelled = true;
+        closeHandler?.();
+        hideModal();
+    };
+    // Static DOM, so this binds fine before the modal is revealed.
+    const closeBtn = document.getElementById('onboarding-close-btn');
+    closeBtn.onclick = cancelOnboarding;
+
+    // The watcher in navigation.js starts before this wizard opens, per
+    // design, specifically so a mid-onboarding account switch is observed
+    // here. A switch means the user wants the wallet-bound work (disclaimer,
+    // keys, registration) done for the account they switched to, so it
+    // aborts whatever step is in flight; the replan loop below recomputes
+    // the gate plan for the account actually active now.
+    let rebindDebounce = null;
+    const clearRebindDebounce = () => {
+        if (rebindDebounce) clearTimeout(rebindDebounce);
+        rebindDebounce = null;
+    };
+    const onAccountRebind = (event) => {
+        // The tracker decides; this only carries out the timer action. A
+        // switch back to the account we are already on returns 'cancel',
+        // which is what stops an obsolete switch from firing later.
+        const action = rebind.observe(event.detail?.address);
+        if (action === 'ignore') return;
+        clearRebindDebounce();
+        if (action === 'cancel') return;
+        // Give a moment for a click already in flight against the current
+        // step's UI to land before aborting it out from under that
+        // interaction -- the switch is already recorded in the tracker
+        // (picked up at the next safe checkpoint even without this timer
+        // firing), so this only softens how abruptly an active step's DOM
+        // can change mid-click, not how promptly the account switch itself
+        // is noticed.
+        rebindDebounce = setTimeout(() => {
+            rebindDebounce = null;
+            const due = rebind.dueAddress();
+            if (due) rebindHandler?.(due);
+        }, 400);
+    };
+    App.events.addEventListener('wallet:account-rebind', onAccountRebind);
 
     const ensureNotCancelled = () => {
         if (cancelled) throw new Error('Onboarding cancelled');
@@ -341,19 +429,70 @@ export async function runOnboardingWizard({
 
     const waitForStep = (setup) => new Promise((resolve, reject) => {
         closeHandler = () => reject(new Error('Onboarding cancelled'));
+        rebindHandler = (nextAddress) => reject(new AccountRebindSignal(nextAddress));
         setup(
             (value) => {
                 closeHandler = null;
+                rebindHandler = null;
                 resolve(value);
             },
             (error) => {
                 closeHandler = null;
+                rebindHandler = null;
                 reject(error);
             },
         );
     });
 
-    for (let i = 0; i < steps.length; i += 1) {
+    try {
+    // The listener is now live, but the watcher in navigation.js started
+    // before this function was called, so a switch may already have landed
+    // and been dispatched into the void. Reconcile against live state once,
+    // here, rather than trusting the address the caller passed in.
+    rebind.observe(App.state.wallet.address);
+
+    replanLoop:
+    while (true) {
+        // `plan === null` is the first pass; the rest is a replan after a
+        // switch. Both compute under the listener, so a switch arriving
+        // during the computation is caught by the re-check below instead of
+        // being overwritten by a plan built for the previous account.
+        const adopted = rebind.adopt();
+        if (plan === null || adopted !== null) {
+            if (adopted !== null) address = adopted;
+            plan = await computeStepPlan(address, { bootnodeRequired });
+            if (rebind.dueAddress() !== null) {
+                // Switched again while we were computing. Discard this plan
+                // rather than acting on one built for a stale account.
+                continue replanLoop;
+            }
+            if (!hasRequiredStep(plan.steps)) {
+                break;
+            }
+            if (adopted !== null) {
+                Toast.show('Freighter account changed — continuing onboarding for it.', 'info', 5000);
+            }
+        }
+        // Only a pending value that is no longer a change. Clearing
+        // unconditionally here discarded a switch that landed during the
+        // replan above.
+        rebind.discardStale();
+        // Deferred until here so the "nothing to do" break above can return
+        // without ever flashing an empty modal.
+        showModalOnce();
+
+        const { steps, state, disclaimerState, persisted } = plan;
+        STEP_ORDER.forEach(stepId => {
+            setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
+        });
+
+        for (let i = 0; i < steps.length; i += 1) {
+        // Per-step checkpoint: a switch recorded since the last step began is
+        // acted on here without waiting for the debounce, so the next step
+        // never starts under an account the user has left.
+        if (rebind.dueAddress() !== null) {
+            continue replanLoop;
+        }
         const stepId = steps[i];
         setError('');
         steps.forEach((candidate, index) => {
@@ -361,6 +500,7 @@ export async function runOnboardingWizard({
         });
         renderWhy(stepId);
 
+        try {
         if (stepId === 'disclaimer') {
             const markdown = document.createElement('div');
             markdown.className = 'space-y-3 text-sm text-slate-300';
@@ -489,6 +629,11 @@ export async function runOnboardingWizard({
                             aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
+                            // Rejecting waitForStep does not cancel this
+                            // handler, so it can still be running for an
+                            // abandoned step. The error slot belongs to
+                            // whatever step is on screen now.
+                            if (error?.code === 'SESSION_SUPERSEDED') return;
                             derive.disabled = false;
                             setError(error?.message || 'Failed to derive privacy keys');
                         }
@@ -583,7 +728,10 @@ export async function runOnboardingWizard({
                             if (enableNotifications && Notification.permission === 'default') {
                                 await requestNotificationPermission();
                             }
-                            await storage.setSetting('bootnode_config', { enabled, url });
+                            // `address` is the wizard's live binding (declared
+                            // `let` and reassigned on re-bind), so this writes
+                            // under the account the user is actually looking at.
+                            await storage.setSetting('bootnode_config', { enabled, url }, address);
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();
@@ -664,16 +812,18 @@ export async function runOnboardingWizard({
                                 throw new Error('Derive keys before registration');
                             }
                             register.disabled = true;
-                            await registerNow({
-                                address,
-                                notePublicKey: state.keys.pubKey,
-                                encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
-                                networkPassphrase,
-                                signer,
-                            });
+                            await registerNow({ address, networkPassphrase, signer });
                             state.registered = true;
                             resolve();
                         } catch (error) {
+                            // Same reasoning as the derive step's catch:
+                            // this handler keeps running after
+                            // its step has been abandoned, and a
+                            // SESSION_SUPERSEDED failure means the replan is
+                            // already under way for another account -- the
+                            // shared error slot belongs to whatever step is
+                            // now on screen.
+                            if (error?.code === 'SESSION_SUPERSEDED') return;
                             register.disabled = false;
                             setError(error?.message || 'Failed to register public keys');
                         }
@@ -683,6 +833,18 @@ export async function runOnboardingWizard({
             });
             ensureNotCancelled();
         }
+        } catch (error) {
+            if (error instanceof AccountRebindSignal) {
+                continue replanLoop;
+            }
+            throw error;
+        }
+        }
+        break;
+    }
+    } finally {
+        App.events.removeEventListener('wallet:account-rebind', onAccountRebind);
+        clearRebindDebounce();
     }
 
     hideModal();

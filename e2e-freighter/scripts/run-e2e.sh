@@ -94,6 +94,11 @@ PROFILE_SUBDIR="$(bash "$SCRIPT_DIR/provision.sh" --restore)"
 USER_DATA_DIR="$(dirname "$PROFILE_SUBDIR")"
 TMP_ROOT="$(dirname "$USER_DATA_DIR")"
 
+# Chrome singleton lock files can survive a restored profile if a previous
+# run crashed. Remove them before launch so Chrome doesn't treat this profile
+# as already open in another tab.
+rm -f "$USER_DATA_DIR/SingletonLock" "$USER_DATA_DIR/SingletonSocket" "$USER_DATA_DIR/SingletonCookie"
+
 cleanup() { rm -rf "$TMP_ROOT"; }
 trap cleanup EXIT
 

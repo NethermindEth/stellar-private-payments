@@ -5,6 +5,14 @@
 
 import { client, isRuntimeReady } from '../wasm-facade.js';
 import { App } from './core.js';
+import {
+    beginPoolOp,
+    endPoolOp,
+    hasInFlightPoolOps,
+    waitForPoolOpsToDrain,
+} from '../pool-ops.js';
+
+export { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrain };
 
 App.events.addEventListener('pool:selected', () => {
     if (App.state.wallet.connected) {

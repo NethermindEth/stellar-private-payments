@@ -118,6 +118,106 @@ pub enum StorageWorkerRequest {
     DeriveASPleaf(AdminASPRequest),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
+    /// Bind the worker to the account whose wallet session the client has
+    /// opened. Not reachable from [`crate::storage::Storage::call`].
+    BindSession(Address),
+    /// Drop the binding, revoking the capability without touching the data.
+    UnbindSession,
+}
+
+impl StorageWorkerRequest {
+    /// Whether this request may only be served for the account the worker is
+    /// bound to.
+    ///
+    /// The line is *key material*: `AspSecret`, `DeriveSaveUserKeys`,
+    /// `DisclosureInputs` and `Transact` all read or write private keys, and
+    /// `BindSession`/`UnbindSession` decide which account those four serve.
+    /// For all of them the address must come from an established wallet
+    /// session, never from the caller.
+    ///
+    /// `UserKeys` is not privileged: it returns public keys only and has to run
+    /// during onboarding, before any session exists. The note and balance
+    /// queries are also unprivileged — a caller can still name any address to
+    /// read them, which is a real weakness but needs a general read policy
+    /// rather than this guard.
+    pub(crate) fn requires_bound_session(&self) -> bool {
+        matches!(
+            self,
+            Self::AspSecret(_)
+                | Self::DeriveSaveUserKeys(..)
+                | Self::DisclosureInputs(_)
+                | Self::Transact(_)
+                | Self::BindSession(_)
+                | Self::UnbindSession
+        )
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod privileged_request_tests {
+    use super::*;
+    use stellar_private_payments::types::KeyDerivationSignature;
+
+    const ADDR: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    #[test]
+    fn key_material_requests_are_privileged() {
+        assert!(StorageWorkerRequest::AspSecret(ADDR.to_string()).requires_bound_session());
+        assert!(
+            StorageWorkerRequest::DeriveSaveUserKeys(
+                ADDR.to_string(),
+                KeyDerivationSignature(vec![0u8; 64]),
+                "Test Network".to_string(),
+            )
+            .requires_bound_session()
+        );
+        assert!(StorageWorkerRequest::BindSession(ADDR.to_string()).requires_bound_session());
+        assert!(StorageWorkerRequest::UnbindSession.requires_bound_session());
+    }
+
+    #[test]
+    fn zk_input_builders_are_privileged_too() {
+        // These return note_private_key / note_blinding for the account their
+        // request names, so they leak strictly more than AspSecret does.
+        assert!(
+            StorageWorkerRequest::DisclosureInputs(DisclosureInputsRequest {
+                user_address: ADDR.to_string(),
+                pool_address: "CPOOL".to_string(),
+                selected_commitments: Vec::new(),
+                pool_root: None,
+                pool_next_index: 0,
+                tree_depth: 20,
+            })
+            .requires_bound_session()
+        );
+    }
+
+    #[test]
+    fn the_public_key_probe_stays_reachable() {
+        // Onboarding calls this before any session exists; privileging it
+        // would deadlock the flow it is part of.
+        assert!(!StorageWorkerRequest::UserKeys(ADDR.to_string()).requires_bound_session());
+    }
+
+    #[test]
+    fn app_persistence_requests_stay_reachable() {
+        // The app's own AppStorage layer reaches the worker through
+        // Storage.call for all of these; none touch key material.
+        assert!(!StorageWorkerRequest::GetSetting("explorer".into()).requires_bound_session());
+        assert!(
+            !StorageWorkerRequest::SetSetting {
+                key: "explorer".into(),
+                value_json: "{}".into(),
+            }
+            .requires_bound_session()
+        );
+        assert!(!StorageWorkerRequest::DisclaimerState(ADDR.to_string()).requires_bound_session());
+        assert!(
+            !StorageWorkerRequest::AcceptDisclaimer(ADDR.to_string(), "abc".into())
+                .requires_bound_session()
+        );
+        assert!(!StorageWorkerRequest::Ping.requires_bound_session());
+    }
 }
 
 #[allow(clippy::large_enum_variant)]

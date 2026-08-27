@@ -29,6 +29,24 @@ pub enum Error {
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
+    /// The wallet signed with a different account than the one requested —
+    /// the signature is not attributable to the identity the request was
+    /// built for, and must not be accepted as if it were.
+    #[error("wallet signed with {actual}, but {requested} was requested")]
+    SignerAddressMismatch { requested: String, actual: String },
+
+    /// A session was requested in which the signing account is not the note
+    /// owner.
+    ///
+    /// Nothing downstream honours the two differing — the envelope source, the
+    /// pool contract's `sender` and the auth-entry signer are all built from
+    /// the owner — so a divergent pair is refused rather than silently
+    /// collapsed. Whether divergence should be supported is an open question.
+    #[error(
+        "signing account {signer} is not the note owner {owner}; a session where they differ is not supported"
+    )]
+    SignerIsNotNoteOwner { owner: String, signer: String },
+
     #[error("{0}")]
     Other(String),
 }

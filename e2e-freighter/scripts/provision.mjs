@@ -7,6 +7,8 @@
 // Steps:
 //   1. Create/import the Freighter wallet (setup-freighter-profile.mjs)
 //   2. If --add-account: import account B (add-account.mjs)
+//   2b. If --add-account: make the active account explicit (--active-account,
+//       default 'A') instead of leaving whichever import ran last selected
 //   3. Drive the app's onboarding wizard (complete-onboarding.mjs)
 //   4. Verify the result (verify-onboarded.mjs)
 //
@@ -38,6 +40,21 @@ const args = process.argv.slice(2);
 const ADD_ACCOUNT = args.includes('--add-account');
 const VERIFY_ONLY = args.includes('--verify');
 const SKIP_WIZARD = args.includes('--skip-wizard');
+
+// Which account is active in the Freighter UI at the moment the profile is
+// snapshotted. Without this, the last account imported (B, when
+// --add-account is used) is left selected simply because import happens to
+// select what it just imported — an incidental outcome, not a chosen one.
+// A two-account test that needs to start on A and switch to B mid-flow (the
+// owner-reported onboarding scenario) depends on the snapshot starting on A.
+const activeAccountArg = args.find((a) => a.startsWith('--active-account='));
+const ACTIVE_ACCOUNT = activeAccountArg ? activeAccountArg.split('=')[1].toUpperCase() : 'A';
+if (!['A', 'B'].includes(ACTIVE_ACCOUNT)) {
+  throw new Error(`provision: --active-account must be 'A' or 'B', got '${ACTIVE_ACCOUNT}'`);
+}
+if (ACTIVE_ACCOUNT === 'B' && !ADD_ACCOUNT) {
+  throw new Error("provision: --active-account=B requires --add-account (there is no account B otherwise)");
+}
 
 // ── Freighter UI selectors ──
 // Freighter's first-run screen offers no import path: you create a wallet with
@@ -103,6 +120,14 @@ async function readStoredAddresses(page) {
     () => new Promise((resolve) => chrome.storage.local.get(null, resolve)),
   );
   return [...new Set(JSON.stringify(storage).match(/G[A-Z2-7]{55}/g) || [])];
+}
+
+// The name Freighter shows for the currently active account, e.g. "Account
+// 2". Freighter auto-selects whatever wallet an import just added, so
+// reading this right after an import is how we learn the label it was
+// actually assigned — rather than guessing at Freighter's internal naming.
+async function readActiveAccountName(page) {
+  return (await page.locator(SEL.accountName).innerText()).trim();
 }
 
 // Drives add-wallet -> Import Stellar Secret Key -> submit. Assumes the
@@ -176,8 +201,13 @@ async function provisionFreighter(context) {
     }
   }
 
-  step('Freighter wallet created and account imported');
+  // 6. Capture the label Freighter assigned this account (it is now the
+  //    active one, having just been imported) so the active-account switch
+  //    later in the run can target it by name rather than by guesswork.
+  const accountAName = await readActiveAccountName(page);
+  step(`Freighter wallet created and account imported as '${accountAName}'`);
   await page.close();
+  return accountAName;
 }
 
 // ── Step 2: Import account B (add-account.mjs) ──
@@ -198,8 +228,25 @@ async function importAccountB(context) {
     getRequiredEnv('E2E_FREIGHTER_PASSWORD'),
   );
 
-  step('account B imported');
+  // Importing a wallet selects it, same as account A's import did.
+  const accountBName = await readActiveAccountName(page);
+  step(`account B imported as '${accountBName}'`);
   await page.close();
+  return accountBName;
+}
+
+// ── Step 2b: Make the active-at-snapshot-time account explicit ──
+// Runs after both imports so it is a deliberate choice, not whatever import
+// happened to leave selected.
+async function setActiveAccount(context, name) {
+  step(`setting active account to '${name}' before completing the wizard`);
+  const page = await switchFreighterAccount(context, name);
+  await page.waitForTimeout(400);
+  const nowActive = await readActiveAccountName(page);
+  if (nowActive !== name) {
+    throw new Error(`setActiveAccount: expected '${name}' to be active, but '${nowActive}' is`);
+  }
+  step(`active account confirmed: '${nowActive}'`);
 }
 
 // ── Step 3: Complete onboarding wizard ──
@@ -257,6 +304,21 @@ async function verifyProfile(context) {
   step('profile verified: connected, no wizard, deposit form reachable');
 }
 
+// Report which addresses the extension holds and which one is active, so a
+// snapshot rebuild's log is itself evidence of what the profile contains —
+// not just an assertion that provisioning "worked".
+async function reportAccountState(context) {
+  const extPage = await context.newPage();
+  await extPage.goto(`chrome-extension://${EXT_ID}/index.html`);
+  await extPage.waitForTimeout(800);
+  const addresses = await readStoredAddresses(extPage);
+  const activeName = await readActiveAccountName(extPage);
+  step(`stored addresses: ${addresses.join(', ') || '(none)'}`);
+  step(`active account: '${activeName}'`);
+  await extPage.close();
+  return { addresses, activeName };
+}
+
 // ── Main ──
 async function main() {
   if (VERIFY_ONLY) {
@@ -265,6 +327,7 @@ async function main() {
     try {
       await unlockFreighter(context);
       await verifyProfile(context);
+      await reportAccountState(context);
     } finally {
       await context.close();
     }
@@ -275,11 +338,20 @@ async function main() {
   const context = await launch({ userDataDir: PROFILE_DIR, headless: false });
   try {
     await unlockFreighter(context);
-    await provisionFreighter(context);
+    const accountAName = await provisionFreighter(context);
 
+    let accountBName = null;
     if (ADD_ACCOUNT) {
-      await importAccountB(context);
+      accountBName = await importAccountB(context);
+
+      // The account active right now is whichever import ran last (B) — make
+      // the account active at snapshot time an explicit choice instead of
+      // leaving it at that incidental result.
+      const targetName = ACTIVE_ACCOUNT === 'B' ? accountBName : accountAName;
+      await setActiveAccount(context, targetName);
     }
+
+    await reportAccountState(context);
 
     if (!SKIP_WIZARD) {
       await completeWizard(context);

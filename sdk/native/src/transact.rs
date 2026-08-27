@@ -201,7 +201,13 @@ pub fn load_user_key_material(
         },
         membership_blinding,
     } = storage.get_user_keys(user_address)?.ok_or_else(|| {
-        anyhow::anyhow!("address {user_address} should generate privacy keys and ASP secret first")
+        // The address is a Tier-1 value and this error reaches both a UI
+        // toast and the telemetry ring buffer. Wrapped to match the
+        // Sensitive() treatment the commitment field below already gets.
+        anyhow::anyhow!(
+            "address {} should generate privacy keys and ASP secret first",
+            crate::types::Sensitive(user_address)
+        )
     })?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))

@@ -1,9 +1,17 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { createWalletSessionMonitor, requireTestnetNetwork, UNREADABLE_WALLET_MESSAGE } from '../wallet-session-policy.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
-import { closeAppPool, createAppPool } from './pool.js';
+import {
+    closeAppPool,
+    createAppPool,
+    hasInFlightPoolOps,
+    waitForPoolOpsToDrain,
+    beginPoolOp,
+    endPoolOp,
+} from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
@@ -117,9 +125,12 @@ function setMoveFlow(flow) {
     });
 }
 
-async function bootnodeCheck(rpcUrl) {
+async function bootnodeCheck(rpcUrl, address) {
     const storage = await ensureStorage();
-    const stored = await storage.getStoredBootnodeUrl();
+    // The archive endpoint is account-scoped. Passed explicitly rather
+    // than read from App.state here, so the caller is forced to have an
+    // account in hand before this can ask for one account's bootnode.
+    const stored = await storage.getStoredBootnodeUrl(address);
     const required = await bootnodeRequired(rpcUrl);
 
     if (required && !stored) {
@@ -131,7 +142,7 @@ async function bootnodeCheck(rpcUrl) {
         if (!modal.accepted || !modal.url) {
             throw new Error('RPC_SYNC_GAP: bootnode required');
         }
-        await storage.setBootnodeConfig(modal.url);
+        await storage.setBootnodeConfig(modal.url, address);
     }
 
     return { bootnodeRequired: required };
@@ -157,10 +168,16 @@ async function loadRuntimeState() {
     const explorerSetting = await storage.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await storage.getBootnodeConfig();
+    // Both are account-scoped, so they follow whichever account is live
+    // now. loadRuntimeState() runs after the post-wizard hand-off, by which
+    // point App.state.wallet.address is the re-bound account if the user
+    // switched mid-wizard -- reading it here rather than a captured
+    // value is what makes these settings follow the re-bind.
+    const settingsAddress = App.state.wallet.address;
+    const bootnodeSetting = await storage.getBootnodeConfig(settingsAddress);
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
-    const telemetrySetting = await storage.getSetting('telemetry_config');
+    const telemetrySetting = await storage.getTelemetryConfig(settingsAddress);
     App.state.settings.telemetry = telemetrySetting || { level: 'info', revealSensitive: false };
     try {
         await configureTelemetrySettings({
@@ -365,7 +382,14 @@ export const Shell = {
 
         App.events.addEventListener('dashboard:view-receipt', (event) => {
             const { noteId } = event.detail;
-            window.history.replaceState(null, '', `#disclosure?commitment=${encodeURIComponent(noteId)}`);
+            // This used to also do
+            //   history.replaceState(null, '', `#disclosure?commitment=${noteId}`)
+            // which put a note commitment -- an identifier for one specific
+            // payment -- into session history, browser profile sync and the
+            // omnibox, where it outlives the session and syncs to the user's
+            // other devices. It was there to cover the case where the
+            // disclosure view had not loaded its notes yet; disclosure.js now
+            // holds that hand-off in memory instead (pendingNoteSelection).
             setActiveView('disclosure');
             // Give the disclosure view a moment to load if it hasn't already
             setTimeout(() => {
@@ -398,6 +422,14 @@ export const Shell = {
 export const Wallet = {
     _connectPromise: null,
     _stopWatcher: null,
+    // Bumped on connect() and disconnect(). connect() re-checks it after each
+    // await so a torn-down session cannot be resurrected, and a new connect()
+    // cannot be clobbered by an old one finishing late.
+    _sessionEpoch: 0,
+    // Guards the watcher's change path against re-entry. Declared here rather
+    // than materialised on first assignment so it sits with the other
+    // session-lifetime fields.
+    _pendingChange: false,
 
     init() {
         document.getElementById('wallet-btn')?.addEventListener('click', () => {
@@ -418,15 +450,19 @@ export const Wallet = {
             // flips as soon as Freighter supplies an address, while runtime
             // and pool initialization still make transaction controls unusable.
             document.body.dataset.walletState = 'connecting';
+            const epoch = ++this._sessionEpoch;
+            const superseded = () => this._sessionEpoch !== epoch;
             const signer = new FreighterSigner();
 
             try {
                 const address = await connectWallet();
-                const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
-                const rpcUrl = sorobanRpcUrl || '';
-                if (!rpcUrl.toLowerCase().includes('testnet')) {
-                    throw new Error('This app supports Stellar testnet only.');
-                }
+                // Shared with admin.js so the two pages cannot drift apart
+                // again; the throw wording is unchanged. requireTestnetNetwork
+                // also rejects a missing RPC URL on its own terms rather than
+                // letting an empty string fail the substring test and be
+                // reported as a wrong-network error.
+                const { network, networkPassphrase, sorobanRpcUrl: rpcUrl } =
+                    requireTestnetNetwork(await getWalletNetwork());
 
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;
@@ -435,9 +471,13 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
-                const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
-                await initializeRuntime(rpcUrl);
+                const { bootnodeRequired } = await bootnodeCheck(rpcUrl, address);
+                await initializeRuntime(rpcUrl, { address });
                 await client().backgroundSync();
+
+                // Started before onboarding opens so a mid-wizard account
+                // switch is caught while the wizard is still on screen.
+                this.startWatcher();
 
                 await runOnboardingWizard({
                     address,
@@ -446,18 +486,38 @@ export const Wallet = {
                     signer,
                 });
 
-                await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+                // Past the wizard there is nothing left to re-point, and the
+                // work below binds a session for one specific account, so a
+                // switch from here ends the session instead of re-binding.
+                // Checked before the assignment: a network change during the
+                // wizard already disconnected, and writing 'binding' over that
+                // would advertise a session that is not being bound.
+                if (superseded()) return;
+                document.body.dataset.walletState = 'binding';
+
+                // The watcher may have re-bound App.state.wallet.address to a
+                // different account while the wizard was open; that live
+                // value, not the one connectWallet() returned above, is the
+                // account everything from here on must act as.
+                const liveAddress = App.state.wallet.address;
+                await client().openAccount({ networkPassphrase, userAddress: liveAddress }, signer);
+                if (superseded()) return;
                 const keys = await client().account().userPublicKeys();
+                if (superseded()) return;
                 App.state.keys.notePublicKey = keys.notePublicKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
 
                 await loadRuntimeState();
+                if (superseded()) return;
                 renderSettingsDrawer();
                 renderWallet();
-                App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+                App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: liveAddress } }));
                 await createAppPool();
+                // Last gate before the app declares itself usable: everything
+                // above ran for liveAddress, so publishing 'ready' after a
+                // teardown would advertise a session that no longer exists.
+                if (superseded()) return;
                 document.body.dataset.walletState = 'ready';
-                this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
@@ -478,21 +538,91 @@ export const Wallet = {
         return this._connectPromise;
     },
 
+    /**
+     * End the wallet session for a reason the user must act on.
+     *
+     * Freezes new wallet-bound work (requireWallet() reads walletState), then
+     * waits for anything already running: its OpHistory write still needs the
+     * client this teardown nulls out.
+     *
+     * The try/finally matters — if disconnect() throws, _pendingChange would
+     * stay true and mute every later change, including after a reconnect.
+     */
+    async _endSession(message) {
+        if (this._pendingChange) return;
+        this._pendingChange = true;
+        try {
+            document.body.dataset.walletState = 'changing';
+            if (hasInFlightPoolOps()) {
+                await waitForPoolOpsToDrain();
+            }
+            this.disconnect();
+            Toast.show(message, 'info', 6000);
+        } finally {
+            this._pendingChange = false;
+        }
+    },
+
     startWatcher() {
         if (this._stopWatcher) return;
+        // One monitor per watcher, so the unreadable streak cannot outlive the
+        // session it belongs to (disconnect() drops the watcher; the next
+        // startWatcher() builds a fresh pair).
+        const monitor = createWalletSessionMonitor();
         this._stopWatcher = startWalletWatcher({
             intervalMs: 2_000,
             onChange: async (info) => {
-                if (!App.state.wallet.connected || info?.error) return;
-                if (info.address && info.address !== App.state.wallet.address) {
-                    this.disconnect();
-                    Toast.show('Freighter account changed. Reconnect to continue.', 'info', 6000);
+                if (!App.state.wallet.connected) return;
+
+                // Detection is shared with admin.js; the response is not.
+                const { networkChanged, changed, sessionUnverifiable } =
+                    monitor.observe(info, App.state.wallet);
+
+                // The watcher can no longer name the active account, for long
+                // enough that this is not a blip. Handled before the lifecycle
+                // branches below: the rebind branch cannot rebind to an account
+                // it cannot name.
+                if (sessionUnverifiable) {
+                    await this._endSession(UNREADABLE_WALLET_MESSAGE);
+                    return;
                 }
+                if (!changed) return;
+
+                // 'binding' is the post-wizard hand-off: no wizard on screen
+                // to re-point, and a session being bound for one account.
+                const state = document.body.dataset.walletState;
+                if (state === 'ready' || state === 'binding') {
+                    // Past onboarding, both a network change and an account
+                    // change end the session; there is no wizard left to
+                    // re-point at the new account.
+                    await this._endSession(
+                        networkChanged
+                            ? 'Freighter network changed. Reconnect to continue.'
+                            : 'Freighter account changed. Reconnect to continue.',
+                    );
+                    return;
+                }
+
+                // Still onboarding: a network change blocks, but an account
+                // change means the user wants THIS account, so re-bind rather
+                // than leave the remaining steps written under the old one.
+                if (networkChanged) {
+                    this.disconnect();
+                    Toast.show('Freighter network changed. Reconnect to continue.', 'info', 6000);
+                    return;
+                }
+                App.state.wallet.address = info.address;
+                renderWallet();
+                App.events.dispatchEvent(new CustomEvent('wallet:account-rebind', { detail: { address: info.address } }));
             },
         });
     },
 
     disconnect() {
+        // Invalidate any connect() still in flight before tearing anything
+        // down, so its remaining awaits abort instead of publishing a
+        // session over the top of this teardown.
+        this._sessionEpoch += 1;
         this._stopWatcher?.();
         this._stopWatcher = null;
         disposeClient();
@@ -506,6 +636,17 @@ export const Wallet = {
             networkPassphrase: null,
         };
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
+        // Cleared, not just re-read on the next connect: the settings drawer
+        // is reachable while connecting, so a stale value would be shown to the
+        // next account. `explorer` is global and stays.
+        App.state.settings.bootnode = { enabled: false, url: '' };
+        App.state.settings.telemetry = { level: 'info', revealSensitive: false };
+        // revealSensitive is a process-global inside the wasm, not part of the
+        // client this teardown disposes, so it would stay armed for the next
+        // account. Fire-and-forget: it must not reject the teardown.
+        void Promise.resolve(
+            configureTelemetrySettings({ level: 'info', revealSensitive: false }),
+        ).catch((e) => console.warn('[Wallet] failed to reset telemetry posture:', e));
         document.body.dataset.walletState = 'disconnected';
         renderWallet();
         this.closeSettings();
@@ -539,12 +680,18 @@ export const Wallet = {
             const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
+            // `explorer` is global; bootnode and telemetry are written
+            // under the account currently in front of the user.
+            const settingsAddress = App.state.wallet.address;
+            if (!settingsAddress) {
+                throw new Error('Connect a wallet before saving account settings.');
+            }
             await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
             await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
-            });
-            await storage.setSetting('telemetry_config', { level: logLevel, revealSensitive });
+            }, settingsAddress);
+            await storage.setTelemetryConfig({ level: logLevel, revealSensitive }, settingsAddress);
 
             App.state.settings.explorerBaseUrl = explorerBaseUrl;
             App.state.settings.bootnode = { enabled: !!bootnodeEnabled, url: bootnodeEnabled ? bootnodeUrl : '' };
@@ -574,10 +721,17 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true; // prevent duplicate registrations
-            const hash = await client().account().registerPublicKeys({
-                notePublicKeyHex: App.state.keys.notePublicKey,
-                encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
-            });
+            // registerPublicKeys signs and submits on-chain, so the watcher's
+            // drain has to be able to see it.
+            beginPoolOp();
+            let hash;
+            try {
+                // No keys passed: the SDK then reads them from storage for the
+                // bound account rather than taking whatever the UI last rendered.
+                hash = await client().account().registerPublicKeys();
+            } finally {
+                endPoolOp();
+            }
             App.state.profile.registered = true;
             renderSettingsDrawer();
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {

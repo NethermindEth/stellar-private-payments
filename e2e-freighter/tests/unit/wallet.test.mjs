@@ -5,6 +5,7 @@ import {
   approveOrWatch,
   expectNoFreighterApproval,
   rejectInFreighter,
+  switchFreighterAccount,
   waitForAnyFreighterApproval,
   waitForFreighterApproval,
 } from '../../src/wallet.mjs';
@@ -57,6 +58,49 @@ function fakePage({ route = '', buttons = [], closeBeforeWait = false } = {}) {
 function fakeContext(initialPages = []) {
   const allPages = initialPages;
   return { pages: () => allPages, allPages };
+}
+
+// switchFreighterAccount only touches the extension's account-view button
+// and the `.detail-name` rows in the account list it opens, so the fake only
+// needs to model those two locators (plus `goto`, which extensionHomePage
+// calls unconditionally on the page it finds or creates). `confirmsSwitch`
+// controls whether selecting a row actually updates the header text the
+// post-click confirmation wait reads back — false reproduces the
+// account-header-never-confirms case.
+function fakeAccountSwitchPage({ initialActive = 'Account 2', visibleRows = [], confirmsSwitch = true } = {}) {
+  const clicks = [];
+  let active = initialActive;
+  const page = {
+    url: () => extensionUrl(),
+    clicks,
+    async goto() {},
+    locator(selector, options) {
+      if (selector === '[data-testid="account-view-account-name"]') {
+        return {
+          async waitFor() {},
+          async click() { clicks.push('open-account-list'); },
+          async innerText() { return active; },
+        };
+      }
+      if (selector === '.detail-name') {
+        const wanted = options?.hasText;
+        const visible = visibleRows.includes(wanted);
+        const row = {
+          first: () => row,
+          async waitFor() {
+            if (!visible) throw new Error(`${wanted} not visible`);
+          },
+          async click() {
+            clicks.push(`select:${wanted}`);
+            if (confirmsSwitch) active = wanted;
+          },
+        };
+        return row;
+      }
+      throw new Error(`fakeAccountSwitchPage: unexpected selector '${selector}'`);
+    },
+  };
+  return page;
 }
 
 function advancingWaitOptions(onSleep = () => {}) {
@@ -155,4 +199,55 @@ test('handles an approval page closing before action and while a human approves'
   const humanResult = await humanPromise;
   assert.equal(humanResult.pageClosed, true);
   assert.equal(humanPage.listenerCount('close'), 0);
+});
+
+test('switchFreighterAccount opens the account list, selects the named row, and confirms the header updated', async () => {
+  const page = fakeAccountSwitchPage({ visibleRows: ['Account 2', 'Account 3'] });
+  const context = fakeContext([page]);
+
+  const result = await switchFreighterAccount(context, 'Account 3');
+
+  assert.equal(result, page);
+  assert.deepEqual(page.clicks, ['open-account-list', 'select:Account 3']);
+});
+
+test('switchFreighterAccount reuses an already-open extension page instead of opening a new one', async () => {
+  const page = fakeAccountSwitchPage({ initialActive: 'Account 2', visibleRows: ['Account 2'] });
+  let newPageCalls = 0;
+  const context = {
+    pages: () => [page],
+    newPage: async () => { newPageCalls += 1; throw new Error('should not open a new page'); },
+  };
+
+  await switchFreighterAccount(context, 'Account 2');
+
+  assert.equal(newPageCalls, 0);
+});
+
+test('switchFreighterAccount rejects when the named account row never appears', async () => {
+  const page = fakeAccountSwitchPage({ visibleRows: ['Account 2'] });
+  const context = fakeContext([page]);
+
+  await assert.rejects(switchFreighterAccount(context, 'Account 3'), /Account 3 not visible/);
+  // The account list was still opened before the row lookup failed.
+  assert.deepEqual(page.clicks, ['open-account-list']);
+});
+
+test('switchFreighterAccount rejects if the row is clicked but the header never confirms the switch', async () => {
+  // Reproduces the real flake this guards against: the row click resolves,
+  // but Freighter's own commit of the new active account (redux store +
+  // extension-storage write) never lands, so the header keeps showing the
+  // previously active account.
+  const page = fakeAccountSwitchPage({
+    initialActive: 'Account 2',
+    visibleRows: ['Account 2', 'Account 3'],
+    confirmsSwitch: false,
+  });
+  const context = fakeContext([page]);
+
+  await assert.rejects(
+    switchFreighterAccount(context, 'Account 3', { timeoutMs: 20, waitOptions: advancingWaitOptions() }),
+    /account header never confirmed the switch/,
+  );
+  assert.deepEqual(page.clicks, ['open-account-list', 'select:Account 3']);
 });

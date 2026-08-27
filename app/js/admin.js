@@ -1,6 +1,9 @@
 import { contract } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
+import { connectWallet, getConnectedAddress, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, startWalletWatcher } from './wallet.js';
+import { createPinnedSigner } from './wallet-signer-guard.js';
+import { createWalletSessionMonitor, requireTestnetNetwork, UNREADABLE_WALLET_MESSAGE } from './wallet-session-policy.js';
+import { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrain } from './pool-ops.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
@@ -42,15 +45,23 @@ const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn')
 
 const state = {
   address: null,
+  network: null,
   networkPassphrase: null,
   rpcUrl: null,
   contracts: null,
   membershipClient: null,
   nonMembershipClient: null,
-  membershipClientId: null,
-  nonMembershipClientId: null,
+  // Cache keys now carry the signing identity, not just the contract ID. A
+  // contract.Client is built around a signer pinned to one address and one
+  // passphrase (see contractClient below), so a client cached under the
+  // contract ID alone would be handed back after an account change and sign
+  // as the previous account.
+  membershipClientKey: null,
+  nonMembershipClientKey: null,
   cryptoReady: false,
   adminInsertOnly: null,
+  stopWatcher: null,
+  pendingChange: false,
 };
 
 // -----------------------------
@@ -128,6 +139,15 @@ function parseBigIntInput(value, label) {
   }
 }
 
+/**
+ * Clear the ASP-secret field. Called from the insert's `finally`, from
+ * disconnect() and on pagehide, so the secret does not outlive the submission
+ * it was typed for.
+ */
+function clearAspSecretInput() {
+  if (allowlistAspSecretInput) allowlistAspSecretInput.value = '';
+}
+
 const reverseHexWithPrefix = (hex) => {
   const hasPrefix = hex.startsWith("0x");
   const pureHex = hasPrefix ? hex.slice(2) : hex;
@@ -144,29 +164,58 @@ function ensureWalletConnected() {
   }
 }
 
-function buildSigner() {
-  return {
-    signTransaction: async (transactionXdr, opts = {}) => {
-      return signWalletTransaction(transactionXdr, {
-        networkPassphrase: state.networkPassphrase,
-        address: state.address,
-        ...opts,
-      });
-    },
-    signAuthEntry: async (entryXdr, opts = {}) => {
-      return signWalletAuthEntry(entryXdr, {
-        networkPassphrase: state.networkPassphrase,
-        address: state.address,
-        ...opts,
-      });
-    },
-  };
+/** Read and guard the wallet's network. The only writer of state.network/rpcUrl. */
+async function refreshNetwork() {
+  const net = requireTestnetNetwork(await getWalletNetwork());
+  state.network = net.network;
+  state.networkPassphrase = net.networkPassphrase;
+  state.rpcUrl = net.sorobanRpcUrl;
+  return net;
 }
 
-async function getMembershipClient(contractId) {
-  if (state.membershipClient && state.membershipClientId === contractId) return state.membershipClient;
-  const signer = buildSigner();
-  state.membershipClient = await contract.Client.from({
+/**
+ * Re-read the wallet immediately before a privileged write.
+ *
+ * The watcher polls every two seconds, so `state` can be stale at the moment
+ * of the click. This page is privileged, so it does not rely on watcher timing:
+ * it re-confirms the network and the active account synchronously each time.
+ * getConnectedAddress() never prompts and returns null when the wallet is
+ * locked or has not granted this origin — a write must not proceed then.
+ *
+ * Read-only paths are left unguarded so the page stays usable for inspection.
+ */
+async function requireWritableSession() {
+  const net = requireTestnetNetwork(await getWalletNetwork());
+  if (state.networkPassphrase && net.networkPassphrase !== state.networkPassphrase) {
+    throw new Error('Freighter network changed. Reconnect before submitting.');
+  }
+  const active = await getConnectedAddress();
+  if (!active) {
+    throw new Error('Freighter is not reporting an active account for this site. Reconnect before submitting.');
+  }
+  if (active !== state.address) {
+    throw new Error('Freighter is on a different account than this page connected as. Reconnect before submitting.');
+  }
+  return net;
+}
+
+/**
+ * Build (or reuse) a contract.Client bound to the connected admin account.
+ *
+ * The signer is wallet.js's adapter with this page's identity pinned, so
+ * contract.Client cannot override it.
+ */
+async function contractClient(slot, contractId) {
+  ensureWalletConnected();
+  const key = `${contractId}|${state.address}|${state.networkPassphrase}`;
+  if (state[`${slot}Client`] && state[`${slot}ClientKey`] === key) {
+    return state[`${slot}Client`];
+  }
+  const signer = createPinnedSigner(
+    { signTransaction: signWalletTransaction, signAuthEntry: signWalletAuthEntry },
+    { address: state.address, networkPassphrase: state.networkPassphrase },
+  );
+  const built = await contract.Client.from({
     rpcUrl: state.rpcUrl,
     networkPassphrase: state.networkPassphrase,
     publicKey: state.address,
@@ -174,37 +223,39 @@ async function getMembershipClient(contractId) {
     signAuthEntry: signer.signAuthEntry,
     contractId,
   });
-  state.membershipClientId = contractId;
-  return state.membershipClient;
+  state[`${slot}Client`] = built;
+  state[`${slot}ClientKey`] = key;
+  return built;
 }
 
-async function getNonMembershipClient(contractId) {
-  if (state.nonMembershipClient && state.nonMembershipClientId === contractId) return state.nonMembershipClient;
-  const signer = buildSigner();
-  state.nonMembershipClient = await contract.Client.from({
-    rpcUrl: state.rpcUrl,
-    networkPassphrase: state.networkPassphrase,
-    publicKey: state.address,
-    signTransaction: signer.signTransaction,
-    signAuthEntry: signer.signAuthEntry,
-    contractId,
-  });
-  state.nonMembershipClientId = contractId;
-  return state.nonMembershipClient;
+const getMembershipClient = (contractId) => contractClient('membership', contractId);
+const getNonMembershipClient = (contractId) => contractClient('nonMembership', contractId);
+
+function forgetContractClients() {
+  state.membershipClient = null;
+  state.nonMembershipClient = null;
+  state.membershipClientKey = null;
+  state.nonMembershipClientKey = null;
 }
 
 async function ensureCryptoReady() {
   if (!state.cryptoReady) {
     setStatus('Loading app...', 'info');
-    const { sorobanRpcUrl, ...network } = await getWalletNetwork();
+    // One guarded read, recorded in `state`; no second opinion, and no
+    // hard-coded fallback endpoint to disagree with it.
+    if (!state.rpcUrl) await refreshNetwork();
+    const sorobanRpcUrl = state.rpcUrl;
     try {
       const storage = await ensureStorage();
       if (await bootnodeRequired(sorobanRpcUrl)) {
-        if (!(await storage.getStoredBootnodeUrl())) {
+        // Admin has no connected account at init, so this asks for
+        // "this account's bootnode" with no account and correctly gets none,
+        // rather than inheriting whichever account last configured one.
+        if (!(await storage.getStoredBootnodeUrl(state.address))) {
           throw new Error('RPC_SYNC_GAP: bootnode required');
         }
       }
-      await initializeRuntime(sorobanRpcUrl);
+      await initializeRuntime(sorobanRpcUrl, { address: state.address });
       await client().backgroundSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
@@ -240,10 +291,12 @@ async function connect() {
   try {
     setStatus('Connecting wallet...', 'info');
     const address = await connectWallet();
-    const net = await getWalletNetwork();
+    // Guarded, and the only network read on this path: no second
+    // getWalletNetwork() call to disagree with it, and no hard-coded
+    // soroban-testnet fallback standing in for a wallet that reported no RPC
+    // endpoint at all.
+    const net = await refreshNetwork();
     state.address = address;
-    state.networkPassphrase = net.networkPassphrase;
-    state.rpcUrl = net.sorobanRpcUrl || 'https://soroban-testnet.stellar.org';
 
     walletChip.textContent = shortAddress(address);
     connectBtn.title = "Click to disconnect";
@@ -262,29 +315,104 @@ async function connect() {
       btn.removeAttribute('title');
     });
 
-    state.membershipClient = null;
-    state.nonMembershipClient = null;
+    forgetContractClients();
+
+    // Observe the live wallet from here on. This page had no watcher at all,
+    // so an account or network switch after connect left it signing under one
+    // identity while every label on screen named another.
+    startWatcher();
 
     updateAdminInsertOnlyDisplay(state.adminInsertOnly);
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
   } catch (err) {
+    // startWatcher() can throw after the address and buttons are already set,
+    // so unwind rather than advertise a session the page does not have.
+    if (state.address) disconnect();
     if (err.code === 'USER_REJECTED') {
       setStatus('Connection cancelled', 'info');
     } else {
       setStatus('Wallet error', 'error');
-      showToast('Wallet connection failed', 'error');
+      // The network guard's message names the actual problem ("testnet only",
+      // "no RPC URL"); replacing it with a generic failure string would hide
+      // the one thing the admin can act on.
+      showToast(err?.message || 'Wallet connection failed', 'error');
     }
   }
 }
 
+/**
+ * Watch the wallet for account and network changes.
+ *
+ * Detection is shared with the main app; the response is simpler here. This
+ * page holds no per-account key material, so there is nothing to re-bind to
+ * and every change ends the session. Contract state stays on screen and
+ * refreshable; only the write controls are disabled.
+ */
+function startWatcher() {
+  if (state.stopWatcher) return;
+  // One monitor per watcher, so a streak cannot outlive its session.
+  const monitor = createWalletSessionMonitor();
+  state.stopWatcher = startWalletWatcher({
+    intervalMs: 2_000,
+    onChange: async (info) => {
+      if (!state.address) return;
+      const { networkChanged, changed, sessionUnverifiable } = monitor.observe(info, state);
+      // The watcher answered but could not say which account is
+      // active, for long enough that this is not a blip. This page used to
+      // read that as "nothing changed" and stay connected with the allowlist
+      // and blocklist controls enabled, under an identity it could no longer
+      // confirm.
+      if (sessionUnverifiable) {
+        await endSession(UNREADABLE_WALLET_MESSAGE);
+        return;
+      }
+      if (!changed) return;
+      await endSession(
+        networkChanged
+          ? 'Freighter network changed. Reconnect to continue.'
+          : 'Freighter account changed. Reconnect to continue.',
+      );
+    },
+  });
+}
+
+/**
+ * End the wallet session for a reason the admin must act on.
+ *
+ * The try/finally matters — if disconnect() throws, pendingChange would stay
+ * true and mute every later change.
+ */
+async function endSession(message) {
+  if (state.pendingChange) return;
+  state.pendingChange = true;
+  try {
+    // Do not sever state out from under a submission already awaiting a
+    // signature. pool-ops.js holds the in-flight counter; its name
+    // is the main app's, but the module is generic and this page loads its own
+    // instance, so there is no cross-page interaction.
+    if (hasInFlightPoolOps()) {
+      await waitForPoolOpsToDrain();
+    }
+    disconnect();
+    showToast(message, 'info', 6000);
+  } finally {
+    state.pendingChange = false;
+  }
+}
+
 function disconnect() {
+  state.stopWatcher?.();
+  state.stopWatcher = null;
   state.address = null;
+  state.network = null;
   state.networkPassphrase = null;
   state.rpcUrl = null;
-  state.membershipClient = null;
-  state.nonMembershipClient = null;
+  forgetContractClients();
+  // A disconnect is an exit path for the ASP secret too: the field must not
+  // keep holding it for whoever connects next.
+  clearAspSecretInput();
 
   walletChip.textContent = 'Connect Freighter';
   connectBtn.removeAttribute('title');
@@ -382,16 +510,22 @@ async function toggleAdminInsertOnly() {
     const newValue = !state.adminInsertOnly;
     setStatus(`Setting admin-only insert to ${newValue ? 'enabled' : 'disabled'}...`, 'info');
 
+    await requireWritableSession();
     const mClient = await getMembershipClient(contractId);
-    const tx = await mClient.set_admin_insert_only({ admin_only: newValue });
-    await tx.signAndSend();
+    beginPoolOp();
+    try {
+      const tx = await mClient.set_admin_insert_only({ admin_only: newValue });
+      await tx.signAndSend();
+    } finally {
+      endPoolOp();
+    }
 
     setStatus('Setting updated', 'ok');
     showToast(`Admin-only insert ${newValue ? 'enabled' : 'disabled'}`, 'success');
     await refreshState();
   } catch (err) {
     setStatus('Toggle failed', 'error');
-    showToast('Failed to toggle admin-only insert', 'error');
+    showToast(err?.message || 'Failed to toggle admin-only insert', 'error');
   } finally {
     if (state.address) toggleAdminInsertOnlyBtn.disabled = false;
     toggleAdminInsertOnlyBtn.textContent = originalText;
@@ -423,23 +557,37 @@ async function insertMembershipLeaf() {
 
     setStatus('Computing and submitting allowlist insert transaction...', 'info');
     await ensureCryptoReady();
+    // Checked here, before the secret is used for anything, so a wrong network costs the
+    // admin a retype rather than a leaf inserted into a tree on a chain the
+    // pool does not read.
+    await requireWritableSession();
 
     const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
 
     const mClient = await getMembershipClient(contractId);
-    const tx = await mClient.insert_leaf({ leaf: leafValue });
-    await tx.signAndSend();
+    beginPoolOp();
+    try {
+      const tx = await mClient.insert_leaf({ leaf: leafValue });
+      await tx.signAndSend();
+    } finally {
+      endPoolOp();
+    }
 
     setStatus('The allowlist insert transaction sent', 'ok');
     showToast('Added to the allowlist successfully', 'success');
     allowlistPublicKeyInput.value = '';
-    allowlistAspSecretInput.value = '';
     await refreshState();
   } catch (err) {
     setStatus('Allowlist insert failed', 'error');
+    // err.message is a validation label, a wallet error or an RPC error; none
+    // of them carry the secret. It is interpolated deliberately so the admin
+    // can tell a rejected signature from a wrong network.
     showToast(`Allowlist insert failed: ${err.message}`, 'error');
   } finally {
+    // Every exit path, not just success: thrown validation errors, a declined
+    // signature, an RPC failure and the happy path all land here.
+    clearAspSecretInput();
     if (state.address) addToAllowlistBtn.disabled = false;
     addToAllowlistBtn.textContent = originalText;
   }
@@ -461,9 +609,15 @@ async function insertNonMembershipLeaf() {
     addToBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Submitting blocklist insert transaction...', 'info');
+    await requireWritableSession();
     const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.insert_leaf({ key: keyValue, value: valueValue });
-    await tx.signAndSend();
+    beginPoolOp();
+    try {
+      const tx = await nmClient.insert_leaf({ key: keyValue, value: valueValue });
+      await tx.signAndSend();
+    } finally {
+      endPoolOp();
+    }
 
     setStatus('The blocklist insert transaction sent', 'ok');
     showToast('Added to the blocklist successfully', 'success');
@@ -492,9 +646,15 @@ async function removeNonMembershipLeaf() {
     removeFromBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Submitting blocklist removal transaction...', 'info');
+    await requireWritableSession();
     const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.delete_leaf({ key: keyValue });
-    await tx.signAndSend();
+    beginPoolOp();
+    try {
+      const tx = await nmClient.delete_leaf({ key: keyValue });
+      await tx.signAndSend();
+    } finally {
+      endPoolOp();
+    }
 
     setStatus('The blocklist removal transaction sent', 'ok');
     showToast('Removed from the blocklist successfully', 'success');
@@ -553,6 +713,14 @@ nonMembershipContractInput?.addEventListener('input', () => {
   updateContractLink(nonMembershipContractLinkEl, nonMembershipContractInput.value.trim());
 });
 
+// Navigation away is an exit path too, and the only one the handlers above
+// cannot reach. `pagehide` rather than `beforeunload`: it also fires when the
+// page enters the back/forward cache, which is precisely the case where the
+// DOM survives with the field still populated and can be restored later.
+window.addEventListener('pagehide', () => {
+  clearAspSecretInput();
+});
+
 async function init() {
   setStatus('Initializing...', 'info');
   await loadExplorerSetting();
@@ -563,5 +731,9 @@ async function init() {
 
 init().catch(err => {
   setStatus('Init failed', 'error');
+  // The network guard fires on this path (refreshNetwork -> ensureCryptoReady).
+  // Leaving it in the console only would present a wrong-network wallet as an
+  // unexplained dead page.
+  showToast(err?.message || 'Initialization failed', 'error', 8000);
   console.error('Init error:', err);
 });

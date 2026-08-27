@@ -15,7 +15,10 @@ use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
-    types::{DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey, SignerAddress},
+    types::{
+        DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress, NotePublicKey,
+        SignerAddress,
+    },
     verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
@@ -25,7 +28,7 @@ use crate::{
     correlation::{new_correlation_id, with_correlation_id},
     deployment::deployment_config,
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
-    signer::WalletSigner,
+    signer::{SEP43_USER_REJECTED_CODE, WalletSigner},
     storage::Storage,
     workers::{
         prover::{ProverBridge, ProverWorker},
@@ -36,6 +39,16 @@ use gloo_worker::Spawnable;
 
 pub use account::Account;
 pub use pool::PrivatePool;
+
+/// Set `code` on a JsError so it survives the wasm boundary without relying
+/// on message wording — the same pattern sdk/web/src/signer.rs uses for
+/// wallet-side errors it builds directly.
+fn js_error_with_code(message: &str, code: f64) -> JsError {
+    let err = JsError::new(message);
+    let value = JsValue::from(err.clone());
+    let _ = js_sys::Reflect::set(&value, &JsValue::from_str("code"), &JsValue::from_f64(code));
+    err
+}
 
 pub(crate) fn pool_err(error: Error) -> JsError {
     use stellar_private_payments::types::AspMembershipSync;
@@ -51,6 +64,12 @@ pub(crate) fn pool_err(error: Error) -> JsError {
         Error::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
             JsError::new("indexer sync in progress; try again shortly")
         }
+        // Without this, pool_err's fallback rebuilds a bare JsError from
+        // Display alone, so cancellation detection on the JS side has
+        // nothing but the message text to go on — carry the SEP-0043 code
+        // through explicitly instead, matching cause (not error) so a
+        // rejection wrapped inside Error::PlanExecution is caught here too.
+        Error::UserRejected(_) => js_error_with_code(&cause.to_string(), SEP43_USER_REJECTED_CODE),
         _ => JsError::new(&error.to_string()),
     }
 }
@@ -78,8 +97,13 @@ struct AccountOptions {
     network_passphrase: String,
     user_address: Option<String>,
     /// The account that signs and pays. Optional, and defaults to
-    /// `user_address` so existing callers are unaffected. Nothing in the app
-    /// sets it to a different account yet; that is a later change.
+    /// `user_address` so existing callers are unaffected.
+    ///
+    /// Supplying a *different* account is accepted by deserialization and
+    /// then refused: key derivation refuses it in
+    /// [`ensure_derivation_identity`], and opening the session refuses it in
+    /// the native client. The field stays because it is where the eventual
+    /// split will be expressed; it is not yet a working feature.
     signer_address: Option<String>,
 }
 
@@ -212,19 +236,67 @@ impl Client {
 
             self.ensure_prover().await?;
 
-            if !self.user_keys_exist(&user_address).await? {
-                let message = stellar_private_payments::KEY_DERIVATION_MESSAGE.to_string();
-                let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
-                let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
-                self.derive_save_user_keys(user_address.clone(), signature)
-                    .await?;
-            }
+            // Bind the storage worker before anything touches key material.
+            // The existence probe, the derivation, and every later call the
+            // returned Account makes are served by the worker only while this
+            // account is the bound one - see
+            // StorageWorkerRequest::requires_bound_session.
+            self.bind_storage_session(&user_address).await?;
 
-            Ok(Account::new(Rc::new(
-                self.open_native_account(wallet_signer, user_address)?,
-            )))
+            // A session that fails to open must not leave the worker bound to
+            // its account: a refused configuration would otherwise still have
+            // handed the page the capability it was denied.
+            match self.open_bound_session(wallet_signer, user_address).await {
+                Ok(account) => Ok(account),
+                Err(e) => {
+                    // The release is best-effort. If it fails the binding
+                    // outlives the failed open, which grants nothing on its
+                    // own - the privileged requests are unreachable without an
+                    // Account - but the original error is what the caller
+                    // needs to see, so it is not replaced by this one.
+                    let _ = self.release_storage_session().await;
+                    Err(e)
+                }
+            }
         })
         .await
+    }
+
+    /// Derive keys if this is the account's first session, then open it.
+    ///
+    /// Split out of [`Self::account`] so that every failure between binding
+    /// the storage worker and holding a usable [`Account`] flows through one
+    /// place, where the binding can be released.
+    async fn open_bound_session(
+        &self,
+        wallet_signer: WalletSigner,
+        user_address: String,
+    ) -> Result<Account, JsError> {
+        if !self.user_keys_exist(&user_address).await? {
+            // Before the wallet is asked for anything: refuse to derive
+            // one account's privacy keys from another account's
+            // signature. See ensure_derivation_identity.
+            ensure_derivation_identity(&user_address, wallet_signer.signer_address())?;
+            let message = stellar_private_payments::KEY_DERIVATION_MESSAGE.to_string();
+            let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
+            let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
+            self.derive_save_user_keys(user_address.clone(), signature)
+                .await?;
+        }
+
+        Ok(Account::new(Rc::new(
+            self.open_native_account(wallet_signer, user_address)?,
+        )))
+    }
+
+    /// Release the storage worker's session binding.
+    ///
+    /// Call on disconnect. This revokes the capability to read or write this
+    /// account's privacy keys; it deliberately does not delete anything, so
+    /// reconnecting restores the session rather than re-onboarding it.
+    #[wasm_bindgen(js_name = releaseStorageSession)]
+    pub async fn release_storage_session_js(&self) -> Result<(), JsError> {
+        self.release_storage_session().await
     }
 
     /// Catch local storage up to the current chain tip for the deployment.
@@ -386,9 +458,16 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
+        // Read back off the signer rather than from AccountOptions: this is
+        // the address the wallet will actually be asked to sign with, so it
+        // is the one the native client must validate. Passing the option
+        // through separately would let the check and the request drift.
+        let signer_address = wallet_signer.signer_address().clone();
         let signer: Handle<dyn stellar_private_payments::Signer> =
             Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
-        self.inner.account(user_address, signer).map_err(pool_err)
+        self.inner
+            .account(NoteOwnerAddress::new(user_address), signer_address, signer)
+            .map_err(pool_err)
     }
 
     async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
@@ -396,6 +475,24 @@ impl Client {
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::UserKeys(Some(_)) => Ok(true),
             StorageWorkerResponse::UserKeys(None) => Ok(false),
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn bind_storage_session(&self, address: &str) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::BindSession(address.to_string());
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn release_storage_session(&self) -> Result<(), JsError> {
+        match self
+            .storage_request(StorageWorkerRequest::UnbindSession, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
             other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
         }
     }
@@ -428,6 +525,33 @@ impl Client {
             .await
             .map_err(|e| JsError::new(&format!("storage worker error: {e}")))
     }
+}
+
+/// Refuse to derive one account's privacy keys from another account's
+/// signature.
+///
+/// Derivation signs [`KEY_DERIVATION_MESSAGE`] with `signerAddress` and files
+/// the result under `userAddress`. If those differ, the owner's keys are a
+/// function of a delegate's signature and nothing downstream can tell. What
+/// should happen instead is an open design question; this only makes the case
+/// loud rather than silent.
+///
+/// Runs before the wallet is prompted, so a rejected configuration costs no
+/// signature request.
+///
+/// [`KEY_DERIVATION_MESSAGE`]: stellar_private_payments::KEY_DERIVATION_MESSAGE
+fn ensure_derivation_identity(
+    user_address: &str,
+    signer_address: &SignerAddress,
+) -> Result<(), JsError> {
+    if signer_address.as_str() == user_address {
+        return Ok(());
+    }
+    Err(JsError::new(&format!(
+        "refusing to derive privacy keys for {user_address} from a signature by \
+         {signer_address}: userAddress and signerAddress must be the same account \
+         the first time keys are derived",
+    )))
 }
 
 async fn resolve_user_address(
@@ -469,4 +593,102 @@ async fn resolve_user_address(
     resolved
         .as_string()
         .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
+}
+
+/// Acceptance tests for [`pool_err`]'s coded and uncoded paths.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod pool_err_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    fn code_of(error: &JsError) -> Option<f64> {
+        js_sys::Reflect::get(&JsValue::from(error.clone()), &JsValue::from_str("code"))
+            .ok()
+            .and_then(|code| code.as_f64())
+    }
+
+    #[wasm_bindgen_test]
+    fn pool_err_carries_the_sep43_code_for_a_user_rejection() {
+        let error = pool_err(Error::UserRejected("stub decline".to_string()));
+        assert_eq!(
+            code_of(&error),
+            Some(SEP43_USER_REJECTED_CODE),
+            "a rejection crossing the wasm boundary via pool_err must carry \
+             the SEP-0043 code, not rely on the JS side substring-matching \
+             the message"
+        );
+        let message = js_sys::Reflect::get(&JsValue::from(error), &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap();
+        assert!(
+            message.contains("stub decline"),
+            "the wallet's own rejection message must still be preserved: {message}"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn pool_err_leaves_other_errors_uncoded() {
+        let error = pool_err(Error::Other("some other failure".to_string()));
+        assert_eq!(
+            code_of(&error),
+            None,
+            "only a genuine SEP-0043 rejection should carry code -4"
+        );
+    }
+}
+
+/// Acceptance tests for [`ensure_derivation_identity`].
+#[cfg(all(test, target_arch = "wasm32"))]
+mod derivation_identity_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    fn message_of(error: &JsError) -> String {
+        js_sys::Reflect::get(&JsValue::from(error.clone()), &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap()
+    }
+
+    #[wasm_bindgen_test]
+    fn derivation_is_allowed_when_the_owner_signs_for_itself() {
+        // The only configuration any caller uses today, and the one the
+        // signerAddress default produces.
+        assert!(ensure_derivation_identity(OWNER, &SignerAddress::new(OWNER)).is_ok());
+    }
+
+    #[wasm_bindgen_test]
+    fn derivation_is_refused_when_a_delegate_signs_for_the_owner() {
+        let error = ensure_derivation_identity(OWNER, &SignerAddress::new(DELEGATE))
+            .expect_err("keys for one account must not be derived from another's signature");
+        let message = message_of(&error);
+        assert!(
+            message.contains(OWNER) && message.contains(DELEGATE),
+            "the refusal must name both identities so the caller can see which \
+             pair was rejected: {message}"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn the_comparison_is_exact() {
+        // Guards against anyone later "helpfully" relaxing this to a prefix,
+        // case-insensitive, or trimmed comparison. Strkeys are exact.
+        let mut lowercased = OWNER.to_ascii_lowercase();
+        assert!(
+            ensure_derivation_identity(OWNER, &SignerAddress::new(lowercased.as_str())).is_err()
+        );
+        lowercased = format!(" {OWNER}");
+        assert!(
+            ensure_derivation_identity(OWNER, &SignerAddress::new(lowercased.as_str())).is_err()
+        );
+        assert!(ensure_derivation_identity(OWNER, &SignerAddress::new("")).is_err());
+    }
 }

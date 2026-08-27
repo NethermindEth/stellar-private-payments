@@ -10,7 +10,7 @@ import { client, isRuntimeReady } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { App, Toast, Utils } from './core.js';
-import { ensureAppPool } from './pool.js';
+import { ensureAppPool, beginPoolOp, endPoolOp } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { getTransactionErrorMessage } from './errors.js';
@@ -44,6 +44,13 @@ function parseAmount(value, { allowNegative = false } = {}) {
 function requireWallet() {
     if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
         throw new Error('Connect your wallet first');
+    }
+    // Set by navigation.js while a detected account/network change is
+    // draining any in-flight op before it disconnects. Refuse new
+    // wallet-bound work during that window rather than start one against an
+    // identity the app is already in the process of abandoning.
+    if (document.body.dataset.walletState === 'changing') {
+        throw new Error('Wallet account changed. Please wait a moment and try again.');
     }
     if (!isRuntimeReady()) {
         throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
@@ -82,10 +89,12 @@ function bindTxProgress(button, flow) {
 
 async function runPoolOp(flow, button, fn) {
     const unbind = button ? bindTxProgress(button, flow) : () => {};
+    beginPoolOp();
     try {
         return await fn();
     } finally {
         unbind();
+        endPoolOp();
     }
 }
 
@@ -116,12 +125,17 @@ async function txCountRow(amountValue) {
 }
 
 async function submitDeposit(button, amountValue, pool) {
+    // Captured now, before the signature/submission await below, so the
+    // history record files against the account this op actually ran under
+    // even if a wallet account/network change (and the disconnect it
+    // eventually triggers) lands while the op is still in flight.
+    const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing deposit…');
     const session = await ensureAppPool();
     const result = await runPoolOp('deposit', button, () => session.deposit(amountValue));
     if (Transactions.showExecuteResult(result, 'Deposit')) {
         const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+        OpHistory.record(operatorAddress, pool.poolContractId, {
             type: 'Deposit',
             amount: amountValue,
             direction: 'in',
@@ -134,6 +148,9 @@ async function submitDeposit(button, amountValue, pool) {
 async function submitTransfer(button, amountValue, pool, transferRefs, transferAddress) {
     const noteKey = transferRefs.noteKey.value.trim();
     const encKey = transferRefs.encKey.value.trim();
+    // See submitDeposit: captured before the await so the record files
+    // against the account the op actually ran under.
+    const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing transfer…');
     const session = await ensureAppPool();
     const result = await runPoolOp('transfer', button, () =>
@@ -141,7 +158,7 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
     );
     if (Transactions.showExecuteResult(result, 'Transfer')) {
         const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+        OpHistory.record(operatorAddress, pool.poolContractId, {
             type: 'Sent',
             amount: amountValue,
             direction: 'out',
@@ -159,6 +176,9 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
 }
 
 async function submitWithdraw(button, amountValue, pool, recipient) {
+    // See submitDeposit: captured before the await so the record files
+    // against the account the op actually ran under.
+    const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing withdrawal…');
     const session = await ensureAppPool();
     const result = await runPoolOp('withdraw', button, () =>
@@ -166,7 +186,7 @@ async function submitWithdraw(button, amountValue, pool, recipient) {
     );
     if (Transactions.showExecuteResult(result, 'Withdrawal')) {
         const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+        OpHistory.record(operatorAddress, pool.poolContractId, {
             type: 'Withdraw',
             amount: amountValue,
             direction: 'out',
@@ -568,6 +588,9 @@ export const Transactions = {
                 });
                 if (!confirmed) return;
 
+                // See submitDeposit: captured before the await so the record
+                // files against the account the op actually ran under.
+                const operatorAddress = App.state.wallet.address;
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();
                 const result = await runPoolOp('transact', button, () => session.transact({
@@ -582,7 +605,7 @@ export const Transactions = {
                     const hashes = result?.hashes ?? txResultsToHashes(result);
                     const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
                     const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
-                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+                    OpHistory.record(operatorAddress, pool.poolContractId, {
                         type: 'Advanced',
                         amount: absAmount,
                         direction,

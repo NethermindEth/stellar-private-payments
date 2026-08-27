@@ -28,6 +28,7 @@ import {
     signTransaction,
     signMessage
 } from '@stellar/freighter-api';
+import { verifySignerAddress, assertSignedValue } from './wallet-signer-guard.js';
 /**
  * Request wallet access and return the active public key.
  *
@@ -140,17 +141,48 @@ export async function getWalletAddress() {
 export function startWalletWatcher(opts) {
     const { intervalMs = 3000, onChange } = opts || {};
     const watcher = new WatchWalletChanges(intervalMs);
-    const res = watcher.watch((info) => {
-        try {
-            onChange?.(info);
-        } catch (e) {
+    const deliver = (info) => {
+        // onChange is async, so a plain try/catch would only catch a throw
+        // before its first await. Promise.resolve(...).catch() surfaces a
+        // rejection from anywhere in the handler while keeping this callback
+        // synchronous.
+        Promise.resolve(onChange?.(info)).catch((e) => {
             console.warn('[Wallet] watch callback failed:', e);
-        }
-    });
+        });
+    };
+    const res = watcher.watch(deliver);
     if (res?.error) {
         throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
     }
-    return () => watcher.stop();
+
+    // WatchWalletChanges stops polling for good on its first failed poll: its
+    // fetchInfo is async, watch() never awaits it, and the setTimeout that
+    // re-arms it sits after `await requestPublicKey()`. So we poll ourselves as
+    // well, turning failures into an error payload rather than a rejection.
+    // Duplicate notifications are harmless — an unchanged context classifies as
+    // no change either way.
+    const heartbeat = setInterval(async () => {
+        let info;
+        try {
+            const address = await getConnectedAddress();
+            if (!address) {
+                info = { address: '', error: { message: 'Freighter reports no active account for this site' } };
+            } else {
+                const details = await getNetworkDetails();
+                info = details?.error
+                    ? { address: '', error: details.error }
+                    : { address, network: details?.network, networkPassphrase: details?.networkPassphrase };
+            }
+        } catch (e) {
+            info = { address: '', error: e };
+        }
+        deliver(info);
+    }, intervalMs);
+
+    return () => {
+        watcher.stop();
+        clearInterval(heartbeat);
+    };
 }
 
 /**
@@ -224,6 +256,11 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Transaction signature failed');
     }
+    // Older Freighter versions return a null signature instead of an error
+    // payload when the user declines (see signWalletMessage below, and
+    // sdk/web/js/freighter.js's matching guards on the same three methods).
+    assertSignedValue('No signed transaction returned by the wallet.', signedTxXdr);
+    verifySignerAddress('Transaction signature', opts.address, signerAddress);
 
     return { signedTxXdr, signerAddress };
 }
@@ -237,7 +274,7 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
  * @param {Object} opts - Optional signing context.
  * @param {string} [opts.networkPassphrase] - Network passphrase for signing.
  * @param {string} [opts.address] - Specific account to sign with.
- * @returns {Promise<{signedAuthEntry: string | null, signerAddress: string}>}
+ * @returns {Promise<{signedAuthEntry: string, signerAddress: string}>}
  */
 export async function signWalletAuthEntry(entryXdr, opts = {}) {
     await ensureFreighterReady();
@@ -246,6 +283,11 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Auth entry signature failed');
     }
+    // See signWalletTransaction above: a null signature with no error payload
+    // means the user declined, not that the wallet handed back "nothing to
+    // sign" -- freighter.js's signAuthEntry already treats it the same way.
+    assertSignedValue('No signed auth entry returned by the wallet.', signedAuthEntry);
+    verifySignerAddress('Auth entry signature', opts.address, signerAddress);
 
     return { signedAuthEntry, signerAddress };
 }
@@ -283,11 +325,8 @@ export async function signWalletMessage(message, opts = {}) {
     // signature instead of an error payload when the user declines, so classify
     // this as a rejection via the structured code rather than by wording the
     // message so that a substring matcher happens to catch it.
-    if (!signedMessage) {
-        const err = new Error('No signature returned by the wallet.');
-        err.code = 'USER_REJECTED';
-        throw err;
-    }
+    assertSignedValue('No signature returned by the wallet.', signedMessage);
+    verifySignerAddress('Message signature', freighterOpts.address, signerAddress);
 
     return { signedMessage, signerAddress };
 }
