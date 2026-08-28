@@ -55,6 +55,7 @@
                         <button type="button" data-target="overview" class="tab-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition">Overview</button>
                         <button type="button" data-target="allowlist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Allowlist</button>
                         <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
+                        <button type="button" data-target="global-view" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Global View</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -201,6 +202,92 @@
                         </button>
                     </div>
                 </div>
+            </section>
+
+            <!-- 4. Global View Tab -->
+            <section id="global-view" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="global-view-heading">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Pool Audit</p>
+                        <h2 id="global-view-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Global View</h2>
+                        <p class="mt-2 text-sm text-slate-400">Decrypt and verify pool transacts with the admin authority key. No wallet required.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" id="gvkAuditBtn" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Sync &amp; Audit
+                        </button>
+                        <button type="button" id="gvkLoadMoreBtn" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            Load more
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPoolSelect">Pool</label>
+                        <select id="gvkPoolSelect" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                            <option value="">Loading pools...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPrivateKey">Authority private key (d)</label>
+                        <input id="gvkPrivateKey" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-500">Loaded from local DB when available; not saved from this page.</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="inline-flex items-center gap-1 rounded-full border border-white/10 bg-ink-950/40 p-1" role="tablist" aria-label="Result view">
+                        <button type="button" id="gvkViewTxBtn" class="rounded-full bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-100 transition" aria-pressed="true">
+                            Transaction view
+                        </button>
+                        <button type="button" id="gvkViewNoteBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
+                            Note view
+                        </button>
+                    </div>
+                    <button type="button" id="gvkExportBtn" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Export CSV
+                    </button>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-950/40 p-4">
+                    <div class="flex items-center justify-between">
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Filters</p>
+                        <button type="button" id="gvkFiltersClearBtn" class="text-xs font-medium text-slate-400 transition hover:text-cyan-200">
+                            Clear filters
+                        </button>
+                    </div>
+                    <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (XLM)</label>
+                            <div class="mt-2 flex items-center gap-2">
+                                <input id="gvkFilterAmountMin" type="number" min="0" step="0.0000001" placeholder="min" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                                <span class="text-slate-600">–</span>
+                                <input id="gvkFilterAmountMax" type="number" min="0" step="0.0000001" placeholder="max" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterLedgerFrom">Ledger range</label>
+                            <div class="mt-2 flex items-center gap-2">
+                                <input id="gvkFilterLedgerFrom" type="number" min="0" placeholder="from" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                                <span class="text-slate-600">–</span>
+                                <input id="gvkFilterLedgerTo" type="number" min="0" placeholder="to" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                            </div>
+                        </div>
+                        <div class="sm:col-span-2 lg:col-span-2">
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
+                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                        </div>
+                    </div>
+                </div>
+
+                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300"></div>
+
+                <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-500">
+                    Select a pool, enter the authority key, then run Sync &amp; Audit.
+                </div>
+
+                <div id="gvkAuditResults" class="hidden space-y-3"></div>
             </section>
 
         </main>

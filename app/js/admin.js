@@ -4,6 +4,7 @@ import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransac
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
+import { initGvkAuditPanel } from './admin-gvk.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -558,6 +559,7 @@ async function init() {
   await loadExplorerSetting();
   await ensureCryptoReady();
   await refreshState();
+  await initGvkAuditPanel({ ensureCryptoReady, showToast });
   setStatus('Ready', 'ok');
 }
 

@@ -1,5 +1,6 @@
 import init, {
   Client as WasmClient,
+  GvkAudit,
   PrivatePool,
   Storage as WasmStorage,
   bootnodeRequired as wasmBootnodeRequired,
@@ -89,6 +90,8 @@ function wrapClient(wasmClient) {
     allContractsData: () => wasmClient.allContractsData(),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash),
+    gvkAudit: (poolContractId, globalViewPrivateKeyHex) =>
+      wasmClient.gvkAudit(poolContractId, globalViewPrivateKeyHex),
   };
 }
 
@@ -133,6 +136,7 @@ export const Client = {
   contractConfig: WasmClient.contractConfig,
 };
 export {
+  GvkAudit,
   PrivatePool,
   bootnodeRequired,
   deriveAspUserLeaf,

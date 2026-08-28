@@ -57,8 +57,14 @@ function wrapSdkClient(sdk) {
         async backgroundSync() {
             await sdk.backgroundSync();
         },
+        async sync() {
+            await sdk.sync();
+        },
         stopBackgroundSync() {
             sdk.stopBackgroundSync();
+        },
+        async gvkAudit(poolContractId, globalViewPrivateKeyHex) {
+            return sdk.gvkAudit(poolContractId, globalViewPrivateKeyHex);
         },
         async openAccount(
             { networkPassphrase, userAddress },

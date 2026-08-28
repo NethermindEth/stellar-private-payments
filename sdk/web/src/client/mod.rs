@@ -13,10 +13,13 @@ use std::{rc::Rc, str::FromStr};
 
 use serde::Deserialize;
 use stellar_private_payments::{
-    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
+    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, GvkAudit as NativeGvkAudit,
+    Handle, Storage as StorageBackend,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
-    types::{DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey},
+    types::{
+        BabyJubJubPoint, DisclosureReceipt, Field, GvkMode, KeyDerivationSignature, NotePublicKey,
+    },
     verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
@@ -285,6 +288,56 @@ impl Client {
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
+    }
+
+    /// Open an admin GVK audit cursor without a wallet session.
+    ///
+    /// `globalViewPrivateKeyHex` is the admin authority scalar as a
+    /// `0x`-prefixed field hex string. The derived public key must match the
+    /// pool's configured `gvkAuthorityPubKey`.
+    #[wasm_bindgen(js_name = gvkAudit)]
+    pub async fn gvk_audit(
+        &self,
+        pool_contract_id: String,
+        global_view_private_key_hex: String,
+    ) -> Result<GvkAudit, JsError> {
+        let d_priv = Field::from_str(global_view_private_key_hex.trim())
+            .map_err(|e| JsError::new(&format!("invalid GVK private key: {e}")))?;
+
+        let pool = deployment_config()?
+            .pool(&pool_contract_id)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        if pool.gvk_mode == GvkMode::Off {
+            return Err(JsError::new(&format!(
+                "pool {} is not GVK-enabled (gvkMode is off)",
+                pool_contract_id
+            )));
+        }
+
+        let configured = pool.gvk_authority_pub_key.as_ref().ok_or_else(|| {
+            JsError::new(&format!(
+                "pool {} has no gvkAuthorityPubKey in deployment config",
+                pool_contract_id
+            ))
+        })?;
+
+        let derived = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        if derived != *configured {
+            return Err(JsError::new(
+                "GVK private key does not match pool gvkAuthorityPubKey in deployment config",
+            ));
+        }
+
+        self.inner.sync().await.map_err(pool_err)?;
+
+        let storage = self.inner.storage().fork().map_err(pool_err)?;
+
+        Ok(GvkAudit::new(NativeGvkAudit::new(
+            storage,
+            pool_contract_id,
+            d_priv,
+        )))
     }
 }
 
