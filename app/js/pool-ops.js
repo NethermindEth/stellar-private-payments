@@ -29,6 +29,16 @@ export function hasInFlightPoolOps() {
     return inFlightOps > 0;
 }
 
+/** Runs fn inside the in-flight window; a follow-up write must go inside fn too. */
+export async function runTrackedOp(fn) {
+    beginPoolOp();
+    try {
+        return await fn();
+    } finally {
+        endPoolOp();
+    }
+}
+
 export function waitForPoolOpsToDrain({ timeoutMs = 15000, intervalMs = 100 } = {}) {
     if (!hasInFlightPoolOps()) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -44,4 +54,11 @@ export function waitForPoolOpsToDrain({ timeoutMs = 15000, intervalMs = 100 } = 
         };
         check();
     });
+}
+
+/** waitForPoolOpsToDrain, but a timeout also fires onTimeout instead of vanishing silently. */
+export async function waitForPoolOpsToDrainNotified({ timeoutMs = 15000, intervalMs = 100, onTimeout } = {}) {
+    const drained = await waitForPoolOpsToDrain({ timeoutMs, intervalMs });
+    if (!drained) onTimeout?.();
+    return drained;
 }

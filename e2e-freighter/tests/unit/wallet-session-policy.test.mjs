@@ -16,6 +16,7 @@ const {
     classifyWalletChange,
     createWalletSessionMonitor,
     requireTestnetNetwork,
+    requireUsableWalletSession,
 } = await import(
     process.env.WALLET_POLICY_SRC
         ? pathToFileURL(process.env.WALLET_POLICY_SRC).href
@@ -164,11 +165,17 @@ test('classifyWalletChange reports both when both moved', () => {
 const ERROR_POLL = { address: '', network: '', networkPassphrase: '', error: { message: 'not allowed' } };
 const FALLTHROUGH_POLL = { address: undefined, network: undefined, networkPassphrase: undefined };
 
+// Advances well past the coalescing window so each .observe() is its own round.
+function stepClock(stepMs = 1000) {
+    let t = 0;
+    return () => (t += stepMs);
+}
+
 test('a single unreadable poll does not end the session', () => {
     // Freighter's background service worker sleeps and can fail one round
     // trip. Ending a healthy session on one blip would be a worse bug than
     // the one this fixes.
-    const monitor = createWalletSessionMonitor();
+    const monitor = createWalletSessionMonitor({ now: stepClock() });
     const first = monitor.observe(ERROR_POLL, CURRENT);
     assert.equal(first.unreadable, true);
     assert.equal(first.sessionUnverifiable, false);
@@ -176,7 +183,7 @@ test('a single unreadable poll does not end the session', () => {
 });
 
 test('a persistently unreadable wallet ends the session at the limit', () => {
-    const monitor = createWalletSessionMonitor({ unreadableLimit: 3 });
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, now: stepClock() });
     assert.equal(monitor.observe(ERROR_POLL, CURRENT).sessionUnverifiable, false);
     assert.equal(monitor.observe(ERROR_POLL, CURRENT).sessionUnverifiable, false);
     assert.equal(monitor.observe(ERROR_POLL, CURRENT).sessionUnverifiable, true);
@@ -189,7 +196,7 @@ test('the upstream double-callback must not reset the streak (regression)', () =
     // score the second callback as a healthy poll, reset the counter, and the
     // limit would never be reached no matter how long the wallet stayed
     // unreadable — leaving the page live under the previous identity forever.
-    const monitor = createWalletSessionMonitor({ unreadableLimit: 3 });
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, now: stepClock() });
 
     assert.equal(monitor.observe(ERROR_POLL, CURRENT).unreadableStreak, 1);
     assert.equal(
@@ -201,7 +208,7 @@ test('the upstream double-callback must not reset the streak (regression)', () =
 });
 
 test('any readable poll clears the streak', () => {
-    const monitor = createWalletSessionMonitor({ unreadableLimit: 3 });
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, now: stepClock() });
     monitor.observe(ERROR_POLL, CURRENT);
     monitor.observe(ERROR_POLL, CURRENT);
     const recovered = monitor.observe({ ...CURRENT }, CURRENT);
@@ -212,7 +219,7 @@ test('any readable poll clears the streak', () => {
 });
 
 test('a readable poll that reports a change also clears the streak', () => {
-    const monitor = createWalletSessionMonitor({ unreadableLimit: 3 });
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, now: stepClock() });
     monitor.observe(ERROR_POLL, CURRENT);
     const changed = monitor.observe({ ...CURRENT, address: 'GBBB' }, CURRENT);
     assert.equal(changed.changed, true);
@@ -220,10 +227,46 @@ test('a readable poll that reports a change also clears the streak', () => {
 });
 
 test('reset() forgets the streak', () => {
-    const monitor = createWalletSessionMonitor({ unreadableLimit: 2 });
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 2, now: stepClock() });
     monitor.observe(ERROR_POLL, CURRENT);
     monitor.reset();
     assert.equal(monitor.observe(ERROR_POLL, CURRENT).sessionUnverifiable, false);
+});
+
+// ── coalescing: the native watcher and the app heartbeat both feed
+// this monitor and can both report one dropped round trip independently ──
+
+test('two unreadable reports inside the coalesce window count as one round', () => {
+    let t = 0;
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, now: () => t });
+    t = 0;
+    assert.equal(monitor.observe(ERROR_POLL, CURRENT).unreadableStreak, 1);
+    t = 100;
+    assert.equal(
+        monitor.observe(ERROR_POLL, CURRENT).unreadableStreak,
+        1,
+        'a second report 100ms later must not advance the streak',
+    );
+    t = 5000;
+    assert.equal(
+        monitor.observe(ERROR_POLL, CURRENT).unreadableStreak,
+        2,
+        'a report far outside the window is a genuinely new round',
+    );
+});
+
+test('coalescing does not delay a genuinely persistent outage from tripping the limit', () => {
+    let t = 0;
+    const monitor = createWalletSessionMonitor({ unreadableLimit: 3, coalesceWindowMs: 750, now: () => t });
+    const results = [];
+    for (const base of [0, 2000, 4000]) {
+        t = base;
+        results.push(monitor.observe(ERROR_POLL, CURRENT));
+        t = base + 100;
+        results.push(monitor.observe(ERROR_POLL, CURRENT));
+    }
+    assert.deepEqual(results.map((r) => r.sessionUnverifiable), [false, false, false, false, true, true]);
+    assert.deepEqual(results.map((r) => r.unreadableStreak), [1, 1, 2, 2, 3, 3]);
 });
 
 test('the shipped limit is a bounded window, not a placeholder', () => {
@@ -232,4 +275,50 @@ test('the shipped limit is a bounded window, not a placeholder', () => {
     // it is a deliberate decision rather than a silent one.
     assert.ok(UNREADABLE_POLL_LIMIT >= 2, 'one poll would end healthy sessions on a transient blip');
     assert.ok(UNREADABLE_POLL_LIMIT <= 5, 'a long streak leaves the unverified window open too long');
+});
+
+// --- gating wallet-bound work on the session lifecycle ---------------------
+
+const USABLE = {
+    address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    networkPassphrase: TESTNET.networkPassphrase,
+    walletState: 'ready',
+    runtimeReady: true,
+};
+
+test('a fully bound session admits wallet-bound work', () => {
+    assert.doesNotThrow(() => requireUsableWalletSession(USABLE));
+});
+
+test('the binding hand-off refuses wallet-bound work', () => {
+    assert.throws(
+        () => requireUsableWalletSession({ ...USABLE, walletState: 'binding' }),
+        /still connecting/i,
+        'during the hand-off the address is published and the runtime is up, but no account session is bound yet',
+    );
+});
+
+test('a pending account change refuses wallet-bound work', () => {
+    assert.throws(
+        () => requireUsableWalletSession({ ...USABLE, walletState: 'changing' }),
+        /wallet account changed/i,
+    );
+});
+
+test('a session without an address refuses wallet-bound work', () => {
+    assert.throws(
+        () => requireUsableWalletSession({ ...USABLE, address: null }),
+        /connect your wallet first/i,
+    );
+    assert.throws(
+        () => requireUsableWalletSession({ ...USABLE, networkPassphrase: null }),
+        /connect your wallet first/i,
+    );
+});
+
+test('a runtime that is not ready refuses wallet-bound work', () => {
+    assert.throws(
+        () => requireUsableWalletSession({ ...USABLE, runtimeReady: false }),
+        /still connecting/i,
+    );
 });

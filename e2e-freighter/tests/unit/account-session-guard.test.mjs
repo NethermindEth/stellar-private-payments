@@ -9,6 +9,8 @@ import {
     requireNoteOwner,
     sessionMatchesCache,
     createSessionGeneration,
+    openPairKey,
+    createInFlightOpenRegistry,
 } from '../../../app/js/account-session-guard.js';
 
 const OWNER = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
@@ -151,4 +153,173 @@ test('a token never issued is not current', () => {
     assert.equal(gen.isCurrent(0), false);
     assert.equal(gen.isCurrent(undefined), false);
     assert.equal(gen.isCurrent(99), false);
+});
+
+// --- coalescing concurrent opens of the same pair --------------------------
+
+function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
+test('openPairKey keys on both identities', () => {
+    assert.equal(openPairKey(OWNER, OWNER), openPairKey(OWNER, OWNER));
+    assert.notEqual(openPairKey(OWNER, OWNER), openPairKey(OWNER, DELEGATE));
+    assert.notEqual(openPairKey(OWNER, OWNER), openPairKey(DELEGATE, OWNER));
+});
+
+test('openPairKey is null when either identity is absent', () => {
+    for (const absent of [null, undefined, '']) {
+        assert.equal(openPairKey(absent, OWNER), null);
+        assert.equal(openPairKey(OWNER, absent), null);
+        assert.equal(openPairKey(absent, absent), null);
+    }
+});
+
+test('concurrent opens of the same pair share one SDK call', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gate = deferred();
+    let opens = 0;
+    const openFn = () => {
+        opens += 1;
+        return gate.promise;
+    };
+
+    const key = openPairKey(OWNER, OWNER);
+    const first = registry.share(key, openFn);
+    const second = registry.share(key, openFn);
+    gate.resolve('account');
+
+    assert.equal(await first, 'account');
+    assert.equal(await second, 'account');
+    assert.equal(opens, 1, 'the second caller must reuse the in-flight open, not open again');
+});
+
+test('concurrent opens of distinct pairs each reach the SDK', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gateA = deferred();
+    const gateB = deferred();
+    const seen = [];
+
+    const a = registry.share(openPairKey(OWNER, OWNER), () => {
+        seen.push('a');
+        return gateA.promise;
+    });
+    const b = registry.share(openPairKey(DELEGATE, DELEGATE), () => {
+        seen.push('b');
+        return gateB.promise;
+    });
+    gateB.resolve('B');
+    gateA.resolve('A');
+
+    assert.equal(await a, 'A');
+    assert.equal(await b, 'B');
+    assert.deepEqual(seen.sort(), ['a', 'b']);
+});
+
+test('a null key never coalesces', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gate = deferred();
+    let opens = 0;
+    const first = registry.share(null, () => {
+        opens += 1;
+        return gate.promise.then(() => 'one');
+    });
+    const second = registry.share(null, () => {
+        opens += 1;
+        return gate.promise.then(() => 'two');
+    });
+    gate.resolve();
+
+    assert.equal(await first, 'one');
+    assert.equal(await second, 'two');
+    assert.equal(opens, 2);
+});
+
+test('once the open settles, the next open of the pair starts fresh', async () => {
+    const registry = createInFlightOpenRegistry();
+    const key = openPairKey(OWNER, OWNER);
+    let opens = 0;
+    const openFn = () => Promise.resolve(`session-${(opens += 1)}`);
+
+    assert.equal(await registry.share(key, openFn), 'session-1');
+    assert.equal(
+        await registry.share(key, openFn),
+        'session-2',
+        'a settled open is no longer in flight; the settled-session cache, not this registry, dedupes it',
+    );
+});
+
+test('a rejected open rejects every waiter and clears the entry', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gate = deferred();
+    let opens = 0;
+    const key = openPairKey(OWNER, OWNER);
+
+    const first = registry.share(key, () => {
+        opens += 1;
+        return gate.promise;
+    });
+    const second = registry.share(key, () => {
+        opens += 1;
+        return gate.promise;
+    });
+    gate.reject(new Error('sdk unavailable'));
+
+    await assert.rejects(first, /sdk unavailable/);
+    await assert.rejects(second, /sdk unavailable/);
+    assert.equal(opens, 1);
+
+    // The failure must not pin the pair: a later open retries the SDK.
+    const retry = registry.share(key, () => Promise.resolve('recovered'));
+    assert.equal(await retry, 'recovered');
+});
+
+test('clear() drops in-flight entries so the next share opens anew', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gate = deferred();
+    let opens = 0;
+    const key = openPairKey(OWNER, OWNER);
+    const openFn = () => {
+        opens += 1;
+        const label = `open-${opens}`;
+        return gate.promise.then(() => label);
+    };
+
+    const first = registry.share(key, openFn);
+    registry.clear();
+    const second = registry.share(key, openFn);
+    gate.resolve();
+
+    assert.equal(await first, 'open-1');
+    assert.equal(await second, 'open-2');
+    assert.equal(opens, 2, 'after a teardown a same-pair open must not join the pre-teardown one');
+});
+
+test('a late-resolving open does not evict a newer entry for the same pair', async () => {
+    const registry = createInFlightOpenRegistry();
+    const gateA = deferred();
+    const gateB = deferred();
+    const key = openPairKey(OWNER, OWNER);
+
+    const first = registry.share(key, () => gateA.promise.then(() => 'stale'));
+    registry.clear();
+    let opensB = 0;
+    const second = registry.share(key, () => {
+        opensB += 1;
+        return gateB.promise.then(() => 'fresh');
+    });
+    gateA.resolve();
+    assert.equal(await first, 'stale');
+
+    const third = registry.share(key, () => Promise.resolve('third'));
+    gateB.resolve();
+    assert.equal(await second, 'fresh');
+    assert.equal(await third, 'fresh', 'a same-pair open must join the fresh in-flight one, not reopen');
+    assert.equal(opensB, 1);
 });

@@ -116,6 +116,8 @@ impl Storage {
     /// The refusal is deliberately not conditional on *which* address is
     /// named: a check of the form "is this the right address?" would still
     /// leave the address a caller-supplied parameter, which is the defect.
+    /// Other request kinds are gated by the worker's central
+    /// [`StorageWorkerRequest::session_policy`] instead.
     #[wasm_bindgen(js_name = call)]
     pub async fn call(
         &self,

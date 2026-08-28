@@ -133,16 +133,10 @@ impl WalletSigner {
             .map_err(|e| wallet_js_error(method, "failed", e))?;
 
         let (value, signer_address) = normalize_sign_result(method, result)?;
-        // `signer_address` is absent only for the bare-string result
-        // convention (a custom signer with nothing to check); every SEP-0043
-        // wallet (Freighter included) always sets it, and a mismatch there
-        // means the wallet signed with an account other than the one
-        // `wallet_opts()` asked for above — the signature is not
-        // attributable to the requested identity and must not be accepted
-        // silently.
-        if let Some(actual) = signer_address
-            && actual != self.signer_address.as_str()
-        {
+        let actual = signer_address.ok_or_else(|| {
+            JsError::new(&format!("signer.{method} result missing signerAddress"))
+        })?;
+        if actual != self.signer_address.as_str() {
             return Err(signer_address_mismatch_error(
                 method,
                 self.signer_address.as_str(),
@@ -265,8 +259,10 @@ fn normalize_sign_result(
     method: &str,
     result: JsValue,
 ) -> Result<(String, Option<String>), JsError> {
-    if let Some(s) = result.as_string() {
-        return Ok((s, None));
+    if result.as_string().is_some() {
+        return Err(JsError::new(&format!(
+            "signer.{method} must return an object with signerAddress"
+        )));
     }
 
     let field = match method {
@@ -288,7 +284,8 @@ fn normalize_sign_result(
 
     let signer_address = Reflect::get(&result, &JsValue::from_str("signerAddress"))
         .ok()
-        .and_then(|v| v.as_string());
+        .and_then(|v| v.as_string())
+        .filter(|s| !s.is_empty());
 
     Ok((value, signer_address))
 }

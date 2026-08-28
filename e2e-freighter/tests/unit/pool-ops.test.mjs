@@ -172,3 +172,98 @@ test('the watcher callback surfaces an async rejection, not only a sync throw', 
         'so a rejection from anywhere in the handler is at least logged',
     );
 });
+
+// --- the op lifetime covers the history write -------------------------------
+
+import {
+    runTrackedOp,
+    waitForPoolOpsToDrainNotified,
+} from '../../../app/js/pool-ops.js';
+
+function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('runTrackedOp keeps the op in flight until a deferred write settles', async () => {
+    const gate = deferred();
+    const op = runTrackedOp(async () => {
+        // Stands in for the OpHistory write after the pool operation.
+        await gate.promise;
+        return 'done';
+    });
+    await flush();
+    assert.equal(
+        hasInFlightPoolOps(),
+        true,
+        'the counter must not drain while the history write is still pending',
+    );
+    gate.resolve();
+    assert.equal(await op, 'done');
+    assert.equal(hasInFlightPoolOps(), false);
+});
+
+test('runTrackedOp ends the op even when the tracked work throws', async () => {
+    await assert.rejects(
+        runTrackedOp(async () => {
+            throw new Error('pool op failed');
+        }),
+        /pool op failed/,
+    );
+    assert.equal(hasInFlightPoolOps(), false, 'a failed op must not wedge the drain');
+});
+
+test('runTrackedOp ends the op when an early stage succeeds but the write fails', async () => {
+    // The history write failing must not leave the counter held either.
+    await assert.rejects(
+        runTrackedOp(async () => {
+            await Promise.resolve('tx ok');
+            throw new Error('record failed');
+        }),
+        /record failed/,
+    );
+    assert.equal(hasInFlightPoolOps(), false);
+});
+
+// --- a drain timeout is reported, not discarded -----------------------------
+
+test('waitForPoolOpsToDrainNotified reports a timeout and still resolves false', async () => {
+    const timeouts = [];
+    beginPoolOp();
+    try {
+        const drained = await waitForPoolOpsToDrainNotified({
+            timeoutMs: 30,
+            intervalMs: 5,
+            onTimeout: () => timeouts.push('reported'),
+        });
+        assert.equal(drained, false, 'the result must stay honest: the ops did not drain');
+        assert.deepEqual(timeouts, ['reported'], 'a discarded timeout leaves no trace anywhere');
+    } finally {
+        endPoolOp();
+    }
+});
+
+test('waitForPoolOpsToDrainNotified does not report when the ops drain', async () => {
+    const timeouts = [];
+    beginPoolOp();
+    const drained = waitForPoolOpsToDrainNotified({
+        intervalMs: 5,
+        onTimeout: () => timeouts.push('reported'),
+    });
+    setTimeout(() => endPoolOp(), 20);
+    assert.equal(await drained, true);
+    assert.deepEqual(timeouts, []);
+});
+
+test('waitForPoolOpsToDrainNotified resolves immediately with nothing in flight', async () => {
+    const timeouts = [];
+    assert.equal(await waitForPoolOpsToDrainNotified({ onTimeout: () => timeouts.push('x') }), true);
+    assert.deepEqual(timeouts, []);
+});

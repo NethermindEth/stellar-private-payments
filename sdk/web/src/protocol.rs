@@ -125,30 +125,68 @@ pub enum StorageWorkerRequest {
     UnbindSession,
 }
 
+/// How a request interacts with the worker's session binding. Assigned by
+/// [`StorageWorkerRequest::session_policy`] and enforced centrally by the
+/// worker router and the raw `Storage.call` surface.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SessionPolicy<'a> {
+    /// Establishes or revokes the binding itself.
+    SessionControl,
+    /// Private key material for the named account.
+    KeyMaterial(&'a Address),
+    /// A write served only under a bound session.
+    BoundWrite { address: Option<&'a Address> },
+    /// An account-data read served only for the bound account.
+    BoundRead(&'a Address),
+    /// A documented public exception, reachable before any session exists.
+    Public,
+}
+
 impl StorageWorkerRequest {
-    /// Whether this request may only be served for the account the worker is
-    /// bound to.
-    ///
-    /// The line is *key material*: `AspSecret`, `DeriveSaveUserKeys`,
-    /// `DisclosureInputs` and `Transact` all read or write private keys, and
-    /// `BindSession`/`UnbindSession` decide which account those four serve.
-    /// For all of them the address must come from an established wallet
-    /// session, never from the caller.
-    ///
-    /// `UserKeys` is not privileged: it returns public keys only and has to run
-    /// during onboarding, before any session exists. The note and balance
-    /// queries are also unprivileged — a caller can still name any address to
-    /// read them, which is a real weakness but needs a general read policy
-    /// rather than this guard.
+    /// The access policy for this request. Exhaustive match, no wildcard, so
+    /// a new variant must be classified to compile.
+    pub(crate) fn session_policy(&self) -> SessionPolicy<'_> {
+        match self {
+            Self::BindSession(_) | Self::UnbindSession => SessionPolicy::SessionControl,
+            Self::AspSecret(address) | Self::DeriveSaveUserKeys(address, ..) => {
+                SessionPolicy::KeyMaterial(address)
+            }
+            Self::DisclosureInputs(req) => SessionPolicy::KeyMaterial(&req.user_address),
+            Self::Transact(req) => SessionPolicy::KeyMaterial(&req.user_address),
+            Self::AcceptDisclaimer(address, _) | Self::RecordOperation { address, .. } => {
+                SessionPolicy::BoundWrite {
+                    address: Some(address),
+                }
+            }
+            Self::SaveEvents(_)
+            | Self::SaveSyncProgress { .. }
+            | Self::ClearIndexingCursors
+            | Self::ClampLastFullyIndexedLedger(_)
+            | Self::ProcessPendingState => SessionPolicy::BoundWrite { address: None },
+            Self::UserNotes(address, _)
+            | Self::PortfolioBalances(address)
+            | Self::ListOperations { address, .. } => SessionPolicy::BoundRead(address),
+            Self::UnspentUserNotes { user_address, .. }
+            | Self::PoolUserNotes { user_address, .. } => SessionPolicy::BoundRead(user_address),
+            Self::Ping
+            | Self::SyncState
+            | Self::GetSetting(_)
+            | Self::SetSetting { .. }
+            | Self::UserKeys(_)
+            | Self::DisclaimerState(_)
+            | Self::RecipientLookup { .. }
+            | Self::OperationalFeed { .. }
+            | Self::DeriveASPleaf(_)
+            | Self::ConfigureTelemetry(_)
+            | Self::DumpLogs => SessionPolicy::Public,
+        }
+    }
+
+    /// Whether the raw `Storage.call` surface refuses this request outright.
     pub(crate) fn requires_bound_session(&self) -> bool {
         matches!(
-            self,
-            Self::AspSecret(_)
-                | Self::DeriveSaveUserKeys(..)
-                | Self::DisclosureInputs(_)
-                | Self::Transact(_)
-                | Self::BindSession(_)
-                | Self::UnbindSession
+            self.session_policy(),
+            SessionPolicy::SessionControl | SessionPolicy::KeyMaterial(_)
         )
     }
 }
@@ -217,6 +255,146 @@ mod privileged_request_tests {
                 .requires_bound_session()
         );
         assert!(!StorageWorkerRequest::Ping.requires_bound_session());
+    }
+
+    #[test]
+    fn session_control_is_classified_separately_from_key_material() {
+        assert_eq!(
+            StorageWorkerRequest::BindSession(ADDR.to_string()).session_policy(),
+            SessionPolicy::SessionControl
+        );
+        assert_eq!(
+            StorageWorkerRequest::UnbindSession.session_policy(),
+            SessionPolicy::SessionControl
+        );
+        assert_eq!(
+            StorageWorkerRequest::AspSecret(ADDR.to_string()).session_policy(),
+            SessionPolicy::KeyMaterial(&ADDR.to_string())
+        );
+    }
+
+    #[test]
+    fn account_record_writes_are_bound_to_the_named_account() {
+        for request in [
+            StorageWorkerRequest::AcceptDisclaimer(ADDR.to_string(), "abc".into()),
+            StorageWorkerRequest::RecordOperation {
+                address: ADDR.to_string(),
+                pool_contract_id: "CPOOL".into(),
+                op_type: "deposit".into(),
+                amount: "1".into(),
+                direction: "in".into(),
+                counterparty: None,
+                tx_hash: None,
+            },
+        ] {
+            assert_eq!(
+                request.session_policy(),
+                SessionPolicy::BoundWrite {
+                    address: Some(&ADDR.to_string())
+                },
+                "account-record write must be bound to its address: {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn chain_state_writes_require_a_session_without_an_address() {
+        for request in [
+            StorageWorkerRequest::SaveEvents(ContractsEventData {
+                events: Vec::new(),
+                cursor: String::new(),
+                latest_ledger: 0,
+            }),
+            StorageWorkerRequest::SaveSyncProgress {
+                metadata: Vec::new(),
+                fully_indexed: false,
+            },
+            StorageWorkerRequest::ClearIndexingCursors,
+            StorageWorkerRequest::ClampLastFullyIndexedLedger(0),
+            StorageWorkerRequest::ProcessPendingState,
+        ] {
+            assert_eq!(
+                request.session_policy(),
+                SessionPolicy::BoundWrite { address: None },
+                "chain-state write must require a bound session: {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_data_reads_are_bound_to_the_named_account() {
+        for request in [
+            StorageWorkerRequest::UserNotes(ADDR.to_string(), 10),
+            StorageWorkerRequest::PortfolioBalances(ADDR.to_string()),
+            StorageWorkerRequest::ListOperations {
+                address: ADDR.to_string(),
+                pool_contract_id: "CPOOL".into(),
+                limit: 10,
+            },
+            StorageWorkerRequest::UnspentUserNotes {
+                user_address: ADDR.to_string(),
+                pool_contract_id: "CPOOL".into(),
+            },
+            StorageWorkerRequest::PoolUserNotes {
+                user_address: ADDR.to_string(),
+                pool_contract_id: "CPOOL".into(),
+            },
+        ] {
+            let expected_address = match &request {
+                StorageWorkerRequest::UnspentUserNotes { user_address, .. }
+                | StorageWorkerRequest::PoolUserNotes { user_address, .. } => user_address,
+                _ => &ADDR.to_string(),
+            };
+            assert_eq!(
+                request.session_policy(),
+                SessionPolicy::BoundRead(expected_address),
+                "account-data read must be bound to its account: {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_public_exception_is_named_explicitly() {
+        let exceptions = [
+            StorageWorkerRequest::Ping,
+            StorageWorkerRequest::SyncState,
+            StorageWorkerRequest::GetSetting("explorer".into()),
+            StorageWorkerRequest::SetSetting {
+                key: "explorer".into(),
+                value_json: "{}".into(),
+            },
+            StorageWorkerRequest::UserKeys(ADDR.to_string()),
+            StorageWorkerRequest::DisclaimerState(ADDR.to_string()),
+            StorageWorkerRequest::RecipientLookup {
+                address: ADDR.to_string(),
+                public_key_registry_contract_id: "CREG".into(),
+            },
+            StorageWorkerRequest::OperationalFeed {
+                limit: 10,
+                asp_membership_contract_id: "CASP".into(),
+                public_key_registry_contract_id: "CREG".into(),
+            },
+            StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
+                membership_blinding: stellar_private_payments::types::Field::ZERO,
+                pubkey: stellar_private_payments::types::NotePublicKey([0u8; 32]),
+            }),
+            StorageWorkerRequest::ConfigureTelemetry(WorkerTelemetryConfig {
+                level: "info".into(),
+                reveal_sensitive: false,
+            }),
+            StorageWorkerRequest::DumpLogs,
+        ];
+        for request in exceptions {
+            assert_eq!(
+                request.session_policy(),
+                SessionPolicy::Public,
+                "expected a documented public exception: {request:?}"
+            );
+            assert!(
+                !request.requires_bound_session(),
+                "public exception must stay reachable on the raw surface: {request:?}"
+            );
+        }
     }
 }
 

@@ -29,6 +29,7 @@ console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
 gloo-worker = { workspace = true }
+getrandom = { workspace = true, features = ["js"] }
 js-sys = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }

@@ -114,7 +114,9 @@ export async function driveWizard(page, context, {
     log.debug('step', step, 'clicking', choice);
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 
-    if (choice === 'Derive and store keys') {
+    // Both open an SDK session, which prompts for a signature only the first
+    // time it runs for an address with no keys yet; optional otherwise.
+    if (choice === 'Accept disclaimer' || choice === 'Derive and store keys') {
       const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
       if (approvalPage) await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
     }

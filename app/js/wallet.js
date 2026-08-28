@@ -160,21 +160,36 @@ export function startWalletWatcher(opts) {
     // re-arms it sits after `await requestPublicKey()`. So we poll ourselves as
     // well, turning failures into an error payload rather than a rejection.
     // Duplicate notifications are harmless — an unchanged context classifies as
-    // no change either way.
+    // no change either way. Raced against a deadline so a hung Freighter call
+    // (the same failure mode this heartbeat exists to catch) reports
+    // unreadable instead of hanging the tick forever.
+    const heartbeatDeadlineMs = opts?.heartbeatDeadlineMs ?? Math.max(500, Math.floor(intervalMs * 0.75));
+    let heartbeatTicking = false;
     const heartbeat = setInterval(async () => {
+        if (heartbeatTicking) return;
+        heartbeatTicking = true;
         let info;
         try {
-            const address = await getConnectedAddress();
-            if (!address) {
-                info = { address: '', error: { message: 'Freighter reports no active account for this site' } };
-            } else {
-                const details = await getNetworkDetails();
-                info = details?.error
-                    ? { address: '', error: details.error }
-                    : { address, network: details?.network, networkPassphrase: details?.networkPassphrase };
-            }
+            info = await Promise.race([
+                (async () => {
+                    const address = await getConnectedAddress();
+                    if (!address) {
+                        return { address: '', error: { message: 'Freighter reports no active account for this site' } };
+                    }
+                    const details = await getNetworkDetails();
+                    return details?.error
+                        ? { address: '', error: details.error }
+                        : { address, network: details?.network, networkPassphrase: details?.networkPassphrase };
+                })(),
+                new Promise((resolve) => setTimeout(
+                    () => resolve({ address: '', error: { message: 'Wallet heartbeat timed out' } }),
+                    heartbeatDeadlineMs,
+                )),
+            ]);
         } catch (e) {
             info = { address: '', error: e };
+        } finally {
+            heartbeatTicking = false;
         }
         deliver(info);
     }, intervalMs);

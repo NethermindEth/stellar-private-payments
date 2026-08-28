@@ -1,7 +1,7 @@
 use crate::protocol::{
     AdminASPRequest, AspSecret, CorrelatedRequest, DisclaimerStatePayload, DisclosureInputs,
-    DisclosureInputsRequest, PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest,
-    StorageWorkerResponse, UserKeys,
+    DisclosureInputsRequest, PublicEncryptionKeyPair, PublicNoteKeyPair, SessionPolicy,
+    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -65,7 +65,7 @@ thread_local! {
     static BOUND_SESSION: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Refuse a key-material request that is not for the bound account.
+/// Refuse an account-bound request that is not for the bound account.
 ///
 /// A failure, not a fallback — serving whichever account is bound would answer
 /// about a different account without saying so. Neither address appears in the
@@ -76,11 +76,26 @@ fn ensure_session_binding(address: &str) -> Result<()> {
     match bound {
         Some(bound) if bound == address => Ok(()),
         Some(_) => Err(anyhow!(
-            "refused: this account's privacy keys are not available to the open wallet session"
+            "refused: this account's data is not available to the open wallet session"
         )),
         None => Err(anyhow!(
             "refused: no wallet session is bound to this storage worker"
         )),
+    }
+}
+
+/// Refuse a request that needs a bound session but names no account.
+///
+/// Chain-state writes are deployment-global, so any bound session authorizes
+/// them; an unbound worker performs no writes at all.
+fn ensure_session_present() -> Result<()> {
+    let bound = BOUND_SESSION.with(|session| session.borrow().is_some());
+    if bound {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "refused: no wallet session is bound to this storage worker"
+        ))
     }
 }
 
@@ -211,6 +226,17 @@ pub(crate) async fn StorageWorker(
 
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
+    // Central session gate; request arms make no privilege decisions of their own.
+    match req.session_policy() {
+        SessionPolicy::SessionControl | SessionPolicy::Public => {}
+        SessionPolicy::KeyMaterial(address) | SessionPolicy::BoundRead(address) => {
+            ensure_session_binding(address)?;
+        }
+        SessionPolicy::BoundWrite { address } => match address {
+            Some(address) => ensure_session_binding(address)?,
+            None => ensure_session_present()?,
+        },
+    }
     let resp = match req {
         StorageWorkerRequest::Ping => {
             tracing::trace!("[{WORKER_NAME}] ping");
@@ -279,9 +305,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
-            // Before the derivation, not after: a refusal must cost no key
-            // material being computed from a signature we are about to reject.
-            ensure_session_binding(&address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] deriving and saving user keys for the account {}",
                 Sensitive(&address)
@@ -356,7 +379,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }))
         }
         StorageWorkerRequest::AspSecret(address) => {
-            ensure_session_binding(&address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
@@ -485,9 +507,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::OperationalFeed(list)
         }
         StorageWorkerRequest::DisclosureInputs(req) => {
-            // Returns note_private_key and note_blinding for req.user_address,
-            // so it is gated exactly as the ASP secret read is.
-            ensure_session_binding(&req.user_address)?;
             tracing::trace!(
                 "[{WORKER_NAME}] build selective disclosure inputs for {}",
                 Sensitive(&req.user_address)
@@ -541,8 +560,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
         }
         StorageWorkerRequest::Transact(req) => {
-            // Builds the prover witness from the same key material.
-            ensure_session_binding(&req.user_address)?;
             tracing::trace!("[{WORKER_NAME}] transact");
             with_storage_mut!(storage => match build_transact_params(storage, &req)? {
                 BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
@@ -1013,6 +1030,217 @@ mod session_binding_tests {
     fn unbind() {
         futures::executor::block_on(router(StorageWorkerRequest::UnbindSession))
             .expect("releasing a session succeeds");
+    }
+
+    fn route(req: StorageWorkerRequest) -> anyhow::Result<StorageWorkerResponse> {
+        futures::executor::block_on(router(req))
+    }
+
+    fn route_labeled(req: StorageWorkerRequest) -> (String, anyhow::Result<StorageWorkerResponse>) {
+        let label = format!("{req:?}");
+        (label, route(req))
+    }
+
+    fn is_session_refusal(result: &anyhow::Result<StorageWorkerResponse>) -> bool {
+        result
+            .as_ref()
+            .expect_err("expected a refusal")
+            .to_string()
+            .contains("wallet session")
+    }
+
+    fn passed_gate(result: anyhow::Result<StorageWorkerResponse>) -> bool {
+        match result {
+            Ok(_) => true,
+            Err(e) => e.to_string().contains("storage is not initialized"),
+        }
+    }
+
+    fn accept_disclaimer(address: &str) -> StorageWorkerRequest {
+        StorageWorkerRequest::AcceptDisclaimer(address.to_string(), "hash".to_string())
+    }
+
+    fn record_operation(address: &str) -> StorageWorkerRequest {
+        StorageWorkerRequest::RecordOperation {
+            address: address.to_string(),
+            pool_contract_id: "CPOOL".to_string(),
+            op_type: "deposit".to_string(),
+            amount: "1".to_string(),
+            direction: "in".to_string(),
+            counterparty: None,
+            tx_hash: None,
+        }
+    }
+
+    fn chain_state_writes() -> Vec<StorageWorkerRequest> {
+        vec![
+            StorageWorkerRequest::SaveEvents(ContractsEventData {
+                events: Vec::new(),
+                cursor: String::new(),
+                latest_ledger: 0,
+            }),
+            StorageWorkerRequest::SaveSyncProgress {
+                metadata: Vec::new(),
+                fully_indexed: false,
+            },
+            StorageWorkerRequest::ClearIndexingCursors,
+            StorageWorkerRequest::ClampLastFullyIndexedLedger(0),
+            StorageWorkerRequest::ProcessPendingState,
+        ]
+    }
+
+    fn account_data_reads(address: &str) -> Vec<StorageWorkerRequest> {
+        vec![
+            StorageWorkerRequest::UserNotes(address.to_string(), 10),
+            StorageWorkerRequest::PortfolioBalances(address.to_string()),
+            StorageWorkerRequest::ListOperations {
+                address: address.to_string(),
+                pool_contract_id: "CPOOL".to_string(),
+                limit: 10,
+            },
+            StorageWorkerRequest::UnspentUserNotes {
+                user_address: address.to_string(),
+                pool_contract_id: "CPOOL".to_string(),
+            },
+            StorageWorkerRequest::PoolUserNotes {
+                user_address: address.to_string(),
+                pool_contract_id: "CPOOL".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn account_record_writes_require_a_bound_session() {
+        assert!(
+            is_session_refusal(&route(accept_disclaimer(OWNER))),
+            "AcceptDisclaimer must be refused before any session exists"
+        );
+        assert!(
+            is_session_refusal(&route(record_operation(OWNER))),
+            "RecordOperation must be refused before any session exists"
+        );
+    }
+
+    #[test]
+    fn account_record_writes_reject_a_cross_account_address() {
+        bind(OWNER);
+        for req in [accept_disclaimer(OTHER), record_operation(OTHER)] {
+            let result = route(req);
+            assert!(
+                is_session_refusal(&result),
+                "cross-account write served: {result:?}"
+            );
+            let message = result.expect_err("refusal").to_string();
+            assert!(
+                !message.contains(OWNER) && !message.contains(OTHER),
+                "a refusal must not disclose either address: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_record_writes_serve_the_bound_account() {
+        bind(OWNER);
+        assert!(
+            passed_gate(route(accept_disclaimer(OWNER))),
+            "the bound account's disclaimer write must pass the session gate"
+        );
+        assert!(
+            passed_gate(route(record_operation(OWNER))),
+            "the bound account's operation write must pass the session gate"
+        );
+    }
+
+    #[test]
+    fn chain_state_writes_require_a_bound_session() {
+        for req in chain_state_writes() {
+            let (label, result) = route_labeled(req);
+            assert!(
+                is_session_refusal(&result),
+                "chain-state write served without a session: {label}"
+            );
+        }
+        bind(OWNER);
+        for req in chain_state_writes() {
+            let (label, result) = route_labeled(req);
+            assert!(
+                passed_gate(result),
+                "chain-state write refused despite a bound session: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_data_reads_require_the_bound_account() {
+        for req in account_data_reads(OWNER) {
+            let (label, result) = route_labeled(req);
+            assert!(
+                is_session_refusal(&result),
+                "account data read served without a session: {label}"
+            );
+        }
+        bind(OWNER);
+        for req in account_data_reads(OTHER) {
+            let (label, result) = route_labeled(req);
+            assert!(
+                is_session_refusal(&result),
+                "cross-account read served: {label}"
+            );
+        }
+        for req in account_data_reads(OWNER) {
+            let (label, result) = route_labeled(req);
+            assert!(
+                passed_gate(result),
+                "the bound account's read must pass the session gate: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn documented_public_exceptions_reach_their_handlers_without_a_session() {
+        let public_requests = vec![
+            StorageWorkerRequest::DisclaimerState(OWNER.to_string()),
+            StorageWorkerRequest::UserKeys(OWNER.to_string()),
+            StorageWorkerRequest::GetSetting("explorer".to_string()),
+            StorageWorkerRequest::SetSetting {
+                key: "explorer".to_string(),
+                value_json: "{}".to_string(),
+            },
+            StorageWorkerRequest::SyncState,
+            StorageWorkerRequest::RecipientLookup {
+                address: OTHER.to_string(),
+                public_key_registry_contract_id: "CREG".to_string(),
+            },
+        ];
+        for req in public_requests {
+            let (label, result) = route_labeled(req);
+            assert!(
+                passed_gate(result),
+                "documented public exception refused by the session gate: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn unbinding_revokes_bound_write_and_read_access() {
+        bind(OWNER);
+        assert!(passed_gate(route(accept_disclaimer(OWNER))));
+        unbind();
+        assert!(is_session_refusal(&route(accept_disclaimer(OWNER))));
+        for req in account_data_reads(OWNER) {
+            let (label, result) = route_labeled(req);
+            assert!(
+                is_session_refusal(&result),
+                "read still served after unbind: {label}"
+            );
+        }
+        for req in chain_state_writes() {
+            let (label, result) = route_labeled(req);
+            assert!(
+                is_session_refusal(&result),
+                "chain-state write still served after unbind: {label}"
+            );
+        }
     }
 
     #[test]

@@ -3,7 +3,7 @@ import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUs
 import { connectWallet, getConnectedAddress, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, startWalletWatcher } from './wallet.js';
 import { createPinnedSigner } from './wallet-signer-guard.js';
 import { createWalletSessionMonitor, requireTestnetNetwork, UNREADABLE_WALLET_MESSAGE } from './wallet-session-policy.js';
-import { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrain } from './pool-ops.js';
+import { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrainNotified } from './pool-ops.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
@@ -58,7 +58,8 @@ const state = {
   // as the previous account.
   membershipClientKey: null,
   nonMembershipClientKey: null,
-  cryptoReady: false,
+  // Distinct from any real address, including null (init()'s pre-connect state).
+  cryptoReadyForAddress: Symbol('never-initialized'),
   adminInsertOnly: null,
   stopWatcher: null,
   pendingChange: false,
@@ -239,7 +240,9 @@ function forgetContractClients() {
 }
 
 async function ensureCryptoReady() {
-  if (!state.cryptoReady) {
+  // Keyed on the address the runtime was last built for, so this re-runs once
+  // a real address replaces the pre-connect null.
+  if (state.cryptoReadyForAddress !== state.address) {
     setStatus('Loading app...', 'info');
     // One guarded read, recorded in `state`; no second opinion, and no
     // hard-coded fallback endpoint to disagree with it.
@@ -248,9 +251,6 @@ async function ensureCryptoReady() {
     try {
       const storage = await ensureStorage();
       if (await bootnodeRequired(sorobanRpcUrl)) {
-        // Admin has no connected account at init, so this asks for
-        // "this account's bootnode" with no account and correctly gets none,
-        // rather than inheriting whichever account last configured one.
         if (!(await storage.getStoredBootnodeUrl(state.address))) {
           throw new Error('RPC_SYNC_GAP: bootnode required');
         }
@@ -261,7 +261,7 @@ async function ensureCryptoReady() {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
       throw e;
     }
-    state.cryptoReady = true;
+    state.cryptoReadyForAddress = state.address;
     setStatus('App ready', 'ok');
   }
 }
@@ -297,6 +297,7 @@ async function connect() {
     // endpoint at all.
     const net = await refreshNetwork();
     state.address = address;
+    await ensureCryptoReady();
 
     walletChip.textContent = shortAddress(address);
     connectBtn.title = "Click to disconnect";
@@ -393,7 +394,11 @@ async function endSession(message) {
     // is the main app's, but the module is generic and this page loads its own
     // instance, so there is no cross-page interaction.
     if (hasInFlightPoolOps()) {
-      await waitForPoolOpsToDrain();
+      await waitForPoolOpsToDrainNotified({
+        onTimeout: () => console.warn(
+          '[admin] pool operations did not drain in time; disconnecting anyway',
+        ),
+      });
     }
     disconnect();
     showToast(message, 'info', 6000);

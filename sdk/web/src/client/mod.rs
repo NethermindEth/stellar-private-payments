@@ -10,6 +10,7 @@ mod transact;
 
 use std::{rc::Rc, str::FromStr};
 
+use base64::Engine;
 use serde::Deserialize;
 use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
@@ -36,6 +37,13 @@ use crate::{
     },
 };
 use gloo_worker::Spawnable;
+
+fn session_challenge(address: &str, network: &str, nonce: &[u8; 32]) -> String {
+    format!(
+        "stellar-private-payments session\naddress:{address}\nnetwork:{network}\nnonce:{}",
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(nonce),
+    )
+}
 
 pub use account::Account;
 pub use pool::PrivatePool;
@@ -224,7 +232,14 @@ impl Client {
             // Defaults to the note owner. The wallet signs with this account.
             let signer_address =
                 SignerAddress::new(opts.signer_address.unwrap_or_else(|| user_address.clone()));
-            let wallet_signer = WalletSigner::new(signer, opts.network_passphrase, signer_address)?;
+            let network_passphrase = opts.network_passphrase.clone();
+            let wallet_signer = WalletSigner::new(signer, network_passphrase, signer_address)?;
+
+            let mut nonce = [0u8; 32];
+            getrandom::getrandom(&mut nonce)
+                .map_err(|e| JsError::new(&format!("failed to generate session challenge: {e}")))?;
+            let challenge = session_challenge(&user_address, &opts.network_passphrase, &nonce);
+            wallet_signer.sign_wallet_message(&challenge).await?;
 
             self.ensure_prover().await?;
 
@@ -355,6 +370,27 @@ impl Client {
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
+    }
+}
+
+#[cfg(test)]
+mod session_challenge_tests {
+    use super::session_challenge;
+
+    #[test]
+    fn challenge_binds_address_network_and_nonce() {
+        let nonce = [7u8; 32];
+        let challenge = session_challenge("GABC", "Test Network", &nonce);
+        assert!(challenge.contains("address:GABC"));
+        assert!(challenge.contains("network:Test Network"));
+        assert!(challenge.contains("nonce:"));
+    }
+
+    #[test]
+    fn different_nonces_produce_different_challenges() {
+        let first = session_challenge("GABC", "Test Network", &[1u8; 32]);
+        let second = session_challenge("GABC", "Test Network", &[2u8; 32]);
+        assert_ne!(first, second);
     }
 }
 

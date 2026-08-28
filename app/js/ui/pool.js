@@ -9,10 +9,19 @@ import {
     beginPoolOp,
     endPoolOp,
     hasInFlightPoolOps,
+    runTrackedOp,
     waitForPoolOpsToDrain,
+    waitForPoolOpsToDrainNotified,
 } from '../pool-ops.js';
 
-export { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrain };
+export {
+    beginPoolOp,
+    endPoolOp,
+    hasInFlightPoolOps,
+    runTrackedOp,
+    waitForPoolOpsToDrain,
+    waitForPoolOpsToDrainNotified,
+};
 
 App.events.addEventListener('pool:selected', () => {
     if (App.state.wallet.connected) {

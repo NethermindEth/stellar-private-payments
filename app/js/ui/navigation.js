@@ -9,10 +9,12 @@ import {
     createAppPool,
     hasInFlightPoolOps,
     waitForPoolOpsToDrain,
+    waitForPoolOpsToDrainNotified,
     beginPoolOp,
     endPoolOp,
 } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
+import { runConnectStages } from '../connect-pipeline.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
@@ -446,79 +448,48 @@ export const Wallet = {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
-            // This is intentionally separate from wallet.connected: that flag
-            // flips as soon as Freighter supplies an address, while runtime
-            // and pool initialization still make transaction controls unusable.
-            document.body.dataset.walletState = 'connecting';
             const epoch = ++this._sessionEpoch;
             const superseded = () => this._sessionEpoch !== epoch;
             const signer = new FreighterSigner();
 
             try {
-                const address = await connectWallet();
-                // Shared with admin.js so the two pages cannot drift apart
-                // again; the throw wording is unchanged. requireTestnetNetwork
-                // also rejects a missing RPC URL on its own terms rather than
-                // letting an empty string fail the substring test and be
-                // reported as a wrong-network error.
-                const { network, networkPassphrase, sorobanRpcUrl: rpcUrl } =
-                    requireTestnetNetwork(await getWalletNetwork());
-
-                App.state.wallet.connected = true;
-                App.state.wallet.address = address;
-                App.state.wallet.sorobanRpcUrl = rpcUrl;
-                App.state.wallet.network = network;
-                App.state.wallet.networkPassphrase = networkPassphrase;
-                renderWallet();
-
-                const { bootnodeRequired } = await bootnodeCheck(rpcUrl, address);
-                await initializeRuntime(rpcUrl, { address });
-                await client().backgroundSync();
-
-                // Started before onboarding opens so a mid-wizard account
-                // switch is caught while the wizard is still on screen.
-                this.startWatcher();
-
-                await runOnboardingWizard({
-                    address,
-                    networkPassphrase,
-                    bootnodeRequired,
-                    signer,
+                const result = await runConnectStages({
+                    superseded,
+                    setWalletState: (state) => {
+                        document.body.dataset.walletState = state;
+                    },
+                    connectWallet,
+                    getNetwork: async () => requireTestnetNetwork(await getWalletNetwork()),
+                    publishWallet: ({ address, network, networkPassphrase, sorobanRpcUrl }) => {
+                        App.state.wallet.connected = true;
+                        App.state.wallet.address = address;
+                        App.state.wallet.sorobanRpcUrl = sorobanRpcUrl;
+                        App.state.wallet.network = network;
+                        App.state.wallet.networkPassphrase = networkPassphrase;
+                        renderWallet();
+                    },
+                    bootnodeCheck,
+                    initializeRuntime,
+                    startWatcher: () => this.startWatcher(),
+                    runOnboardingWizard: (args) => runOnboardingWizard({ ...args, signer }),
+                    liveAddress: () => App.state.wallet.address,
+                    openAccount: ({ networkPassphrase, userAddress }) =>
+                        client().openAccount({ networkPassphrase, userAddress }, signer),
+                    backgroundSync: () => client().backgroundSync(),
+                    userPublicKeys: () => client().account().userPublicKeys(),
+                    publishKeys: (keys) => {
+                        App.state.keys.notePublicKey = keys.notePublicKey;
+                        App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
+                    },
+                    loadRuntimeState,
+                    publishReady: ({ address }) => {
+                        renderSettingsDrawer();
+                        renderWallet();
+                        App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+                    },
+                    createAppPool,
                 });
-
-                // Past the wizard there is nothing left to re-point, and the
-                // work below binds a session for one specific account, so a
-                // switch from here ends the session instead of re-binding.
-                // Checked before the assignment: a network change during the
-                // wizard already disconnected, and writing 'binding' over that
-                // would advertise a session that is not being bound.
-                if (superseded()) return;
-                document.body.dataset.walletState = 'binding';
-
-                // The watcher may have re-bound App.state.wallet.address to a
-                // different account while the wizard was open; that live
-                // value, not the one connectWallet() returned above, is the
-                // account everything from here on must act as.
-                const liveAddress = App.state.wallet.address;
-                await client().openAccount({ networkPassphrase, userAddress: liveAddress }, signer);
-                if (superseded()) return;
-                const keys = await client().account().userPublicKeys();
-                if (superseded()) return;
-                App.state.keys.notePublicKey = keys.notePublicKey;
-                App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
-
-                await loadRuntimeState();
-                if (superseded()) return;
-                renderSettingsDrawer();
-                renderWallet();
-                App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: liveAddress } }));
-                await createAppPool();
-                // Last gate before the app declares itself usable: everything
-                // above ran for liveAddress, so publishing 'ready' after a
-                // teardown would advertise a session that no longer exists.
-                if (superseded()) return;
-                document.body.dataset.walletState = 'ready';
-                if (!auto) Toast.show('Wallet connected', 'success');
+                if (result.connected && !auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
                 this.disconnect();
@@ -554,7 +525,11 @@ export const Wallet = {
         try {
             document.body.dataset.walletState = 'changing';
             if (hasInFlightPoolOps()) {
-                await waitForPoolOpsToDrain();
+                await waitForPoolOpsToDrainNotified({
+                    onTimeout: () => console.warn(
+                        '[Wallet] pool operations did not drain in time; disconnecting anyway',
+                    ),
+                });
             }
             this.disconnect();
             Toast.show(message, 'info', 6000);

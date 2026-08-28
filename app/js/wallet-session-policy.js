@@ -9,6 +9,28 @@ export const WRONG_NETWORK_MESSAGE = 'This app supports Stellar testnet only.';
 export const NO_RPC_MESSAGE =
     'Freighter did not report a Soroban RPC URL for the active network. Check the network settings in Freighter.';
 
+export const CONNECT_WALLET_MESSAGE = 'Connect your wallet first';
+
+export const WALLET_CHANGING_MESSAGE = 'Wallet account changed. Please wait a moment and try again.';
+
+export const STILL_CONNECTING_MESSAGE = 'Still connecting to your wallet. Please wait a moment and try again.';
+
+/** Refuse wallet-bound work unless the session can actually serve it. */
+export function requireUsableWalletSession({ address, networkPassphrase, walletState, runtimeReady }) {
+    if (!address || !networkPassphrase) {
+        throw new Error(CONNECT_WALLET_MESSAGE);
+    }
+    if (walletState === 'changing') {
+        throw new Error(WALLET_CHANGING_MESSAGE);
+    }
+    if (walletState === 'binding') {
+        throw new Error(STILL_CONNECTING_MESSAGE);
+    }
+    if (!runtimeReady) {
+        throw new Error(STILL_CONNECTING_MESSAGE);
+    }
+}
+
 /**
  * Validate the wallet's reported network, or throw.
  *
@@ -40,6 +62,10 @@ export function requireTestnetNetwork(details) {
 // active. One poll would end healthy sessions whenever Freighter's service
 // worker drops a single round trip.
 export const UNREADABLE_POLL_LIMIT = 3;
+
+// The watcher and the heartbeat can both report the same dropped round trip;
+// calls this close together count as one round, not two.
+export const UNREADABLE_COALESCE_WINDOW_MS = 750;
 
 /**
  * Compare a watcher notification against the session's current context.
@@ -76,18 +102,28 @@ export function classifyWalletChange(info, current) {
  * Wraps {@link classifyWalletChange} with a count of consecutive unreadable
  * polls. Any readable poll resets it.
  *
- * @param {{unreadableLimit?: number}} [options]
+ * @param {{unreadableLimit?: number, coalesceWindowMs?: number, now?: () => number}} [options]
  */
-export function createWalletSessionMonitor({ unreadableLimit = UNREADABLE_POLL_LIMIT } = {}) {
+export function createWalletSessionMonitor({
+    unreadableLimit = UNREADABLE_POLL_LIMIT,
+    coalesceWindowMs = UNREADABLE_COALESCE_WINDOW_MS,
+    now = () => Date.now(),
+} = {}) {
     let unreadableStreak = 0;
+    let lastUnreadableAt = -Infinity;
     return {
         observe(info, current) {
             const classified = classifyWalletChange(info, current);
             if (!classified.unreadable) {
                 unreadableStreak = 0;
+                lastUnreadableAt = -Infinity;
                 return { ...classified, unreadableStreak: 0, sessionUnverifiable: false };
             }
-            unreadableStreak += 1;
+            const at = now();
+            if (at - lastUnreadableAt >= coalesceWindowMs) {
+                unreadableStreak += 1;
+            }
+            lastUnreadableAt = at;
             return {
                 ...classified,
                 unreadableStreak,
@@ -96,6 +132,7 @@ export function createWalletSessionMonitor({ unreadableLimit = UNREADABLE_POLL_L
         },
         reset() {
             unreadableStreak = 0;
+            lastUnreadableAt = -Infinity;
         },
     };
 }

@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "description": "Private payments app on Stellar",
   "main": "js/app.js",
-  "scripts": {},
+  "scripts": {
+    "lint": "eslint js --ext .js",
+    "test:lint": "node --test test/lint-no-undef.test.mjs"
+  },
   "author": "",
   "devDependencies": {
+    "eslint": "^9.35.0",
     "esbuild": "^0.28.1",
     "tailwindcss": "^4.1.18"
   },

@@ -25,7 +25,7 @@
  * @param {string|undefined} signerAddress
  */
 export function verifySignerAddress(label, requestedAddress, signerAddress) {
-  if (!requestedAddress || !signerAddress || requestedAddress === signerAddress) return;
+  if (!requestedAddress || !signerAddress || !signerAddress.trim() || requestedAddress === signerAddress) return;
   const err = new Error(
     `${label}: wallet signed with ${signerAddress}, but ${requestedAddress} was requested`,
   );
@@ -56,4 +56,17 @@ export function assertSignedValue(message, value) {
   const err = new Error(message);
   err.code = -4;
   throw err;
+}
+
+export function createPinnedSigner(adapter, identity) {
+  const { address, networkPassphrase } = identity || {};
+  if (!address || !networkPassphrase) {
+    throw new Error('createPinnedSigner requires both address and networkPassphrase');
+  }
+  const pin = (opts) => ({ ...opts, networkPassphrase, address });
+  return {
+    signMessage: (message, opts = {}) => adapter.signMessage(message, pin(opts)),
+    signTransaction: (xdr, opts = {}) => adapter.signTransaction(xdr, pin(opts)),
+    signAuthEntry: (xdr, opts = {}) => adapter.signAuthEntry(xdr, pin(opts)),
+  };
 }

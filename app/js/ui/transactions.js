@@ -7,10 +7,11 @@
  */
 
 import { client, isRuntimeReady } from '../wasm-facade.js';
+import { requireUsableWalletSession } from '../wallet-session-policy.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { App, Toast, Utils } from './core.js';
-import { ensureAppPool, beginPoolOp, endPoolOp } from './pool.js';
+import { ensureAppPool, runTrackedOp } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { getTransactionErrorMessage } from './errors.js';
@@ -42,19 +43,12 @@ function parseAmount(value, { allowNegative = false } = {}) {
 }
 
 function requireWallet() {
-    if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
-        throw new Error('Connect your wallet first');
-    }
-    // Set by navigation.js while a detected account/network change is
-    // draining any in-flight op before it disconnects. Refuse new
-    // wallet-bound work during that window rather than start one against an
-    // identity the app is already in the process of abandoning.
-    if (document.body.dataset.walletState === 'changing') {
-        throw new Error('Wallet account changed. Please wait a moment and try again.');
-    }
-    if (!isRuntimeReady()) {
-        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
-    }
+    requireUsableWalletSession({
+        address: App.state.wallet.address,
+        networkPassphrase: App.state.wallet.networkPassphrase,
+        walletState: document.body.dataset.walletState,
+        runtimeReady: isRuntimeReady(),
+    });
 }
 
 function setLoading(button, loading, label = 'Submitting…') {
@@ -87,14 +81,17 @@ function bindTxProgress(button, flow) {
     return () => window.removeEventListener(TX_PROGRESS_EVENT, handler);
 }
 
-async function runPoolOp(flow, button, fn) {
+async function runPoolOp(flow, button, fn, after) {
     const unbind = button ? bindTxProgress(button, flow) : () => {};
-    beginPoolOp();
     try {
-        return await fn();
+        // `after` runs inside the tracked window (the OpHistory write).
+        return await runTrackedOp(async () => {
+            const result = await fn();
+            if (after) await after(result);
+            return result;
+        });
     } finally {
         unbind();
-        endPoolOp();
     }
 }
 
@@ -125,24 +122,24 @@ async function txCountRow(amountValue) {
 }
 
 async function submitDeposit(button, amountValue, pool) {
-    // Captured now, before the signature/submission await below, so the
-    // history record files against the account this op actually ran under
-    // even if a wallet account/network change (and the disconnect it
-    // eventually triggers) lands while the op is still in flight.
+    // Captured before the submission await so the record attributes correctly.
     const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing deposit…');
     const session = await ensureAppPool();
-    const result = await runPoolOp('deposit', button, () => session.deposit(amountValue));
-    if (Transactions.showExecuteResult(result, 'Deposit')) {
-        const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(operatorAddress, pool.poolContractId, {
-            type: 'Deposit',
-            amount: amountValue,
-            direction: 'in',
-            hashes,
-        });
-        document.getElementById('deposit-amount').value = '';
-    }
+    await runPoolOp('deposit', button, () => session.deposit(amountValue), async (result) => {
+        if (Transactions.showExecuteResult(result, 'Deposit')) {
+            const hashes = result?.hashes ?? txResultsToHashes(result);
+            // Awaited inside the tracked window: teardown waits for this
+            // write instead of nulling the client out from under it.
+            await OpHistory.record(operatorAddress, pool.poolContractId, {
+                type: 'Deposit',
+                amount: amountValue,
+                direction: 'in',
+                hashes,
+            });
+            document.getElementById('deposit-amount').value = '';
+        }
+    });
 }
 
 async function submitTransfer(button, amountValue, pool, transferRefs, transferAddress) {
@@ -153,26 +150,28 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
     const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing transfer…');
     const session = await ensureAppPool();
-    const result = await runPoolOp('transfer', button, () =>
+    await runPoolOp('transfer', button, () =>
         session.transferToKeys(noteKey, encKey, amountValue),
-    );
-    if (Transactions.showExecuteResult(result, 'Transfer')) {
-        const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(operatorAddress, pool.poolContractId, {
-            type: 'Sent',
-            amount: amountValue,
-            direction: 'out',
-            counterparty: transferAddress.value.trim() || noteKey,
-            hashes,
-        });
-        document.getElementById('transfer-amount').value = '';
-        transferAddress.value = '';
-        transferRefs.noteKey.value = '';
-        transferRefs.encKey.value = '';
-        transferRefs.status.textContent = '';
-        transferRefs.warning.textContent = '';
-        transferRefs.manual.classList.add('hidden');
-    }
+    async (result) => {
+        if (Transactions.showExecuteResult(result, 'Transfer')) {
+            const hashes = result?.hashes ?? txResultsToHashes(result);
+            // See submitDeposit: awaited inside the tracked window.
+            await OpHistory.record(operatorAddress, pool.poolContractId, {
+                type: 'Sent',
+                amount: amountValue,
+                direction: 'out',
+                counterparty: transferAddress.value.trim() || noteKey,
+                hashes,
+            });
+            document.getElementById('transfer-amount').value = '';
+            transferAddress.value = '';
+            transferRefs.noteKey.value = '';
+            transferRefs.encKey.value = '';
+            transferRefs.status.textContent = '';
+            transferRefs.warning.textContent = '';
+            transferRefs.manual.classList.add('hidden');
+        }
+    });
 }
 
 async function submitWithdraw(button, amountValue, pool, recipient) {
@@ -181,21 +180,23 @@ async function submitWithdraw(button, amountValue, pool, recipient) {
     const operatorAddress = App.state.wallet.address;
     setLoading(button, true, 'Preparing withdrawal…');
     const session = await ensureAppPool();
-    const result = await runPoolOp('withdraw', button, () =>
+    await runPoolOp('withdraw', button, () =>
         session.withdraw(amountValue, recipient),
-    );
-    if (Transactions.showExecuteResult(result, 'Withdrawal')) {
-        const hashes = result?.hashes ?? txResultsToHashes(result);
-        OpHistory.record(operatorAddress, pool.poolContractId, {
-            type: 'Withdraw',
-            amount: amountValue,
-            direction: 'out',
-            counterparty: recipient,
-            hashes,
-        });
-        document.getElementById('withdraw-amount').value = '';
-        document.getElementById('withdraw-recipient').value = '';
-    }
+    async (result) => {
+        if (Transactions.showExecuteResult(result, 'Withdrawal')) {
+            const hashes = result?.hashes ?? txResultsToHashes(result);
+            // See submitDeposit: awaited inside the tracked window.
+            await OpHistory.record(operatorAddress, pool.poolContractId, {
+                type: 'Withdraw',
+                amount: amountValue,
+                direction: 'out',
+                counterparty: recipient,
+                hashes,
+            });
+            document.getElementById('withdraw-amount').value = '';
+            document.getElementById('withdraw-recipient').value = '';
+        }
+    });
 }
 
 function txResultsToHashes(results) {
@@ -593,30 +594,32 @@ export const Transactions = {
                 const operatorAddress = App.state.wallet.address;
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();
-                const result = await runPoolOp('transact', button, () => session.transact({
+                await runPoolOp('transact', button, () => session.transact({
                     extRecipient: recipient,
                     extAmount: publicAmount,
                     inputNoteIds,
                     outputAmounts: amounts,
                     outRecipientNoteKeysHex: noteKeys,
                     outRecipientEncKeysHex: encKeys,
-                }));
-                if (this.showExecuteResult(result, 'Advanced transaction')) {
-                    const hashes = result?.hashes ?? txResultsToHashes(result);
-                    const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
-                    const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
-                    OpHistory.record(operatorAddress, pool.poolContractId, {
-                        type: 'Advanced',
-                        amount: absAmount,
-                        direction,
-                        counterparty: direction === 'out' ? recipient : null,
-                        hashes,
-                    });
-                    this.buildAdvancedComposer();
-                    document.getElementById('advanced-public-deposit').value = '';
-                    document.getElementById('advanced-public-withdraw').value = '';
-                    document.getElementById('advanced-public-recipient').value = '';
-                }
+                }), async (result) => {
+                    if (this.showExecuteResult(result, 'Advanced transaction')) {
+                        const hashes = result?.hashes ?? txResultsToHashes(result);
+                        const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
+                        const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
+                        // See submitDeposit: awaited inside the tracked window.
+                        await OpHistory.record(operatorAddress, pool.poolContractId, {
+                            type: 'Advanced',
+                            amount: absAmount,
+                            direction,
+                            counterparty: direction === 'out' ? recipient : null,
+                            hashes,
+                        });
+                        this.buildAdvancedComposer();
+                        document.getElementById('advanced-public-deposit').value = '';
+                        document.getElementById('advanced-public-withdraw').value = '';
+                        document.getElementById('advanced-public-recipient').value = '';
+                    }
+                });
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });
             } finally {

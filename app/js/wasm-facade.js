@@ -25,6 +25,8 @@ import {
     requireNoteOwner,
     sessionMatchesCache,
     createSessionGeneration,
+    openPairKey,
+    createInFlightOpenRegistry,
 } from './account-session-guard.js';
 
 let storageHandle = null;
@@ -40,6 +42,7 @@ let boundSignerAddress = null;
 // is no longer current when it returns was superseded while it was in
 // flight, and must not write its result over the newer session's.
 const openAccountGeneration = createSessionGeneration();
+const inFlightOpens = createInFlightOpenRegistry();
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
@@ -101,26 +104,28 @@ function wrapSdkClient(sdk) {
 
             // Compared at the point of the cache WRITE, not before the call:
             // an abandoned open can resolve last and overwrite a newer session.
-            const generation = openAccountGeneration.begin();
-            const account = await sdk.account(
-                {
-                    networkPassphrase,
-                    userAddress,
-                    signerAddress: effectiveSigner,
-                },
-                signer,
-            );
-            if (!openAccountGeneration.isCurrent(generation)) {
-                const error = new Error(
-                    'Account session superseded: another account was opened while this one was still opening.',
+            return inFlightOpens.share(openPairKey(userAddress, effectiveSigner), async () => {
+                const generation = openAccountGeneration.begin();
+                const account = await sdk.account(
+                    {
+                        networkPassphrase,
+                        userAddress,
+                        signerAddress: effectiveSigner,
+                    },
+                    signer,
                 );
-                error.code = 'SESSION_SUPERSEDED';
-                throw error;
-            }
-            boundAccount = account;
-            boundUserAddress = userAddress;
-            boundSignerAddress = effectiveSigner;
-            return boundAccount;
+                if (!openAccountGeneration.isCurrent(generation)) {
+                    const error = new Error(
+                        'Account session superseded: another account was opened while this one was still opening.',
+                    );
+                    error.code = 'SESSION_SUPERSEDED';
+                    throw error;
+                }
+                boundAccount = account;
+                boundUserAddress = userAddress;
+                boundSignerAddress = effectiveSigner;
+                return boundAccount;
+            });
         },
         account() {
             if (!boundAccount) {
@@ -191,6 +196,7 @@ export function disposeClient() {
     // A teardown supersedes anything still opening, or that call would
     // repopulate the cache moments after it was cleared.
     openAccountGeneration.invalidate();
+    inFlightOpens.clear();
 }
 
 /**

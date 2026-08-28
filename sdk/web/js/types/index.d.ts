@@ -52,6 +52,7 @@ export interface Account {
 
 /** Deployment runtime returned by {@link Client.new}. */
 export interface Client {
+  releaseStorageSession(): Promise<void>;
   backgroundSync(): Promise<void>;
   stopBackgroundSync(): void;
   sync(): Promise<void>;

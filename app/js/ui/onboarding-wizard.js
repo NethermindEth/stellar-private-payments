@@ -4,6 +4,7 @@ import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { App, Utils, Toast } from './core.js';
 import { createRebindTracker } from '../onboarding-rebind.js';
+import { createStepLifecycle } from '../onboarding-step-lifecycle.js';
 import { beginPoolOp, endPoolOp } from './pool.js';
 import {
     hasNotificationSupport,
@@ -361,6 +362,7 @@ export async function runOnboardingWizard({
 } = {}) {
     if (!initialAddress) throw new Error('Wallet address required for onboarding');
 
+    const storage = client().storage();
     let address = initialAddress;
     // Computed inside the replan loop, after subscribing to
     // wallet:account-rebind — computeStepPlan awaits a network lookup, so a
@@ -368,6 +370,8 @@ export async function runOnboardingWizard({
     let plan = null;
 
     let cancelled = false;
+    // Owns which step may touch the wizard's shared surface.
+    const lifecycle = createStepLifecycle();
     let closeHandler = null;
     let rebindHandler = null;
     // Owns which account onboarding is for and which switch is still
@@ -376,12 +380,16 @@ export async function runOnboardingWizard({
     const rebind = createRebindTracker(address);
     let modalShown = false;
     const showModalOnce = () => {
-        if (modalShown) return;
+        // Keyed on visibility, not a one-shot flag: cancelOnboarding() hides it.
+        const el = document.getElementById('onboarding-modal');
+        if (modalShown && el && !el.classList.contains('hidden')) return;
         modalShown = true;
         showModal();
     };
     const cancelOnboarding = () => {
         cancelled = true;
+        lifecycle.cancel();
+        clearRebindDebounce();
         closeHandler?.();
         hideModal();
     };
@@ -423,25 +431,39 @@ export async function runOnboardingWizard({
     };
     App.events.addEventListener('wallet:account-rebind', onAccountRebind);
 
+    // Also cancel on a mid-wizard disconnect (network change, unreadable wallet).
+    const onWalletDisconnected = () => cancelOnboarding();
+    App.events.addEventListener('wallet:disconnected', onWalletDisconnected);
+
     const ensureNotCancelled = () => {
         if (cancelled) throw new Error('Onboarding cancelled');
     };
 
+    // setup() gets isLive() as a third argument; a handler must check it
+    // before touching shared state, since rejecting the promise doesn't stop it.
     const waitForStep = (setup) => new Promise((resolve, reject) => {
-        closeHandler = () => reject(new Error('Onboarding cancelled'));
-        rebindHandler = (nextAddress) => reject(new AccountRebindSignal(nextAddress));
-        setup(
-            (value) => {
-                closeHandler = null;
-                rebindHandler = null;
-                resolve(value);
-            },
-            (error) => {
-                closeHandler = null;
-                rebindHandler = null;
-                reject(error);
-            },
-        );
+        const token = lifecycle.begin();
+        const isLive = () => lifecycle.isLive(token);
+        const settle = (finish) => (arg) => {
+            if (!isLive()) return;
+            lifecycle.retire(token);
+            closeHandler = null;
+            rebindHandler = null;
+            finish(arg);
+        };
+        closeHandler = () => {
+            lifecycle.retire(token);
+            closeHandler = null;
+            rebindHandler = null;
+            reject(new Error('Onboarding cancelled'));
+        };
+        rebindHandler = (nextAddress) => {
+            lifecycle.retire(token);
+            closeHandler = null;
+            rebindHandler = null;
+            reject(new AccountRebindSignal(nextAddress));
+        };
+        setup(settle(resolve), settle(reject), isLive);
     });
 
     try {
@@ -453,6 +475,7 @@ export async function runOnboardingWizard({
 
     replanLoop:
     while (true) {
+        ensureNotCancelled();
         // `plan === null` is the first pass; the rest is a replan after a
         // switch. Both compute under the listener, so a switch arriving
         // during the computation is caught by the re-check below instead of
@@ -461,6 +484,7 @@ export async function runOnboardingWizard({
         if (plan === null || adopted !== null) {
             if (adopted !== null) address = adopted;
             plan = await computeStepPlan(address, { bootnodeRequired });
+            ensureNotCancelled();
             if (rebind.dueAddress() !== null) {
                 // Switched again while we were computing. Discard this plan
                 // rather than acting on one built for a stale account.
@@ -512,7 +536,7 @@ export async function runOnboardingWizard({
             });
             renderContent(panel);
 
-            await waitForStep((resolve, reject) => {
+            await waitForStep((resolve, reject, isLive) => {
                 const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const accept = makeButton({
                     text: 'Accept disclaimer',
@@ -520,9 +544,12 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             accept.disabled = true;
+                            await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+                            if (!isLive()) return;
                             await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
+                            if (!isLive()) return;
                             accept.disabled = false;
                             setError(error?.message || 'Failed to accept disclaimer');
                         }
@@ -608,7 +635,7 @@ export async function runOnboardingWizard({
             });
             renderContent(panel);
 
-            await waitForStep((resolve, reject) => {
+            await waitForStep((resolve, reject, isLive) => {
                 const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const derive = makeButton({
                     text: 'Derive and store keys',
@@ -621,6 +648,7 @@ export async function runOnboardingWizard({
                                 signer,
                             );
                             const result = await client().account().userPublicKeys();
+                            if (!isLive()) return;
                             state.keys = {
                                 pubKey: result.notePublicKey,
                                 encryptionKeypair: { publicKey: result.encryptionPublicKey },
@@ -629,11 +657,7 @@ export async function runOnboardingWizard({
                             aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
-                            // Rejecting waitForStep does not cancel this
-                            // handler, so it can still be running for an
-                            // abandoned step. The error slot belongs to
-                            // whatever step is on screen now.
-                            if (error?.code === 'SESSION_SUPERSEDED') return;
+                            if (!isLive()) return;
                             derive.disabled = false;
                             setError(error?.message || 'Failed to derive privacy keys');
                         }
@@ -646,6 +670,8 @@ export async function runOnboardingWizard({
         }
 
         if (stepId === 'retention') {
+            // Snapshotted so a mid-step rebind can't retarget this write.
+            const stepAddress = address;
             const enableNotifications = hasNotificationSupport();
             const bootnodeEnabled = bootnodeRequired || !!state.bootnode?.enabled;
             const inputWrap = document.createElement('div');
@@ -689,7 +715,7 @@ export async function runOnboardingWizard({
             });
             renderContent(panel);
 
-            await waitForStep((resolve, reject) => {
+            await waitForStep((resolve, reject, isLive) => {
                 const later = makeButton({ text: 'Continue', variant: 'ghost', onClick: () => resolve() });
                 const requestNotif = enableNotifications && Notification.permission !== 'granted'
                     ? makeButton({
@@ -728,10 +754,8 @@ export async function runOnboardingWizard({
                             if (enableNotifications && Notification.permission === 'default') {
                                 await requestNotificationPermission();
                             }
-                            // `address` is the wizard's live binding (declared
-                            // `let` and reassigned on re-bind), so this writes
-                            // under the account the user is actually looking at.
-                            await storage.setSetting('bootnode_config', { enabled, url }, address);
+                            if (!isLive()) return;
+                            await storage.setSetting('bootnode_config', { enabled, url }, stepAddress);
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();
@@ -801,7 +825,7 @@ export async function runOnboardingWizard({
             });
             renderContent(panel);
 
-            await waitForStep((resolve, reject) => {
+            await waitForStep((resolve, reject, isLive) => {
                 const later = makeButton({ text: 'Register later', variant: 'ghost', onClick: () => resolve() });
                 const register = makeButton({
                     text: 'Register now',
@@ -813,17 +837,11 @@ export async function runOnboardingWizard({
                             }
                             register.disabled = true;
                             await registerNow({ address, networkPassphrase, signer });
+                            if (!isLive()) return;
                             state.registered = true;
                             resolve();
                         } catch (error) {
-                            // Same reasoning as the derive step's catch:
-                            // this handler keeps running after
-                            // its step has been abandoned, and a
-                            // SESSION_SUPERSEDED failure means the replan is
-                            // already under way for another account -- the
-                            // shared error slot belongs to whatever step is
-                            // now on screen.
-                            if (error?.code === 'SESSION_SUPERSEDED') return;
+                            if (!isLive()) return;
                             register.disabled = false;
                             setError(error?.message || 'Failed to register public keys');
                         }
@@ -844,6 +862,7 @@ export async function runOnboardingWizard({
     }
     } finally {
         App.events.removeEventListener('wallet:account-rebind', onAccountRebind);
+        App.events.removeEventListener('wallet:disconnected', onWalletDisconnected);
         clearRebindDebounce();
     }
 

@@ -4,26 +4,20 @@ export interface SignOptions {
   networkPassphrase?: string;
 }
 
-export type SignMessageResult =
-  | string
-  | {
-      signedMessage: string;
-      signerAddress?: string;
-    };
+export interface SignMessageResult {
+  signedMessage: string;
+  signerAddress: string;
+}
 
-export type SignTransactionResult =
-  | string
-  | {
-      signedTxXdr: string;
-      signerAddress?: string;
-    };
+export interface SignTransactionResult {
+  signedTxXdr: string;
+  signerAddress: string;
+}
 
-export type SignAuthEntryResult =
-  | string
-  | {
-      signedAuthEntry: string;
-      signerAddress?: string;
-    };
+export interface SignAuthEntryResult {
+  signedAuthEntry: string;
+  signerAddress: string;
+}
 
 /**
  * Wallet adapter for {@link Client.account}.

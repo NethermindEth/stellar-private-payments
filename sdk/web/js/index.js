@@ -65,6 +65,7 @@ function wrapAccount(wasmAccount) {
 
 function wrapClient(wasmClient) {
   return {
+    releaseStorageSession: () => wasmClient.releaseStorageSession(),
     backgroundSync: () => wasmClient.backgroundSync(),
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     sync: () => wasmClient.sync(),

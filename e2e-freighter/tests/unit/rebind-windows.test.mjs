@@ -1,15 +1,16 @@
-// Ordering invariants for the two windows in which the wallet watcher can
+// Ordering invariants for the windows in which the wallet watcher can
 // observe an account switch that nothing acts on.
 //
-// These assert over SOURCE, which needs justifying. Both properties are
+// These assert over SOURCE, which needs justifying. The properties below are
 // control-flow ordering — "the listener is registered before the first plan
-// computation", "the epoch is re-checked after every await" — with no value to
+// computation", "the epoch is bumped on teardown" — with no value to
 // extract and assert on, and neither onboarding-wizard.js nor navigation.js
 // loads under plain `node --test`. The e2e suite cannot reach these windows
 // either: test 12 switches accounts at a fixed point after the wizard has
 // subscribed.
 //
-// They cannot show the ordering is sufficient at runtime.
+// connect()'s per-await supersession discipline has behavioral coverage in
+// connect-pipeline.test.mjs instead.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -76,18 +77,18 @@ test('the empty-plan exit cannot happen before the wizard has subscribed', () =>
 
 // Slice out connect()'s post-wizard hand-off: from the point the wizard has
 // returned and a session starts being bound, to the point the app declares
-// itself usable.
-function handoffRegion(source) {
-  const start = source.indexOf("walletState = 'binding'");
-  const end = source.indexOf("walletState = 'ready'", start === -1 ? 0 : start);
-  return { start, end, text: start === -1 || end === -1 ? '' : source.slice(start, end) };
-}
+// itself usable. The staged sequence lives in connect-pipeline.js (extracted
+// so its supersession checks are behaviorally tested), so the markers are
+// read from there rather than from navigation.js.
+const PIPELINE = process.env.REBIND_PIPELINE_SRC
+  ? readFileSync(process.env.REBIND_PIPELINE_SRC, 'utf8')
+  : readFileSync(repoFile('app/js/connect-pipeline.js'), 'utf8');
 
 test('a distinct post-wizard hand-off state exists', () => {
-  const { start } = handoffRegion(NAVIGATION);
-  assert.notEqual(
-    start,
-    -1,
+  const binding = PIPELINE.indexOf("setWalletState('binding')");
+  const ready = PIPELINE.indexOf("setWalletState('ready')", binding === -1 ? 0 : binding);
+  assert.ok(
+    binding !== -1 && ready !== -1 && binding < ready,
     'connect() must mark the post-wizard hand-off with its own wallet state. While it ' +
     'was still "connecting", the watcher took its re-bind branch and mutated ' +
     'App.state.wallet.address while openAccount/userPublicKeys/loadRuntimeState/' +
@@ -102,22 +103,6 @@ test('the watcher ends the session during the hand-off rather than re-binding', 
     -1,
     "the watcher's disconnect branch must cover the hand-off state as well as 'ready'; " +
     'during the hand-off there is no wizard on screen to re-point at another account',
-  );
-});
-
-test('every await in the hand-off is followed by a supersession check', () => {
-  const { text } = handoffRegion(NAVIGATION);
-  assert.notEqual(text, '', 'hand-off region not found');
-
-  const awaits = text.match(/\bawait\b/g)?.length ?? 0;
-  const checks = text.match(/superseded\(\)/g)?.length ?? 0;
-
-  assert.ok(awaits > 0, 'the hand-off is expected to await at least once');
-  assert.ok(
-    checks >= awaits,
-    `the hand-off has ${awaits} await(s) but only ${checks} supersession check(s). ` +
-    'Each await is a window in which the watcher can tear the session down; without a ' +
-    'check after it, the remaining statements publish a session that no longer exists.',
   );
 });
 

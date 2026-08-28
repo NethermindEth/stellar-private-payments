@@ -6056,6 +6056,7 @@ dependencies = [
  "base64",
  "console_error_panic_hook",
  "futures",
+ "getrandom 0.2.17",
  "gloo-timers",
  "gloo-worker",
  "js-sys",

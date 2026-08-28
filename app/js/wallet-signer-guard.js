@@ -14,7 +14,7 @@
  * @param {string|undefined} signerAddress
  */
 export function verifySignerAddress(label, requestedAddress, signerAddress) {
-    if (!requestedAddress || !signerAddress || requestedAddress === signerAddress) return;
+    if (!requestedAddress || !signerAddress || !signerAddress.trim() || requestedAddress === signerAddress) return;
     const err = new Error(
         `${label}: wallet signed with ${signerAddress}, but ${requestedAddress} was requested`,
     );
@@ -50,9 +50,9 @@ export function assertSignedValue(message, value) {
  * Returned as arrow-function properties rather than methods: contract.Client
  * invokes these options unbound, so anything relying on `this` throws.
  *
- * @param {{signTransaction: Function, signAuthEntry: Function}} adapter
+ * @param {{signMessage: Function, signTransaction: Function, signAuthEntry: Function}} adapter
  * @param {{address: string, networkPassphrase: string}} identity
- * @returns {{signTransaction: Function, signAuthEntry: Function}}
+ * @returns {{signMessage: Function, signTransaction: Function, signAuthEntry: Function}}
  */
 export function createPinnedSigner(adapter, identity) {
     const { address, networkPassphrase } = identity || {};
@@ -62,6 +62,7 @@ export function createPinnedSigner(adapter, identity) {
     }
     const pin = (opts) => ({ ...opts, networkPassphrase, address });
     return {
+        signMessage: (message, opts = {}) => adapter.signMessage(message, pin(opts)),
         signTransaction: (xdr, opts = {}) => adapter.signTransaction(xdr, pin(opts)),
         signAuthEntry: (xdr, opts = {}) => adapter.signAuthEntry(xdr, pin(opts)),
     };
