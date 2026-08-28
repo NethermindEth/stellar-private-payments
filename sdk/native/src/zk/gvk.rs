@@ -155,6 +155,14 @@ impl GlobalViewKeyMemo {
             GvkMode::Traceable => GlobalViewKeyMode::Traceable,
         };
 
+        if gvk_mode == GvkMode::Traceable && input_notes.len() != n_input_slots {
+            bail!(
+                "traceable GVK build: input_notes.len() ({}) must equal n_input_slots ({})",
+                input_notes.len(),
+                n_input_slots
+            );
+        }
+
         let outputs = output_notes
             .iter()
             .enumerate()
@@ -428,7 +436,7 @@ mod tests {
         }];
 
         let memo =
-            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, nonce, &inputs, &outputs, 2)?;
+            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, nonce, &inputs, &outputs, 1)?;
 
         assert_eq!(memo.mode, GlobalViewKeyMode::Traceable);
         assert_eq!(memo.inputs.as_ref().expect("inputs").len(), 1);
@@ -438,6 +446,18 @@ mod tests {
         assert_eq!(dec_inputs.len(), 1);
         assert_eq!(dec_inputs[0].pk, inputs[0].pk);
         assert_eq!(dec_outputs[0].pk, outputs[0].pk);
+        Ok(())
+    }
+
+    #[test]
+    fn traceable_build_rejects_input_count_mismatch() -> Result<()> {
+        let admin = BabyJubJubPoint::from_priv_scalar(&field(1)).expect("valid admin key");
+        let inputs = vec![sample_note(), sample_note()];
+        let outputs = vec![sample_note()];
+        assert!(
+            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, field(1), &inputs, &outputs, 1)
+                .is_err()
+        );
         Ok(())
     }
 
