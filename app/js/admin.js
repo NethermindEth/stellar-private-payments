@@ -1,10 +1,12 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, diagnoseAmbiguousKeypairs } from './wasm-facade.js';
 import { connectWallet, getConnectedAddress, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, startWalletWatcher } from './wallet.js';
 import { createPinnedSigner } from './wallet-signer-guard.js';
 import { createWalletSessionMonitor, requireTestnetNetwork, UNREADABLE_WALLET_MESSAGE } from './wallet-session-policy.js';
 import { beginPoolOp, endPoolOp, hasInFlightPoolOps, waitForPoolOpsToDrainNotified } from './pool-ops.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { isDbMigrationFailedError, showDbMigrationFailedModal } from './db-migration-failed.js';
+import { isAmbiguousKeypairsError, showAmbiguousKeypairsModal } from './db-ambiguous-keypairs.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 
@@ -259,6 +261,12 @@ async function ensureCryptoReady() {
       await client().backgroundSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
+      else if (isAmbiguousKeypairsError(e?.message)) {
+        showAmbiguousKeypairsModal(e.message, {
+          accountAddress: state.address,
+          diagnose: diagnoseAmbiguousKeypairs,
+        });
+      } else if (isDbMigrationFailedError(e?.message)) showDbMigrationFailedModal(e.message);
       throw e;
     }
     state.cryptoReadyForAddress = state.address;

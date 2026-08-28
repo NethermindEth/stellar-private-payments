@@ -69,6 +69,24 @@ impl Storage {
 
         Ok(storage)
     }
+
+    /// Opens a handle to a fresh storage-worker isolate, unlike
+    /// [`Self::open_internal`] not rejecting on the worker's own init failure
+    /// — the situation `DiagnoseAmbiguousKeypairs` exists to diagnose. `call()`
+    /// still enforces the usual [`SessionPolicy`] allowlist.
+    ///
+    /// [`SessionPolicy`]: crate::protocol::SessionPolicy
+    pub(crate) fn open_diagnostic_only(worker_url: String) -> Self {
+        crate::wasm_start();
+        Self {
+            bridge: StorageBridge::new(
+                StorageWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&worker_url),
+            ),
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -90,6 +108,24 @@ impl Storage {
                 .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
         )
         .await
+    }
+
+    /// A handle for the `DiagnoseAmbiguousKeypairs` request only.
+    /// [`Self::open`] rejects when `Storage::connect()` failed inside the
+    /// worker, which is exactly what that request exists to explain, so it
+    /// needs its own, non-rejecting way in. Use for nothing else.
+    #[wasm_bindgen(js_name = openDiagnosticOnly)]
+    pub fn open_diagnostic_only_js(options: JsValue) -> Result<Storage, JsError> {
+        let opts: OpenOptions = if options.is_null() || options.is_undefined() {
+            OpenOptions { worker_url: None }
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+
+        Ok(Self::open_diagnostic_only(
+            opts.worker_url
+                .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+        ))
     }
 
     /// New handle to the same storage worker (shared `spp.db`).

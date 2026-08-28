@@ -20,7 +20,7 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
-import { AppStorage } from './app-storage.js';
+import { AppStorage, storageCall } from './app-storage.js';
 import {
     requireNoteOwner,
     sessionMatchesCache,
@@ -210,6 +210,24 @@ export async function ensureStorage() {
         bindAppStorage(storageHandle);
     }
     return appStorageInstance;
+}
+
+/**
+ * Non-destructive support diagnostic for the ambiguous-keypairs recovery case:
+ * fingerprints local candidate key sets and reports which, if any, match the
+ * account's on-chain registration. Uses its own storage handle -- `Storage.open()`
+ * would reject here, since a failed migration is exactly what this explains.
+ * @param {string} accountAddress
+ */
+export async function diagnoseAmbiguousKeypairs(accountAddress) {
+    await ensureWasmInit();
+    const diagnosticStorage = Storage.openDiagnosticOnly();
+    const response = await storageCall(
+        diagnosticStorage,
+        { DiagnoseAmbiguousKeypairs: { account_address: accountAddress } },
+        15_000,
+    );
+    return response.AmbiguousKeypairsDiagnostic;
 }
 
 /**

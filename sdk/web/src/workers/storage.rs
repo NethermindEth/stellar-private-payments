@@ -178,7 +178,12 @@ async fn init() -> Result<(), JsError> {
     let storage = match SqliteStorage::connect() {
         Ok(storage) => storage,
         Err(e) => {
-            let msg = format!("Failed to open local database: {e}");
+            // `e.to_string()` is short and SQL-free (MigrationFailedError /
+            // AmbiguousKeypairsError in state/storage.rs); the full chain only
+            // goes to this log via Debug, never to the modal.
+            let error_details = format!("{e:?}");
+            let msg = e.to_string();
+            tracing::error!(details = %error_details, "[{WORKER_NAME}] fatal error opening local database");
             INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
             return Err(JsError::new(&msg));
         }
@@ -558,6 +563,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::DumpLogs => {
             StorageWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
+        }
+        StorageWorkerRequest::DiagnoseAmbiguousKeypairs { account_address } => {
+            tracing::debug!(
+                account = %Sensitive(&account_address),
+                "[{WORKER_NAME}] building ambiguous-keypairs recovery diagnostic",
+            );
+            // Bypasses with_storage!/the STORAGE slot: must work precisely
+            // when normal init left it empty.
+            let conn = SqliteStorage::connect_raw_for_diagnostics()?;
+            let diagnostic = SqliteStorage::diagnose_ambiguous_keypairs(&conn, &account_address)?;
+            StorageWorkerResponse::AmbiguousKeypairsDiagnostic(diagnostic)
         }
         StorageWorkerRequest::Transact(req) => {
             tracing::trace!("[{WORKER_NAME}] transact");

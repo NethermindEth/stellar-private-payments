@@ -8,7 +8,7 @@ use crate::types::{
 use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
 use rusqlite_migration::{M, Migrations};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::path::Path;
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -33,6 +33,62 @@ const AMBIGUOUS_KEYPAIRS_HELP: &str = "This wallet's local database holds two di
      privacy keys for the same account, so it cannot tell which one your notes were encrypted \
      under. Nothing has been deleted. Choosing for you could permanently hide the notes under the \
      other set, so the database is left as it is for inspection or support.";
+
+/// Stable, grep-able marker a caller (e.g. the OPFS worker) can match on to
+/// show a distinct blocking modal, instead of matching against `Display`
+/// text that varies with the underlying SQLite failure.
+pub const DB_MIGRATION_FAILED_CODE: &str = "db-migration-failed";
+
+/// A migration or database-open failure other than the ambiguous-keypairs
+/// case (see [`AmbiguousKeypairsError`]).
+///
+/// `Display` is short and SQL-free, unlike `rusqlite_migration::Error`'s own
+/// (which embeds the whole migration file). The full error is still reachable
+/// via `source()` for anything that wants the chain (`{:?}`/`{:#}`).
+#[derive(Debug)]
+pub struct MigrationFailedError(rusqlite_migration::Error);
+
+impl std::fmt::Display for MigrationFailedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Couldn't open your local wallet database. Your notes are safe; reloading usually \
+             fixes this. (code: {DB_MIGRATION_FAILED_CODE})"
+        )
+    }
+}
+
+impl std::error::Error for MigrationFailedError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+/// Distinguishes this case from [`DB_MIGRATION_FAILED_CODE`] so a caller can
+/// offer [`Storage::diagnose_ambiguous_keypairs`] instead of a bare reload.
+pub const AMBIGUOUS_KEYPAIRS_CODE: &str = "ambiguous-keypairs";
+
+/// Migration 2 refused an ambiguous database: two different key sets filed
+/// under one account. Kept distinct from [`MigrationFailedError`] for the
+/// same reason it exists — matching message text is the hazard
+/// `is_keypairs_uniqueness_failure` itself avoids.
+#[derive(Debug)]
+pub struct AmbiguousKeypairsError(rusqlite_migration::Error);
+
+impl std::fmt::Display for AmbiguousKeypairsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{AMBIGUOUS_KEYPAIRS_HELP} (code: {AMBIGUOUS_KEYPAIRS_CODE})"
+        )
+    }
+}
+
+impl std::error::Error for AmbiguousKeypairsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
 
 pub struct Storage {
     conn: Connection,
@@ -78,14 +134,66 @@ pub(crate) type DeriveNoteFn<'a> =
 
 /// Whether a migration failure is migration 2 refusing an ambiguous database.
 ///
-/// Matched on the message rather than a typed variant because
-/// `rusqlite_migration` wraps the underlying `rusqlite` error and SQLite
-/// reports a failed `CREATE UNIQUE INDEX` as a constraint violation naming the
-/// table and column, not the index. Both spellings are accepted so this keeps
-/// working if that ever changes; a miss only costs the friendlier message.
+/// Matched on the typed error, not on `to_string()`: `rusqlite_migration`'s
+/// `Display` embeds the whole migration file it was running, and migration 2's
+/// text contains the very index name a message match would look for — so any
+/// failure during it (a locked database, a missing column) would be reported
+/// as ambiguous keypairs. The crate also documents its messages as
+/// human-only and subject to change between patch releases.
 fn is_keypairs_uniqueness_failure(error: &rusqlite_migration::Error) -> bool {
-    let message = error.to_string();
-    message.contains("keypairs.account_id") || message.contains("idx_keypairs_account_unique")
+    let rusqlite_migration::Error::RusqliteError { err, .. } = error else {
+        return false;
+    };
+    let rusqlite::Error::SqliteFailure(code, message) = err else {
+        return false;
+    };
+    code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+        && message
+            .as_deref()
+            .is_some_and(|m| m.contains("keypairs.account_id"))
+}
+
+/// Short, one-way fingerprint of a public key: long enough to eyeball two
+/// candidates as different, useless for reconstructing the key. Safe to
+/// export off-device, unlike the key bytes themselves.
+fn public_key_fingerprint(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(&Sha256::digest(bytes)[..6])
+}
+
+/// One local candidate key set, identified only by a fingerprint of its
+/// public keys — never the keys themselves, and never the private key or
+/// membership-blinding columns from the same `keypairs` row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeypairCandidate {
+    pub row_id: i64,
+    pub note_public_key_fingerprint: String,
+    pub encryption_public_key_fingerprint: String,
+    pub matches_registry: bool,
+}
+
+/// "No match found" needs `public_keys` to actually be populated to mean
+/// anything, so an empty registry gets its own status rather than collapsing
+/// into `Unregistered`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RegistryStatus {
+    Registered,
+    Unregistered,
+    ChainDataUnavailable,
+}
+
+/// Non-destructive, exportable diagnostic for the ambiguous-keypairs recovery
+/// case: fingerprints every local candidate key set for an account and
+/// reports which, if any, match its on-chain registration. Selects nothing,
+/// deletes nothing — for a human to read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmbiguousKeypairsDiagnostic {
+    pub account_address: String,
+    pub candidates: Vec<KeypairCandidate>,
+    pub registry_status: RegistryStatus,
 }
 
 impl Storage {
@@ -101,14 +209,95 @@ impl Storage {
         Self::connect_with_connection(Connection::open_in_memory()?)
     }
 
+    /// Opens the default database file without running migrations. For
+    /// [`Self::diagnose_ambiguous_keypairs`], which must work precisely when
+    /// [`Self::connect`] cannot.
+    pub fn connect_raw_for_diagnostics() -> Result<Connection> {
+        Ok(Connection::open(DB_NAME)?)
+    }
+
+    /// Builds an [`AmbiguousKeypairsDiagnostic`] for `account_address`.
+    /// `keypairs` and `public_keys` are both unchanged by migration 2, so this
+    /// reads correctly whether `conn` is stuck at version 1 or fully migrated.
+    pub fn diagnose_ambiguous_keypairs(
+        conn: &Connection,
+        account_address: &str,
+    ) -> Result<AmbiguousKeypairsDiagnostic> {
+        let account_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM accounts WHERE address = ?1",
+                params![account_address],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let mut candidates = Vec::new();
+        if let Some(account_id) = account_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, note_public_key, encryption_public_key
+                 FROM keypairs WHERE account_id = ?1 ORDER BY id",
+            )?;
+            let rows = stmt
+                .query_map(params![account_id], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            for (row_id, note_public_key, encryption_public_key) in rows {
+                let matches_registry: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM public_keys
+                         WHERE owner = ?1 AND note_key = ?2 AND encryption_key = ?3
+                         LIMIT 1",
+                        params![account_address, note_public_key, encryption_public_key],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                candidates.push(KeypairCandidate {
+                    row_id,
+                    note_public_key_fingerprint: public_key_fingerprint(&note_public_key),
+                    encryption_public_key_fingerprint: public_key_fingerprint(
+                        &encryption_public_key,
+                    ),
+                    matches_registry,
+                });
+            }
+        }
+
+        let registry_status = if candidates.iter().any(|c| c.matches_registry) {
+            RegistryStatus::Registered
+        } else {
+            let registered_rows: i64 =
+                conn.query_row("SELECT COUNT(*) FROM public_keys", [], |row| row.get(0))?;
+            if registered_rows == 0 {
+                RegistryStatus::ChainDataUnavailable
+            } else {
+                RegistryStatus::Unregistered
+            }
+        };
+
+        Ok(AmbiguousKeypairsDiagnostic {
+            account_address: account_address.to_string(),
+            candidates,
+            registry_status,
+        })
+    }
+
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         MIGRATIONS.to_latest(&mut conn).map_err(|e| {
             // Only migration 2's unique index can fail on real user data, and
             // only for the ambiguous case it deliberately refuses to resolve.
+            // The full `e` (SQL included) is kept as `source()` on both typed
+            // errors below, not folded into either Display.
             if is_keypairs_uniqueness_failure(&e) {
-                anyhow!("{AMBIGUOUS_KEYPAIRS_HELP} (underlying error: {e})")
+                anyhow::Error::new(AmbiguousKeypairsError(e))
             } else {
-                anyhow!(e)
+                anyhow::Error::new(MigrationFailedError(e))
             }
         })?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -2094,6 +2283,62 @@ mod tests {
         Ok(())
     }
 
+    /// A migration-2 failure that is NOT a uniqueness violation must keep its
+    /// own error. Migration 2's SQL text contains the index name, so a
+    /// message-based classification matched every failure here.
+    #[test]
+    fn an_unrelated_migration_failure_is_not_reported_as_ambiguous_keypairs() -> Result<()> {
+        let mut conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4)])?;
+        // A second connection holding an exclusive lock makes migration 2 fail
+        // for a reason that has nothing to do with duplicate key material.
+        let blocker = Connection::open_in_memory()?;
+        blocker.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        conn.execute_batch("PRAGMA query_only = ON")?;
+
+        let error = MIGRATIONS
+            .to_latest(&mut conn)
+            .expect_err("a read-only database cannot run the migration");
+        assert!(
+            !is_keypairs_uniqueness_failure(&error),
+            "a non-uniqueness failure must not be reported as ambiguous keypairs, got: {error}"
+        );
+        Ok(())
+    }
+
+    /// A database predating the membership_blinding column fails migration 2
+    /// with "no such column", not a constraint violation, and must say so
+    /// rather than claim the user holds two sets of privacy keys.
+    #[test]
+    fn a_missing_column_is_not_reported_as_ambiguous_keypairs() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 1)?;
+        conn.execute_batch("ALTER TABLE keypairs DROP COLUMN membership_blinding")?;
+
+        let error = MIGRATIONS
+            .to_latest(&mut conn)
+            .expect_err("migration 2 groups by a column this database does not have");
+        assert!(
+            !is_keypairs_uniqueness_failure(&error),
+            "a missing-column failure must not be reported as ambiguous keypairs, got: {error}"
+        );
+
+        let conn = {
+            let mut c = Connection::open_in_memory()?;
+            MIGRATIONS.to_version(&mut c, 1)?;
+            c.execute_batch("ALTER TABLE keypairs DROP COLUMN membership_blinding")?;
+            c
+        };
+        let error = match Storage::connect_with_connection(conn) {
+            Ok(_) => panic!("opening a pre-membership_blinding database must fail"),
+            Err(error) => error,
+        };
+        assert!(
+            !error.to_string().contains("two different sets"),
+            "the user must not be told they hold two key sets: {error}"
+        );
+        Ok(())
+    }
+
     /// The failure a user would actually see. A bare SQLite uniqueness error
     /// naming an index says nothing about their wallet; this asserts the
     /// explanation survives all the way out of connect().
@@ -2110,6 +2355,100 @@ mod tests {
             message.contains("two different sets") && message.contains("Nothing has been deleted"),
             "the user-facing error must say what happened and that data is intact: {message}"
         );
+        Ok(())
+    }
+
+    /// `public_keys` FK's to `raw_contract_events`, but foreign_keys is never
+    /// turned on for these in-memory test connections (matching
+    /// `v1_database_with_keypair_rows`), so an arbitrary event_id is enough.
+    fn insert_public_keys_row(
+        conn: &Connection,
+        owner: &str,
+        note_key: &[u8],
+        encryption_key: &[u8],
+        event_id: &str,
+    ) -> Result<()> {
+        conn.execute(
+            "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![owner, encryption_key, note_key, event_id],
+        )?;
+        Ok(())
+    }
+
+    /// The case the diagnostic exists for: two candidates, one of them
+    /// matching the account's on-chain registration. Nothing in the output is
+    /// long enough to be the key itself.
+    #[test]
+    fn diagnostic_flags_the_candidate_matching_the_registry() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+        insert_public_keys_row(&conn, "GTESTACCOUNT", &[5u8; 32], &[5u8; 32], "evt-1")?;
+
+        let diagnostic = Storage::diagnose_ambiguous_keypairs(&conn, "GTESTACCOUNT")?;
+        assert_eq!(
+            diagnostic.candidates.len(),
+            2,
+            "both local candidates must be reported"
+        );
+        assert_eq!(diagnostic.registry_status, RegistryStatus::Registered);
+
+        let matching: Vec<_> = diagnostic
+            .candidates
+            .iter()
+            .filter(|c| c.matches_registry)
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "exactly the registered candidate must be flagged"
+        );
+
+        for candidate in &diagnostic.candidates {
+            assert_eq!(
+                candidate.note_public_key_fingerprint.len(),
+                12,
+                "a fingerprint, not the 64-hex-char key itself, must be exported"
+            );
+        }
+        Ok(())
+    }
+
+    /// The registry has been indexed and has entries — just not for this
+    /// account. Must not be confused with "not yet synced".
+    #[test]
+    fn diagnostic_reports_unregistered_when_the_registry_has_no_match() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+        insert_public_keys_row(&conn, "GSOMEONEELSE", &[9u8; 32], &[9u8; 32], "evt-1")?;
+
+        let diagnostic = Storage::diagnose_ambiguous_keypairs(&conn, "GTESTACCOUNT")?;
+        assert_eq!(diagnostic.registry_status, RegistryStatus::Unregistered);
+        assert!(diagnostic.candidates.iter().all(|c| !c.matches_registry));
+        Ok(())
+    }
+
+    /// The registry table itself is empty — indexing has not reached the
+    /// registry contract yet, so "unregistered" cannot be told apart from
+    /// "not yet synced".
+    #[test]
+    fn diagnostic_reports_chain_data_unavailable_when_the_registry_is_empty() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+
+        let diagnostic = Storage::diagnose_ambiguous_keypairs(&conn, "GTESTACCOUNT")?;
+        assert_eq!(
+            diagnostic.registry_status,
+            RegistryStatus::ChainDataUnavailable
+        );
+        Ok(())
+    }
+
+    /// An address with no local account at all (e.g. a typo in a support
+    /// diagnostic run) must not panic or invent candidates.
+    #[test]
+    fn diagnostic_is_empty_for_an_address_with_no_local_account() -> Result<()> {
+        let conn = v1_database_with_keypair_rows(&[(&[4u8; 32], 4), (&[5u8; 32], 5)])?;
+
+        let diagnostic = Storage::diagnose_ambiguous_keypairs(&conn, "GNOACCOUNTATALL")?;
+        assert!(diagnostic.candidates.is_empty());
         Ok(())
     }
 

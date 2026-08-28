@@ -1,10 +1,12 @@
-import { client, isRuntimeReady, verifySelectiveDisclosure } from './wasm-facade.js';
+import { client, isRuntimeReady, verifySelectiveDisclosure, diagnoseAmbiguousKeypairs } from './wasm-facade.js';
 import {
   connectWallet,
   getConnectedAddress,
   getWalletNetwork,
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { isDbMigrationFailedError, showDbMigrationFailedModal } from './db-migration-failed.js';
+import { isAmbiguousKeypairsError, showAmbiguousKeypairsModal } from './db-ambiguous-keypairs.js';
 import { getActivePoolContractId } from './ui/pool.js';
 import { filterNotes, createNoteRow } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
@@ -1422,6 +1424,13 @@ export function mountVerify(container) {
       console.error('Verification failed:', err);
       if (isDbLockedError(err?.message)) {
         showDbLockedModal(err.message);
+      } else if (isAmbiguousKeypairsError(err?.message)) {
+        showAmbiguousKeypairsModal(err.message, {
+          accountAddress: getConnectedAddress(),
+          diagnose: diagnoseAmbiguousKeypairs,
+        });
+      } else if (isDbMigrationFailedError(err?.message)) {
+        showDbMigrationFailedModal(err.message);
       }
       resultsWrap.replaceChildren(
         el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',

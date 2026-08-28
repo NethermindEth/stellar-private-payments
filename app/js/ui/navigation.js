@@ -2,7 +2,7 @@ import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.j
 import { createWalletSessionMonitor, requireTestnetNetwork, UNREADABLE_WALLET_MESSAGE } from '../wallet-session-policy.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, diagnoseAmbiguousKeypairs } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import {
     closeAppPool,
@@ -16,6 +16,8 @@ import {
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { runConnectStages } from '../connect-pipeline.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
+import { isDbMigrationFailedError, showDbMigrationFailedModal } from '../db-migration-failed.js';
+import { isAmbiguousKeypairsError, showAmbiguousKeypairsModal } from '../db-ambiguous-keypairs.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -492,11 +494,20 @@ export const Wallet = {
                 if (result.connected && !auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
+                // Captured before disconnect() clears App.state.wallet.address.
+                const failedAddress = App.state.wallet.address;
                 this.disconnect();
+                // All three below are blocking conditions shown even on
+                // auto-connect, which is their common trigger.
                 if (isDbLockedError(message)) {
-                    // Blocking condition: another tab/window holds the local DB lock.
-                    // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
+                } else if (isAmbiguousKeypairsError(message)) {
+                    showAmbiguousKeypairsModal(message, {
+                        accountAddress: failedAddress,
+                        diagnose: diagnoseAmbiguousKeypairs,
+                    });
+                } else if (isDbMigrationFailedError(message)) {
+                    showDbMigrationFailedModal(message);
                 } else if (!auto) {
                     Toast.show(message || 'Failed to connect wallet', 'error');
                 }

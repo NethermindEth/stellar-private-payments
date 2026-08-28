@@ -123,6 +123,12 @@ pub enum StorageWorkerRequest {
     BindSession(Address),
     /// Drop the binding, revoking the capability without touching the data.
     UnbindSession,
+    /// Support diagnostic for the ambiguous-keypairs recovery case. Bypasses
+    /// the worker's normal `STORAGE` slot, since it must work when that slot
+    /// is empty because `Storage::connect()` itself failed.
+    DiagnoseAmbiguousKeypairs {
+        account_address: Address,
+    },
 }
 
 /// How a request interacts with the worker's session binding. Assigned by
@@ -178,7 +184,8 @@ impl StorageWorkerRequest {
             | Self::OperationalFeed { .. }
             | Self::DeriveASPleaf(_)
             | Self::ConfigureTelemetry(_)
-            | Self::DumpLogs => SessionPolicy::Public,
+            | Self::DumpLogs
+            | Self::DiagnoseAmbiguousKeypairs { .. } => SessionPolicy::Public,
         }
     }
 
@@ -383,6 +390,9 @@ mod privileged_request_tests {
                 reveal_sensitive: false,
             }),
             StorageWorkerRequest::DumpLogs,
+            StorageWorkerRequest::DiagnoseAmbiguousKeypairs {
+                account_address: ADDR.to_string(),
+            },
         ];
         for request in exceptions {
             assert_eq!(
@@ -419,6 +429,7 @@ pub enum StorageWorkerResponse {
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
     Logs(String),
+    AmbiguousKeypairsDiagnostic(stellar_private_payments::state::AmbiguousKeypairsDiagnostic),
 }
 
 #[allow(clippy::large_enum_variant)]
