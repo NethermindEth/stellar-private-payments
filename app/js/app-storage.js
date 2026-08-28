@@ -5,6 +5,7 @@
 
 const SETTING_EXPLORER = 'explorer';
 const SETTING_BOOTNODE_CONFIG = 'bootnode_config';
+const SETTING_GVK_AUTHORITY = 'gvk_authority';
 
 /** Suggested archive URL when none is stored yet (wizard + sync-gap consent). */
 export const DEFAULT_BOOTNODE_URL = 'https://bootnode.dev-nethermind.xyz';
@@ -108,5 +109,10 @@ export class AppStorage {
             return config.url;
         }
         return undefined;
+    }
+
+    /** Operator GVK authority key from local wallet settings, if stored. */
+    async getGvkAuthoritySetting() {
+        return this.getSetting(SETTING_GVK_AUTHORITY);
     }
 }
