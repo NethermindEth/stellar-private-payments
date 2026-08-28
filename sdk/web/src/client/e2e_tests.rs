@@ -186,11 +186,19 @@ enum SignerMode {
     Signing,
 }
 
-/// `signMessage` return, shared by both modes.
+/// `signMessage` return, shared by both modes. Mirrors a real SEP-0043
+/// wallet's `{ signedMessage, signerAddress }` response shape — `signer.rs`'s
+/// `normalize_sign_result` rejects a bare string.
 fn sign_message_fn() -> Function {
+    let address = ACCOUNT_A_ADDRESS.expect(
+        "E2E_ACCOUNT_A_ADDRESS not compiled in: run via \
+         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
+    );
     Function::new_with_args(
         "message, opts",
-        &format!("return Promise.resolve('{STUB_SIGNATURE_B64}');"),
+        &format!(
+            "return Promise.resolve({{ signedMessage: {STUB_SIGNATURE_B64:?}, signerAddress: {address:?} }});"
+        ),
     )
 }
 
@@ -233,17 +241,41 @@ fn signer_with_mode(mode: SignerMode) -> JsValue {
     signer.into()
 }
 
+/// Build a `{ [field]: value, signerAddress }` result, mirroring a real
+/// SEP-0043 wallet's response shape — `signer.rs`'s `normalize_sign_result`
+/// rejects a bare string.
+fn signed_result(field: &str, value: &str, signer_address: &str) -> JsValue {
+    let result = Object::new();
+    Reflect::set(
+        &result,
+        &JsValue::from_str(field),
+        &JsValue::from_str(value),
+    )
+    .unwrap();
+    Reflect::set(
+        &result,
+        &JsValue::from_str("signerAddress"),
+        &JsValue::from_str(signer_address),
+    )
+    .unwrap();
+    result.into()
+}
+
 /// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
 fn install_real_signing(signer: &Object) {
     let secret = ACCOUNT_A_SECRET.expect(
         "E2E_ACCOUNT_A_SECRET not compiled in: run via \
          `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
     );
+    let address = ACCOUNT_A_ADDRESS.expect(
+        "E2E_ACCOUNT_A_ADDRESS not compiled in: run via \
+         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
+    );
     let local = Rc::new(
         ChainLocalSigner::from_secret(secret).expect("E2E_ACCOUNT_A_SECRET must be a valid S… key"),
     );
 
-    // signTransaction(txXdrBase64, opts) -> Promise<signedTxXdrBase64>
+    // signTransaction(txXdrBase64, opts) -> Promise<{signedTxXdr, signerAddress}>
     let tx_signer = local.clone();
     let sign_tx = Closure::wrap(Box::new(move |tx_b64: JsValue, _opts: JsValue| {
         let b64 = tx_b64.as_string().expect("signTransaction takes a string");
@@ -255,11 +287,12 @@ fn install_real_signing(signer: &Object) {
         let out = signed
             .to_xdr_base64(Limits::none())
             .expect("signed envelope must encode");
-        js_sys::Promise::resolve(&JsValue::from_str(&out))
+        js_sys::Promise::resolve(&signed_result("signedTxXdr", &out, address))
     })
         as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>);
 
-    // signAuthEntry(preimageBase64, opts) -> Promise<signatureBase64>
+    // signAuthEntry(preimageBase64, opts) -> Promise<{signedAuthEntry,
+    // signerAddress}>
     let entry_signer = local.clone();
     let sign_entry = Closure::wrap(Box::new(move |preimage_b64: JsValue, _opts: JsValue| {
         let b64 = preimage_b64
@@ -269,7 +302,11 @@ fn install_real_signing(signer: &Object) {
             .decode(b64.trim())
             .expect("auth preimage must be base64");
         let signature = entry_signer.sign(&bytes);
-        js_sys::Promise::resolve(&JsValue::from_str(&STANDARD.encode(signature.as_bytes())))
+        js_sys::Promise::resolve(&signed_result(
+            "signedAuthEntry",
+            &STANDARD.encode(signature.as_bytes()),
+            address,
+        ))
     })
         as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>);
 
@@ -437,9 +474,8 @@ async fn e2e_seed_deposit_creates_spendable_notes() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
-    client.sync().await.expect("initial sync must succeed");
-
     let account = open_account_a_with(&client, SignerMode::Signing).await;
+    client.sync().await.expect("initial sync must succeed");
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
 
@@ -499,7 +535,6 @@ fn assert_halted_at_signing(flow: &str, response: &JsValue, stages: &[String]) {
 async fn e2e_deposit_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
-    client.sync().await.expect("sync must succeed");
 
     let account = open_account_a(&client).await;
     let pool = open_pool(&account).await;
@@ -538,7 +573,6 @@ async fn e2e_transfer_halts_at_signing() {
 
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
-    client.sync().await.expect("initial sync must succeed");
 
     // Give account A something to spend.
     seed_deposit(&client, SEED_DEPOSIT_STROOPS).await;
@@ -581,7 +615,6 @@ async fn e2e_transfer_halts_at_signing() {
 async fn e2e_withdraw_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
-    client.sync().await.expect("initial sync must succeed");
 
     seed_deposit(&client, SEED_DEPOSIT_STROOPS).await;
     client

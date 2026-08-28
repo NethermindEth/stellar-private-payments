@@ -717,6 +717,10 @@ mod pool_err_tests {
 
     #[wasm_bindgen_test]
     fn pool_err_carries_a_distinct_code_for_a_signer_mismatch_and_redacts_both_addresses() {
+        // Other tests in this page run telemetry init with the test-default
+        // reveal_sensitive=true and never restore it, so this redaction
+        // assertion cannot rely on that global's ambient state.
+        stellar_private_payments::types::set_reveal_sensitive(false);
         let error = pool_err(Error::SignerAddressMismatch {
             requested: "GREQUESTED".to_string(),
             actual: "GACTUAL".to_string(),
@@ -735,6 +739,7 @@ mod pool_err_tests {
             !message.contains("GREQUESTED") && !message.contains("GACTUAL"),
             "neither identity may appear in the user-visible message: {message}"
         );
+        stellar_private_payments::types::set_reveal_sensitive(true);
     }
 }
 

@@ -115,15 +115,20 @@ export async function driveWizard(page, context, {
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 
     // Both open an SDK session, which prompts for a signature only the first
-    // time it runs for an address with no keys yet; optional otherwise.
+    // time it runs for an address with no keys yet — sometimes more than
+    // once (session auth, then privacy-key derivation). Keep approving until
+    // no further approval shows up within a short window.
     if (choice === 'Accept disclaimer' || choice === 'Derive and store keys') {
-      const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
-      if (approvalPage) await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
+      let approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
+      while (approvalPage) {
+        await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
+        approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
+      }
     }
 
     await waitForCondition({
       operation: 'onboarding:step-settle',
-      timeoutMs: 5000,
+      timeoutMs: 30000,
       intervalMs: 100,
       observe: async () => ({
         hidden: await modalHidden(),

@@ -141,6 +141,28 @@ test('by default driveWizard waits for the post-onboarding runtime lifecycle', a
   );
 });
 
+test('a step that triggers multiple signMessage approvals gets every one of them approved', async () => {
+    // Opening an SDK session for an address with no keys yet can prompt twice
+    // in sequence (session auth, then privacy-key derivation) — driveWizard
+    // must keep approving until Freighter stops showing new ones.
+    const page = fakeWizardPage([['Accept disclaimer'], ['Register later']]);
+    const approvals = ['first approval page', 'second approval page', null];
+    const approved = [];
+
+    await driveWizard(page, {}, {
+        logTag: 'test',
+        waitForFreighterApproval: async () => {
+            const next = approvals.shift();
+            if (next === null) return null;
+            return next;
+        },
+        approveOrWatch: async (context, kind) => { approved.push(kind); },
+    });
+
+    assert.deepEqual(approved, ['signMessage', 'signMessage']);
+    assert.deepEqual(page.clicks, ['Accept disclaimer', 'Register later']);
+});
+
 test('waitForRuntimeReady:false returns as soon as the wizard closes, without waiting on the lifecycle', async () => {
   // `disconnected` is the state the app lands in when onboarding finishes
   // while the active wallet account differs from the connected one: the
