@@ -1,7 +1,7 @@
 {
   "name": "stellar-private-payments",
-  "version": "0.1.0-alpha.1",
-  "description": "Stellar Private Payments browser SDK (alpha)",
+  "version": "0.1.0",
+  "description": "Stellar Private Payments browser SDK",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -10,8 +10,7 @@
     "directory": "sdk/web"
   },
   "publishConfig": {
-    "access": "public",
-    "tag": "alpha"
+    "access": "public"
   },
   "main": "./js/index.js",
   "types": "./js/types/index.d.ts",
