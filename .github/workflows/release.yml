@@ -31,14 +31,30 @@ jobs:
   check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
       - run: sh scripts/release-versions.sh check
+      - id: sdk
+        run: |
+          if git diff "${{ github.event.pull_request.base.sha }}" HEAD -- sdk/native/Cargo.toml \
+               | grep -q '^+version = '; then
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify SDK version bump matches API changes
+        if: steps.sdk.outputs.bump == 'true'
+        uses: obi1kenobi/cargo-semver-checks-action@5b298c9520f7096a4683c0bd981a7ac5a7e249ae # v2
+        with:
+          package: stellar-private-payments
+          manifest-path: sdk/native/Cargo.toml
+          verbose: true
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
