@@ -34,8 +34,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
-      - uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
       - run: sh scripts/release-versions.sh check
@@ -50,10 +50,10 @@ jobs:
       npm: ${{ steps.tag.outputs.publish_npm }}
       cli: ${{ steps.tag.outputs.publish_cli }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
       - id: tag
@@ -68,7 +68,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Skip if already on crates.io
         id: registry
         run: |
@@ -102,8 +102,8 @@ jobs:
       run:
         working-directory: sdk/web
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
-      - uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
@@ -142,8 +142,8 @@ jobs:
     outputs:
       publish: ${{ steps.registry.outputs.publish }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
-      - uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
       - name: Skip if GitHub release already has assets
@@ -166,7 +166,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ format('cli-v{0}', needs.tag.outputs.cli) }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
       # sets the rustup default, which that file overrides.
@@ -229,7 +229,7 @@ jobs:
           done
           ls -l out
 
-      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: dist
           path: out/*
@@ -250,7 +250,7 @@ jobs:
           - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
           - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
       # sets the rustup default, which that file overrides.
@@ -316,7 +316,7 @@ jobs:
             shasum -a 256 "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"
           fi
 
-      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: spp-${{ matrix.target }}
           path: out/*
@@ -331,7 +331,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ format('cli-v{0}', needs.tag.outputs.cli) }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           path: artifacts
 
@@ -349,7 +349,7 @@ jobs:
             * )        echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           files: out/*
