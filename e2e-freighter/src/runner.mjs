@@ -138,14 +138,34 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
   // A missing-history check can require explicit bootnode consent before the
   // onboarding wizard is shown. Treat both modals as an intentional paused
   // connect state instead of timing out while `Wallet.connect()` is blocked.
-  await waitForCondition({
-    operation: 'app:connect-or-setup-modal',
-    timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
-    intervalMs: 100,
-    observe: () => readAppLifecycle(page),
-    isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
-      walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
-  });
+  //
+  // An already-onboarded account skips the wizard but still gets a fresh
+  // session-auth signMessage challenge on every Client::account open, by
+  // design. Nothing else watches for that popup on this path, so approve
+  // any that appear for as long as this wait runs.
+  let watchingSignMessage = true;
+  const signMessageWatcher = (async () => {
+    while (watchingSignMessage) {
+      const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 2_000 }).catch(() => null);
+      if (!watchingSignMessage) return;
+      if (approvalPage) {
+        await approveOrWatch(context, 'signMessage', { timeoutMs: 30_000 }).catch(() => {});
+      }
+    }
+  })();
+  try {
+    await waitForCondition({
+      operation: 'app:connect-or-setup-modal',
+      timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
+      intervalMs: 100,
+      observe: () => readAppLifecycle(page),
+      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
+        walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
+    });
+  } finally {
+    watchingSignMessage = false;
+    await signMessageWatcher;
+  }
 
   if (await isBootnodeConsentVisible(page)) {
     log.info('connectApp: bootnode consent is open — accepting the configured default');
