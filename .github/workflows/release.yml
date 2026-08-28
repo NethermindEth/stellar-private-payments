@@ -1,0 +1,364 @@
+# Release pipeline: PR check → merge to main → tag + publish in one run.
+# Publish jobs are idempotent: each checks the registry before shipping.
+#
+# Configure trusted publishers (workflow file must be release.yml):
+#   - crates.io: stellar-private-payments
+#   - npm: stellar-private-payments
+name: Release
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths: &release_paths
+      - "sdk/native/Cargo.toml"
+      - "sdk/web/package.json"
+      - "cli/Cargo.toml"
+      - "Cargo.toml"
+      - "scripts/release-versions.sh"
+      - ".github/workflows/release.yml"
+  push:
+    branches: ["main"]
+    paths: *release_paths
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+      - run: sh scripts/release-versions.sh check
+
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sdk: ${{ steps.tag.outputs.publish_sdk }}
+      npm: ${{ steps.tag.outputs.publish_npm }}
+      cli: ${{ steps.tag.outputs.publish_cli }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+      - id: tag
+        run: sh scripts/release-versions.sh tag
+
+  sdk:
+    needs: tag
+    if: needs.tag.outputs.sdk != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Skip if already on crates.io
+        id: registry
+        run: |
+          if sh scripts/release-versions.sh published sdk '${{ needs.tag.outputs.sdk }}'; then
+            echo "already on crates.io — skip"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        if: steps.registry.outputs.publish == 'true'
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        if: steps.registry.outputs.publish == 'true'
+      - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        if: steps.registry.outputs.publish == 'true'
+        id: auth
+      - if: steps.registry.outputs.publish == 'true'
+        run: cargo publish -p stellar-private-payments --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  npm:
+    needs: tag
+    if: needs.tag.outputs.npm != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/web
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+      - name: Skip if already on npm
+        id: registry
+        working-directory: .
+        run: |
+          if sh scripts/release-versions.sh published npm '${{ needs.tag.outputs.npm }}'; then
+            echo "already on npm — skip"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        if: steps.registry.outputs.publish == 'true'
+        with:
+          targets: wasm32-unknown-unknown
+      - if: steps.registry.outputs.publish == 'true'
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+        working-directory: .
+      - if: steps.registry.outputs.publish == 'true'
+        run: npm ci
+      - if: steps.registry.outputs.publish == 'true'
+        run: npm run build
+      - if: steps.registry.outputs.publish == 'true'
+        run: npm run check:artifacts && npm run check:types
+      - if: steps.registry.outputs.publish == 'true'
+        run: npm publish --ignore-scripts --provenance
+
+  cli-ready:
+    needs: tag
+    if: needs.tag.outputs.cli != ''
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.registry.outputs.publish }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+      - name: Skip if GitHub release already has assets
+        id: registry
+        run: |
+          if sh scripts/release-versions.sh published cli '${{ needs.tag.outputs.cli }}'; then
+            echo "GitHub release already published — skip"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  cli-dist:
+    needs: [tag, cli-ready]
+    if: needs.cli-ready.outputs.publish == 'true'
+    name: Build dist bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ format('cli-v{0}', needs.tag.outputs.cli) }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
+      # sets the rustup default, which that file overrides.
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Verify tag matches crate version
+        run: |
+          set -eu
+          crate_ver="$(sed -n 's/^version = "\(.*\)"/\1/p' cli/Cargo.toml | head -1)"
+          tag="${RELEASE_TAG}"
+          expected="${tag#cli-v}"
+          echo "tag=$tag crate_version=$crate_ver expected=$expected"
+          if [ "$expected" != "$crate_ver" ]; then
+            echo "::error::tag $tag does not match cli crate version $crate_ver (expected cli-v$crate_ver)"
+            exit 1
+          fi
+
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Build circuits (release) — produces r1cs
+        run: make circuits
+
+      - name: Assemble dist
+        run: |
+          set -eu
+          STAGING="$(mktemp -d)"
+          BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/source-bundle.tar.gz"
+
+          # Legal set: LICENSE.txt, NOTICE.txt, licenses/{LGPL,GPL}, circuits/NOTICE.txt.
+          sh deployments/scripts/stage-dist-legal.sh "$STAGING" "$BUNDLE_URL"
+          # The CLI dist mirrors the app layout minus the disclaimer file.
+          rm -f "$STAGING/DISCLAIMER.txt"
+
+          # Compiled circuit artifacts + proving keys / witness graphs the CLI loads.
+          CIRCUITS="target/circuits-artifacts"
+          KEYS="deployments/testnet/circuit_keys"
+          for stem in policy_tx_2_2 policy_tx_2_2_A policy_tx_2_2_B policy_tx_2_2_AB \
+                      selectiveDisclosure_1; do
+            cp "$CIRCUITS/${stem}.r1cs" "$STAGING/circuits/"
+            cp "$KEYS/${stem}.graph.bin" "$STAGING/circuits/"
+            cp "$KEYS/${stem}_proving_key.bin" "$STAGING/circuits/"
+          done
+
+          # Corresponding Source bundle (LGPL-3.0).
+          sh deployments/scripts/package-circuits-source-bundle.sh "$STAGING/circuits/source-bundle.tar.gz"
+
+          mkdir -p out
+          tar -C "$STAGING" -czf out/dist.tar.gz .
+          cp "$STAGING/circuits/source-bundle.tar.gz" out/source-bundle.tar.gz
+          for f in dist.tar.gz source-bundle.tar.gz; do
+            sha256sum "out/$f" | sed "s| out/| |" > "out/$f.sha256"
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: dist
+          path: out/*
+
+  build-cli:
+    needs: [tag, cli-ready]
+    if: needs.cli-ready.outputs.publish == 'true'
+    name: Build spp (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
+          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
+      # sets the rustup default, which that file overrides.
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+
+      # Native (macOS) builds compile with rust-toolchain.toml, so
+      # add the target to that toolchain. The musl targets build via `cross`,
+      # which supplies the target inside its container.
+      - name: Add target
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Prepare circuits inputs (avoid in-build git fetch / keygen)
+        shell: bash
+        run: |
+          set -eu
+          # Check out circomlib at the locked rev so tools/circuit-compiler skips fetching.
+          LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          if [ ! -d circuits/src/circomlib/.git ]; then
+            git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
+          fi
+          git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
+          git -C circuits/src/circomlib checkout --detach FETCH_HEAD
+          # Canonical keys so circuit-compiler does not run a (random) trusted setup.
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cross
+
+      - name: Build
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          else
+            cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p out
+          BIN="target/${{ matrix.target }}/release/spp"
+          test -f "$BIN"
+          tar -C "$(dirname "$BIN")" -czf "out/spp-${{ matrix.target }}.tar.gz" spp
+          cd out
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"
+          else
+            shasum -a 256 "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"
+          fi
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: spp-${{ matrix.target }}
+          path: out/*
+
+  cli-github-release:
+    name: GitHub Release
+    needs: [tag, cli-ready, cli-dist, build-cli]
+    if: needs.cli-ready.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ format('cli-v{0}', needs.tag.outputs.cli) }}
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p out
+          find artifacts -type f -exec cp {} out/ \;
+          ls -l out
+
+      - name: Determine prerelease
+        id: pre
+        run: |
+          case "${RELEASE_TAG}" in
+            cli-v*-* ) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            * )        echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: out/*
+          prerelease: ${{ steps.pre.outputs.prerelease }}
+          generate_release_notes: true
+          body: |
+            ## Install CLI
+
+            ```bash
+            curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version ${{ env.RELEASE_TAG }}
+            ```
+          fail_on_unmatched_files: true
