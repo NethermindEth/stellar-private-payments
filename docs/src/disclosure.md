@@ -82,6 +82,13 @@ Note owners generate receipts through the **Disclosure** view in the main app, r
 The CLI uses the same local wallet database and native Rust SDK as the other
 `spp` commands. Pass one `--commitment` for each note to disclose, up to four.
 
+`spp notes --unspent` lists the commitments available to disclose, in the
+`0x…` form `--commitment` expects:
+
+```bash
+spp notes --account alice --unspent
+```
+
 ```bash
 spp disclosure generate CPOOL… \
   --account alice \

@@ -224,7 +224,7 @@ fn explorer_base(config: &CliConfig) -> Result<String> {
     crate::explorer::base_url(&storage)
 }
 
-fn asset_symbol(asset: &AssetDescriptor) -> String {
+pub fn asset_symbol(asset: &AssetDescriptor) -> String {
     match asset {
         AssetDescriptor::Native => "XLM".to_string(),
         AssetDescriptor::Classic { code, .. } => {
