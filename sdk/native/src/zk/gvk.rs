@@ -175,6 +175,12 @@ impl GlobalViewKeyMemo {
                     .collect::<Result<Vec<_>>>()?,
             )
         } else {
+            if !input_notes.is_empty() {
+                bail!(
+                    "view-only GVK memo build received {} input notes; pass an empty input_notes slice",
+                    input_notes.len()
+                );
+            }
             None
         };
 
@@ -370,20 +376,6 @@ mod tests {
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(0xFEED_FACE);
 
-        let inputs = vec![
-            GvkNote {
-                pk: field(111),
-                amount: field(50),
-                blinding: field(11),
-                salt: field(0xDEADBEEF),
-            },
-            GvkNote {
-                pk: field(222),
-                amount: field(30),
-                blinding: field(22),
-                salt: field(0xDEADBEE0),
-            },
-        ];
         let outputs = vec![
             GvkNote {
                 pk: field(333),
@@ -399,7 +391,7 @@ mod tests {
             },
         ];
 
-        let memo = GlobalViewKeyMemo::build(GvkMode::ViewOnly, admin, nonce, &inputs, &outputs, 2)?;
+        let memo = GlobalViewKeyMemo::build(GvkMode::ViewOnly, admin, nonce, &[], &outputs, 2)?;
 
         assert_eq!(memo.version, GLOBAL_VIEW_KEY_MEMO_VERSION);
         assert_eq!(memo.mode, GlobalViewKeyMode::ViewOnly);
