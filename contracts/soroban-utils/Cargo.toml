@@ -20,5 +20,8 @@ ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 soroban-sdk = { workspace = true }
 
+[features]
+testutils = []
+
 [lints]
 workspace = true

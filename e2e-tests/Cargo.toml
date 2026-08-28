@@ -23,7 +23,7 @@ num-bigint = { workspace = true }
 pool = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Shared deps
-soroban-utils = { workspace = true }
+soroban-utils = { workspace = true, features = ["testutils"] }
 stellar-private-payments = { workspace = true }
 
 [lints]

@@ -1,7 +1,9 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
-use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contract, contractimpl};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
+#[cfg(any(test, feature = "testutils"))]
+use soroban_sdk::{contract, contractimpl};
 
 /// Update the contract administrator
 ///
@@ -28,9 +30,11 @@ where
 }
 
 /// Mock token contract for testing purposes
+#[cfg(any(test, feature = "testutils"))]
 #[contract]
 pub struct MockToken;
 
+#[cfg(any(test, feature = "testutils"))]
 #[contractimpl]
 impl MockToken {
     pub fn balance(_env: Env, _id: Address) -> i128 {

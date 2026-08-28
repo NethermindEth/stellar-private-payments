@@ -24,6 +24,7 @@ soroban-sdk.workspace = true
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
+soroban-utils = { workspace = true, features = ["testutils"] }
 
 # external
 ark-bn254 = { workspace = true }
