@@ -73,8 +73,11 @@ impl GvkNote {
             .map(Scalar::from)
             .map_err(|_| anyhow!("note encryption index {idx} exceeds u64"))?;
         let r = self.derive_r(d, nonce, idx);
-        let big_r = babyjub::point_to_coords(babyjub::scalar_mul(babyjub::base8(), r));
-        let k = keystream(shared_secret(r, d));
+        let big_r = babyjub::point_to_coords(
+            babyjub::scalar_mul(babyjub::base8(), r)
+                .ok_or_else(|| anyhow!("failed to derive ephemeral public key"))?,
+        );
+        let k = keystream(shared_secret(r, d)?);
         Ok(GlobalViewKeyCiphertext {
             r: BabyJubJubPoint::from_coords(big_r.0, big_r.1),
             c1: scalar_to_field(&(field_to_scalar(&self.pk) + k[0])),
@@ -108,16 +111,21 @@ impl GvkRecoveredNote {
 
 impl GlobalViewKeyCiphertext {
     /// Admin-side decryption using the authority private scalar `d`.
-    pub fn decrypt(&self, d_priv: &Field) -> GvkRecoveredNote {
+    pub fn decrypt(&self, d_priv: &Field) -> Result<GvkRecoveredNote> {
         let d_priv = field_to_scalar(d_priv);
         let big_r =
             babyjub::point_from_coords(field_to_scalar(&self.r.x), field_to_scalar(&self.r.y));
-        let k = keystream(babyjub::mul8(babyjub::scalar_mul(big_r, d_priv)));
-        GvkRecoveredNote {
+        let k = keystream(
+            babyjub::mul8(babyjub::scalar_mul(big_r, d_priv).ok_or_else(|| {
+                anyhow!("invalid ephemeral public key in global view key ciphertext")
+            })?)
+            .ok_or_else(|| anyhow!("invalid ephemeral public key in global view key ciphertext"))?,
+        );
+        Ok(GvkRecoveredNote {
             pk: scalar_to_field(&(field_to_scalar(&self.c1) - k[0])),
             amount: scalar_to_field(&(field_to_scalar(&self.c2) - k[1])),
             blinding: scalar_to_field(&(field_to_scalar(&self.c3) - k[2])),
-        }
+        })
     }
 }
 
@@ -192,14 +200,17 @@ impl GlobalViewKeyMemo {
             .outputs
             .iter()
             .map(|ct| ct.decrypt(d_priv))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
 
-        let inputs = self.inputs.as_ref().map(|input_cts| {
-            input_cts
-                .iter()
-                .map(|ct| ct.decrypt(d_priv))
-                .collect::<Vec<_>>()
-        });
+        let inputs = match self.inputs.as_ref() {
+            None => None,
+            Some(input_cts) => Some(
+                input_cts
+                    .iter()
+                    .map(|ct| ct.decrypt(d_priv))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+        };
 
         Ok((inputs, outputs))
     }
@@ -215,8 +226,14 @@ pub fn generate_gvk_nonce() -> Result<Field> {
     generate_random_blinding()
 }
 
-fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Point {
-    babyjub::scalar_mul(babyjub::mul8(babyjub::point_from_coords(d.0, d.1)), r)
+fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Result<Point> {
+    babyjub::scalar_mul(
+        babyjub::mul8(babyjub::point_from_coords(d.0, d.1)).ok_or_else(|| {
+            anyhow!("invalid administrator public key for global view key encryption")
+        })?,
+        r,
+    )
+    .ok_or_else(|| anyhow!("invalid administrator public key for global view key encryption"))
 }
 
 fn keystream(s: Point) -> [Scalar; 3] {
@@ -246,10 +263,10 @@ mod tests {
     #[test]
     fn known_answer_roundtrip() -> Result<()> {
         let d_priv = field(987_654_321);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let ct = note.encrypt(&admin, &field(42), 0)?;
-        let recovered = ct.decrypt(&d_priv);
+        let recovered = ct.decrypt(&d_priv)?;
 
         assert_eq!(recovered.pk, note.pk);
         assert_eq!(recovered.amount, note.amount);
@@ -260,7 +277,7 @@ mod tests {
     #[test]
     fn keystream_no_reuse_across_idx() -> Result<()> {
         let d_priv = field(11);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(99);
         let note = sample_note();
         let ct0 = note.encrypt(&admin, &nonce, 0)?;
@@ -274,7 +291,7 @@ mod tests {
     #[test]
     fn distinct_nonce_changes_ciphertext() -> Result<()> {
         let d_priv = field(11);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let a = note.encrypt(&admin, &field(1), 0)?;
         let b = note.encrypt(&admin, &field(2), 0)?;
@@ -286,11 +303,26 @@ mod tests {
     #[test]
     fn tampered_ciphertext_not_recovered() -> Result<()> {
         let d_priv = field(7);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let mut ct = note.encrypt(&admin, &field(5), 0)?;
         ct.c1 = field(0x1234_5678);
-        let recovered = ct.decrypt(&d_priv);
+        let recovered = ct.decrypt(&d_priv)?;
+        assert_ne!(recovered.pk, note.pk);
+        Ok(())
+    }
+
+    #[test]
+    fn off_curve_ephemeral_key_not_recovered() -> Result<()> {
+        let d_priv = field(7);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        let note = sample_note();
+        let mut ct = note.encrypt(&admin, &field(5), 0)?;
+        ct.r = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        let recovered = ct.decrypt(&d_priv)?;
         assert_ne!(recovered.pk, note.pk);
         Ok(())
     }
@@ -298,7 +330,7 @@ mod tests {
     #[test]
     fn view_only_memo_roundtrip() -> Result<()> {
         let d_priv = field(0x5EED);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(0xFEED_FACE);
 
         let inputs = vec![
@@ -350,7 +382,7 @@ mod tests {
     #[test]
     fn traceable_memo_roundtrip() -> Result<()> {
         let d_priv = field(0x5EED);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(0xFEED_FACE);
 
         let inputs = vec![GvkNote {

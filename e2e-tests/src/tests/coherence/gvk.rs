@@ -36,7 +36,8 @@ fn gvk_encrypt_matches_circuit_reference() {
         blinding: field(0xDEAD_BEEF),
         salt: field(0xCAFE_F00D),
     };
-    let admin = BabyJubJubPoint::from_priv_scalar(&scalar_to_field(&d_priv));
+    let admin =
+        BabyJubJubPoint::from_priv_scalar(&scalar_to_field(&d_priv)).expect("valid admin key");
     let sdk_ct = sdk_note
         .encrypt(&admin, &field(42), 0)
         .expect("sdk encrypt");
