@@ -23,6 +23,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow, bail};
 use ark_bn254::Fr as Scalar;
+use ark_ff::Zero;
 use taceo_poseidon2::bn254::t4;
 
 /// Domain separation for the `r` derivation chain.
@@ -67,6 +68,7 @@ impl GvkNote {
         nonce: &Field,
         idx: usize,
     ) -> Result<GlobalViewKeyCiphertext> {
+        validate_global_view_public_key(admin_pub_key)?;
         let d = admin_pub_key.to_coords();
         let nonce = field_to_scalar(nonce);
         let idx = u64::try_from(idx)
@@ -77,7 +79,11 @@ impl GvkNote {
             babyjub::scalar_mul(babyjub::base8(), r)
                 .ok_or_else(|| anyhow!("failed to derive ephemeral public key"))?,
         );
-        let k = keystream(shared_secret(r, d)?);
+        let shared = shared_secret(r, d)?;
+        if shared.x.is_zero() {
+            bail!("degenerate global view key shared secret");
+        }
+        let k = keystream(shared);
         Ok(GlobalViewKeyCiphertext {
             r: BabyJubJubPoint::from_coords(big_r.0, big_r.1),
             c1: scalar_to_field(&(field_to_scalar(&self.pk) + k[0])),
@@ -216,6 +222,24 @@ impl GlobalViewKeyMemo {
     }
 }
 
+/// Validates admin key `D` per `GlobalViewKeyEncryption`: on-curve and not
+/// low-order (`x(8·D) ≠ 0`).
+pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    let point = babyjub::point_from_coords(
+        field_to_scalar(&admin_pub_key.x),
+        field_to_scalar(&admin_pub_key.y),
+    );
+    if !point.is_on_curve() {
+        bail!("admin public key is not on the Baby JubJub curve");
+    }
+    let eight_d = babyjub::mul8(point)
+        .ok_or_else(|| anyhow!("admin public key is not a valid Baby JubJub point"))?;
+    if eight_d.x.is_zero() {
+        bail!("admin public key has low order");
+    }
+    Ok(())
+}
+
 /// Generate a fresh per-note salt for GVK encryption.
 pub fn generate_gvk_salt() -> Result<Field> {
     generate_random_blinding()
@@ -228,12 +252,11 @@ pub fn generate_gvk_nonce() -> Result<Field> {
 
 fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Result<Point> {
     babyjub::scalar_mul(
-        babyjub::mul8(babyjub::point_from_coords(d.0, d.1)).ok_or_else(|| {
-            anyhow!("invalid administrator public key for global view key encryption")
-        })?,
+        babyjub::mul8(babyjub::point_from_coords(d.0, d.1))
+            .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))?,
         r,
     )
-    .ok_or_else(|| anyhow!("invalid administrator public key for global view key encryption"))
+    .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))
 }
 
 fn keystream(s: Point) -> [Scalar; 3] {
@@ -423,6 +446,64 @@ mod tests {
         assert_eq!(dec_inputs.len(), 1);
         assert_eq!(dec_inputs[0].pk, inputs[0].pk);
         assert_eq!(dec_outputs[0].pk, outputs[0].pk);
+        Ok(())
+    }
+
+    #[test]
+    fn validate_pub_gvk_accepts_base8_derived_key() {
+        let d_priv = field(987_654_321);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        validate_global_view_public_key(&admin).expect("valid for gvk");
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_off_curve() {
+        let admin = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        assert!(validate_global_view_public_key(&admin).is_err());
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_low_order() -> Result<()> {
+        use core::str::FromStr;
+
+        const NEG_ONE: &str =
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+        let neg_one = Scalar::from_str(NEG_ONE).expect("valid p-1");
+        let admin = BabyJubJubPoint {
+            x: field(0),
+            y: scalar_to_field(&neg_one),
+        };
+        assert!(validate_global_view_public_key(&admin).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn encrypt_rejects_off_curve_pub_gvk() -> Result<()> {
+        let note = sample_note();
+        let admin = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        assert!(note.encrypt(&admin, &field(5), 0).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn encrypt_rejects_low_order_pub_gvk() -> Result<()> {
+        use core::str::FromStr;
+
+        const NEG_ONE: &str =
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+        let neg_one = Scalar::from_str(NEG_ONE).expect("valid p-1");
+        let note = sample_note();
+        let admin = BabyJubJubPoint {
+            x: field(0),
+            y: scalar_to_field(&neg_one),
+        };
+        assert!(note.encrypt(&admin, &field(5), 0).is_err());
         Ok(())
     }
 }

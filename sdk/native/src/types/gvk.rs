@@ -1,7 +1,7 @@
 //! Global View Key (GVK) memo types.
 //!
 //! Data structures + serialization for the off-chain memo a pool
-//! administrator uses to audit notes, mirroring the in-circuit encryption in
+//! admin uses to audit notes, mirroring the in-circuit encryption in
 //! `circuits/src/globalViewKey.circom`. Encryption and decryption live in
 //! [`crate::zk::gvk`].
 
@@ -85,7 +85,7 @@ pub struct GlobalViewKeyMemo {
     pub version: u32,
     /// View-only vs. traceable, see field docs on [`GlobalViewKeyMemo`].
     pub mode: GlobalViewKeyMode,
-    /// The administrator Baby JubJub public key `D` this memo claims to be
+    /// The admin Baby JubJub public key `D` this memo claims to be
     /// encrypted under.
     ///
     /// This is informational only and is not verified by
