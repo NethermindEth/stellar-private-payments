@@ -83,6 +83,8 @@ pub fn double(p: Point) -> Option<Point> {
 }
 
 /// Multiply `point` by the integer value of `scalar` via double-and-add.
+///
+/// Not constant-time (branches on scalar bits).
 pub fn scalar_mul(point: Point, scalar: Scalar) -> Option<Point> {
     let mut acc = identity();
     let mut base = point;
