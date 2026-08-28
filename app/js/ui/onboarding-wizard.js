@@ -1,7 +1,7 @@
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
-import { friendlyErrorMessage } from '../facade-errors.js';
+import { friendlyErrorForCode } from '../facade-errors.js';
 import { App, Utils, Toast } from './core.js';
 import { createRebindTracker } from '../onboarding-rebind.js';
 import { createStepLifecycle } from '../onboarding-step-lifecycle.js';
@@ -51,15 +51,17 @@ function setPersistPromptedFlag() {
     }
 }
 
-function setError(message) {
+// Accepts either a plain message string (most call sites) or the caught
+// error itself, when a call site needs friendlyErrorForCode to see `.code`.
+function setError(errorOrMessage) {
     const el = document.getElementById('onboarding-error');
     if (!el) return;
-    if (!message) {
+    if (!errorOrMessage) {
         el.textContent = '';
         el.classList.add('hidden');
         return;
     }
-    el.textContent = friendlyErrorMessage(message);
+    el.textContent = friendlyErrorForCode(errorOrMessage);
     el.classList.remove('hidden');
 }
 
@@ -551,7 +553,7 @@ export async function runOnboardingWizard({
                         } catch (error) {
                             if (!isLive()) return;
                             accept.disabled = false;
-                            setError(error?.message || 'Failed to accept disclaimer');
+                            setError(error || 'Failed to accept disclaimer');
                         }
                     },
                 });
@@ -659,7 +661,7 @@ export async function runOnboardingWizard({
                         } catch (error) {
                             if (!isLive()) return;
                             derive.disabled = false;
-                            setError(error?.message || 'Failed to derive privacy keys');
+                            setError(error || 'Failed to derive privacy keys');
                         }
                     },
                 });

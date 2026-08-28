@@ -65,7 +65,16 @@ function wrapAccount(wasmAccount) {
 
 function wrapClient(wasmClient) {
   return {
-    releaseStorageSession: () => wasmClient.releaseStorageSession(),
+    releaseStorageSession: async () => {
+      // A stale dist/ would otherwise surface as "not a function", which reads
+      // like the release itself failing.
+      if (typeof wasmClient.releaseStorageSession !== 'function') {
+        throw new Error(
+          'releaseStorageSession is unavailable in the loaded wasm build — rebuild the package (npm run build)',
+        );
+      }
+      return wasmClient.releaseStorageSession();
+    },
     backgroundSync: () => wasmClient.backgroundSync(),
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     sync: () => wasmClient.sync(),

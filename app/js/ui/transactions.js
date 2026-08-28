@@ -644,7 +644,11 @@ export const Transactions = {
             if (Array.isArray(result.hashes) && result.hashes.length) {
                 this.showSubmittedToasts(result.hashes, label, origin);
             }
-            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000, { origin });
+            // result.code is the SEP-0043 wallet-rejection code; result.errorCode is
+            // the app-level structured code (e.g. SIGNER_ADDRESS_MISMATCH) -- the two
+            // are mutually exclusive, and ui/errors.js reads either through `.code`.
+            const errorForToast = { message: result.message, code: result.code ?? result.errorCode };
+            Toast.show(getTransactionErrorMessage(errorForToast, label) || `${label} failed`, 'error', 7000, { origin });
             return false;
         }
         if (result?.status === 'ok') {

@@ -11,7 +11,7 @@ use stellar_private_payments::{
 };
 use wasm_bindgen::{JsError, JsValue};
 
-use super::{pool::PrivatePool, pool_err_message};
+use super::{pool::PrivatePool, pool_err_message, structured_error_code, wallet_rejection_code};
 
 pub(crate) use progress::emit;
 
@@ -41,6 +41,11 @@ enum ExecuteJsResponse {
         /// rejection (-4). Lets JS callers classify without parsing `message`.
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<i32>,
+        /// App-level structured code, distinct from the SEP-0043 `code`
+        /// above (e.g. "SIGNER_ADDRESS_MISMATCH"), for a failure the UI must
+        /// classify by code rather than message text.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_code: Option<&'static str>,
     },
     AspNotReady,
 }
@@ -64,11 +69,16 @@ impl From<ExecuteOutcome> for ExecuteJsResponse {
                     }
                     _ => Vec::new(),
                 };
-                let code = wallet_rejection_code(&error);
+                // wallet_rejection_code only ever returns SEP43_USER_REJECTED_CODE (-4.0) or
+                // None -- always exactly representable as i32, unlike an arbitrary f64.
+                #[allow(clippy::cast_possible_truncation)]
+                let code = wallet_rejection_code(&error).map(|c| c as i32);
+                let error_code = structured_error_code(&error);
                 Self::Failed {
                     hashes,
                     message: pool_err_message(error),
                     code,
+                    error_code,
                 }
             }
             Err(ExecuteFailure::AspNotReady) => Self::AspNotReady,
@@ -89,19 +99,6 @@ fn step_msg(verb: &str, current: u32, total: u32) -> String {
         format!("{verb} step {current}/{total}…")
     } else {
         format!("{verb}…")
-    }
-}
-
-/// SEP-0043 error code when the failure cause is a wallet user rejection,
-/// unwrapping [`Error::PlanExecution`] to reach the underlying cause.
-fn wallet_rejection_code(error: &Error) -> Option<i32> {
-    let cause = match error {
-        Error::PlanExecution(plan) => plan.cause(),
-        other => other,
-    };
-    match cause {
-        Error::UserRejected(_) => Some(-4),
-        _ => None,
     }
 }
 
@@ -214,21 +211,21 @@ impl PrivatePool {
     }
 }
 
-/// Tests for the SEP-0043 rejection-code mapping exposed to JS.
+/// Tests for the error-code mapping exposed to JS via [`ExecuteJsResponse`].
 #[cfg(all(test, target_arch = "wasm32"))]
 mod spike_tests {
     // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
     // is meant for production paths, not assertions.
     #![allow(clippy::unwrap_used)]
 
-    use super::*;
+    use super::{super::SIGNER_ADDRESS_MISMATCH_CODE, *};
     use wasm_bindgen_test::*;
 
     #[wasm_bindgen_test]
     fn spike_error_mapping_rejection_code() {
         assert_eq!(
             wallet_rejection_code(&Error::UserRejected("stub halt".to_string())),
-            Some(-4),
+            Some(-4.0),
             "a user rejection must surface as SEP-0043 code -4"
         );
 
@@ -246,12 +243,39 @@ mod spike_tests {
         );
         assert_eq!(
             wallet_rejection_code(&mid_plan),
-            Some(-4),
+            Some(-4.0),
             "PlanExecution must be unwrapped to reach the rejection cause"
         );
 
         let mid_plan_other =
             PlanExecutionError::into_error(Vec::new(), Error::Other("simulate failed".to_string()));
         assert_eq!(wallet_rejection_code(&mid_plan_other), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn spike_error_mapping_signer_mismatch_code() {
+        let mismatch = Error::SignerAddressMismatch {
+            requested: "GREQUESTED".to_string(),
+            actual: "GACTUAL".to_string(),
+        };
+        assert_eq!(
+            structured_error_code(&mismatch),
+            Some(SIGNER_ADDRESS_MISMATCH_CODE),
+        );
+        assert_eq!(
+            wallet_rejection_code(&mismatch),
+            None,
+            "a signer mismatch is not a wallet rejection and must not carry -4"
+        );
+
+        let response = ExecuteJsResponse::from(Err(ExecuteFailure::Failed(mismatch)));
+        let ExecuteJsResponse::Failed {
+            code, error_code, ..
+        } = response
+        else {
+            panic!("expected ExecuteJsResponse::Failed");
+        };
+        assert_eq!(code, None);
+        assert_eq!(error_code, Some(SIGNER_ADDRESS_MISMATCH_CODE));
     }
 }

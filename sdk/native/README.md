@@ -6,7 +6,7 @@ Native Rust client for privacy pool deposits, transfers, withdrawals, and local 
 
 ```
 Client (deployment: sync, operational_feed, recipient_lookup)
-  └─ account(signer) → Account (portfolio, user_notes, user_public_keys, is_registered, register_public_keys, sync, pool)
+  └─ account(user_address, signer_address, signer) → Account (portfolio, user_notes, user_public_keys, is_registered, register_public_keys, sync, pool)
        └─ pool(id) → PrivatePool (deposit / transfer / withdraw / balance / notes)
 ```
 
@@ -16,10 +16,13 @@ Client (deployment: sync, operational_feed, recipient_lookup)
 
 ## Quick start
 
+Mirrors the crate-level doctest in [`src/lib.rs`](src/lib.rs), which `cargo test --doc`
+compile-checks on every run — keep the two identical.
+
 ```rust
 use stellar_private_payments::{
     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
-    types::ContractConfig,
+    types::{ContractConfig, NoteOwnerAddress, SignerAddress},
 };
 
 let deployment: ContractConfig = /* load from deployments/ */;
@@ -45,8 +48,13 @@ let signer = Handle::from_box(
         as Box<dyn stellar_private_payments::Signer>,
 );
 
-let account = client.account("G...", signer)?;
-let pool = account.pool("C...")?;
+// Note owner first, then the signing account.
+let account = client.account(
+    NoteOwnerAddress::new("G..."),
+    SignerAddress::new("G..."),
+    signer,
+)?;
+let pool = account.pool("CA2TZ...")?;
 
 pool.deposit(10_000_000u128.into()).await?;
 let balance = pool.balance().await?;
@@ -147,9 +155,14 @@ For CLI and synchronous hosts, use `stellar_private_payments::blocking`:
 
 ```rust
 use stellar_private_payments::blocking::{Client, Account};
+use stellar_private_payments::types::{NoteOwnerAddress, SignerAddress};
 
 let client = Client::init(rpc_url, storage, prover, deployment, None)?;
-let account = client.account("G...", signer)?;
+let account = client.account(
+    NoteOwnerAddress::new("G..."),
+    SignerAddress::new("G..."),
+    signer,
+)?;
 let portfolio = account.portfolio()?;
 ```
 

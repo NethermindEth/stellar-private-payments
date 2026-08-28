@@ -96,8 +96,17 @@ Omit `--output` to write the receipt JSON to standard
 output. Repeat `--commitment` to disclose two, three, or four notes in one
 receipt.
 
-### Preselection via URL
-A per-row **Disclose** button in the main app's notes table (Advanced tab → Actions column) links to:
+### Preselection
+
+A per-row **Disclose** button in the main app's notes table (Advanced tab → Actions column)
+preselects that note in the Disclosure view directly — it no longer navigates through a URL.
+Earlier versions wrote the note commitment into the URL fragment (`#disclosure?commitment=…`),
+which put a commitment identifying a specific payment into session history, browser profile
+sync, and the omnibox; that write path was removed, and preselection now happens via an
+in-app hand-off instead.
+
+The Disclosure view still **reads** `commitment` from the URL, for a link you construct or
+share deliberately (e.g. from support tooling):
 
 ```
 /#disclosure?commitment=0x<note-commitment>

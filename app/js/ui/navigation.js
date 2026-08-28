@@ -18,6 +18,7 @@ import { runConnectStages } from '../connect-pipeline.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { isDbMigrationFailedError, showDbMigrationFailedModal } from '../db-migration-failed.js';
 import { isAmbiguousKeypairsError, showAmbiguousKeypairsModal } from '../db-ambiguous-keypairs.js';
+import { friendlyErrorForCode } from '../facade-errors.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -493,6 +494,15 @@ export const Wallet = {
                 });
                 if (result.connected && !auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
+                if (superseded()) {
+                    // A newer connect() call already owns the session (its
+                    // own epoch bump is what made this one stale, typically
+                    // via the watcher's disconnect()). That flow -- or the
+                    // watcher itself -- already tore down or explained
+                    // things; disconnecting or showing anything here would
+                    // only tear down whatever it already set up.
+                    return;
+                }
                 const message = error?.message || '';
                 // Captured before disconnect() clears App.state.wallet.address.
                 const failedAddress = App.state.wallet.address;
@@ -509,7 +519,7 @@ export const Wallet = {
                 } else if (isDbMigrationFailedError(message)) {
                     showDbMigrationFailedModal(message);
                 } else if (!auto) {
-                    Toast.show(message || 'Failed to connect wallet', 'error');
+                    Toast.show(friendlyErrorForCode(error) || 'Failed to connect wallet', 'error');
                 }
                 throw error;
             } finally {

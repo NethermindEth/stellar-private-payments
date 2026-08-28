@@ -3,7 +3,10 @@ name: Semver checks
 on:
   pull_request:
     branches: ["main"]
-    paths: ["**/Cargo.toml"] # Only run when Cargo.toml changes
+    paths:
+      - "**/Cargo.toml" # dependency/version changes
+      - "**/Cargo.lock" # dependency version changes (can move a public re-exported type)
+      - "sdk/native/src/**" # the only publish = true crate; its API can change without touching Cargo.toml
   push:
     tags: ["v*"] # Run on version tags
 

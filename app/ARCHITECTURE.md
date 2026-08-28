@@ -25,7 +25,7 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.open() → bootnodeRequired() → Client.new() → backgroundSync() → client.account(signer) → account.pool() → PrivatePool ops
+init() → Storage.open() → bootnodeRequired() → Client.new() → backgroundSync() → client.account(options, signer) → account.pool() → PrivatePool ops
 ```
 
 The app wraps this in `wasm-facade.js` and `ui/pool.js`: `bootnodeRequired` → `initializeRuntime` → `client().backgroundSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.

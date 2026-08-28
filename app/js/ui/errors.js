@@ -162,19 +162,26 @@ export function isProofVerificationError(message) {
            (msg.includes('contract') && msg.includes('#0') && msg.includes('verif'));
 }
 
+// SEP-0043 v1.2.1 defines -4 as the user-rejection code. Some adapters also
+// expose a string 'USER_REJECTED' code for app-level compatibility.
+const CANCELLATION_CODES = new Set([-4, 'USER_REJECTED']);
+
 /**
  * Checks if an error indicates the user cancelled/rejected the action.
+ *
+ * Once an error carries *any* structured `.code` (cancellation or not, e.g.
+ * 'SIGNER_ADDRESS_MISMATCH'), that code is authoritative and the message is
+ * never consulted -- a wrong-signer address is untrusted, wallet-controlled
+ * text, and could otherwise contain a substring like "rejected" and be
+ * misclassified as a cancellation. The substring fallback below only runs
+ * when no code was set at all.
  * @param {Error|string|unknown} error - The error to check
  * @returns {boolean} True if user cancelled
  */
 export function isUserCancelledError(error) {
-    // SEP-0043 v1.2.1 defines -4 as the user-rejection code. Some adapters
-    // also expose a string 'USER_REJECTED' code for app-level compatibility.
-    // The structured code is authoritative; the substring check below is only a
-    // fallback for wallets/versions that do not set it, and deliberately looks
-    // at the wallet's own text rather than the full composed message.
-    if (error && (error.code === -4 || error.code === 'USER_REJECTED')) {
-        return true;
+    const code = error?.code;
+    if (code !== undefined && code !== null) {
+        return CANCELLATION_CODES.has(code);
     }
     const msg = walletProvidedMessage(error).toLowerCase();
     return msg.includes('rejected') ||
@@ -199,6 +206,14 @@ export function getFriendlyErrorMessage(error, operationType = 'Transaction') {
     // getTransactionErrorMessage, which also short-circuits on cancellation.
     if (isUserCancelledError(error)) {
         return 'Transaction was cancelled.';
+    }
+
+    // Checked by code, ahead of the pattern list, so the reply never echoes
+    // the requested/signed-with addresses the backend already keeps out of
+    // this message.
+    if (error?.code === 'SIGNER_ADDRESS_MISMATCH') {
+        return 'The connected wallet signed with a different account than expected. ' +
+            'Switch to the correct account in your wallet and try again.';
     }
 
     // Check against known error patterns

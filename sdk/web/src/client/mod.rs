@@ -19,7 +19,7 @@ use stellar_private_payments::{
     disclosure::verify_disclosure_receipt,
     types::{
         DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress, NotePublicKey,
-        SignerAddress,
+        Sensitive, SignerAddress,
     },
 };
 use wasm_bindgen::prelude::*;
@@ -51,41 +51,83 @@ pub use pool::PrivatePool;
 /// Set `code` on a JsError so it survives the wasm boundary without relying
 /// on message wording — the same pattern sdk/web/src/signer.rs uses for
 /// wallet-side errors it builds directly.
-fn js_error_with_code(message: &str, code: f64) -> JsError {
+fn js_error_with_code(message: &str, code: impl Into<JsValue>) -> JsError {
     let err = JsError::new(message);
     let value = JsValue::from(err.clone());
-    let _ = js_sys::Reflect::set(&value, &JsValue::from_str("code"), &JsValue::from_f64(code));
+    let _ = js_sys::Reflect::set(&value, &JsValue::from_str("code"), &code.into());
     err
+}
+
+/// App-level structured code for a signer-identity mismatch, matching the
+/// string the app's own `wallet-signer-guard.js`/`sdk/web/js/signer-guard.js`
+/// already set for the same guarantee at the Freighter-adapter layer.
+pub(crate) const SIGNER_ADDRESS_MISMATCH_CODE: &str = "SIGNER_ADDRESS_MISMATCH";
+
+/// The underlying failure a plan execution wraps, or `error` itself.
+/// Unwrapping here — not separately in every caller — is what lets
+/// `wallet_rejection_code`/`structured_error_code`/`pool_err` classify a
+/// cause identically everywhere it crosses the wasm boundary.
+fn execute_cause(error: &Error) -> &Error {
+    match error {
+        Error::PlanExecution(plan) => plan.cause(),
+        other => other,
+    }
+}
+
+/// Never the two addresses themselves — only a fingerprint-free description a
+/// support agent could still recognise, redacted like any other Tier-1 value.
+fn signer_address_mismatch_message(requested: &str, actual: &str) -> String {
+    format!(
+        "the wallet signed with a different account than requested (requested {}, signed with {})",
+        Sensitive(requested),
+        Sensitive(actual),
+    )
+}
+
+/// SEP-0043 wallet-protocol code when the cause was a user rejection.
+pub(crate) fn wallet_rejection_code(error: &Error) -> Option<f64> {
+    match execute_cause(error) {
+        Error::UserRejected(_) => Some(SEP43_USER_REJECTED_CODE),
+        _ => None,
+    }
+}
+
+/// App-level structured code, distinct from the wallet-protocol code above,
+/// for a cause the UI must classify by code rather than message text.
+pub(crate) fn structured_error_code(error: &Error) -> Option<&'static str> {
+    match execute_cause(error) {
+        Error::SignerAddressMismatch { .. } => Some(SIGNER_ADDRESS_MISMATCH_CODE),
+        _ => None,
+    }
 }
 
 pub(crate) fn pool_err(error: Error) -> JsError {
     use stellar_private_payments::types::AspMembershipSync;
 
-    let cause = match &error {
-        Error::PlanExecution(plan) => plan.cause(),
-        other => other,
-    };
-    match cause {
+    match execute_cause(&error) {
         Error::MembershipSync(AspMembershipSync::RegisterAtASP) => {
             JsError::new("register at ASP before transacting")
         }
         Error::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
             JsError::new("indexer sync in progress; try again shortly")
         }
-        // Without this, pool_err's fallback rebuilds a bare JsError from
-        // Display alone, so cancellation detection on the JS side has
-        // nothing but the message text to go on — carry the SEP-0043 code
-        // through explicitly instead, matching cause (not error) so a
-        // rejection wrapped inside Error::PlanExecution is caught here too.
-        Error::UserRejected(_) => js_error_with_code(&cause.to_string(), SEP43_USER_REJECTED_CODE),
+        Error::UserRejected(_) => {
+            js_error_with_code(&execute_cause(&error).to_string(), SEP43_USER_REJECTED_CODE)
+        }
+        Error::SignerAddressMismatch { requested, actual } => js_error_with_code(
+            &signer_address_mismatch_message(requested, actual),
+            SIGNER_ADDRESS_MISMATCH_CODE,
+        ),
         _ => JsError::new(&error.to_string()),
     }
 }
 
 pub(crate) fn pool_err_message(error: Error) -> String {
-    match &error {
-        Error::PlanExecution(plan) => plan.cause().to_string(),
-        other => other.to_string(),
+    match execute_cause(&error) {
+        Error::SignerAddressMismatch { requested, actual } => {
+            signer_address_mismatch_message(requested, actual)
+        }
+        cause => cause.to_string(),
     }
 }
 
@@ -664,6 +706,34 @@ mod pool_err_tests {
             code_of(&error),
             None,
             "only a genuine SEP-0043 rejection should carry code -4"
+        );
+    }
+
+    fn string_code_of(error: &JsError) -> Option<String> {
+        js_sys::Reflect::get(&JsValue::from(error.clone()), &JsValue::from_str("code"))
+            .ok()
+            .and_then(|code| code.as_string())
+    }
+
+    #[wasm_bindgen_test]
+    fn pool_err_carries_a_distinct_code_for_a_signer_mismatch_and_redacts_both_addresses() {
+        let error = pool_err(Error::SignerAddressMismatch {
+            requested: "GREQUESTED".to_string(),
+            actual: "GACTUAL".to_string(),
+        });
+        assert_eq!(
+            string_code_of(&error),
+            Some(SIGNER_ADDRESS_MISMATCH_CODE.to_string()),
+            "must carry a distinct, non-SEP-0043 code so the UI never falls \
+             back to classifying this as a rejection"
+        );
+        let message = js_sys::Reflect::get(&JsValue::from(error), &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap();
+        assert!(
+            !message.contains("GREQUESTED") && !message.contains("GACTUAL"),
+            "neither identity may appear in the user-visible message: {message}"
         );
     }
 }

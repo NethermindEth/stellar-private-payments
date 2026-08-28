@@ -252,9 +252,9 @@ fn wallet_sign_error(error: JsError) -> Error {
     }
 }
 
-/// Extract the signed value and, when present, the `signerAddress` the
-/// wallet reports it signed with. Absent only for the legacy bare-string
-/// result convention (no object to read a `signerAddress` field off of).
+/// Extract the signed value and, when present, the `signerAddress` the wallet
+/// reports it signed with. Bare-string results are refused outright: there is
+/// no object to read `signerAddress` off, so the signature is unattributable.
 fn normalize_sign_result(
     method: &str,
     result: JsValue,

@@ -64,9 +64,30 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 |--------|----------------------------------------------------------|
 | `Storage.open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ UserKeys: address }` probe) |
+| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only**, see below |
 
 The package exports a `Storage` namespace with `open` only; `fork` / `call` are on the opened handle.
+
+#### `call` request kinds
+
+Externally tagged, e.g. `await storage.call({ DisclaimerState: 'G...' })`.
+
+| Request | Purpose |
+|---------|---------|
+| `{ GetSetting: key }` | Read an app setting |
+| `{ SetSetting: { key, value_json } }` | Write an app setting (explorer, bootnode, telemetry) |
+| `{ DisclaimerState: address }` | Stored disclaimer text, hash, and acceptance |
+| `{ AcceptDisclaimer: [address, disclaimerHashHex] }` | Record acceptance |
+| `{ UserKeys: address }` | Onboarding probe — public note/encryption keys only, never the ASP secret |
+| `{ RecordOperation: fields }` | Append to local operation history |
+| `{ ListOperations: { address, pool_contract_id, limit } }` | Read local operation history |
+| `{ DiagnoseAmbiguousKeypairs: { account_address } }` | Support diagnostic when the local database holds two key sets for one account |
+
+Requests that read or write private key material — `AspSecret`, `DeriveSaveUserKeys`,
+`DisclosureInputs`, `Transact` — and the session-binding controls `BindSession` / `UnbindSession`
+are **refused** on this surface: it takes the account as an argument, so anything reachable through
+it is addressable by any script on the page. Key material is reachable only through
+`client.account()`, which binds the worker to the account whose wallet session it opened.
 
 ### Free functions
 
@@ -89,6 +110,7 @@ The package exports a `Storage` namespace with `open` only; `fork` / `call` are 
 | `aspState()` | On-chain ASP membership state |
 | `allContractsData()` | On-chain pool + ASP state |
 | `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Verify a disclosure receipt (uses this client's prover) |
+| `releaseStorageSession()` | Revoke the storage worker's account binding; the local database is untouched, so a later `account()` restores it |
 
 ### `verifySelectiveDisclosure` (standalone)
 
@@ -102,7 +124,8 @@ Walletless verification — no `Storage` / `Client`. Prover worker URL defaults 
 
 | Method | Description |
 |--------|-------------|
-| `userAddress` | Connected Stellar address |
+| `userAddress` | The account that owns the notes |
+| `signerAddress` | The account that signs and pays; equal to `userAddress` unless `signerAddress` was passed to `account()` |
 | `portfolio()` | Balances across all enabled pools |
 | `userPublicKeys()` | Note + encryption public keys |
 | `aspSecret()` | ASP membership blinding |
@@ -143,6 +166,24 @@ Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance`
 
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`.
 Optional Freighter adapter: `import { FreighterSigner } from 'stellar-private-payments/freighter'` (requires peer `@stellar/freighter-api`).
+
+Each method **must resolve to an object carrying `signerAddress`** alongside the signed value —
+a bare string is refused, because there is nothing to attribute the signature to:
+
+| Method | Required result |
+|--------|-----------------|
+| `signTransaction(xdr, opts?)` | `{ signedTxXdr, signerAddress }` |
+| `signAuthEntry(xdr, opts?)` | `{ signedAuthEntry, signerAddress }` |
+| `signMessage(message, opts?)` | `{ signedMessage, signerAddress }` |
+
+`opts.address` is the account the SDK asked to sign with. When the wallet reports a different
+`signerAddress`, the call fails with code `SIGNER_ADDRESS_MISMATCH` — deliberately not the
+SEP-0043 user-rejection code (`-4`), so a wrong signer is never reported as a decline.
+Optional `getPublicKey()` lets the SDK resolve `userAddress` when it is omitted.
+
+`FreighterSigner.ensureReady()` runs before each call (detection, allow-list, and — when not yet
+granted — a `setAllowed()` prompt); call it up front if you would rather surface that prompt
+before a signing flow starts.
 
 ## Logging & Diagnostics
 
