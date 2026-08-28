@@ -5,6 +5,7 @@ use crate::types::{ContractConfig, DisclosureReceipt, DisclosureVerificationRepo
 use crate::{
     Error, Prover,
     chain::{RpcClient, StateFetcher},
+    disclosure::verify_disclosure_receipt as verify_disclosure_receipt_async,
 };
 
 use super::runtime::block_on;
@@ -20,7 +21,7 @@ pub fn verify_disclosure_receipt(
         RpcClient::new(rpc_url.as_ref()).map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
     let fetcher = StateFetcher::new(rpc, contract_config)
         .map_err(|e| Error::Other(format!("state fetcher error: {e:#}")))?;
-    block_on(crate::verify_disclosure_receipt(
+    block_on(verify_disclosure_receipt_async(
         &fetcher,
         prover,
         receipt,

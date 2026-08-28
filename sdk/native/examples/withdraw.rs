@@ -80,9 +80,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    let recipient = common::env_or("SPP_RECIPIENT_ADDRESS", account.user_address());
+    let recipient = common::env_or("SPP_RECIPIENT_ADDRESS", account.user_address().as_str());
     println!("Recipient: {recipient}");
-    if recipient == account.user_address() {
+    if recipient == account.user_address().as_str() {
         println!("(Using self-withdrawal; funds will return to the wallet's public address.)");
     }
 

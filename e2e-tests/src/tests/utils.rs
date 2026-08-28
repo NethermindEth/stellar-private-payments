@@ -8,9 +8,9 @@ use circuits::test::utils::{
     circom_tester::{Inputs, SignalKey},
     general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
     keypair::derive_public_key,
-    merkle_tree::{merkle_proof, merkle_root},
+    merkle_tree::PrefixTree,
     sparse_merkle_tree::prepare_smt_proof_with_overrides,
-    transaction::{commitment, prepopulated_leaves},
+    transaction::{commitment, prepopulated_prefix},
     transaction_case::{
         TransactionWitness, TxCase, build_base_inputs, prepare_transaction_witness,
     },
@@ -33,7 +33,7 @@ use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField, Zero};
 
 /// Number of levels in the pool's commitment Merkle tree
-pub const LEVELS: usize = 10;
+pub const LEVELS: usize = 20;
 
 /// Number of membership proofs required per input
 pub const N_MEM_PROOFS: usize = 1;
@@ -42,7 +42,16 @@ pub const N_MEM_PROOFS: usize = 1;
 pub const N_NON_PROOFS: usize = 1;
 
 /// Number of levels in the ASP membership Merkle tree
-pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
+pub const ASP_MEMBERSHIP_LEVELS: usize = 10;
+
+/// Number of levels in the ASP non-membership sparse Merkle tree
+pub const SMT_LEVELS: usize = 10;
+
+/// Leaves seeded into the pool and ASP membership trees before a case runs.
+///
+/// Every `leaf_index` a case picks must stay inside it; `transact` appends its
+/// outputs at it.
+pub const LEAF_PREFIX: usize = 64;
 
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
@@ -63,16 +72,6 @@ pub fn test_env() -> Env {
         Env::default()
     }
 }
-
-/// Zero-value leaf of the pool commitment Merkle tree
-///
-/// The pool holds this value in the empty positions. The tests leave the last
-/// leaf pair empty, because a full tree makes `transact` revert before it can
-/// insert the new output commitments.
-pub const POOL_ZERO_LEAF: [u8; 32] = [
-    37, 48, 34, 136, 219, 153, 53, 3, 68, 151, 65, 131, 206, 49, 13, 99, 181, 58, 187, 158, 240,
-    248, 87, 87, 83, 238, 211, 110, 1, 24, 249, 206,
-];
 
 /// Transact circuit stem the pool e2e tests prove against.
 ///
@@ -205,7 +204,13 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
 
     let verifier_address = env.register(CircomGroth16Verifier, ());
 
-    let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
+    let asp_membership = env.register(
+        ASPMembership,
+        (
+            admin.clone(),
+            u32::try_from(ASP_MEMBERSHIP_LEVELS).expect("ASP_MEMBERSHIP_LEVELS fits in u32"),
+        ),
+    );
 
     let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
 
@@ -285,8 +290,8 @@ pub fn bytes32_to_bigint(bytes: &BytesN<32>) -> BigInt {
 /// Contains the leaves and position information needed to construct
 /// membership proofs for a given public key.
 pub struct MembershipTreeProof {
-    /// All leaves in the membership tree
-    pub leaves: [Scalar; 1 << LEVELS],
+    /// Filled leaf prefix of the membership tree
+    pub leaves: Vec<Scalar>,
     /// Index where the public key leaf is inserted
     pub index: usize,
     /// Blinding factor used in the leaf commitment
@@ -324,14 +329,11 @@ where
 
     for j in 0..N_MEM_PROOFS {
         let seed_j = seed_fn(j);
-        let base_mem_leaves_j = prepopulated_leaves(LEVELS, seed_j, &[], 24);
+        let base_mem_leaves_j = prepopulated_prefix(seed_j, &[], LEAF_PREFIX);
 
         for input in &case.inputs {
             membership_trees.push(MembershipTreeProof {
-                leaves: base_mem_leaves_j
-                    .clone()
-                    .try_into()
-                    .expect("Failed to convert to array"),
+                leaves: base_mem_leaves_j.clone(),
                 index: input.leaf_index,
                 blinding: Scalar::zero(),
             });
@@ -421,7 +423,7 @@ pub fn build_policy_inputs(
         let base_idx = j
             .checked_mul(n_inputs)
             .expect("Failed to calculate base index");
-        let mut frozen_leaves = membership_trees[base_idx].leaves;
+        let mut frozen_leaves = membership_trees[base_idx].leaves.clone();
 
         for (k, &pk_scalar) in pubs.iter().enumerate() {
             let index = k
@@ -434,7 +436,8 @@ pub fn build_policy_inputs(
             frozen_leaves[tree.index] = leaf;
         }
 
-        let root_scalar = merkle_root(frozen_leaves.to_vec());
+        let membership_tree = PrefixTree::new(&frozen_leaves, ASP_MEMBERSHIP_LEVELS);
+        let root_scalar = membership_tree.root();
 
         for i in 0..n_inputs {
             let idx = i
@@ -446,7 +449,7 @@ pub fn build_policy_inputs(
             let pk_scalar = pubs[i];
             let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
 
-            let (siblings, path_idx_u64, _depth) = merkle_proof(&frozen_leaves, t.index);
+            let (siblings, path_idx_u64) = membership_tree.proof(t.index);
 
             mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
             mp_blinding[i].push(scalar_to_bigint(t.blinding));
@@ -470,7 +473,7 @@ pub fn build_policy_inputs(
             let proof = prepare_smt_proof_with_overrides(
                 &non_membership[i].key_non_inclusion,
                 &overrides,
-                LEVELS,
+                SMT_LEVELS,
             );
 
             nmp_key[i].push(scalar_to_bigint(pubs[i]));
@@ -608,7 +611,7 @@ pub fn sync_contract_state(
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &contracts.asp_non_membership);
 
     // Membership tree: rebuild the frozen leaves the proof used.
-    let mut memb_leaves = membership_trees[0].leaves;
+    let mut memb_leaves = membership_trees[0].leaves.clone();
     for (i, tree) in membership_trees.iter().enumerate().take(case.inputs.len()) {
         memb_leaves[tree.index] = poseidon2_hash2(
             witness.public_keys[i],
@@ -616,8 +619,8 @@ pub fn sync_contract_state(
             Some(Scalar::from(1u64)),
         );
     }
-    for leaf in memb_leaves {
-        asp_membership_client.insert_leaf(&scalar_to_u256(env, leaf));
+    for leaf in &memb_leaves {
+        asp_membership_client.insert_leaf(&scalar_to_u256(env, *leaf));
     }
 
     // Non-membership tree: insert the same sparse Merkle tree overrides.
@@ -631,15 +634,11 @@ pub fn sync_contract_state(
         let pub_key = derive_public_key(note.priv_key);
         leaves[note.leaf_index] = commitment(note.amount, pub_key, note.blinding);
     }
-    let len = leaves.len();
-    assert_eq!(len % 2, 0, "Leaves should be even for this test");
-    // Keep the last pair empty, so that `transact` can insert its two outputs.
-    let inserted = len.checked_sub(2).expect("pool needs at least two leaves");
+    assert_eq!(leaves.len() % 2, 0, "Leaves should be even for this test");
     let pool_client = PoolContractClient::new(env, &contracts.pool);
-    for (i, leaf) in leaves.iter().enumerate().take(inserted).step_by(2) {
-        let leaf_1 = scalar_to_u256(env, *leaf);
-        let second = i.checked_add(1).expect("leaf pair index");
-        let leaf_2 = scalar_to_u256(env, leaves[second]);
+    for pair in leaves.chunks_exact(2) {
+        let leaf_1 = scalar_to_u256(env, pair[0]);
+        let leaf_2 = scalar_to_u256(env, pair[1]);
         env.as_contract(&contracts.pool, || {
             let _ = pool::merkle_with_history::MerkleTreeWithHistory::insert_two_leaves(
                 env, leaf_1, leaf_2,

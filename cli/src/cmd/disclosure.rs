@@ -5,8 +5,7 @@ use std::{path::Path, str::FromStr};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use stellar_private_payments::{
-    DisclosureRequest,
-    disclosure::find_circuit,
+    disclosure::{DisclosureRequest, find_circuit},
     types::{DisclosureReceipt, DisclosureVerificationReport, Field, correlation_id_or_new},
 };
 

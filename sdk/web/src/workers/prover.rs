@@ -11,7 +11,9 @@ use gloo_worker::{
 };
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments::{
-    Error, PreparedProverTx, Prover, ProverEngine, disclosure,
+    Error, Prover, disclosure,
+    prover::ProverEngine,
+    transact::PreparedProverTx,
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
         DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
@@ -713,7 +715,7 @@ impl Prover for ProverBridge {
 
     async fn prove_disclosure(
         &self,
-        params: stellar_private_payments::DisclosureProveParams,
+        params: stellar_private_payments::disclosure::DisclosureProveParams,
     ) -> Result<DisclosureReceipt, Error> {
         match self
             .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)

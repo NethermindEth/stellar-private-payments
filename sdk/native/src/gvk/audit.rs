@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn audit_commitment_event_roundtrip() -> anyhow::Result<()> {
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = generate_gvk_nonce()?;
         let note = GvkNote::new(
             field(0xBEEF),
@@ -326,7 +326,7 @@ mod tests {
 
         let audited = audit_commitment_event(&d_priv, &event).expect("audit output note");
         assert_eq!(audited.note.pk, note.pk);
-        assert_eq!(audited.note.amount(), 5_000_000u128.into());
+        assert_eq!(audited.note.amount()?, 5_000_000u128.into());
         assert_eq!(audited.note.blinding, note.blinding);
         assert_eq!(audited.commitment, commitment);
         Ok(())
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn audit_commitment_event_rejects_tampered_ciphertext() -> anyhow::Result<()> {
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(field(1), 1u128.into(), field(2), field(3));
         let mut ct = note.encrypt(&admin, &field(4), 0)?;
         ct.c1 = field(0xFFFF);
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn audit_nullifier_event_finds_matching_commitment() -> anyhow::Result<()> {
         let d_priv = field(0x510);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(field(0xABC), 42u128.into(), field(0xDEF), field(5));
         let ct = note.encrypt(&admin, &field(9), 0)?;
         let commitment = commitment_for(&note)?;
@@ -369,7 +369,7 @@ mod tests {
         let audited = audit_nullifier_event(&d_priv, &event, [field(0x1111), commitment])
             .expect("match spent note");
         assert_eq!(audited.commitment, commitment);
-        assert_eq!(audited.note.amount(), 42u128.into());
+        assert_eq!(audited.note.amount()?, 42u128.into());
         Ok(())
     }
 
@@ -383,11 +383,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_output_note() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("output")?;
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
             field(0xBEEF),
             NoteAmount::from(5_000_000u128),
@@ -416,7 +417,10 @@ mod tests {
         let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(5_000_000u128));
+        assert_eq!(
+            tx.outputs[0].note.amount()?,
+            NoteAmount::from(5_000_000u128)
+        );
         assert!(tx.inputs.is_empty());
         assert!(tx.nullifiers.is_empty());
         assert_eq!(audit.next_tx().await?, None);
@@ -425,11 +429,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_traceable_input() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("traceable")?;
         let d_priv = field(0x510);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
 
         let spent = GvkNote::new(
             field(0xABC),

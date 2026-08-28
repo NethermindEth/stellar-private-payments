@@ -36,11 +36,9 @@ pub struct DisclaimerState {
 }
 
 #[derive(Debug, Clone)]
-pub struct AccountKeys {
+pub(crate) struct AccountKeys {
     pub account_id: i64,
-    pub note_keypair: NoteKeyPair,
-    pub encryption_keypair: EncryptionKeyPair,
-    pub membership_blinding: Field,
+    pub keys: StoredUserKeys,
 }
 
 #[derive(Debug, Clone)]
@@ -51,22 +49,23 @@ pub struct StoredUserKeys {
 }
 
 #[derive(Debug, Clone)]
-pub struct PoolCommitmentRow {
+pub(crate) struct PoolCommitmentRow {
     pub commitment_id: i64,
     pub commitment: Field,
     pub leaf_index: u32,
     pub encrypted_output: Vec<u8>,
+    #[allow(dead_code)]
     pub gvk_ciphertext: Option<crate::types::GlobalViewKeyCiphertext>,
 }
 
 #[derive(Debug, Clone)]
-pub struct DerivedUserNoteRow {
+pub(crate) struct DerivedUserNoteRow {
     pub amount: NoteAmount,
     pub blinding: Field,
     pub expected_nullifier: Field,
 }
 
-pub type DeriveNoteFn<'a> =
+pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 impl Storage {
@@ -1322,15 +1321,17 @@ impl Storage {
 
             Ok(AccountKeys {
                 account_id,
-                note_keypair: NoteKeyPair {
-                    private: note_priv,
-                    public: note_pub,
+                keys: StoredUserKeys {
+                    note_keypair: NoteKeyPair {
+                        private: note_priv,
+                        public: note_pub,
+                    },
+                    encryption_keypair: EncryptionKeyPair {
+                        private: enc_priv,
+                        public: enc_pub,
+                    },
+                    membership_blinding,
                 },
-                encryption_keypair: EncryptionKeyPair {
-                    private: enc_priv,
-                    public: enc_pub,
-                },
-                membership_blinding,
             })
         })?;
 
@@ -1344,7 +1345,7 @@ impl Storage {
     /// Scan pool commitments and insert decryptable notes into `user_notes`.
     ///
     /// Progress is tracked per-account in `account_commitment_scan`.
-    pub fn scan_commitments_for_user_notes(
+    pub(crate) fn scan_commitments_for_user_notes(
         &mut self,
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
@@ -1439,7 +1440,7 @@ impl Storage {
                     let quota = pool_quota.min(ACCOUNT_CHUNK);
                     let commitments: Vec<PoolCommitmentRow> = {
                         let mut stmt = tx.prepare(
-                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output
+                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output, c.gvk_ciphertext
                              FROM pool_commitments c
                              JOIN raw_contract_events r ON r.id = c.event_id
                              WHERE r.contract_id = ?1 AND c.id > ?2
@@ -1455,12 +1456,13 @@ impl Storage {
                                 let leaf_index_i64: i64 = row.get(2)?;
                                 let leaf_index = col_u32(leaf_index_i64, 2)?;
                                 let encrypted_output: Vec<u8> = row.get(3)?;
+                                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 4)?;
                                 Ok(PoolCommitmentRow {
                                     commitment_id,
                                     commitment,
                                     leaf_index,
                                     encrypted_output,
-                                    gvk_ciphertext: None,
+                                    gvk_ciphertext,
                                 })
                             },
                         )?;
@@ -1826,8 +1828,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2374,8 +2376,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2450,8 +2452,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2543,8 +2545,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2622,8 +2624,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2697,8 +2699,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2844,6 +2846,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
         use crate::{
@@ -2862,7 +2865,7 @@ mod tests {
         ));
         let mut storage = Storage::connect_file(&path)?;
         let d_priv = Field(crate::types::U256::from(0xAD00));
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
             Field(crate::types::U256::from(0xBEEF)),
             NoteAmount::from(99u128),
@@ -2939,7 +2942,7 @@ mod tests {
         let mut audit = crate::gvk::GvkAudit::new(local, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(99u128));
+        assert_eq!(tx.outputs[0].note.amount()?, NoteAmount::from(99u128));
         assert_eq!(tx.outputs[0].commitment, commitment);
 
         let _ = std::fs::remove_file(path);

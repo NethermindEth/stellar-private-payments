@@ -4,7 +4,7 @@ mod local;
 mod noop;
 
 pub use local::LocalProver;
-pub use noop::NoopProver;
+pub(crate) use noop::NoopProver;
 
 use crate::{
     chain::hash_ext_data_offchain,

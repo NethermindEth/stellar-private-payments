@@ -1,3 +1,4 @@
+mod address;
 mod amounts;
 mod chain_data;
 mod circuit_stem;
@@ -8,6 +9,7 @@ mod ext_data;
 mod gvk;
 mod logging;
 mod policy_tx;
+pub use address::*;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
@@ -62,7 +64,7 @@ pub struct PoolConfigEntry {
     /// backwards compatibility
     #[serde(default)]
     pub gvk_mode: GvkMode,
-    /// Pool administrator's Baby JubJub public key `D`, informational only
+    /// Pool admin's Baby JubJub public key `D`, informational only
     /// not verified. `None` when `gvk_mode` is [`GvkMode::Off`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gvk_authority_pub_key: Option<BabyJubJubPoint>,

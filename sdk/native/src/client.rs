@@ -1,9 +1,12 @@
-use crate::types::{ContractConfig, OperationalFeedItem, RecipientLookup};
+use crate::types::{
+    ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup, SignerAddress,
+};
 
 use crate::{
-    Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
+    Account, Error, Handle, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
     correlation::correlation_id_or_new,
+    prover::NoopProver,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
 
@@ -140,14 +143,19 @@ impl<S: Storage> Client<S> {
     )]
     pub fn account(
         &self,
-        user_address: impl Into<String>,
+        user_address: impl Into<NoteOwnerAddress>,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
+        let user_address = user_address.into();
+        // The signing account is the note owner until a caller can choose
+        // otherwise.
+        let signer_address = SignerAddress::new(user_address.as_str());
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,
             self.prover.clone(),
-            user_address.into(),
+            user_address,
+            signer_address,
             signer,
             self.sync.clone(),
             self.contract_config.clone(),

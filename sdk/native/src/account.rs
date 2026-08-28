@@ -1,14 +1,15 @@
 use crate::types::{
-    ContractConfig, EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary,
+    ContractConfig, EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance,
+    SignerAddress, UserNoteSummary,
 };
 
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage,
+    Error, Handle, PrivatePool, Prover, Signer, Storage,
     chain::RpcClient,
     sync::{SyncHandle, catch_up, confirm_tx},
-    types::TransactionResult,
+    types::{PrivatePoolConfig, TransactionResult},
 };
 
 /// Stellar account session
@@ -18,18 +19,23 @@ pub struct Account<S: Storage> {
     rpc: RpcClient,
     storage: S,
     prover: Handle<dyn Prover>,
-    user_address: String,
+    user_address: NoteOwnerAddress,
+    signer_address: SignerAddress,
     signer: Handle<dyn Signer>,
     sync: SyncHandle,
     contract_config: ContractConfig,
 }
 
 impl<S: Storage> Account<S> {
+    // Bundling these into a struct would trade the lint for an indirection at
+    // the only two call sites, both of which name every field explicitly.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rpc: RpcClient,
         storage: S,
         prover: Handle<dyn Prover>,
-        user_address: String,
+        user_address: NoteOwnerAddress,
+        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
         sync: SyncHandle,
         contract_config: ContractConfig,
@@ -39,14 +45,22 @@ impl<S: Storage> Account<S> {
             storage,
             prover,
             user_address,
+            signer_address,
             signer,
             sync,
             contract_config,
         }
     }
 
-    pub fn user_address(&self) -> &str {
+    /// The account that owns the notes.
+    pub fn user_address(&self) -> &NoteOwnerAddress {
         &self.user_address
+    }
+
+    /// The account that signs and pays. A distinct type from
+    /// [`Self::user_address`] so the two cannot be confused.
+    pub fn signer_address(&self) -> &SignerAddress {
+        &self.signer_address
     }
 
     pub fn signer(&self) -> &Handle<dyn Signer> {
@@ -74,24 +88,30 @@ impl<S: Storage> Account<S> {
     pub async fn portfolio(&self) -> Result<Vec<PortfolioBalance>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .list_portfolio_balances(&self.user_address, &self.contract_config)
+            .list_portfolio_balances(self.user_address.as_str(), &self.contract_config)
             .await
     }
 
     /// Locally derived note and encryption public keys for this account.
     pub async fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        self.storage.user_public_keys(&self.user_address).await
+        self.storage
+            .user_public_keys(self.user_address.as_str())
+            .await
     }
 
     /// Locally derived ASP membership blinding for this account.
     pub async fn asp_secret(&self) -> Result<Field, Error> {
-        self.storage.asp_secret(&self.user_address).await
+        self.storage.asp_secret(self.user_address.as_str()).await
     }
 
     /// Derive the ASP membership tree leaf for this account's note public key.
     pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
-        let note = self.storage.user_public_keys(&self.user_address).await?.0;
-        let blinding = self.storage.asp_secret(&self.user_address).await?;
+        let note = self
+            .storage
+            .user_public_keys(self.user_address.as_str())
+            .await?
+            .0;
+        let blinding = self.storage.asp_secret(self.user_address.as_str()).await?;
         crate::crypto::derive_asp_user_leaf(&note, &blinding)
     }
 
@@ -101,7 +121,7 @@ impl<S: Storage> Account<S> {
     pub async fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .list_user_notes(&self.user_address, limit)
+            .list_user_notes(self.user_address.as_str(), limit)
             .await
     }
 
@@ -112,7 +132,7 @@ impl<S: Storage> Account<S> {
         self.ensure_synced().await?;
         Ok(self
             .storage
-            .recipient_lookup(&self.user_address, &self.contract_config)
+            .recipient_lookup(self.user_address.as_str(), &self.contract_config)
             .await?
             .entry
             .is_some())
@@ -126,7 +146,11 @@ impl<S: Storage> Account<S> {
     ) -> Result<TransactionResult, Error> {
         let (note_pk, enc_pk) = match (note_public_key, encryption_public_key) {
             (Some(note), Some(enc)) => (note, enc),
-            (None, None) => self.storage().user_public_keys(&self.user_address).await?,
+            (None, None) => {
+                self.storage()
+                    .user_public_keys(self.user_address.as_str())
+                    .await?
+            }
             _ => {
                 return Err(Error::Other(
                     "note and encryption public keys must both be provided or both omitted".into(),
@@ -137,7 +161,10 @@ impl<S: Storage> Account<S> {
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
         let prepared = fetcher
-            .prepare_register(&self.user_address, note_pk.0, enc_pk.0)
+            // Registration uses the note-owner address, which is both the
+            // registry key and the transaction source. Which it should be when
+            // the two identities differ is unsettled.
+            .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
             .await
             .map_err(|e| Error::Other(format!("prepare register: {e:#}")))?;
         let signed = self.signer.sign_soroban_transaction(&prepared).await?;
@@ -155,6 +182,7 @@ impl<S: Storage> Account<S> {
             contract_config: self.contract_config.clone(),
             pool_contract_id: pool_contract_id.into(),
             user_address: self.user_address.clone(),
+            signer_address: self.signer_address.clone(),
         };
 
         PrivatePool::init(

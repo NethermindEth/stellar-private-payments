@@ -49,6 +49,9 @@ function wrapAccount(wasmAccount) {
     get userAddress() {
       return wasmAccount.userAddress;
     },
+    get signerAddress() {
+      return wasmAccount.signerAddress;
+    },
     portfolio: () => wasmAccount.portfolio(),
     userPublicKeys: () => wasmAccount.userPublicKeys(),
     aspSecret: () => wasmAccount.aspSecret(),
@@ -75,10 +78,21 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
+      // An omitted `userAddress` is resolved from `signer.getPublicKey()`
+      // above, so passing `signerAddress` without `userAddress` would silently
+      // make the signer the note owner.
+      if (options.signerAddress && !options.userAddress) {
+        throw new Error(
+          'options.userAddress is required when options.signerAddress is supplied',
+        );
+      }
+      const signerAddress = options.signerAddress ?? userAddress;
+
       const wasmAccount = await wasmClient.account(
         {
           ...options,
           userAddress,
+          signerAddress,
         },
         signer,
       );

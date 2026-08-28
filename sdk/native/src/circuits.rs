@@ -67,7 +67,7 @@ mod store {
 
     use super::{CircuitHashes, CircuitLockfile, Error, circuit_lock};
     use crate::types::{
-        PolicyFlags, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        CircuitStem, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
         SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
@@ -134,12 +134,12 @@ mod store {
             read_artifacts(&self.dir, stem, hashes)
         }
 
-        pub fn transact_artifacts(&self) -> Result<Vec<(PolicyFlags, ProverArtifacts)>, Error> {
-            PolicyFlags::all_flags()
+        pub fn transact_artifacts(&self) -> Result<Vec<(CircuitStem, ProverArtifacts)>, Error> {
+            CircuitStem::all_transact_stems()
                 .into_iter()
-                .map(|flags| {
-                    self.artifacts(&flags.circuit_stem())
-                        .map(|artifacts| (flags, artifacts))
+                .map(|stem| {
+                    self.artifacts(&stem.to_string())
+                        .map(|artifacts| (stem, artifacts))
                 })
                 .collect()
         }
@@ -268,7 +268,7 @@ pub use store::CircuitStore;
 mod tests {
     use super::*;
     use crate::types::{
-        PolicyFlags, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        CircuitStem, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
         SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
 
@@ -283,12 +283,9 @@ mod tests {
     fn lockfile_covers_transact_and_disclosure() {
         let lock = circuit_lock().expect("parse embedded circuits.json");
         assert!(!lock.version.is_empty());
-        for flags in PolicyFlags::all_flags() {
-            assert!(
-                lock.circuits.contains_key(&flags.circuit_stem()),
-                "missing {}",
-                flags.circuit_stem()
-            );
+        for stem in CircuitStem::all_transact_stems() {
+            let stem_str = stem.to_string();
+            assert!(lock.circuits.contains_key(&stem_str), "missing {stem_str}");
         }
         for stem in DISCLOSURE_STEMS {
             assert!(lock.circuits.contains_key(stem), "missing {stem}");

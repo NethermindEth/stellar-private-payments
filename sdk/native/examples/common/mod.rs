@@ -226,7 +226,7 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
     })?;
     let signer = build_signer(&secret, &passphrase, &user_address)?;
     client
-        .account(&user_address, signer)
+        .account(user_address.as_str(), signer)
         .map_err(|e| format!("open account session: {e}"))
 }
 
@@ -368,7 +368,9 @@ pub fn require_funded_for_pool(
                 .map_err(|e| format!("state fetcher: {e}"))?;
             let runtime =
                 tokio::runtime::Runtime::new().map_err(|e| format!("tokio runtime: {e}"))?;
-            let entry = match runtime.block_on(fetcher.rpc().get_account(address)) {
+            // Note-owner, not signer: a deposit pulls tokens from whoever
+            // sends it, so it cannot be delegated to a different account.
+            let entry = match runtime.block_on(fetcher.rpc().get_account(address.as_str())) {
                 Ok(entry) => entry,
                 Err(e) => {
                     let msg = e.to_string();

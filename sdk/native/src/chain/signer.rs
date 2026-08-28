@@ -381,7 +381,8 @@ fn tx_hash_for_signature(
 }
 
 /// Verifies the Ed25519 signature at `signature_index` in a signed v1 envelope.
-pub fn verify_tx(
+#[allow(dead_code)]
+pub(crate) fn verify_tx(
     envelope: &TransactionEnvelope,
     network_passphrase: &str,
     signer_public_key: &str,

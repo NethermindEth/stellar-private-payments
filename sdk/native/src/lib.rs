@@ -15,13 +15,9 @@
 //!
 //! let store = CircuitStore::open("./circuits");
 //! store.ensure_blocking()?;
-//! let stem = CircuitStem::transact(
-//!     PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-//!     Default::default(),
-//! );
-//! let artifacts = store.artifacts(&stem.to_string())?;
+//! let artifacts = store.transact_artifacts()?;
 //! let prover = Handle::from_box(
-//!     Box::new(LocalProver::from_artifacts(&[(stem, artifacts)])?) as Box<dyn Prover>,
+//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 //! );
 //! let signer = Handle::from_box(
 //!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
@@ -50,8 +46,11 @@ pub mod chain;
 pub mod circuits;
 pub mod disclosure;
 pub mod gvk;
+pub mod plan;
 pub mod planner;
+pub mod prover;
 pub mod state;
+pub mod transact;
 pub mod types;
 pub mod zk;
 
@@ -64,50 +63,24 @@ mod correlation;
 pub mod crypto;
 mod error;
 mod handle;
-mod plan;
 mod pool;
-mod prover;
 mod signer;
 mod sleep;
 mod storage;
 mod sync;
-mod transact;
 
 pub use account::Account;
 #[cfg(not(target_arch = "wasm32"))]
 pub use circuits::CircuitStore;
 pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
 pub use client::Client;
-pub use core::PoolCore;
-pub use disclosure::{
-    BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
-    DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
-};
 pub use error::{Error, PlanExecutionError};
-pub use gvk::{GvkAudit, GvkTxAudit, audit_commitment_event, audit_nullifier_event};
 pub use handle::Handle;
-pub use plan::PreparedTransactionPlan;
-pub use planner::{SpendTarget, SpendableNote, Transact};
 pub use pool::PrivatePool;
-pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
+pub use prover::{LocalProver, Prover};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
-pub use sync::{BackgroundSync, BackgroundSyncStop, SyncHandle, SyncMode, bootnode_required};
-pub use transact::{
-    BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
-    build_transact_params, build_validated_pool_tree, load_user_key_material,
-    transact_request_from_step,
-};
-pub use types::{
-    Estimate, OperationalFeedItem, PolicyFlags, PortfolioBalance, PrivatePoolConfig,
-    ProverArtifacts, RecipientLookup, SignedTransaction, TransactChainContext, TransactionResult,
-    TransferRecipient, UserNoteSummary,
-};
-pub use zk::{
-    encryption::KEY_DERIVATION_MESSAGE,
-    gvk::{GvkAuditedNote, GvkRecoveredNote},
-    prover::convert_proof_to_soroban,
-};
+pub use sync::{BackgroundSync, BackgroundSyncStop, SyncMode, bootnode_required};
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).
-pub type PreparedTransaction = PreparedProverTx;
+pub type PreparedTransaction = transact::PreparedProverTx;

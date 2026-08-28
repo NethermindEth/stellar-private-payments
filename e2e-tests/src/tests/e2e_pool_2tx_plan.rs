@@ -5,9 +5,9 @@
 //! .bin` operation graph, the same artifact the CLI and the SDK load.
 
 use super::utils::{
-    DeployedContracts, LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint,
-    deploy_contracts, generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, test_env,
-    u256_to_scalar, wrap_groth16_proof,
+    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, build_membership_trees,
+    bytes32_to_bigint, deploy_contracts, generate_proof, non_membership_overrides_from_pubs,
+    scalar_to_u256, test_env, u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -17,8 +17,8 @@ use asp_non_membership::ASPNonMembershipClient;
 use circuits::test::utils::{
     general::{poseidon2_hash2, scalar_to_bigint},
     keypair::derive_public_key,
-    merkle_tree::merkle_root,
-    transaction::{commitment, prepopulated_leaves},
+    merkle_tree::{merkle_root_padded, zero_leaf},
+    transaction::{commitment, prepopulated_prefix},
     transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
@@ -190,7 +190,7 @@ fn apply_consolidate_to_harness(
         commitment(Scalar::from(0u64), Scalar::from(0u64), Scalar::from(0u64));
 
     assert_eq!(
-        merkle_root(leaves.to_vec()),
+        merkle_root_padded(leaves, LEVELS),
         u256_to_scalar(&pool_client.get_root()),
         "off-chain leaves must match pool after consolidate"
     );
@@ -237,7 +237,7 @@ fn run_step(
     assert!(result.verified, "Proof should verify locally");
 
     if bootstrap_pool_through.is_some() {
-        let mut memb_leaves = membership_trees[0].leaves;
+        let mut memb_leaves = membership_trees[0].leaves.clone();
         memb_leaves[membership_trees[0].index] = poseidon2_hash2(
             witness.public_keys[0],
             membership_trees[0].blinding,
@@ -248,8 +248,8 @@ fn run_step(
             membership_trees[1].blinding,
             Some(Scalar::from(1u64)),
         );
-        for leaf in memb_leaves {
-            asp_membership.insert_leaf(&scalar_to_u256(env, leaf));
+        for leaf in &memb_leaves {
+            asp_membership.insert_leaf(&scalar_to_u256(env, *leaf));
         }
 
         for (key, value) in non_membership_overrides_from_pubs(&witness.public_keys) {
@@ -365,29 +365,20 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
     )?;
     assert_eq!(session.len(), 2);
 
-    let mut leaves = prepopulated_leaves(LEVELS, 0xDEAD_BEEFu64, &[0, 1, 6], 24);
+    let mut leaves = prepopulated_prefix(0xDEAD_BEEFu64, &[0, 1, 6], LEAF_PREFIX);
     for note in &test_wallet {
         note.set_in_tree(&mut leaves);
     }
 
-    let zero = U256::from_be_bytes(
-        &env,
-        &Bytes::from_array(
-            &env,
-            &[
-                37, 48, 34, 136, 219, 153, 53, 3, 68, 151, 65, 131, 206, 49, 13, 99, 181, 58, 187,
-                158, 240, 248, 87, 87, 83, 238, 211, 110, 1, 24, 249, 206,
-            ],
-        ),
-    );
+    // Reserve the slots `transact` appends each consolidate output pair into.
     let reserved_leaves = session.len().checked_mul(2).expect("reserved leaf count");
-    let first_merge_leaf_index = leaves
-        .len()
-        .checked_sub(reserved_leaves)
-        .expect("tree has reserved tail");
-    for leaf in &mut leaves[first_merge_leaf_index..] {
-        *leaf = u256_to_scalar(&zero);
-    }
+    let first_merge_leaf_index = leaves.len();
+    leaves.resize(
+        first_merge_leaf_index
+            .checked_add(reserved_leaves)
+            .expect("reserved tail"),
+        zero_leaf(),
+    );
 
     let ext_data = ExtData {
         recipient: Address::generate(&env),

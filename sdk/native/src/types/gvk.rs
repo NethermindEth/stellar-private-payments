@@ -1,7 +1,7 @@
 //! Global View Key (GVK) memo types.
 //!
 //! Data structures + serialization for the off-chain memo a pool
-//! administrator uses to audit notes, mirroring the in-circuit encryption in
+//! admin uses to audit notes, mirroring the in-circuit encryption in
 //! `circuits/src/globalViewKey.circom`. Encryption and decryption live in
 //! [`crate::zk::gvk`].
 
@@ -15,9 +15,9 @@ pub const GLOBAL_VIEW_KEY_MEMO_VERSION: u32 = 1;
 /// A Baby JubJub curve point.
 ///
 /// Baby JubJub's base field equals BN254's scalar field, so coordinates are
-/// represented with the existing [`Field`] type. This struct does not
-/// validate that `(x, y)` lies on the curve; that check requires curve
-/// arithmetic this crate does not depend on.
+/// represented with the existing [`Field`] type. Deserialization does not
+/// validate that `(x, y)` lies on the curve; callers using these coordinates
+/// in curve arithmetic must handle invalid points via [`crate::zk::babyjub`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BabyJubJubPoint {
@@ -85,7 +85,7 @@ pub struct GlobalViewKeyMemo {
     pub version: u32,
     /// View-only vs. traceable, see field docs on [`GlobalViewKeyMemo`].
     pub mode: GlobalViewKeyMode,
-    /// The administrator Baby JubJub public key `D` this memo claims to be
+    /// The admin Baby JubJub public key `D` this memo claims to be
     /// encrypted under.
     ///
     /// This is informational only and is not verified by

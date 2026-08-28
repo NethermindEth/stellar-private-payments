@@ -58,7 +58,9 @@ pub fn point_to_coords(p: Point) -> (Scalar, Scalar) {
 }
 
 /// Complete twisted Edwards addition, matching circomlib's `BabyAdd`.
-pub fn add(p: Point, q: Point) -> Point {
+///
+/// Returns `None` only when a denominator is not invertible.
+pub fn add(p: Point, q: Point) -> Option<Point> {
     let a = Scalar::from(168700u64);
     let d = Scalar::from(168696u64);
     let beta = p.x * q.y;
@@ -66,55 +68,58 @@ pub fn add(p: Point, q: Point) -> Point {
     let delta = (p.y - a * p.x) * (q.x + q.y);
     let tau = beta * gamma;
 
-    let x_den = (Scalar::one() + d * tau)
-        .inverse()
-        .expect("BabyJubJub addition denominator is never zero");
-    let y_den = (Scalar::one() - d * tau)
-        .inverse()
-        .expect("BabyJubJub addition denominator is never zero");
+    let x_den = (Scalar::one() + d * tau).inverse()?;
+    let y_den = (Scalar::one() - d * tau).inverse()?;
 
-    Point {
+    Some(Point {
         x: (beta + gamma) * x_den,
         y: (delta + a * beta - gamma) * y_den,
-    }
+    })
 }
 
 /// Point doubling, matching circomlib's `BabyDbl`.
-pub fn double(p: Point) -> Point {
+pub fn double(p: Point) -> Option<Point> {
     add(p, p)
 }
 
 /// Multiply `point` by the integer value of `scalar` via double-and-add.
-pub fn scalar_mul(point: Point, scalar: Scalar) -> Point {
+///
+/// Not constant-time (branches on scalar bits).
+pub fn scalar_mul(point: Point, scalar: Scalar) -> Option<Point> {
     let mut acc = identity();
     let mut base = point;
     for bit in scalar.into_bigint().to_bits_le() {
         if bit {
-            acc = add(acc, base);
+            acc = add(acc, base)?;
         }
-        base = double(base);
+        base = double(base)?;
     }
-    acc
+    Some(acc)
 }
 
 /// Clear the cofactor: return `8 * point` (three doublings).
-pub fn mul8(point: Point) -> Point {
-    double(double(double(point)))
+pub fn mul8(point: Point) -> Option<Point> {
+    double(double(double(point)?)?)
 }
 
-/// Whether `point` satisfies the Baby JubJub curve equation.
-pub fn is_on_curve(point: Point) -> bool {
-    let a = Scalar::from(168700u64);
-    let d = Scalar::from(168696u64);
-    let x2 = point.x * point.x;
-    let y2 = point.y * point.y;
-    a * x2 + y2 == Scalar::one() + d * x2 * y2
+impl Point {
+    /// Whether this point satisfies the Baby JubJub curve equation.
+    pub fn is_on_curve(self) -> bool {
+        let a = Scalar::from(168700u64);
+        let d = Scalar::from(168696u64);
+        let x2 = self.x * self.x;
+        let y2 = self.y * self.y;
+        a * x2 + y2 == Scalar::one() + d * x2 * y2
+    }
 }
 
 impl BabyJubJubPoint {
     /// Returns `scalar * BASE8`.
-    pub fn from_priv_scalar(scalar: &Field) -> Self {
-        Self::from_point(scalar_mul(base8(), field_to_scalar(scalar)))
+    pub fn from_priv_scalar(scalar: &Field) -> Option<Self> {
+        Some(Self::from_point(scalar_mul(
+            base8(),
+            field_to_scalar(scalar),
+        )?))
     }
 
     pub(crate) fn to_coords(&self) -> (Scalar, Scalar) {
@@ -144,13 +149,13 @@ mod tests {
 
     #[test]
     fn base8_is_on_curve() {
-        assert!(is_on_curve(base8()));
+        assert!(base8().is_on_curve());
     }
 
     #[test]
     fn base8_has_prime_order() {
         let l = Scalar::from_str(SUBGROUP_ORDER).expect("valid subgroup order");
-        assert_eq!(scalar_mul(base8(), l), identity());
+        assert_eq!(scalar_mul(base8(), l), Some(identity()));
     }
 
     #[test]
@@ -166,7 +171,10 @@ mod tests {
         let b = Scalar::from(654321u64);
         assert_eq!(
             scalar_mul(g, a + b),
-            add(scalar_mul(g, a), scalar_mul(g, b))
+            add(
+                scalar_mul(g, a).expect("valid scalar mul"),
+                scalar_mul(g, b).expect("valid scalar mul")
+            )
         );
     }
 }

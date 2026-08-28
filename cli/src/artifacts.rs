@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    ProverArtifacts,
     disclosure::{
         RegisteredCircuit, SELECTIVE_DISCLOSURE_1, SELECTIVE_DISCLOSURE_2, SELECTIVE_DISCLOSURE_3,
         SELECTIVE_DISCLOSURE_4,
     },
-    types::CircuitStem,
+    types::{CircuitStem, ProverArtifacts},
 };
 
 use crate::config::default_data_dir;

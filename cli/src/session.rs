@@ -7,9 +7,9 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments::{
-    Handle, LocalProver, LocalStorage, Prover, Signer, TransferRecipient,
+    Handle, LocalProver, LocalStorage, Prover, Signer,
     blocking::{Account as SdkAccount, Client, PrivatePool},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
+    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
@@ -61,7 +61,10 @@ impl ClientSession {
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
         let sdk_account = client
-            .account(&account.address, alias_signer(config, account, network))
+            .account(
+                account.address.as_str(),
+                alias_signer(config, account, network),
+            )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
         Ok(Self {
@@ -77,7 +80,10 @@ impl ClientSession {
     ) -> Result<Self> {
         let client = disclosure_client(config, network)?;
         let sdk_account = client
-            .account(&account.address, alias_signer(config, account, network))
+            .account(
+                account.address.as_str(),
+                alias_signer(config, account, network),
+            )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
         Ok(Self {
             client,
@@ -92,7 +98,7 @@ impl ClientSession {
     pub fn operational_feed(
         &self,
         limit: u32,
-    ) -> Result<Vec<stellar_private_payments::OperationalFeedItem>> {
+    ) -> Result<Vec<stellar_private_payments::types::OperationalFeedItem>> {
         self.client
             .operational_feed(limit)
             .map_err(|e| anyhow::anyhow!("operational feed: {e}"))

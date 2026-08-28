@@ -8,7 +8,7 @@ use stellar_private_payments::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
     },
-    types::SignedTransaction,
+    types::{SignedTransaction, SignerAddress},
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -21,14 +21,17 @@ const SIGN_METHODS: &[&str] = &["signMessage", "signTransaction", "signAuthEntry
 pub struct WalletSigner {
     signer: JsValue,
     network_passphrase: String,
-    user_address: String,
+    /// The account this signer asks the wallet to sign with: the requested
+    /// `address`, the auth entries selected for signing, and the public key
+    /// embedded in the address credential.
+    signer_address: SignerAddress,
 }
 
 impl WalletSigner {
     pub fn new(
         signer: JsValue,
         network_passphrase: String,
-        user_address: String,
+        signer_address: SignerAddress,
     ) -> Result<Self, JsError> {
         if signer.is_null() || signer.is_undefined() {
             return Err(JsError::new("signer is required"));
@@ -43,7 +46,7 @@ impl WalletSigner {
         Ok(Self {
             signer,
             network_passphrase,
-            user_address,
+            signer_address,
         })
     }
 
@@ -55,8 +58,12 @@ impl WalletSigner {
         &self,
         prepared: &PreparedSorobanTx,
     ) -> Result<TransactionEnvelope, JsError> {
-        let steps = auth_sign_steps(prepared, &self.network_passphrase, &self.user_address)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let steps = auth_sign_steps(
+            prepared,
+            &self.network_passphrase,
+            self.signer_address.as_str(),
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
 
         let mut auth_signatures = Vec::with_capacity(steps.len());
         for step in &steps {
@@ -72,8 +79,9 @@ impl WalletSigner {
             ));
         }
 
-        let tx_b64 = unsigned_tx_for_signing(prepared, &self.user_address, &auth_signatures)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let tx_b64 =
+            unsigned_tx_for_signing(prepared, self.signer_address.as_str(), &auth_signatures)
+                .map_err(|e| JsError::new(&e.to_string()))?;
 
         let signed_b64 = self
             .call("signTransaction", &[tx_b64.as_str().into()])
@@ -84,7 +92,11 @@ impl WalletSigner {
 
     fn wallet_opts(&self) -> Object {
         let opts = Object::new();
-        let _ = Reflect::set(&opts, &"address".into(), &self.user_address.clone().into());
+        let _ = Reflect::set(
+            &opts,
+            &"address".into(),
+            &JsValue::from_str(self.signer_address.as_str()),
+        );
         let _ = Reflect::set(
             &opts,
             &"networkPassphrase".into(),
@@ -296,7 +308,7 @@ mod spike_tests {
     }
 
     fn new_signer(signer: JsValue) -> Result<WalletSigner, JsError> {
-        WalletSigner::new(signer, PASSPHRASE.to_string(), ADDRESS.to_string())
+        WalletSigner::new(signer, PASSPHRASE.to_string(), SignerAddress::new(ADDRESS))
     }
 
     fn error_message(error: JsError) -> String {

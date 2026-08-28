@@ -180,7 +180,7 @@ Mixed-policy example:
 ./deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
@@ -194,7 +194,7 @@ For testnet purposes
   --deployer <identity> \
   --policy-flags blocklist \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool native:$(stellar contract id asset --asset native --network testnet) \
   --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
@@ -207,7 +207,7 @@ Allowlist + blocklist pool:
   --deployer <identity> \
   --policy-flags allowlist-blocklist \
   --asp-levels 10 \
-  --pool-levels 10 \
+  --pool-levels 20 \
   --max-deposit 1000000000 \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
@@ -298,25 +298,15 @@ cargo build -p stellar-private-payments-cli
 
 If you build it in a release mode, then ensure that proper data directory is configured.
 
-A CLI *prerelease* can be done with 
-
-```sh
-git tag v0.1.0-rc.1 # with a proper new version
-git push origin v0.1.0-rc.1
-```
-
-then you can install it from the Github with
+A CLI *prerelease* can be done with a release PR that bumps `cli/Cargo.toml` (keeping the same major.minor as `sdk/native` and `sdk/web/package.json`), then merge to `main`. Auto-tag creates `cli-v…` and the Release workflow publishes binaries.
 
 ```sh
 ./scripts/install.sh --pre
 ```
 
-To make a production release of CLI
+To make a production release of CLI, merge a release PR with the desired `cli/Cargo.toml` version bump. Tags and GitHub releases are created automatically (`cli-vX.Y.Z`).
 
-```sh
-git tag v0.1.0 # with a proper new version
-git push origin v0.1.0
-```
+Release versions share **major.minor** across `sdk/native`, `sdk/web/package.json`, and `cli/Cargo.toml`; patch versions are independent. See `scripts/release-versions.sh check`.
 
 ## Instrumentation & Logging Guidelines
 
