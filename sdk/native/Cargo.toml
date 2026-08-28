@@ -1,6 +1,6 @@
 [package]
 name = "stellar-private-payments"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
