@@ -455,6 +455,20 @@ impl From<NoteAmount> for Field {
     }
 }
 
+impl TryFrom<Field> for NoteAmount {
+    type Error = anyhow::Error;
+
+    fn try_from(field: Field) -> Result<Self> {
+        let le = field.to_le_bytes();
+        if le[16..] != [0u8; 16] {
+            return Err(anyhow!("note amount exceeds u128"));
+        }
+        Ok(NoteAmount::from(u128::from_le_bytes(
+            le[..16].try_into().expect("16-byte slice"),
+        )))
+    }
+}
+
 impl TryFrom<ExtAmount> for Field {
     type Error = anyhow::Error;
 
@@ -741,6 +755,19 @@ mod tests {
         let f = Field::from_le_bytes_mod_order(le);
         assert_eq!(U256::from(f), small);
 
+        Ok(())
+    }
+
+    #[test]
+    fn note_amount_try_from_field() -> Result<()> {
+        assert_eq!(
+            NoteAmount::try_from(Field::from(NoteAmount::from(1_000_000)))?,
+            NoteAmount::from(1_000_000)
+        );
+
+        let mut le = Field::from(NoteAmount::from(42)).to_le_bytes();
+        le[16] = 1;
+        assert!(NoteAmount::try_from(Field::try_from_le_bytes(le)?).is_err());
         Ok(())
     }
 

@@ -101,11 +101,11 @@ impl GvkNote {
 }
 
 impl GvkRecoveredNote {
-    pub fn amount(&self) -> NoteAmount {
-        let bytes = self.amount.to_le_bytes();
-        let mut amount_le = [0u8; 16];
-        amount_le.copy_from_slice(&bytes[..16]);
-        NoteAmount::from(u128::from_le_bytes(amount_le))
+    /// Interprets the recovered amount field as a [`NoteAmount`]
+    ///
+    /// Fails if the field's upper 16 little-endian bytes are non-zero.
+    pub fn amount(&self) -> Result<NoteAmount> {
+        NoteAmount::try_from(self.amount)
     }
 }
 
@@ -270,7 +270,21 @@ mod tests {
 
         assert_eq!(recovered.pk, note.pk);
         assert_eq!(recovered.amount, note.amount);
+        assert_eq!(recovered.amount()?, NoteAmount::from(1_000_000));
         assert_eq!(recovered.blinding, note.blinding);
+        Ok(())
+    }
+
+    #[test]
+    fn amount_rejects_non_u128_field() -> Result<()> {
+        let mut le = [0u8; 32];
+        le[16] = 1;
+        let note = GvkRecoveredNote {
+            pk: field(0),
+            amount: Field::try_from_le_bytes(le)?,
+            blinding: field(0),
+        };
+        assert!(note.amount().is_err());
         Ok(())
     }
 
