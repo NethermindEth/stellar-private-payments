@@ -62,7 +62,7 @@ pub struct PoolConfigEntry {
     /// backwards compatibility
     #[serde(default)]
     pub gvk_mode: GvkMode,
-    /// Pool administrator's Baby JubJub public key `D`, informational only
+    /// Pool admin's Baby JubJub public key `D`, informational only
     /// not verified. `None` when `gvk_mode` is [`GvkMode::Off`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gvk_authority_pub_key: Option<BabyJubJubPoint>,

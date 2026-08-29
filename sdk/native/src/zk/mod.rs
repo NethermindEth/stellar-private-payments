@@ -1,11 +1,13 @@
 //! Zero-knowledge proving stack: circuit crypto, Groth16, witness generation,
 //! and selective-disclosure receipt validation.
 
+pub mod babyjub;
 pub mod circom_reduction;
 pub mod crypto;
 pub mod disclosure;
 pub mod encryption;
 pub mod flows;
+pub mod gvk;
 pub mod merkle;
 pub mod notes;
 pub mod prover;
