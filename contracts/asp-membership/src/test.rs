@@ -5,7 +5,10 @@ use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
-use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
+use soroban_sdk::{
+    Address, Bytes, Env, IntoVal, U256, Vec, vec,
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+};
 use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -719,4 +722,199 @@ fn test_leaf_added_event_exact_shape() {
     }
     .to_xdr(&env, &contract_id);
     assert_eq!(events.events()[0], expected);
+}
+
+
+#[test]
+fn test_inserter_defaults_to_none() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    assert!(
+        client.get_inserter().is_none(),
+        "inserter should be unset by default"
+    );
+}
+
+#[test]
+fn test_set_and_clear_inserter() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    client.set_inserter(&Some(inserter.clone()));
+    assert_eq!(
+        client.get_inserter(),
+        Some(inserter.clone()),
+        "inserter should be set"
+    );
+
+    client.set_inserter(&None);
+    assert!(
+        client.get_inserter().is_none(),
+        "inserter should be cleared by None"
+    );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_set_inserter_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // No auths mocked: the admin auth required by set_inserter is missing.
+    client.set_inserter(&Some(inserter));
+}
+
+#[test]
+fn test_inserter_authorizes_insert() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // Admin delegates insertion to the inserter.
+    env.mock_all_auths();
+    client.set_inserter(&Some(inserter.clone()));
+
+    // The inserter, not the admin, authorizes this insertion.
+    let leaf = U256::from_u32(&env, 100u32);
+    client
+        .mock_auths(&[MockAuth {
+            address: &inserter,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "insert_leaf",
+                args: (leaf.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .insert_leaf(&leaf);
+
+    let next_index: u64 = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
+    });
+    assert_eq!(next_index, 1, "the inserter should be able to insert");
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_admin_cannot_insert_when_inserter_set() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // Admin delegates insertion to the inserter.
+    env.mock_all_auths();
+    client.set_inserter(&Some(inserter));
+
+    // The admin's auth alone no longer authorizes an insertion.
+    let leaf = U256::from_u32(&env, 100u32);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "insert_leaf",
+                args: (leaf.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .insert_leaf(&leaf);
+}
+
+#[test]
+fn test_clearing_inserter_restores_admin_auth() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_inserter(&Some(inserter));
+    client.set_inserter(&None);
+
+    // With the inserter cleared, the admin authorizes insertion again.
+    let leaf = U256::from_u32(&env, 100u32);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "insert_leaf",
+                args: (leaf.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .insert_leaf(&leaf);
+
+    let next_index: u64 = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
+    });
+    assert_eq!(
+        next_index, 1,
+        "admin should authorize insertion again after the inserter is cleared"
+    );
+}
+
+#[test]
+fn test_inserter_ignored_when_permissionless() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let inserter = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // Set an inserter and disable admin-only insert via storage, so no mocked
+    // auths mask the property under test: open insertion needs no authorization.
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Inserter, &inserter);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminInsertOnly, &false);
+    });
+
+    // No auths mocked: the insert must still succeed, ignoring the inserter.
+    let leaf = U256::from_u32(&env, 42u32);
+    client.insert_leaf(&leaf);
+
+    let next_index: u64 = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
+    });
+    assert_eq!(
+        next_index, 1,
+        "permissionless insertion should ignore the inserter"
+    );
 }

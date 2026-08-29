@@ -28,6 +28,10 @@ enum DataKey {
     Root,
     /// Whether admin permission is required to insert a leaf
     AdminInsertOnly,
+    /// Optional delegated inserter authorized to call `insert_leaf` while
+    /// `admin_insert_only` is enabled. When unset, the admin authorizes
+    /// insertions, as before.
+    Inserter,
 }
 
 /// Contract error types
@@ -142,6 +146,44 @@ impl ASPMembership {
         Ok(())
     }
 
+    /// Set (or clear) the delegated inserter
+    ///
+    /// When an inserter is set, it, rather than the admin, authorizes
+    /// `insert_leaf` while `admin_insert_only` is enabled. This lets a deployer
+    /// plug an on-chain admission policy (for example a KYC-gated admitter) into
+    /// the tree by granting it exactly one capability, inserting, without
+    /// handing over the admin role via `update_admin`. Passing `None` clears the
+    /// inserter and restores admin-authorized insertion. Only the admin can call
+    /// this function.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `inserter` - The delegated inserter address, or `None` to clear it
+    pub fn set_inserter(env: Env, inserter: Option<Address>) -> Result<(), Error> {
+        let store = env.storage().persistent();
+        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        match inserter {
+            Some(addr) => store.set(&DataKey::Inserter, &addr),
+            None => store.remove(&DataKey::Inserter),
+        }
+        Ok(())
+    }
+
+    /// Get the current delegated inserter, if any
+    ///
+    /// Returns the address authorized to insert leaves while `admin_insert_only`
+    /// is enabled, or `None` if insertions are authorized by the admin.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// The inserter address wrapped in `Some`, or `None` if unset
+    pub fn get_inserter(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::Inserter)
+    }
+
     /// Get the current Merkle root
     ///
     /// Returns the current root hash of the Merkle tree.
@@ -182,8 +224,9 @@ impl ASPMembership {
     /// Adds a new member to the Merkle tree and updates the root. The leaf is
     /// inserted at the next available index and the tree is updated efficiently
     /// by only recomputing the hashes along the path to the root. If
-    /// `admin_insert_only` is enabled (the default), only the admin can insert
-    /// leaves; otherwise, anyone can call this function.
+    /// `admin_insert_only` is enabled (the default), the insertion must be
+    /// authorized by the delegated inserter if one is set (see `set_inserter`),
+    /// otherwise by the admin; if disabled, anyone can call this function.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -196,8 +239,14 @@ impl ASPMembership {
         let store = env.storage().persistent();
         let admin_only: bool = store.get(&DataKey::AdminInsertOnly).unwrap_or(true);
         if admin_only {
-            let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-            admin.require_auth();
+            // A delegated inserter, when set, authorizes insertion; otherwise
+            // the admin does, as before.
+            let maybe_inserter: Option<Address> = store.get(&DataKey::Inserter);
+            let authorizer: Address = match maybe_inserter {
+                Some(inserter) => inserter,
+                None => store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?,
+            };
+            authorizer.require_auth();
         }
 
         let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
