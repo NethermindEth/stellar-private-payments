@@ -283,8 +283,8 @@ mod tests {
 /// acceptance is pure `Reflect` plumbing and no method is called.
 #[cfg(all(test, target_arch = "wasm32"))]
 mod spike_tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
-    // is meant for production paths, not assertions.
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny is meant for production paths, not assertions.
     #![allow(clippy::unwrap_used)]
 
     use super::*;

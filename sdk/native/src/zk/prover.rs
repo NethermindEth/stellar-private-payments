@@ -155,7 +155,8 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
         // Allocate all variables and store them for constraint generation
         let mut variables: Vec<Variable> = Vec::with_capacity(num_wires);
 
-        // Wire 0 is always the constant 1 (already exists as Variable::One in arkworks)
+        // Wire 0 is always the constant 1 (already exists as Variable::One in
+        // arkworks)
         variables.push(Variable::One);
 
         // Allocate public inputs (wires 1..=num_public)
@@ -631,10 +632,11 @@ pub fn verify_proof(
 
 #[cfg(test)]
 mod tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
-    // targets production paths, not assertions. `lc!() + var` is the idiomatic
-    // way to build a constraint in a test circuit; the arithmetic-side-effects
-    // deny is aimed at production integer math, not linear-combination sugar.
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny targets production paths, not assertions. `lc!() + var` is the
+    // idiomatic way to build a constraint in a test circuit; the
+    // arithmetic-side-effects deny is aimed at production integer math, not
+    // linear-combination sugar.
     #![allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
 
     use super::*;
@@ -663,8 +665,9 @@ mod tests {
     /// artifacts are gitignored build outputs, so tests must not depend on
     /// them.
     fn minimal_r1cs(num_pub_out: u32, num_pub_in: u32, num_wires: u32) -> Vec<u8> {
-        // Header section body: field_size(4) + prime(32) + wires/pubout/pubin/prvin
-        // (4*4) + num_labels(8) + num_constraints(4) = 64 bytes.
+        // Header section body: field_size(4) + prime(32) +
+        // wires/pubout/pubin/prvin (4*4) + num_labels(8) +
+        // num_constraints(4) = 64 bytes.
         let mut header = Vec::new();
         header.extend_from_slice(&32u32.to_le_bytes()); // field_size
         header.extend_from_slice(&[0u8; 32]); // prime (skipped by parser)

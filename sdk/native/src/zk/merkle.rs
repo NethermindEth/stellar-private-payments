@@ -169,7 +169,8 @@ impl MerklePrefixTree {
             return Err(anyhow!("Depth must be between 1 and 32"));
         }
 
-        // Build the empty-subtree chain using the same zero leaf as the contract.
+        // Build the empty-subtree chain using the same zero leaf as the
+        // contract.
         let mut zero_leaf_be = crypto::zero_leaf();
         zero_leaf_be.reverse();
         let zero_leaf_le: [u8; 32] = zero_leaf_be

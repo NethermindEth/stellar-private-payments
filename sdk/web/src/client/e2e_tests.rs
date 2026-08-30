@@ -89,8 +89,8 @@ const STUB_SIGNATURE_B64: &str =
 /// Build a same-origin `blob:` URL for a worker loader served at
 /// `{STATIC_ORIGIN}/workers/{file}`.
 async fn blob_worker_url(file: &str) -> String {
-    // Use XMLHttpRequest, not fetch, because this crate's circuits tests replace
-    // `window.fetch` with a shim and never restore it.
+    // Use XMLHttpRequest, not fetch, because this crate's circuits tests
+    // replace `window.fetch` with a shim and never restore it.
     let js = format!(
         r#"(async function () {{
              const base = '{STATIC_ORIGIN}/workers';
@@ -273,8 +273,8 @@ fn install_real_signing(signer: &Object) {
     })
         as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>);
 
-    // `into_js_value` intentionally leaks: the signer must stay callable for the
-    // rest of the test.
+    // `into_js_value` intentionally leaks: the signer must stay callable for
+    // the rest of the test.
     Reflect::set(
         signer,
         &JsValue::from_str("signTransaction"),

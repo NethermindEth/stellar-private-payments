@@ -252,8 +252,8 @@ impl SparseMerkleTree {
         let mut current_hash = new_leaf_hash;
         let mut siblings = find_result.siblings.clone();
 
-        // If there's a collision (not_found_key != 0 and is_old0 == false), we need to
-        // extend the path
+        // If there's a collision (not_found_key != 0 and is_old0 == false), we
+        // need to extend the path
         if !find_result.is_old0 {
             let old_key_bits = field_to_bits(&find_result.not_found_key);
 

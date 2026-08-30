@@ -383,7 +383,8 @@ impl ASPNonMembership {
         let mut rt_old = zero.clone();
         let mut added_one = false;
 
-        // Handle collision case: extend siblings for a common prefix and add old leaf
+        // Handle collision case: extend siblings for a common prefix and add
+        // old leaf
         if !find_result.is_old0 {
             let old_key_bits = Self::split_bits(&env, &find_result.not_found_key);
             let mut i = siblings.len();
@@ -415,12 +416,13 @@ impl ASPNonMembership {
         store.set(&DataKey::Node(rt.clone()), &leaf_node);
 
         // Build up the tree from leaf to root (process siblings in reverse)
-        // Siblings are stored from root level (index 0) to leaf level (last index)
+        // Siblings are stored from root level (index 0) to leaf level (last
+        // index)
         let siblings_len = siblings.len();
         for (i, sibling) in siblings.iter().enumerate().rev() {
             // Check if we need to delete old nodes (mixed case)
-            // Skip the last index if added_one=true (it's the old leaf, not an internal
-            // node)
+            // Skip the last index if added_one=true (it's the old leaf, not an
+            // internal node)
             let is_last_added_leaf = added_one && (i == siblings_len.saturating_sub(1) as usize);
             if !is_last_added_leaf
                 && (i as u32) < siblings_len.saturating_sub(1)
@@ -547,7 +549,8 @@ impl ASPNonMembership {
                 if node_data.len() == 3 && node_data.get(0).ok_or(Error::KeyNotFound)? == one {
                     // Last sibling is a leaf - promote it
                     rt_new = last_sibling.clone();
-                    // Remove the last sibling from the list since we're promoting it
+                    // Remove the last sibling from the list since we're
+                    // promoting it
                     siblings_to_use.pop_back();
                 } else if node_data.len() == 2 {
                     // Last sibling is an internal node - replace with zero
@@ -660,7 +663,8 @@ impl ASPNonMembership {
             return Ok(false); // Key exists, so non-membership is false
         }
 
-        // Verify the proof: check that siblings match and not_found_key/value match
+        // Verify the proof: check that siblings match and not_found_key/value
+        // match
         if find_result.siblings.len() != siblings.len() {
             return Err(Error::InvalidProof);
         }
@@ -681,7 +685,8 @@ impl ASPNonMembership {
             return Err(Error::InvalidProof);
         }
 
-        // Reconstruct root from proof (process siblings in reverse: leaf to root)
+        // Reconstruct root from proof (process siblings in reverse: leaf to
+        // root)
         let mut computed_root =
             if not_found_key != key && not_found_value != U256::from_u32(&env, 0u32) {
                 Self::hash_leaf(&env, not_found_key, not_found_value)

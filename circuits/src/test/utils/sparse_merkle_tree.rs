@@ -294,8 +294,8 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
 
         for level in (0..res_find.siblings.len()).rev() {
             let sibling = &res_find.siblings[level];
-            // Rebuild nodes from the bottom up; depending on the bit we decide left/right
-            // order.
+            // Rebuild nodes from the bottom up; depending on the bit we decide
+            // left/right order.
             let (old_node, new_node) = if key_bits[level] {
                 (
                     vec![sibling.clone(), current_rt_old.clone()],
@@ -411,7 +411,8 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
             }
 
             if mixed {
-                // Once we hit a mixed branch we need to keep rebuilding upwards.
+                // Once we hit a mixed branch we need to keep rebuilding
+                // upwards.
                 res.siblings.insert(0, res_find.siblings[level].clone());
                 let new_node = if key_bits[level] {
                     vec![new_sibling, rt_new.clone()]

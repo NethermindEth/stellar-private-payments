@@ -113,7 +113,8 @@ mod tests {
             let mut x: u64 = 0xDEADBEEFCAFEBABE;
             (0..N)
                 .map(|_| {
-                    // x = x * 2862933555777941757 + 3037000493  (64-bit LCG-ish)
+                    // x = x * 2862933555777941757 + 3037000493  (64-bit
+                    // LCG-ish)
                     x = x.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
                     Scalar::from(x)
                 })
