@@ -16,7 +16,7 @@ pub(crate) const TOID_LEN: usize = 19;
 const ROW_BATCH: u32 = 256;
 
 /// Decrypted notes and public nullifiers for one private `transact` call
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct GvkTxAudit {
     pub ledger: u32,
     pub outputs: Vec<GvkAuditedNote>,
@@ -26,7 +26,7 @@ pub struct GvkTxAudit {
     pub nullifiers: Vec<Field>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct TxGroup {
     ledger: u32,
     toid: String,
@@ -423,7 +423,7 @@ mod tests {
         );
         assert!(tx.inputs.is_empty());
         assert!(tx.nullifiers.is_empty());
-        assert_eq!(audit.next_tx().await?, None);
+        assert!(audit.next_tx().await?.is_none());
 
         let _ = std::fs::remove_file(path);
         Ok(())

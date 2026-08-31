@@ -45,7 +45,7 @@ pub struct GvkNote {
 }
 
 /// The subset of note secrets an admin recovers by decryption.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct GvkRecoveredNote {
     pub pk: Field,
     pub amount: Field,
@@ -53,7 +53,7 @@ pub struct GvkRecoveredNote {
 }
 
 /// Admin-recovered note secrets verified against an on-chain commitment.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct GvkAuditedNote {
     pub note: GvkRecoveredNote,
     pub commitment: Field,
