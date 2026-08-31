@@ -33,7 +33,7 @@ repo-specific deployment key formats directly.
 The ceremony requires a Phase 1 Powers of Tau file large enough for the circuit's constraint count.
 
 **Use ptau power 16** (2^16 = 65,536). `policy_tx_2_2_AB` is 23,738 constraints, but
-`policy_tx_gvk_2_2_AB_traceable` is 42,506 and a ceremony key set should cover the largest
+`policy_tx_2_2_AB_gvk_T` is 42,506 and a ceremony key set should cover the largest
 circuit in the repo.
 
 Pick the right power: `ceil(log2(num_constraints))`. If unsure, run `npx snarkjs r1cs info $PATH.r1cs` to check.
