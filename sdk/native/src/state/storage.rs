@@ -1007,24 +1007,24 @@ impl Storage {
 
         rows.map(|row| {
             let (ledger, event_id, kind, field, encoded) = row?;
-            let gvk_ciphertext = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
+            let gvk_ciphertext_opt = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
             match kind {
                 0 => {
-                    let encoded = encoded.ok_or_else(|| {
+                    let gvk_ciphertext = gvk_ciphertext_opt.ok_or_else(|| {
                         anyhow!("commitment row missing gvk_ciphertext after filter")
                     })?;
                     Ok(crate::gvk::GvkEvent::Commitment {
                         ledger,
                         event_id,
                         commitment: field,
-                        gvk_ciphertext: decode_gvk_ciphertext(&encoded)?,
+                        gvk_ciphertext,
                     })
                 }
                 1 => Ok(crate::gvk::GvkEvent::Nullifier {
                     ledger,
                     event_id,
                     nullifier: field,
-                    gvk_ciphertext,
+                    gvk_ciphertext: gvk_ciphertext_opt,
                 }),
                 other => Err(anyhow!("unknown pool GVK event kind: {other}")),
             }
