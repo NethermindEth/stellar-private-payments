@@ -478,7 +478,8 @@ impl TryFrom<ExtAmount> for Field {
             let v = U256::from(
                 u128::try_from(value.0).map_err(|_| anyhow!("ext amount out of range"))?,
             );
-            // For i128, v is always < modulus in practice; keep a guard for completeness.
+            // For i128, v is always < modulus in practice; keep a guard for
+            // completeness.
             if v >= m {
                 return Err(anyhow!("ext amount out of field range"));
             }
@@ -850,7 +851,8 @@ mod rusqlite_impls {
 
     impl ToSql for Field {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-            // Store as 32-byte little-endian blob (matches prover/circuit byte order).
+            // Store as 32-byte little-endian blob (matches prover/circuit byte
+            // order).
             Ok(ToSqlOutput::Owned(Value::Blob(self.to_le_bytes().to_vec())))
         }
     }

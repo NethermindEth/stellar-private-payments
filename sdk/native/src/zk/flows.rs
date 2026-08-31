@@ -745,8 +745,8 @@ where
         );
     }
 
-    // ASP proofs objects, duplicated across input slots, with a single [0] entry
-    // per slot.
+    // ASP proofs objects, duplicated across input slots, with a single [0]
+    // entry per slot.
     for slot in 0..N_INPUTS {
         if let Some(membership_proof) = &membership_proof {
             let prefix_m = format!("membershipProofs[{slot}][0].");
@@ -980,7 +980,8 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
         &field_to_circuit_hex(&params.ext_context_hash)?,
     );
 
-    // Compute per-note nullifiers for public disclosure and wire private inputs.
+    // Compute per-note nullifiers for public disclosure and wire private
+    // inputs.
     let mut output_nullifier_hex: Vec<String> = Vec::with_capacity(n_notes);
     let mut nullifier_fields: Vec<Field> = Vec::with_capacity(n_notes);
     let mut amount_fields: Vec<Field> = Vec::with_capacity(n_notes);

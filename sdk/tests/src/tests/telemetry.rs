@@ -53,7 +53,8 @@ fn test_ring_buffer_has_no_secrets_and_redacts_sensitive() {
         String::from_utf8(buf.lock().expect("lock buffer").clone()).expect("valid utf-8 logs");
     println!("Captured logs:\n{}", output);
 
-    // Verify deposit log: it should contain "deposit started" and redacted amount
+    // Verify deposit log: it should contain "deposit started" and redacted
+    // amount
     assert!(output.contains("deposit started"));
     assert!(output.contains("amount"));
     assert!(output.contains("<redacted>"));

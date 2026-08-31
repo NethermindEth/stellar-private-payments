@@ -504,7 +504,8 @@ mod tests {
     #[ignore]
     fn test_tx_1in_1out() -> Result<()> {
         // One real input (in1), one dummy input (in0.amount = 0).
-        // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
+        // One real output (out0 = in1.amount), one dummy output (out1.amount =
+        // 0).
         for_each_policy(PolicyCircuitSet::All, |asp, wasm, r1cs| {
             let case = TxCase::new(
                 vec![
@@ -1317,7 +1318,8 @@ mod tests {
     #[ignore]
     fn test_non_membership_fails() -> Result<()> {
         // One real input (in1), one dummy input (in0.amount = 0).
-        // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
+        // One real output (out0 = in1.amount), one dummy output (out1.amount =
+        // 0).
         for_each_policy(PolicyCircuitSet::NonMembership, |asp, wasm, r1cs| {
             let case = TxCase::new(
                 vec![
@@ -1557,7 +1559,8 @@ mod tests {
         let d = admin_public_key(d_priv);
         let nonce = Scalar::from(0xFEED_FACEu64);
 
-        // 2 inputs (50 + 30) and 2 outputs (60 + 20) balance with publicAmount 0.
+        // 2 inputs (50 + 30) and 2 outputs (60 + 20) balance with publicAmount
+        // 0.
         let in_notes = vec![
             InputNote {
                 leaf_index: 3,
@@ -1647,8 +1650,9 @@ mod tests {
         let proof = prove_policy_gvk_case(circuit)?;
         let n_ins = proof.in_notes.len();
 
-        // The admin decrypts each emitted ciphertext back to its note. Outputs are
-        // encrypted at idx nIns+k; inputs (traceable only) at idx k.
+        // The admin decrypts each emitted ciphertext back to its note. Outputs
+        // are encrypted at idx nIns+k; inputs (traceable only) at idx
+        // k.
         let check = |note: Note, idx: usize| {
             let ct = encrypt_note(
                 &note,

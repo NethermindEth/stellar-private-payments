@@ -239,7 +239,8 @@ pub fn prove_transaction_case(
         )),
         Ok(Err(e)) => Err(anyhow::anyhow!("Prover error: {e:?}")),
         Err(panic_info) => {
-            // Tests expect panics for invalid proofs; convert any panic into a typed error.
+            // Tests expect panics for invalid proofs; convert any panic into a
+            // typed error.
             let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
                 s.to_string()
             } else if let Some(s) = panic_info.downcast_ref::<String>() {

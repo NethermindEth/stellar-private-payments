@@ -331,8 +331,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
-    // is meant for production paths, not assertions.
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny is meant for production paths, not assertions.
     #![allow(clippy::unwrap_used)]
 
     use super::*;
@@ -430,7 +430,8 @@ mod tests {
         setup_test_env().await;
         let fetch_count = install_fetch_shim();
 
-        // First fetch: cache miss -> exactly one network round-trip, populates cache.
+        // First fetch: cache miss -> exactly one network round-trip, populates
+        // cache.
         let bytes1 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -494,8 +495,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Verified fetch reads the poisoned entry, fails the hash check, evicts it,
-        // and refetches from the (shimmed) network exactly once.
+        // Verified fetch reads the poisoned entry, fails the hash check, evicts
+        // it, and refetches from the (shimmed) network exactly once.
         let bytes = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -510,7 +511,8 @@ mod tests {
             "self-heal should refetch from network exactly once"
         );
 
-        // The healed entry is now cached: a subsequent read is a hit (no new fetch).
+        // The healed entry is now cached: a subsequent read is a hit (no new
+        // fetch).
         let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -622,7 +624,8 @@ mod tests {
             "corrupt entry should invoke derive exactly once to self-heal"
         );
 
-        // The healed entry is now cached: a subsequent read is a hit (no re-derive).
+        // The healed entry is now cached: a subsequent read is a hit (no
+        // re-derive).
         let (derive_count2, derive2) = install_derive_counter();
         let bytes2 = get_or_derive_uncompressed(UNCOMPRESSED_FILE, UNCOMPRESSED_SHA, derive2)
             .await

@@ -355,9 +355,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] list portfolio balances for the account {}",
                 Sensitive(&address)
             );
-            // Load the contract config from the embedded deployment JSON rather than
-            // receiving it over the worker bridge: ContractConfig contains the
-            // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
+            // Load the contract config from the embedded deployment JSON rather
+            // than receiving it over the worker bridge:
+            // ContractConfig contains the internally-tagged
+            // `AssetDescriptor` enum, which the bincode worker codec
             // cannot deserialize (panics with DeserializeAnyNotSupported).
             let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
             let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;

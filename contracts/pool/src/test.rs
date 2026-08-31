@@ -327,8 +327,8 @@ fn pool_constructor_sets_state() {
 fn merkle_init_only_once() {
     let env = test_env();
     // As MerkleTreeWithHistory is now a module
-    // We need to register the contract first to access the env.storage of a smart
-    // contract
+    // We need to register the contract first to access the env.storage of a
+    // smart contract
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
@@ -1089,9 +1089,9 @@ fn transact_rejects_deposit_above_maximum() {
     env.mock_all_auths();
 
     let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD1);
-    // try_from rather than `as`: the boundary is the whole point of this test, so a
-    // value that did not fit i32 must fail loudly instead of wrapping into a
-    // negative deposit.
+    // try_from rather than `as`: the boundary is the whole point of this test,
+    // so a value that did not fit i32 must fail loudly instead of wrapping
+    // into a negative deposit.
     let above_max = i32::try_from(max + 1).expect("max + 1 must fit i32");
     let over = mk_ext_data(&env, Address::generate(&env), above_max);
 
@@ -1298,7 +1298,8 @@ fn transact_reports_unknown_root_before_later_checks() {
     env.mock_all_auths();
 
     let nullifier = 0xE3;
-    // Presence of the key is the spent flag, the same shape `mark_spent` writes.
+    // Presence of the key is the spent flag, the same shape `mark_spent`
+    // writes.
     env.as_contract(&pool_id, || {
         env.storage().persistent().set(
             &crate::pool::DataKey::Nullifier(U256::from_u32(&env, nullifier)),

@@ -55,9 +55,9 @@ pub(crate) fn export_deployment(
     circuit_keys::write_vk_soroban_bin(&pk.vk, &vk_soroban_path)?;
     circuit_keys::write_vk_rust_const(&pk.vk, &vk_const_path)?;
 
-    // Validate emitted proving key by checking the on-disk verifying key matches.
-    // We deserialize unchecked here because the proving key is derived from a
-    // trusted ceremony.
+    // Validate emitted proving key by checking the on-disk verifying key
+    // matches. We deserialize unchecked here because the proving key is
+    // derived from a trusted ceremony.
     let written_pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(
         &fs::read(&pk_path).with_context(|| format!("failed to read {}", pk_path.display()))?[..],
     )

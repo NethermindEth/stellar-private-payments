@@ -1006,8 +1006,8 @@ impl Storage {
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
-        // The indexer sync metadata is authoritative for "how far we've indexed", even
-        // if there were no ASP events in recent ledgers.
+        // The indexer sync metadata is authoritative for "how far we've
+        // indexed", even if there were no ASP events in recent ledgers.
         let sync_meta = self
             .get_sync_metadata()?
             .into_iter()
@@ -1021,20 +1021,23 @@ impl Storage {
             return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
-        // `current_ledger <= last_fully_indexed_ledger`: we have indexed at least
-        // as far as the ledger of this contract-state read, so we have the data
-        // needed to reconcile membership. The indexer tip can legitimately sit a
-        // few ledgers *ahead* of this read — the events RPC and the
-        // contract-state read advance independently — so "metadata ahead" is
-        // normal skew, not corruption, and must not be a hard error. The
-        // authoritative correctness check is the root reconciliation below, which
-        // detects any genuine divergence.
+        // `current_ledger <= last_fully_indexed_ledger`: we have indexed at
+        // least as far as the ledger of this contract-state read, so we
+        // have the data needed to reconcile membership. The indexer tip
+        // can legitimately sit a few ledgers *ahead* of this read — the
+        // events RPC and the contract-state read advance independently
+        // — so "metadata ahead" is normal skew, not corruption, and
+        // must not be a hard error. The authoritative correctness check
+        // is the root reconciliation below, which detects any genuine
+        // divergence.
 
         // Get the last stored root for the ASP membership tree and the ledger
         // that produced it. The ledger is derived by joining with the raw event
         // log so we can distinguish:
-        // - "no new ASP events" (root matches, even if last leaf ledger < tip), vs
-        // - "partial processing" (raw events ingested to tip but leaves table lags).
+        // - "no new ASP events" (root matches, even if last leaf ledger < tip),
+        //   vs
+        // - "partial processing" (raw events ingested to tip but leaves table
+        //   lags).
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
@@ -1059,8 +1062,8 @@ impl Storage {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
 
-        // current_ledger == last_fully_indexed_ledger: require root match and leaf
-        // existence.
+        // current_ledger == last_fully_indexed_ledger: require root match and
+        // leaf existence.
         if *current_root != last_root {
             // If the root at the chain tip doesn't match the last stored root
             // but our last stored leaf is from an earlier ledger, we may have
@@ -1561,7 +1564,8 @@ impl Storage {
         counterparty: Option<&str>,
         tx_hash: Option<&str>,
     ) -> Result<()> {
-        // created_at is filled by the DB as UTC epoch seconds, not the client clock.
+        // created_at is filled by the DB as UTC epoch seconds, not the client
+        // clock.
         self.conn.execute(
             "INSERT INTO app_user_operations
                 (address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, created_at)
@@ -2594,7 +2598,8 @@ mod tests {
         }])?;
         storage.reconcile_nullifiers(100)?;
 
-        // The unspent-only lookup rejects it, but the spent-tolerant lookup returns it.
+        // The unspent-only lookup rejects it, but the spent-tolerant lookup
+        // returns it.
         assert!(
             storage
                 .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?

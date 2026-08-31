@@ -33,7 +33,8 @@ pub(crate) fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error>
     if let xdr::ScVal::Address(addr) = val {
         match addr {
             xdr::ScAddress::Account(account_id) => {
-                // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant -> Uint256
+                // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant
+                // -> Uint256
                 let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(bytes)) = &account_id.0;
                 Ok(ed25519::PublicKey(*bytes).to_string().as_str().to_string())
             }
@@ -130,8 +131,9 @@ pub(crate) fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Erro
 /// Helper to convert Soroban `U256` parts into a `crate::types::U256`.
 pub(crate) fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
     if let xdr::ScVal::U256(parts) = val {
-        // Soroban encodes U256 as 4x u64 limbs, big-endian by limb significance.
-        // Reconstruct as: hi_hi<<192 + hi_lo<<128 + lo_hi<<64 + lo_lo.
+        // Soroban encodes U256 as 4x u64 limbs, big-endian by limb
+        // significance. Reconstruct as: hi_hi<<192 + hi_lo<<128 +
+        // lo_hi<<64 + lo_lo.
         let hi_hi = U256::from(parts.hi_hi);
         let hi_lo = U256::from(parts.hi_lo);
         let lo_hi = U256::from(parts.lo_hi);
@@ -318,7 +320,8 @@ mod tests {
         // Sample nullifier (a BN254 field element).
         let nullifier = Field(U256::from(0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF_u128));
 
-        // Encode as the U256 ScVal the pool contract emits in NewNullifierEvent.
+        // Encode as the U256 ScVal the pool contract emits in
+        // NewNullifierEvent.
         let scval = field_to_scval_u256(nullifier);
         let b64 = scval_to_base64(&scval).expect("encode nullifier to base64");
 

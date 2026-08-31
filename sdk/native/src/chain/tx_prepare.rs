@@ -255,7 +255,8 @@ mod tests {
         let xdr::TransactionEnvelope::Tx(v1) = env else {
             panic!("expected v1 envelope");
         };
-        // Account is at seq 9; the new tx must use seq + 1 = 10 (txBAD_SEQ otherwise).
+        // Account is at seq 9; the new tx must use seq + 1 = 10 (txBAD_SEQ
+        // otherwise).
         assert_eq!(v1.tx.seq_num, xdr::SequenceNumber(10));
         assert_eq!(v1.tx.fee, 350);
 

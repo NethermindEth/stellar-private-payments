@@ -243,9 +243,9 @@ impl StateFetcher {
             valued_keys: vec![],
         });
 
-        // We fetch up to MAX_SNAPSHOT_ATTEMPTS and comparing roots indices to ensure
-        // that the roots fetched later correspond to the pools states
-        // fetched first
+        // We fetch up to MAX_SNAPSHOT_ATTEMPTS and comparing roots indices to
+        // ensure that the roots fetched later correspond to the pools
+        // states fetched first
         let mut last_drift = String::new();
 
         for attempt in 1..=MAX_SNAPSHOT_ATTEMPTS {
@@ -653,7 +653,8 @@ impl StateFetcher {
             .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
 
         // Newer RPC servers return read-only results in `xdr` instead of the
-        // legacy `retval` field. Try `retval` first for backwards compatibility.
+        // legacy `retval` field. Try `retval` first for backwards
+        // compatibility.
         let retval_b64 = op_result
             .retval
             .or(op_result.xdr)
