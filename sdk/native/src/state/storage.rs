@@ -2947,8 +2947,9 @@ mod tests {
         let mut audit = crate::gvk::GvkAudit::new(local, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].note.amount()?, NoteAmount::from(99u128));
         assert_eq!(tx.outputs[0].commitment, commitment);
+        let output = tx.outputs[0].note.as_ref().expect("recovered output note");
+        assert_eq!(output.note.amount()?, NoteAmount::from(99u128));
 
         let _ = std::fs::remove_file(path);
         Ok(())

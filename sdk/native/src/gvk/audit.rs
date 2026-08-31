@@ -15,15 +15,33 @@ pub(crate) const TOID_LEN: usize = 19;
 
 const ROW_BATCH: u32 = 256;
 
-/// Decrypted notes and public nullifiers for one private `transact` call
+/// One output slot from a private `transact` call.
+///
+/// `commitment` is always present; `note` is `None` for dummy outputs or when
+/// decryption/verification fails.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GvkOutputSlot {
+    pub commitment: Field,
+    pub note: Option<GvkAuditedNote>,
+}
+
+/// One input slot from a private `transact` call.
+///
+/// `nullifier` is always present; `note` is `None` for dummy inputs, view-only
+/// pools (no ciphertext), or when decryption/verification fails.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GvkSpentInput {
+    pub nullifier: Field,
+    pub note: Option<GvkAuditedNote>,
+}
+
+/// Decrypted notes aligned with on-chain input/output slots for one private
+/// `transact` call.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GvkTxAudit {
     pub ledger: u32,
-    pub outputs: Vec<GvkAuditedNote>,
-    /// Traceable pools only; empty for view-only pools.
-    pub inputs: Vec<GvkAuditedNote>,
-    /// Public nullifiers emitted in this transaction.
-    pub nullifiers: Vec<Field>,
+    pub outputs: Vec<GvkOutputSlot>,
+    pub inputs: Vec<GvkSpentInput>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -118,32 +136,27 @@ impl<S: Storage> GvkAudit<S> {
     }
 
     async fn audit_group(&mut self, group: TxGroup) -> Result<GvkTxAudit> {
-        let mut audited_outputs = Vec::new();
+        let d_priv = self.d_priv;
+
+        let mut outputs = Vec::with_capacity(group.outputs.len());
         for (commitment, ciphertext) in group.outputs {
-            if let Some(note) = ciphertext.decrypt_audited_for_commitment(&self.d_priv, &commitment)
-            {
-                audited_outputs.push(note);
-            }
+            let note = ciphertext.decrypt_audited_for_commitment(&d_priv, &commitment);
+            outputs.push(GvkOutputSlot { commitment, note });
         }
 
-        let mut nullifiers = Vec::with_capacity(group.nullifiers.len());
-        let mut audited_inputs = Vec::new();
+        let candidates = self.commitment_candidates().await?;
+        let mut inputs = Vec::with_capacity(group.nullifiers.len());
         for (nullifier, ciphertext) in group.nullifiers {
-            nullifiers.push(nullifier);
-            if let Some(ct) = ciphertext {
-                let d_priv = self.d_priv;
-                let candidates = self.commitment_candidates().await?;
-                if let Some(note) = try_decrypt_against_commitment_set(&d_priv, &ct, candidates) {
-                    audited_inputs.push(note);
-                }
-            }
+            let note = ciphertext
+                .as_ref()
+                .and_then(|ct| try_decrypt_against_commitment_set(&d_priv, ct, candidates));
+            inputs.push(GvkSpentInput { nullifier, note });
         }
 
         Ok(GvkTxAudit {
             ledger: group.ledger,
-            outputs: audited_outputs,
-            inputs: audited_inputs,
-            nullifiers,
+            outputs,
+            inputs,
         })
     }
 
@@ -417,12 +430,10 @@ mod tests {
         let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(
-            tx.outputs[0].note.amount()?,
-            NoteAmount::from(5_000_000u128)
-        );
+        let output = tx.outputs[0].note.as_ref().expect("recovered output note");
+        assert_eq!(output.note.amount()?, NoteAmount::from(5_000_000u128));
+        assert_eq!(tx.outputs[0].commitment, commitment);
         assert!(tx.inputs.is_empty());
-        assert!(tx.nullifiers.is_empty());
         assert!(audit.next_tx().await?.is_none());
 
         let _ = std::fs::remove_file(path);
@@ -491,8 +502,15 @@ mod tests {
         let tx = audit.next_tx().await?.expect("transact tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.inputs.len(), 1);
-        assert_eq!(tx.inputs[0].commitment, spent_commitment);
-        assert_eq!(tx.nullifiers, vec![field(0x999)]);
+        assert_eq!(tx.inputs[0].nullifier, field(0x999));
+        assert_eq!(
+            tx.inputs[0]
+                .note
+                .as_ref()
+                .expect("recovered input note")
+                .commitment,
+            spent_commitment
+        );
 
         let _ = std::fs::remove_file(path);
         Ok(())
