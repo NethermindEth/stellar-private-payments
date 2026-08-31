@@ -297,12 +297,6 @@ async fn e2e_smoke_client_construction() {
 
     let mut client = build_test_client(&storage).await;
 
-    // `Client::new` spawns the prover but does not ping it; ping explicitly.
-    client
-        .ensure_prover()
-        .await
-        .expect("prover worker must start and answer its ping");
-
     Client::contract_config().expect("bundled deployment config must parse");
     assert!(!stub_signer().is_undefined());
 

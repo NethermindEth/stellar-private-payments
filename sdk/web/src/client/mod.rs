@@ -207,8 +207,6 @@ impl Client {
                 SignerAddress::new(opts.signer_address.unwrap_or_else(|| user_address.clone()));
             let wallet_signer = WalletSigner::new(signer, opts.network_passphrase, signer_address)?;
 
-            self.ensure_prover().await?;
-
             if !self.user_keys_exist(&user_address).await? {
                 let message =
                     stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
@@ -282,7 +280,6 @@ impl Client {
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
-        self.ensure_prover().await?;
         let fetcher = self.state_fetcher()?;
         let report = verify_disclosure_receipt(&fetcher, &self.prover, &receipt, &expected_vk_hash)
             .await
@@ -352,10 +349,6 @@ pub async fn verify_selective_disclosure_standalone(
                 .as_module(true)
                 .spawn(&prover_worker_url),
         );
-        prover
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
             .await
@@ -370,13 +363,6 @@ impl Client {
         self.inner
             .state_fetcher()
             .map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    async fn ensure_prover(&self) -> Result<(), JsError> {
-        self.prover
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))
     }
 
     fn open_native_account(
