@@ -5,7 +5,7 @@
 use crate::types::{
     AspMembershipProof, AspNonMembershipProof, BabyJubJubPoint, EncryptionPublicKey, ExtAmount,
     ExtData, Field, GlobalViewKeyCiphertext, GvkMode, NoteAmount, NotePrivateKey, NotePublicKey,
-    PolicyFlags, U256,
+    PolicyFlags,
 };
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -909,7 +909,7 @@ where
         (None, None)
     } else {
         let admin = admin_view_key.as_ref().expect("validated above");
-        let nonce = Field(U256::from_big_endian(&ext_data_hash_be));
+        let nonce = Field::try_from_be_bytes(ext_data_hash_be)?;
         let (outputs, inputs) = build_transact_gvk_ciphertexts(
             gvk_mode,
             admin,
@@ -1789,7 +1789,9 @@ mod tests {
     }
 
     fn fixed_ext_data_hash(_ext: &ExtData) -> Result<[u8; 32]> {
-        Ok([0xAA; 32])
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0xAA;
+        Ok(Field::try_from_le_bytes(bytes)?.to_be_bytes())
     }
 
     fn gvk_signal_single<'a>(signals: &'a CircuitInputs, name: &str) -> &'a str {
