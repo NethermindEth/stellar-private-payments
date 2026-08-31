@@ -362,6 +362,32 @@ fn pool_gvk_update_admin_transfers_control() {
     assert_eq!(stored_admin, new_admin);
 }
 
+#[test]
+fn update_admin_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert!(matches!(
+        pool.try_update_admin(&new_admin),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
     BytesN::from_array(env, &[fill; 32])
 }

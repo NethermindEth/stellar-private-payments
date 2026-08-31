@@ -260,6 +260,24 @@ fn test_update_admin() {
 }
 
 #[test]
+fn test_update_admin_errors_when_admin_unset() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert!(matches!(
+        client.try_update_admin(&new_admin),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
+#[test]
 fn test_new_admin_can_insert_after_update() {
     let env = test_env();
     let admin = Address::generate(&env);

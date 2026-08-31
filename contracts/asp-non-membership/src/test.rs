@@ -917,3 +917,21 @@ fn test_leaf_inserted_and_deleted_event_exact_shapes() {
     .to_xdr(&env, &contract_id);
     assert_eq!(events_after_delete.events()[0], expected_deleted);
 }
+
+#[test]
+fn test_update_admin_errors_when_admin_unset() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert!(matches!(
+        client.try_update_admin(&new_admin),
+        Err(Ok(Error::NotInitialized))
+    ));
+}

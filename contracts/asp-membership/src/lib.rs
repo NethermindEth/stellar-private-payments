@@ -117,12 +117,14 @@ impl ASPMembership {
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `new_admin` - Address of the new administrator
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        if !env.storage().persistent().has(&DataKey::Admin) {
-            return Err(Error::NotInitialized);
-        }
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
-        Ok(())
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
+            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
 
     /// Set whether admin permission is required to insert a leaf
