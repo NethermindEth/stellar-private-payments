@@ -75,6 +75,9 @@ rusqlite = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
 
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
@@ -93,3 +96,7 @@ wasm-bindgen-test = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+harness = false
+name = "merkle_build"
