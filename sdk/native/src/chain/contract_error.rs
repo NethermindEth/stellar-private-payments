@@ -10,29 +10,7 @@
 //! [`ContractConfig`], resolves the contract id to a [`ContractKind`] and
 //! looks up a human message (`resolve` / `translate`).
 
-use crate::types::ContractConfig;
-
-/// Which deployed contract raised a [`ContractErrorInfo`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContractKind {
-    Pool,
-    PoolGvk,
-    AspMembership,
-    AspNonMembership,
-    Groth16Verifier,
-}
-
-impl ContractKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ContractKind::Pool => "pool",
-            ContractKind::PoolGvk => "pool-gvk",
-            ContractKind::AspMembership => "asp-membership",
-            ContractKind::AspNonMembership => "asp-non-membership",
-            ContractKind::Groth16Verifier => "groth16-verifier",
-        }
-    }
-}
+use crate::types::{ContractConfig, ContractKind};
 
 /// A Soroban contract error recovered from RPC simulation error text.
 ///
@@ -365,29 +343,26 @@ pub fn translate(raw: &str, config: Option<&ContractConfig>) -> Option<ContractE
 mod tests {
     use super::*;
 
-    /// Exact error text from GitHub issue #417, `#2` raised by the pool
-    /// (`contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ`)
-    /// on the `topics:[error, ...]` diagnostic event.
-    const ISSUE_417_ERROR_TEXT: &str = r#"Error: simulate transaction: transaction simulation failed: HostError: Error(Contract, #2)
+    /// A pool `#2` (`MerkleTreeFull`) simulation failure, trimmed to the
+    /// shape the parser reads: the `HostError` header and the
+    /// `topics:[error, ...]` diagnostic event naming the pool.
+    ///
+    /// The surrounding events are kept short but real — including one naming
+    /// the verifier, so the tests show the pool is chosen because it raised
+    /// the error, not merely because it is the only contract mentioned.
+    const POOL_ERROR_WITH_EVENT_LOG: &str = r#"Error: simulate transaction: transaction simulation failed: HostError: Error(Contract, #2)
 
 Event log (newest first):
    0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #2)], data:"escalating Ok(ScErrorType::Contract) frame-exit to Err"
    1: [Contract Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[new_nullifier_event, 6280451338868492752671156339895579541324923628591032519637967657233742246669], data:{}
-   2: [Contract Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[new_nullifier_event, 13627095465848477540409244661059194730751966883125925674948357069594146904052], data:{}
-   3: [Diagnostic Event] contract:CB2O4B67OKQC6J26KBNM3JK5J7SO63MCSRDCTPPNDTZM7HG5NKIASSV3, topics:[fn_return, verify], data:true
-   4: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[fn_call, CB2O4B67OKQC6J26KBNM3JK5J7SO63MCSRDCTPPNDTZM7HG5NKIASSV3, verify], data:[{a: Bytes(0c3e24c72af608a6d5bb55d00281c8e10a842053196366ea4936e7bf074b15722f7a98613d2fdfd9c0a4154bd67d522be8e95f01797942affea2c5c928eb8a01), b: Bytes(0315b6f892ff9080ea4a8dd78c043e9af2f38813845536a238ce0ec5b3f08ff526c493d1933c2d7f073c1c78e8cbbb5d3efdc1b0e797f88ffa85a5c32811b4f91e465064ea4ed85b9e70cbf9f9db17159a4484631c5ddd53454a1dec99ead2842da3e292fe4c1b6b075585d5a09a889af6b77f796a70f09af4246ed6e9e3443b), c: Bytes(09bd32dac2927f8877068a4f464365a205c7d0c4d7fb27dbc6c26eb258fee6a41083d63eeb2742b51bfc1ad40808b8f04ba2425ff8b7f0cbea47de1a7494f60a)}, [14212522759817983482126755769707558704184383610488348330486178750659127155783, 10000000, 19448146204961194677429112825207949198704832210533964786923558453016065362563, 13627095465848477540409244661059194730751966883125925674948357069594146904052, 6280451338868492752671156339895579541324923628591032519637967657233742246669, 17698643738420998424268684480042559766517744347930360610151617517721275760346, 15840001438643249783196890418512551411731461051269622228600426660224818621360, 0, 0]]
-   5: [Diagnostic Event] contract:CBIY4GW5OYAIIPHDY5Y7HY7U4YW64SSV3C3FLBJHOE472DIHQQKBMGWC, topics:[fn_return, get_root], data:0
-   6: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[fn_call, CBIY4GW5OYAIIPHDY5Y7HY7U4YW64SSV3C3FLBJHOE472DIHQQKBMGWC, get_root], data:Void
-   7: [Diagnostic Event] contract:CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC, topics:[fn_return, transfer], data:Void
-   8: [Contract Event] contract:CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC, topics:[transfer, GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG, CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, "native"], data:10000000
-   9: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[fn_call, CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC, transfer], data:[GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG, CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, 10000000]
-   10: [Diagnostic Event] topics:[fn_call, CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, transact], data:[{asp_membership_root: 0, asp_non_membership_root: 0, ext_data_hash: Bytes(2aff42bb3aa67dbfd5aa11cb595c6602267ebfd42d40cc163f9ce89b071e4a83), input_nullifiers: [13627095465848477540409244661059194730751966883125925674948357069594146904052, 6280451338868492752671156339895579541324923628591032519637967657233742246669], output_commitment0: 17698643738420998424268684480042559766517744347930360610151617517721275760346, output_commitment1: 15840001438643249783196890418512551411731461051269622228600426660224818621360, proof: {a: Bytes(0c3e24c72af608a6d5bb55d00281c8e10a842053196366ea4936e7bf074b15722f7a98613d2fdfd9c0a4154bd67d522be8e95f01797942affea2c5c928eb8a01), b: Bytes(0315b6f892ff9080ea4a8dd78c043e9af2f38813845536a238ce0ec5b3f08ff526c493d1933c2d7f073c1c78e8cbbb5d3efdc1b0e797f88ffa85a5c32811b4f91e465064ea4ed85b9e70cbf9f9db17159a4484631c5ddd53454a1dec99ead2842da3e292fe4c1b6b075585d5a09a889af6b77f796a70f09af4246ed6e9e3443b), c: Bytes(09bd32dac2927f8877068a4f464365a205c7d0c4d7fb27dbc6c26eb258fee6a41083d63eeb2742b51bfc1ad40808b8f04ba2425ff8b7f0cbea47de1a7494f60a)}, public_amount: 10000000, root: 14212522759817983482126755769707558704184383610488348330486178750659127155783}, {encrypted_output0: Bytes(83ba1ab9ae1b63690adb0db9de779ef4b7ad2f562896fa0cb4375284033e385b044c630c064a4196ad85ab8473995256a4b64c8d42ea0e1096b3272e7c66038c540722b60e625c9fb7c126c4dd8c26fcb2584cf8deccdc48307f03fa6a35fc398cfb0cf88c2fed4bf7437affcb0d9d4de0dd19d063f84e21), encrypted_output1: Bytes(b5daacd23617ba16b73d69cd21366ed078536fff0d86663eb0d5a5b3c270701efa832fa5d6b26503182a8ad854824c46fc6f22065d666d89c32c0d766324d505e6deea3703e122c05b866ead3d6af688ffb85c46f06897afbcb75aaa83b0f44c755d4df858008714d4155ce9bd17eea57fc7aa7be9ebc795), ext_amount: 10000000, recipient: CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ}, GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG]
+   2: [Diagnostic Event] contract:CB2O4B67OKQC6J26KBNM3JK5J7SO63MCSRDCTPPNDTZM7HG5NKIASSV3, topics:[fn_return, verify], data:true
+   3: [Diagnostic Event] topics:[fn_call, CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, transact], data:[...]
 "#;
 
     #[test]
-    fn parses_the_issue_417_error_text() {
-        let info =
-            parse_contract_error(ISSUE_417_ERROR_TEXT).expect("recognizable Error(Contract, #N)");
+    fn parses_code_and_contract_id_from_an_event_log() {
+        let info = parse_contract_error(POOL_ERROR_WITH_EVENT_LOG)
+            .expect("recognizable Error(Contract, #N)");
         assert_eq!(info.code, 2);
         assert_eq!(
             info.contract_id,
@@ -399,12 +374,13 @@ Event log (newest first):
     /// which contract raised it — this is the whole reason `kind` exists.
     #[test]
     fn same_code_means_different_things_per_contract_kind() {
-        let mut as_pool = parse_contract_error(ISSUE_417_ERROR_TEXT).expect("parses");
+        let mut as_pool = parse_contract_error(POOL_ERROR_WITH_EVENT_LOG).expect("parses");
         resolve(&mut as_pool, Some(ContractKind::Pool));
         assert_eq!(as_pool.name, Some("MerkleTreeFull"));
         assert!(as_pool.message.expect("resolved").contains("pool is full"));
 
-        let mut as_asp_non_membership = parse_contract_error(ISSUE_417_ERROR_TEXT).expect("parses");
+        let mut as_asp_non_membership =
+            parse_contract_error(POOL_ERROR_WITH_EVENT_LOG).expect("parses");
         resolve(
             &mut as_asp_non_membership,
             Some(ContractKind::AspNonMembership),

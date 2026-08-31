@@ -325,7 +325,7 @@ mod tests {
     /// alongside the readable translation (from `contract_error::translate`).
     #[test]
     fn ensure_success_reports_readable_message_and_keeps_raw_text() {
-        const ISSUE_417_ERROR_TEXT: &str = "transaction simulation failed: HostError: Error(Contract, #2)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #2)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"";
+        const POOL_ERROR_WITH_EVENT_LOG: &str = "transaction simulation failed: HostError: Error(Contract, #2)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #2)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"";
         const TEST_CONFIG_JSON: &str = r#"{
             "network": "test",
             "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -352,7 +352,7 @@ mod tests {
             results: vec![],
             transaction_data: None,
             min_resource_fee: None,
-            error: Some(ISSUE_417_ERROR_TEXT.to_string()),
+            error: Some(POOL_ERROR_WITH_EVENT_LOG.to_string()),
         };
 
         let err = sim
@@ -361,6 +361,6 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("This pool is full"), "{rendered}");
         assert!(rendered.contains("pool::MerkleTreeFull"), "{rendered}");
-        assert!(rendered.contains(ISSUE_417_ERROR_TEXT), "{rendered}");
+        assert!(rendered.contains(POOL_ERROR_WITH_EVENT_LOG), "{rendered}");
     }
 }

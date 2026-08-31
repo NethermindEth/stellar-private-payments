@@ -10,7 +10,6 @@ mod gvk;
 mod logging;
 mod policy_tx;
 pub use address::*;
-use crate::chain::ContractKind;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
@@ -45,6 +44,32 @@ pub struct ContractConfig {
     pub public_key_registry: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
+}
+
+/// Which deployed contract raised a Soroban contract error.
+///
+/// Resolved from a contract id by [`ContractConfig::classify_contract`].
+/// A numeric error code is only meaningful against the error table of
+/// the contract that raised it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractKind {
+    Pool,
+    PoolGvk,
+    AspMembership,
+    AspNonMembership,
+    Groth16Verifier,
+}
+
+impl ContractKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ContractKind::Pool => "pool",
+            ContractKind::PoolGvk => "pool-gvk",
+            ContractKind::AspMembership => "asp-membership",
+            ContractKind::AspNonMembership => "asp-non-membership",
+            ContractKind::Groth16Verifier => "groth16-verifier",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
