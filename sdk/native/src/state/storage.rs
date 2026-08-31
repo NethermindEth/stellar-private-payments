@@ -1,9 +1,9 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::types::{
-    AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
-    EncryptionPrivateKey, EncryptionPublicKey, Field, GlobalViewKeyCiphertext, LeafAddedEvent,
-    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
+    AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
+    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, LeafAddedEvent, NewCommitmentEvent,
+    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
+    PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary,
     UserOperation,
 };
 use anyhow::{Context, Result, anyhow};
@@ -610,7 +610,7 @@ impl Storage {
     pub fn list_portfolio_balances(
         &self,
         address: &str,
-        config: &ContractConfig,
+        enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>> {
         let mut stmt = self.conn.prepare(
             "SELECT pool.address, n.amount
@@ -643,14 +643,14 @@ impl Storage {
         }
 
         let mut balances = Vec::new();
-        for pool in config.enabled_pools() {
+        for pool in enabled_pools {
             let (note_count, amount) = aggregated
                 .remove(&pool.pool_contract_id)
                 .unwrap_or((0, NoteAmount::ZERO));
             balances.push(PortfolioBalance {
                 pool_contract_id: pool.pool_contract_id.clone(),
                 token_contract_id: pool.token_contract_id.clone(),
-                token_label: pool.token_label(),
+                token_label: pool.token_label.clone(),
                 amount,
                 note_count,
             });

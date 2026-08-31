@@ -20,8 +20,8 @@ use stellar_private_payments::{
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, RecipientLookup, Sensitive, SyncMetadata,
-        UserNoteSummary,
+        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive,
+        SyncMetadata, UserNoteSummary,
     },
     zk::{
         crypto::asp_membership_leaf,
@@ -350,18 +350,15 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
-        StorageWorkerRequest::PortfolioBalances(address) => {
+        StorageWorkerRequest::PortfolioBalances {
+            address,
+            enabled_pools,
+        } => {
             tracing::trace!(
                 "[{WORKER_NAME}] list portfolio balances for the account {}",
                 Sensitive(&address)
             );
-            // Load the contract config from the embedded deployment JSON rather
-            // than receiving it over the worker bridge:
-            // ContractConfig contains the internally-tagged
-            // `AssetDescriptor` enum, which the bincode worker codec
-            // cannot deserialize (panics with DeserializeAnyNotSupported).
-            let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
-            let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;
+            let list = with_storage!(s => s.list_portfolio_balances(&address, &enabled_pools)?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }
         StorageWorkerRequest::RecordOperation {
@@ -732,19 +729,19 @@ impl Storage for StorageBridge {
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
-        config: &ContractConfig,
+        enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error> {
         match self
             .call(
-                StorageWorkerRequest::PortfolioBalances(user_address.to_string()),
+                StorageWorkerRequest::PortfolioBalances {
+                    address: user_address.to_string(),
+                    enabled_pools: enabled_pools.to_vec(),
+                },
                 5_000,
             )
             .await
         {
-            Ok(StorageWorkerResponse::PortfolioBalances(balances)) => {
-                let _ = config;
-                Ok(balances)
-            }
+            Ok(StorageWorkerResponse::PortfolioBalances(balances)) => Ok(balances),
             Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading portfolio balances: {other:?}"
             ))),

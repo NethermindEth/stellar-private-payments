@@ -6,7 +6,7 @@ use crate::{
     state::{SqliteStorage, StoredUserKeys},
     types::{
         ContractConfig, EncryptionPublicKey, Field, NotePublicKey, OperationalFeedItem,
-        PortfolioBalance, RecipientLookup, UserNoteSummary,
+        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -76,10 +76,10 @@ pub(crate) fn pool_notes_from_storage(
 pub(crate) fn portfolio_balances_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
-    config: &ContractConfig,
+    enabled_pools: &[PortfolioPoolEntry],
 ) -> Result<Vec<PortfolioBalance>, Error> {
     storage
-        .list_portfolio_balances(user_address, config)
+        .list_portfolio_balances(user_address, enabled_pools)
         .map_err(|e| Error::Other(e.to_string()))
 }
 
@@ -138,7 +138,7 @@ pub trait Storage: crate::chain::ContractDataStorage {
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
-        config: &ContractConfig,
+        enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error>;
 
     async fn list_user_notes(

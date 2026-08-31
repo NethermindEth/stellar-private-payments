@@ -16,14 +16,17 @@ use stellar_private_payments::{
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
-    types::{DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey, SignerAddress},
+    types::{
+        ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey,
+        SignerAddress,
+    },
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::{
     correlation::{new_correlation_id, with_correlation_id},
-    deployment::deployment_config,
+    deployment::{parse_contract_config, require_circuits_base_url},
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
     storage::Storage,
@@ -69,6 +72,7 @@ pub struct Client {
     storage: Storage,
     inner: NativeClient<StorageBridge>,
     prover: ProverBridge,
+    contract_config: ContractConfig,
     background_sync_stop: Option<BackgroundSyncStop>,
 }
 
@@ -81,10 +85,12 @@ struct AccountOptions {
     signer_address: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VerifyDisclosureOptions {
     prover_worker_url: Option<String>,
+    contract_config: serde_json::Value,
+    circuits_base_url: String,
 }
 
 #[wasm_bindgen]
@@ -95,9 +101,19 @@ impl Client {
         rpc_url: String,
         storage: &Storage,
         prover_worker_url: String,
+        contract_config: JsValue,
+        circuits_base_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
-        Self::new_inner(rpc_url, storage, prover_worker_url, bootnode_url).await
+        Self::new_inner(
+            rpc_url,
+            storage,
+            prover_worker_url,
+            contract_config,
+            circuits_base_url,
+            bootnode_url,
+        )
+        .await
     }
 
     #[tracing::instrument(
@@ -109,6 +125,8 @@ impl Client {
         rpc_url: String,
         storage: &Storage,
         prover_worker_url: String,
+        contract_config: JsValue,
+        circuits_base_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
         crate::wasm_start();
@@ -126,13 +144,18 @@ impl Client {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 
-        let contract_config = deployment_config()?;
+        let contract_config = parse_contract_config(contract_config)?;
+        let circuits_base_url = require_circuits_base_url(circuits_base_url)?;
         let prover = ProverBridge::new(
             ProverWorker::spawner()
                 .with_loader(true)
                 .as_module(true)
                 .spawn(&prover_worker_url),
         );
+        prover
+            .configure_circuits_base(circuits_base_url)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let prover_handle: Handle<dyn stellar_private_payments::Prover> =
             Handle::from_box(Box::new(prover.clone()) as Box<dyn stellar_private_payments::Prover>);
 
@@ -140,10 +163,15 @@ impl Client {
             rpc_url,
             storage_bridge,
             prover_handle,
-            (*contract_config).clone(),
+            contract_config.clone(),
             bootnode_url,
         )
         .map_err(pool_err)?;
+
+        prover
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&format!("prover worker unreachable: {e:?}")))?;
 
         // Let telemetry config pushes and log dumps reach the worker isolates.
         crate::telemetry::register_worker_sinks(Some(storage.bridge()), Some(prover.clone()));
@@ -152,14 +180,16 @@ impl Client {
             storage,
             inner,
             prover,
+            contract_config,
             background_sync_stop: None,
         })
     }
 
-    /// Bundled deployment config (contract addresses, pools, network).
+    /// Deployment config used by this client (contract addresses, pools,
+    /// network).
     #[wasm_bindgen(js_name = contractConfig)]
-    pub fn contract_config() -> Result<JsValue, JsError> {
-        Ok(serde_wasm_bindgen::to_value(deployment_config()?)?)
+    pub fn contract_config(&self) -> Result<JsValue, JsError> {
+        Ok(serde_wasm_bindgen::to_value(&self.contract_config)?)
     }
 
     /// Start background contract-event sync into local storage.
@@ -327,21 +357,23 @@ pub async fn verify_selective_disclosure_standalone(
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
         let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
-            VerifyDisclosureOptions::default()
+            return Err(JsError::new(
+                "verifySelectiveDisclosure options with contractConfig and circuitsBaseUrl are required",
+            ));
         } else {
             serde_wasm_bindgen::from_value(options)?
         };
-
+        let contract_config: ContractConfig = serde_json::from_value(opts.contract_config)
+            .map_err(|e| JsError::new(&format!("invalid contractConfig: {e}")))?;
+        let circuits_base_url = require_circuits_base_url(opts.circuits_base_url)?;
         let prover_worker_url = opts
             .prover_worker_url
             .filter(|url| !url.trim().is_empty())
             .ok_or_else(|| {
                 JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
             })?;
-
-        let contract_config = deployment_config()?;
         let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
-        let fetcher = StateFetcher::new(rpc, (*contract_config).clone())
+        let fetcher = StateFetcher::new(rpc, contract_config)
             .map_err(|e| JsError::new(&e.to_string()))?;
         let prover = ProverBridge::new(
             ProverWorker::spawner()
@@ -349,6 +381,14 @@ pub async fn verify_selective_disclosure_standalone(
                 .as_module(true)
                 .spawn(&prover_worker_url),
         );
+        prover
+            .configure_circuits_base(circuits_base_url)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        prover
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&format!("prover worker unreachable: {e:?}")))?;
 
         let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
             .await
@@ -389,11 +429,10 @@ impl Client {
         address: String,
         signature: Vec<u8>,
     ) -> Result<(), JsError> {
-        let config = deployment_config()?;
         let req = StorageWorkerRequest::DeriveSaveUserKeys(
             address,
             KeyDerivationSignature(signature),
-            config.network.clone(),
+            self.contract_config.network.clone(),
         );
         match self.storage_request(req, 5_000).await? {
             StorageWorkerResponse::Saved => Ok(()),

@@ -14,6 +14,13 @@ import init, {
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
 
+function requireField(value, name) {
+  if (value === undefined || value === null) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+}
+
 /**
  * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
  * then pass the instance (or a fork) to {@link Client.new}.
@@ -28,10 +35,15 @@ async function openStorage(options = {}) {
  * Probe whether the wallet RPC needs a historical-sync bootnode.
  * @param {string} rpcUrl
  * @param {import('../dist/stellar_private_payments_web.js').Storage} storage
+ * @param {{ contractConfig: unknown }} options
  * @returns {Promise<boolean>}
  */
-async function bootnodeRequired(rpcUrl, storage) {
-  return wasmBootnodeRequired(rpcUrl, storage);
+async function bootnodeRequired(rpcUrl, storage, options) {
+  return wasmBootnodeRequired(
+    rpcUrl,
+    storage,
+    requireField(options?.contractConfig, 'contractConfig'),
+  );
 }
 
 /**
@@ -69,6 +81,7 @@ function wrapClient(wasmClient) {
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     sync: () => wasmClient.sync(),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
+    contractConfig: () => wasmClient.contractConfig(),
     account: async (options, signer) => {
       const userAddress =
         options.userAddress ??
@@ -78,9 +91,6 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
-      // An omitted `userAddress` is resolved from `signer.getPublicKey()`
-      // above, so passing `signerAddress` without `userAddress` would silently
-      // make the signer the note owner.
       if (options.signerAddress && !options.userAddress) {
         throw new Error(
           'options.userAddress is required when options.signerAddress is supplied',
@@ -109,11 +119,11 @@ function wrapClient(wasmClient) {
 /**
  * Create a deployment client. Call {@link bootnodeRequired} (configure bootnode
  * if needed), then `backgroundSync`, then `account` before pool ops.
- *
- * When `options.storage` is omitted, opens a default storage worker automatically.
- * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
  */
 async function newClient(options) {
+  const contractConfig = requireField(options.contractConfig, 'contractConfig');
+  const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
+
   const storage =
     options.storage ??
     (await openStorage({
@@ -125,6 +135,8 @@ async function newClient(options) {
       options.rpcUrl,
       storage,
       options.proverWorkerUrl ?? proverWorkerUrl,
+      contractConfig,
+      circuitsBaseUrl,
       options.bootnodeUrl ?? undefined,
     ),
   );
@@ -132,9 +144,10 @@ async function newClient(options) {
 
 /**
  * Walletless selective-disclosure verification (no storage / Client).
- * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
  */
-function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options = {}) {
+function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options) {
+  requireField(options?.contractConfig, 'contractConfig');
+  requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
   return wasmVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
     proverWorkerUrl,
     ...options,
@@ -144,7 +157,6 @@ function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options 
 export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
-  contractConfig: WasmClient.contractConfig,
 };
 export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export { configureTelemetry, set_log_level, dump_recent_logs, debugLogsEnabled };

@@ -43,11 +43,6 @@ web-sys = { workspace = true }
 sqlite-wasm-rs = { workspace = true }
 sqlite-wasm-vfs = { workspace = true }
 
-[build-dependencies]
-serde_json = { workspace = true }
-sha2 = { workspace = true }
-stellar-private-payments = { workspace = true }
-
 [dev-dependencies]
 wasm-bindgen-test = { workspace = true }
 

@@ -4,6 +4,7 @@ import type { PrivatePool } from '../../dist/stellar_private_payments_web.js';
 
 import type {
   AccountOptions,
+  BootnodeRequiredOptions,
   ClientNewOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
@@ -19,6 +20,7 @@ export type { Client as WasmClient } from '../../dist/stellar_private_payments_w
 
 export type {
   AccountOptions,
+  BootnodeRequiredOptions,
   ClientNewOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
@@ -56,6 +58,7 @@ export interface Client {
   stopBackgroundSync(): void;
   sync(): Promise<void>;
   operationalFeed(limit: number): Promise<unknown>;
+  contractConfig(): unknown;
   account(options: AccountOptions, signer: WalletSigner): Promise<Account>;
   recipientLookup(address: string): Promise<unknown>;
   aspState(): Promise<unknown>;
@@ -73,6 +76,7 @@ export interface Client {
 export declare function bootnodeRequired(
   rpcUrl: string,
   storage: Storage,
+  options: BootnodeRequiredOptions,
 ): Promise<boolean>;
 
 /**
@@ -90,11 +94,10 @@ export declare function verifySelectiveDisclosure(
   rpcUrl: string,
   receiptJson: string,
   expectedVkHash: string,
-  options?: VerifyDisclosureOptions,
+  options: VerifyDisclosureOptions,
 ): Promise<DisclosureVerificationReport>;
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
 export declare const Client: {
   new(options: ClientNewOptions): Promise<Client>;
-  contractConfig(): unknown;
 };

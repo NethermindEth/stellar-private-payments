@@ -13,12 +13,6 @@ mod storage;
 mod telemetry;
 pub mod workers;
 
-pub(crate) mod artifact_hashes {
-    include!(concat!(env!("OUT_DIR"), "/artifact_hashes.rs"));
-}
-
-pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
-
 pub use bootnode::bootnode_required_js as bootnode_required;
 pub use client::{
     Account, Client, PrivatePool, derive_asp_user_leaf, verify_selective_disclosure_standalone,

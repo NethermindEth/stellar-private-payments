@@ -74,6 +74,7 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 cp app/404.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
+cp deployments/testnet/deployments.json "$TRUNK_STAGING_DIR/deployments.json"
 
 # Top-level legal files (NOTICE, LICENSE, circuits/NOTICE for footer links).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"

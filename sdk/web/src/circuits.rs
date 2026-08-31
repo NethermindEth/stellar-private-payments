@@ -3,13 +3,24 @@
 
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
 use sha2::{Digest as _, Sha256};
-use std::fmt::Write as _;
+use std::{cell::RefCell, fmt::Write as _};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Cache, CacheStorage, Request, RequestInit, RequestMode, Response};
 
 const CIRCUITS_BASE_GLOBAL: &str = "__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__";
 const CACHE_NAME: &str = "stellar-circuits-v1";
+
+thread_local! {
+    static CIRCUITS_BASE_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Override the circuits artifact base URL for this worker isolate.
+pub(crate) fn set_circuits_base_url(base: String) {
+    CIRCUITS_BASE_OVERRIDE.with(|cell| {
+        *cell.borrow_mut() = Some(base);
+    });
+}
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -28,19 +39,12 @@ fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn ensure_sha256_matches(
     name: &str,
     bytes: &[u8],
-    expected_len: usize,
     expected_sha256: [u8; 32],
 ) -> Result<(), JsError> {
-    if bytes.len() != expected_len {
-        return Err(JsError::new(&format!(
-            "{name} length mismatch: expected={}, got={}",
-            expected_len,
-            bytes.len(),
-        )));
-    }
     let actual = sha256(bytes);
     if actual != expected_sha256 {
         return Err(JsError::new(&format!(
@@ -52,7 +56,37 @@ pub(crate) fn ensure_sha256_matches(
     Ok(())
 }
 
+fn map_circuit_err(err: stellar_private_payments::Error) -> JsError {
+    JsError::new(&err.to_string())
+}
+
+pub(crate) async fn fetch_circuit_artifact(stem: &str, kind: &str) -> Result<Vec<u8>, JsError> {
+    let lock = stellar_private_payments::circuit_lock().map_err(map_circuit_err)?;
+    let filename = stellar_private_payments::CircuitLockfile::artifact_file_name(stem, kind);
+    let bytes = fetch_circuit_file(&filename).await?;
+    if let Err(err) = lock.verify_artifact(stem, kind, &bytes) {
+        tracing::warn!(
+            "[circuits] hash mismatch for {stem}/{kind}: {err:?}, evicting and refetching"
+        );
+        let url_string = circuit_fetch_url(&filename)?;
+        if let Some(cache) = open_cache().await.unwrap_or(None) {
+            let _ = JsFuture::from(cache.delete_with_str(&url_string)).await;
+        }
+        let refetched_bytes = fetch_circuit_file(&filename).await?;
+        lock.verify_artifact(stem, kind, &refetched_bytes)
+            .map_err(map_circuit_err)?;
+        return Ok(refetched_bytes);
+    }
+    Ok(bytes)
+}
+
 fn circuit_fetch_url(filename: &str) -> Result<String, JsError> {
+    if let Some(base) = CIRCUITS_BASE_OVERRIDE.with(|cell| cell.borrow().clone())
+        && !base.is_empty()
+    {
+        return Ok(format!("{base}{filename}"));
+    }
+
     let global = js_sys::global();
 
     if let Ok(value) = Reflect::get(&global, &JsValue::from_str(CIRCUITS_BASE_GLOBAL))
@@ -193,20 +227,20 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
     response_to_bytes(resp).await
 }
 
+#[cfg(test)]
 pub(crate) async fn fetch_circuit_file_verified(
     filename: &str,
-    expected_len: usize,
     expected_sha256: [u8; 32],
 ) -> Result<Vec<u8>, JsError> {
     let bytes = fetch_circuit_file(filename).await?;
-    if let Err(err) = ensure_sha256_matches(filename, &bytes, expected_len, expected_sha256) {
+    if let Err(err) = ensure_sha256_matches(filename, &bytes, expected_sha256) {
         tracing::warn!("[circuits] hash mismatch for {filename}: {err:?}, evicting and refetching");
         let url_string = circuit_fetch_url(filename)?;
         if let Some(cache) = open_cache().await.unwrap_or(None) {
             let _ = JsFuture::from(cache.delete_with_str(&url_string)).await;
         }
         let refetched_bytes = fetch_circuit_file(filename).await?;
-        ensure_sha256_matches(filename, &refetched_bytes, expected_len, expected_sha256)?;
+        ensure_sha256_matches(filename, &refetched_bytes, expected_sha256)?;
         return Ok(refetched_bytes);
     }
     Ok(bytes)
@@ -343,7 +377,6 @@ mod tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     const TEST_FILE: &str = "test.bin";
-    const EXPECTED_LEN: usize = 4;
     const GOOD_BYTES: [u8; 4] = [1, 2, 3, 4];
     // sha256([1, 2, 3, 4]) ==
     // 9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a
@@ -432,7 +465,7 @@ mod tests {
 
         // First fetch: cache miss -> exactly one network round-trip, populates
         // cache.
-        let bytes1 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
+        let bytes1 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
         assert_eq!(bytes1, GOOD_BYTES.to_vec());
@@ -452,7 +485,7 @@ mod tests {
         );
 
         // Second fetch: cache hit -> the counter must NOT advance.
-        let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
+        let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
         assert_eq!(bytes2, GOOD_BYTES.to_vec());
@@ -464,21 +497,14 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn test_hash_rejects_wrong_len_and_wrong_digest() {
-        // Wrong length is rejected.
+    fn test_hash_rejects_wrong_digest() {
         assert!(
-            ensure_sha256_matches("x", &[1, 2, 3], EXPECTED_LEN, EXPECTED_SHA256).is_err(),
-            "wrong length must be rejected"
-        );
-        // Correct length but wrong digest is rejected.
-        assert!(
-            ensure_sha256_matches("x", &[9, 9, 9, 9], EXPECTED_LEN, EXPECTED_SHA256).is_err(),
+            ensure_sha256_matches("x", &[9, 9, 9, 9], EXPECTED_SHA256).is_err(),
             "wrong digest must be rejected"
         );
-        // Correct bytes pass.
         assert!(
-            ensure_sha256_matches("x", &GOOD_BYTES, EXPECTED_LEN, EXPECTED_SHA256).is_ok(),
-            "matching length and digest must pass"
+            ensure_sha256_matches("x", &GOOD_BYTES, EXPECTED_SHA256).is_ok(),
+            "matching digest must pass"
         );
     }
 
@@ -497,7 +523,7 @@ mod tests {
 
         // Verified fetch reads the poisoned entry, fails the hash check, evicts
         // it, and refetches from the (shimmed) network exactly once.
-        let bytes = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
+        let bytes = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
         assert_eq!(
@@ -513,7 +539,7 @@ mod tests {
 
         // The healed entry is now cached: a subsequent read is a hit (no new
         // fetch).
-        let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_LEN, EXPECTED_SHA256)
+        let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
         assert_eq!(bytes2, GOOD_BYTES.to_vec());

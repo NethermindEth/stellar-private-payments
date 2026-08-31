@@ -17,7 +17,7 @@ use stellar_private_payments::{
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
+        PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
     },
     zk::flows::TransactParams,
 };
@@ -81,7 +81,10 @@ pub enum StorageWorkerRequest {
     UserKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
-    PortfolioBalances(Address),
+    PortfolioBalances {
+        address: Address,
+        enabled_pools: Vec<PortfolioPoolEntry>,
+    },
     RecordOperation {
         address: Address,
         pool_contract_id: String,
@@ -150,6 +153,7 @@ pub enum ProverWorkerRequest {
     Transact(TransactParams),
     Disclosure(DisclosureProveParams),
     VerifyDisclosureProof(DisclosureReceipt, String),
+    ConfigureCircuitsBase(String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
 }
@@ -158,6 +162,7 @@ pub enum ProverWorkerRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ProverWorkerResponse {
     Pong,
+    Saved,
     Error(String),
     TransactPrepared(PreparedProverTx),
     Disclosure(DisclosureReceipt),
