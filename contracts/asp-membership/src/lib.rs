@@ -26,8 +26,6 @@ enum DataKey {
     NextIndex,
     /// Current Merkle root
     Root,
-    /// Whether admin permission is required to insert a leaf
-    AdminInsertOnly,
 }
 
 /// Contract error types
@@ -92,7 +90,6 @@ impl ASPMembership {
         store.set(&DataKey::Admin, &admin);
         store.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
-        store.set(&DataKey::AdminInsertOnly, &true);
 
         // Initialize an empty tree with zero hashes at each level
         let zeros: Vec<U256> = get_zeroes(&env);
@@ -125,23 +122,6 @@ impl ASPMembership {
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
-    }
-
-    /// Set whether admin permission is required to insert a leaf
-    ///
-    /// When `admin_only` is true (default), only the admin can insert leaves.
-    /// When false, anyone can insert leaves. Only the admin can change this
-    /// setting.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    /// * `admin_only` - Whether admin permission is required for leaf insertion
-    pub fn set_admin_insert_only(env: Env, admin_only: bool) -> Result<(), Error> {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
-        store.set(&DataKey::AdminInsertOnly, &admin_only);
-        Ok(())
     }
 
     /// Get the current Merkle root
@@ -183,24 +163,23 @@ impl ASPMembership {
     ///
     /// Adds a new member to the Merkle tree and updates the root. The leaf is
     /// inserted at the next available index and the tree is updated efficiently
-    /// by only recomputing the hashes along the path to the root. If
-    /// `admin_insert_only` is enabled (the default), only the admin can insert
-    /// leaves; otherwise, anyone can call this function.
+    /// by only recomputing the hashes along the path to the root. The admin
+    /// must authorize the call.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `leaf` - The leaf value to insert (typically a commitment or hash)
     ///
-    /// # Returns
-    /// Returns `Ok(())` on success, or `MerkleTreeFull` if the tree is at
-    /// capacity
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract is missing the admin
+    /// address or any tree state the insertion reads,
+    /// [`Error::MerkleTreeFull`] if the tree is at capacity, and
+    /// [`Error::Overflow`] if the next leaf index would exceed `u64::MAX`.
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin_only: bool = store.get(&DataKey::AdminInsertOnly).unwrap_or(true);
-        if admin_only {
-            let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-            admin.require_auth();
-        }
+        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
 
         let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
         let actual_index: u64 = store
