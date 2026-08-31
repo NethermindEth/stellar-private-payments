@@ -276,6 +276,8 @@ impl<S: Storage> PrivatePool<S> {
                 self.config.pool_contract_id
             )));
         }
+        crate::types::validate_gvk_authority_key(&global_view_private_key, pool)
+            .map_err(|e| Error::InvalidConfig(e.to_string()))?;
         self.ensure_synced().await?;
 
         let storage = self.storage.fork()?;

@@ -5,7 +5,7 @@
 //! `circuits/src/globalViewKey.circom`. Encryption and decryption live in
 //! [`crate::zk::gvk`].
 
-use super::{Field, PolicyFlags};
+use super::{Field, PolicyFlags, PoolConfigEntry};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
@@ -198,6 +198,25 @@ pub fn parse_gvk_circuit_stem(stem: &str) -> Result<(PolicyFlags, GvkMode)> {
     Ok((parsed.policy_flags, parsed.gvk_mode))
 }
 
+/// Ensure `d_priv` derives the GVK authority public key declared for `pool`
+pub fn validate_gvk_authority_key(d_priv: &Field, pool: &PoolConfigEntry) -> Result<()> {
+    let configured = pool.gvk_authority_pub_key.as_ref().ok_or_else(|| {
+        anyhow!(
+            "pool {} has no gvkAuthorityPubKey in deployment config",
+            pool.pool_contract_id
+        )
+    })?;
+    let derived = BabyJubJubPoint::from_priv_scalar(d_priv)
+        .ok_or_else(|| anyhow!("invalid GVK authority private key"))?;
+    if &derived != configured {
+        return Err(anyhow!(
+            "GVK private key does not match gvkAuthorityPubKey for pool {}",
+            pool.pool_contract_id
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     // Small fixed offsets over test seeds cannot overflow.
@@ -363,6 +382,53 @@ mod tests {
         let memo = traceable_memo();
 
         assert!(memo.validate(3, 2).is_err());
+    }
+
+    fn pool_entry(key: Option<BabyJubJubPoint>) -> PoolConfigEntry {
+        PoolConfigEntry {
+            pool_contract_id: "CPOOL".to_string(),
+            token_contract_id: "CTOKEN".to_string(),
+            deployment_ledger: 1,
+            enabled: true,
+            asset: crate::types::AssetDescriptor::Native,
+            policy_flags: PolicyFlags::EMPTY,
+            gvk_mode: GvkMode::ViewOnly,
+            gvk_authority_pub_key: key,
+        }
+    }
+
+    #[test]
+    fn validate_gvk_authority_key_accepts_matching_key() -> Result<()> {
+        use crate::zk::encryption::generate_random_blinding;
+
+        let d_priv = generate_random_blinding()?;
+        let pub_key = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("derive pubkey");
+        validate_gvk_authority_key(&d_priv, &pool_entry(Some(pub_key)))?;
+        Ok(())
+    }
+
+    #[test]
+    fn validate_gvk_authority_key_rejects_mismatch() -> Result<()> {
+        use crate::zk::encryption::generate_random_blinding;
+
+        let d_priv = generate_random_blinding()?;
+        let err = validate_gvk_authority_key(&d_priv, &pool_entry(Some(point(7, 11))))
+            .expect_err("wrong key for configured pubkey");
+        assert!(
+            format!("{err:#}").contains("does not match gvkAuthorityPubKey"),
+            "{err:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn validate_gvk_authority_key_requires_configured_pubkey() {
+        let err = validate_gvk_authority_key(&field(1), &pool_entry(None))
+            .expect_err("missing configured pubkey");
+        assert!(
+            format!("{err:#}").contains("no gvkAuthorityPubKey"),
+            "{err:#}"
+        );
     }
 }
 
