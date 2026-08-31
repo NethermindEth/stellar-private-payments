@@ -285,42 +285,49 @@ fn parse_code(raw: &str) -> Option<u32> {
     digits.parse::<u32>().ok()
 }
 
-/// Recovers the contract id that raised the error from the RPC event log
-/// embedded in `raw`.
-///
-/// Prefers the line naming the `error` diagnostic event (which names the
-/// contract that actually escalated the failure) over any earlier,
-/// unrelated `contract:` mention — e.g. a callee the failing contract had
-/// invoked before failing itself.
-fn parse_contract_id(raw: &str) -> Option<String> {
-    let chosen = raw
-        .lines()
-        .find(|line| line.contains("topics:[error") && line.contains("contract:"))
-        .or_else(|| raw.lines().find(|line| line.contains("contract:")))?;
+/// Topic Soroban stamps on the diagnostic event of a frame that failed.
+const ERROR_TOPIC: &str = "topics:[error";
 
-    let after = chosen.split("contract:").nth(1)?;
+/// Reads the `contract:C…` id out of a single event log line.
+fn parse_contract_id(line: &str) -> Option<String> {
+    let after = line.split("contract:").nth(1)?;
     let id: String = after
         .chars()
         .take_while(char::is_ascii_alphanumeric)
         .collect();
-    if id.starts_with('C') && id.len() == 56 {
-        Some(id)
-    } else {
-        None
+    (id.starts_with('C') && id.len() == 56).then_some(id)
+}
+
+/// Reads one `error` diagnostic event.
+///
+/// The code and the contract are taken from the *same* line, so a nested
+/// call can never pair a code raised by one contract with the id of another.
+fn parse_error_frame(line: &str) -> Option<ContractErrorInfo> {
+    if !line.contains(ERROR_TOPIC) {
+        return None;
     }
+    Some(ContractErrorInfo {
+        code: parse_code(line)?,
+        contract_id: parse_contract_id(line),
+        kind: None,
+        name: None,
+        message: None,
+    })
 }
 
 /// Recovers a bare (unresolved) contract error from RPC simulation error
-/// text: the numeric code from `Error(Contract, #N)`, and (best-effort) the
-/// contract id that raised it. Resolving `code` to a [`ContractKind`]
+/// text: the numeric code from `Error(Contract, #N)`, and the contract id
+/// that raised it. Resolving `code` to a [`ContractKind`]
 /// happens separately in [`resolve`], since that needs a deployment config.
 ///
 /// Returns `None` if `raw` contains no recognizable `Error(Contract, #N)`.
 pub fn parse_contract_error(raw: &str) -> Option<ContractErrorInfo> {
-    let code = parse_code(raw)?;
+    if let Some(frame) = raw.lines().find_map(parse_error_frame) {
+        return Some(frame);
+    }
     Some(ContractErrorInfo {
-        code,
-        contract_id: parse_contract_id(raw),
+        code: parse_code(raw)?,
+        contract_id: None,
         kind: None,
         name: None,
         message: None,
@@ -503,5 +510,34 @@ Event log (newest first):
             info.contract_id,
             Some("CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ".to_string())
         );
+    }
+
+    /// A pool call that fails because its verifier failed produces one `error`
+    /// frame per contract. The code and the id must come from the same frame:
+    /// pairing the pool's `#7` with the verifier's id would name `#7` against
+    /// the verifier's table, which does not define it.
+    #[test]
+    fn nested_frames_pair_the_code_with_its_own_contract() {
+        let raw = r#"HostError: Error(Contract, #7)
+
+Event log (newest first):
+   0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #7)], data:"escalating Ok(ScErrorType::Contract) frame-exit to Err"
+   1: [Diagnostic Event] contract:CB2O4B67OKQC6J26KBNM3JK5J7SO63MCSRDCTPPNDTZM7HG5NKIASSV3, topics:[error, Error(Contract, #0)], data:"escalating Ok(ScErrorType::Contract) frame-exit to Err"
+"#;
+        let info = parse_contract_error(raw).expect("parses");
+        assert_eq!(info.code, 7);
+        assert_eq!(
+            info.contract_id,
+            Some("CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ".to_string())
+        );
+    }
+
+    /// Without an event log the code is still recoverable, but nothing names
+    /// the contract, so it must not be guessed.
+    #[test]
+    fn bare_header_yields_code_without_a_contract_id() {
+        let info = parse_contract_error("HostError: Error(Contract, #9)").expect("parses");
+        assert_eq!(info.code, 9);
+        assert_eq!(info.contract_id, None);
     }
 }
