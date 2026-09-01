@@ -88,7 +88,10 @@ impl<S: Storage> Account<S> {
     pub async fn portfolio(&self) -> Result<Vec<PortfolioBalance>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .list_portfolio_balances(self.user_address.as_str(), &self.contract_config)
+            .list_portfolio_balances(
+                self.user_address.as_str(),
+                &self.contract_config.portfolio_pools(),
+            )
             .await
     }
 

@@ -3,14 +3,24 @@
 
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
 use sha2::{Digest as _, Sha256};
-use std::fmt::Write as _;
-use stellar_private_payments::circuits::{ArtifactKind, artifact_file_name, circuit_lock};
+use std::{cell::RefCell, fmt::Write as _};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Cache, CacheStorage, Request, RequestInit, RequestMode, Response};
 
 const CIRCUITS_BASE_GLOBAL: &str = "__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__";
 const CACHE_NAME: &str = "stellar-circuits-v1";
+
+thread_local! {
+    static CIRCUITS_BASE_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Override the circuits artifact base URL for this worker isolate.
+pub(crate) fn set_circuits_base_url(base: String) {
+    CIRCUITS_BASE_OVERRIDE.with(|cell| {
+        *cell.borrow_mut() = Some(base);
+    });
+}
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -29,6 +39,7 @@ fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn ensure_sha256_matches(
     name: &str,
     bytes: &[u8],
@@ -45,30 +56,37 @@ pub(crate) fn ensure_sha256_matches(
     Ok(())
 }
 
-pub(crate) fn verify_lockfile_artifact(
-    stem: &str,
-    kind: ArtifactKind,
-    bytes: &[u8],
-) -> Result<(), JsError> {
-    circuit_lock()
-        .map_err(|e| JsError::new(&e.to_string()))?
-        .verify(stem, kind, bytes)
-        .map_err(|e| JsError::new(&e.to_string()))
+fn map_circuit_err(err: stellar_private_payments::Error) -> JsError {
+    JsError::new(&err.to_string())
 }
 
-pub(crate) async fn fetch_lockfile_artifact(
-    stem: &str,
-    kind: ArtifactKind,
-) -> Result<Vec<u8>, JsError> {
-    let filename = artifact_file_name(stem, kind);
-    let expected_sha256 = circuit_lock()
-        .map_err(|e| JsError::new(&e.to_string()))?
-        .artifact_sha256(stem, kind)
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    fetch_circuit_file_verified(&filename, expected_sha256).await
+pub(crate) async fn fetch_circuit_artifact(stem: &str, kind: &str) -> Result<Vec<u8>, JsError> {
+    let lock = stellar_private_payments::circuit_lock().map_err(map_circuit_err)?;
+    let filename = stellar_private_payments::CircuitLockfile::artifact_file_name(stem, kind);
+    let bytes = fetch_circuit_file(&filename).await?;
+    if let Err(err) = lock.verify_artifact(stem, kind, &bytes) {
+        tracing::warn!(
+            "[circuits] hash mismatch for {stem}/{kind}: {err:?}, evicting and refetching"
+        );
+        let url_string = circuit_fetch_url(&filename)?;
+        if let Some(cache) = open_cache().await.unwrap_or(None) {
+            let _ = JsFuture::from(cache.delete_with_str(&url_string)).await;
+        }
+        let refetched_bytes = fetch_circuit_file(&filename).await?;
+        lock.verify_artifact(stem, kind, &refetched_bytes)
+            .map_err(map_circuit_err)?;
+        return Ok(refetched_bytes);
+    }
+    Ok(bytes)
 }
 
 fn circuit_fetch_url(filename: &str) -> Result<String, JsError> {
+    if let Some(base) = CIRCUITS_BASE_OVERRIDE.with(|cell| cell.borrow().clone())
+        && !base.is_empty()
+    {
+        return Ok(format!("{base}{filename}"));
+    }
+
     let global = js_sys::global();
 
     if let Ok(value) = Reflect::get(&global, &JsValue::from_str(CIRCUITS_BASE_GLOBAL))
@@ -209,6 +227,7 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
     response_to_bytes(resp).await
 }
 
+#[cfg(test)]
 pub(crate) async fn fetch_circuit_file_verified(
     filename: &str,
     expected_sha256: [u8; 32],
@@ -479,12 +498,10 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_hash_rejects_wrong_digest() {
-        // Correct length but wrong digest is rejected.
         assert!(
             ensure_sha256_matches("x", &[9, 9, 9, 9], EXPECTED_SHA256).is_err(),
             "wrong digest must be rejected"
         );
-        // Correct bytes pass.
         assert!(
             ensure_sha256_matches("x", &GOOD_BYTES, EXPECTED_SHA256).is_ok(),
             "matching digest must pass"

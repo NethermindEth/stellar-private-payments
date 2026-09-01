@@ -22,7 +22,8 @@ access).
 make circuits
 ```
 
-`sdk/web/build.rs` and the npm dist both read from `target/circuits-artifacts/`.
+Circuit artifacts must exist under `target/circuits-artifacts/` (served from
+`sdk/web/dist/circuits/` after `npm run build`).
 
 Everything else is handled by the wrapper script described below.
 
@@ -114,9 +115,7 @@ test page loads these assets cross-origin.
 
 Configuration is read at **compile time** via `option_env!`
 (`E2E_ACCOUNT_A_ADDRESS`, `E2E_ACCOUNT_A_SECRET`, `E2E_ACCOUNT_B_ADDRESS`,
-`E2E_RPC_URL`, `E2E_BOOTNODE_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`). `sdk/web/build.rs`
-declares `rerun-if-env-changed` for each, so editing the env file rebuilds the
-test binary on the next run.
+`E2E_RPC_URL`, `E2E_BOOTNODE_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`).
 
 They must be **exported** for the `cargo` invocation, not merely present in the
 file — the wrapper does that for you. Invoking `cargo test` directly, without

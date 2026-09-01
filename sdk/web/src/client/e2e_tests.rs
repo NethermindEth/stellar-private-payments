@@ -29,6 +29,18 @@ use wasm_bindgen_test::*;
 use super::Client;
 use crate::storage::Storage;
 
+const TEST_DEPLOYMENT_JSON: &str = include_str!("../../../../deployments/testnet/deployments.json");
+
+fn test_contract_config() -> JsValue {
+    let config: stellar_private_payments::types::ContractConfig =
+        serde_json::from_str(TEST_DEPLOYMENT_JSON).expect("parse test deployment json");
+    serde_wasm_bindgen::to_value(&config).expect("contract config js value")
+}
+
+fn test_circuits_base_url() -> String {
+    format!("{STATIC_ORIGIN}/circuits/")
+}
+
 wasm_bindgen_test_configure!(run_in_browser);
 
 /// Origin of the CORS-enabled static server rooted at `sdk/web/dist`.
@@ -162,6 +174,8 @@ async fn build_test_client(storage: &Storage) -> Client {
         RPC_URL.to_string(),
         storage,
         prover_url,
+        test_contract_config(),
+        test_circuits_base_url(),
         BOOTNODE_URL.map(str::to_owned),
     )
     .await
@@ -297,7 +311,9 @@ async fn e2e_smoke_client_construction() {
 
     let mut client = build_test_client(&storage).await;
 
-    Client::contract_config().expect("bundled deployment config must parse");
+    client
+        .contract_config()
+        .expect("deployment config must parse");
     assert!(!stub_signer().is_undefined());
 
     client.stop_background_sync();

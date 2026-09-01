@@ -19,19 +19,23 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
+const contractConfig = await fetch('/deployments.json').then((r) => r.json());
+const circuitsBaseUrl = new URL('./circuits/', import.meta.url).href;
 const signer = new FreighterSigner();
 
 await init();
 
 const storage = await Storage.open();
 
-if (await bootnodeRequired(rpcUrl, storage)) {
+if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
 }
 
 const client = await Client.new({
   rpcUrl,
   storage,
+  contractConfig,
+  circuitsBaseUrl,
   // bootnodeUrl: '...',
   // proverWorkerUrl defaults to package dist/workers/prover-worker.js
 });
@@ -49,13 +53,16 @@ console.log(await pool.balance()); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n); // defaults to connected wallet
 
-const cfg = Client.contractConfig();
+const cfg = client.contractConfig();
 const feed = await client.operationalFeed(10);
 const lookup = await client.recipientLookup('G...');
 const chain = await client.allContractsData();
 
 // Walletless verify (no Client / storage)
-const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash);
+const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
+  contractConfig,
+  circuitsBaseUrl,
+});
 ```
 
 ### `Storage`
@@ -72,14 +79,16 @@ The package exports a `Storage` namespace with `open` only; `fork` / `call` are 
 
 | Function | Description |
 |----------|-------------|
-| `bootnodeRequired(rpcUrl, storage)` | `true` if wallet RPC needs a historical-sync bootnode |
+| `bootnodeRequired(rpcUrl, storage, { contractConfig })` | `true` if wallet RPC needs a historical-sync bootnode |
+| `deriveAspUserLeaf(notePublicKey, membershipBlinding)` | ASP membership leaf from explicit hex inputs |
+| `verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { contractConfig, circuitsBaseUrl, proverWorkerUrl? })` | Walletless disclosure verification (no Storage / Client) |
 
 ### `Client`
 
 | Method | Description |
 |--------|-------------|
-| `new({ rpcUrl, storage?, proverWorkerUrl?, bootnodeUrl? })` | Build native client + spawn prover worker (no wallet yet) |
-| `contractConfig()` | Static deployment config |
+| `new({ rpcUrl, contractConfig, circuitsBaseUrl, storage?, proverWorkerUrl?, bootnodeUrl? })` | Build native client + spawn prover worker (no wallet yet) |
+| `contractConfig()` | Deployment config for this client instance |
 | `backgroundSync()` | Background contract-event sync |
 | `stopBackgroundSync()` | Stop the background indexer (also on Client drop) |
 | `sync()` | Explicit foreground catch-up |
@@ -93,7 +102,7 @@ The package exports a `Storage` namespace with `open` only; `fork` / `call` are 
 ### `verifySelectiveDisclosure` (standalone)
 
 ```ts
-verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { proverWorkerUrl? })
+verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { contractConfig, circuitsBaseUrl, proverWorkerUrl? })
 ```
 
 Walletless verification — no `Storage` / `Client`. Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
@@ -111,14 +120,6 @@ Walletless verification — no `Storage` / `Client`. Prover worker URL defaults 
 | `deriveAspUserLeaf()` | ASP membership tree leaf from stored keys |
 | `registerPublicKeys(options?)` | On-chain key registry |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
-
-### Free functions
-
-| Function | Description |
-|----------|-------------|
-| `deriveAspUserLeaf(notePublicKey, membershipBlinding)` | ASP membership leaf from explicit hex inputs |
-| `bootnodeRequired(rpcUrl, storage)` | Whether historical-sync bootnode is needed |
-| `verifySelectiveDisclosure(...)` | Walletless disclosure verification |
 
 ### `PrivatePool`
 

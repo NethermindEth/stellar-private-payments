@@ -6,7 +6,8 @@ use crate::{
     state::{SqliteStorage, StoredUserKeys},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata,
+        UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -103,9 +104,9 @@ impl Storage for LocalStorage {
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
-        config: &ContractConfig,
+        enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error> {
-        portfolio_balances_from_storage(&self.storage(), user_address, config)
+        portfolio_balances_from_storage(&self.storage(), user_address, enabled_pools)
     }
 
     async fn list_user_notes(

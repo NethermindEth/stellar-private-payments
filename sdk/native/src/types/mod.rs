@@ -193,6 +193,14 @@ pub struct PortfolioBalance {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PortfolioPoolEntry {
+    pub pool_contract_id: String,
+    pub token_contract_id: String,
+    pub token_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecipientLookup {
     pub entry: Option<PublicKeyEntry>,
     pub registry_fully_synced: bool,
@@ -327,9 +335,24 @@ impl PoolConfigEntry {
     }
 }
 
+impl From<&PoolConfigEntry> for PortfolioPoolEntry {
+    fn from(pool: &PoolConfigEntry) -> Self {
+        Self {
+            pool_contract_id: pool.pool_contract_id.clone(),
+            token_contract_id: pool.token_contract_id.clone(),
+            token_label: pool.token_label(),
+        }
+    }
+}
+
 impl ContractConfig {
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
         self.pools.iter().filter(|p| p.enabled)
+    }
+
+    /// Enabled pool metadata for portfolio rendering.
+    pub fn portfolio_pools(&self) -> Vec<PortfolioPoolEntry> {
+        self.enabled_pools().map(PortfolioPoolEntry::from).collect()
     }
 
     /// Contract IDs for enabled pools and ASP membership.

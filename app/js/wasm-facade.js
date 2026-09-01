@@ -22,6 +22,12 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
 
+const DEPLOYMENT_CONFIG_URL = new URL('/deployments.json', window.location.href).href;
+const CIRCUITS_BASE_URL = new URL(
+  './js/stellar-private-payments/dist/circuits/',
+  window.location.href,
+).href;
+
 let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
@@ -31,12 +37,37 @@ let currentRpcUrl = null;
 let currentBootnodeUrl = null;
 let boundUserAddress = null;
 let boundSignerAddress = null;
+let deploymentConfigPromise = null;
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
         await init();
         wasmReady = true;
     }
+}
+
+/** Load the app deployment config served at `/deployments.json`. */
+export async function loadDeploymentConfig() {
+    if (!deploymentConfigPromise) {
+        deploymentConfigPromise = fetch(DEPLOYMENT_CONFIG_URL)
+            .then(async (res) => {
+                if (!res.ok) {
+                    throw new Error(
+                        `failed to load deployment config from ${DEPLOYMENT_CONFIG_URL}`,
+                    );
+                }
+                return res.json();
+            })
+            .catch((err) => {
+                deploymentConfigPromise = null;
+                throw err;
+            });
+    }
+    return deploymentConfigPromise;
+}
+
+export function circuitsBaseUrl() {
+    return CIRCUITS_BASE_URL;
 }
 
 function bindAppStorage(sdkStorage) {
@@ -47,7 +78,7 @@ function wrapSdkClient(sdk) {
     return {
         ...sdk,
         contractConfig() {
-            return Client.contractConfig();
+            return sdk.contractConfig();
         },
         storage() {
             if (!appStorageInstance) {
@@ -66,9 +97,6 @@ function wrapSdkClient(sdk) {
             signer = new FreighterSigner(),
         ) {
             const effectiveSigner = signerAddress ?? userAddress;
-            // Keyed on both identities: a session bound to one signing
-            // account must never be handed back for another, which a
-            // cache keyed on the note owner alone would do silently.
             if (
                 boundUserAddress === userAddress &&
                 boundSignerAddress === effectiveSigner &&
@@ -108,10 +136,13 @@ function wrapSdkClient(sdk) {
 }
 
 async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
+    const contractConfig = await loadDeploymentConfig();
     const sdk = await Client.new({
         storage: sdkStorage,
         rpcUrl,
         bootnodeUrl: bootnodeUrl ?? undefined,
+        contractConfig,
+        circuitsBaseUrl: circuitsBaseUrl(),
     });
     return wrapSdkClient(sdk);
 }
@@ -152,7 +183,8 @@ export async function bootnodeRequired(rpcUrl) {
         throw new Error('rpcUrl is required');
     }
     await ensureStorage();
-    return sdkBootnodeRequired(rpcUrl, storageHandle);
+    const contractConfig = await loadDeploymentConfig();
+    return sdkBootnodeRequired(rpcUrl, storageHandle, { contractConfig });
 }
 
 /**
@@ -210,7 +242,11 @@ export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
  */
 export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash) {
     await ensureWasmInit();
-    return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash);
+    const contractConfig = await loadDeploymentConfig();
+    return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
+        contractConfig,
+        circuitsBaseUrl: circuitsBaseUrl(),
+    });
 }
 
 /** SDK deployment client + cached account session. */

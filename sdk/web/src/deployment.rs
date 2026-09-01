@@ -1,18 +1,18 @@
 use stellar_private_payments::types::ContractConfig;
-use wasm_bindgen::JsError;
+use wasm_bindgen::{JsError, JsValue};
 
-pub(crate) fn deployment_config() -> Result<&'static ContractConfig, JsError> {
-    static CONFIG: std::sync::OnceLock<Result<&'static ContractConfig, String>> =
-        std::sync::OnceLock::new();
-
-    let result = CONFIG.get_or_init(|| {
-        let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)
-            .map_err(|e| format!("invalid deployment config: {e}"))?;
-        Ok(Box::leak(Box::new(config)))
-    });
-
-    match result {
-        Ok(config) => Ok(*config),
-        Err(message) => Err(JsError::new(message)),
+pub(crate) fn parse_contract_config(value: JsValue) -> Result<ContractConfig, JsError> {
+    if value.is_null() || value.is_undefined() {
+        return Err(JsError::new("contractConfig is required"));
     }
+    serde_wasm_bindgen::from_value(value)
+        .map_err(|e| JsError::new(&format!("invalid contractConfig: {e}")))
+}
+
+pub(crate) fn require_circuits_base_url(value: String) -> Result<String, JsError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(JsError::new("circuitsBaseUrl is required"));
+    }
+    Ok(format!("{}/", trimmed.trim_end_matches('/')))
 }
