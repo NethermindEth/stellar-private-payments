@@ -5,7 +5,11 @@ use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
-use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
+use soroban_sdk::{
+    Address, Bytes, Env, IntoVal, U256, Vec,
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    vec,
+};
 use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -306,6 +310,50 @@ fn test_new_admin_can_insert_after_update() {
         next_index, 1,
         "NextIndex should be 1 after insertion by new admin"
     );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_update_admin_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    client.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_old_admin_cannot_insert_after_update() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let leaf = U256::from_u32(&env, 100u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (leaf.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&leaf);
 }
 
 #[test]

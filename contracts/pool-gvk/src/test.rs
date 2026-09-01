@@ -388,6 +388,29 @@ fn update_admin_errors_when_admin_unset() {
     ));
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn update_admin_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    pool.update_admin(&Address::generate(&env));
+}
+
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
     BytesN::from_array(env, &[fill; 32])
 }

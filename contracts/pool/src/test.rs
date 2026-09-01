@@ -837,6 +837,51 @@ fn update_admin_errors_when_admin_unset() {
     ));
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn update_admin_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    pool.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn update_asp_membership_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    pool.update_asp_membership(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn update_asp_non_membership_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    pool.update_asp_non_membership(&Address::generate(&env));
+}
+
 #[test]
 fn update_admin_transfers_control() {
     let env = test_env();

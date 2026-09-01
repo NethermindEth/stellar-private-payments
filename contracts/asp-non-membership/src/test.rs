@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{Address, Bytes, Env, U256, testutils::Address as _};
+use soroban_sdk::{
+    Address, Bytes, Env, IntoVal, U256,
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+};
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -934,4 +937,119 @@ fn test_update_admin_errors_when_admin_unset() {
         client.try_update_admin(&new_admin),
         Err(Ok(Error::NotInitialized))
     ));
+}
+
+#[test]
+fn test_update_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let stored_admin: Address = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin updated")
+    });
+    assert_eq!(stored_admin, new_admin);
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
+
+    assert_ne!(client.get_root(), U256::from_u32(&env, 0u32));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_update_admin_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    client.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_insert_leaf_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 42u32));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_delete_leaf_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    let key = U256::from_u32(&env, 1u32);
+    client.insert_leaf(&key, &U256::from_u32(&env, 42u32));
+
+    env.mock_auths(&[]);
+    client.delete_leaf(&key);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_old_admin_cannot_insert_after_update() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
 }
