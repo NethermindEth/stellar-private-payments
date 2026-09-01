@@ -1056,7 +1056,7 @@ impl Storage {
 
         let mut stmt = self.conn.prepare(&sql)?;
         let mut params: Vec<&dyn rusqlite::types::ToSql> =
-            Vec::with_capacity(1 + commitments.len());
+            Vec::with_capacity(1_usize.saturating_add(commitments.len()));
         params.push(&pool_contract_id);
         params.extend(commitments.iter().map(|c| c as &dyn rusqlite::types::ToSql));
         let rows = stmt.query_map(params_from_iter(params), |row| row.get(0))?;
