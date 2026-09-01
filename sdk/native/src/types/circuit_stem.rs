@@ -27,10 +27,10 @@ impl CircuitStem {
 
     /// Parse a stem string back into its components.
     pub fn from_string(stem: &str) -> Result<Self> {
-        if let Some((policy_stem, gvk_mode)) = parse_gvk_suffix(stem) {
+        if let Some((policy_stem, mode_word)) = stem.rsplit_once(GVK_STEM_SUFFIX) {
             Ok(Self {
                 policy_flags: PolicyFlags::from_stem(policy_stem)?,
-                gvk_mode,
+                gvk_mode: gvk_mode_from_stem_word(mode_word)?,
             })
         } else {
             Ok(Self {
@@ -74,12 +74,6 @@ fn compose_stem_string(policy_flags: PolicyFlags, gvk_mode: GvkMode) -> String {
         return base;
     };
     format!("{base}{GVK_STEM_SUFFIX}{mode_word}")
-}
-
-fn parse_gvk_suffix(stem: &str) -> Option<(&str, GvkMode)> {
-    let (base, mode_word) = stem.rsplit_once(GVK_STEM_SUFFIX)?;
-    let gvk_mode = gvk_mode_from_stem_word(mode_word).ok()?;
-    Some((base, gvk_mode))
 }
 
 fn gvk_stem_word(mode: GvkMode) -> Option<&'static str> {
