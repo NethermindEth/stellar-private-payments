@@ -37,6 +37,8 @@ if [[ ! -d "$CIRCUITS_OUT" ]]; then
   exit 1
 fi
 
+sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
+
 # Start from a clean circuits directory so stale files from earlier builds (e.g.
 # old cache sidecars or renamed circuits) cannot leak into the npm package.
 rm -rf "$DIST/circuits"

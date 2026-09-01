@@ -22,10 +22,8 @@ esac
 WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
 WASM_OUT_NAME="stellar_private_payments_web"
 
-echo "==> Building circuit artifacts (if needed)..."
-if [[ ! -d "$ROOT/target/circuits-artifacts" ]]; then
-  make -C "$ROOT" circuits
-fi
+echo "==> Verifying circuit artifacts match lockfile..."
+sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
 cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
