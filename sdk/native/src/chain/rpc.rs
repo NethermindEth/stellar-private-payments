@@ -384,19 +384,22 @@ impl Client {
                 if let Error::JsonRpc { message, .. } = &e
                     && let Some((oldest, newest)) = parse_ledger_range(message)
                 {
-                    // Requested a ledger older than the RPC retains: a real gap.
+                    // Requested a ledger older than the RPC retains: a real
+                    // gap.
                     if start_ledger < oldest {
                         return Err(Error::RpcSyncGap(oldest));
                     }
-                    // Requested a ledger past the RPC's queryable events tip: we
-                    // are already caught up and the RPC simply hasn't indexed
-                    // this far yet (its events tip lags the chain tip). Not an
+                    // Requested a ledger past the RPC's queryable events tip:
+                    // we are already caught up and the RPC
+                    // simply hasn't indexed this far yet
+                    // (its events tip lags the chain tip). Not an
                     // error — callers treat this as "nothing new this round".
                     if start_ledger > newest {
                         return Err(Error::RpcAhead(newest));
                     }
                 }
-                // Surface what we actually requested so range errors are diagnosable.
+                // Surface what we actually requested so range errors are
+                // diagnosable.
                 if let Error::JsonRpc { code, message } = e {
                     return Err(Error::JsonRpc {
                         code,

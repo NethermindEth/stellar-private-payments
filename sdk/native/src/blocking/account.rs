@@ -1,6 +1,9 @@
 //! Sync wrapper around [`crate::Account`] via a shared Tokio runtime.
 
-use crate::types::{EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary};
+use crate::types::{
+    EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance, SignerAddress,
+    UserNoteSummary,
+};
 
 use crate::{
     Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage,
@@ -21,8 +24,14 @@ impl Account {
         Self { inner }
     }
 
-    pub fn user_address(&self) -> &str {
+    /// The account that owns the notes.
+    pub fn user_address(&self) -> &NoteOwnerAddress {
         self.inner.user_address()
+    }
+
+    /// The account that signs and pays.
+    pub fn signer_address(&self) -> &SignerAddress {
+        self.inner.signer_address()
     }
 
     pub fn signer(&self) -> &Handle<dyn Signer> {

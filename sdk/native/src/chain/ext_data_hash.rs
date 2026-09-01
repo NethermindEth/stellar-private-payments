@@ -8,7 +8,7 @@ use stellar_xdr::{Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXd
 use crate::chain::conversions::i128_to_i256_scval;
 
 // please refer to hash_ext_data in contracts/pool/src/pool.rs
-pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
+pub(crate) fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     // 1. Prepare ScVal entries
     // Soroban structs serialize to XDR Maps sorted alphabetically by key
     let mut entries: Vec<(&str, ScVal)> = vec![
@@ -52,8 +52,8 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
 
     // 5. Modular arithmetic in the BN254 scalar field.
     //
-    // Soroban's on-chain logic reduces a 256-bit hash modulo the field order. We
-    // mirror that behavior off-chain using `crate::types::U256`.
+    // Soroban's on-chain logic reduces a 256-bit hash modulo the field order.
+    // We mirror that behavior off-chain using `crate::types::U256`.
     let mut digest_be = [0u8; 32];
     digest_be.copy_from_slice(digest.as_slice());
     let digest_u256 = U256::from_big_endian(&digest_be);

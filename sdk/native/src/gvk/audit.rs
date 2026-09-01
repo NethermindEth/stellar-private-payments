@@ -1,6 +1,7 @@
 //! Admin-side Global View Key audit over indexed pool events.
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 use crate::{
@@ -15,19 +16,39 @@ pub(crate) const TOID_LEN: usize = 19;
 
 const ROW_BATCH: u32 = 256;
 
-/// Decrypted notes and public nullifiers for one private `transact` call
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// One output slot from a private `transact` call.
+///
+/// `commitment` is always present; `note` is `None` for dummy outputs or when
+/// decryption/verification fails.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GvkOutputSlot {
+    pub commitment: Field,
+    pub note: Option<GvkAuditedNote>,
+}
+
+/// One input slot from a private `transact` call.
+///
+/// `nullifier` is always present; `note` is `None` for dummy inputs, view-only
+/// pools (no ciphertext), or when decryption/verification fails.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GvkSpentInput {
+    pub nullifier: Field,
+    pub note: Option<GvkAuditedNote>,
+}
+
+/// Decrypted notes aligned with on-chain input/output slots for one private
+/// `transact` call.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GvkTxAudit {
     pub ledger: u32,
-    pub outputs: Vec<GvkAuditedNote>,
-    /// Traceable pools only; empty for view-only pools.
-    pub inputs: Vec<GvkAuditedNote>,
-    /// Public nullifiers emitted in this transaction.
-    pub nullifiers: Vec<Field>,
+    pub outputs: Vec<GvkOutputSlot>,
+    pub inputs: Vec<GvkSpentInput>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct TxGroup {
     ledger: u32,
     toid: String,
@@ -119,32 +140,27 @@ impl<S: Storage> GvkAudit<S> {
     }
 
     async fn audit_group(&mut self, group: TxGroup) -> Result<GvkTxAudit> {
-        let mut audited_outputs = Vec::new();
+        let d_priv = self.d_priv;
+
+        let mut outputs = Vec::with_capacity(group.outputs.len());
         for (commitment, ciphertext) in group.outputs {
-            if let Some(note) = ciphertext.decrypt_audited_for_commitment(&self.d_priv, &commitment)
-            {
-                audited_outputs.push(note);
-            }
+            let note = ciphertext.decrypt_audited_for_commitment(&d_priv, &commitment);
+            outputs.push(GvkOutputSlot { commitment, note });
         }
 
-        let mut nullifiers = Vec::with_capacity(group.nullifiers.len());
-        let mut audited_inputs = Vec::new();
+        let candidates = self.commitment_candidates().await?;
+        let mut inputs = Vec::with_capacity(group.nullifiers.len());
         for (nullifier, ciphertext) in group.nullifiers {
-            nullifiers.push(nullifier);
-            if let Some(ct) = ciphertext {
-                let d_priv = self.d_priv;
-                let candidates = self.commitment_candidates().await?;
-                if let Some(note) = try_decrypt_against_commitment_set(&d_priv, &ct, candidates) {
-                    audited_inputs.push(note);
-                }
-            }
+            let note = ciphertext
+                .as_ref()
+                .and_then(|ct| try_decrypt_against_commitment_set(&d_priv, ct, candidates));
+            inputs.push(GvkSpentInput { nullifier, note });
         }
 
         Ok(GvkTxAudit {
             ledger: group.ledger,
-            outputs: audited_outputs,
-            inputs: audited_inputs,
-            nullifiers,
+            outputs,
+            inputs,
         })
     }
 
@@ -306,7 +322,7 @@ mod tests {
     #[test]
     fn audit_commitment_event_roundtrip() -> anyhow::Result<()> {
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = generate_gvk_nonce()?;
         let note = GvkNote::new(
             field(0xBEEF),
@@ -327,7 +343,7 @@ mod tests {
 
         let audited = audit_commitment_event(&d_priv, &event).expect("audit output note");
         assert_eq!(audited.note.pk, note.pk);
-        assert_eq!(audited.note.amount(), 5_000_000u128.into());
+        assert_eq!(audited.note.amount()?, 5_000_000u128.into());
         assert_eq!(audited.note.blinding, note.blinding);
         assert_eq!(audited.commitment, commitment);
         Ok(())
@@ -336,7 +352,7 @@ mod tests {
     #[test]
     fn audit_commitment_event_rejects_tampered_ciphertext() -> anyhow::Result<()> {
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(field(1), 1u128.into(), field(2), field(3));
         let mut ct = note.encrypt(&admin, &field(4), 0)?;
         ct.c1 = field(0xFFFF);
@@ -356,7 +372,7 @@ mod tests {
     #[test]
     fn audit_nullifier_event_finds_matching_commitment() -> anyhow::Result<()> {
         let d_priv = field(0x510);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(field(0xABC), 42u128.into(), field(0xDEF), field(5));
         let ct = note.encrypt(&admin, &field(9), 0)?;
         let commitment = commitment_for(&note)?;
@@ -370,7 +386,7 @@ mod tests {
         let audited = audit_nullifier_event(&d_priv, &event, [field(0x1111), commitment])
             .expect("match spent note");
         assert_eq!(audited.commitment, commitment);
-        assert_eq!(audited.note.amount(), 42u128.into());
+        assert_eq!(audited.note.amount()?, 42u128.into());
         Ok(())
     }
 
@@ -384,11 +400,12 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_output_note() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("output")?;
         let d_priv = field(0xA11CE);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
             field(0xBEEF),
             NoteAmount::from(5_000_000u128),
@@ -417,20 +434,22 @@ mod tests {
         let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(5_000_000u128));
+        let output = tx.outputs[0].note.as_ref().expect("recovered output note");
+        assert_eq!(output.note.amount()?, NoteAmount::from(5_000_000u128));
+        assert_eq!(tx.outputs[0].commitment, commitment);
         assert!(tx.inputs.is_empty());
-        assert!(tx.nullifiers.is_empty());
-        assert_eq!(audit.next_tx().await?, None);
+        assert!(audit.next_tx().await?.is_none());
 
         let _ = std::fs::remove_file(path);
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_traceable_input() -> anyhow::Result<()> {
         let (path, storage) = open_audit_db("traceable")?;
         let d_priv = field(0x510);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
 
         let spent = GvkNote::new(
             field(0xABC),
@@ -487,8 +506,15 @@ mod tests {
         let tx = audit.next_tx().await?.expect("transact tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.inputs.len(), 1);
-        assert_eq!(tx.inputs[0].commitment, spent_commitment);
-        assert_eq!(tx.nullifiers, vec![field(0x999)]);
+        assert_eq!(tx.inputs[0].nullifier, field(0x999));
+        assert_eq!(
+            tx.inputs[0]
+                .note
+                .as_ref()
+                .expect("recovered input note")
+                .commitment,
+            spent_commitment
+        );
 
         let _ = std::fs::remove_file(path);
         Ok(())

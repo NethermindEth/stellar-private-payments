@@ -5,7 +5,7 @@
 use crate::types::{
     AspMembershipProof, AspNonMembershipProof, BabyJubJubPoint, EncryptionPublicKey, ExtAmount,
     ExtData, Field, GlobalViewKeyCiphertext, GvkMode, NoteAmount, NotePrivateKey, NotePublicKey,
-    PolicyFlags, U256,
+    PolicyFlags,
 };
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -152,6 +152,8 @@ pub struct TransactParams {
 
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -191,6 +193,8 @@ pub struct DepositParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -237,6 +241,8 @@ pub struct WithdrawParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -279,6 +285,8 @@ pub struct TransferParams {
     pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
+    /// ASP membership (allowlist) Merkle tree depth.
+    pub asp_depth: u32,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: u32,
     /// Pool ASP policy flags (selects the transact circuit).
@@ -305,6 +313,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
         gvk_mode,
@@ -323,6 +332,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
             gvk_mode,
@@ -348,6 +358,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
         gvk_mode,
@@ -405,6 +416,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
             gvk_mode,
@@ -429,6 +441,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
         gvk_mode,
@@ -447,6 +460,7 @@ where
             membership_proof,
             non_membership_proof,
             tree_depth,
+            asp_depth,
             smt_depth,
             policy_flags,
             gvk_mode,
@@ -477,6 +491,7 @@ where
         membership_proof,
         non_membership_proof,
         tree_depth,
+        asp_depth,
         smt_depth,
         policy_flags,
         gvk_mode,
@@ -486,12 +501,16 @@ where
     if tree_depth == 0 {
         return Err(anyhow!("tree_depth must be > 0"));
     }
+    if asp_depth == 0 {
+        return Err(anyhow!("asp_depth must be > 0"));
+    }
     if smt_depth == 0 {
         return Err(anyhow!("smt_depth must be > 0"));
     }
 
     let tree_depth_usize =
         usize::try_from(tree_depth).map_err(|_| anyhow!("tree_depth too large"))?;
+    let asp_depth_usize = usize::try_from(asp_depth).map_err(|_| anyhow!("asp_depth too large"))?;
     let smt_depth_usize = usize::try_from(smt_depth).map_err(|_| anyhow!("smt_depth too large"))?;
 
     // Validate ASP proof shapes and policy consistency early.
@@ -507,10 +526,10 @@ where
             ));
         }
         (true, Some(proof)) => {
-            if proof.path_elements.len() != tree_depth_usize {
+            if proof.path_elements.len() != asp_depth_usize {
                 return Err(anyhow!(
                     "membership_proof.path_elements length mismatch: expected {}, got {}",
-                    tree_depth,
+                    asp_depth,
                     proof.path_elements.len()
                 ));
             }
@@ -770,8 +789,8 @@ where
         );
     }
 
-    // ASP proofs objects, duplicated across input slots, with a single [0] entry
-    // per slot.
+    // ASP proofs objects, duplicated across input slots, with a single [0]
+    // entry per slot.
     for slot in 0..N_INPUTS {
         if let Some(membership_proof) = &membership_proof {
             let prefix_m = format!("membershipProofs[{slot}][0].");
@@ -890,7 +909,7 @@ where
         (None, None)
     } else {
         let admin = admin_view_key.as_ref().expect("validated above");
-        let nonce = Field(U256::from_big_endian(&ext_data_hash_be));
+        let nonce = Field::try_from_be_bytes(ext_data_hash_be)?;
         let (outputs, inputs) = build_transact_gvk_ciphertexts(
             gvk_mode,
             admin,
@@ -1124,7 +1143,8 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
         &field_to_circuit_hex(&params.ext_context_hash)?,
     );
 
-    // Compute per-note nullifiers for public disclosure and wire private inputs.
+    // Compute per-note nullifiers for public disclosure and wire private
+    // inputs.
     let mut output_nullifier_hex: Vec<String> = Vec::with_capacity(n_notes);
     let mut nullifier_fields: Vec<Field> = Vec::with_capacity(n_notes);
     let mut amount_fields: Vec<Field> = Vec::with_capacity(n_notes);
@@ -1245,8 +1265,9 @@ mod tests {
     #[test]
     fn deposit_pads_inputs_and_outputs() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1266,9 +1287,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1320,6 +1342,7 @@ mod tests {
     #[test]
     fn blocklist_transact_omits_membership_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
@@ -1340,6 +1363,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1367,6 +1391,7 @@ mod tests {
     #[test]
     fn open_transact_omits_asp_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
 
         let artifacts = transact(
@@ -1386,6 +1411,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::EMPTY,
                 gvk_mode: GvkMode::Off,
@@ -1414,8 +1440,9 @@ mod tests {
     #[test]
     fn allowlist_transact_omits_blocklist_witness() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
 
         let artifacts = transact(
             TransactParams {
@@ -1431,9 +1458,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST,
                 gvk_mode: GvkMode::Off,
@@ -1458,44 +1486,11 @@ mod tests {
         assert!(artifacts.prepared.asp_non_membership_root.is_zero());
     }
 
+    /// A membership proof cut to the pool depth must be rejected.
     #[test]
-    fn blocklist_transact_rejects_membership_proof() {
+    fn allowlist_transact_rejects_membership_proof_sized_to_the_pool_depth() {
         let tree_depth: u32 = 10;
-        let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
-        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
-
-        let res = transact(
-            TransactParams {
-                priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
-                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
-                ext_recipient: "POOL".into(),
-                ext_amount: ExtAmount::from(10),
-                inputs: Vec::new(),
-                outputs: vec![TransactOutput {
-                    amount: NoteAmount::from(10),
-                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
-                    recipient_note_pubkey: None,
-                    recipient_encryption_pubkey: None,
-                }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
-                tree_depth,
-                smt_depth,
-                policy_flags: PolicyFlags::BLOCKLIST,
-                gvk_mode: GvkMode::Off,
-                admin_view_key: None,
-            },
-            |_| Ok([0u8; 32]),
-        );
-
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn both_transact_requires_non_membership_proof() {
-        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
 
@@ -1516,6 +1511,84 @@ mod tests {
                 membership_proof: Some(zero_membership(tree_depth_usize)),
                 non_membership_proof: None,
                 tree_depth,
+                asp_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::ALLOWLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        let err = res.expect_err("membership proof at the pool depth must be rejected");
+        assert!(
+            err.to_string().contains("path_elements length mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn blocklist_transact_rejects_membership_proof() {
+        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
+        let smt_depth: u32 = 10;
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(asp_depth_usize)),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
+                tree_depth,
+                asp_depth,
+                smt_depth,
+                policy_flags: PolicyFlags::BLOCKLIST,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn both_transact_requires_non_membership_proof() {
+        let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
+        let smt_depth: u32 = 10;
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
+
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(asp_depth_usize)),
+                non_membership_proof: None,
+                tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1530,6 +1603,7 @@ mod tests {
     #[test]
     fn both_transact_requires_membership_proof() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
@@ -1550,6 +1624,7 @@ mod tests {
                 membership_proof: None,
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1564,8 +1639,10 @@ mod tests {
     #[test]
     fn withdraw_auto_builds_change_outputs() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1587,9 +1664,10 @@ mod tests {
                 withdraw_amount: ExtAmount::from(7),
                 inputs: vec![input],
                 outputs: None,
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1614,8 +1692,10 @@ mod tests {
     #[test]
     fn transfer_requires_balanced_equation() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1642,9 +1722,10 @@ mod tests {
                 pool_address: "POOL".into(),
                 inputs: vec![input],
                 outputs: vec![out],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1659,8 +1740,10 @@ mod tests {
     #[test]
     fn withdraw_splits_change_when_exceeds_note_amount_max() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
@@ -1683,9 +1766,10 @@ mod tests {
                 withdraw_amount: ExtAmount::ONE,
                 inputs: vec![input0],
                 outputs: None,
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1701,10 +1785,13 @@ mod tests {
         BabyJubJubPoint::from_priv_scalar(
             &Field::try_from_le_bytes([0x11; 32]).expect("admin scalar"),
         )
+        .expect("valid admin key")
     }
 
     fn fixed_ext_data_hash(_ext: &ExtData) -> Result<[u8; 32]> {
-        Ok([0xAA; 32])
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0xAA;
+        Ok(Field::try_from_le_bytes(bytes)?.to_be_bytes())
     }
 
     fn gvk_signal_single<'a>(signals: &'a CircuitInputs, name: &str) -> &'a str {
@@ -1741,8 +1828,9 @@ mod tests {
     #[test]
     fn gvk_off_no_inputs() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let artifacts = deposit(
@@ -1758,9 +1846,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Off,
@@ -1778,8 +1867,9 @@ mod tests {
     #[test]
     fn gvk_viewonly_sets_inputs_and_output_ciphertexts() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let artifacts = deposit(
@@ -1795,9 +1885,10 @@ mod tests {
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 }],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::ViewOnly,
@@ -1828,8 +1919,10 @@ mod tests {
     #[test]
     fn gvk_traceable_sets_inputs_and_both_ciphertexts() {
         let tree_depth: u32 = 10;
+        let asp_depth: u32 = 8;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let input = TransactInputNote {
@@ -1853,9 +1946,10 @@ mod tests {
                 pool_address: "POOL".into(),
                 inputs: vec![input],
                 outputs: vec![out],
-                membership_proof: Some(zero_membership(tree_depth_usize)),
+                membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
+                asp_depth,
                 smt_depth,
                 policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
                 gvk_mode: GvkMode::Traceable,

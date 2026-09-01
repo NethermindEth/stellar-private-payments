@@ -20,7 +20,7 @@ fn main() {
     let out = out_dir.join("disclaimer_hash.rs");
 
     let contents = format!(
-        "pub const CURRENT_DISCLAIMER_HASH_HEX: &str = \"{}\";\n",
+        "pub(crate) const CURRENT_DISCLAIMER_HASH_HEX: &str = \"{}\";\n",
         hex
     );
     fs::write(out, contents).expect("write generated disclaimer_hash.rs");

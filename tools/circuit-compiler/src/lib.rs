@@ -57,7 +57,8 @@ fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bo
 }
 
 fn groth16_key_circuits() -> Vec<String> {
-    // Keep in sync with `stellar_private_payments::types::PolicyFlags::all_stems`.
+    // Keep in sync with
+    // `stellar_private_payments::types::PolicyFlags::all_stems`.
     let mut circuits = vec![
         "policy_tx_2_2".to_owned(),
         "policy_tx_2_2_A".to_owned(),
@@ -185,8 +186,8 @@ pub fn run(opts: CompileOptions) -> Result<()> {
         let r1cs_file = out_file.with_extension("r1cs");
         let sym_file = out_file.with_extension("sym");
 
-        // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM
-        // compilation
+        // Hardcoded Values for BN128 (also known as BN254) and only R1CS and
+        // SYM compilation
         let prime = BigInt::parse_bytes(
             "21888242871839275222246405745257275088548364400416034343698204186575808495617"
                 .as_bytes(),
@@ -212,9 +213,9 @@ pub fn run(opts: CompileOptions) -> Result<()> {
         Report::print_reports(&report_warns, &program_archive.file_library);
 
         // === CHECK DEPENDENCIES ===
-        // We now extract all included files from the parsed circuit and check if
-        // rebuild is needed This prevents situations where a circuit is not
-        // updated, but its dependencies are
+        // We now extract all included files from the parsed circuit and check
+        // if rebuild is needed This prevents situations where a circuit
+        // is not updated, but its dependencies are
         let dependencies = extract_circom_dependencies(&circom_file, &circuits_dir)?;
 
         // Get circuit name for key generation check
@@ -234,7 +235,8 @@ pub fn run(opts: CompileOptions) -> Result<()> {
             let sym_modified = fs::metadata(&sym_file)?.modified()?;
             let newest_artifact = r1cs_modified.max(sym_modified);
 
-            // Check if any dependency (including the main file) is newer than artifacts
+            // Check if any dependency (including the main file) is newer than
+            // artifacts
             let needs_rebuild =
                 check_dependencies_need_rebuild(&dependencies, &circom_file, newest_artifact)?;
 
@@ -244,7 +246,8 @@ pub fn run(opts: CompileOptions) -> Result<()> {
                     circom_file.display()
                 );
 
-                // Keep deterministic publish directory updated even on "skip" builds.
+                // Keep deterministic publish directory updated even on "skip"
+                // builds.
                 if wasm_path.exists() {
                     if let Err(e) = publish_circuit_artifacts(
                         &publish_dir,
@@ -255,16 +258,17 @@ pub fn run(opts: CompileOptions) -> Result<()> {
                         eprintln!("Failed to publish artifacts for {circuit_name}: {e}");
                     }
                 } else {
-                    // WASM missing: fall through so we can regenerate it instead of silently
-                    // leaving the deterministic directory incomplete.
+                    // WASM missing: fall through so we can regenerate it
+                    // instead of silently leaving the
+                    // deterministic directory incomplete.
                     eprintln!(
                         "WASM missing for {} - recompiling to restore deterministic artifacts",
                         circuit_name
                     );
                 }
 
-                // Still check if we need to generate keys for circuits that ship PK/VK under
-                // testdata/
+                // Still check if we need to generate keys for circuits that
+                // ship PK/VK under testdata/
                 if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits)
                     && wasm_path.exists()
                 {
@@ -1017,7 +1021,8 @@ fn check_keys_need_generation(
     r1cs_file: &Path,
     force_regen: bool,
 ) -> (bool, String) {
-    // Check if essential key files exist (the 3 needed for proving/verification)
+    // Check if essential key files exist (the 3 needed for
+    // proving/verification)
     let (essential_exist, missing) = check_essential_keys_exist(pk_path, vk_path, vk_soroban_path);
 
     if !essential_exist {
@@ -1172,7 +1177,8 @@ fn generate_keys_if_needed(
                 );
             }
 
-            // Write verification key (const Rust) for potential embedding in contract
+            // Write verification key (const Rust) for potential embedding in
+            // contract
             if let Err(e) = write_verification_key_rust_const(&vk, &vk_const_path) {
                 eprintln!("Failed to write VK Rust const: {e}");
             } else {

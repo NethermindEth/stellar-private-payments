@@ -23,6 +23,12 @@ export interface AccountOptions {
   networkPassphrase: string;
   /** Optional when `signer.getPublicKey()` is implemented. */
   userAddress?: string;
+  /**
+   * The account that signs the transaction, sources its envelope and pays the
+   * fee. Defaults to `userAddress`, and requires `userAddress` to be supplied —
+   * otherwise the note owner is resolved from the signer.
+   */
+  signerAddress?: string;
 }
 
 /** Options for {@link Account.pool}. */

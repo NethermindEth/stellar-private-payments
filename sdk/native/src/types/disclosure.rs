@@ -9,7 +9,7 @@ pub const DISCLOSURE_RECEIPT_VERSION: u32 = 1;
 pub const SELECTIVE_DISCLOSURE_1_CIRCUIT: &str = "selectiveDisclosure_1";
 
 /// Merkle tree depth expected by `selectiveDisclosure_1`.
-pub const SELECTIVE_DISCLOSURE_1_LEVELS: u32 = 10;
+pub const SELECTIVE_DISCLOSURE_1_LEVELS: u32 = 20;
 
 /// Number of notes disclosed by `selectiveDisclosure_1`.
 pub const SELECTIVE_DISCLOSURE_1_N_NOTES: u32 = 1;
@@ -18,7 +18,7 @@ pub const SELECTIVE_DISCLOSURE_1_N_NOTES: u32 = 1;
 pub const SELECTIVE_DISCLOSURE_2_CIRCUIT: &str = "selectiveDisclosure_2";
 
 /// Merkle tree depth expected by `selectiveDisclosure_2`.
-pub const SELECTIVE_DISCLOSURE_2_LEVELS: u32 = 10;
+pub const SELECTIVE_DISCLOSURE_2_LEVELS: u32 = 20;
 
 /// Number of notes disclosed by `selectiveDisclosure_2`.
 pub const SELECTIVE_DISCLOSURE_2_N_NOTES: u32 = 2;
@@ -27,7 +27,7 @@ pub const SELECTIVE_DISCLOSURE_2_N_NOTES: u32 = 2;
 pub const SELECTIVE_DISCLOSURE_3_CIRCUIT: &str = "selectiveDisclosure_3";
 
 /// Merkle tree depth expected by `selectiveDisclosure_3`.
-pub const SELECTIVE_DISCLOSURE_3_LEVELS: u32 = 10;
+pub const SELECTIVE_DISCLOSURE_3_LEVELS: u32 = 20;
 
 /// Number of notes disclosed by `selectiveDisclosure_3`.
 pub const SELECTIVE_DISCLOSURE_3_N_NOTES: u32 = 3;
@@ -36,7 +36,7 @@ pub const SELECTIVE_DISCLOSURE_3_N_NOTES: u32 = 3;
 pub const SELECTIVE_DISCLOSURE_4_CIRCUIT: &str = "selectiveDisclosure_4";
 
 /// Merkle tree depth expected by `selectiveDisclosure_4`.
-pub const SELECTIVE_DISCLOSURE_4_LEVELS: u32 = 10;
+pub const SELECTIVE_DISCLOSURE_4_LEVELS: u32 = 20;
 
 /// Number of notes disclosed by `selectiveDisclosure_4`.
 pub const SELECTIVE_DISCLOSURE_4_N_NOTES: u32 = 4;
@@ -403,7 +403,7 @@ mod tests {
         let json = r#"{
             "version": 1,
             "unexpected": true,
-            "circuit": {"name": "selectiveDisclosure_1", "levels": 10, "nNotes": 1, "vkHash": "0x1111111111111111111111111111111111111111111111111111111111111111"},
+            "circuit": {"name": "selectiveDisclosure_1", "levels": 20, "nNotes": 1, "vkHash": "0x1111111111111111111111111111111111111111111111111111111111111111"},
             "context": {"network": "testnet", "poolAddress": "CAAA", "authorityLabel": "A", "authorityIdentityPayloadHex": "0x61", "purpose": "p", "contextNonce": "0x0000000000000000000000000000000000000000000000000000000000000000"},
             "publicInputs": {"roots": [], "noteCommitments": [], "extContextHash": "0x0000000000000000000000000000000000000000000000000000000000000000"},
             "proofCompressedHex": "0x",

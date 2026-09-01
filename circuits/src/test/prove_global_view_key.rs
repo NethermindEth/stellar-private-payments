@@ -199,7 +199,8 @@ mod tests {
             load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        // (1, 1) does not satisfy the Baby JubJub curve equation, so BabyCheck fails.
+        // (1, 1) does not satisfy the Baby JubJub curve equation, so BabyCheck
+        // fails.
         let bad_d = (Scalar::from(1u64), Scalar::from(1u64));
         let inputs = gvk_inputs(&sample_notes(2), bad_d, Scalar::from(3u64));
 

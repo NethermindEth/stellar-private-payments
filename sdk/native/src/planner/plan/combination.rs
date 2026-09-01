@@ -4,10 +4,10 @@ use super::PlanError;
 use crate::types::{NoteAmount, Sensitive, correlation_id_or_new};
 
 /// Upper bound on combination size explored by [`find_combination`].
-pub const TRANSACTION_LIMIT: usize = 10;
+pub(crate) const TRANSACTION_LIMIT: usize = 10;
 
 #[derive(Debug, PartialEq)]
-pub enum CombinationResult {
+pub(crate) enum CombinationResult {
     /// Tier 1: Exactly two elements that sum exactly to the goal
     TwoExact(usize, usize),
     /// Tier 1.5: A single element that matches the goal exactly
@@ -28,7 +28,7 @@ pub enum CombinationResult {
 /// prioritizing the lowest combination count (with two-note pairs preferred
 /// over single-note exact matches).
 #[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), goal = ?Sensitive(&goal)))]
-pub fn find_combination(
+pub(crate) fn find_combination(
     values: &[NoteAmount],
     goal: NoteAmount,
 ) -> Result<CombinationResult, PlanError> {

@@ -36,11 +36,9 @@ pub struct DisclaimerState {
 }
 
 #[derive(Debug, Clone)]
-pub struct AccountKeys {
+pub(crate) struct AccountKeys {
     pub account_id: i64,
-    pub note_keypair: NoteKeyPair,
-    pub encryption_keypair: EncryptionKeyPair,
-    pub membership_blinding: Field,
+    pub keys: StoredUserKeys,
 }
 
 #[derive(Debug, Clone)]
@@ -51,22 +49,23 @@ pub struct StoredUserKeys {
 }
 
 #[derive(Debug, Clone)]
-pub struct PoolCommitmentRow {
+pub(crate) struct PoolCommitmentRow {
     pub commitment_id: i64,
     pub commitment: Field,
     pub leaf_index: u32,
     pub encrypted_output: Vec<u8>,
+    #[allow(dead_code)]
     pub gvk_ciphertext: Option<crate::types::GlobalViewKeyCiphertext>,
 }
 
 #[derive(Debug, Clone)]
-pub struct DerivedUserNoteRow {
+pub(crate) struct DerivedUserNoteRow {
     pub amount: NoteAmount,
     pub blinding: Field,
     pub expected_nullifier: Field,
 }
 
-pub type DeriveNoteFn<'a> =
+pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 impl Storage {
@@ -464,7 +463,8 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -484,6 +484,7 @@ impl Storage {
             let created_at_ledger_i64: i64 = row.get(4)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
             let spent_i64: i64 = row.get(5)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 6)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -492,6 +493,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                gvk_ciphertext,
             })
         })?;
 
@@ -515,7 +517,8 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -533,6 +536,7 @@ impl Storage {
             let created_at_ledger_i64: i64 = row.get(3)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
             let spent_i64: i64 = row.get(4)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -541,6 +545,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                gvk_ciphertext,
             })
         })?;
 
@@ -563,7 +568,8 @@ impl Storage {
                 pool.address,
                 n.amount,
                 c.leaf_index,
-                r.ledger
+                r.ledger,
+                c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -581,6 +587,7 @@ impl Storage {
             let leaf_index = col_u32(leaf_index_i64, 3)?;
             let created_at_ledger_i64: i64 = row.get(4)?;
             let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -589,6 +596,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: false,
+                gvk_ciphertext,
             })
         })?;
 
@@ -999,24 +1007,24 @@ impl Storage {
 
         rows.map(|row| {
             let (ledger, event_id, kind, field, encoded) = row?;
-            let gvk_ciphertext = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
+            let gvk_ciphertext_opt = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
             match kind {
                 0 => {
-                    let encoded = encoded.ok_or_else(|| {
+                    let gvk_ciphertext = gvk_ciphertext_opt.ok_or_else(|| {
                         anyhow!("commitment row missing gvk_ciphertext after filter")
                     })?;
                     Ok(crate::gvk::GvkEvent::Commitment {
                         ledger,
                         event_id,
                         commitment: field,
-                        gvk_ciphertext: decode_gvk_ciphertext(&encoded)?,
+                        gvk_ciphertext,
                     })
                 }
                 1 => Ok(crate::gvk::GvkEvent::Nullifier {
                     ledger,
                     event_id,
                     nullifier: field,
-                    gvk_ciphertext,
+                    gvk_ciphertext: gvk_ciphertext_opt,
                 }),
                 other => Err(anyhow!("unknown pool GVK event kind: {other}")),
             }
@@ -1108,8 +1116,8 @@ impl Storage {
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
-        // The indexer sync metadata is authoritative for "how far we've indexed", even
-        // if there were no ASP events in recent ledgers.
+        // The indexer sync metadata is authoritative for "how far we've
+        // indexed", even if there were no ASP events in recent ledgers.
         let sync_meta = self
             .get_sync_metadata()?
             .into_iter()
@@ -1123,20 +1131,23 @@ impl Storage {
             return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
-        // `current_ledger <= last_fully_indexed_ledger`: we have indexed at least
-        // as far as the ledger of this contract-state read, so we have the data
-        // needed to reconcile membership. The indexer tip can legitimately sit a
-        // few ledgers *ahead* of this read — the events RPC and the
-        // contract-state read advance independently — so "metadata ahead" is
-        // normal skew, not corruption, and must not be a hard error. The
-        // authoritative correctness check is the root reconciliation below, which
-        // detects any genuine divergence.
+        // `current_ledger <= last_fully_indexed_ledger`: we have indexed at
+        // least as far as the ledger of this contract-state read, so we
+        // have the data needed to reconcile membership. The indexer tip
+        // can legitimately sit a few ledgers *ahead* of this read — the
+        // events RPC and the contract-state read advance independently
+        // — so "metadata ahead" is normal skew, not corruption, and
+        // must not be a hard error. The authoritative correctness check
+        // is the root reconciliation below, which detects any genuine
+        // divergence.
 
         // Get the last stored root for the ASP membership tree and the ledger
         // that produced it. The ledger is derived by joining with the raw event
         // log so we can distinguish:
-        // - "no new ASP events" (root matches, even if last leaf ledger < tip), vs
-        // - "partial processing" (raw events ingested to tip but leaves table lags).
+        // - "no new ASP events" (root matches, even if last leaf ledger < tip),
+        //   vs
+        // - "partial processing" (raw events ingested to tip but leaves table
+        //   lags).
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
@@ -1161,8 +1172,8 @@ impl Storage {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
 
-        // current_ledger == last_fully_indexed_ledger: require root match and leaf
-        // existence.
+        // current_ledger == last_fully_indexed_ledger: require root match and
+        // leaf existence.
         if *current_root != last_root {
             // If the root at the chain tip doesn't match the last stored root
             // but our last stored leaf is from an earlier ledger, we may have
@@ -1313,15 +1324,17 @@ impl Storage {
 
             Ok(AccountKeys {
                 account_id,
-                note_keypair: NoteKeyPair {
-                    private: note_priv,
-                    public: note_pub,
+                keys: StoredUserKeys {
+                    note_keypair: NoteKeyPair {
+                        private: note_priv,
+                        public: note_pub,
+                    },
+                    encryption_keypair: EncryptionKeyPair {
+                        private: enc_priv,
+                        public: enc_pub,
+                    },
+                    membership_blinding,
                 },
-                encryption_keypair: EncryptionKeyPair {
-                    private: enc_priv,
-                    public: enc_pub,
-                },
-                membership_blinding,
             })
         })?;
 
@@ -1335,7 +1348,7 @@ impl Storage {
     /// Scan pool commitments and insert decryptable notes into `user_notes`.
     ///
     /// Progress is tracked per-account in `account_commitment_scan`.
-    pub fn scan_commitments_for_user_notes(
+    pub(crate) fn scan_commitments_for_user_notes(
         &mut self,
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
@@ -1430,7 +1443,7 @@ impl Storage {
                     let quota = pool_quota.min(ACCOUNT_CHUNK);
                     let commitments: Vec<PoolCommitmentRow> = {
                         let mut stmt = tx.prepare(
-                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output
+                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output, c.gvk_ciphertext
                              FROM pool_commitments c
                              JOIN raw_contract_events r ON r.id = c.event_id
                              WHERE r.contract_id = ?1 AND c.id > ?2
@@ -1446,12 +1459,13 @@ impl Storage {
                                 let leaf_index_i64: i64 = row.get(2)?;
                                 let leaf_index = col_u32(leaf_index_i64, 2)?;
                                 let encrypted_output: Vec<u8> = row.get(3)?;
+                                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 4)?;
                                 Ok(PoolCommitmentRow {
                                     commitment_id,
                                     commitment,
                                     leaf_index,
                                     encrypted_output,
-                                    gvk_ciphertext: None,
+                                    gvk_ciphertext,
                                 })
                             },
                         )?;
@@ -1662,7 +1676,8 @@ impl Storage {
         counterparty: Option<&str>,
         tx_hash: Option<&str>,
     ) -> Result<()> {
-        // created_at is filled by the DB as UTC epoch seconds, not the client clock.
+        // created_at is filled by the DB as UTC epoch seconds, not the client
+        // clock.
         self.conn.execute(
             "INSERT INTO app_user_operations
                 (address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, created_at)
@@ -1723,6 +1738,19 @@ fn encode_optional_gvk_ciphertext(
 
 fn decode_gvk_ciphertext(encoded: &str) -> Result<GlobalViewKeyCiphertext> {
     serde_json::from_str(encoded).map_err(Into::into)
+}
+
+fn optional_gvk_ciphertext_col(
+    row: &rusqlite::Row<'_>,
+    idx: usize,
+) -> rusqlite::Result<Option<GlobalViewKeyCiphertext>> {
+    let encoded: Option<String> = row.get(idx)?;
+    match encoded {
+        None => Ok(None),
+        Some(encoded) => decode_gvk_ciphertext(&encoded).map(Some).map_err(|e| {
+            rusqlite::Error::InvalidParameterName(format!("gvk_ciphertext[{idx}]: {e:#}"))
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -1804,8 +1832,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2352,8 +2380,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2428,8 +2456,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2521,8 +2549,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2600,8 +2628,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2675,8 +2703,8 @@ mod tests {
                           row: &PoolCommitmentRow|
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2717,7 +2745,8 @@ mod tests {
         }])?;
         storage.reconcile_nullifiers(100)?;
 
-        // The unspent-only lookup rejects it, but the spent-tolerant lookup returns it.
+        // The unspent-only lookup rejects it, but the spent-tolerant lookup
+        // returns it.
         assert!(
             storage
                 .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?
@@ -2822,6 +2851,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
         use crate::{
@@ -2840,7 +2870,7 @@ mod tests {
         ));
         let mut storage = Storage::connect_file(&path)?;
         let d_priv = Field(crate::types::U256::from(0xAD00));
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
             Field(crate::types::U256::from(0xBEEF)),
             NoteAmount::from(99u128),
@@ -2872,8 +2902,41 @@ mod tests {
             commitment,
             index: 0,
             encrypted_output: vec![],
-            gvk_ciphertext: Some(ct),
+            gvk_ciphertext: Some(ct.clone()),
         }])?;
+
+        storage.conn.execute(
+            "INSERT INTO accounts (address) VALUES (?1)",
+            params!["GUSER"],
+        )?;
+        let account_id: i64 = storage.conn.query_row(
+            "SELECT id FROM accounts WHERE address = ?1",
+            params!["GUSER"],
+            |row| row.get(0),
+        )?;
+        let commitment_id: i64 = storage.conn.query_row(
+            "SELECT id FROM pool_commitments WHERE commitment = ?1",
+            params![commitment],
+            |row| row.get(0),
+        )?;
+        storage.conn.execute(
+            "INSERT INTO user_notes (
+                id, account_id, commitment_id, nullifier_id,
+                expected_nullifier, blinding, amount
+             ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
+            params![
+                commitment,
+                account_id,
+                commitment_id,
+                Field(crate::types::U256::from(1)),
+                Field(crate::types::U256::from(2)),
+                NoteAmount::from(99u128).to_string(),
+            ],
+        )?;
+        let notes = storage.list_pool_user_notes("CPOOL", "GUSER")?;
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].gvk_ciphertext.as_ref(), Some(&ct));
+
         drop(storage);
 
         let rows = Storage::connect_file(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
@@ -2884,8 +2947,9 @@ mod tests {
         let mut audit = crate::gvk::GvkAudit::new(local, "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].note.amount(), NoteAmount::from(99u128));
         assert_eq!(tx.outputs[0].commitment, commitment);
+        let output = tx.outputs[0].note.as_ref().expect("recovered output note");
+        assert_eq!(output.note.amount()?, NoteAmount::from(99u128));
 
         let _ = std::fs::remove_file(path);
         Ok(())

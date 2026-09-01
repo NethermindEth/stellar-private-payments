@@ -11,11 +11,32 @@ export interface GvkAuditedNote {
   commitment: string;
 }
 
-/** Decrypted notes and public nullifiers for one private `transact` call. */
+/** One output slot from a private `transact` call. */
+export interface GvkOutputSlot {
+  commitment: string;
+  note: GvkAuditedNote | null;
+}
+
+/** One input slot from a private `transact` call. */
+export interface GvkSpentInput {
+  nullifier: string;
+  note: GvkAuditedNote | null;
+}
+
+/** Decrypted notes aligned with on-chain input/output slots for one private `transact` call. */
 export interface GvkTxAudit {
   ledger: number;
-  outputs: GvkAuditedNote[];
-  /** Traceable pools only; empty for view-only pools. */
-  inputs: GvkAuditedNote[];
-  nullifiers: string[];
+  outputs: GvkOutputSlot[];
+  inputs: GvkSpentInput[];
+}
+
+/** Admin audit cursor returned by {@link PrivatePool.audit}. */
+export interface GvkAudit {
+  nextTx(): Promise<GvkTxAudit | null>;
+}
+
+declare module '../../dist/stellar_private_payments_web.js' {
+  export class GvkAudit {
+    nextTx(): Promise<GvkTxAudit | null>;
+  }
 }

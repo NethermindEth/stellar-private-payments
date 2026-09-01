@@ -4,8 +4,9 @@
 //!
 //! `circuits` crate keeps a duplicated copy of this logic
 //! (`circuits/src/core/merkle.rs`), so we can avoid inter-dependency.
-//! Bit-identical synchronization is enforced at production depth 10
-//! (1024 leaves) by `e2e-tests/src/tests/coherence/merkle.rs`.
+//! Bit-identical synchronization is enforced by
+//! `e2e-tests/src/tests/coherence/merkle.rs`, over both a full tree and the
+//! padded prefix the pool actually holds.
 
 use core::ops::Add;
 
@@ -168,7 +169,8 @@ impl MerklePrefixTree {
             return Err(anyhow!("Depth must be between 1 and 32"));
         }
 
-        // Build the empty-subtree chain using the same zero leaf as the contract.
+        // Build the empty-subtree chain using the same zero leaf as the
+        // contract.
         let mut zero_leaf_be = crypto::zero_leaf();
         zero_leaf_be.reverse();
         let zero_leaf_le: [u8; 32] = zero_leaf_be

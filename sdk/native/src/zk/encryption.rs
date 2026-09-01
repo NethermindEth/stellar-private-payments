@@ -366,8 +366,8 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
         return Err(anyhow!("Private key must be 32 bytes"));
     }
 
-    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) + tag
-    // (16) = 120
+    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) +
+    // tag (16) = 120
     if encrypted_data.len() < 120 {
         return Err(anyhow!("Encrypted data too short"));
     }

@@ -3,7 +3,8 @@
 use std::{rc::Rc, str::FromStr};
 
 use stellar_private_payments::{
-    DisclosureRequest, PrivatePool as NativePrivatePool,
+    PrivatePool as NativePrivatePool,
+    disclosure::DisclosureRequest,
     types::{
         DisclosureReceipt, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, TransferRecipient,
     },

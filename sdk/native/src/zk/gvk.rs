@@ -23,6 +23,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow, bail};
 use ark_bn254::Fr as Scalar;
+use ark_ff::Zero;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use taceo_poseidon2::bn254::t4;
@@ -45,12 +46,20 @@ pub struct GvkNote {
 }
 
 /// The subset of note secrets an admin recovers by decryption.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GvkRecoveredNote {
     pub pk: Field,
     pub amount: Field,
     pub blinding: Field,
+}
+
+/// Admin-recovered note secrets verified against an on-chain commitment.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GvkAuditedNote {
+    pub note: GvkRecoveredNote,
+    pub commitment: Field,
 }
 
 impl GvkNote {
@@ -70,14 +79,22 @@ impl GvkNote {
         nonce: &Field,
         idx: usize,
     ) -> Result<GlobalViewKeyCiphertext> {
+        validate_global_view_public_key(admin_pub_key)?;
         let d = admin_pub_key.to_coords();
         let nonce = field_to_scalar(nonce);
         let idx = u64::try_from(idx)
             .map(Scalar::from)
             .map_err(|_| anyhow!("note encryption index {idx} exceeds u64"))?;
         let r = self.derive_r(d, nonce, idx);
-        let big_r = babyjub::point_to_coords(babyjub::scalar_mul(babyjub::base8(), r));
-        let k = keystream(shared_secret(r, d));
+        let big_r = babyjub::point_to_coords(
+            babyjub::scalar_mul(babyjub::base8(), r)
+                .ok_or_else(|| anyhow!("failed to derive ephemeral public key"))?,
+        );
+        let shared = shared_secret(r, d)?;
+        if shared.x.is_zero() {
+            bail!("degenerate global view key shared secret");
+        }
+        let k = keystream(shared);
         Ok(GlobalViewKeyCiphertext {
             r: BabyJubJubPoint::from_coords(big_r.0, big_r.1),
             c1: scalar_to_field(&(field_to_scalar(&self.pk) + k[0])),
@@ -100,35 +117,32 @@ impl GvkNote {
     }
 }
 
-/// Admin-recovered note secrets verified against an on-chain commitment.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GvkAuditedNote {
-    pub note: GvkRecoveredNote,
-    pub commitment: Field,
-}
-
 impl GvkRecoveredNote {
-    pub fn amount(&self) -> NoteAmount {
-        let bytes = self.amount.to_le_bytes();
-        let mut amount_le = [0u8; 16];
-        amount_le.copy_from_slice(&bytes[..16]);
-        NoteAmount::from(u128::from_le_bytes(amount_le))
+    /// Interprets the recovered amount field as a [`NoteAmount`]
+    ///
+    /// Fails if the field's upper 16 little-endian bytes are non-zero.
+    pub fn amount(&self) -> Result<NoteAmount> {
+        NoteAmount::try_from(self.amount)
     }
 }
 
 impl GlobalViewKeyCiphertext {
     /// Admin-side decryption using the authority private scalar `d`.
-    pub fn decrypt(&self, d_priv: &Field) -> GvkRecoveredNote {
+    pub fn decrypt(&self, d_priv: &Field) -> Result<GvkRecoveredNote> {
         let d_priv = field_to_scalar(d_priv);
         let big_r =
             babyjub::point_from_coords(field_to_scalar(&self.r.x), field_to_scalar(&self.r.y));
-        let k = keystream(babyjub::mul8(babyjub::scalar_mul(big_r, d_priv)));
-        GvkRecoveredNote {
+        let k = keystream(
+            babyjub::mul8(babyjub::scalar_mul(big_r, d_priv).ok_or_else(|| {
+                anyhow!("invalid ephemeral public key in global view key ciphertext")
+            })?)
+            .ok_or_else(|| anyhow!("invalid ephemeral public key in global view key ciphertext"))?,
+        );
+        Ok(GvkRecoveredNote {
             pk: scalar_to_field(&(field_to_scalar(&self.c1) - k[0])),
             amount: scalar_to_field(&(field_to_scalar(&self.c2) - k[1])),
             blinding: scalar_to_field(&(field_to_scalar(&self.c3) - k[2])),
-        }
+        })
     }
 
     /// Decrypt and verify the recovered plaintext against
@@ -142,7 +156,7 @@ impl GlobalViewKeyCiphertext {
         d_priv: &Field,
         expected_commitment: &Field,
     ) -> Option<GvkAuditedNote> {
-        audited_from_recovered(self.decrypt(d_priv), expected_commitment)
+        audited_from_recovered(self.decrypt(d_priv).ok()?, expected_commitment)
     }
 }
 
@@ -167,12 +181,13 @@ pub fn try_decrypt_against_commitment_set(
     ciphertext: &GlobalViewKeyCiphertext,
     candidate_commitments: &HashSet<Field>,
 ) -> Option<GvkAuditedNote> {
-    let recovered = ciphertext.decrypt(d_priv);
+    let recovered = ciphertext.decrypt(d_priv).ok()?;
     audited_from_recovered_in_set(recovered, candidate_commitments)
 }
 
 pub(crate) fn commitment_field_for_recovered(recovered: &GvkRecoveredNote) -> Option<Field> {
-    if recovered.amount().is_zero() {
+    let amount = recovered.amount().ok()?;
+    if amount.is_zero() {
         return None;
     }
 
@@ -237,6 +252,14 @@ impl GlobalViewKeyMemo {
             GvkMode::Traceable => GlobalViewKeyMode::Traceable,
         };
 
+        if gvk_mode == GvkMode::Traceable && input_notes.len() != n_input_slots {
+            bail!(
+                "traceable GVK build: input_notes.len() ({}) must equal n_input_slots ({})",
+                input_notes.len(),
+                n_input_slots
+            );
+        }
+
         let outputs = output_notes
             .iter()
             .enumerate()
@@ -257,6 +280,12 @@ impl GlobalViewKeyMemo {
                     .collect::<Result<Vec<_>>>()?,
             )
         } else {
+            if !input_notes.is_empty() {
+                bail!(
+                    "view-only GVK memo build received {} input notes; pass an empty input_notes slice",
+                    input_notes.len()
+                );
+            }
             None
         };
 
@@ -288,17 +317,38 @@ impl GlobalViewKeyMemo {
             .outputs
             .iter()
             .map(|ct| ct.decrypt(d_priv))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
 
-        let inputs = self.inputs.as_ref().map(|input_cts| {
-            input_cts
-                .iter()
-                .map(|ct| ct.decrypt(d_priv))
-                .collect::<Vec<_>>()
-        });
+        let inputs = match self.inputs.as_ref() {
+            None => None,
+            Some(input_cts) => Some(
+                input_cts
+                    .iter()
+                    .map(|ct| ct.decrypt(d_priv))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+        };
 
         Ok((inputs, outputs))
     }
+}
+
+/// Validates admin key `D` per `GlobalViewKeyEncryption`: on-curve and not
+/// low-order (`x(8·D) ≠ 0`).
+pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    let point = babyjub::point_from_coords(
+        field_to_scalar(&admin_pub_key.x),
+        field_to_scalar(&admin_pub_key.y),
+    );
+    if !point.is_on_curve() {
+        bail!("admin public key is not on the Baby JubJub curve");
+    }
+    let eight_d = babyjub::mul8(point)
+        .ok_or_else(|| anyhow!("admin public key is not a valid Baby JubJub point"))?;
+    if eight_d.x.is_zero() {
+        bail!("admin public key has low order");
+    }
+    Ok(())
 }
 
 /// Generate a fresh per-note salt for GVK encryption.
@@ -311,8 +361,13 @@ pub fn generate_gvk_nonce() -> Result<Field> {
     generate_random_blinding()
 }
 
-fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Point {
-    babyjub::scalar_mul(babyjub::mul8(babyjub::point_from_coords(d.0, d.1)), r)
+fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Result<Point> {
+    babyjub::scalar_mul(
+        babyjub::mul8(babyjub::point_from_coords(d.0, d.1))
+            .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))?,
+        r,
+    )
+    .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))
 }
 
 fn keystream(s: Point) -> [Scalar; 3] {
@@ -324,7 +379,7 @@ fn keystream(s: Point) -> [Scalar; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{types::GLOBAL_VIEW_KEY_MEMO_VERSION, zk::crypto};
+    use crate::types::GLOBAL_VIEW_KEY_MEMO_VERSION;
 
     fn field(value: u64) -> Field {
         Field(crate::types::U256::from(value))
@@ -342,7 +397,7 @@ mod tests {
     #[test]
     fn decrypt_audited_for_commitment_rejects_wrong_commitment() -> Result<()> {
         let d_priv = field(7);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let ct = note.encrypt(&admin, &field(5), 0)?;
         assert!(
@@ -355,7 +410,7 @@ mod tests {
     #[test]
     fn decrypt_audited_for_commitment_accepts_valid_note() -> Result<()> {
         let d_priv = field(7);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let ct = note.encrypt(&admin, &field(5), 0)?;
         let commitment_le = crypto::compute_commitment(
@@ -373,7 +428,7 @@ mod tests {
             .decrypt_audited_for_commitment(&d_priv, &commitment)
             .expect("valid audited note");
         assert_eq!(audited.note.pk, note.pk);
-        assert_eq!(audited.note.amount(), NoteAmount::from(1_000_000u128));
+        assert_eq!(audited.note.amount()?, NoteAmount::from(1_000_000u128));
         assert_eq!(audited.note.blinding, note.blinding);
         Ok(())
     }
@@ -381,21 +436,35 @@ mod tests {
     #[test]
     fn known_answer_roundtrip() -> Result<()> {
         let d_priv = field(987_654_321);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let ct = note.encrypt(&admin, &field(42), 0)?;
-        let recovered = ct.decrypt(&d_priv);
+        let recovered = ct.decrypt(&d_priv)?;
 
         assert_eq!(recovered.pk, note.pk);
         assert_eq!(recovered.amount, note.amount);
+        assert_eq!(recovered.amount()?, NoteAmount::from(1_000_000));
         assert_eq!(recovered.blinding, note.blinding);
+        Ok(())
+    }
+
+    #[test]
+    fn amount_rejects_non_u128_field() -> Result<()> {
+        let mut le = [0u8; 32];
+        le[16] = 1;
+        let note = GvkRecoveredNote {
+            pk: field(0),
+            amount: Field::try_from_le_bytes(le)?,
+            blinding: field(0),
+        };
+        assert!(note.amount().is_err());
         Ok(())
     }
 
     #[test]
     fn keystream_no_reuse_across_idx() -> Result<()> {
         let d_priv = field(11);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(99);
         let note = sample_note();
         let ct0 = note.encrypt(&admin, &nonce, 0)?;
@@ -409,7 +478,7 @@ mod tests {
     #[test]
     fn distinct_nonce_changes_ciphertext() -> Result<()> {
         let d_priv = field(11);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let a = note.encrypt(&admin, &field(1), 0)?;
         let b = note.encrypt(&admin, &field(2), 0)?;
@@ -421,11 +490,26 @@ mod tests {
     #[test]
     fn tampered_ciphertext_not_recovered() -> Result<()> {
         let d_priv = field(7);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
         let mut ct = note.encrypt(&admin, &field(5), 0)?;
         ct.c1 = field(0x1234_5678);
-        let recovered = ct.decrypt(&d_priv);
+        let recovered = ct.decrypt(&d_priv)?;
+        assert_ne!(recovered.pk, note.pk);
+        Ok(())
+    }
+
+    #[test]
+    fn off_curve_ephemeral_key_not_recovered() -> Result<()> {
+        let d_priv = field(7);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        let note = sample_note();
+        let mut ct = note.encrypt(&admin, &field(5), 0)?;
+        ct.r = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        let recovered = ct.decrypt(&d_priv)?;
         assert_ne!(recovered.pk, note.pk);
         Ok(())
     }
@@ -433,23 +517,9 @@ mod tests {
     #[test]
     fn view_only_memo_roundtrip() -> Result<()> {
         let d_priv = field(0x5EED);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(0xFEED_FACE);
 
-        let inputs = vec![
-            GvkNote {
-                pk: field(111),
-                amount: field(50),
-                blinding: field(11),
-                salt: field(0xDEADBEEF),
-            },
-            GvkNote {
-                pk: field(222),
-                amount: field(30),
-                blinding: field(22),
-                salt: field(0xDEADBEE0),
-            },
-        ];
         let outputs = vec![
             GvkNote {
                 pk: field(333),
@@ -465,7 +535,7 @@ mod tests {
             },
         ];
 
-        let memo = GlobalViewKeyMemo::build(GvkMode::ViewOnly, admin, nonce, &inputs, &outputs, 2)?;
+        let memo = GlobalViewKeyMemo::build(GvkMode::ViewOnly, admin, nonce, &[], &outputs, 2)?;
 
         assert_eq!(memo.version, GLOBAL_VIEW_KEY_MEMO_VERSION);
         assert_eq!(memo.mode, GlobalViewKeyMode::ViewOnly);
@@ -485,7 +555,7 @@ mod tests {
     #[test]
     fn traceable_memo_roundtrip() -> Result<()> {
         let d_priv = field(0x5EED);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let nonce = field(0xFEED_FACE);
 
         let inputs = vec![GvkNote {
@@ -502,7 +572,7 @@ mod tests {
         }];
 
         let memo =
-            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, nonce, &inputs, &outputs, 2)?;
+            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, nonce, &inputs, &outputs, 1)?;
 
         assert_eq!(memo.mode, GlobalViewKeyMode::Traceable);
         assert_eq!(memo.inputs.as_ref().expect("inputs").len(), 1);
@@ -512,6 +582,76 @@ mod tests {
         assert_eq!(dec_inputs.len(), 1);
         assert_eq!(dec_inputs[0].pk, inputs[0].pk);
         assert_eq!(dec_outputs[0].pk, outputs[0].pk);
+        Ok(())
+    }
+
+    #[test]
+    fn traceable_build_rejects_input_count_mismatch() -> Result<()> {
+        let admin = BabyJubJubPoint::from_priv_scalar(&field(1)).expect("valid admin key");
+        let inputs = vec![sample_note(), sample_note()];
+        let outputs = vec![sample_note()];
+        assert!(
+            GlobalViewKeyMemo::build(GvkMode::Traceable, admin, field(1), &inputs, &outputs, 1)
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn validate_pub_gvk_accepts_base8_derived_key() {
+        let d_priv = field(987_654_321);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        validate_global_view_public_key(&admin).expect("valid for gvk");
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_off_curve() {
+        let admin = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        assert!(validate_global_view_public_key(&admin).is_err());
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_low_order() -> Result<()> {
+        use core::str::FromStr;
+
+        const NEG_ONE: &str =
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+        let neg_one = Scalar::from_str(NEG_ONE).expect("valid p-1");
+        let admin = BabyJubJubPoint {
+            x: field(0),
+            y: scalar_to_field(&neg_one),
+        };
+        assert!(validate_global_view_public_key(&admin).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn encrypt_rejects_off_curve_pub_gvk() -> Result<()> {
+        let note = sample_note();
+        let admin = BabyJubJubPoint {
+            x: field(1),
+            y: field(1),
+        };
+        assert!(note.encrypt(&admin, &field(5), 0).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn encrypt_rejects_low_order_pub_gvk() -> Result<()> {
+        use core::str::FromStr;
+
+        const NEG_ONE: &str =
+            "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+        let neg_one = Scalar::from_str(NEG_ONE).expect("valid p-1");
+        let note = sample_note();
+        let admin = BabyJubJubPoint {
+            x: field(0),
+            y: scalar_to_field(&neg_one),
+        };
+        assert!(note.encrypt(&admin, &field(5), 0).is_err());
         Ok(())
     }
 }

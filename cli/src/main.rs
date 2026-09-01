@@ -105,6 +105,23 @@ enum Commands {
         /// Pool contract id (C…); omit for all enabled pools
         pool: Option<String>,
     },
+    /// Notes owned by this account, newest first
+    ///
+    /// Omit the pool to show notes across all enabled pools. Use --spent /
+    /// --unspent to narrow by status, and --limit to cap the rows shown.
+    Notes {
+        /// Pool contract id (C…); omit for all enabled pools
+        pool: Option<String>,
+        /// Show only notes that have been spent
+        #[arg(long)]
+        spent: bool,
+        /// Show only notes that are still unspent
+        #[arg(long, conflicts_with = "spent")]
+        unspent: bool,
+        /// Maximum number of notes to show (default: all)
+        #[arg(long)]
+        limit: Option<u32>,
+    },
     /// Latest operational events
     Feed {
         /// Number of items to show (default 5)
@@ -271,6 +288,18 @@ fn main() -> Result<()> {
             json,
         ),
         Commands::Overview { pool } => cmd::overview::run(&config, pool.as_deref(), json),
+        Commands::Notes {
+            pool,
+            spent,
+            unspent,
+            limit,
+        } => cmd::notes::run(
+            &config,
+            pool.as_deref(),
+            cmd::notes::NotesStatus::from_flags(spent, unspent),
+            limit,
+            json,
+        ),
         Commands::Feed { limit } => cmd::feed::run(&config, limit, json),
         Commands::Config { command } => match command {
             ConfigCommands::Show => cmd::config::show(&config, json),

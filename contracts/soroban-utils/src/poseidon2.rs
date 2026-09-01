@@ -45,7 +45,8 @@ pub fn poseidon2_compress(env: &Env, left: U256, right: U256) -> U256 {
         &round_constants,
     );
 
-    // Compression step: we get elements from the output vector and add the inputs
+    // Compression step: we get elements from the output vector and add the
+    // inputs
     let out_0 = out.get(0).unwrap();
     let mut compressed_0 = out_0.add(&left);
     if compressed_0 >= bn256_mod {

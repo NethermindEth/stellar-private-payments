@@ -58,7 +58,11 @@ fn withdraw_single_step() {
     let amount = NoteAmount::from(10u128);
     let wallet = pool.spendable_notes().expect("spendable notes");
     let plan = pool
-        .prepare_withdraw(&wallet, amount, pool.config().user_address.clone())
+        .prepare_withdraw(
+            &wallet,
+            amount,
+            pool.config().user_address.as_str().to_string(),
+        )
         .expect("prepare withdraw");
 
     assert_eq!(plan.tx_count(), 1);
@@ -105,7 +109,11 @@ fn withdraw_zero() {
     let pool = test_pool(Some(&[])).expect("test pool");
 
     let err = pool
-        .prepare_withdraw(&[], NoteAmount::ZERO, pool.config().user_address.clone())
+        .prepare_withdraw(
+            &[],
+            NoteAmount::ZERO,
+            pool.config().user_address.as_str().to_string(),
+        )
         .expect_err("zero withdraw should not plan");
 
     assert!(matches!(err, Error::InvalidConfig(_)));

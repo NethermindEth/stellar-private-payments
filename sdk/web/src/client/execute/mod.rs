@@ -5,7 +5,8 @@ mod progress;
 use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
 use stellar_private_payments::{
-    Error, PlanExecutionError, PreparedTransactionPlan,
+    Error, PlanExecutionError,
+    plan::PreparedTransactionPlan,
     types::{AspMembershipSync, TransactionResult},
 };
 use wasm_bindgen::{JsError, JsValue};
@@ -216,8 +217,8 @@ impl PrivatePool {
 /// Tests for the SEP-0043 rejection-code mapping exposed to JS.
 #[cfg(all(test, target_arch = "wasm32"))]
 mod spike_tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
-    // is meant for production paths, not assertions.
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny is meant for production paths, not assertions.
     #![allow(clippy::unwrap_used)]
 
     use super::*;

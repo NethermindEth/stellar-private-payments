@@ -15,7 +15,7 @@ pub(crate) use crate::state::process_local_state;
 pub(crate) use plan::{pool_transact_input, transact_step_for_plan};
 
 /// Config and planning for one privacy pool.
-pub struct PoolCore {
+pub(crate) struct PoolCore {
     config: PrivatePoolConfig,
 }
 

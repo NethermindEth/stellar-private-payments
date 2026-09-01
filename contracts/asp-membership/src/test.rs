@@ -141,7 +141,8 @@ fn test_hash_pair() {
 
     let result = client.hash_pair(&left, &right);
 
-    // Verify result is a valid U256 (not zero, since we're hashing non-zero values)
+    // Verify result is a valid U256 (not zero, since we're hashing non-zero
+    // values)
     let zero = U256::from_u32(&env, 0u32);
     assert_ne!(result, zero);
 
@@ -270,7 +271,8 @@ fn test_new_admin_can_insert_after_update() {
     // Update admin
     client.update_admin(&new_admin);
 
-    // Verify the new admin can insert a leaf (using mock_all_auths to authorize)
+    // Verify the new admin can insert a leaf (using mock_all_auths to
+    // authorize)
 
     let leaf = U256::from_u32(&env, 100u32);
     client.insert_leaf(&leaf);

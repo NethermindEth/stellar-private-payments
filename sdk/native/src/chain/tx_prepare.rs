@@ -1,6 +1,6 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
-use crate::types::ExtData;
+use crate::types::{ExtData, SignerAddress};
 use anyhow::{Result, anyhow};
 use stellar_xdr::{self as xdr};
 
@@ -14,7 +14,7 @@ use super::{
 
 /// Prover output needed to prepare a pool `transact` invocation.
 #[derive(Debug, Clone)]
-pub struct PoolTransactInput {
+pub(crate) struct PoolTransactInput {
     pub proof_uncompressed: Vec<u8>,
     pub ext_data: ExtData,
     pub public: OnchainProofPublicInputs,
@@ -23,12 +23,13 @@ pub struct PoolTransactInput {
 impl StateFetcher {
     /// Simulates `transact` and returns unsigned XDR + auth entries for the
     /// wallet.
-    pub async fn prepare_pool_transact(
+    pub(crate) async fn prepare_pool_transact(
         &self,
         pool_contract_id: &str,
         input: &PoolTransactInput,
-        source_account: &str,
+        source_account: &SignerAddress,
     ) -> Result<PreparedSorobanTx> {
+        let source_account = source_account.as_str();
         self.enabled_pool_for(pool_contract_id)?;
         let proof_scval = if let Some(output_gvk_ciphertexts) = &input.public.output_gvk_ciphertexts
         {
@@ -274,7 +275,8 @@ mod tests {
         let xdr::TransactionEnvelope::Tx(v1) = env else {
             panic!("expected v1 envelope");
         };
-        // Account is at seq 9; the new tx must use seq + 1 = 10 (txBAD_SEQ otherwise).
+        // Account is at seq 9; the new tx must use seq + 1 = 10 (txBAD_SEQ
+        // otherwise).
         assert_eq!(v1.tx.seq_num, xdr::SequenceNumber(10));
         assert_eq!(v1.tx.fee, 350);
 

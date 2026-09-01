@@ -16,7 +16,8 @@ mod tests {
     #[ignore]
     fn test_tx_1in_1out() -> Result<()> {
         // One real input (in1), one dummy input (in0.amount = 0).
-        // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
+        // One real output (out0 = in1.amount), one dummy output (out1.amount =
+        // 0).
         let (wasm, r1cs) = load_artifacts("transaction2")?;
         let real_idx = 7;
 
@@ -102,7 +103,8 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_1in_2out_split() -> Result<()> {
-        // One real input (in1); two real outputs that split the amount; in0 is dummy.
+        // One real input (in1); two real outputs that split the amount; in0 is
+        // dummy.
         let (wasm, r1cs) = load_artifacts("transaction2")?;
 
         let total = Scalar::from(20u64);
@@ -253,15 +255,16 @@ mod tests {
             LEVELS,
         )?;
 
-        // Compute Tx1.out0 commitment and insert it into the tree as if it was appended
-        // to the on-chain tree
+        // Compute Tx1.out0 commitment and insert it into the tree as if it was
+        // appended to the on-chain tree
         let out0_commit = commitment(tx1_out0.amount, tx1_out0.pub_key, tx1_out0.blinding);
         leaves[chain_idx] = out0_commit;
 
         // ----------------------------
         // TX2: spend Tx1.out0
         // ----------------------------
-        // in1 matches Tx1.out0 (priv -> pub matches; amount & blinding match too)
+        // in1 matches Tx1.out0 (priv -> pub matches; amount & blinding match
+        // too)
         let tx2_in1 = InputNote {
             leaf_index: chain_idx,
             priv_key: chain_priv,
@@ -293,7 +296,8 @@ mod tests {
             vec![tx2_out_real, tx2_out_dummy],
         );
 
-        // Now Tx2 should verify because the tree contains Tx1.out0 at `chain_idx`
+        // Now Tx2 should verify because the tree contains Tx1.out0 at
+        // `chain_idx`
         prove_transaction_case(&wasm, &r1cs, &tx2, leaves, Scalar::from(0u64), LEVELS)
     }
 
@@ -536,8 +540,8 @@ mod tests {
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
         let (wasm, r1cs) = load_artifacts("transaction2")?;
 
-        // Make one real note and reuse it for BOTH inputs -> identical commitments,
-        // signatures, and nullifiers
+        // Make one real note and reuse it for BOTH inputs -> identical
+        // commitments, signatures, and nullifiers
         let privk = Scalar::from(7777u64);
         let blind = Scalar::from(4242u64);
         let amount = Scalar::from(33u64);
@@ -573,7 +577,8 @@ mod tests {
 
         let leaves = prepopulated_leaves(LEVELS, 0xC0FFEEu64, &[0, real_idx], 24);
 
-        // Run: should fail because circuit enforces all input nullifiers to be distinct
+        // Run: should fail because circuit enforces all input nullifiers to be
+        // distinct
         let res = prove_transaction_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64), LEVELS);
         assert!(
             res.is_err(),

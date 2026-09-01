@@ -4,8 +4,8 @@ mod tests {
         circom_tester::{CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys},
         general::{load_artifacts, scalar_to_bigint},
         keypair::{derive_public_key, sign},
-        merkle_tree::{merkle_proof, merkle_root},
-        transaction::{commitment, nullifier, prepopulated_leaves},
+        merkle_tree::PrefixTree,
+        transaction::{commitment, nullifier, prepopulated_prefix},
     };
     use anyhow::{Context, Result};
     use ark_bn254::Fr as Scalar;
@@ -34,8 +34,13 @@ mod tests {
         matches!(outcome, Ok(Ok(ref res)) if res.verified)
     }
 
-    const LEVELS: usize = 10;
+    const LEVELS: usize = 20;
     const EXT_CONTEXT_HASH: u64 = 0xC0FFEE_u64;
+
+    /// Leaves seeded into the pool tree before a case runs.
+    ///
+    /// Every `leaf_index` a note picks must stay inside it.
+    const LEAF_PREFIX: usize = 64;
 
     /// Note material for a single selective-disclosure proof.
     #[derive(Clone)]
@@ -66,12 +71,9 @@ mod tests {
 
             leaves[note.leaf_index] = note_commitment;
 
-            let root = merkle_root(leaves.to_vec());
-            let (siblings, path_idx_u64, depth) = merkle_proof(leaves, note.leaf_index);
-            assert_eq!(
-                depth, LEVELS,
-                "unexpected Merkle depth: expected {LEVELS}, got {depth}"
-            );
+            let tree = PrefixTree::new(leaves, LEVELS);
+            let root = tree.root();
+            let (siblings, path_idx_u64) = tree.proof(note.leaf_index);
 
             let path_indices = Scalar::from(path_idx_u64);
             let sig = sign(note.priv_key, note_commitment, path_indices);
@@ -111,7 +113,7 @@ mod tests {
 
     fn sample_leaves(notes: &[DisclosureNote]) -> Vec<Scalar> {
         let indices: Vec<usize> = notes.iter().map(|n| n.leaf_index).collect();
-        prepopulated_leaves(LEVELS, 0xD15C_105E_u64, &indices, 24)
+        prepopulated_prefix(0xD15C_105E_u64, &indices, LEAF_PREFIX)
     }
 
     #[allow(clippy::arithmetic_side_effects)]

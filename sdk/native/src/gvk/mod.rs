@@ -6,5 +6,8 @@
 mod audit;
 mod event;
 
-pub use audit::{GvkAudit, GvkTxAudit, audit_commitment_event, audit_nullifier_event};
+pub use audit::{
+    GvkAudit, GvkOutputSlot, GvkSpentInput, GvkTxAudit, audit_commitment_event,
+    audit_nullifier_event,
+};
 pub use event::GvkEvent;

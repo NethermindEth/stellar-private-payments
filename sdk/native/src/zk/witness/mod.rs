@@ -217,7 +217,8 @@ mod tests {
 
     #[test]
     fn parse_inputs_rejects_nested_arrays() {
-        // The prover never emits nested arrays; reject rather than silently flatten.
+        // The prover never emits nested arrays; reject rather than silently
+        // flatten.
         assert!(parse_inputs("{\"m\": [[1, 2], [3, 4]]}").is_err());
     }
 

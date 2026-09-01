@@ -145,12 +145,13 @@ impl MerkleTreeWithHistory {
         // Hash the two leaves to form their parent node at level 1
         let mut current_hash = poseidon2_compress(env, leaf_1, leaf_2);
 
-        // Calculate the parent index at level 1 (since we already hashed the two
-        // leaves)
+        // Calculate the parent index at level 1 (since we already hashed the
+        // two leaves)
         let mut current_index = next_index >> 1;
 
         // Update the tree by recomputing hashes along the path to root
-        // Start at level 1 since current_hash is already the parent of the two leaves
+        // Start at level 1 since current_hash is already the parent of the two
+        // leaves
         for lvl in 1..levels {
             let is_right = current_index & 1 == 1;
             if is_right {

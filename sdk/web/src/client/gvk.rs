@@ -1,11 +1,14 @@
 //! Admin GVK audit cursor for wasm.
 
-use stellar_private_payments::GvkAudit as NativeGvkAudit;
+use stellar_private_payments::gvk::GvkAudit as NativeGvkAudit;
 use wasm_bindgen::prelude::*;
 
 use crate::workers::storage::StorageBridge;
 
 /// Cursor over decrypted pool transacts for admin audit.
+///
+/// Holds the admin view private key for its lifetime; drop the cursor when
+/// finished rather than retaining it longer than needed.
 #[wasm_bindgen]
 pub struct GvkAudit {
     inner: NativeGvkAudit<StorageBridge>,

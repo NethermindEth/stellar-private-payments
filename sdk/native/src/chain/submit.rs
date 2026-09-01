@@ -7,7 +7,7 @@ use crate::chain::rpc::Client;
 
 /// Submits a signed transaction; returns the transaction hash.
 #[tracing::instrument(name = "submit_tx", level = "info", skip_all, fields(correlation_id = %crate::types::correlation_id_or_new()))]
-pub async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<String> {
+pub(crate) async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<String> {
     let send = rpc
         .send_transaction(signed_tx)
         .await
@@ -21,7 +21,7 @@ pub async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TxConfirmStatus {
+pub(crate) enum TxConfirmStatus {
     Success,
     Failed { detail: String },
     Pending,
@@ -29,7 +29,7 @@ pub enum TxConfirmStatus {
 
 /// Polls transaction status once.
 #[tracing::instrument(name = "confirm_tx", level = "info", skip_all, fields(correlation_id = %crate::types::correlation_id_or_new(), hash = %hash))]
-pub async fn confirm_tx(rpc: &Client, hash: &str) -> Result<TxConfirmStatus> {
+pub(crate) async fn confirm_tx(rpc: &Client, hash: &str) -> Result<TxConfirmStatus> {
     let status = rpc
         .get_transaction(hash)
         .await

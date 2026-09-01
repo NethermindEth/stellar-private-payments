@@ -62,7 +62,7 @@ let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 
 The native SDK ships an embedded circuit lockfile and downloads the matching
 GitHub release with [`CircuitStore`] (native targets only). Call
-`ensure` / `ensure_blocking`, then pass the returned [`ProverArtifacts`] to
+`ensure` / `ensure_blocking`, then pass the returned artifacts to
 [`LocalProver`], or supply a custom [`Prover`]. The CLI and browser SDK load
 artifacts from their own paths.
 
@@ -164,14 +164,14 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | `PrivatePool` | Pool-scoped transact operations |
 | `LocalStorage` | SQLite-backed `Storage` implementation |
 | `CircuitStore` | Download and verify circuit artifacts (native only) |
-| `PortfolioBalance` | Per-pool balance + note count |
-| `RecipientLookup` | Registry lookup for private transfers |
+| `types::PortfolioBalance` | Per-pool balance + note count |
+| `types::RecipientLookup` | Registry lookup for private transfers |
 
 ### Privacy keys
 
 | API | Role |
 |-----|------|
-| `KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
 | `Account::user_public_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
 | `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |

@@ -49,9 +49,17 @@ impl Account {
 
 #[wasm_bindgen]
 impl Account {
+    /// The account that owns the notes.
     #[wasm_bindgen(getter, js_name = userAddress)]
     pub fn user_address(&self) -> String {
         self.inner.user_address().to_string()
+    }
+
+    /// The account that signs and pays. Equal to [`Self::user_address`] until
+    /// a caller supplies a different `signerAddress`.
+    #[wasm_bindgen(getter, js_name = signerAddress)]
+    pub fn signer_address(&self) -> String {
+        self.inner.signer_address().to_string()
     }
 
     /// Portfolio balances across all enabled pools in the deployment.

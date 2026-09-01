@@ -12,10 +12,12 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments::{
-    BuildDisclosureInputs, BuildTransactParams, Error, SpendableNote, Storage, TransactRequest,
-    build_disclosure_inputs, build_transact_params,
+    Error, Storage,
     chain::ContractDataStorage,
+    disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
+    planner::SpendableNote,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
+    transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
         OperationalFeedItem, PortfolioBalance, RecipientLookup, Sensitive, SyncMetadata,
@@ -353,9 +355,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] list portfolio balances for the account {}",
                 Sensitive(&address)
             );
-            // Load the contract config from the embedded deployment JSON rather than
-            // receiving it over the worker bridge: ContractConfig contains the
-            // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
+            // Load the contract config from the embedded deployment JSON rather
+            // than receiving it over the worker bridge:
+            // ContractConfig contains the internally-tagged
+            // `AssetDescriptor` enum, which the bincode worker codec
             // cannot deserialize (panics with DeserializeAnyNotSupported).
             let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
             let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;

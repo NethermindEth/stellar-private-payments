@@ -132,6 +132,7 @@ pub struct TransactChainContext {
     pub pool_root: Field,
     pub pool_next_index: u32,
     pub pool_merkle_levels: u32,
+    pub asp_membership_levels: u32,
     pub asp_membership_root: Field,
     pub asp_membership_contract_id: String,
     pub asp_membership_ledger: u32,
@@ -163,6 +164,7 @@ pub fn transact_chain_context_from_state(
         pool_root,
         pool_next_index,
         pool_merkle_levels: pool.merkle_levels,
+        asp_membership_levels: data.asp_membership.levels,
         asp_membership_root: data.asp_membership.root,
         asp_membership_contract_id: data.asp_membership.contract_id,
         asp_membership_ledger: data.asp_membership.ledger,
@@ -362,12 +364,12 @@ mod pool_info_gvk_tests {
             verifier: "CVERIFIER".to_string(),
             aspmembership: "CASPM".to_string(),
             aspnonmembership: "CASPN".to_string(),
-            merkle_levels: 10,
+            merkle_levels: 20,
             merkle_current_root_index: Some(3),
             merkle_next_index: "6".to_string(),
             maximum_deposit_amount: ExtAmount::from(1_000i128),
             merkle_root: Some(Field(U256::from(7))),
-            merkle_capacity: 1024,
+            merkle_capacity: 1_048_576,
             total_commitments: "6".to_string(),
             policy_flags: PolicyFlags::EMPTY,
             admin_view_key: Some(BabyJubJubPoint {
@@ -398,7 +400,7 @@ mod pool_info_gvk_tests {
         assert!(decoded.admin_view_key.is_none());
         assert!(decoded.gvk_mode.is_none());
         assert_eq!(decoded.contract_id, "CPOOL");
-        assert_eq!(decoded.merkle_levels, 10);
+        assert_eq!(decoded.merkle_levels, 20);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 /// <reference path="./wasm.d.ts" />
+/// <reference path="./gvk.d.ts" />
 
 import type { PrivatePool } from '../../dist/stellar_private_payments_web.js';
 
@@ -10,7 +11,6 @@ import type {
   VerifyDisclosureOptions,
 } from './options.js';
 import type { DisclosureVerificationReport } from './disclosure.js';
-import type { GvkTxAudit } from './gvk.js';
 import type { Storage } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
@@ -37,7 +37,10 @@ export type {
 
 /** Wallet session returned by {@link Client.account}. */
 export interface Account {
+  /** The account that owns the notes. */
   readonly userAddress: string;
+  /** The account that signs and pays; equal to `userAddress` by default. */
+  readonly signerAddress: string;
   portfolio(): Promise<unknown>;
   userPublicKeys(): Promise<unknown>;
   aspSecret(): Promise<string>;
@@ -97,14 +100,11 @@ export declare const Client: {
   contractConfig(): unknown;
 };
 
-export type { GvkAuditedNote, GvkRecoveredNote, GvkTxAudit } from './gvk.js';
-
-/** Admin audit cursor returned by {@link PrivatePool.audit}. */
-export interface GvkAudit {
-  nextTx(): Promise<GvkTxAudit | null>;
-}
-
-/** Per-pool session — wasm class with typed {@link GvkAudit audit}. */
-export interface PrivatePool {
-  audit(globalViewPrivateKeyHex: string): Promise<GvkAudit>;
-}
+export type {
+  GvkAudit,
+  GvkAuditedNote,
+  GvkOutputSlot,
+  GvkRecoveredNote,
+  GvkSpentInput,
+  GvkTxAudit,
+} from './gvk.js';

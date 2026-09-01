@@ -4,7 +4,7 @@
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
 use sha2::{Digest as _, Sha256};
 use std::fmt::Write as _;
-use stellar_private_payments::ArtifactKind;
+use stellar_private_payments::circuits::{ArtifactKind, artifact_file_name, circuit_lock};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Cache, CacheStorage, Request, RequestInit, RequestMode, Response};
@@ -50,7 +50,9 @@ pub(crate) fn verify_lockfile_artifact(
     kind: ArtifactKind,
     bytes: &[u8],
 ) -> Result<(), JsError> {
-    stellar_private_payments::verify_artifact_bytes(stem, kind, bytes)
+    circuit_lock()
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .verify(stem, kind, bytes)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -58,8 +60,10 @@ pub(crate) async fn fetch_lockfile_artifact(
     stem: &str,
     kind: ArtifactKind,
 ) -> Result<Vec<u8>, JsError> {
-    let filename = stellar_private_payments::artifact_file_name(stem, kind);
-    let expected_sha256 = stellar_private_payments::artifact_sha256_bytes(stem, kind)
+    let filename = artifact_file_name(stem, kind);
+    let expected_sha256 = circuit_lock()
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .artifact_sha256(stem, kind)
         .map_err(|e| JsError::new(&e.to_string()))?;
     fetch_circuit_file_verified(&filename, expected_sha256).await
 }
@@ -342,8 +346,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
-    // is meant for production paths, not assertions.
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny is meant for production paths, not assertions.
     #![allow(clippy::unwrap_used)]
 
     use super::*;
@@ -440,7 +444,8 @@ mod tests {
         setup_test_env().await;
         let fetch_count = install_fetch_shim();
 
-        // First fetch: cache miss -> exactly one network round-trip, populates cache.
+        // First fetch: cache miss -> exactly one network round-trip, populates
+        // cache.
         let bytes1 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -499,8 +504,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Verified fetch reads the poisoned entry, fails the hash check, evicts it,
-        // and refetches from the (shimmed) network exactly once.
+        // Verified fetch reads the poisoned entry, fails the hash check, evicts
+        // it, and refetches from the (shimmed) network exactly once.
         let bytes = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -515,7 +520,8 @@ mod tests {
             "self-heal should refetch from network exactly once"
         );
 
-        // The healed entry is now cached: a subsequent read is a hit (no new fetch).
+        // The healed entry is now cached: a subsequent read is a hit (no new
+        // fetch).
         let bytes2 = fetch_circuit_file_verified(TEST_FILE, EXPECTED_SHA256)
             .await
             .unwrap();
@@ -627,7 +633,8 @@ mod tests {
             "corrupt entry should invoke derive exactly once to self-heal"
         );
 
-        // The healed entry is now cached: a subsequent read is a hit (no re-derive).
+        // The healed entry is now cached: a subsequent read is a hit (no
+        // re-derive).
         let (derive_count2, derive2) = install_derive_counter();
         let bytes2 = get_or_derive_uncompressed(UNCOMPRESSED_FILE, UNCOMPRESSED_SHA, derive2)
             .await

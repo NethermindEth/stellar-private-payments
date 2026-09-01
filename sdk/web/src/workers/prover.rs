@@ -11,8 +11,11 @@ use gloo_worker::{
 };
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments::{
-    ArtifactKind, Error, PreparedProverTx, Prover, ProverEngine, artifact_file_name,
-    artifact_sha256_bytes, disclosure,
+    Error, Prover,
+    circuits::{ArtifactKind, artifact_file_name, circuit_lock},
+    disclosure,
+    prover::ProverEngine,
+    transact::PreparedProverTx,
     types::{
         CircuitStem, DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
         DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
@@ -30,16 +33,8 @@ use stellar_private_payments::{
 };
 use tracing::Instrument;
 use wasm_bindgen::JsError;
-use wasm_bindgen_futures::spawn_local;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
-
-#[derive(Clone, Debug)]
-enum InitState {
-    Pending,
-    Ready,
-    Failed(String),
-}
 
 fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
@@ -60,7 +55,6 @@ thread_local! {
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
-    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
 
 fn init_transact_prover(
@@ -161,7 +155,9 @@ async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>,
     let pk_name_for_closure = pk_name.clone();
     let stem = stem.to_string();
     let r1cs_bytes = r1cs_bytes.to_vec();
-    let pk_sha256 = artifact_sha256_bytes(&stem, ArtifactKind::ProvingKey)
+    let pk_sha256 = circuit_lock()
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .artifact_sha256(&stem, ArtifactKind::ProvingKey)
         .map_err(|e| JsError::new(&e.to_string()))?;
     get_or_derive_uncompressed(&pk_name, pk_sha256, move || async move {
         let compressed = fetch_lockfile_artifact(&stem, ArtifactKind::ProvingKey).await?;
@@ -179,59 +175,24 @@ async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>,
     .await
 }
 
-async fn load_circuit_artifacts() -> Result<(), JsError> {
-    let policy_stems: Vec<String> = CircuitStem::all_transact_stems()
-        .into_iter()
-        .map(|stem| stem.to_string())
-        .collect();
-
-    let transact_ready = TRANSACT_PROVERS.with(|s| {
-        policy_stems
-            .iter()
-            .all(|stem| s.borrow().contains_key(stem))
-    });
-    let all_ready = transact_ready
-        && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow().iter().all(|c| c.is_some()))
-        && DISCLOSURE_PROVERS.with(|s| s.borrow().iter().all(|p| p.is_some()));
-    if all_ready {
+async fn ensure_transact_prover(stem: &str) -> Result<(), JsError> {
+    if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
         return Ok(());
     }
 
-    let to_load: Vec<(&str, &[u8])> = policy_stems
-        .iter()
-        .filter_map(|stem| {
-            if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
-                return None;
-            }
-            crate::bundled_proving_keys::bundled_policy_proving_key(stem)
-                .map(|proving_key| (stem.as_str(), proving_key))
-        })
-        .collect();
+    let bundled_pk = crate::bundled_proving_keys::bundled_policy_proving_key(stem)
+        .ok_or_else(|| JsError::new(&format!("no bundled proving key for {stem}")))?;
 
-    if !to_load.is_empty() {
-        let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
-            futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
-                let graph = fetch_lockfile_artifact(stem, ArtifactKind::Graph).await?;
-                let r1cs = fetch_lockfile_artifact(stem, ArtifactKind::R1cs).await?;
-                Ok::<_, JsError>((graph, r1cs))
-            }))
-            .await?;
+    let (graph_bytes, r1cs_bytes) = try_join!(
+        fetch_lockfile_artifact(stem, ArtifactKind::Graph),
+        fetch_lockfile_artifact(stem, ArtifactKind::R1cs)
+    )?;
 
-        let mut loaded = Vec::with_capacity(to_load.len());
-        for (&(stem, proving_key), (graph_bytes, r1cs_bytes)) in
-            to_load.iter().zip(transact_artifacts.iter())
-        {
-            let prover = build_transact_prover(stem, proving_key, graph_bytes, r1cs_bytes).await?;
-            loaded.push((stem.to_owned(), prover));
-        }
+    let engine = build_transact_prover(stem, bundled_pk, &graph_bytes, &r1cs_bytes).await?;
 
-        TRANSACT_PROVERS.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            for (stem, prover) in loaded {
-                borrow.insert(stem, prover);
-            }
-        });
-    }
+    TRANSACT_PROVERS.with(|cell| {
+        cell.borrow_mut().insert(stem.to_owned(), engine);
+    });
 
     Ok(())
 }
@@ -255,7 +216,9 @@ async fn build_transact_prover(
     let pk_name = artifact_file_name(stem, ArtifactKind::ProvingKey);
     let pk_name_for_log = pk_name.clone();
     let pk_name_for_closure = pk_name.clone();
-    let pk_sha256 = artifact_sha256_bytes(stem, ArtifactKind::ProvingKey)
+    let pk_sha256 = circuit_lock()
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .artifact_sha256(stem, ArtifactKind::ProvingKey)
         .map_err(|e| JsError::new(&e.to_string()))?;
     let r1cs_bytes_for_closure = r1cs_bytes.to_vec();
     let bundled_for_closure = bundled_compressed_pk.to_vec();
@@ -303,34 +266,9 @@ pub fn worker_main() {
         let _guard = worker_span.enter();
         crate::telemetry::init_telemetry(None);
         crate::telemetry::install_panic_hook();
-        tracing::debug!("[{WORKER_NAME}] starting...");
+        tracing::debug!("[{WORKER_NAME}] ready");
     }
     ProverWorker::registrar().register();
-    spawn_local(
-        async move {
-            if let Err(e) = init().await {
-                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
-            }
-        }
-        .instrument(worker_span),
-    );
-}
-
-async fn init() -> Result<(), JsError> {
-    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
-
-    match load_circuit_artifacts().await {
-        Ok(()) => {
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-            tracing::debug!("[{WORKER_NAME}] initialized");
-            Ok(())
-        }
-        Err(e) => {
-            let msg = format!("{e:?}");
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
-            Err(e)
-        }
-    }
 }
 
 #[oneshot]
@@ -357,26 +295,15 @@ pub(crate) async fn ProverWorker(
 pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerResponse> {
     let resp = match req {
         ProverWorkerRequest::Ping => {
-            tracing::trace!("[{WORKER_NAME}] ping");
-            loop {
-                match INIT_STATE.with(|s| s.borrow().clone()) {
-                    InitState::Ready => {
-                        tracing::trace!("[{WORKER_NAME}] pong");
-                        return Ok(ProverWorkerResponse::Pong);
-                    }
-                    InitState::Failed(msg) => {
-                        tracing::debug!("[{WORKER_NAME}] ping -> init failed");
-                        return Ok(ProverWorkerResponse::Error(msg));
-                    }
-                    InitState::Pending => {}
-                }
-
-                TimeoutFuture::new(50).await;
-            }
+            tracing::trace!("[{WORKER_NAME}] ping/pong");
+            ProverWorkerResponse::Pong
         }
         ProverWorkerRequest::Transact(params) => {
             tracing::debug!("[{WORKER_NAME}] transact");
             let stem = CircuitStem::transact(params.policy_flags, params.gvk_mode).to_string();
+            ensure_transact_prover(&stem)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
                 let engine = borrow.get_mut(&stem).ok_or_else(|| {
@@ -583,16 +510,6 @@ impl ProverBridge {
             other => Ok(other),
         }
     }
-
-    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self
-            .call(ProverWorkerRequest::Ping, PROVE_TIMEOUT_MS)
-            .await?
-        {
-            ProverWorkerResponse::Pong => Ok(()),
-            other => Err(anyhow!("unexpected response: {other:?}")),
-        }
-    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -612,7 +529,7 @@ impl Prover for ProverBridge {
 
     async fn prove_disclosure(
         &self,
-        params: stellar_private_payments::DisclosureProveParams,
+        params: stellar_private_payments::disclosure::DisclosureProveParams,
     ) -> Result<DisclosureReceipt, Error> {
         match self
             .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)

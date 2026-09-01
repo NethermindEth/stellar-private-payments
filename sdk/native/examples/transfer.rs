@@ -29,8 +29,8 @@
 mod common;
 
 use stellar_private_payments::{
-    Error, TransferRecipient,
-    types::{EncryptionPublicKey, NotePublicKey},
+    Error,
+    types::{EncryptionPublicKey, NotePublicKey, TransferRecipient},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

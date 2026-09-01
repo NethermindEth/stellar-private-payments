@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use stellar_private_payments::{
-    circuits::{ArtifactKind, verify_artifact_bytes},
+    circuits::{ArtifactKind, CircuitLockfile, artifact_file_name, circuit_lock},
     types::CircuitStem,
 };
 
@@ -20,11 +20,11 @@ fn read_file(path: &Path) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("sdk/web/build.rs: failed to read {}: {e}", path.display()))
 }
 
-fn assert_lockfile_match(stem: &str, kind: ArtifactKind, bytes: &[u8]) {
-    verify_artifact_bytes(stem, kind, bytes).unwrap_or_else(|e| {
+fn assert_lockfile_match(lock: &CircuitLockfile, stem: &str, kind: ArtifactKind, bytes: &[u8]) {
+    lock.verify(stem, kind, bytes).unwrap_or_else(|e| {
         panic!(
             "sdk/web/build.rs: {} does not match embedded circuits.json: {e}",
-            stellar_private_payments::artifact_file_name(stem, kind)
+            artifact_file_name(stem, kind)
         )
     });
 }
@@ -75,6 +75,7 @@ fn main() {
     }
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let lock = circuit_lock().expect("parse embedded circuits.json");
     let mut bundled_proving_key_arms = String::new();
 
     for stem in CircuitStem::all_transact_stems() {
@@ -89,9 +90,9 @@ fn main() {
         let graph_bytes = read_file(&graph_path);
         let r1cs_bytes = read_file(&r1cs_path);
 
-        assert_lockfile_match(&stem, ArtifactKind::ProvingKey, &proving_key_bytes);
-        assert_lockfile_match(&stem, ArtifactKind::Graph, &graph_bytes);
-        assert_lockfile_match(&stem, ArtifactKind::R1cs, &r1cs_bytes);
+        assert_lockfile_match(&lock, &stem, ArtifactKind::ProvingKey, &proving_key_bytes);
+        assert_lockfile_match(&lock, &stem, ArtifactKind::Graph, &graph_bytes);
+        assert_lockfile_match(&lock, &stem, ArtifactKind::R1cs, &r1cs_bytes);
 
         fs::write(
             out_dir.join(format!("{stem}_proving_key.bin")),
@@ -119,12 +120,13 @@ fn main() {
         println!("cargo:rerun-if-changed={}", r1cs_path.display());
 
         assert_lockfile_match(
+            &lock,
             &stem,
             ArtifactKind::ProvingKey,
             &read_file(&proving_key_path),
         );
-        assert_lockfile_match(&stem, ArtifactKind::Graph, &read_file(&graph_path));
-        assert_lockfile_match(&stem, ArtifactKind::R1cs, &read_file(&r1cs_path));
+        assert_lockfile_match(&lock, &stem, ArtifactKind::Graph, &read_file(&graph_path));
+        assert_lockfile_match(&lock, &stem, ArtifactKind::R1cs, &read_file(&r1cs_path));
     }
 
     let out = format!(

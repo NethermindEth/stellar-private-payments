@@ -135,7 +135,8 @@ impl R1CS {
             Vec::new()
         };
 
-        // num_public = num_pub_out + num_pub_in (not including the constant 1 wire)
+        // num_public = num_pub_out + num_pub_in (not including the constant 1
+        // wire)
         let num_public = header
             .num_pub_out
             .checked_add(header.num_pub_in)

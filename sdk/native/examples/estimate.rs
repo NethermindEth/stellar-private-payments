@@ -20,7 +20,7 @@
 
 mod common;
 
-use stellar_private_payments::{Error, TransferRecipient};
+use stellar_private_payments::{Error, types::TransferRecipient};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::init_tracing()?;
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("Lower SPP_AMOUNT_STROOPS or deposit more to see a spend plan.");
         } else {
-            let recipient = TransferRecipient::from(account.user_address());
+            let recipient = TransferRecipient::from(account.user_address().as_str());
             let transfer_plan = pool.prepare_transfer(&notes, recipient, amount)?;
             print_plan_cursor(&transfer_plan);
         }
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_plan_cursor(plan: &stellar_private_payments::PreparedTransactionPlan) {
+fn print_plan_cursor(plan: &stellar_private_payments::plan::PreparedTransactionPlan) {
     println!("  total transactions: {}", plan.tx_count());
     println!("  current transaction: {}", plan.current_tx());
     println!("  is complete: {}", plan.is_complete());

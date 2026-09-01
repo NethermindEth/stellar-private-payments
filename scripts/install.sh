@@ -69,17 +69,30 @@ TARGET="${arch_part}-${os_part}"
 
 # --- resolve release tag ----------------------------------------------------
 api="https://api.github.com/repos/$REPO"
-if [ -z "$VERSION" ]; then
-  if [ "$ALLOW_PRE" = "1" ]; then
-    # Newest release overall (includes prereleases): first tag_name in the list.
-    VERSION="$(dl_stdout "$api/releases?per_page=1" \
-      | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
-  else
-    VERSION="$(dl_stdout "$api/releases/latest" \
-      | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
+resolve_latest_cli_tag() {
+  # Only CLI publishes GitHub Releases (newest-first). Prefer stable cli-vX.Y.Z;
+  # with --pre take any cli-v*.
+  tags="$(dl_stdout "$api/releases?per_page=100" \
+    | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"cli-v[^"]+"' \
+    | sed -E 's/.*"([^"]+)".*/\1/')"
+  if [ -z "$tags" ]; then
+    return 1
   fi
+  if [ "$ALLOW_PRE" = "1" ]; then
+    printf '%s\n' "$tags" | head -1
+    return 0
+  fi
+  printf '%s\n' "$tags" | grep -E '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1
+}
+if [ -z "$VERSION" ]; then
+  VERSION="$(resolve_latest_cli_tag || true)"
 fi
-[ -n "$VERSION" ] || err "could not resolve a release tag (try --pre or SPP_VERSION)"
+[ -n "$VERSION" ] || err "could not resolve a cli-v* release tag (try --pre or SPP_VERSION)"
+case "$VERSION" in
+  cli-v*) ;;
+  v*) err "legacy tag $VERSION is unsupported; use cli-vX.Y.Z (e.g. cli-v0.1.1)" ;;
+  *) err "expected a cli-vX.Y.Z release tag, got: $VERSION" ;;
+esac
 
 base="https://github.com/$REPO/releases/download/$VERSION"
 bin_asset="spp-${TARGET}.tar.gz"

@@ -295,7 +295,7 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_1_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_1_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
-    canonical_vk_hash: "0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107",
+    canonical_vk_hash: "0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_1.graph.bin",
@@ -310,7 +310,7 @@ pub const SELECTIVE_DISCLOSURE_2: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_2_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_2_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_2_N_NOTES,
-    canonical_vk_hash: "0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd",
+    canonical_vk_hash: "0xc057dc17d370429a81a9e0fb1a81d7e7d7dd1af8ca373639db9a651c1a8d3464",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_2.graph.bin",
@@ -325,7 +325,7 @@ pub const SELECTIVE_DISCLOSURE_3: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_3_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_3_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_3_N_NOTES,
-    canonical_vk_hash: "0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f",
+    canonical_vk_hash: "0x20a0ec3d1b71c3f9978234116dd1f25c8a6711e5fcfdf37da181d6c0edf79a69",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_3.graph.bin",
@@ -340,7 +340,7 @@ pub const SELECTIVE_DISCLOSURE_4: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_4_CIRCUIT,
     levels: SELECTIVE_DISCLOSURE_4_LEVELS,
     n_notes: SELECTIVE_DISCLOSURE_4_N_NOTES,
-    canonical_vk_hash: "0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0",
+    canonical_vk_hash: "0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f",
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         graph: "selectiveDisclosure_4.graph.bin",
@@ -1176,22 +1176,22 @@ mod tests {
             (
                 "selectiveDisclosure_1_vk.json",
                 "selectiveDisclosure_1_proving_key.bin",
-                "0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107",
+                "0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2",
             ),
             (
                 "selectiveDisclosure_2_vk.json",
                 "selectiveDisclosure_2_proving_key.bin",
-                "0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd",
+                "0xc057dc17d370429a81a9e0fb1a81d7e7d7dd1af8ca373639db9a651c1a8d3464",
             ),
             (
                 "selectiveDisclosure_3_vk.json",
                 "selectiveDisclosure_3_proving_key.bin",
-                "0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f",
+                "0x20a0ec3d1b71c3f9978234116dd1f25c8a6711e5fcfdf37da181d6c0edf79a69",
             ),
             (
                 "selectiveDisclosure_4_vk.json",
                 "selectiveDisclosure_4_proving_key.bin",
-                "0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0",
+                "0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f",
             ),
         ];
 

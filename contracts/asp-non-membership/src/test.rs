@@ -316,7 +316,8 @@ fn test_delete_from_two_keys() {
     assert!(result1.found, "key1 should still be found");
     assert_eq!(result1.found_value, value1, "key1 value should match");
 
-    // Root should match what we'd get from inserting just key1 (see previous tests)
+    // Root should match what we'd get from inserting just key1 (see previous
+    // tests)
     let expected_root_bytes = [
         36, 47, 214, 99, 44, 86, 82, 102, 2, 180, 27, 116, 85, 152, 220, 251, 240, 186, 68, 254,
         31, 87, 13, 109, 107, 75, 208, 28, 34, 234, 154, 162,

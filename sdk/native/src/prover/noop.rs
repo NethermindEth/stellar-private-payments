@@ -14,7 +14,7 @@ use super::Prover;
 const READ_ONLY: &str = "read-only pool session cannot prove; open a full session";
 
 /// A no-op [`Prover`]; every proving method errors.
-pub struct NoopProver;
+pub(crate) struct NoopProver;
 
 #[async_trait::async_trait(?Send)]
 impl Prover for NoopProver {
