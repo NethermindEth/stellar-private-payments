@@ -124,7 +124,10 @@ pub enum StorageWorkerRequest {
         after: Option<(u32, String)>,
         limit: u32,
     },
-    ListPoolCommitmentHashes(String),
+    PoolHasCommitments {
+        pool_contract_id: String,
+        commitments: Vec<Field>,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -149,7 +152,7 @@ pub enum StorageWorkerResponse {
     DeriveASPleaf(Field),
     Logs(String),
     PoolGvkEvents(Vec<GvkEvent>),
-    PoolCommitmentHashes(Vec<Field>),
+    PoolHasCommitments(Vec<Field>),
 }
 
 #[allow(clippy::large_enum_variant)]

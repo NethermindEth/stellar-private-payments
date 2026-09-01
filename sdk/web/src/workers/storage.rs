@@ -507,10 +507,18 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
             StorageWorkerResponse::PoolGvkEvents(events)
         }
-        StorageWorkerRequest::ListPoolCommitmentHashes(pool_contract_id) => {
-            tracing::trace!("[{WORKER_NAME}] list pool commitment hashes for {pool_contract_id}");
-            let hashes = with_storage!(s => s.list_pool_commitment_hashes(&pool_contract_id)?)?;
-            StorageWorkerResponse::PoolCommitmentHashes(hashes)
+        StorageWorkerRequest::PoolHasCommitments {
+            pool_contract_id,
+            commitments,
+        } => {
+            tracing::trace!(
+                "[{WORKER_NAME}] verify {} pool commitment(s) for {pool_contract_id}",
+                commitments.len()
+            );
+            let found = with_storage!(s =>
+                s.pool_has_commitments(&pool_contract_id, &commitments)?
+            )?;
+            StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
         }
     };
     Ok(resp)
@@ -977,20 +985,24 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn list_pool_commitment_hashes(
+    async fn pool_has_commitments(
         &self,
         pool_contract_id: &str,
-    ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
+        commitments: &[stellar_private_payments::types::Field],
+    ) -> Result<std::collections::HashSet<stellar_private_payments::types::Field>, Error> {
         match self
             .call(
-                StorageWorkerRequest::ListPoolCommitmentHashes(pool_contract_id.to_string()),
+                StorageWorkerRequest::PoolHasCommitments {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    commitments: commitments.to_vec(),
+                },
                 30_000,
             )
             .await
         {
-            Ok(StorageWorkerResponse::PoolCommitmentHashes(hashes)) => Ok(hashes),
+            Ok(StorageWorkerResponse::PoolHasCommitments(found)) => Ok(found.into_iter().collect()),
             Ok(other) => Err(Error::Other(format!(
-                "unexpected storage response listing pool commitment hashes: {other:?}"
+                "unexpected storage response verifying pool commitments: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e.to_string())),
         }

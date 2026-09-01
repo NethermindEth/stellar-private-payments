@@ -4,12 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
-use crate::{
-    gvk::GvkEvent,
-    storage::Storage,
-    types::Field,
-    zk::gvk::{GvkAuditedNote, try_decrypt_against_commitment_set},
-};
+use crate::{gvk::GvkEvent, storage::Storage, types::Field, zk::gvk::GvkAuditedNote};
 
 /// Stellar RPC event ids start with a 19-character TOID (SEP-0035 operation id)
 pub(crate) const TOID_LEN: usize = 19;
@@ -62,7 +57,6 @@ pub struct GvkAudit<S: Storage> {
     pool_contract_id: String,
     d_priv: Field,
     after: Option<(u32, String)>,
-    commitment_candidates: Option<HashSet<Field>>,
     pending: Option<TxGroup>,
     complete: VecDeque<TxGroup>,
     exhausted: bool,
@@ -75,7 +69,6 @@ impl<S: Storage> GvkAudit<S> {
             pool_contract_id: pool_contract_id.into(),
             d_priv,
             after: None,
-            commitment_candidates: None,
             pending: None,
             complete: VecDeque::new(),
             exhausted: false,
@@ -148,12 +141,37 @@ impl<S: Storage> GvkAudit<S> {
             outputs.push(GvkOutputSlot { commitment, note });
         }
 
-        let candidates = self.commitment_candidates().await?;
-        let mut inputs = Vec::with_capacity(group.nullifiers.len());
+        let mut input_slots = Vec::with_capacity(group.nullifiers.len());
+        let mut candidate_commitments = Vec::new();
         for (nullifier, ciphertext) in group.nullifiers {
-            let note = ciphertext
-                .as_ref()
-                .and_then(|ct| try_decrypt_against_commitment_set(&d_priv, ct, candidates));
+            let recovered = ciphertext.as_ref().and_then(|ct| ct.decrypt(&d_priv).ok());
+            let computed = recovered.as_ref().and_then(|n| n.commitment_field());
+            if let Some(computed) = computed {
+                candidate_commitments.push(computed);
+            }
+            input_slots.push((nullifier, recovered, computed));
+        }
+
+        let verified = if candidate_commitments.is_empty() {
+            HashSet::new()
+        } else {
+            self.storage
+                .pool_has_commitments(&self.pool_contract_id, &candidate_commitments)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+        };
+
+        let mut inputs = Vec::with_capacity(input_slots.len());
+        for (nullifier, recovered, computed) in input_slots {
+            let note = match (recovered, computed) {
+                (Some(rec), Some(commitment)) if verified.contains(&commitment) => {
+                    Some(GvkAuditedNote {
+                        note: rec,
+                        commitment,
+                    })
+                }
+                _ => None,
+            };
             inputs.push(GvkSpentInput { nullifier, note });
         }
 
@@ -162,23 +180,6 @@ impl<S: Storage> GvkAudit<S> {
             outputs,
             inputs,
         })
-    }
-
-    async fn commitment_candidates(&mut self) -> Result<&HashSet<Field>> {
-        if self.commitment_candidates.is_none() {
-            let set = self
-                .storage
-                .list_pool_commitment_hashes(&self.pool_contract_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?
-                .into_iter()
-                .collect();
-            self.commitment_candidates = Some(set);
-        }
-        Ok(self
-            .commitment_candidates
-            .as_ref()
-            .expect("just initialized"))
     }
 }
 
@@ -227,20 +228,6 @@ pub fn audit_commitment_event(
 ) -> Option<GvkAuditedNote> {
     let ciphertext = event.gvk_ciphertext.as_ref()?;
     ciphertext.decrypt_audited_for_commitment(admin_private_key, &event.commitment)
-}
-
-/// Decrypt and verify a traceable-mode input note from a `NewNullifierEvent`.
-pub fn audit_nullifier_event(
-    admin_private_key: &Field,
-    event: &crate::types::NewNullifierEvent,
-    candidate_commitments: impl IntoIterator<Item = Field>,
-) -> Option<GvkAuditedNote> {
-    let ciphertext = event.gvk_ciphertext.as_ref()?;
-    crate::zk::gvk::try_decrypt_against_commitments(
-        admin_private_key,
-        ciphertext,
-        candidate_commitments,
-    )
 }
 
 #[cfg(test)]
@@ -366,27 +353,6 @@ mod tests {
         };
 
         assert!(audit_commitment_event(&d_priv, &event).is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn audit_nullifier_event_finds_matching_commitment() -> anyhow::Result<()> {
-        let d_priv = field(0x510);
-        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
-        let note = GvkNote::new(field(0xABC), 42u128.into(), field(0xDEF), field(5));
-        let ct = note.encrypt(&admin, &field(9), 0)?;
-        let commitment = commitment_for(&note)?;
-
-        let event = NewNullifierEvent {
-            id: "nullifier-event".into(),
-            nullifier: field(0x999),
-            gvk_ciphertext: Some(ct),
-        };
-
-        let audited = audit_nullifier_event(&d_priv, &event, [field(0x1111), commitment])
-            .expect("match spent note");
-        assert_eq!(audited.commitment, commitment);
-        assert_eq!(audited.note.amount()?, 42u128.into());
         Ok(())
     }
 
