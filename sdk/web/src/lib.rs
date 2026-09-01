@@ -7,6 +7,7 @@ mod circuits;
 mod client;
 mod correlation;
 mod deployment;
+mod models;
 mod protocol;
 mod signer;
 mod storage;

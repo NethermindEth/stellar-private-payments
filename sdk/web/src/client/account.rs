@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use serde::{Deserialize, Serialize};
 use stellar_private_payments::{
     Account as NativeAccount,
     types::{EncryptionPublicKey, NotePublicKey},
@@ -10,32 +9,16 @@ use stellar_private_payments::{
 
 use wasm_bindgen::prelude::*;
 
-use crate::workers::storage::StorageBridge;
+use crate::{
+    models::{
+        PoolOptions, PortfolioBalance, RegisterPublicKeysOptions, UserNoteSummary, UserPublicKeys,
+        portfolio_balances, user_note_summaries,
+    },
+    workers::storage::StorageBridge,
+};
 
 use super::{pool::PrivatePool, pool_err};
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UserPublicKeysOut {
-    note_public_key: NotePublicKey,
-    encryption_public_key: EncryptionPublicKey,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RegisterPublicKeysOptions {
-    note_public_key_hex: Option<String>,
-    encryption_public_key_hex: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PoolOptions {
-    pool_contract: String,
-}
-
-/// Wallet session for one Stellar account. Construct via
-/// [`super::Client::account`].
 #[wasm_bindgen]
 pub struct Account {
     inner: Rc<NativeAccount<StorageBridge>>,
@@ -63,26 +46,23 @@ impl Account {
     }
 
     /// Portfolio balances across all enabled pools in the deployment.
-    pub async fn portfolio(&self) -> Result<JsValue, JsError> {
+    pub async fn portfolio(&self) -> Result<Vec<PortfolioBalance>, JsError> {
         let portfolio = self.inner.portfolio().await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&portfolio)?)
+        Ok(portfolio_balances(portfolio))
     }
 
     /// Locally derived note and encryption public keys for this account.
     #[wasm_bindgen(js_name = userPublicKeys)]
-    pub async fn user_public_keys(&self) -> Result<JsValue, JsError> {
-        let (note, enc) = self.inner.user_public_keys().await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&UserPublicKeysOut {
-            note_public_key: note,
-            encryption_public_key: enc,
-        })?)
+    pub async fn user_public_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.user_public_keys().await.map_err(pool_err)?;
+        Ok(UserPublicKeys::from(keys))
     }
 
     /// Notes for this account across all pools (newest first).
     #[wasm_bindgen(js_name = userNotes)]
-    pub async fn user_notes(&self, limit: u32) -> Result<JsValue, JsError> {
+    pub async fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, JsError> {
         let notes = self.inner.user_notes(limit).await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&notes)?)
+        Ok(user_note_summaries(notes))
     }
 
     /// Locally derived ASP membership blinding for this account.
@@ -111,15 +91,11 @@ impl Account {
     /// Register this account's public keys on the deployment-wide registry.
     #[wasm_bindgen(js_name = registerPublicKeys)]
     pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {
-        let opts: RegisterPublicKeysOptions = if options.is_null() || options.is_undefined() {
-            RegisterPublicKeysOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
+        let opts = RegisterPublicKeysOptions::from_value(options)?;
 
         let (note_public_key, encryption_public_key) = match (
-            opts.note_public_key_hex,
-            opts.encryption_public_key_hex,
+            opts.note_public_key_hex(),
+            opts.encryption_public_key_hex(),
         ) {
             (Some(note), Some(enc)) => (
                 Some(NotePublicKey::parse(&note).map_err(|e| JsError::new(&e.to_string()))?),
@@ -143,8 +119,8 @@ impl Account {
 
     /// Open a private pool session for this account.
     pub async fn pool(&self, options: JsValue) -> Result<PrivatePool, JsError> {
-        let opts: PoolOptions = serde_wasm_bindgen::from_value(options)?;
-        let inner = Rc::new(self.inner.pool(opts.pool_contract).map_err(pool_err)?);
+        let opts = PoolOptions::from_value(options)?;
+        let inner = Rc::new(self.inner.pool(opts.pool_contract()).map_err(pool_err)?);
         Ok(PrivatePool::from_parts(
             inner,
             self.inner.user_address().to_string(),
