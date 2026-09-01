@@ -154,14 +154,13 @@ async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>,
     let pk_name = artifact_file_name(stem, ArtifactKind::ProvingKey);
     let pk_name_for_closure = pk_name.clone();
     let stem = stem.to_string();
-    let r1cs_bytes = r1cs_bytes.to_vec();
     let pk_sha256 = circuit_lock()
         .map_err(|e| JsError::new(&e.to_string()))?
         .artifact_sha256(&stem, ArtifactKind::ProvingKey)
         .map_err(|e| JsError::new(&e.to_string()))?;
     get_or_derive_uncompressed(&pk_name, pk_sha256, move || async move {
         let compressed = fetch_lockfile_artifact(&stem, ArtifactKind::ProvingKey).await?;
-        let tmp = Groth16Prover::new(&compressed, &r1cs_bytes).map_err(|e| {
+        let tmp = Groth16Prover::new(&compressed, r1cs_bytes).map_err(|e| {
             JsError::new(&format!(
                 "failed to build prover for uncompressed export ({pk_name_for_closure}): {e:#}"
             ))
@@ -220,16 +219,13 @@ async fn build_transact_prover(
         .map_err(|e| JsError::new(&e.to_string()))?
         .artifact_sha256(stem, ArtifactKind::ProvingKey)
         .map_err(|e| JsError::new(&e.to_string()))?;
-    let r1cs_bytes_for_closure = r1cs_bytes.to_vec();
-    let bundled_for_closure = bundled_compressed_pk.to_vec();
 
     let fast_path = get_or_derive_uncompressed(&pk_name, pk_sha256, move || async move {
-        let tmp =
-            Groth16Prover::new(&bundled_for_closure, &r1cs_bytes_for_closure).map_err(|e| {
-                JsError::new(&format!(
-                    "failed to build prover for uncompressed export ({pk_name_for_closure}): {e:#}"
-                ))
-            })?;
+        let tmp = Groth16Prover::new(bundled_compressed_pk, r1cs_bytes).map_err(|e| {
+            JsError::new(&format!(
+                "failed to build prover for uncompressed export ({pk_name_for_closure}): {e:#}"
+            ))
+        })?;
         tmp.get_uncompressed_proving_key().map_err(|e| {
             JsError::new(&format!(
                 "failed to export uncompressed proving key ({pk_name_for_closure}): {e:#}"
