@@ -118,8 +118,13 @@ impl TryFrom<ExtAmount> for NoteAmount {
     type Error = anyhow::Error;
 
     fn try_from(value: ExtAmount) -> Result<Self> {
-        let v =
-            u128::try_from(value.0).map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
+        let v = u128::try_from(value.0).map_err(|_| {
+            // Escapes to a UI toast and the telemetry ring buffer.
+            anyhow!(
+                "NoteAmount out of range: {}",
+                crate::types::Sensitive(value.0)
+            )
+        })?;
         Ok(NoteAmount(v))
     }
 }
@@ -595,6 +600,18 @@ mod tests {
         assert_eq!(max.checked_add(NoteAmount(1)), None);
         assert_eq!(z.checked_sub(NoteAmount(1)), None);
         Ok(())
+    }
+
+    #[test]
+    fn note_amount_out_of_range_error_redacts_the_amount() {
+        let _guard = crate::types::lock_reveal_flag();
+        crate::types::set_reveal_sensitive(false);
+
+        let err = NoteAmount::try_from(ExtAmount(-4242)).expect_err("negative is out of range");
+        let rendered = format!("{err:#}");
+
+        assert!(!rendered.contains("4242"), "amount leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "not redacted: {rendered}");
     }
 
     #[test]
