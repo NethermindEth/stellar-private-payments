@@ -394,16 +394,16 @@ fn registry_row() -> Row {
 ///
 /// A change to what a contract stores updates these in the same commit.
 const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 40, 27),
-    ("pool transact, transfer, blocklist, fresh tree", 36, 25),
-    ("pool transact, withdrawal, blocklist, fresh tree", 39, 27),
-    ("pool transact, transfer, root one transaction old", 124, 24),
+    ("pool transact, deposit, blocklist, fresh tree", 41, 27),
+    ("pool transact, transfer, blocklist, fresh tree", 37, 25),
+    ("pool transact, withdrawal, blocklist, fresh tree", 40, 27),
+    ("pool transact, transfer, root one transaction old", 125, 24),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        39,
+        40,
         25,
     ),
-    ("pool get_root", 3, 0),
+    ("pool get_root", 4, 0),
     ("pool-gvk transact, transfer, view-only", 38, 25),
     ("asp-membership insert_leaf, first leaf", 17, 13),
     ("asp-non-membership insert_leaf, ninth key", 14, 10),
@@ -525,7 +525,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (39, 24);
+const EXPECTED_REAL_PROOF: (u32, u32) = (40, 24);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.
