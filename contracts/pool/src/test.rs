@@ -9,11 +9,15 @@ use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::Address as _,
+    testutils::{Address as _, Ledger as _, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    constants::bn256_modulus,
+    ttl::{EXTEND_TO, THRESHOLD},
+    utils::MockToken,
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -346,6 +350,149 @@ fn merkle_init_only_once() {
         let result = MerkleTreeWithHistory::init(&env, levels);
         assert!(result.is_err());
     });
+}
+
+fn merkle_entry_ttl(env: &Env, pool: &Address, key: &MerkleDataKey) -> u32 {
+    env.as_contract(pool, || env.storage().persistent().get_ttl(key))
+}
+
+/// Advances the ledger far enough that every entry sitting at [`EXTEND_TO`]
+/// drops below [`THRESHOLD`], so a later bump is visible as a jump back up.
+fn decay_below_threshold(env: &Env) {
+    let target = env
+        .ledger()
+        .sequence()
+        .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
+    env.ledger().set_sequence_number(target);
+}
+
+fn insert_pair(env: &Env, pool: &Address, left: u32, right: u32) {
+    env.as_contract(pool, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            env,
+            U256::from_u32(env, left),
+            U256::from_u32(env, right),
+        )
+        .unwrap_or_else(|err| panic!("expected leaf insertion to succeed: {err:?}"));
+    });
+}
+
+#[test]
+fn insert_two_leaves_extends_touched_entries() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let untouched_before = merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0));
+
+    insert_pair(&env, &pool_id, 1, 2);
+
+    for key in [
+        MerkleDataKey::Levels,
+        MerkleDataKey::NextIndex,
+        MerkleDataKey::CurrentRootIndex,
+        MerkleDataKey::Root(1),
+        MerkleDataKey::FilledSubtree(1),
+        MerkleDataKey::Zeroes(1),
+    ] {
+        assert_eq!(
+            merkle_entry_ttl(&env, &pool_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        untouched_before
+    );
+}
+
+#[test]
+fn is_known_root_extends_only_the_matching_slot() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    // Reading the root the constructor wrote lifts Root(0) to EXTEND_TO, so all
+    // three occupied slots start the search from the same TTL.
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected the initial root to exist: {err:?}"));
+    });
+    insert_pair(&env, &pool_id, 1, 2);
+    insert_pair(&env, &pool_id, 3, 4);
+    let first_root: U256 = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::Root(1))
+            .unwrap_or_else(|| panic!("expected the first inserted root to be stored"))
+    });
+    decay_below_threshold(&env);
+
+    let known = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::is_known_root(&env, &first_root)
+            .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
+    });
+
+    assert!(known);
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(1)),
+        EXTEND_TO
+    );
+    let unextended = THRESHOLD.saturating_sub(1);
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(2)),
+        unextended
+    );
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        unextended
+    );
+
+    let unknown = U256::from_u32(&env, 0xdead_beef);
+    let found = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::is_known_root(&env, &unknown)
+            .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
+    });
+    assert!(!found);
+}
+
+#[test]
+fn get_last_root_extends_the_current_slot() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected last root to exist: {err:?}"));
+    });
+
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        EXTEND_TO
+    );
+    assert_eq!(
+        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::CurrentRootIndex),
+        EXTEND_TO
+    );
 }
 
 #[test]
