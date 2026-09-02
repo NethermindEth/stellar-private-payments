@@ -215,7 +215,11 @@ pub(crate) fn load_user_key_material(
         },
         membership_blinding,
     } = storage.get_user_keys(user_address)?.ok_or_else(|| {
-        anyhow::anyhow!("address {user_address} should generate privacy keys and ASP secret first")
+        // Escapes to a UI toast and the telemetry ring buffer.
+        anyhow::anyhow!(
+            "address {} should generate privacy keys and ASP secret first",
+            crate::types::Sensitive(user_address)
+        )
     })?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
@@ -348,4 +352,28 @@ fn build_pool_input_note(
         merkle_path_elements: path_elements,
         merkle_path_indices: path_indices,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_user_key_material;
+    use crate::{
+        state::SqliteStorage,
+        types::{lock_reveal_flag, set_reveal_sensitive},
+    };
+
+    const ADDRESS: &str = "GTESTACCOUNTWITHNOSTOREDKEYS";
+
+    #[test]
+    fn missing_user_keys_error_redacts_the_address() {
+        let _guard = lock_reveal_flag();
+        set_reveal_sensitive(false);
+        let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+
+        let err = load_user_key_material(&storage, ADDRESS).expect_err("no keys are stored");
+        let rendered = format!("{err:#}");
+
+        assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "not redacted: {rendered}");
+    }
 }
