@@ -12,7 +12,7 @@
 //! these functions.
 
 use soroban_sdk::{Env, U256, Vec, contracttype};
-use soroban_utils::{get_zeroes, poseidon2_compress};
+use soroban_utils::{bump_entry, get_zeroes, poseidon2_compress};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -125,12 +125,15 @@ impl MerkleTreeWithHistory {
         let levels: u32 = storage
             .get(&MerkleDataKey::Levels)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::Levels);
         let next_index: u64 = storage
             .get(&MerkleDataKey::NextIndex)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::NextIndex);
         let mut root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::CurrentRootIndex);
         let max_leaves = 1u64.checked_shl(levels).ok_or(Error::WrongLevels)?;
 
         // NextIndex must be even for two-leaf insertion
@@ -154,18 +157,19 @@ impl MerkleTreeWithHistory {
         // leaves
         for lvl in 1..levels {
             let is_right = current_index & 1 == 1;
+            let subtree_key = MerkleDataKey::FilledSubtree(lvl);
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = storage
-                    .get(&MerkleDataKey::FilledSubtree(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let left: U256 = storage.get(&subtree_key).ok_or(Error::NotInitialized)?;
+                bump_entry(env, &subtree_key);
                 current_hash = poseidon2_compress(env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                storage.set(&MerkleDataKey::FilledSubtree(lvl), &current_hash);
-                let zero_val: U256 = storage
-                    .get(&MerkleDataKey::Zeroes(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                storage.set(&subtree_key, &current_hash);
+                bump_entry(env, &subtree_key);
+                let zero_key = MerkleDataKey::Zeroes(lvl);
+                let zero_val: U256 = storage.get(&zero_key).ok_or(Error::NotInitialized)?;
+                bump_entry(env, &zero_key);
                 current_hash = poseidon2_compress(env, current_hash, zero_val);
             }
             current_index >>= 1;
@@ -174,7 +178,9 @@ impl MerkleTreeWithHistory {
         // Update the root history index
         root_index = root_index.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
         // Update the root with the computed hash
-        storage.set(&MerkleDataKey::Root(root_index), &current_hash);
+        let root_key = MerkleDataKey::Root(root_index);
+        storage.set(&root_key, &current_hash);
+        bump_entry(env, &root_key);
         storage.set(&MerkleDataKey::CurrentRootIndex, &root_index);
 
         // Update NextIndex
@@ -217,14 +223,17 @@ impl MerkleTreeWithHistory {
         let current_root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::CurrentRootIndex);
 
         // Search the ring buffer for the root
         let mut i = current_root_index;
         loop {
             // roots[i]
-            if let Some(r) = storage.get::<MerkleDataKey, U256>(&MerkleDataKey::Root(i))
+            let root_key = MerkleDataKey::Root(i);
+            if let Some(r) = storage.get::<MerkleDataKey, U256>(&root_key)
                 && &r == root
             {
+                bump_entry(env, &root_key);
                 return Ok(true);
             }
             i = i.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
@@ -252,10 +261,12 @@ impl MerkleTreeWithHistory {
         let current_root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::CurrentRootIndex);
 
-        storage
-            .get(&MerkleDataKey::Root(current_root_index))
-            .ok_or(Error::NotInitialized)
+        let root_key = MerkleDataKey::Root(current_root_index);
+        let root = storage.get(&root_key).ok_or(Error::NotInitialized)?;
+        bump_entry(env, &root_key);
+        Ok(root)
     }
 
     /// Hash two U256 values using Poseidon2 compression
