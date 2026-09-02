@@ -1,7 +1,6 @@
 import init, {
   Client as WasmClient,
-  PoolExecuteResult,
-  PrivatePool,
+  DisclosureRequest,
   Storage as WasmStorage,
   bootnodeRequired as wasmBootnodeRequired,
   deriveAspUserLeaf as wasmDeriveAspUserLeaf,
@@ -162,7 +161,7 @@ export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
 };
-export { PoolExecuteResult, PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { DisclosureRequest, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

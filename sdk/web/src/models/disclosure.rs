@@ -120,6 +120,7 @@ impl DisclosurePublicInputs {
         self.inner.nullifiers.iter().map(field_hex).collect()
     }
 
+    /// Decimal strings, matching the receipt's `toJSON` amount format.
     #[wasm_bindgen(getter)]
     pub fn amounts(&self) -> Vec<String> {
         self.inner
@@ -180,15 +181,6 @@ impl DisclosureReceipt {
         self.inner
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|e| JsError::new(&format!("failed to serialize disclosure receipt: {e}")))
-    }
-
-    /// Reconstruct a receipt from `toJSON` output, for verification after
-    /// storage or transport.
-    #[wasm_bindgen(js_name = fromJSON)]
-    pub fn from_json(value: JsValue) -> Result<DisclosureReceipt, JsError> {
-        let inner: NativeDisclosureReceipt = serde_wasm_bindgen::from_value(value)
-            .map_err(|e| JsError::new(&format!("invalid disclosure receipt: {e}")))?;
-        Ok(Self { inner })
     }
 }
 

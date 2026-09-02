@@ -5,8 +5,8 @@ import {
   Client,
   Storage,
   TX_PROGRESS_EVENT,
-  PoolExecuteResult,
   type ContractConfig,
+  type PoolExecuteResult,
   type PrivatePool,
 } from '../index.js';
 

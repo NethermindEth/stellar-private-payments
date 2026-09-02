@@ -10,14 +10,15 @@ export type {
   DisclosureContext,
   DisclosurePublicInputs,
   DisclosureReceipt,
-  DisclosureRequest,
   DisclosureVerificationReport,
   GlobalViewKeyCiphertext,
   OperationalFeedItem,
   PoolConfigEntry,
   PoolEstimate,
+  PoolExecuteResult,
   PoolInfo,
   PortfolioBalance,
+  PrivatePool,
   PublicKeyEntry,
   RecipientLookup,
   UserNoteSummary,
@@ -25,11 +26,7 @@ export type {
   VerifierEntry,
 } from './crates/stellar_private_payments_web.js';
 
-export {
-  PoolExecuteResult,
-  PrivatePool,
-  default,
-} from './crates/stellar_private_payments_web.js';
+export { DisclosureRequest, default } from './crates/stellar_private_payments_web.js';
 
 // JS facade (`js/index.js`) — options and wrapped session entry points.
 export * from './api-types.js';
