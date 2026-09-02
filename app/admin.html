@@ -128,33 +128,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Admin Insert Only Toggle -->
-                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 mt-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Admin-Only Leaf Insert</p>
-                            <p class="mt-1 text-xs text-slate-400">When enabled, only the admin can insert membership leaves.</p>
-                        </div>
-                        <div class="flex items-center gap-4 flex-shrink-0">
-                            <span id="adminInsertOnlyStatus" class="font-mono text-sm text-slate-400">--</span>
-                            <button
-                                type="button"
-                                id="toggleAdminInsertOnlyBtn"
-                                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                                disabled
-                                title="Please connect your wallet first"
-                            >
-                                Toggle
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Warning shown when admin-only insert is disabled -->
-                    <div id="openInsertWarning" class="hidden mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                        <span class="font-semibold uppercase tracking-wide text-amber-400 text-xs mr-1">Warning:</span>
-                        Admin-only insert is disabled. Anyone can now add membership leaves to the ASP. This bypasses the intended access-control safeguard.
-                    </div>
-                </div>
             </section>
 
             <!-- 2. Allowlist Tab -->
