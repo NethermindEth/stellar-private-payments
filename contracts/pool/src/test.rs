@@ -2,14 +2,18 @@ use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof,
     merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
     policy,
+    pool::DataKey,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Ledger as _, storage::Persistent as _},
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec, contract, contractimpl,
+    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    testutils::{
+        Address as _, Ledger as _,
+        storage::{Instance as _, Persistent as _},
+    },
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
@@ -352,8 +356,15 @@ fn merkle_init_only_once() {
     });
 }
 
-fn merkle_entry_ttl(env: &Env, pool: &Address, key: &MerkleDataKey) -> u32 {
-    env.as_contract(pool, || env.storage().persistent().get_ttl(key))
+fn entry_ttl<K>(env: &Env, contract: &Address, key: &K) -> u32
+where
+    K: IntoVal<Env, Val>,
+{
+    env.as_contract(contract, || env.storage().persistent().get_ttl(key))
+}
+
+fn instance_ttl(env: &Env, contract: &Address) -> u32 {
+    env.as_contract(contract, || env.storage().instance().get_ttl())
 }
 
 /// Advances the ledger far enough that every entry sitting at [`EXTEND_TO`]
@@ -388,7 +399,7 @@ fn insert_two_leaves_extends_touched_entries() {
         8,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
-    let untouched_before = merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0));
+    let untouched_before = entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0));
 
     insert_pair(&env, &pool_id, 1, 2);
 
@@ -401,13 +412,13 @@ fn insert_two_leaves_extends_touched_entries() {
         MerkleDataKey::Zeroes(1),
     ] {
         assert_eq!(
-            merkle_entry_ttl(&env, &pool_id, &key),
+            entry_ttl(&env, &pool_id, &key),
             EXTEND_TO,
             "{key:?} should have been extended"
         );
     }
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
         untouched_before
     );
 }
@@ -447,16 +458,16 @@ fn is_known_root_extends_only_the_matching_slot() {
 
     assert!(known);
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(1)),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::Root(1)),
         EXTEND_TO
     );
     let unextended = THRESHOLD.saturating_sub(1);
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(2)),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::Root(2)),
         unextended
     );
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
         unextended
     );
 
@@ -486,13 +497,305 @@ fn get_last_root_extends_the_current_slot() {
     });
 
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
         EXTEND_TO
     );
     assert_eq!(
-        merkle_entry_ttl(&env, &pool_id, &MerkleDataKey::CurrentRootIndex),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::CurrentRootIndex),
         EXTEND_TO
     );
+}
+
+/// A verifier that accepts every proof.
+///
+/// The workspace's shared `CircomGroth16Verifier` embeds a verification key
+/// chosen at compile time, and producing a proof it accepts needs the proving
+/// key and witness machinery that lives in `e2e-tests`. Tests that have to
+/// observe a `transact` run to completion wire the pool to this instead.
+#[contract]
+struct AcceptingVerifier;
+
+#[contractimpl]
+impl AcceptingVerifier {
+    pub fn verify(
+        _env: Env,
+        _proof: Groth16Proof,
+        _public_inputs: Vec<Bn254Fr>,
+    ) -> Result<bool, contract_types::Groth16Error> {
+        Ok(true)
+    }
+}
+
+fn register_pool_with_verifier(
+    env: &Env,
+    setup: &TestSetup,
+    verifier: &Address,
+    levels: u32,
+    policy_flags: u32,
+) -> Address {
+    env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            U256::from_u32(env, 1000),
+            levels,
+            policy_flags,
+        ),
+    )
+}
+
+#[test]
+fn transact_extends_instance_config_and_nullifier_ttl() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(
+        &env,
+        &setup,
+        &verifier,
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xA11CE;
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    pool.transact(&proof, &ext, &Address::generate(&env));
+
+    assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
+    for key in [
+        DataKey::Token,
+        DataKey::PolicyFlags,
+        DataKey::Nullifier(U256::from_u32(&env, nullifier)),
+    ] {
+        assert_eq!(
+            entry_ttl(&env, &pool_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+}
+
+#[test]
+fn transact_extends_linked_contract_instances() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(
+        &env,
+        &setup,
+        &verifier,
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xA11CF);
+    // `asp_roots` above already extended both ASP instances, so decay first:
+    // without this the assertions below hold before `transact` even runs.
+    //
+    // Each ASP instance is reachable by two paths here, `bump_dependency` and
+    // the ASP's own `bump_instance` during the root cross-call, so what this
+    // pins is the invariant that every linked instance survives the call, not
+    // which of the two extended it. The verifier has only the one path.
+    decay_below_threshold(&env);
+    pool.transact(&proof, &ext, &Address::generate(&env));
+
+    assert_eq!(instance_ttl(&env, &verifier), EXTEND_TO);
+    assert_eq!(instance_ttl(&env, &setup.asp_membership_address), EXTEND_TO);
+    assert_eq!(
+        instance_ttl(&env, &setup.asp_non_membership_address),
+        EXTEND_TO
+    );
+}
+
+#[test]
+fn transact_on_an_open_pool_leaves_asp_instances_alone() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(&env, &setup, &verifier, 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let zero = U256::from_u32(&env, 0);
+    let membership_before = instance_ttl(&env, &setup.asp_membership_address);
+    let non_membership_before = instance_ttl(&env, &setup.asp_non_membership_address);
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, zero.clone(), zero, 0xA11D0);
+    pool.transact(&proof, &ext, &Address::generate(&env));
+
+    assert_eq!(instance_ttl(&env, &verifier), EXTEND_TO);
+    assert_eq!(
+        instance_ttl(&env, &setup.asp_membership_address),
+        membership_before
+    );
+    assert_eq!(
+        instance_ttl(&env, &setup.asp_non_membership_address),
+        non_membership_before
+    );
+}
+
+/// A failed invocation rolls back its storage changes, and a TTL extension is
+/// one of them, so the pool pays no rent for a call it refused.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn failed_transact_rolls_back_the_ttl_extension() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(
+        &env,
+        &setup,
+        &verifier,
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+    let before = instance_ttl(&env, &pool_id);
+
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(&env),
+        root: U256::from_u32(&env, 0xFF),
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xAB));
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x01),
+        output_commitment1: U256::from_u32(&env, 0x02),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: compute_ext_hash(&env, &ext),
+        asp_membership_root: member_root,
+        asp_non_membership_root: non_member_root,
+    };
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("an unknown root must be refused");
+
+    assert_eq!(err, Ok(Error::UnknownRoot));
+    assert_ne!(before, EXTEND_TO);
+    assert_eq!(instance_ttl(&env, &pool_id), before);
+}
+
+/// The spent check must not extend a nullifier entry that does not exist,
+/// because the host rejects an extension of a missing key.
+#[test]
+fn is_spent_on_an_unknown_nullifier_does_not_panic() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    assert!(!pool.is_spent(&U256::from_u32(&env, 0xBEEF)));
+}
+
+/// The address an admin writes must come off the seven-day fuse with it, or
+/// the pool forgets which ASP it points at.
+#[test]
+fn update_asp_membership_extends_the_written_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.update_asp_membership(&Address::generate(&env));
+
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &DataKey::ASPMembership),
+        EXTEND_TO
+    );
+}
+
+/// Same for the non-membership address.
+#[test]
+fn update_asp_non_membership_extends_the_written_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.update_asp_non_membership(&Address::generate(&env));
+
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &DataKey::ASPNonMembership),
+        EXTEND_TO
+    );
+}
+
+/// A nullifier already on file is re-extended by the spent check, so a pool
+/// that keeps being read never lets its double-spend record expire.
+#[test]
+fn is_spent_extends_a_nullifier_already_on_file() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let nullifier = U256::from_u32(&env, 0xC0FFEE);
+    mark_nullifier_spent(&env, &pool_id, &nullifier);
+    decay_below_threshold(&env);
+    let key = DataKey::Nullifier(nullifier.clone());
+    assert_ne!(entry_ttl(&env, &pool_id, &key), EXTEND_TO);
+
+    assert!(pool.is_spent(&nullifier));
+
+    assert_eq!(entry_ttl(&env, &pool_id, &key), EXTEND_TO);
+}
+
+#[test]
+fn getters_extend_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    pool.get_root();
+
+    assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
 }
 
 #[test]
