@@ -153,16 +153,17 @@ impl PrivatePool {
 
     /// Generate a selective-disclosure proof for a note commitment.
     ///
-    /// `config` matches [`DisclosureRequest`] (camelCase; `selectedCommitments`
-    /// array with 1..=4 entries). Returns `undefined` when the account must
-    /// register at the ASP before disclosing; check with `== null`.
-    pub async fn disclose(&self, config: JsValue) -> Result<Option<DisclosureReceipt>, JsError> {
+    /// Returns `undefined` when the account must register at the ASP before
+    /// disclosing; check with `== null`.
+    pub async fn disclose(
+        &self,
+        req: &DisclosureRequest,
+    ) -> Result<Option<DisclosureReceipt>, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let req = DisclosureRequest::from_value(config)?;
             emit("disclose", "prove", "Generating proof…", None, None);
             match self
                 .inner()
-                .disclose(req.into_native())
+                .disclose(req.native())
                 .await
                 .map_err(pool_err)?
             {

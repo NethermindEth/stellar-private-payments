@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use serde::Serialize;
 use stellar_private_payments::{
     disclosure::DisclosureRequest as NativeDisclosureRequest,
     types::{
@@ -176,10 +177,18 @@ impl DisclosureReceipt {
     /// verification.
     #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsError> {
-        let json = serde_json::to_value(&self.inner)
-            .map_err(|e| JsError::new(&format!("failed to serialize disclosure receipt: {e}")))?;
-        serde_wasm_bindgen::to_value(&json)
-            .map_err(|e| JsError::new(&format!("failed to convert disclosure receipt: {e}")))
+        self.inner
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsError::new(&format!("failed to serialize disclosure receipt: {e}")))
+    }
+
+    /// Reconstruct a receipt from `toJSON` output, for verification after
+    /// storage or transport.
+    #[wasm_bindgen(js_name = fromJSON)]
+    pub fn from_json(value: JsValue) -> Result<DisclosureReceipt, JsError> {
+        let inner: NativeDisclosureReceipt = serde_wasm_bindgen::from_value(value)
+            .map_err(|e| JsError::new(&format!("invalid disclosure receipt: {e}")))?;
+        Ok(Self { inner })
     }
 }
 
@@ -278,7 +287,7 @@ impl DisclosureRequest {
         Ok(Self { inner })
     }
 
-    pub(crate) fn into_native(self) -> NativeDisclosureRequest {
-        self.inner
+    pub(crate) fn native(&self) -> NativeDisclosureRequest {
+        self.inner.clone()
     }
 }

@@ -1,8 +1,8 @@
 //! Shared native → JS field conversions for wasm-bindgen models.
 
 use stellar_private_payments::types::{
-    EncryptionPublicKey, Field, GvkMode, NoteAmount, NotePublicKey, PolicyFlag, PolicyFlags,
-    encode_0x_hex,
+    EncryptionPublicKey, Field, GvkMode, NoteAmount, NotePublicKey, POLICY_FLAGS_IN_SUFFIX_ORDER,
+    PolicyFlags, encode_0x_hex,
 };
 
 pub(crate) fn gvk_mode_name(mode: GvkMode) -> &'static str {
@@ -14,9 +14,9 @@ pub(crate) fn gvk_mode_name(mode: GvkMode) -> &'static str {
 }
 
 pub(crate) fn policy_flag_names(flags: PolicyFlags) -> Vec<String> {
-    [PolicyFlag::Allowlist, PolicyFlag::Blocklist]
-        .into_iter()
-        .filter(|flag| flags.contains(*flag))
+    POLICY_FLAGS_IN_SUFFIX_ORDER
+        .iter()
+        .filter(|flag| flags.contains(**flag))
         .map(|flag| flag.name().to_string())
         .collect()
 }

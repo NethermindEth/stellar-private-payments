@@ -286,7 +286,7 @@ impl PoolInfo {
 
     #[wasm_bindgen(getter, js_name = aspNonMembership)]
     pub fn aspnonmembership(&self) -> String {
-        self.inner.asp_nonmembership.clone()
+        self.inner.asp_non_membership.clone()
     }
 
     #[wasm_bindgen(getter, js_name = merkleLevels)]

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use serde::Serialize;
 use stellar_private_payments::types::{
     AssetDescriptor as NativeAssetDescriptor, ContractConfig as NativeContractConfig,
     PoolConfigEntry as NativePoolConfigEntry,
@@ -211,10 +212,9 @@ impl ContractConfig {
     /// Plain JSON object matching `deployments.json` (for round-trip input).
     #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsError> {
-        let json = serde_json::to_value(self.native())
-            .map_err(|e| JsError::new(&format!("failed to serialize contractConfig: {e}")))?;
-        serde_wasm_bindgen::to_value(&json)
-            .map_err(|e| JsError::new(&format!("failed to convert contractConfig: {e}")))
+        self.native()
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsError::new(&format!("failed to serialize contractConfig: {e}")))
     }
 
     pub(crate) fn native(&self) -> &NativeContractConfig {
