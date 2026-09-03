@@ -1,4 +1,9 @@
-import { client, isRuntimeReady, verifySelectiveDisclosure } from './wasm-facade.js';
+import {
+  DisclosureRequest,
+  client,
+  isRuntimeReady,
+  verifySelectiveDisclosure,
+} from './wasm-facade.js';
 import {
   connectWallet,
   getConnectedAddress,
@@ -808,13 +813,14 @@ async function generateReceipt(form) {
       state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
     const pool = await client().account().pool({ poolContract: poolContractId });
 
-    const receipt = await pool.disclose({
-      selectedCommitments: state.selectedNotes.map((n) => n.id),
-      authorityLabel: form.authority,
-      authorityIdentityPayloadHex: form.payload,
-      purpose: form.purpose,
-      contextNonce: form.nonce,
-    });
+    const req = new DisclosureRequest(
+      state.selectedNotes.map((n) => n.id),
+      form.authority,
+      form.payload,
+      form.purpose,
+      form.nonce,
+    );
+    const receipt = await pool.disclose(req);
 
     if (!receipt) {
       return null;

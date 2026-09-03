@@ -27,7 +27,7 @@ use wasm_bindgen::{JsValue, closure::Closure};
 use wasm_bindgen_test::*;
 
 use super::Client;
-use crate::storage::Storage;
+use crate::{models::PoolExecuteResult, storage::Storage};
 
 const TEST_DEPLOYMENT_JSON: &str = include_str!("../../../../deployments/testnet/deployments.json");
 
@@ -311,9 +311,7 @@ async fn e2e_smoke_client_construction() {
 
     let mut client = build_test_client(&storage).await;
 
-    client
-        .contract_config()
-        .expect("deployment config must parse");
+    client.contract_config();
     assert!(!stub_signer().is_undefined());
 
     client.stop_background_sync();
@@ -351,29 +349,21 @@ async fn open_account_a_with(client: &Client, mode: SignerMode) -> super::Accoun
         .expect("account session must open")
 }
 
-/// Read the `status` field of an `execute_plan` response.
-fn response_status(response: &JsValue) -> String {
-    Reflect::get(response, &JsValue::from_str("status"))
-        .unwrap()
-        .as_string()
-        .unwrap_or_default()
+/// Read the `status` field of a pool execute response.
+fn response_status(response: &PoolExecuteResult) -> String {
+    response.status()
 }
 
-/// Number of confirmed transaction hashes in an `execute_plan` response.
-fn response_hash_count(response: &JsValue) -> u32 {
-    Reflect::get(response, &JsValue::from_str("hashes"))
-        .ok()
-        .and_then(|hashes| js_sys::Array::try_from(hashes).ok().map(|a| a.length()))
-        .unwrap_or(0)
+/// Number of confirmed transaction hashes in a pool execute response.
+fn response_hash_count(response: &PoolExecuteResult) -> u32 {
+    response.hashes().len() as u32
 }
 
-/// SEP-0043 error code from an `execute_plan` response, when present.
+/// SEP-0043 error code from a pool execute response, when present.
 ///
 /// `-4` is the sentinel for a user rejection.
-fn response_code(response: &JsValue) -> Option<f64> {
-    Reflect::get(response, &JsValue::from_str("code"))
-        .ok()
-        .and_then(|code| code.as_f64())
+fn response_code(response: &PoolExecuteResult) -> Option<i32> {
+    response.code()
 }
 
 /// DOM event carrying transaction progress.
@@ -430,9 +420,7 @@ async fn seed_deposit(client: &Client, amount: u128) {
         status,
         "ok",
         "seed deposit must confirm on chain, got status={status} message={:?}",
-        Reflect::get(&response, &JsValue::from_str("message"))
-            .ok()
-            .and_then(|m| m.as_string())
+        response.message()
     );
     console_log!(
         "seeded deposit of {amount} stroops in {} transaction(s)",
@@ -476,12 +464,9 @@ async fn e2e_seed_deposit_creates_spendable_notes() {
 ///
 /// Checks status=failed, code=-4, no submitted hashes, and that the `sign`
 /// stage was reached.
-fn assert_halted_at_signing(flow: &str, response: &JsValue, stages: &[String]) {
+fn assert_halted_at_signing(flow: &str, response: &PoolExecuteResult, stages: &[String]) {
     let status = response_status(response);
-    let message = Reflect::get(response, &JsValue::from_str("message"))
-        .ok()
-        .and_then(|m| m.as_string())
-        .unwrap_or_default();
+    let message = response.message().unwrap_or_default();
 
     assert_eq!(
         status, "failed",
@@ -489,7 +474,7 @@ fn assert_halted_at_signing(flow: &str, response: &JsValue, stages: &[String]) {
     );
     assert_eq!(
         response_code(response),
-        Some(-4.0),
+        Some(-4),
         "{flow}: expected the SEP-0043 code -4 sentinel (message: {message}; stages: {stages:?})"
     );
     assert_eq!(
@@ -668,7 +653,7 @@ async fn e2e_session_account_setup_and_sync() {
     console_log!(
         "account {} pool balance: {balance} stroops, notes present: {}",
         account.user_address(),
-        !notes.is_undefined()
+        !notes.is_empty()
     );
 
     client.stop_background_sync();

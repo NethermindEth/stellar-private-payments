@@ -378,12 +378,12 @@ impl StateFetcher {
                         "Verifier",
                         pool.pool_contract_id
                     )?)?,
-                    aspmembership: scval_to_address_string(get_state!(
+                    asp_membership: scval_to_address_string(get_state!(
                         pool_state,
                         "ASPMembership",
                         pool.pool_contract_id
                     )?)?,
-                    aspnonmembership: scval_to_address_string(get_state!(
+                    asp_non_membership: scval_to_address_string(get_state!(
                         pool_state,
                         "ASPNonMembership",
                         pool.pool_contract_id

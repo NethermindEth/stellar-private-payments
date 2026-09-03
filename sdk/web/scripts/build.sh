@@ -159,4 +159,7 @@ write_worker_loader prover-worker
 echo "==> Staging bundled circuit artifacts..."
 bash "$WEB/scripts/stage-circuits-dist.sh"
 
+echo "==> Staging wasm-bindgen TypeScript declarations..."
+bash "$WEB/scripts/stage-wasm-types.sh"
+
 echo "==> Built sdk/web/dist/"

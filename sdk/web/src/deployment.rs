@@ -1,12 +1,9 @@
-use stellar_private_payments::types::ContractConfig;
+use crate::models::contract_config_from_js;
+use stellar_private_payments::types::ContractConfig as NativeContractConfig;
 use wasm_bindgen::{JsError, JsValue};
 
-pub(crate) fn parse_contract_config(value: JsValue) -> Result<ContractConfig, JsError> {
-    if value.is_null() || value.is_undefined() {
-        return Err(JsError::new("contractConfig is required"));
-    }
-    serde_wasm_bindgen::from_value(value)
-        .map_err(|e| JsError::new(&format!("invalid contractConfig: {e}")))
+pub(crate) fn parse_contract_config(value: JsValue) -> Result<NativeContractConfig, JsError> {
+    Ok(contract_config_from_js(value)?.native().clone())
 }
 
 pub(crate) fn require_circuits_base_url(value: String) -> Result<String, JsError> {

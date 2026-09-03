@@ -10,6 +10,7 @@
 
 import init, {
   Client,
+  DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
   deriveAspUserLeaf as sdkDeriveAspUserLeaf,
@@ -21,6 +22,8 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+
+export { DisclosureRequest };
 
 const DEPLOYMENT_CONFIG_URL = new URL('/deployments.json', window.location.href).href;
 const CIRCUITS_BASE_URL = new URL(
