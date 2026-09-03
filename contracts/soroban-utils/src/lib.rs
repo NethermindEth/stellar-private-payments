@@ -5,6 +5,7 @@
 //! across multiple Soroban contracts
 
 pub mod constants;
+pub mod pausable;
 pub mod poseidon2;
 pub mod ttl;
 pub mod utils;
