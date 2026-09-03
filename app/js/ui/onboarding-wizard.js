@@ -285,10 +285,16 @@ export async function runOnboardingWizard({
     const storagePrompted = storageAvailable ? getPersistPromptedFlag() : true;
     const needsStorageStep = storageAvailable && (!persisted || !storagePrompted);
     const needsNotificationStep = notificationStepNeeded();
+    // `bootnodeRequired` measures the RPC's event-history gap, not whether a
+    // fallback is configured, so it stays true after the step has been saved.
+    // Re-prompt only while the saved config cannot actually close the gap,
+    // otherwise a gapped RPC reopens onboarding on every connect.
+    const bootnodeUnresolved =
+        bootnodeRequired && !(bootnodeSetting?.enabled && bootnodeSetting?.url);
 
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
-        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
+        ...(needsNotificationStep || !bootnodeSetting || bootnodeUnresolved ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),

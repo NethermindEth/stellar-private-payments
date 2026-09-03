@@ -84,7 +84,6 @@ pub struct AspMembership {
     pub levels: u32,
     pub next_index: String,
     pub admin: String,
-    pub admin_insert_only: bool,
     pub capacity: u64,
     pub used_slots: String, //num_bigint::BigUint,
 }

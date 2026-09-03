@@ -1,36 +1,50 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
-use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contract, contractimpl};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
+#[cfg(any(test, feature = "testutils"))]
+use soroban_sdk::{contract, contractimpl};
 
-/// Update the contract administrator
+/// Error returned by the shared admin helpers.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AdminError {
+    /// No admin address is stored under the given key.
+    NotInitialized,
+}
+
+/// Replaces the administrator stored under `admin_key` with `new_admin`.
 ///
-/// Changes the admin address to a new address. Only the current admin
-/// can call this function.
+/// The address already stored under `admin_key` must authorize the call. Each
+/// contract passes its own storage key, so contracts sharing this helper keep
+/// separate admin entries.
 ///
-/// # Arguments
-/// * `env` - The Soroban environment
-/// * `admin_key` - Storage key for the admin address (e.g., `DataKey::Admin`)
-/// * `new_admin` - Address of the new administrator
+/// # Errors
+///
+/// Returns [`AdminError::NotInitialized`] if no address is stored under
+/// `admin_key`.
 ///
 /// # Panics
-/// Panics if the caller is not the current admin
-pub fn update_admin<K>(env: &Env, admin_key: &K, new_admin: &Address)
+///
+/// Panics if the address stored under `admin_key` does not authorize the call,
+/// because `require_auth` raises a host error rather than returning.
+pub fn update_admin<K>(env: &Env, admin_key: &K, new_admin: &Address) -> Result<(), AdminError>
 where
     K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
 {
     let store = env.storage().persistent();
-    let admin: Address = store.get(admin_key).expect("admin not initialized");
+    let admin: Address = store.get(admin_key).ok_or(AdminError::NotInitialized)?;
     admin.require_auth();
 
-    // Update admin address
     store.set(admin_key, new_admin);
+    Ok(())
 }
 
 /// Mock token contract for testing purposes
+#[cfg(any(test, feature = "testutils"))]
 #[contract]
 pub struct MockToken;
 
+#[cfg(any(test, feature = "testutils"))]
 #[contractimpl]
 impl MockToken {
     pub fn balance(_env: Env, _id: Address) -> i128 {

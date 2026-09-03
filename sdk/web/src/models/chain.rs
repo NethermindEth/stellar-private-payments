@@ -176,11 +176,6 @@ impl AspMembership {
         self.inner.admin.clone()
     }
 
-    #[wasm_bindgen(getter, js_name = adminInsertOnly)]
-    pub fn admin_insert_only(&self) -> bool {
-        self.inner.admin_insert_only
-    }
-
     #[wasm_bindgen(getter)]
     pub fn capacity(&self) -> u64 {
         self.inner.capacity
