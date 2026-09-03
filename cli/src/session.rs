@@ -9,7 +9,10 @@ use anyhow::Result;
 use stellar_private_payments::{
     Handle, LocalProver, LocalStorage, Prover, Signer,
     blocking::{Account as SdkAccount, Client, PrivatePool},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
+    types::{
+        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, SignerAddress,
+        TransferRecipient,
+    },
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
@@ -62,7 +65,8 @@ impl ClientSession {
         };
         let sdk_account = client
             .account(
-                account.address.as_str(),
+                NoteOwnerAddress::new(account.address.as_str()),
+                SignerAddress::new(account.address.as_str()),
                 alias_signer(config, account, network),
             )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
@@ -81,7 +85,8 @@ impl ClientSession {
         let client = disclosure_client(config, network)?;
         let sdk_account = client
             .account(
-                account.address.as_str(),
+                NoteOwnerAddress::new(account.address.as_str()),
+                SignerAddress::new(account.address.as_str()),
                 alias_signer(config, account, network),
             )
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;

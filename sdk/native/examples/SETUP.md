@@ -221,8 +221,8 @@ pool admin must insert that wallet's ASP membership leaf into the
    Run it with `cargo run --release --example <name>`, once per wallet with that
    wallet's `SPP_WALLET_PATH` and `STELLAR_SECRET_KEY` exported, then delete the
    file. Note there is no `Client::account_for_secret`; an account session is
-   opened with `Client::account(&address, signer)`, which is what
-   `common::build_account` wraps.
+   opened with `Client::account(user_address, signer_address, signer)`, which
+   is what `common::build_account` wraps.
 
 3. As the pool admin, invoke `insert_leaf` once per participant:
 

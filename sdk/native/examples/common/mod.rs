@@ -35,7 +35,10 @@ use stellar_private_payments::{
     CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
-    types::{AssetDescriptor, ContractConfig, NoteAmount, PoolConfigEntry, ProverArtifacts},
+    types::{
+        AssetDescriptor, ContractConfig, NoteAmount, NoteOwnerAddress, PoolConfigEntry,
+        ProverArtifacts, SignerAddress,
+    },
 };
 
 /// Initialize a `tracing_subscriber` formatter driven by `RUST_LOG`.
@@ -226,7 +229,11 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
     })?;
     let signer = build_signer(&secret, &passphrase, &user_address)?;
     client
-        .account(user_address.as_str(), signer)
+        .account(
+            NoteOwnerAddress::new(user_address.as_str()),
+            SignerAddress::new(user_address.as_str()),
+            signer,
+        )
         .map_err(|e| format!("open account session: {e}"))
 }
 

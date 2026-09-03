@@ -29,6 +29,20 @@ pub enum Error {
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
+    /// The signing account is not the note owner.
+    ///
+    /// The two transaction paths disagree on which identity drives them:
+    /// transact sources the envelope, `sender` and sequence number from the
+    /// signer, registration from the owner. Which is right when they differ is
+    /// unsettled, so a divergent pair is refused rather than resolved here.
+    // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
+    #[error(
+        "signing account {} is not the note owner {}; a session where they differ is not supported",
+        crate::types::Sensitive(signer),
+        crate::types::Sensitive(owner)
+    )]
+    SignerIsNotNoteOwner { owner: String, signer: String },
+
     #[error("{0}")]
     Other(String),
 }
