@@ -240,11 +240,18 @@ async function verifyProfile(context) {
 
   // What actually matters is that the wizard completion persisted — that is
   // the thing every later headless run depends on skipping.
-  const wizardVisible = await page.evaluate(
-    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
-  );
-  if (wizardVisible) {
-    throw new Error('verify: onboarding wizard rendered after connecting — completion did not persist into the profile');
+  const wizard = await page.evaluate(() => ({
+    visible: !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
+    // The wizard marks each step pending/done from the same gates that decide
+    // whether it opens at all, so this names which gate re-fired.
+    pending: [...document.querySelectorAll('#onboarding-steps [data-step]')]
+      .filter((el) => el.dataset.state === 'pending')
+      .map((el) => el.dataset.step),
+  }));
+  if (wizard.visible) {
+    throw new Error(
+      `verify: onboarding wizard rendered after connecting — unsatisfied step(s): ${wizard.pending.join(', ') || 'unknown'}`,
+    );
   }
 
   // And that the app is actually usable, not merely un-blocked. The deposit
