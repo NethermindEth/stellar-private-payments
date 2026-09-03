@@ -19,6 +19,7 @@ use soroban_sdk::{
 };
 use soroban_utils::{
     constants::bn256_modulus,
+    pausable::{self, PauseChanged},
     ttl::{EXTEND_TO, THRESHOLD},
     utils::MockToken,
 };
@@ -1984,4 +1985,342 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// Tokens minted to the sender and to the pool by [`pausable_pool`], enough for
+/// any single deposit or withdrawal the pause tests make.
+const PAUSE_FIXTURE_FUNDS: i128 = 10_000;
+
+/// A pool on a verifier that accepts every proof, holding a real asset so that
+/// a deposit or a withdrawal shows up in balances. Authorizations are mocked,
+/// and the pool carries no ASP policy, so only the pause check stands between a
+/// well-formed transaction and success.
+fn pausable_pool(env: &Env, sender: &Address) -> (TestSetup, Address, PoolContractClient<'static>) {
+    env.mock_all_auths();
+    let mut setup = setup_test_contracts(env);
+    setup.token = register_funded_token(env, sender, PAUSE_FIXTURE_FUNDS);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(env, &setup, &verifier, 3, 0);
+    StellarAssetClient::new(env, &setup.token).mint(&pool_id, &PAUSE_FIXTURE_FUNDS);
+    let pool = PoolContractClient::new(env, &pool_id);
+    (setup, pool_id, pool)
+}
+
+/// The public amount a proof must carry for `ext_amount`: the value itself for
+/// a deposit or a transfer, and the field's complement for a withdrawal.
+fn expected_public_amount(env: &Env, ext_amount: i32) -> U256 {
+    let magnitude = U256::from_u32(env, ext_amount.unsigned_abs());
+    if ext_amount < 0 {
+        bn256_modulus(env).sub(&magnitude)
+    } else {
+        magnitude
+    }
+}
+
+/// A proof and external data moving `ext_amount`, consistent enough that only
+/// the pause check can refuse it.
+fn mk_transact_of(
+    env: &Env,
+    setup: &TestSetup,
+    pool: &PoolContractClient,
+    ext_amount: i32,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let (member_root, non_member_root) = asp_roots(setup);
+    let (mut proof, _) = mk_transact_proof(env, pool, member_root, non_member_root, nullifier);
+    let ext = mk_ext_data(env, Address::generate(env), ext_amount);
+    proof.ext_data_hash = compute_ext_hash(env, &ext);
+    proof.public_amount = expected_public_amount(env, ext_amount);
+    (proof, ext)
+}
+
+#[test]
+fn transact_rejects_deposit_while_deposits_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, pool_id, pool) = pausable_pool(&env, &sender);
+    let token = TokenClient::new(&env, &setup.token);
+    pool.pause(&pausable::DEPOSITS, &None);
+
+    let nullifier = 0xD1;
+    let (proof, ext) = mk_transact_of(&env, &setup, &pool, 500, nullifier);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a deposit must be refused while deposits are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert_eq!(token.balance(&sender), PAUSE_FIXTURE_FUNDS);
+    assert_eq!(token.balance(&pool_id), PAUSE_FIXTURE_FUNDS);
+    assert!(!pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+#[test]
+fn transact_allows_withdrawal_and_transfer_while_only_deposits_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, pool_id, pool) = pausable_pool(&env, &sender);
+    let token = TokenClient::new(&env, &setup.token);
+    pool.pause(&pausable::DEPOSITS, &None);
+
+    let (withdrawal, withdrawal_ext) = mk_transact_of(&env, &setup, &pool, -300, 0xD2);
+    pool.transact(&withdrawal, &withdrawal_ext, &sender);
+    let (transfer, transfer_ext) = mk_transact_of(&env, &setup, &pool, 0, 0xD3);
+    pool.transact(&transfer, &transfer_ext, &sender);
+
+    assert_eq!(
+        token.balance(&pool_id),
+        PAUSE_FIXTURE_FUNDS.saturating_sub(300)
+    );
+}
+
+#[test]
+fn transact_rejects_transfer_while_transfers_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::TRANSFERS, &None);
+
+    let (proof, ext) = mk_transact_of(&env, &setup, &pool, 0, 0xD4);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a transfer must be refused while transfers are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+}
+
+#[test]
+fn transact_rejects_withdrawal_while_withdrawals_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, pool_id, pool) = pausable_pool(&env, &sender);
+    let token = TokenClient::new(&env, &setup.token);
+    pool.pause(&pausable::WITHDRAWALS, &None);
+
+    let (proof, ext) = mk_transact_of(&env, &setup, &pool, -300, 0xD5);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a withdrawal must be refused while withdrawals are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert_eq!(token.balance(&pool_id), PAUSE_FIXTURE_FUNDS);
+}
+
+#[test]
+fn full_pause_blocks_all_three_shapes() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::POOL_MASK, &None);
+
+    for ext_amount in [500i32, 0, -300] {
+        let (proof, ext) = mk_transact_of(&env, &setup, &pool, ext_amount, 0xD6);
+        let err = pool
+            .try_transact(&proof, &ext, &sender)
+            .expect_err("a fully paused pool must refuse every shape");
+        assert_eq!(
+            err,
+            Ok(Error::Paused),
+            "ext_amount {ext_amount} was allowed"
+        );
+    }
+}
+
+#[test]
+fn withdrawals_reopen_when_the_timed_pause_expires_but_deposits_stay_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, pool_id, pool) = pausable_pool(&env, &sender);
+    let token = TokenClient::new(&env, &setup.token);
+    let until = env.ledger().sequence().saturating_add(10);
+    pool.pause(&(pausable::DEPOSITS | pausable::WITHDRAWALS), &Some(until));
+
+    env.ledger().set_sequence_number(until);
+
+    let (withdrawal, withdrawal_ext) = mk_transact_of(&env, &setup, &pool, -300, 0xD7);
+    pool.transact(&withdrawal, &withdrawal_ext, &sender);
+    assert_eq!(
+        token.balance(&pool_id),
+        PAUSE_FIXTURE_FUNDS.saturating_sub(300)
+    );
+
+    let (deposit, deposit_ext) = mk_transact_of(&env, &setup, &pool, 500, 0xD8);
+    let err = pool
+        .try_transact(&deposit, &deposit_ext, &sender)
+        .expect_err("only withdrawals reopen when a timed pause expires");
+    assert_eq!(err, Ok(Error::Paused));
+
+    let state = pool.get_pause_state();
+    assert_eq!(state.flags, pausable::DEPOSITS | pausable::WITHDRAWALS);
+    assert!(state.armed);
+}
+
+#[test]
+fn transact_succeeds_again_after_unpause() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::TRANSFERS, &None);
+    let (proof, ext) = mk_transact_of(&env, &setup, &pool, 0, 0xD9);
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+
+    pool.unpause(&pausable::TRANSFERS);
+
+    pool.transact(&proof, &ext, &sender);
+}
+
+#[test]
+fn update_admin_works_while_fully_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, pool_id, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::POOL_MASK, &None);
+    let new_admin = Address::generate(&env);
+
+    pool.update_admin(&new_admin);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin updated")
+    });
+    assert_eq!(stored, new_admin);
+}
+
+#[test]
+fn getters_work_while_fully_paused() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (setup, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::POOL_MASK, &None);
+
+    let root = pool.get_root();
+
+    assert!(pool.is_known_root(&root));
+    assert_eq!(
+        pool.get_asp_membership_root(),
+        setup.asp_membership_client.get_root()
+    );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+
+    PoolContractClient::new(&env, &pool_id).pause(&pausable::DEPOSITS, &None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+
+    PoolContractClient::new(&env, &pool_id).unpause(&pausable::DEPOSITS);
+}
+
+#[test]
+fn pause_errors_when_admin_unset() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, pool_id, pool) = pausable_pool(&env, &sender);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(
+        pool.try_pause(&pausable::DEPOSITS, &None)
+            .expect_err("a pool with no admin cannot be paused"),
+        Ok(Error::NotInitialized)
+    );
+    assert_eq!(
+        pool.try_unpause(&pausable::DEPOSITS)
+            .expect_err("a pool with no admin cannot be unpaused"),
+        Ok(Error::NotInitialized)
+    );
+}
+
+#[test]
+fn pause_rejects_zero_flags() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, _, pool) = pausable_pool(&env, &sender);
+
+    let err = pool
+        .try_pause(&0u32, &None)
+        .expect_err("a pause that names no bit must be refused");
+
+    assert_eq!(err, Ok(Error::InvalidPauseFlags));
+}
+
+#[test]
+fn pause_rejects_unknown_bits() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, _, pool) = pausable_pool(&env, &sender);
+
+    let err = pool
+        .try_pause(&8u32, &None)
+        .expect_err("a pause naming a bit the pool does not honor must be refused");
+
+    assert_eq!(err, Ok(Error::InvalidPauseFlags));
+}
+
+#[test]
+fn second_timed_pause_is_refused_while_armed() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::WITHDRAWALS, &Some(500));
+
+    let err = pool
+        .try_pause(&pausable::DEPOSITS, &Some(900))
+        .expect_err("a second timed pause must not move the promised ledger");
+
+    assert_eq!(err, Ok(Error::TimedPauseArmed));
+    assert_eq!(pool.get_pause_state().until, Some(500));
+}
+
+#[test]
+fn untimed_pause_clears_the_arm_so_a_timed_pause_is_accepted_again() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, _, pool) = pausable_pool(&env, &sender);
+    pool.pause(&pausable::WITHDRAWALS, &Some(500));
+
+    pool.pause(&pausable::DEPOSITS, &None);
+    pool.pause(&pausable::TRANSFERS, &Some(900));
+
+    assert_eq!(pool.get_pause_state().until, Some(900));
+}
+
+#[test]
+fn pause_emits_pause_changed_from_the_pool_address() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_, pool_id, pool) = pausable_pool(&env, &sender);
+
+    pool.pause(&pausable::DEPOSITS, &Some(500));
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+    let expected = PauseChanged {
+        flags: pausable::DEPOSITS,
+        until: Some(500),
+    }
+    .to_xdr(&env, &pool_id);
+    assert_eq!(events.events()[0], expected);
 }
