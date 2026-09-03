@@ -149,7 +149,7 @@ SPP core is agnostic to the compliance layer: the contracts provide the building
 deployer builds the onboarding process that fits its use case. Solutions already built on top by the
 community:
 
-- [**asp-admitter**](https://github.com/Galmanus/spp-compliance-layer) — a contract that acts as admin
+- [**asp-admitter**](https://github.com/Galmanus/spp-compliance-layer/tree/main/asp-admitter) — a contract that acts as admin
   over `asp-membership` and wraps the admission step with an auditable on-chain receipt, so an operator
   can run KYC-gated onboarding without managing the Association Set by hand. Deployed and exercised on
   testnet; design notes and receipts in the repository.
