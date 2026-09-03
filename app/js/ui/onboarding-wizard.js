@@ -277,7 +277,9 @@ export async function runOnboardingWizard({
     const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
-    const bootnodeSetting = await storage.getBootnodeConfig();
+    // Scoped to the address this wizard is running for, so the bootnode shown
+    // is the one belonging to the account being onboarded.
+    const bootnodeSetting = await storage.getBootnodeConfig(address);
     const registryLookup = await client().recipientLookup(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
@@ -286,9 +288,16 @@ export async function runOnboardingWizard({
     const needsStorageStep = storageAvailable && (!persisted || !storagePrompted);
     const needsNotificationStep = notificationStepNeeded();
 
+    // A missing bootnode record does not mean the user was never asked: the
+    // record is per-account, so an already-onboarded account simply has none.
+    // Gate on completed onboarding instead. A new account still gets the step,
+    // and a real sync gap still forces it via bootnodeRequired.
+    const hasCompletedOnboarding = !!disclaimerState?.accepted && keysExist;
+    const retentionNeverAsked = !bootnodeSetting && !hasCompletedOnboarding;
+
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
-        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
+        ...(needsNotificationStep || retentionNeverAsked || bootnodeRequired ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
@@ -583,7 +592,7 @@ export async function runOnboardingWizard({
                             if (enableNotifications && Notification.permission === 'default') {
                                 await requestNotificationPermission();
                             }
-                            await storage.setSetting('bootnode_config', { enabled, url });
+                            await storage.setSetting('bootnode_config', { enabled, url }, address);
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();

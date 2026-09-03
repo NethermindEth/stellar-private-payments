@@ -117,9 +117,12 @@ function setMoveFlow(flow) {
     });
 }
 
-async function bootnodeCheck(rpcUrl) {
+async function bootnodeCheck(rpcUrl, address) {
     const storage = await ensureStorage();
-    const stored = await storage.getStoredBootnodeUrl();
+    // The archive endpoint is account-scoped. Passed explicitly rather
+    // than read from App.state here, so the caller is forced to have an
+    // account in hand before this can ask for one account's bootnode.
+    const stored = await storage.getStoredBootnodeUrl(address);
     const required = await bootnodeRequired(rpcUrl);
 
     if (required && !stored) {
@@ -131,7 +134,7 @@ async function bootnodeCheck(rpcUrl) {
         if (!modal.accepted || !modal.url) {
             throw new Error('RPC_SYNC_GAP: bootnode required');
         }
-        await storage.setBootnodeConfig(modal.url);
+        await storage.setBootnodeConfig(modal.url, address);
     }
 
     return { bootnodeRequired: required };
@@ -157,10 +160,13 @@ async function loadRuntimeState() {
     const explorerSetting = await storage.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await storage.getBootnodeConfig();
+    // Both are account-scoped, so they follow whichever account is live now
+    // rather than a value captured earlier in the connect sequence.
+    const settingsAddress = App.state.wallet.address;
+    const bootnodeSetting = await storage.getBootnodeConfig(settingsAddress);
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
-    const telemetrySetting = await storage.getSetting('telemetry_config');
+    const telemetrySetting = await storage.getTelemetryConfig(settingsAddress);
     App.state.settings.telemetry = telemetrySetting || { level: 'info', revealSensitive: false };
     try {
         await configureTelemetrySettings({
@@ -435,8 +441,8 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
-                const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
-                await initializeRuntime(rpcUrl);
+                const { bootnodeRequired } = await bootnodeCheck(rpcUrl, address);
+                await initializeRuntime(rpcUrl, { address });
                 await client().backgroundSync();
 
                 await runOnboardingWizard({
@@ -506,6 +512,17 @@ export const Wallet = {
             networkPassphrase: null,
         };
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
+        // Cleared, not just re-read on the next connect: the settings drawer
+        // is reachable while connecting, so a stale value would be shown to the
+        // next account. `explorer` is global and stays.
+        App.state.settings.bootnode = { enabled: false, url: '' };
+        App.state.settings.telemetry = { level: 'info', revealSensitive: false };
+        // revealSensitive is a process-global inside the wasm, not part of the
+        // client this teardown disposes, so it would stay armed for the next
+        // account. Fire-and-forget: it must not reject the teardown.
+        void Promise.resolve(
+            configureTelemetrySettings({ level: 'info', revealSensitive: false }),
+        ).catch((e) => console.warn('[Wallet] failed to reset telemetry posture:', e));
         document.body.dataset.walletState = 'disconnected';
         renderWallet();
         this.closeSettings();
@@ -539,12 +556,18 @@ export const Wallet = {
             const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
+            // `explorer` is global; bootnode and telemetry are written
+            // under the account currently in front of the user.
+            const settingsAddress = App.state.wallet.address;
+            if (!settingsAddress) {
+                throw new Error('Connect a wallet before saving account settings.');
+            }
             await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
             await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
-            });
-            await storage.setSetting('telemetry_config', { level: logLevel, revealSensitive });
+            }, settingsAddress);
+            await storage.setTelemetryConfig({ level: logLevel, revealSensitive }, settingsAddress);
 
             App.state.settings.explorerBaseUrl = explorerBaseUrl;
             App.state.settings.bootnode = { enabled: !!bootnodeEnabled, url: bootnodeEnabled ? bootnodeUrl : '' };

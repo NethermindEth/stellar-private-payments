@@ -200,11 +200,11 @@ async function ensureCryptoReady() {
     try {
       const storage = await ensureStorage();
       if (await bootnodeRequired(sorobanRpcUrl)) {
-        if (!(await storage.getStoredBootnodeUrl())) {
+        if (!(await storage.getStoredBootnodeUrl(state.address))) {
           throw new Error('RPC_SYNC_GAP: bootnode required');
         }
       }
-      await initializeRuntime(sorobanRpcUrl);
+      await initializeRuntime(sorobanRpcUrl, { address: state.address });
       await client().backgroundSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);

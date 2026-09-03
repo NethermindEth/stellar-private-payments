@@ -192,9 +192,10 @@ export async function bootnodeRequired(rpcUrl) {
  * Prefer resolving bootnode (via {@link bootnodeRequired} + settings/modal)
  * before this so the Client is built once with the right URL.
  * @param {string} rpcUrl
- * @param {{ bootnodeUrl?: string|null }} [options]
+ * @param {{ bootnodeUrl?: string|null, address?: string|null }} [options] -
+ *   `address` scopes the stored-bootnode fallback; without it none is resolved.
  */
-export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
+export async function initializeRuntime(rpcUrl, { bootnodeUrl, address } = {}) {
     await ensureStorage();
 
     if (currentRpcUrl !== rpcUrl) {
@@ -205,7 +206,10 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
 
     let resolvedBootnode = bootnodeUrl;
     if (resolvedBootnode === undefined && appStorageInstance) {
-        resolvedBootnode = await appStorageInstance.getStoredBootnodeUrl();
+        // The stored bootnode is account-scoped. Without an address there
+        // is no account whose endpoint this could be, so the fallback yields
+        // undefined rather than reaching for whatever was stored globally.
+        resolvedBootnode = await appStorageInstance.getStoredBootnodeUrl(address);
     }
 
     if (
