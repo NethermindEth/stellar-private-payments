@@ -24,6 +24,24 @@ pub struct AdminUpdated {
     pub new_admin: Address,
 }
 
+/// Returns the administrator stored under `admin_key` and extends the entry's
+/// lifetime.
+///
+/// # Errors
+///
+/// Returns [`AdminError::NotInitialized`] if no address is stored under
+/// `admin_key`.
+pub fn get_admin<K>(env: &Env, admin_key: &K) -> Result<Address, AdminError>
+where
+    K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
+{
+    env.storage()
+        .persistent()
+        .get(admin_key)
+        .inspect(|_| bump_entry(env, admin_key))
+        .ok_or(AdminError::NotInitialized)
+}
+
 /// Replaces the administrator stored under `admin_key` with `new_admin`.
 ///
 /// The address already stored under `admin_key` must authorize the call. Each
@@ -49,12 +67,10 @@ pub fn update_admin<K>(env: &Env, admin_key: &K, new_admin: &Address) -> Result<
 where
     K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
 {
-    let store = env.storage().persistent();
-    let admin: Address = store.get(admin_key).ok_or(AdminError::NotInitialized)?;
-    bump_entry(env, admin_key);
+    let admin = get_admin(env, admin_key)?;
     admin.require_auth();
 
-    store.set(admin_key, new_admin);
+    env.storage().persistent().set(admin_key, new_admin);
     AdminUpdated {
         old_admin: admin,
         new_admin: new_admin.clone(),

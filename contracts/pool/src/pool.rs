@@ -23,7 +23,9 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::{bump_dependency, bump_entry, bump_instance, constants::bn256_modulus};
+use soroban_utils::{
+    AdminError, bump_dependency, bump_entry, bump_instance, constants::bn256_modulus, get_admin,
+};
 
 // Re-exported rather than merely imported so `pool::ExtData` and
 // `pool::hash_ext_data` keep resolving for existing consumers (`e2e-tests`,
@@ -153,6 +155,12 @@ pub struct NewNullifierEvent {
     /// The nullifier that was spent
     #[topic]
     pub nullifier: U256,
+}
+
+impl From<AdminError> for Error {
+    fn from(AdminError::NotInitialized: AdminError) -> Self {
+        Self::NotInitialized
+    }
 }
 
 /// Privacy Pool Contract
@@ -611,15 +619,6 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Get the admin address
-    fn get_admin(env: &Env) -> Result<Address, Error> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .inspect(|_| bump_entry(env, &DataKey::Admin))
-            .ok_or(Error::NotInitialized)
-    }
-
     /// Get the pool's ASP policy flags.
     pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
         Self::touch(env);
@@ -689,8 +688,7 @@ impl PoolContract {
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         Self::touch(&env);
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     // ========== ASP Contract Functions ==========
@@ -724,8 +722,7 @@ impl PoolContract {
     /// * `new_asp_membership` - New ASP Membership contract address
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
         Self::touch(env);
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPMembership, &new_asp_membership);
@@ -747,8 +744,7 @@ impl PoolContract {
         new_asp_non_membership: Address,
     ) -> Result<(), Error> {
         Self::touch(env);
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);

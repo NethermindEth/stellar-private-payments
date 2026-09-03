@@ -27,7 +27,9 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{bump_entry, bump_instance, poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{
+    AdminError, bump_entry, bump_instance, get_admin, poseidon2_compress, poseidon2_hash2,
+};
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -82,6 +84,12 @@ struct LeafDeletedEvent {
     root: U256,
 }
 
+impl From<AdminError> for Error {
+    fn from(AdminError::NotInitialized: AdminError) -> Self {
+        Self::NotInitialized
+    }
+}
+
 #[contract]
 pub struct ASPNonMembership;
 
@@ -126,8 +134,7 @@ impl ASPNonMembership {
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         bump_instance(&env);
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     /// Hash a leaf node using Poseidon2
@@ -371,9 +378,7 @@ impl ASPNonMembership {
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         bump_instance(&env);
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        bump_entry(&env, &DataKey::Admin);
-        admin.require_auth();
+        get_admin(&env, &DataKey::Admin)?.require_auth();
 
         let root: U256 = store
             .get(&DataKey::Root)
@@ -535,9 +540,7 @@ impl ASPNonMembership {
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         bump_instance(&env);
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        bump_entry(&env, &DataKey::Admin);
-        admin.require_auth();
+        get_admin(&env, &DataKey::Admin)?.require_auth();
         let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
         bump_entry(&env, &DataKey::Root);
 

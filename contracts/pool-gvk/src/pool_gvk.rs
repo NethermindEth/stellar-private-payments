@@ -24,7 +24,9 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::{bump_dependency, bump_entry, bump_instance, constants::bn256_modulus};
+use soroban_utils::{
+    AdminError, bump_dependency, bump_entry, bump_instance, constants::bn256_modulus,
+};
 
 // Re-exported rather than merely imported so `pool_gvk::ExtData` and
 // `pool_gvk::hash_ext_data` stay part of this crate's surface, mirroring
@@ -194,6 +196,12 @@ pub struct NewNullifierEvent {
     pub gvk_ciphertext: Option<GvkCiphertext>,
 }
 
+impl From<AdminError> for Error {
+    fn from(AdminError::NotInitialized: AdminError) -> Self {
+        Self::NotInitialized
+    }
+}
+
 /// Privacy Pool Contract with Global View Key support.
 #[contract]
 pub struct PoolGvkContract;
@@ -346,8 +354,7 @@ impl PoolGvkContract {
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         Self::touch(&env);
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     // ========== ASP Contract Functions ==========
