@@ -102,6 +102,10 @@ export interface ClientNewOptions {
 export interface AccountOptions {
   networkPassphrase: string;
   userAddress?: string;
+  /**
+   * Defaults to `userAddress`. A value differing from `userAddress` is refused
+   * before the wallet is prompted.
+   */
   signerAddress?: string;
 }
 
