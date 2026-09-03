@@ -2,9 +2,14 @@
 
 use super::*;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, U256,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    Address, Bytes, Env, IntoVal, U256, Val, Vec,
+    testutils::{
+        Address as _, Ledger as _, MockAuth, MockAuthInvoke,
+        storage::{Instance as _, Persistent as _},
+    },
+    vec,
 };
+use soroban_utils::ttl::{EXTEND_TO, THRESHOLD};
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -1052,4 +1057,155 @@ fn test_old_admin_cannot_insert_after_update() {
         },
     }]);
     client.insert_leaf(&key, &value);
+}
+
+fn entry_ttl<K>(env: &Env, contract: &Address, key: &K) -> u32
+where
+    K: IntoVal<Env, Val>,
+{
+    env.as_contract(contract, || env.storage().persistent().get_ttl(key))
+}
+
+/// Advances the ledger far enough that every entry sitting at [`EXTEND_TO`]
+/// drops below [`THRESHOLD`], so a later bump is visible as a jump back up.
+fn decay_below_threshold(env: &Env) {
+    let target = env
+        .ledger()
+        .sequence()
+        .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
+    env.ledger().set_sequence_number(target);
+}
+
+/// Returns the hash of every node reachable from the stored root, walking the
+/// tree the way a proof consumer does and failing if a reachable child was
+/// removed.
+fn reachable_nodes(env: &Env, contract: &Address) -> Vec<U256> {
+    env.as_contract(contract, || {
+        let store = env.storage().persistent();
+        let zero = U256::from_u32(env, 0u32);
+        let root: U256 = store.get(&DataKey::Root).expect("Root set in constructor");
+        let mut pending = vec![env, root];
+        let mut seen = Vec::new(env);
+        while let Some(hash) = pending.pop_back() {
+            if hash == zero {
+                continue;
+            }
+            let node: Vec<U256> = store
+                .get(&DataKey::Node(hash.clone()))
+                .expect("a reachable node is still stored");
+            seen.push_back(hash);
+            if node.len() == 2 {
+                pending.push_back(node.get(0).expect("internal node has a left child"));
+                pending.push_back(node.get(1).expect("internal node has a right child"));
+            }
+        }
+        seen
+    })
+}
+
+#[test]
+fn test_insert_leaf_extends_touched_nodes() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    // Keys 1 and 3 share their lowest bit, so the second insertion deepens the
+    // tree rather than replacing a single leaf root.
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 10u32));
+    client.insert_leaf(&U256::from_u32(&env, 3u32), &U256::from_u32(&env, 30u32));
+
+    let nodes = reachable_nodes(&env, &contract_id);
+    assert_eq!(nodes.len(), 4, "a root, one internal node, and two leaves");
+    for hash in nodes.iter() {
+        let key = DataKey::Node(hash);
+        assert_eq!(
+            entry_ttl(&env, &contract_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+}
+
+#[test]
+fn test_delete_leaf_extends_rebuilt_nodes() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    for key in 1u32..=3 {
+        client.insert_leaf(&U256::from_u32(&env, key), &U256::from_u32(&env, 10u32));
+    }
+
+    client.delete_leaf(&U256::from_u32(&env, 2u32));
+
+    let nodes = reachable_nodes(&env, &contract_id);
+    assert_eq!(nodes.len(), 4, "a root, one internal node, and two leaves");
+    for hash in nodes.iter() {
+        let key = DataKey::Node(hash);
+        assert_eq!(
+            entry_ttl(&env, &contract_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+}
+
+/// A blocklist pool reads this root cross-contract on every `transact`, so it
+/// must come off the seven-day fuse with the tree it heads.
+#[test]
+fn test_get_root_extends_root_and_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    client.get_root();
+
+    let instance = env.as_contract(&contract_id, || env.storage().instance().get_ttl());
+    assert_eq!(instance, EXTEND_TO);
+    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::Root), EXTEND_TO);
+}
+
+#[test]
+fn test_find_key_extends_the_path_it_reads() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    // Keys 1 and 2 differ in their lowest bit, so the root holds one leaf under
+    // each branch and a lookup for key 1 reads only the right one.
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 10u32));
+    client.insert_leaf(&U256::from_u32(&env, 2u32), &U256::from_u32(&env, 20u32));
+    let (root, children): (U256, Vec<U256>) = env.as_contract(&contract_id, || {
+        let store = env.storage().persistent();
+        let root: U256 = store.get(&DataKey::Root).expect("Root set after inserts");
+        let children = store
+            .get(&DataKey::Node(root.clone()))
+            .expect("the root node is stored");
+        (root, children)
+    });
+    let off_path = children.get(0).expect("the left branch holds key 2");
+    let on_path = children.get(1).expect("the right branch holds key 1");
+    decay_below_threshold(&env);
+
+    client.find_key(&U256::from_u32(&env, 1u32));
+
+    assert_eq!(
+        entry_ttl(&env, &contract_id, &DataKey::Node(root)),
+        EXTEND_TO
+    );
+    assert_eq!(
+        entry_ttl(&env, &contract_id, &DataKey::Node(on_path)),
+        EXTEND_TO
+    );
+    assert_ne!(
+        entry_ttl(&env, &contract_id, &DataKey::Node(off_path)),
+        EXTEND_TO
+    );
 }
