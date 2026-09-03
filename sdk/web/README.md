@@ -2,7 +2,7 @@
 
 Browser SDK for Stellar Private Payments.
 
-> **Alpha (`0.1.0-alpha.x`)** — not audited and not production-ready.
+> **Work in progress** — not audited and not production-ready.
 
 **`Storage.open`** → **`bootnodeRequired`** → **`Client.new`** → **`backgroundSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
@@ -230,7 +230,7 @@ CI publishes from `main` when `version` in `package.json` is bumped (see `.githu
 ## npm install (app developers)
 
 ```bash
-npm install stellar-private-payments@alpha
+npm install stellar-private-payments
 ```
 
 One package — no separate circuit hosting or Cargo build. Circuit artifacts ship under `dist/circuits/` and load automatically from the prover worker. Your bundler must serve static files from the package `dist/` tree (same as WASM and workers).
