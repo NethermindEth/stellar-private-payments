@@ -4,16 +4,17 @@ use std::{rc::Rc, str::FromStr};
 
 use stellar_private_payments::{
     PrivatePool as NativePrivatePool,
-    disclosure::DisclosureRequest,
-    types::{
-        DisclosureReceipt, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, TransferRecipient,
-    },
+    types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey, TransferRecipient},
 };
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    client::{execute::emit, gvk::GvkAudit, pool_err, transact::parse_transact_step},
+    client::{execute::emit, gvk::GvkAudit, pool_err},
     correlation::{new_correlation_id, with_correlation_id},
+    models::{
+        DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport, PoolEstimate,
+        PoolExecuteResult, UserNoteSummary, transact_from_js, user_note_summaries,
+    },
     workers::storage::StorageBridge,
 };
 
@@ -49,24 +50,24 @@ impl PrivatePool {
     }
 
     /// User notes for this pool (commitments, amounts, spent status).
-    pub async fn notes(&self) -> Result<JsValue, JsError> {
+    pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, JsError> {
         let notes = self.inner().notes().await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&notes)?)
+        Ok(user_note_summaries(notes))
     }
 
     /// Estimate how many on-chain transactions a spend of `amount` stroops
     /// would require.
-    pub async fn estimate(&self, amount: u128) -> Result<JsValue, JsError> {
+    pub async fn estimate(&self, amount: u128) -> Result<PoolEstimate, JsError> {
         let estimate = self
             .inner()
             .estimate(NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&estimate)?)
+        Ok(PoolEstimate::from(estimate))
     }
 
     /// Deposit tokens. `amount` is stroops (`bigint` in JS).
-    pub async fn deposit(&self, amount: u128) -> Result<JsValue, JsError> {
+    pub async fn deposit(&self, amount: u128) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let mut plan = self
                 .inner()
@@ -84,7 +85,7 @@ impl PrivatePool {
         note_public_key_hex: &str,
         encryption_public_key_hex: &str,
         amount: u128,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let recipient = TransferRecipient::keys(
                 NotePublicKey::parse(note_public_key_hex)
@@ -104,7 +105,11 @@ impl PrivatePool {
     }
 
     /// Transfer privately. `recipient` is a Stellar `G...` address.
-    pub async fn transfer(&self, recipient: &str, amount: u128) -> Result<JsValue, JsError> {
+    pub async fn transfer(
+        &self,
+        recipient: &str,
+        amount: u128,
+    ) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
             let mut plan = self
@@ -122,7 +127,7 @@ impl PrivatePool {
         &self,
         amount: u128,
         recipient: Option<String>,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let to = recipient.unwrap_or_else(|| self.user_address.clone());
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
@@ -137,9 +142,9 @@ impl PrivatePool {
 
     /// Low-level pool `transact` call. See SDK [`Transact`] for field
     /// semantics.
-    pub async fn transact(&self, config: JsValue) -> Result<JsValue, JsError> {
+    pub async fn transact(&self, config: JsValue) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let step = parse_transact_step(config)?;
+            let step = transact_from_js(config)?;
             let mut plan = self.inner().prepare_transact(step);
             self.execute_plan(&mut plan, "transact").await
         })
@@ -148,16 +153,22 @@ impl PrivatePool {
 
     /// Generate a selective-disclosure proof for a note commitment.
     ///
-    /// `config` matches [`DisclosureRequest`] (camelCase; `selectedCommitments`
-    /// array with 1..=4 entries). Returns `null` when the account must register
-    /// at the ASP before disclosing.
-    pub async fn disclose(&self, config: JsValue) -> Result<JsValue, JsError> {
+    /// Returns `undefined` when the account must register at the ASP before
+    /// disclosing; check with `== null`.
+    pub async fn disclose(
+        &self,
+        req: &DisclosureRequest,
+    ) -> Result<Option<DisclosureReceipt>, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let req: DisclosureRequest = serde_wasm_bindgen::from_value(config)?;
             emit("disclose", "prove", "Generating proof…", None, None);
-            match self.inner().disclose(req).await.map_err(pool_err)? {
-                None => Ok(JsValue::NULL),
-                Some(receipt) => Ok(serde_wasm_bindgen::to_value(&receipt)?),
+            match self
+                .inner()
+                .disclose(req.native())
+                .await
+                .map_err(pool_err)?
+            {
+                None => Ok(None),
+                Some(receipt) => Ok(Some(DisclosureReceipt::from(receipt))),
             }
         })
         .await
@@ -166,17 +177,16 @@ impl PrivatePool {
     #[wasm_bindgen(js_name = verifyDisclosure)]
     pub async fn verify_disclosure(
         &self,
-        receipt: JsValue,
+        receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<DisclosureVerificationReport, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let receipt: DisclosureReceipt = serde_wasm_bindgen::from_value(receipt)?;
             let report = self
                 .inner()
-                .verify_disclosure(&receipt, expected_vk_hash)
+                .verify_disclosure(receipt.native(), expected_vk_hash)
                 .await
                 .map_err(pool_err)?;
-            Ok(serde_wasm_bindgen::to_value(&report)?)
+            Ok(DisclosureVerificationReport::from(report))
         })
         .await
     }

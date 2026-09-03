@@ -172,25 +172,35 @@ set_log_level('info');
 
 ## TypeScript
 
-Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments/wasm`.
+Public types live under [`js/types/`](./js/types/):
+
+| Module | Role |
+|--------|------|
+| `crates/stellar_private_payments_web.d.ts` | wasm-bindgen domain types + session classes (staged from `dist/` on build; gitignored, never committed) |
+| `api-types.d.ts` | JS facade (`Client.new`, `Account`, options, telemetry) |
+| `index.d.ts` | Package entry — bindgen types + facade |
+
+Low-level wasm classes are available as `WasmClient`, `WasmAccount`, and `WasmStorage`, or via `stellar-private-payments/wasm`.
 
 ```ts
 import init, {
-  Storage,
   Client,
-  verifySelectiveDisclosure,
-  type Account,
-  type WalletSigner,
+  Storage,
+  TX_PROGRESS_EVENT,
+  type ContractConfig,
+  type PoolExecuteResult,
 } from 'stellar-private-payments';
-import { FreighterSigner } from 'stellar-private-payments/freighter';
 ```
 
 After building WASM:
 
 ```bash
 npm run build
+npm run check:bindgen   # wasm exports ⊆ public .d.ts; staged crates/ === dist/
 npm run check:types
 ```
+
+`check:types` and `check:bindgen` both require a full build first: `js/types/crates/stellar_private_payments_web.d.ts` is gitignored and only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
 
 ## Build & publish (maintainers)
 

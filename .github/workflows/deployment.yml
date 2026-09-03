@@ -46,6 +46,9 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
+      - name: Build circuit artifacts
+        run: make circuits
+
       - name: Build app (Trunk)
         run: |
           rm -rf site

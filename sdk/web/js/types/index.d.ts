@@ -1,34 +1,37 @@
-/// <reference path="./wasm.d.ts" />
-/// <reference path="./gvk.d.ts" />
-
-import type { PrivatePool } from '../../dist/stellar_private_payments_web.js';
-
-import type {
-  AccountOptions,
-  BootnodeRequiredOptions,
-  ClientNewOptions,
-  PoolOptions,
-  RegisterPublicKeysOptions,
-  VerifyDisclosureOptions,
-} from './options.js';
-import type { DisclosureVerificationReport } from './disclosure.js';
-import type { Storage } from './storage.js';
-import type { WalletSigner } from './signer.js';
-
-export { default } from '../../dist/stellar_private_payments_web.js';
-export { PrivatePool } from '../../dist/stellar_private_payments_web.js';
-export type { Client as WasmClient } from '../../dist/stellar_private_payments_web.js';
-
+// wasm-bindgen domain types (generated on build; stubbed pre-build).
 export type {
-  AccountOptions,
-  BootnodeRequiredOptions,
-  ClientNewOptions,
-  PoolOptions,
-  RegisterPublicKeysOptions,
-  VerifyDisclosureOptions,
-} from './options.js';
-export type { DisclosureVerificationReport } from './disclosure.js';
-export { Storage, type StorageOpenOptions } from './storage.js';
+  AspMembership,
+  AspNonMembership,
+  AssetDescriptor,
+  BabyJubJubPoint,
+  ContractConfig,
+  ContractsStateData,
+  DisclosureCircuitMetadata,
+  DisclosureContext,
+  DisclosurePublicInputs,
+  DisclosureReceipt,
+  DisclosureVerificationReport,
+  GlobalViewKeyCiphertext,
+  GvkAudit,
+  OperationalFeedItem,
+  PoolConfigEntry,
+  PoolEstimate,
+  PoolExecuteResult,
+  PoolInfo,
+  PortfolioBalance,
+  PrivatePool,
+  PublicKeyEntry,
+  RecipientLookup,
+  UserNoteSummary,
+  UserPublicKeys,
+  VerifierEntry,
+} from './crates/stellar_private_payments_web.js';
+
+export { DisclosureRequest, default } from './crates/stellar_private_payments_web.js';
+
+// JS facade (`js/index.js`) — options and wrapped session entry points.
+export * from './api-types.js';
+
 export type {
   SignAuthEntryResult,
   SignMessageResult,
@@ -37,77 +40,8 @@ export type {
   WalletSigner,
 } from './signer.js';
 
-/** Wallet session returned by {@link Client.account}. */
-export interface Account {
-  /** The account that owns the notes. */
-  readonly userAddress: string;
-  /** The account that signs and pays; equal to `userAddress` by default. */
-  readonly signerAddress: string;
-  portfolio(): Promise<unknown>;
-  userPublicKeys(): Promise<unknown>;
-  aspSecret(): Promise<string>;
-  userNotes(limit: number): Promise<unknown>;
-  isRegistered(): Promise<boolean>;
-  deriveAspUserLeaf(): Promise<string>;
-  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
-  pool(options: PoolOptions): Promise<PrivatePool>;
-}
-
-/** Deployment runtime returned by {@link Client.new}. */
-export interface Client {
-  backgroundSync(): Promise<void>;
-  stopBackgroundSync(): void;
-  sync(): Promise<void>;
-  operationalFeed(limit: number): Promise<unknown>;
-  contractConfig(): unknown;
-  account(options: AccountOptions, signer: WalletSigner): Promise<Account>;
-  recipientLookup(address: string): Promise<unknown>;
-  aspState(): Promise<unknown>;
-  allContractsData(): Promise<unknown>;
-  verifySelectiveDisclosure(
-    receiptJson: string,
-    expectedVkHash: string,
-  ): Promise<DisclosureVerificationReport>;
-}
-
-/**
- * Probe whether the wallet RPC needs a historical-sync bootnode.
- * @returns `true` when a bootnode is required, `false` otherwise.
- */
-export declare function bootnodeRequired(
-  rpcUrl: string,
-  storage: Storage,
-  options: BootnodeRequiredOptions,
-): Promise<boolean>;
-
-/**
- * Derive the ASP membership leaf from explicit public inputs.
- * @param notePublicKey `0x`-prefixed 32-byte hex
- * @param membershipBlinding `0x`-prefixed 32-byte hex field
- */
-export declare function deriveAspUserLeaf(
-  notePublicKey: string,
-  membershipBlinding: string,
-): string;
-
-/** Walletless selective-disclosure verification (no storage / Client). */
-export declare function verifySelectiveDisclosure(
-  rpcUrl: string,
-  receiptJson: string,
-  expectedVkHash: string,
-  options: VerifyDisclosureOptions,
-): Promise<DisclosureVerificationReport>;
-
-/** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
-export declare const Client: {
-  new(options: ClientNewOptions): Promise<Client>;
-};
-
 export type {
-  GvkAudit,
-  GvkAuditedNote,
-  GvkOutputSlot,
-  GvkRecoveredNote,
-  GvkSpentInput,
-  GvkTxAudit,
-} from './gvk.js';
+  Client as WasmClient,
+  Account as WasmAccount,
+  Storage as WasmStorage,
+} from './crates/stellar_private_payments_web.js';

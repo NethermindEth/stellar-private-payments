@@ -3,116 +3,30 @@
 mod progress;
 
 use gloo_timers::future::TimeoutFuture;
-use serde::Serialize;
 use stellar_private_payments::{
-    Error, PlanExecutionError,
+    Error,
     plan::PreparedTransactionPlan,
     types::{AspMembershipSync, TransactionResult},
 };
-use wasm_bindgen::{JsError, JsValue};
+use wasm_bindgen::JsError;
 
-use super::{pool::PrivatePool, pool_err_message};
+use crate::models::{ExecuteOutcome, PoolExecuteResult};
+
+use super::pool::PrivatePool;
 
 pub(crate) use progress::emit;
 
 const POLL_INTERVAL_MS: u32 = 200;
 const SYNC_MAX_RETRIES: u32 = 50;
 
-type ExecuteOutcome = Result<Vec<String>, ExecuteFailure>;
-
-enum ExecuteFailure {
-    /// Mid-plan failure; may be [`Error::PlanExecution`] when some txs already
-    /// confirmed, otherwise the bare cause.
-    Failed(Error),
-    AspNotReady,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
-enum ExecuteJsResponse {
-    #[serde(rename = "ok")]
-    Complete {
-        hashes: Vec<String>,
-    },
-    Failed {
-        hashes: Vec<String>,
-        message: String,
-        /// SEP-0043 error code, present when the failure was a wallet user
-        /// rejection (-4). Lets JS callers classify without parsing `message`.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        code: Option<i32>,
-    },
-    AspNotReady,
-}
-
-impl ExecuteFailure {
-    fn plan(completed: Vec<TransactionResult>, error: Error) -> ExecuteOutcome {
-        Err(Self::Failed(PlanExecutionError::into_error(
-            completed, error,
-        )))
-    }
-}
-
-impl From<ExecuteOutcome> for ExecuteJsResponse {
-    fn from(outcome: ExecuteOutcome) -> Self {
-        match outcome {
-            Ok(hashes) => Self::Complete { hashes },
-            Err(ExecuteFailure::Failed(error)) => {
-                let hashes = match &error {
-                    Error::PlanExecution(plan) => {
-                        plan.completed.iter().map(|tx| tx.tx_hash.clone()).collect()
-                    }
-                    _ => Vec::new(),
-                };
-                let code = wallet_rejection_code(&error);
-                Self::Failed {
-                    hashes,
-                    message: pool_err_message(error),
-                    code,
-                }
-            }
-            Err(ExecuteFailure::AspNotReady) => Self::AspNotReady,
-        }
-    }
-}
-
-impl TryInto<JsValue> for ExecuteJsResponse {
-    type Error = JsError;
-
-    fn try_into(self) -> Result<JsValue, Self::Error> {
-        Ok(serde_wasm_bindgen::to_value(&self)?)
-    }
-}
-
-fn step_msg(verb: &str, current: u32, total: u32) -> String {
-    if total > 1 {
-        format!("{verb} step {current}/{total}…")
-    } else {
-        format!("{verb}…")
-    }
-}
-
-/// SEP-0043 error code when the failure cause is a wallet user rejection,
-/// unwrapping [`Error::PlanExecution`] to reach the underlying cause.
-fn wallet_rejection_code(error: &Error) -> Option<i32> {
-    let cause = match error {
-        Error::PlanExecution(plan) => plan.cause(),
-        other => other,
-    };
-    match cause {
-        Error::UserRejected(_) => Some(-4),
-        _ => None,
-    }
-}
-
 impl PrivatePool {
     pub(crate) async fn execute_plan(
         &self,
         plan: &mut PreparedTransactionPlan,
         flow: &'static str,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<PoolExecuteResult, JsError> {
         let outcome = self.execute_plan_inner(plan, flow).await;
-        ExecuteJsResponse::from(outcome).try_into()
+        Ok(PoolExecuteResult::from_outcome(outcome))
     }
 
     async fn execute_plan_inner(
@@ -141,14 +55,14 @@ impl PrivatePool {
                     Ok(prepared) => break prepared,
                     Err(error @ Error::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
                         if completed.is_empty() {
-                            return Err(ExecuteFailure::AspNotReady);
+                            return ExecuteOutcome::AspNotReady;
                         }
-                        return ExecuteFailure::plan(completed, error);
+                        return ExecuteOutcome::plan(completed, error);
                     }
                     Err(Error::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
                         sync_waits = sync_waits.saturating_add(1);
                         if sync_waits > SYNC_MAX_RETRIES {
-                            return ExecuteFailure::plan(
+                            return ExecuteOutcome::plan(
                                 completed,
                                 Error::MembershipSync(AspMembershipSync::SyncRequired(gap)),
                             );
@@ -166,7 +80,7 @@ impl PrivatePool {
                         );
                         TimeoutFuture::new(POLL_INTERVAL_MS).await;
                     }
-                    Err(error) => return ExecuteFailure::plan(completed, error),
+                    Err(error) => return ExecuteOutcome::plan(completed, error),
                 }
             };
 
@@ -178,7 +92,7 @@ impl PrivatePool {
                 Some(total),
             );
             if let Err(error) = pool.simulate(&mut prepared).await {
-                return ExecuteFailure::plan(completed, error);
+                return ExecuteOutcome::plan(completed, error);
             }
 
             progress::emit(
@@ -190,7 +104,7 @@ impl PrivatePool {
             );
             let signed = match pool.sign(&prepared).await {
                 Ok(signed) => signed,
-                Err(error) => return ExecuteFailure::plan(completed, error),
+                Err(error) => return ExecuteOutcome::plan(completed, error),
             };
 
             progress::emit(
@@ -202,56 +116,22 @@ impl PrivatePool {
             );
             let hash = match pool.submit(signed).await {
                 Ok(hash) => hash,
-                Err(error) => return ExecuteFailure::plan(completed, error),
+                Err(error) => return ExecuteOutcome::plan(completed, error),
             };
             if let Err(error) = pool.confirm(&hash).await {
-                return ExecuteFailure::plan(completed, error);
+                return ExecuteOutcome::plan(completed, error);
             }
             completed.push(TransactionResult { tx_hash: hash });
         }
 
-        Ok(completed.into_iter().map(|tx| tx.tx_hash).collect())
+        ExecuteOutcome::Complete(completed.into_iter().map(|tx| tx.tx_hash).collect())
     }
 }
 
-/// Tests for the SEP-0043 rejection-code mapping exposed to JS.
-#[cfg(all(test, target_arch = "wasm32"))]
-mod spike_tests {
-    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
-    // deny is meant for production paths, not assertions.
-    #![allow(clippy::unwrap_used)]
-
-    use super::*;
-    use wasm_bindgen_test::*;
-
-    #[wasm_bindgen_test]
-    fn spike_error_mapping_rejection_code() {
-        assert_eq!(
-            wallet_rejection_code(&Error::UserRejected("stub halt".to_string())),
-            Some(-4),
-            "a user rejection must surface as SEP-0043 code -4"
-        );
-
-        assert_eq!(
-            wallet_rejection_code(&Error::Other("simulate failed".to_string())),
-            None,
-            "an unrelated failure must not carry a code"
-        );
-
-        let mid_plan = PlanExecutionError::into_error(
-            vec![TransactionResult {
-                tx_hash: "abc123".to_string(),
-            }],
-            Error::UserRejected("stub halt".to_string()),
-        );
-        assert_eq!(
-            wallet_rejection_code(&mid_plan),
-            Some(-4),
-            "PlanExecution must be unwrapped to reach the rejection cause"
-        );
-
-        let mid_plan_other =
-            PlanExecutionError::into_error(Vec::new(), Error::Other("simulate failed".to_string()));
-        assert_eq!(wallet_rejection_code(&mid_plan_other), None);
+fn step_msg(verb: &str, current: u32, total: u32) -> String {
+    if total > 1 {
+        format!("{verb} step {current}/{total}…")
+    } else {
+        format!("{verb}…")
     }
 }

@@ -147,7 +147,7 @@ jobs:
       - if: steps.registry.outputs.publish == 'true'
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
-        run: npm run check:artifacts && npm run check:types
+        run: npm run check:artifacts && npm run check:bindgen && npm run check:types
       - if: steps.registry.outputs.publish == 'true'
         run: npm publish --ignore-scripts --provenance
 
