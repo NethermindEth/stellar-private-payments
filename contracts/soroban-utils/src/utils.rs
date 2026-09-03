@@ -1,9 +1,11 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
-use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contractevent};
 #[cfg(any(test, feature = "testutils"))]
 use soroban_sdk::{contract, contractimpl};
+
+use crate::ttl::bump_entry;
 
 /// Error returned by the shared admin helpers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -12,11 +14,22 @@ pub enum AdminError {
     NotInitialized,
 }
 
+/// Emitted when a contract's administrator changes.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminUpdated {
+    /// Address that held the role before the call.
+    pub old_admin: Address,
+    /// Address that holds it afterwards.
+    pub new_admin: Address,
+}
+
 /// Replaces the administrator stored under `admin_key` with `new_admin`.
 ///
 /// The address already stored under `admin_key` must authorize the call. Each
 /// contract passes its own storage key, so contracts sharing this helper keep
-/// separate admin entries.
+/// separate admin entries. Rotating to the address already stored is allowed
+/// and is recorded like any other rotation.
 ///
 /// # Errors
 ///
@@ -27,15 +40,26 @@ pub enum AdminError {
 ///
 /// Panics if the address stored under `admin_key` does not authorize the call,
 /// because `require_auth` raises a host error rather than returning.
+///
+/// # Events
+///
+/// Publishes [`AdminUpdated`] from the calling contract once the new address is
+/// stored. A call that fails publishes nothing.
 pub fn update_admin<K>(env: &Env, admin_key: &K, new_admin: &Address) -> Result<(), AdminError>
 where
     K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
 {
     let store = env.storage().persistent();
     let admin: Address = store.get(admin_key).ok_or(AdminError::NotInitialized)?;
+    bump_entry(env, admin_key);
     admin.require_auth();
 
     store.set(admin_key, new_admin);
+    AdminUpdated {
+        old_admin: admin,
+        new_admin: new_admin.clone(),
+    }
+    .publish(env);
     Ok(())
 }
 

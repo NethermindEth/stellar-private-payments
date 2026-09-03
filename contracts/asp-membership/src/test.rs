@@ -13,7 +13,10 @@ use soroban_sdk::{
     },
     vec,
 };
-use soroban_utils::ttl::{EXTEND_TO, THRESHOLD};
+use soroban_utils::{
+    AdminUpdated,
+    ttl::{EXTEND_TO, THRESHOLD},
+};
 use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -265,6 +268,51 @@ fn test_update_admin() {
             .expect("Admin updated")
     });
     assert_eq!(stored_admin_after, new_admin);
+}
+
+#[test]
+fn test_update_admin_emits_admin_updated() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+    let expected = AdminUpdated {
+        old_admin: admin,
+        new_admin,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[0], expected);
+}
+
+/// Rotating to the address already stored is a permitted no-op rotation, and it
+/// is recorded so an operator reading the log sees the attempt.
+#[test]
+fn test_update_admin_to_self_emits_with_equal_fields() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&admin);
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+    let expected = AdminUpdated {
+        old_admin: admin.clone(),
+        new_admin: admin,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[0], expected);
 }
 
 #[test]

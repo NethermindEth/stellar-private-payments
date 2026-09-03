@@ -1287,6 +1287,27 @@ fn update_admin_errors_when_admin_unset() {
     ));
 }
 
+/// The refusal is driven from inside a host frame that goes on to succeed,
+/// because a frame that fails discards its events whatever the contract did.
+#[test]
+fn update_admin_errors_when_admin_unset_emits_nothing() {
+    use soroban_sdk::testutils::Events;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let new_admin = Address::generate(&env);
+
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+        assert_eq!(
+            soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin),
+            Err(soroban_utils::AdminError::NotInitialized)
+        );
+    });
+
+    assert!(env.events().all().events().is_empty());
+}
+
 /// This test is skipped under Miri because the panic formatting path triggers
 /// undefined behavior in the `ethnum` crate's unsafe formatting code.
 /// See: https://github.com/nlordell/ethnum-rs/issues/34
