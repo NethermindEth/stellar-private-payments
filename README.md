@@ -143,6 +143,17 @@ If you compile, build, or deploy this project (e.g., hosting the `dist/` folder 
 
 The maintainers of this repository provide the source code "as is" and assume no responsibility for the downstream builds or deployments.
 
+## Community solutions
+
+SPP core is agnostic to the compliance layer: the contracts provide the building blocks, and each
+deployer builds the onboarding process that fits its use case. Solutions already built on top by the
+community:
+
+- [**asp-admitter**](https://github.com/Galmanus/spp-compliance-layer) — a contract that acts as admin
+  over `asp-membership` and wraps the admission step with an auditable on-chain receipt, so an operator
+  can run KYC-gated onboarding without managing the Association Set by hand. Deployed and exercised on
+  testnet; design notes and receipts in the repository.
+
 ## Would like to contribute?
 
 Please check [the issues](https://github.com/NethermindEth/stellar-private-payments/issues).
