@@ -1144,8 +1144,10 @@ impl Storage {
         // Get the last stored root for the ASP membership tree and the ledger
         // that produced it. The ledger is derived by joining with the raw event
         // log so we can distinguish:
-        // - "no new ASP events" (root matches, even if last leaf ledger < tip), vs
-        // - "partial processing" (raw events ingested to tip but leaves table lags).
+        // - "no new ASP events" (root matches, even if last leaf ledger < tip),
+        //   vs
+        // - "partial processing" (raw events ingested to tip but leaves table
+        //   lags).
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
