@@ -5,7 +5,11 @@ use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
-use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
+use soroban_sdk::{
+    Address, Bytes, Env, IntoVal, U256, Vec,
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    vec,
+};
 use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -260,6 +264,24 @@ fn test_update_admin() {
 }
 
 #[test]
+fn test_update_admin_errors_when_admin_unset() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert!(matches!(
+        client.try_update_admin(&new_admin),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
+#[test]
 fn test_new_admin_can_insert_after_update() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -288,6 +310,50 @@ fn test_new_admin_can_insert_after_update() {
         next_index, 1,
         "NextIndex should be 1 after insertion by new admin"
     );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_update_admin_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    client.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_old_admin_cannot_insert_after_update() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let leaf = U256::from_u32(&env, 100u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (leaf.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&leaf);
 }
 
 #[test]
@@ -319,50 +385,37 @@ fn test_multiple_insertions() {
 }
 
 #[test]
-fn test_admin_insert_only_defaults_to_true() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 3u32));
-
-    let stored: bool = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AdminInsertOnly)
-            .expect("AdminInsertOnly set in constructor")
-    });
-    assert!(stored, "AdminInsertOnly should default to true");
-}
-
-#[test]
-fn test_set_admin_insert_only() {
+fn test_insert_leaf_errors_when_admin_unset() {
     let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
-    env.mock_all_auths();
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
 
-    // Disable admin-only insert
-    client.set_admin_insert_only(&false);
+    let leaf = U256::from_u32(&env, 100u32);
+    assert!(matches!(
+        client.try_insert_leaf(&leaf),
+        Err(Ok(Error::NotInitialized))
+    ));
 
-    let stored: bool = env.as_contract(&contract_id, || {
+    let next_index: u64 = env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .get(&DataKey::AdminInsertOnly)
-            .expect("AdminInsertOnly updated")
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set in constructor")
     });
-    assert!(!stored, "AdminInsertOnly should be false after setting it");
+    assert_eq!(next_index, 0, "a rejected insert must not advance the tree");
+}
 
-    // Re-enable admin-only insert
-    client.set_admin_insert_only(&true);
-
-    let stored: bool = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AdminInsertOnly)
-            .expect("AdminInsertOnly re-enabled")
-    });
-    assert!(stored, "AdminInsertOnly should be true after re-enabling");
+/// Key shape of the removed `AdminInsertOnly` flag, so a stale entry can be
+/// written.
+#[contracttype]
+#[derive(Clone)]
+enum LegacyDataKey {
+    AdminInsertOnly,
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -371,129 +424,20 @@ fn test_set_admin_insert_only() {
 #[test]
 #[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
-fn test_set_admin_insert_only_requires_admin() {
+fn test_legacy_admin_insert_only_flag_is_ignored() {
     let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
-    // Should fail without mock_all_auths
-    client.set_admin_insert_only(&false);
-}
-
-#[test]
-fn test_insert_leaf_without_admin_when_permissionless() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 3u32));
-    let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Admin disables admin-only insert via direct storage manipulation
-    // to avoid needing mock_all_auths (which would mask the auth check
-    // we're trying to verify is skipped).
     env.as_contract(&contract_id, || {
         env.storage()
             .persistent()
-            .set(&DataKey::AdminInsertOnly, &false);
+            .set(&LegacyDataKey::AdminInsertOnly, &false);
     });
 
-    // Insert a leaf WITHOUT mock_all_auths — should succeed because
-    // admin_insert_only is false
-    let leaf = U256::from_u32(&env, 42u32);
+    let leaf = U256::from_u32(&env, 100u32);
     client.insert_leaf(&leaf);
-
-    let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set after insert")
-    });
-    assert_eq!(next_index, 1, "Leaf should be inserted without admin auth");
-}
-
-/// This test is skipped under Miri because the panic formatting path triggers
-/// undefined behavior in the `ethnum` crate's unsafe formatting code.
-/// See: https://github.com/nlordell/ethnum-rs/issues/34
-#[test]
-#[cfg_attr(miri, ignore)]
-#[should_panic(expected = "Error(Auth, InvalidAction)")]
-fn test_insert_leaf_requires_admin_when_re_enabled() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 3u32));
-    let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Disable admin-only insert via storage so we don't need mock_all_auths
-    env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminInsertOnly, &false);
-    });
-
-    // Insert a leaf permissionlessly (should succeed)
-    let leaf1 = U256::from_u32(&env, 100u32);
-    client.insert_leaf(&leaf1);
-
-    // Re-enable admin-only insert via storage
-    env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminInsertOnly, &true);
-    });
-
-    // This should panic — admin auth is required again and no auths are mocked
-    let leaf2 = U256::from_u32(&env, 200u32);
-    client.insert_leaf(&leaf2);
-}
-
-#[test]
-fn test_permissionless_insert_multiple_leaves() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 3u32));
-    let client = ASPMembershipClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    client.set_admin_insert_only(&false);
-
-    // Insert multiple leaves
-    for i in 0..5 {
-        let leaf = U256::from_u32(&env, (i + 1) * 10u32);
-        client.insert_leaf(&leaf);
-    }
-
-    let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set after inserts")
-    });
-    assert_eq!(
-        next_index, 5,
-        "Should have 5 leaves after permissionless insertions"
-    );
-}
-
-#[test]
-fn test_permissionless_insert_updates_root() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 3u32));
-    let client = ASPMembershipClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    client.set_admin_insert_only(&false);
-
-    let root_before = client.get_root();
-
-    let leaf = U256::from_u32(&env, 42u32);
-    client.insert_leaf(&leaf);
-
-    let root_after = client.get_root();
-    assert_ne!(
-        root_before, root_after,
-        "Root should change after permissionless insert"
-    );
 }
 
 /// Poseidon2 compression function (same as in
