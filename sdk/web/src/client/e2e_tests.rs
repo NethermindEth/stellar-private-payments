@@ -74,20 +74,36 @@ const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 /// Amount seeded per setup deposit, in stroops (0.1 XLM).
 const SEED_DEPOSIT_STROOPS: u128 = 1_000_000;
 
-/// Address of test account A.
-const ACCOUNT_A_ADDRESS: Option<&str> = option_env!("E2E_ACCOUNT_A_ADDRESS");
+#[derive(Clone, Copy)]
+struct TestAccount {
+    label: &'static str,
+    address: Option<&'static str>,
+    secret: Option<&'static str>,
+}
 
-/// Address of test account B, the transfer recipient.
-const ACCOUNT_B_ADDRESS: Option<&str> = option_env!("E2E_ACCOUNT_B_ADDRESS");
+const ACCOUNT_A: TestAccount = TestAccount {
+    label: "A",
+    address: option_env!("E2E_ACCOUNT_A_ADDRESS"),
+    secret: option_env!("E2E_ACCOUNT_A_SECRET"),
+};
+const ACCOUNT_B: TestAccount = TestAccount {
+    label: "B",
+    address: option_env!("E2E_ACCOUNT_B_ADDRESS"),
+    secret: option_env!("E2E_ACCOUNT_B_SECRET"),
+};
+const ACCOUNT_C: TestAccount = TestAccount {
+    label: "C",
+    address: option_env!("E2E_ACCOUNT_C_ADDRESS"),
+    secret: option_env!("E2E_ACCOUNT_C_SECRET"),
+};
+const ACCOUNT_D: TestAccount = TestAccount {
+    label: "D",
+    address: option_env!("E2E_ACCOUNT_D_ADDRESS"),
+    secret: option_env!("E2E_ACCOUNT_D_SECRET"),
+};
 
 /// Amount moved by the transfer/withdraw flow tests, in stroops.
 const FLOW_AMOUNT_STROOPS: u128 = 500_000;
-
-/// Secret for test account A, used only to sign setup transactions.
-///
-/// These are disposable testnet accounts; never point this at an account that
-/// matters.
-const ACCOUNT_A_SECRET: Option<&str> = option_env!("E2E_ACCOUNT_A_SECRET");
 
 /// Fixed 64-byte signature blob the stub signer returns from `signMessage`.
 ///
@@ -197,7 +213,7 @@ enum SignerMode {
     /// Reject with the SEP-0043 `code: -4` sentinel.
     Sentinel,
     /// Produce real Ed25519 signatures for setup transactions.
-    Signing,
+    Signing(TestAccount),
 }
 
 /// `signMessage` return, shared by both modes.
@@ -241,21 +257,27 @@ fn signer_with_mode(mode: SignerMode) -> JsValue {
             )
             .unwrap();
         }
-        SignerMode::Signing => install_real_signing(&signer),
+        SignerMode::Signing(account) => install_real_signing(&signer, account),
     }
 
     signer.into()
 }
 
 /// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
-fn install_real_signing(signer: &Object) {
-    let secret = ACCOUNT_A_SECRET.expect(
-        "E2E_ACCOUNT_A_SECRET not compiled in: run via \
-         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-    );
-    let local = Rc::new(
-        ChainLocalSigner::from_secret(secret).expect("E2E_ACCOUNT_A_SECRET must be a valid S… key"),
-    );
+fn install_real_signing(signer: &Object, account: TestAccount) {
+    let secret = account.secret.unwrap_or_else(|| {
+        panic!(
+            "E2E_ACCOUNT_{}_SECRET not compiled in: run via \
+             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
+            account.label
+        )
+    });
+    let local = Rc::new(ChainLocalSigner::from_secret(secret).unwrap_or_else(|_| {
+        panic!(
+            "E2E_ACCOUNT_{}_SECRET must be a valid S… key",
+            account.label
+        )
+    }));
 
     // signTransaction(txXdrBase64, opts) -> Promise<signedTxXdrBase64>
     let tx_signer = local.clone();
@@ -317,17 +339,24 @@ async fn e2e_smoke_client_construction() {
     client.stop_background_sync();
 }
 
-/// Open an `Account` session for test account A using the sentinel signer.
-async fn open_account_a(client: &Client) -> super::Account {
-    open_account_a_with(client, SignerMode::Sentinel).await
+/// Open an `Account` session using the sentinel signer.
+async fn open_account(client: &Client, account: TestAccount) -> super::Account {
+    open_account_with(client, account, SignerMode::Sentinel).await
 }
 
-/// Open an `Account` session for test account A with an explicit signer mode.
-async fn open_account_a_with(client: &Client, mode: SignerMode) -> super::Account {
-    let address = ACCOUNT_A_ADDRESS.expect(
-        "E2E_ACCOUNT_A_ADDRESS not compiled in: run via \
-         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-    );
+/// Open an `Account` session for a test account with an explicit signer mode.
+async fn open_account_with(
+    client: &Client,
+    account: TestAccount,
+    mode: SignerMode,
+) -> super::Account {
+    let address = account.address.unwrap_or_else(|| {
+        panic!(
+            "E2E_ACCOUNT_{}_ADDRESS not compiled in: run via \
+             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
+            account.label
+        )
+    });
 
     let options = Object::new();
     Reflect::set(
@@ -369,28 +398,31 @@ fn response_code(response: &PoolExecuteResult) -> Option<i32> {
 /// DOM event carrying transaction progress.
 const TX_PROGRESS_EVENT: &str = "stellar-private-payments:tx-progress";
 
-/// Start recording `stage` values from progress events.
-fn start_progress_capture() {
+/// Start recording `stage` values from progress events under a test-local key.
+fn start_progress_capture(capture_id: &str) {
     js_sys::eval(&format!(
         r#"(function () {{
-             globalThis.__e2eStages = [];
-             globalThis.__e2eProgressListener = function (ev) {{
-               if (ev && ev.detail && ev.detail.stage) {{
-                 globalThis.__e2eStages.push(ev.detail.stage);
+             globalThis.__e2eStages = globalThis.__e2eStages || {{}};
+             globalThis.__e2eProgressListeners = globalThis.__e2eProgressListeners || {{}};
+             globalThis.__e2eStages['{capture_id}'] = [];
+             globalThis.__e2eProgressListeners['{capture_id}'] = function (ev) {{
+               if (ev && ev.detail && ev.detail.flow === '{capture_id}' && ev.detail.stage) {{
+                 globalThis.__e2eStages['{capture_id}'].push(ev.detail.stage);
                }}
              }};
-             window.addEventListener('{TX_PROGRESS_EVENT}', globalThis.__e2eProgressListener);
+             window.addEventListener('{TX_PROGRESS_EVENT}', globalThis.__e2eProgressListeners['{capture_id}']);
            }})()"#
     ))
     .expect("installing the progress listener must succeed");
 }
 
 /// Stop recording and return the stages seen, in order.
-fn captured_stages() -> Vec<String> {
+fn captured_stages(capture_id: &str) -> Vec<String> {
     let joined = js_sys::eval(&format!(
         r#"(function () {{
-             window.removeEventListener('{TX_PROGRESS_EVENT}', globalThis.__e2eProgressListener);
-             return (globalThis.__e2eStages || []).join(',');
+             const listener = (globalThis.__e2eProgressListeners || {{}})['{capture_id}'];
+             if (listener) window.removeEventListener('{TX_PROGRESS_EVENT}', listener);
+             return ((globalThis.__e2eStages || {{}})['{capture_id}'] || []).join(',');
            }})()"#
     ))
     .expect("reading captured stages must succeed")
@@ -406,8 +438,8 @@ fn captured_stages() -> Vec<String> {
 /// Run a deposit to completion so later tests start from real on-chain notes.
 ///
 /// Uses `SignerMode::Signing` because this is setup, not a flow under test.
-async fn seed_deposit(client: &Client, amount: u128) {
-    let account = open_account_a_with(client, SignerMode::Signing).await;
+async fn seed_deposit(client: &Client, test_account: TestAccount, amount: u128) {
+    let account = open_account_with(client, test_account, SignerMode::Signing(test_account)).await;
     let pool = open_pool(&account).await;
 
     let response = pool
@@ -437,11 +469,11 @@ async fn e2e_seed_deposit_creates_spendable_notes() {
 
     client.sync().await.expect("initial sync must succeed");
 
-    let account = open_account_a_with(&client, SignerMode::Signing).await;
+    let account = open_account_with(&client, ACCOUNT_A, SignerMode::Signing(ACCOUNT_A)).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
 
-    seed_deposit(&client, SEED_DEPOSIT_STROOPS).await;
+    seed_deposit(&client, ACCOUNT_A, SEED_DEPOSIT_STROOPS).await;
 
     client
         .sync()
@@ -496,17 +528,17 @@ async fn e2e_deposit_halts_at_signing() {
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("sync must succeed");
 
-    let account = open_account_a(&client).await;
+    let account = open_account(&client, ACCOUNT_B).await;
     let pool = open_pool(&account).await;
 
     let balance_before = pool.balance().await.expect("balance read before");
 
-    start_progress_capture();
+    start_progress_capture("deposit");
     let response = pool
         .deposit(SEED_DEPOSIT_STROOPS)
         .await
         .expect("deposit must resolve at the JS boundary, not throw");
-    let stages = captured_stages();
+    let stages = captured_stages("deposit");
     console_log!("deposit stages: {stages:?}");
 
     assert_halted_at_signing("deposit", &response, &stages);
@@ -526,23 +558,22 @@ async fn e2e_deposit_halts_at_signing() {
 #[wasm_bindgen_test]
 #[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_transfer_halts_at_signing() {
-    let recipient = ACCOUNT_B_ADDRESS.expect(
-        "E2E_ACCOUNT_B_ADDRESS not compiled in: run via \
-         `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-    );
+    let recipient = ACCOUNT_A
+        .address
+        .expect("E2E_ACCOUNT_A_ADDRESS must be compiled in");
 
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("initial sync must succeed");
 
-    // Give account A something to spend.
-    seed_deposit(&client, SEED_DEPOSIT_STROOPS).await;
+    // Give this test's dedicated source account something to spend.
+    seed_deposit(&client, ACCOUNT_C, SEED_DEPOSIT_STROOPS).await;
     client
         .sync()
         .await
         .expect("sync after seeding must succeed");
 
-    let account = open_account_a(&client).await;
+    let account = open_account(&client, ACCOUNT_C).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
     assert!(
@@ -550,12 +581,12 @@ async fn e2e_transfer_halts_at_signing() {
         "seeding must leave at least {FLOW_AMOUNT_STROOPS} stroops spendable, have {balance_before}"
     );
 
-    start_progress_capture();
+    start_progress_capture("transfer");
     let response = pool
         .transfer(recipient, FLOW_AMOUNT_STROOPS)
         .await
         .expect("transfer must resolve at the JS boundary, not throw");
-    let stages = captured_stages();
+    let stages = captured_stages("transfer");
     console_log!("transfer stages: {stages:?}");
 
     assert_halted_at_signing("transfer", &response, &stages);
@@ -578,13 +609,13 @@ async fn e2e_withdraw_halts_at_signing() {
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("initial sync must succeed");
 
-    seed_deposit(&client, SEED_DEPOSIT_STROOPS).await;
+    seed_deposit(&client, ACCOUNT_D, SEED_DEPOSIT_STROOPS).await;
     client
         .sync()
         .await
         .expect("sync after seeding must succeed");
 
-    let account = open_account_a(&client).await;
+    let account = open_account(&client, ACCOUNT_D).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
     assert!(
@@ -592,12 +623,12 @@ async fn e2e_withdraw_halts_at_signing() {
         "seeding must leave at least {FLOW_AMOUNT_STROOPS} stroops spendable, have {balance_before}"
     );
 
-    start_progress_capture();
+    start_progress_capture("withdraw");
     let response = pool
         .withdraw(FLOW_AMOUNT_STROOPS, None)
         .await
         .expect("withdraw must resolve at the JS boundary, not throw");
-    let stages = captured_stages();
+    let stages = captured_stages("withdraw");
     console_log!("withdraw stages: {stages:?}");
 
     assert_halted_at_signing("withdraw", &response, &stages);
@@ -634,10 +665,10 @@ async fn e2e_session_account_setup_and_sync() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
-    let account = open_account_a(&client).await;
+    let account = open_account(&client, ACCOUNT_A).await;
     assert_eq!(
         account.user_address(),
-        ACCOUNT_A_ADDRESS.unwrap(),
+        ACCOUNT_A.address.unwrap(),
         "session must bind to the configured test account"
     );
 
