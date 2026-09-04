@@ -335,6 +335,35 @@ pub struct LeafDeletedEvent {
     pub root: Field,
 }
 
+/// Event emitted when a contract's administrator is replaced
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUpdatedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
+    pub id: String,
+    /// Address that held the administrator role before the call.
+    pub old_admin: String,
+    /// Address that holds it afterwards.
+    pub new_admin: String,
+}
+
+/// Event emitted when a contract's pause bits change
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PauseChangedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
+    pub id: String,
+    /// Bits set after the change.
+    pub flags: u32,
+    /// Ledger from which the withdrawals bit is no longer honored, absent when
+    /// the pause is untimed.
+    pub until: Option<u32>,
+}
+
 /// A contract event after full parsing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -346,6 +375,8 @@ pub enum ProcessedEvent {
     LeafInserted(LeafInsertedEvent),
     LeafUpdated(LeafUpdatedEvent),
     LeafDeleted(LeafDeletedEvent),
+    AdminUpdated(AdminUpdatedEvent),
+    PauseChanged(PauseChangedEvent),
 }
 
 #[cfg(test)]
