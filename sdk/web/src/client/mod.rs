@@ -15,8 +15,8 @@ use stellar_private_payments::{
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
     types::{
-        ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey,
-        SignerAddress,
+        ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress,
+        NotePublicKey, SignerAddress,
     },
 };
 use wasm_bindgen::prelude::*;
@@ -212,11 +212,13 @@ impl Client {
             let opts = AccountOptions::from_value(options)?;
             let user_address =
                 resolve_user_address(&signer, opts.user_address().map(str::to_string)).await?;
+            // Defaults to the note owner. The wallet signs with this account.
             let signer_address = SignerAddress::new(
                 opts.signer_address()
                     .map(str::to_string)
                     .unwrap_or_else(|| user_address.clone()),
             );
+            ensure_signer_is_note_owner(&user_address, &signer_address).map_err(pool_err)?;
             let wallet_signer = WalletSigner::new(
                 signer,
                 opts.network_passphrase().to_string(),
@@ -389,9 +391,14 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
+        // Read off the signer rather than AccountOptions: this is the address
+        // the wallet will actually be asked to sign with.
+        let signer_address = wallet_signer.signer_address().clone();
         let signer: Handle<dyn stellar_private_payments::Signer> =
             Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
-        self.inner.account(user_address, signer).map_err(pool_err)
+        self.inner
+            .account(NoteOwnerAddress::new(user_address), signer_address, signer)
+            .map_err(pool_err)
     }
 
     async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
@@ -430,6 +437,26 @@ impl Client {
             .await
             .map_err(|e| JsError::new(&format!("storage worker error: {e}")))
     }
+}
+
+/// Refuse a session whose signing account is not the note owner.
+///
+/// The native client refuses the same pair, but only once the wallet has
+/// already been asked to sign the derivation message and the resulting keys
+/// have been filed under the owner. This runs first, so a rejected pair costs
+/// no signature request and writes nothing. It raises the native error rather
+/// than a parallel message, so the two cannot drift.
+fn ensure_signer_is_note_owner(
+    user_address: &str,
+    signer_address: &SignerAddress,
+) -> Result<(), Error> {
+    if signer_address.as_str() == user_address {
+        return Ok(());
+    }
+    Err(Error::SignerIsNotNoteOwner {
+        owner: user_address.to_string(),
+        signer: signer_address.as_str().to_string(),
+    })
 }
 
 async fn resolve_user_address(
@@ -471,4 +498,30 @@ async fn resolve_user_address(
     resolved
         .as_string()
         .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
+}
+
+#[cfg(test)]
+mod signer_is_note_owner_tests {
+    use super::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    #[test]
+    fn the_owner_signing_for_itself_is_accepted() {
+        assert!(ensure_signer_is_note_owner(OWNER, &SignerAddress::new(OWNER)).is_ok());
+    }
+
+    #[test]
+    fn a_delegate_signing_for_the_owner_is_refused() {
+        let error = ensure_signer_is_note_owner(OWNER, &SignerAddress::new(DELEGATE))
+            .expect_err("a signer that is not the note owner must not open a session");
+        match &error {
+            Error::SignerIsNotNoteOwner { owner, signer } => {
+                assert_eq!(owner, OWNER);
+                assert_eq!(signer, DELEGATE);
+            }
+            other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
+        }
+    }
 }
