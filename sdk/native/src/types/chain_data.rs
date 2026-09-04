@@ -37,6 +37,22 @@ pub struct ContractsStateData {
     pub asp_non_membership: AspNonMembership,
 }
 
+/// The pause bits a contract has set, as `soroban_utils::pausable` stores
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PauseState {
+    /// Bits set by the last pause or unpause. Which bits mean what depends on
+    /// the contract: pools recognize deposits, transfers, and withdrawals, and
+    /// the ASP contracts recognize mutations.
+    pub flags: u32,
+    /// Ledger from which the withdrawals bit is no longer honored, absent when
+    /// the pause is untimed.
+    pub until: Option<u32>,
+    /// Set by a timed pause, cleared by an untimed pause or an unpause.
+    pub armed: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoolInfo {
@@ -70,6 +86,13 @@ pub struct PoolInfo {
     /// Omitted from serialized output when absent, as for `admin_view_key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gvk_mode: Option<u32>,
+    /// Pause bits read from the contract. `None` when the contract has never
+    /// been paused or unpaused, which includes contracts deployed before the
+    /// pause entry existed. Treat it as all bits clear.
+    ///
+    /// Omitted from serialized output when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<PauseState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +109,13 @@ pub struct AspMembership {
     pub admin: String,
     pub capacity: u64,
     pub used_slots: String, //num_bigint::BigUint,
+    /// Pause bits read from the contract. `None` when the contract has never
+    /// been paused or unpaused, which includes contracts deployed before the
+    /// pause entry existed. Treat it as all bits clear.
+    ///
+    /// Omitted from serialized output when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<PauseState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +129,13 @@ pub struct AspNonMembership {
     pub root: Field,
     pub is_empty: bool,
     pub admin: String,
+    /// Pause bits read from the contract. `None` when the contract has never
+    /// been paused or unpaused, which includes contracts deployed before the
+    /// pause entry existed. Treat it as all bits clear.
+    ///
+    /// Omitted from serialized output when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<PauseState>,
 }
 
 /// ASP non-membership (blocklist) proof data needed by the circuit.
@@ -335,6 +372,35 @@ pub struct LeafDeletedEvent {
     pub root: Field,
 }
 
+/// Event emitted when a contract's administrator is replaced
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUpdatedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
+    pub id: String,
+    /// Address that held the administrator role before the call.
+    pub old_admin: String,
+    /// Address that holds it afterwards.
+    pub new_admin: String,
+}
+
+/// Event emitted when a contract's pause bits change
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PauseChangedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
+    pub id: String,
+    /// Bits set after the change.
+    pub flags: u32,
+    /// Ledger from which the withdrawals bit is no longer honored, absent when
+    /// the pause is untimed.
+    pub until: Option<u32>,
+}
+
 /// A contract event after full parsing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -346,6 +412,8 @@ pub enum ProcessedEvent {
     LeafInserted(LeafInsertedEvent),
     LeafUpdated(LeafUpdatedEvent),
     LeafDeleted(LeafDeletedEvent),
+    AdminUpdated(AdminUpdatedEvent),
+    PauseChanged(PauseChangedEvent),
 }
 
 #[cfg(test)]
@@ -376,6 +444,7 @@ mod pool_info_gvk_tests {
                 y: Field(U256::from(2)),
             }),
             gvk_mode: Some(2),
+            pause: None,
         }
     }
 
@@ -419,6 +488,7 @@ mod pool_info_gvk_tests {
         let pool = PoolInfo {
             admin_view_key: None,
             gvk_mode: None,
+            pause: None,
             ..pool_info_with_gvk()
         };
 
@@ -427,6 +497,7 @@ mod pool_info_gvk_tests {
 
         assert!(!object.contains_key("adminViewKey"));
         assert!(!object.contains_key("gvkMode"));
+        assert!(!object.contains_key("pause"));
         // Unrelated optional fields keep their existing null-emitting shape.
         assert!(object.contains_key("merkleRoot"));
         assert!(object.contains_key("merkleCurrentRootIndex"));
@@ -434,5 +505,82 @@ mod pool_info_gvk_tests {
         let decoded: PoolInfo = serde_json::from_value(value).expect("decode non-GVK PoolInfo");
         assert!(decoded.admin_view_key.is_none());
         assert!(decoded.gvk_mode.is_none());
+    }
+
+    fn pause_state() -> PauseState {
+        PauseState {
+            flags: 5,
+            until: Some(900),
+            armed: true,
+        }
+    }
+
+    /// State serialized before the pause key existed must still decode, for
+    /// every contract that gained the field.
+    #[test]
+    fn contract_state_without_pause_still_decodes() {
+        let pool = PoolInfo {
+            pause: Some(pause_state()),
+            ..pool_info_with_gvk()
+        };
+        assert!(decode_without_pause::<PoolInfo>(&pool).pause.is_none());
+
+        let membership = AspMembership {
+            ledger: 1,
+            contract_id: "CASPM".to_string(),
+            contract_type: "ASP Membership".to_string(),
+            root: Field(U256::from(7)),
+            levels: 20,
+            next_index: "0".to_string(),
+            admin: "GADMIN".to_string(),
+            capacity: 1_048_576,
+            used_slots: "0".to_string(),
+            pause: Some(pause_state()),
+        };
+        assert!(
+            decode_without_pause::<AspMembership>(&membership)
+                .pause
+                .is_none()
+        );
+
+        let non_membership = AspNonMembership {
+            ledger: 1,
+            contract_id: "CASPN".to_string(),
+            contract_type: "ASP Non-Membership".to_string(),
+            root: Field(U256::from(0)),
+            is_empty: true,
+            admin: "GADMIN".to_string(),
+            pause: Some(pause_state()),
+        };
+        assert!(
+            decode_without_pause::<AspNonMembership>(&non_membership)
+                .pause
+                .is_none()
+        );
+    }
+
+    /// Serializes `value`, drops the `pause` key, and decodes what an older
+    /// deployment would have produced.
+    fn decode_without_pause<T>(value: &impl Serialize) -> T
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let mut encoded = serde_json::to_value(value).expect("serialize to value");
+        let object = encoded.as_object_mut().expect("serializes as object");
+        assert!(object.remove("pause").is_some(), "field was present");
+        serde_json::from_value(encoded).expect("decode state written without pause")
+    }
+
+    #[test]
+    fn pool_info_round_trips_with_pause_set() {
+        let pool = PoolInfo {
+            pause: Some(pause_state()),
+            ..pool_info_with_gvk()
+        };
+
+        let encoded = serde_json::to_string(&pool).expect("serialize PoolInfo");
+        let decoded: PoolInfo = serde_json::from_str(&encoded).expect("decode PoolInfo");
+
+        assert_eq!(decoded.pause, Some(pause_state()));
     }
 }

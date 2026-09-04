@@ -1,7 +1,7 @@
 use super::{
     conversions::{
         field_to_scval_u256, scval_to_address_string, scval_to_baby_jub_jub_point, scval_to_bool,
-        scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
+        scval_to_pause_state, scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest},
     soroban_encode::BASE_FEE,
@@ -15,7 +15,7 @@ use stellar_xdr::{self as xdr, ReadXdr};
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
     ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NotePublicKey,
-    PoolInfo, SMT_DEPTH, TransactChainContext, U256, transact_chain_context_from_state,
+    PauseState, PoolInfo, SMT_DEPTH, TransactChainContext, U256, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -99,6 +99,12 @@ impl StateFetcher {
             .transpose()?;
         let gvk_mode = pool_state.get("GvkMode").map(scval_to_u32).transpose()?;
         Ok((admin_view_key, gvk_mode))
+    }
+
+    /// Reads a contract's pause bits, absent on a contract deployed before the
+    /// key existed.
+    fn pause_from_state(state: &HashMap<String, xdr::ScVal>) -> Result<Option<PauseState>> {
+        Ok(state.get("Pause").map(scval_to_pause_state).transpose()?)
     }
 
     /// Cross-checks a pool's configured GVK settings against what the chain
@@ -223,10 +229,12 @@ impl StateFetcher {
                     "MaximumDepositAmount",
                     "PolicyFlags",
                 ],
-                // Only written by `contracts/pool-gvk`, never by
-                // `contracts/pool`, so a missing entry is expected rather
-                // than an error. Read below with `.get(...)`, not `get_state!`.
-                optional_enum_keys: vec!["AdminViewKey", "GvkMode"],
+                // `AdminViewKey` and `GvkMode` are written only by
+                // `contracts/pool-gvk`; `Pause` is absent until the first
+                // pause on either pool. A missing entry is expected rather
+                // than an error for all three, so read them below with
+                // `.get(...)`, not `get_state!`.
+                optional_enum_keys: vec!["AdminViewKey", "GvkMode", "Pause"],
                 valued_keys: vec![],
             });
         }
@@ -234,14 +242,14 @@ impl StateFetcher {
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_membership.as_str(),
             enum_keys: vec!["Root", "Levels", "NextIndex", "Admin"],
-            optional_enum_keys: vec![],
+            optional_enum_keys: vec!["Pause"],
             valued_keys: vec![],
         });
 
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_non_membership.as_str(),
             enum_keys: vec!["Root", "Admin"],
-            optional_enum_keys: vec![],
+            optional_enum_keys: vec!["Pause"],
             valued_keys: vec![],
         });
 
@@ -402,6 +410,7 @@ impl StateFetcher {
                     )?)?,
                     admin_view_key: gvk_admin_view_key,
                     gvk_mode,
+                    pause: Self::pause_from_state(pool_state)?,
                 };
 
                 out.push(pool_info);
@@ -438,6 +447,7 @@ impl StateFetcher {
                 )?)?,
                 capacity: asp_mem_capacity,
                 used_slots: asp_mem_next_index.to_string(),
+                pause: Self::pause_from_state(asp_membership_state)?,
             };
 
             let asp_non_membership_id = &self.config.asp_non_membership;
@@ -462,6 +472,7 @@ impl StateFetcher {
                     "Admin",
                     asp_non_membership_id
                 )?)?,
+                pause: Self::pause_from_state(asp_non_membership_state)?,
             };
 
             return Ok(ContractsStateData {
@@ -918,6 +929,126 @@ mod tests {
 
         assert!(admin_view_key.is_none());
         assert!(gvk_mode.is_none());
+    }
+
+    fn pause_scval(entries: Vec<(&str, xdr::ScVal)>) -> xdr::ScVal {
+        let mut entries: Vec<xdr::ScMapEntry> = entries
+            .into_iter()
+            .map(|(name, val)| xdr::ScMapEntry {
+                key: xdr::ScVal::Symbol(xdr::ScSymbol(name.try_into().expect("symbol"))),
+                val,
+            })
+            .collect();
+        entries.sort_by(|a, b| a.key.cmp(&b.key));
+        xdr::ScVal::Map(Some(xdr::ScMap(entries.try_into().expect("pause map"))))
+    }
+
+    fn pause_state_with(key: &str, val: xdr::ScVal) -> HashMap<String, xdr::ScVal> {
+        HashMap::from([(key.to_string(), val)])
+    }
+
+    #[test]
+    fn pause_is_none_for_a_contract_deployed_before_the_key_existed() {
+        let state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let pause = StateFetcher::pause_from_state(&state).expect("no Pause key present");
+
+        assert!(pause.is_none());
+    }
+
+    #[test]
+    fn pause_is_read_from_a_contract_that_stores_it() {
+        let state = pause_state_with(
+            "Pause",
+            pause_scval(vec![
+                ("flags", xdr::ScVal::U32(5)),
+                ("until", xdr::ScVal::U32(900)),
+                ("armed", xdr::ScVal::Bool(true)),
+            ]),
+        );
+
+        let pause = StateFetcher::pause_from_state(&state).expect("Pause key present");
+
+        assert_eq!(
+            pause,
+            Some(PauseState {
+                flags: 5,
+                until: Some(900),
+                armed: true,
+            })
+        );
+    }
+
+    /// An untimed pause stores `until` as `Void`, which is a present field
+    /// holding `None`, not a missing one.
+    #[test]
+    fn an_untimed_pause_reads_until_as_none() {
+        let state = pause_state_with(
+            "Pause",
+            pause_scval(vec![
+                ("flags", xdr::ScVal::U32(1)),
+                ("until", xdr::ScVal::Void),
+                ("armed", xdr::ScVal::Bool(false)),
+            ]),
+        );
+
+        let pause = StateFetcher::pause_from_state(&state).expect("Pause key present");
+
+        assert_eq!(
+            pause,
+            Some(PauseState {
+                flags: 1,
+                until: None,
+                armed: false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_pause_entry_missing_a_field_names_it() {
+        let full = [
+            ("flags", xdr::ScVal::U32(5)),
+            ("until", xdr::ScVal::Void),
+            ("armed", xdr::ScVal::Bool(false)),
+        ];
+        for missing in ["flags", "until", "armed"] {
+            let entries = full
+                .iter()
+                .filter(|(name, _)| *name != missing)
+                .map(|(name, val)| (*name, val.clone()))
+                .collect();
+            let state = pause_state_with("Pause", pause_scval(entries));
+
+            let err = StateFetcher::pause_from_state(&state)
+                .expect_err("every PauseState field is required");
+
+            assert!(err.to_string().contains(missing), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_pause_entry_with_a_non_u32_flags_is_rejected() {
+        let state = pause_state_with(
+            "Pause",
+            pause_scval(vec![
+                ("flags", xdr::ScVal::Bool(true)),
+                ("until", xdr::ScVal::Void),
+                ("armed", xdr::ScVal::Bool(false)),
+            ]),
+        );
+
+        let err = StateFetcher::pause_from_state(&state).expect_err("flags must be a u32");
+
+        assert!(err.to_string().contains("flags"), "{err}");
+    }
+
+    #[test]
+    fn a_pause_entry_that_is_not_a_map_is_rejected() {
+        let state = pause_state_with("Pause", xdr::ScVal::U32(1));
+
+        let err = StateFetcher::pause_from_state(&state).expect_err("PauseState must be a map");
+
+        assert!(err.to_string().contains("expected ScVal::Map"), "{err}");
     }
 
     #[test]

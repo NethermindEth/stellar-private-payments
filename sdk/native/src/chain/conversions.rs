@@ -1,6 +1,6 @@
 use crate::{
     chain::rpc::Error,
-    types::{BabyJubJubPoint, ContractEvent, Field, GlobalViewKeyCiphertext, U256},
+    types::{BabyJubJubPoint, ContractEvent, Field, GlobalViewKeyCiphertext, PauseState, U256},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use core::ops::Shl;
@@ -219,6 +219,50 @@ pub(crate) fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJub
             .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.x: {e}")))?,
         y: Field::try_from_u256(y)
             .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.y: {e}")))?,
+    })
+}
+
+/// Prefixes a decode failure with the `PauseState` field that produced it.
+fn field<T>(decoded: Result<T, Error>, name: &str) -> Result<T, Error> {
+    decoded.map_err(|e| Error::UnexpectedScVal(format!("PauseState.{name}: {e}")))
+}
+
+/// Decode a `soroban_utils::pausable::PauseState`
+/// (`{ flags: u32, until: Option<u32>, armed: bool }`) from contract storage.
+pub(crate) fn scval_to_pause_state(val: &xdr::ScVal) -> Result<PauseState, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "PauseState: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut flags = None;
+    let mut until = None;
+    let mut armed = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "flags" => flags = Some(field(scval_to_u32(val), "flags")?),
+            "until" => {
+                until = Some(match val {
+                    xdr::ScVal::Void => None,
+                    other => Some(field(scval_to_u32(other), "until")?),
+                });
+            }
+            "armed" => armed = Some(field(scval_to_bool(val), "armed")?),
+            _ => {}
+        }
+    }
+
+    Ok(PauseState {
+        flags: flags
+            .ok_or_else(|| Error::UnexpectedScVal("PauseState missing field: flags".into()))?,
+        until: until
+            .ok_or_else(|| Error::UnexpectedScVal("PauseState missing field: until".into()))?,
+        armed: armed
+            .ok_or_else(|| Error::UnexpectedScVal("PauseState missing field: armed".into()))?,
     })
 }
 

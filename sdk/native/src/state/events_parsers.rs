@@ -5,11 +5,13 @@ use crate::{
         scval_to_u32, scval_to_u64, scval_to_u256,
     },
     types::{
-        ContractEvent, Field, LeafAddedEvent, LeafDeletedEvent, LeafInsertedEvent,
-        LeafUpdatedEvent, NewCommitmentEvent, NewNullifierEvent, ProcessedEvent, PublicKeyEvent,
+        AdminUpdatedEvent, ContractEvent, Field, LeafAddedEvent, LeafDeletedEvent,
+        LeafInsertedEvent, LeafUpdatedEvent, NewCommitmentEvent, NewNullifierEvent,
+        PauseChangedEvent, ProcessedEvent, PublicKeyEvent,
     },
 };
 use anyhow::{Result, anyhow};
+use stellar_xdr as xdr;
 
 /// Field name emitted by `contracts/pool-gvk`'s pool events, carrying the
 /// admin-decryptable ciphertext of the note.
@@ -41,6 +43,14 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
         }
         "leaf_updated" | "LeafUpdated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
         "leaf_deleted" | "LeafDeleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
+        // Governance events contracts/soroban-utils/src/{utils,pausable}.rs, emitted by
+        // every contract that exposes an admin rotation or a pause
+        "admin_updated" | "AdminUpdated" => {
+            ProcessedEvent::AdminUpdated(parse_admin_updated(parsed)?)
+        }
+        "pause_changed" | "PauseChanged" => {
+            ProcessedEvent::PauseChanged(parse_pause_changed(parsed)?)
+        }
         _ => return Err(anyhow!("unhandled event {}", parsed.name)),
     };
     Ok(ev)
@@ -289,18 +299,72 @@ fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
     Ok(LeafDeletedEvent { id, key, root })
 }
 
+// #[contractevent]
+// #[derive(Clone, Debug, Eq, PartialEq)]
+// pub struct AdminUpdated {
+//     pub old_admin: Address,
+//     pub new_admin: Address,
+// }
+fn parse_admin_updated(parsed: ParsedContractEvent) -> Result<AdminUpdatedEvent> {
+    let ParsedContractEvent {
+        id, name, values, ..
+    } = parsed;
+    let old_admin_scval = values
+        .get("old_admin")
+        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an old_admin value"))?;
+    let old_admin = scval_to_address_string(old_admin_scval)?;
+    let new_admin_scval = values
+        .get("new_admin")
+        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an new_admin value"))?;
+    let new_admin = scval_to_address_string(new_admin_scval)?;
+    Ok(AdminUpdatedEvent {
+        id,
+        old_admin,
+        new_admin,
+    })
+}
+
+// #[contractevent]
+// #[derive(Clone, Debug, Eq, PartialEq)]
+// pub struct PauseChanged {
+//     pub flags: u32,
+//     pub until: Option<u32>,
+// }
+fn parse_pause_changed(parsed: ParsedContractEvent) -> Result<PauseChangedEvent> {
+    let ParsedContractEvent {
+        id, name, values, ..
+    } = parsed;
+    let flags_scval = values
+        .get("flags")
+        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an flags value"))?;
+    let flags = scval_to_u32(flags_scval)?;
+    let until_scval = values
+        .get("until")
+        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an until value"))?;
+    let until = match until_scval {
+        xdr::ScVal::Void => None,
+        xdr::ScVal::U32(ledger) => Some(*ledger),
+        other => {
+            return Err(anyhow!(
+                "event `{name}` id {id} has an until value that is neither void nor u32: {other:?}"
+            ));
+        }
+    };
+    Ok(PauseChangedEvent { id, flags, until })
+}
+
 #[cfg(test)]
 mod gvk_passthrough_tests {
     use super::*;
     use crate::types::{Field, U256};
     use stellar_xdr::{self as xdr, WriteXdr};
 
-    fn b64(val: &xdr::ScVal) -> String {
+    pub(super) fn b64(val: &xdr::ScVal) -> String {
         val.to_xdr_base64(xdr::Limits::none())
             .expect("encode scval")
     }
 
-    fn symbol(s: &str) -> xdr::ScVal {
+    pub(super) fn symbol(s: &str) -> xdr::ScVal {
         xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")))
     }
 
@@ -469,5 +533,129 @@ mod gvk_passthrough_tests {
         assert!(without.gvk_ciphertext.is_none());
         let ct = with.gvk_ciphertext.expect("gvk ciphertext");
         assert_eq!(ct.c2, Field(U256::from(2)));
+    }
+}
+
+#[cfg(test)]
+mod governance_event_tests {
+    use super::{
+        gvk_passthrough_tests::{b64, symbol},
+        *,
+    };
+    use stellar_xdr as xdr;
+
+    fn address(byte: u8) -> xdr::ScVal {
+        xdr::ScVal::Address(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
+            [byte; 32],
+        ))))
+    }
+
+    fn event(name: &str, entries: Vec<xdr::ScMapEntry>) -> ContractEvent {
+        let mut entries = entries;
+        // Soroban emits map entries in key order.
+        entries.sort_by(|a, b| a.key.cmp(&b.key));
+        ContractEvent {
+            id: "0000000000000000003-0000000000".to_string(),
+            ledger: 1,
+            contract_id: "CPOOL".to_string(),
+            topics: vec![b64(&symbol(name))],
+            value: b64(&xdr::ScVal::Map(Some(xdr::ScMap(
+                entries.try_into().expect("data map"),
+            )))),
+        }
+    }
+
+    fn admin_updated_event(with_new_admin: bool) -> ContractEvent {
+        let mut entries = vec![xdr::ScMapEntry {
+            key: symbol("old_admin"),
+            val: address(1),
+        }];
+        if with_new_admin {
+            entries.push(xdr::ScMapEntry {
+                key: symbol("new_admin"),
+                val: address(2),
+            });
+        }
+        event("admin_updated", entries)
+    }
+
+    fn pause_changed_event(until: xdr::ScVal) -> ContractEvent {
+        event(
+            "pause_changed",
+            vec![
+                xdr::ScMapEntry {
+                    key: symbol("flags"),
+                    val: xdr::ScVal::U32(5),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("until"),
+                    val: until,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn admin_updated_parses_both_addresses() {
+        let ProcessedEvent::AdminUpdated(ev) =
+            parse_event(admin_updated_event(true)).expect("parse admin_updated")
+        else {
+            panic!("expected an admin updated event");
+        };
+
+        assert_eq!(ev.id, "0000000000000000003-0000000000");
+        assert_eq!(
+            ev.old_admin,
+            "CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526"
+        );
+        assert_eq!(
+            ev.new_admin,
+            "CABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAFNSZ"
+        );
+    }
+
+    #[test]
+    fn admin_updated_without_new_admin_fails() {
+        let err = parse_event(admin_updated_event(false))
+            .expect_err("an admin_updated event without new_admin must not parse");
+
+        assert!(err.to_string().contains("new_admin"), "{err}");
+    }
+
+    #[test]
+    fn pause_changed_reads_an_untimed_pause_as_none() {
+        let ProcessedEvent::PauseChanged(ev) =
+            parse_event(pause_changed_event(xdr::ScVal::Void)).expect("parse pause_changed")
+        else {
+            panic!("expected a pause changed event");
+        };
+
+        assert_eq!(ev.flags, 5);
+        assert_eq!(ev.until, None);
+    }
+
+    #[test]
+    fn pause_changed_reads_a_timed_pause_as_some() {
+        let ProcessedEvent::PauseChanged(ev) =
+            parse_event(pause_changed_event(xdr::ScVal::U32(42))).expect("parse pause_changed")
+        else {
+            panic!("expected a pause changed event");
+        };
+
+        assert_eq!(ev.flags, 5);
+        assert_eq!(ev.until, Some(42));
+    }
+
+    #[test]
+    fn pause_changed_with_a_non_ledger_until_names_the_event_id() {
+        let err = parse_event(pause_changed_event(xdr::ScVal::Bool(true)))
+            .expect_err("an until that is neither void nor u32 must not parse");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("0000000000000000003-0000000000"),
+            "{message}"
+        );
+        assert!(message.contains("until"), "{message}");
     }
 }
