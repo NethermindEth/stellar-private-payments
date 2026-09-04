@@ -802,3 +802,201 @@ fn test_full_tree_insert_fails_without_extending() {
     assert_ne!(before, EXTEND_TO);
     assert_eq!(entry_ttl(&env, &contract_id, &DataKey::NextIndex), before);
 }
+
+fn next_index(env: &Env, contract: &Address) -> u64 {
+    env.as_contract(contract, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set in constructor")
+    })
+}
+
+/// Registers a paused contract and returns its address and client.
+fn paused_contract(env: &Env) -> (Address, ASPMembershipClient<'_>) {
+    let admin = Address::generate(env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(env, &contract_id);
+
+    env.mock_all_auths();
+    client.pause(&pausable::MUTATIONS, &None);
+    (contract_id, client)
+}
+
+#[test]
+fn test_insert_leaf_rejected_while_paused() {
+    use soroban_sdk::testutils::Events;
+    let env = test_env();
+    let (contract_id, client) = paused_contract(&env);
+    let root_before = client.get_root();
+    let events_before = env.events().all().events().len();
+
+    let err = client
+        .try_insert_leaf(&U256::from_u32(&env, 100))
+        .expect_err("an insert must be refused while mutations are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert_eq!(client.get_root(), root_before);
+    assert_eq!(next_index(&env, &contract_id), 0);
+    assert_eq!(env.events().all().events().len(), events_before);
+}
+
+#[test]
+fn test_insert_leaf_allowed_after_unpause() {
+    let env = test_env();
+    let (contract_id, client) = paused_contract(&env);
+
+    client.unpause(&pausable::MUTATIONS);
+    client.insert_leaf(&U256::from_u32(&env, 100));
+
+    assert_eq!(next_index(&env, &contract_id), 1);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_pause_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+
+    ASPMembershipClient::new(&env, &contract_id).pause(&pausable::MUTATIONS, &None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_unpause_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+
+    ASPMembershipClient::new(&env, &contract_id).unpause(&pausable::MUTATIONS);
+}
+
+#[test]
+fn test_pause_rejects_bits_outside_mutations() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let err = client
+        .try_pause(&2u32, &None)
+        .expect_err("a pause naming a bit the contract does not honor must be refused");
+
+    assert_eq!(err, Ok(Error::InvalidPauseFlags));
+}
+
+#[test]
+fn test_timed_pause_arms_and_second_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.pause(&pausable::MUTATIONS, &Some(500));
+
+    let err = client
+        .try_pause(&pausable::MUTATIONS, &Some(900))
+        .expect_err("a second timed pause must not move the promised ledger");
+
+    assert_eq!(err, Ok(Error::TimedPauseArmed));
+    assert_eq!(client.get_pause_state().until, Some(500));
+}
+
+#[test]
+fn test_update_admin_and_get_root_work_while_paused() {
+    let env = test_env();
+    let (contract_id, client) = paused_contract(&env);
+    let new_admin = Address::generate(&env);
+    let root = client.get_root();
+
+    client.update_admin(&new_admin);
+
+    let stored_admin: Address = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin set in constructor")
+    });
+    assert_eq!(stored_admin, new_admin);
+    assert_eq!(client.get_root(), root);
+}
+
+#[test]
+fn test_new_admin_can_unpause_after_rotation() {
+    let env = test_env();
+    let (contract_id, client) = paused_contract(&env);
+    let new_admin = Address::generate(&env);
+    client.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "unpause",
+            args: (pausable::MUTATIONS,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.unpause(&pausable::MUTATIONS);
+
+    assert_eq!(client.get_pause_state().flags, 0);
+}
+
+/// `mock_all_auths` approves any signer, so the tests above cannot tell an
+/// admin signature from anyone else's. This one pins the address.
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_pause_from_a_non_admin_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let stranger = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "pause",
+            args: (pausable::MUTATIONS, None::<u32>).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.pause(&pausable::MUTATIONS, &None);
+}
+
+/// Only `WITHDRAWALS` expires, so a timed pause on `MUTATIONS` records a
+/// deadline that never arrives.
+#[test]
+fn test_a_timed_pause_still_blocks_insert_after_the_ledger_passes() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let until = env.ledger().sequence().saturating_add(10);
+    client.pause(&pausable::MUTATIONS, &Some(until));
+
+    env.ledger().set_sequence_number(until);
+
+    let err = client
+        .try_insert_leaf(&U256::from_u32(&env, 100))
+        .expect_err("a timed pause on mutations never reopens");
+    assert_eq!(err, Ok(Error::Paused));
+    assert!(client.get_pause_state().armed);
+}
