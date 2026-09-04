@@ -1209,3 +1209,174 @@ fn test_find_key_extends_the_path_it_reads() {
         EXTEND_TO
     );
 }
+
+/// Registers a contract holding one leaf, then pauses mutations. Returns the
+/// client, the key it holds, and that key's value.
+fn paused_with_one_leaf(env: &Env) -> (ASPNonMembershipClient<'_>, U256, U256) {
+    let admin = Address::generate(env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(env, &contract_id);
+    let key = U256::from_u32(env, 1u32);
+    let value = U256::from_u32(env, 42u32);
+
+    env.mock_all_auths();
+    client.insert_leaf(&key, &value);
+    client.pause(&pausable::MUTATIONS, &None);
+    (client, key, value)
+}
+
+#[test]
+fn test_insert_leaf_rejected_while_paused() {
+    let env = test_env();
+    let (client, ..) = paused_with_one_leaf(&env);
+    let root_before = client.get_root();
+
+    let err = client
+        .try_insert_leaf(&U256::from_u32(&env, 7u32), &U256::from_u32(&env, 99u32))
+        .expect_err("an insert must be refused while mutations are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert_eq!(client.get_root(), root_before);
+}
+
+#[test]
+fn test_delete_leaf_rejected_while_paused() {
+    let env = test_env();
+    let (client, key, value) = paused_with_one_leaf(&env);
+    let root_before = client.get_root();
+
+    let err = client
+        .try_delete_leaf(&key)
+        .expect_err("a delete must be refused while mutations are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert_eq!(client.get_root(), root_before);
+    let find_result = client.find_key(&key);
+    assert!(find_result.found);
+    assert_eq!(find_result.found_value, value);
+}
+
+#[test]
+fn test_find_key_and_verify_work_while_paused() {
+    let env = test_env();
+    let (client, key, value) = paused_with_one_leaf(&env);
+    let absent_key = U256::from_u32(&env, 99u32);
+
+    let find_result = client.find_key(&absent_key);
+
+    assert!(!find_result.found);
+    assert_eq!(find_result.not_found_key, key);
+    assert_eq!(find_result.not_found_value, value);
+    assert!(client.verify_non_membership(
+        &absent_key,
+        &find_result.siblings,
+        &find_result.not_found_key,
+        &find_result.not_found_value,
+    ));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_pause_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+
+    ASPNonMembershipClient::new(&env, &contract_id).pause(&pausable::MUTATIONS, &None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_unpause_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+
+    ASPNonMembershipClient::new(&env, &contract_id).unpause(&pausable::MUTATIONS);
+}
+
+#[test]
+fn test_writes_resume_after_unpause() {
+    let env = test_env();
+    let (client, key, _) = paused_with_one_leaf(&env);
+
+    client.unpause(&pausable::MUTATIONS);
+    client.insert_leaf(&U256::from_u32(&env, 7u32), &U256::from_u32(&env, 99u32));
+    client.delete_leaf(&key);
+
+    assert!(!client.find_key(&key).found);
+}
+
+#[test]
+fn test_timed_pause_arms_and_second_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.pause(&pausable::MUTATIONS, &Some(500));
+
+    let err = client
+        .try_pause(&pausable::MUTATIONS, &Some(900))
+        .expect_err("a second timed pause must not move the promised ledger");
+
+    assert_eq!(err, Ok(Error::TimedPauseArmed));
+    assert_eq!(client.get_pause_state().until, Some(500));
+}
+
+/// `mock_all_auths` approves any signer, so the tests above cannot tell an
+/// admin signature from anyone else's. This one pins the address.
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_pause_from_a_non_admin_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let stranger = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "pause",
+            args: (pausable::MUTATIONS, None::<u32>).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.pause(&pausable::MUTATIONS, &None);
+}
+
+/// Only `WITHDRAWALS` expires, so a timed pause on `MUTATIONS` records a
+/// deadline that never arrives.
+#[test]
+fn test_a_timed_pause_still_blocks_insert_after_the_ledger_passes() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let until = env.ledger().sequence().saturating_add(10);
+    client.pause(&pausable::MUTATIONS, &Some(until));
+
+    env.ledger().set_sequence_number(until);
+
+    let err = client
+        .try_insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 42u32))
+        .expect_err("a timed pause on mutations never reopens");
+    assert_eq!(err, Ok(Error::Paused));
+    assert!(client.get_pause_state().armed);
+}
