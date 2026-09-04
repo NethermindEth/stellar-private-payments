@@ -25,7 +25,7 @@ import { AppStorage } from './app-storage.js';
 
 export { DisclosureRequest };
 
-const DEPLOYMENT_CONFIG_URL = new URL('/deployments.json', window.location.href).href;
+const DEPLOYMENT_CONFIG_URL = new URL('./deployments.json', document.baseURI).href;
 const CIRCUITS_BASE_URL = new URL(
   './js/stellar-private-payments/dist/circuits/',
   window.location.href,
