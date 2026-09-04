@@ -20,6 +20,10 @@ pub struct GvkAudit {
 impl GvkAudit {
     /// Fetch and audit the next transaction, or `null` when exhausted.
     #[wasm_bindgen(js_name = nextTx)]
+    // Holding the borrow across `.await` is intentional: it serializes
+    // concurrent `nextTx()` calls, turning a reentrant call into a clean
+    // error instead of racing the cursor. Safe on wasm's single thread.
+    #[allow(clippy::await_holding_refcell_ref)]
     pub async fn next_tx(&self) -> Result<JsValue, JsError> {
         let mut inner = self
             .inner
