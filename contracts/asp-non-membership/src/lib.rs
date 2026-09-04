@@ -28,7 +28,9 @@ use soroban_sdk::{
     vec,
 };
 use soroban_utils::{
-    AdminError, bump_entry, bump_instance, get_admin, poseidon2_compress, poseidon2_hash2,
+    AdminError, bump_entry, bump_instance, get_admin,
+    pausable::{self, PauseError, PauseState},
+    poseidon2_compress, poseidon2_hash2,
 };
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -68,6 +70,22 @@ pub enum Error {
     InvalidProof = 4,
     NotInitialized = 5,
     Overflow = 6,
+    /// Tree mutations are paused.
+    Paused = 7,
+    /// Pause flags were zero, or held a bit the contract does not recognize.
+    InvalidPauseFlags = 8,
+    /// A timed pause was asked for after every bit was cleared, while the
+    /// earlier deadline is still ahead.
+    TimedPauseArmed = 9,
+}
+
+impl From<PauseError> for Error {
+    fn from(e: PauseError) -> Self {
+        match e {
+            PauseError::InvalidFlags => Error::InvalidPauseFlags,
+            PauseError::TimedPauseArmed => Error::TimedPauseArmed,
+        }
+    }
 }
 
 // Events
@@ -135,6 +153,63 @@ impl ASPNonMembership {
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         bump_instance(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
+    }
+
+    /// Pauses tree mutations.
+    ///
+    /// The only bit the contract honors is `MUTATIONS` from
+    /// [`soroban_utils::pausable`]. Passing `Some(until)` promises that it
+    /// stops being honored at that ledger. A second timed pause during the
+    /// window keeps the stored `until`, and a timed pause is refused on a
+    /// contract whose bit was cleared while `until` is still ahead. Requires
+    /// admin authorization.
+    ///
+    /// A pause stops `insert_leaf` and `delete_leaf`, and nothing else.
+    /// `update_admin`, `unpause`, `find_key`, `verify_non_membership`, and
+    /// `get_root` answer while the contract is paused, so pools keep proving
+    /// non-membership against a frozen tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored, [`Error::InvalidPauseFlags`] if `flags` is zero or holds a bit
+    /// other than `MUTATIONS`, and [`Error::TimedPauseArmed`] if `until` is
+    /// `Some` while the bit is clear and an earlier `until` is still in the
+    /// future.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the contract.
+    pub fn pause(env: Env, flags: u32, until: Option<u32>) -> Result<(), Error> {
+        bump_instance(&env);
+        get_admin(&env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::pause(&env, flags, until, pausable::MUTATIONS)?)
+    }
+
+    /// Clears the pause bits named by `flags`.
+    ///
+    /// Clearing bits that are not set is accepted, and a timed pause's `until`
+    /// stays in place. Requires admin authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored, and [`Error::InvalidPauseFlags`] if `flags` is zero or holds a
+    /// bit other than `MUTATIONS`.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the contract.
+    pub fn unpause(env: Env, flags: u32) -> Result<(), Error> {
+        bump_instance(&env);
+        get_admin(&env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::unpause(&env, flags, pausable::MUTATIONS)?)
+    }
+
+    /// Returns the contract's pause bits.
+    pub fn get_pause_state(env: Env) -> PauseState {
+        bump_instance(&env);
+        pausable::get_state(&env)
     }
 
     /// Hash a leaf node using Poseidon2
@@ -372,14 +447,18 @@ impl ASPNonMembership {
     ///
     /// # Errors
     ///
+    /// * `Error::Paused` - Tree mutations are paused
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
     #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         bump_instance(&env);
-        let store = env.storage().persistent();
         get_admin(&env, &DataKey::Admin)?.require_auth();
+        if pausable::is_paused(&env, pausable::MUTATIONS) {
+            return Err(Error::Paused);
+        }
 
+        let store = env.storage().persistent();
         let root: U256 = store
             .get(&DataKey::Root)
             .inspect(|_| bump_entry(&env, &DataKey::Root))
@@ -535,12 +614,17 @@ impl ASPNonMembership {
     ///
     /// # Errors
     ///
+    /// * `Error::Paused` - Tree mutations are paused
     /// * `Error::KeyNotFound` - Key does not exist in the tree or database
     ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         bump_instance(&env);
-        let store = env.storage().persistent();
         get_admin(&env, &DataKey::Admin)?.require_auth();
+        if pausable::is_paused(&env, pausable::MUTATIONS) {
+            return Err(Error::Paused);
+        }
+
+        let store = env.storage().persistent();
         let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
         bump_entry(&env, &DataKey::Root);
 
