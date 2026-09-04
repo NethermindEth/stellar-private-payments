@@ -197,7 +197,7 @@ impl PrivatePool {
     /// `0x`-prefixed field hex string. Requires a pool-gvk deployment with
     /// GVK enabled.
     pub async fn audit(&self, global_view_private_key_hex: &str) -> Result<GvkAudit, JsError> {
-        let d_priv = Field::from_str(global_view_private_key_hex)
+        let d_priv = Field::from_str(global_view_private_key_hex.trim())
             .map_err(|e| JsError::new(&e.to_string()))?;
         let inner = self.inner().audit(d_priv).await.map_err(pool_err)?;
         Ok(GvkAudit::new(inner))
