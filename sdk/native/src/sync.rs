@@ -11,6 +11,7 @@ use crate::{
     },
     types::{ContractConfig, SyncMetadata},
 };
+use anyhow::Context as _;
 use futures::task::AtomicWaker;
 
 use crate::{Error, Handle, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult};
@@ -277,9 +278,9 @@ impl<S: Storage> BackgroundSync<S> {
                     &self.contract_config,
                 )
                 .await
-                .map_err(|e| Error::Other(format!("indexer: {e:#}")))?
+                .context("indexer")?
             }
-            Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
+            Err(e) => return Err(e.context("indexer").into()),
         };
 
         loop {
@@ -336,12 +337,9 @@ async fn apply_bootnode_handoff<S: Storage>(
     storage
         .save_sync_progress(metadata, false)
         .await
-        .map_err(|e| Error::Other(format!("handoff sync progress: {e:#}")))?;
+        .context("handoff sync progress")?;
     storage.clear_indexing_cursors().await?;
-    storage
-        .clamp_last_fully_indexed_ledger(from_ledger)
-        .await
-        .map_err(|e| Error::Other(format!("handoff clamp fully indexed: {e:#}")))?;
+    storage.clamp_last_fully_indexed_ledger(from_ledger).await?;
     tracing::info!(
         from_ledger,
         "bootnode handoff, resuming main RPC from cutoff"
@@ -355,7 +353,9 @@ async fn apply_bootnode_handoff_from_err<S: Storage>(
     err: &RpcError,
 ) -> Result<(), Error> {
     let from_ledger = retention_handoff_from_ledger(err).ok_or_else(|| {
-        Error::Other("bootnode handoff missing fromLedger in error data".to_string())
+        Error::Other(anyhow::anyhow!(
+            "bootnode handoff missing fromLedger in error data"
+        ))
     })?;
     apply_bootnode_handoff(storage, contract_config, from_ledger).await
 }
@@ -379,7 +379,7 @@ pub async fn bootnode_required<S: Storage>(
     match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
         Ok(_) => Ok(false),
         Err(e) if is_rpc_sync_gap(&e) => Ok(true),
-        Err(e) => Err(Error::Other(format!("bootnode probe: {e:#}"))),
+        Err(e) => Err(e.context("bootnode probe").into()),
     }
 }
 
@@ -427,18 +427,16 @@ async fn bootnode_catch_up<S: Storage>(
     stop: Option<&AtomicBool>,
 ) -> Result<(), Error> {
     let Some(bootnode) = bootnode_url else {
-        return Err(Error::Other(
+        return Err(Error::Other(anyhow::anyhow!(
             "RPC sync gap: main RPC lacks history; configure a bootnode \
              or use a different RPC / fresher deployment"
-                .to_string(),
-        ));
+        )));
     };
 
     tracing::info!("main RPC sync gap, trying bootnode at {bootnode}");
     storage.clear_indexing_cursors().await?;
 
-    let bootnode_client =
-        RpcClient::new(bootnode).map_err(|e| Error::Other(format!("bootnode rpc: {e:#}")))?;
+    let bootnode_client = RpcClient::new(bootnode).context("bootnode rpc")?;
 
     let bootnode_indexer =
         match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
@@ -449,7 +447,7 @@ async fn bootnode_catch_up<S: Storage>(
                 }
                 return Ok(());
             }
-            Err(e) => return Err(Error::Other(format!("bootnode indexer: {e:#}"))),
+            Err(e) => return Err(e.context("bootnode indexer").into()),
         };
 
     let mut consecutive_failures = 0u32;
@@ -483,9 +481,11 @@ async fn bootnode_catch_up<S: Storage>(
                     "bootnode sync round failed ({consecutive_failures}/{BOOTNODE_CATCH_UP_MAX_FAILURES}): {e:#}"
                 );
                 if consecutive_failures >= BOOTNODE_CATCH_UP_MAX_FAILURES {
-                    return Err(Error::Other(format!(
-                        "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors: {e:#}"
-                    )));
+                    return Err(e
+                        .context(format!(
+                            "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors"
+                        ))
+                        .into());
                 }
                 sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
@@ -509,13 +509,14 @@ pub(crate) async fn catch_up<S: Storage>(
             bootnode_catch_up(storage, contract_config, bootnode_url, None).await?;
             Indexer::init(rpc.clone(), storage.fork()?, contract_config)
                 .await
-                .map_err(|e| Error::Other(format!("indexer: {e:#}")))?
+                .context("indexer")?
         }
-        Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
+        Err(e) => return Err(e.context("indexer").into()),
     };
     catch_up_loop(&indexer, storage, None)
         .await
-        .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))
+        .context("indexer catch-up")
+        .map_err(Into::into)
 }
 
 /// Poll until a submitted transaction succeeds or fails.
@@ -531,7 +532,7 @@ pub(crate) async fn confirm_tx(
         }
         match rpc_confirm_tx(rpc, hash)
             .await
-            .map_err(|e| Error::Other(format!("confirm transaction: {e:#}")))?
+            .context("confirm transaction")?
         {
             TxConfirmStatus::Success => {
                 return Ok(TransactionResult {
@@ -539,10 +540,10 @@ pub(crate) async fn confirm_tx(
                 });
             }
             TxConfirmStatus::Failed { detail } => {
-                return Err(Error::Other(format!("transaction failed{detail}")));
+                return Err(Error::Other(anyhow::anyhow!("transaction failed{detail}")));
             }
             TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
-                return Err(Error::Other(format!(
+                return Err(Error::Other(anyhow::anyhow!(
                     "transaction confirmation timed out after 30s (hash: {hash})"
                 )));
             }
@@ -550,7 +551,7 @@ pub(crate) async fn confirm_tx(
         }
     }
 
-    Err(Error::Other(format!(
+    Err(Error::Other(anyhow::anyhow!(
         "transaction confirmation failed (hash: {hash})"
     )))
 }

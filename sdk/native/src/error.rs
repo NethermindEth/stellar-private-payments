@@ -1,6 +1,6 @@
 use crate::{
     planner::{PlanError, SpendSessionError},
-    types::AspMembershipSync,
+    types::{AspMembershipSync, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -25,7 +25,7 @@ pub enum Error {
     #[error(transparent)]
     PlanExecution(#[from] PlanExecutionError),
 
-    /// The user rejected the wallet signing request (SEP-0043 error code -4).
+    /// The user rejected the wallet signing request (SEP-0043 error code -4)
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
@@ -38,19 +38,20 @@ pub enum Error {
     // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
     #[error(
         "signing account {} is not the note owner {}; a session where they differ is not supported",
-        crate::types::Sensitive(signer),
-        crate::types::Sensitive(owner)
+        Sensitive(signer),
+        Sensitive(owner)
     )]
     SignerIsNotNoteOwner { owner: String, signer: String },
 
-    #[error("{0}")]
-    Other(String),
-}
+    /// Local storage has no privacy keys for address
+    #[error(
+        "no privacy keys found in local storage for {}",
+        Sensitive(user_address)
+    )]
+    UserKeysNotFound { user_address: String },
 
-impl Error {
-    pub fn other(msg: impl Into<String>) -> Self {
-        Self::Other(msg.into())
-    }
+    #[error("{0}")]
+    Other(#[from] anyhow::Error),
 }
 
 /// Multi-tx plan stopped after one or more steps had already confirmed

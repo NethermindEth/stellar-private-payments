@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use crate::chain::{Limits, LocalSigner as StellarSigner, PreparedSorobanTx, WriteXdr};
 
 use super::Signer;
@@ -21,8 +23,7 @@ impl LocalSigner {
         signer_address: SignerAddress,
     ) -> Result<Self, Error> {
         Ok(Self {
-            stellar: StellarSigner::from_secret(secret_key)
-                .map_err(|e| Error::Other(format!("signer: {e:#}")))?,
+            stellar: StellarSigner::from_secret(secret_key).context("signer")?,
             network_passphrase: network_passphrase.into(),
             signer_address,
         })
@@ -57,10 +58,10 @@ impl Signer for LocalSigner {
         let envelope = self
             .stellar
             .sign_prepared_transaction(prepared, &self.network_passphrase, &self.signer_address)
-            .map_err(|e| Error::Other(format!("sign transaction: {e:#}")))?;
+            .context("sign transaction")?;
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())
-            .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
+            .context("encode signed transaction xdr")?;
         Ok(SignedTransaction { signed_xdr })
     }
 }

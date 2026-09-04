@@ -52,7 +52,7 @@ impl PoolCore {
             self.config.pool_contract_id.clone(),
             SpendTarget::transfer(note_public_key, encryption_public_key),
         )?;
-        PreparedTransactionPlan::from_session(session).map_err(Error::from)
+        Ok(PreparedTransactionPlan::from_session(session)?)
     }
 
     pub fn prepare_withdraw(
@@ -70,7 +70,7 @@ impl PoolCore {
             self.config.pool_contract_id.clone(),
             SpendTarget::withdraw(recipient.into()),
         )?;
-        PreparedTransactionPlan::from_session(session).map_err(Error::from)
+        Ok(PreparedTransactionPlan::from_session(session)?)
     }
 
     pub fn estimate(
@@ -90,8 +90,9 @@ impl PoolCore {
         enc_pub: EncryptionPublicKey,
         amount: NoteAmount,
     ) -> Result<Transact, Error> {
-        let ext_amount = ExtAmount::try_from(amount)
-            .map_err(|_| Error::Other("deposit amount exceeds ext_amount range".into()))?;
+        let ext_amount = ExtAmount::try_from(amount).map_err(|_| {
+            Error::Other(anyhow::anyhow!("deposit amount exceeds ext_amount range"))
+        })?;
 
         Ok(Transact::new(
             Vec::new(),
