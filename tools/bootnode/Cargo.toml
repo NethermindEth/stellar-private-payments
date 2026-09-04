@@ -42,7 +42,7 @@ tower = "0.5.3"
 tower-http = { version = "0.6.11", features = ["cors", "set-header", "trace"] }
 tower_governor = "0.7.0"
 tracing = "0.1.44"
-tracing-opentelemetry = { version = "0.29.0", default-features = false }
+tracing-opentelemetry = { version = "0.33.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 url = "2.5.8"
 
