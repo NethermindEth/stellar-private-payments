@@ -46,6 +46,32 @@ pub struct ContractConfig {
     pub pools: Vec<PoolConfigEntry>,
 }
 
+/// Which deployed contract raised a Soroban contract error.
+///
+/// Resolved from a contract id by [`ContractConfig::classify_contract`].
+/// A numeric error code is only meaningful against the error table of
+/// the contract that raised it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractKind {
+    Pool,
+    PoolGvk,
+    AspMembership,
+    AspNonMembership,
+    Groth16Verifier,
+}
+
+impl ContractKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ContractKind::Pool => "pool",
+            ContractKind::PoolGvk => "pool-gvk",
+            ContractKind::AspMembership => "asp-membership",
+            ContractKind::AspNonMembership => "asp-non-membership",
+            ContractKind::Groth16Verifier => "groth16-verifier",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoolConfigEntry {
@@ -387,6 +413,35 @@ impl ContractConfig {
             .get(&key)
             .map(String::as_str)
             .ok_or_else(|| anyhow!("no verifier configured for policy flags {key:?}"))
+    }
+
+    /// Classifies a contract id from a host error against this deployment.
+    ///
+    /// Matches all configured pools, not only enabled ones — a disabled pool
+    /// can still return an error (e.g. for a transaction built before it was
+    /// disabled).
+    pub fn classify_contract(&self, contract_id: &str) -> Option<ContractKind> {
+        if let Some(pool) = self
+            .pools
+            .iter()
+            .find(|p| p.pool_contract_id == contract_id)
+        {
+            return Some(if pool.gvk_mode == GvkMode::Off {
+                ContractKind::Pool
+            } else {
+                ContractKind::PoolGvk
+            });
+        }
+        if self.asp_membership == contract_id {
+            return Some(ContractKind::AspMembership);
+        }
+        if self.asp_non_membership == contract_id {
+            return Some(ContractKind::AspNonMembership);
+        }
+        if self.verifiers.values().any(|v| v == contract_id) {
+            return Some(ContractKind::Groth16Verifier);
+        }
+        None
     }
 }
 

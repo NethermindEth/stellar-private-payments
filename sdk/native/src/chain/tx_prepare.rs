@@ -80,7 +80,7 @@ impl StateFetcher {
         )?;
 
         let sim = self.client.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+        PreparedSorobanTx::from_simulation(&raw, &sim, Some(self.contract_config()))
     }
 
     /// Simulates `register` on the configured public key registry contract and
@@ -105,7 +105,7 @@ impl StateFetcher {
         )?;
 
         let sim = self.client.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+        PreparedSorobanTx::from_simulation(&raw, &sim, Some(self.contract_config()))
     }
 
     async fn account_sequence(&self, source_account: &str) -> Result<xdr::SequenceNumber> {
@@ -237,14 +237,14 @@ mod tests {
             Vec::new(),
         )?;
         let sim = mock.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+        PreparedSorobanTx::from_simulation(&raw, &sim, Some(&config))
     }
 
     #[test]
     fn prepared_tx_applies_simulation_fee_and_auth() {
         let raw = empty_envelope();
         let sim = fixture_sim("500");
-        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim).expect("prepare");
+        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim, None).expect("prepare");
         assert!(prepared.auth_entries.is_empty());
         assert_eq!(prepared.latest_ledger, 1);
         assert!(!prepared.tx_xdr.is_empty());
@@ -348,7 +348,7 @@ mod tests {
         .expect("raw tx");
 
         let sim = block_on(mock.simulate_transaction(&raw)).expect("simulate");
-        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim).expect("prepare");
+        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim, None).expect("prepare");
 
         let env = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
             .expect("xdr");

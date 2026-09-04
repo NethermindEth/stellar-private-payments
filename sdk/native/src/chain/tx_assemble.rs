@@ -54,9 +54,16 @@ impl SimulateTransactionResponse {
     }
 
     /// Fails if the simulation response contains a top-level error string.
-    pub fn ensure_success(&self) -> Result<()> {
+    ///
+    /// `config` lets the failing contract id be resolved to a concrete contract
+    /// so the numeric code can be named; pass `None` when no deployment is
+    /// in scope.
+    pub fn ensure_success(&self, config: Option<&crate::types::ContractConfig>) -> Result<()> {
         if let Some(err) = &self.error {
-            return Err(anyhow!("transaction simulation failed: {err}"));
+            return match crate::chain::contract_error::translate(err, config) {
+                Some(info) => Err(anyhow!("transaction simulation failed: {info}\n\n{err}")),
+                None => Err(anyhow!("transaction simulation failed: {err}")),
+            };
         }
         Ok(())
     }
@@ -68,8 +75,9 @@ impl SimulateTransactionResponse {
 fn assemble_soroban_transaction(
     raw: &xdr::TransactionEnvelope,
     sim: &SimulateTransactionResponse,
+    config: Option<&crate::types::ContractConfig>,
 ) -> Result<xdr::TransactionEnvelope> {
-    sim.ensure_success()?;
+    sim.ensure_success(config)?;
 
     let min_resource_fee = sim.min_resource_fee_u64()?;
     let soroban_data = sim.soroban_transaction_data()?;
@@ -131,8 +139,9 @@ impl PreparedSorobanTx {
     pub(crate) fn from_simulation(
         raw: &xdr::TransactionEnvelope,
         sim: &SimulateTransactionResponse,
+        config: Option<&crate::types::ContractConfig>,
     ) -> Result<Self> {
-        let assembled = assemble_soroban_transaction(raw, sim)?;
+        let assembled = assemble_soroban_transaction(raw, sim, config)?;
         let latest_ledger = u32::try_from(sim.latest_ledger)
             .map_err(|_| anyhow!("latestLedger does not fit into u32"))?;
         Ok(Self {
@@ -251,7 +260,7 @@ mod tests {
                 ..Default::default()
             });
 
-        let assembled = assemble_soroban_transaction(&raw, &sim).expect("assemble");
+        let assembled = assemble_soroban_transaction(&raw, &sim, None).expect("assemble");
         let xdr::TransactionEnvelope::Tx(v1) = &assembled else {
             panic!("expected v1 envelope")
         };
@@ -282,7 +291,7 @@ mod tests {
                 ..Default::default()
             });
 
-        let assembled = assemble_soroban_transaction(&raw, &sim).expect("assemble");
+        let assembled = assemble_soroban_transaction(&raw, &sim, None).expect("assemble");
         let xdr::TransactionEnvelope::Tx(v1) = &assembled else {
             panic!("expected v1 envelope");
         };
@@ -309,6 +318,49 @@ mod tests {
             min_resource_fee: None,
             error: Some("boom".to_string()),
         };
-        assert!(assemble_soroban_transaction(&raw, &sim).is_err());
+        assert!(assemble_soroban_transaction(&raw, &sim, None).is_err());
+    }
+
+    /// `ensure_success` must keep the raw simulation text (for debugging)
+    /// alongside the readable translation (from `contract_error::translate`).
+    #[test]
+    fn ensure_success_reports_readable_message_and_keeps_raw_text() {
+        const POOL_ERROR_WITH_EVENT_LOG: &str = "transaction simulation failed: HostError: Error(Contract, #2)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #2)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"";
+        const TEST_CONFIG_JSON: &str = r#"{
+            "network": "test",
+            "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "verifiers": {},
+            "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "pools": [{
+                "poolContractId": "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ",
+                "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+                "deploymentLedger": 1,
+                "enabled": true,
+                "policyFlags": [],
+                "asset": {"kind": "native"}
+            }]
+        }"#;
+
+        let config: crate::types::ContractConfig =
+            serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let sim = SimulateTransactionResponse {
+            latest_ledger: 0,
+            result: None,
+            results: vec![],
+            transaction_data: None,
+            min_resource_fee: None,
+            error: Some(POOL_ERROR_WITH_EVENT_LOG.to_string()),
+        };
+
+        let err = sim
+            .ensure_success(Some(&config))
+            .expect_err("error carries a message");
+        let rendered = err.to_string();
+        assert!(rendered.contains("This pool is full"), "{rendered}");
+        assert!(rendered.contains("pool::MerkleTreeFull"), "{rendered}");
+        assert!(rendered.contains(POOL_ERROR_WITH_EVENT_LOG), "{rendered}");
     }
 }
