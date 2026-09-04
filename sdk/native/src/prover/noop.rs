@@ -19,14 +19,14 @@ pub(crate) struct NoopProver;
 #[async_trait::async_trait(?Send)]
 impl Prover for NoopProver {
     async fn prove_transact(&self, _params: TransactParams) -> Result<PreparedProverTx, Error> {
-        Err(Error::Other(READ_ONLY.into()))
+        Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
     }
 
     async fn prove_disclosure(
         &self,
         _params: DisclosureProveParams,
     ) -> Result<DisclosureReceipt, Error> {
-        Err(Error::Other(READ_ONLY.into()))
+        Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
     }
 
     async fn verify_disclosure_proof(
@@ -34,6 +34,6 @@ impl Prover for NoopProver {
         _receipt: &DisclosureReceipt,
         _expected_vk_hash: &str,
     ) -> Result<bool, Error> {
-        Err(Error::Other(READ_ONLY.into()))
+        Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
     }
 }

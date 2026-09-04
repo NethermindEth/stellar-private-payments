@@ -15,6 +15,5 @@ pub fn derive_asp_user_leaf(
     note_public_key: &NotePublicKey,
     membership_blinding: &Field,
 ) -> Result<Field, Error> {
-    asp_membership_leaf(note_public_key, membership_blinding)
-        .map_err(|e| Error::Other(e.to_string()))
+    asp_membership_leaf(note_public_key, membership_blinding).map_err(Error::Other)
 }

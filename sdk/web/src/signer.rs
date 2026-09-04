@@ -178,7 +178,7 @@ fn wallet_sign_error(error: JsError) -> Error {
             .unwrap_or_else(|| "request rejected".to_string());
         Error::UserRejected(message)
     } else {
-        Error::Other(format!("{error:?}"))
+        Error::Other(anyhow::anyhow!("{error:?}"))
     }
 }
 
@@ -225,7 +225,7 @@ impl Signer for WalletSigner {
 
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())
-            .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
+            .map_err(|e| Error::Other(anyhow::anyhow!("encode signed transaction xdr: {e}")))?;
 
         Ok(SignedTransaction { signed_xdr })
     }

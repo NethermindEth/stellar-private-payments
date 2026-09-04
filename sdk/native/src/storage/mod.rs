@@ -24,9 +24,9 @@ use std::collections::HashSet;
 pub use local::LocalStorage;
 
 pub(crate) fn map_build_params(
-    result: anyhow::Result<BuildTransactParams>,
+    result: Result<BuildTransactParams, Error>,
 ) -> Result<TransactParams, Error> {
-    match result.map_err(|e| Error::Other(e.to_string()))? {
+    match result? {
         BuildTransactParams::Ready(params) => Ok(*params),
         BuildTransactParams::MembershipSync(status) => Err(Error::MembershipSync(status)),
     }
@@ -37,12 +37,9 @@ pub(crate) fn map_user_keys(
     user_address: &str,
 ) -> Result<StoredUserKeys, Error> {
     storage
-        .get_user_keys(user_address)
-        .map_err(|e| Error::Other(e.to_string()))?
-        .ok_or_else(|| {
-            Error::Other(format!(
-                "address {user_address} should generate privacy keys and ASP secret first"
-            ))
+        .get_user_keys(user_address)?
+        .ok_or_else(|| Error::UserKeysNotFound {
+            user_address: user_address.to_string(),
         })
 }
 
@@ -53,7 +50,7 @@ pub(crate) fn spendable_notes_from_storage(
 ) -> Result<Vec<SpendableNote>, Error> {
     storage
         .list_unspent_user_notes(pool_contract_id, user_address)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
         .map(|notes| {
             notes
                 .into_iter()
@@ -72,7 +69,7 @@ pub(crate) fn pool_notes_from_storage(
 ) -> Result<Vec<UserNoteSummary>, Error> {
     storage
         .list_pool_user_notes(pool_contract_id, user_address)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
 }
 
 pub(crate) fn portfolio_balances_from_storage(
@@ -82,7 +79,7 @@ pub(crate) fn portfolio_balances_from_storage(
 ) -> Result<Vec<PortfolioBalance>, Error> {
     storage
         .list_portfolio_balances(user_address, enabled_pools)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
 }
 
 pub(crate) fn user_notes_from_storage(
@@ -92,7 +89,7 @@ pub(crate) fn user_notes_from_storage(
 ) -> Result<Vec<UserNoteSummary>, Error> {
     storage
         .list_user_notes(user_address, limit)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
 }
 
 pub(crate) fn operational_feed_from_storage(
@@ -102,7 +99,7 @@ pub(crate) fn operational_feed_from_storage(
 ) -> Result<Vec<OperationalFeedItem>, Error> {
     storage
         .get_operational_feed(limit, &config.asp_membership, &config.public_key_registry)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
 }
 
 pub(crate) fn recipient_lookup_from_storage(
@@ -112,7 +109,7 @@ pub(crate) fn recipient_lookup_from_storage(
 ) -> Result<RecipientLookup, Error> {
     storage
         .recipient_lookup(address, &config.public_key_registry)
-        .map_err(|e| Error::Other(e.to_string()))
+        .map_err(Error::Other)
 }
 
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
