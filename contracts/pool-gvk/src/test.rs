@@ -30,6 +30,7 @@ use soroban_sdk::{
 };
 use soroban_utils::{
     constants::bn256_modulus,
+    pausable::{self, PauseChanged},
     ttl::{EXTEND_TO, THRESHOLD},
     utils::MockToken,
 };
@@ -2004,4 +2005,293 @@ fn getters_extend_the_instance() {
     pool.get_root();
 
     assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
+}
+
+/// A GVK pool with mocked authorizations and no ASP policy, for the pause
+/// paths that never reach a proof.
+fn pausable_pool_gvk(env: &Env) -> PoolGvkContractClient<'static> {
+    env.mock_all_auths();
+    let setup = setup_test_contracts(env);
+    let pool_id = register_pool_gvk(
+        env,
+        &setup,
+        U256::from_u32(env, 1000),
+        3,
+        0,
+        mk_point(env, 1, 2),
+        VIEW_ONLY,
+    );
+    PoolGvkContractClient::new(env, &pool_id)
+}
+
+#[test]
+fn transact_rejects_deposit_while_deposits_paused() {
+    let nullifier = 0xF1;
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, nullifier, 500, 1000);
+    pool.pause(&pausable::DEPOSITS, &None);
+
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a deposit must be refused while deposits are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+    assert!(!pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+#[test]
+fn transact_allows_withdrawal_and_transfer_while_only_deposits_paused() {
+    let (_, withdrawing, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF2, -300, 1000);
+    withdrawing.pause(&pausable::DEPOSITS, &None);
+    withdrawing.transact(&proof, &ext, &sender);
+
+    let (_, transferring, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF3, 0, 1000);
+    transferring.pause(&pausable::DEPOSITS, &None);
+    transferring.transact(&proof, &ext, &sender);
+}
+
+#[test]
+fn transact_rejects_transfer_while_transfers_paused() {
+    let (_, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF4, 0, 1000);
+    pool.pause(&pausable::TRANSFERS, &None);
+
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a transfer must be refused while transfers are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+}
+
+#[test]
+fn transact_rejects_withdrawal_while_withdrawals_paused() {
+    let (_, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF5, -300, 1000);
+    pool.pause(&pausable::WITHDRAWALS, &None);
+
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a withdrawal must be refused while withdrawals are paused");
+
+    assert_eq!(err, Ok(Error::Paused));
+}
+
+#[test]
+fn full_pause_blocks_all_three_shapes() {
+    for ext_amount in [500i32, 0, -300] {
+        let (_, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF6, ext_amount, 1000);
+        pool.pause(&pausable::POOL_MASK, &None);
+
+        let err = pool
+            .try_transact(&proof, &ext, &sender)
+            .expect_err("a fully paused pool must refuse every shape");
+
+        assert_eq!(
+            err,
+            Ok(Error::Paused),
+            "ext_amount {ext_amount} was allowed"
+        );
+    }
+}
+
+#[test]
+fn withdrawals_reopen_when_the_timed_pause_expires_but_deposits_stay_paused() {
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF7, -300, 1000);
+    let until = env.ledger().sequence().saturating_add(10);
+    pool.pause(&(pausable::DEPOSITS | pausable::WITHDRAWALS), &Some(until));
+
+    env.ledger().set_sequence_number(until);
+    pool.transact(&proof, &ext, &sender);
+
+    // The pause check reads only the sign of `ext_amount`, and it runs before
+    // the proof is looked at, so a deposit-shaped call needs no proof of its
+    // own to prove that deposits are still shut.
+    let deposit = mk_ext_data(&env, Address::generate(&env), 500);
+    let err = pool
+        .try_transact(&proof, &deposit, &sender)
+        .expect_err("only withdrawals reopen when a timed pause expires");
+    assert_eq!(err, Ok(Error::Paused));
+
+    let state = pool.get_pause_state();
+    assert_eq!(state.flags, pausable::DEPOSITS | pausable::WITHDRAWALS);
+    assert!(state.armed);
+}
+
+#[test]
+fn transact_succeeds_again_after_unpause() {
+    let (_, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xF8, 0, 1000);
+    pool.pause(&pausable::TRANSFERS, &None);
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+
+    pool.unpause(&pausable::TRANSFERS);
+
+    pool.transact(&proof, &ext, &sender);
+}
+
+#[test]
+fn update_admin_works_while_fully_paused() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    pool.pause(&pausable::POOL_MASK, &None);
+    let new_admin = Address::generate(&env);
+
+    pool.update_admin(&new_admin);
+
+    let stored: Address = env.as_contract(&pool.address, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin updated")
+    });
+    assert_eq!(stored, new_admin);
+}
+
+#[test]
+fn getters_work_while_fully_paused() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    pool.pause(&pausable::POOL_MASK, &None);
+
+    let root = pool.get_root();
+
+    assert!(pool.is_known_root(&root));
+    assert_eq!(pool.get_gvk_mode(), VIEW_ONLY);
+}
+
+#[test]
+fn get_admin_view_key_works_while_fully_paused() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    pool.pause(&pausable::POOL_MASK, &None);
+
+    assert_eq!(pool.get_admin_view_key(), mk_point(&env, 1, 2));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    PoolGvkContractClient::new(&env, &pool_id).pause(&pausable::DEPOSITS, &None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    PoolGvkContractClient::new(&env, &pool_id).unpause(&pausable::DEPOSITS);
+}
+
+#[test]
+fn pause_errors_when_admin_unset() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    env.as_contract(&pool.address, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(
+        pool.try_pause(&pausable::DEPOSITS, &None)
+            .expect_err("a pool with no admin cannot be paused"),
+        Ok(Error::NotInitialized)
+    );
+    assert_eq!(
+        pool.try_unpause(&pausable::DEPOSITS)
+            .expect_err("a pool with no admin cannot be unpaused"),
+        Ok(Error::NotInitialized)
+    );
+}
+
+#[test]
+fn pause_rejects_zero_flags() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+
+    let err = pool
+        .try_pause(&0u32, &None)
+        .expect_err("a pause that names no bit must be refused");
+
+    assert_eq!(err, Ok(Error::InvalidPauseFlags));
+}
+
+#[test]
+fn pause_rejects_unknown_bits() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+
+    let err = pool
+        .try_pause(&8u32, &None)
+        .expect_err("a pause naming a bit the pool does not honor must be refused");
+
+    assert_eq!(err, Ok(Error::InvalidPauseFlags));
+}
+
+#[test]
+fn second_timed_pause_is_refused_while_armed() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    pool.pause(&pausable::WITHDRAWALS, &Some(500));
+
+    let err = pool
+        .try_pause(&pausable::DEPOSITS, &Some(900))
+        .expect_err("a second timed pause must not move the promised ledger");
+
+    assert_eq!(err, Ok(Error::TimedPauseArmed));
+    assert_eq!(pool.get_pause_state().until, Some(500));
+}
+
+#[test]
+fn untimed_pause_clears_the_arm_so_a_timed_pause_is_accepted_again() {
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+    pool.pause(&pausable::WITHDRAWALS, &Some(500));
+
+    pool.pause(&pausable::DEPOSITS, &None);
+    pool.pause(&pausable::TRANSFERS, &Some(900));
+
+    assert_eq!(pool.get_pause_state().until, Some(900));
+}
+
+#[test]
+fn pause_emits_pause_changed_from_the_pool_address() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let pool = pausable_pool_gvk(&env);
+
+    pool.pause(&pausable::DEPOSITS, &Some(500));
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+    let expected = PauseChanged {
+        flags: pausable::DEPOSITS,
+        until: Some(500),
+    }
+    .to_xdr(&env, &pool.address);
+    assert_eq!(events.events()[0], expected);
 }

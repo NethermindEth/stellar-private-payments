@@ -24,7 +24,11 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::{bump_dependency, bump_entry, bump_instance, constants::bn256_modulus};
+use soroban_utils::{
+    bump_dependency, bump_entry, bump_instance,
+    constants::bn256_modulus,
+    pausable::{self, PauseError, PauseState},
+};
 
 // Re-exported rather than merely imported so `pool_gvk::ExtData` and
 // `pool_gvk::hash_ext_data` stay part of this crate's surface, mirroring
@@ -72,6 +76,21 @@ pub enum Error {
     WrongGvkCiphertextCount = 16,
     /// Admin view key `D` is unusable as a circuit public input.
     InvalidAdminViewKey = 17,
+    /// Transactions of this shape are paused.
+    Paused = 18,
+    /// Pause flags were zero, or held a bit the pool does not recognize.
+    InvalidPauseFlags = 19,
+    /// A timed pause is in force, and a second one would move its deadline.
+    TimedPauseArmed = 20,
+}
+
+impl From<PauseError> for Error {
+    fn from(e: PauseError) -> Self {
+        match e {
+            PauseError::InvalidFlags => Error::InvalidPauseFlags,
+            PauseError::TimedPauseArmed => Error::TimedPauseArmed,
+        }
+    }
 }
 
 impl From<MerkleError> for Error {
@@ -337,6 +356,15 @@ impl PoolGvkContract {
         Ok(spent)
     }
 
+    /// Get the admin address.
+    fn get_admin(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .inspect(|_| bump_entry(env, &DataKey::Admin))
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Update the contract administrator. Requires authorization from the
     /// current admin.
     ///
@@ -348,6 +376,59 @@ impl PoolGvkContract {
         Self::touch(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+    }
+
+    /// Pause the transaction shapes named by `flags`.
+    ///
+    /// The bits are `DEPOSITS`, `TRANSFERS`, and `WITHDRAWALS` from
+    /// [`soroban_utils::pausable`]. Passing `Some(until)` promises that
+    /// withdrawals reopen at that ledger, and no second timed pause may move
+    /// that ledger. Requires admin authorization.
+    ///
+    /// A pause stops `transact` and nothing else. `update_admin`, `unpause`,
+    /// and every getter answer while the pool is fully paused, so an operator
+    /// can hand over a paused pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the pool has no admin address
+    /// stored, [`Error::InvalidPauseFlags`] if `flags` is zero or holds a bit
+    /// outside the three above, and [`Error::TimedPauseArmed`] if `until` is
+    /// `Some` while a timed pause is already in force.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the pool.
+    pub fn pause(env: &Env, flags: u32, until: Option<u32>) -> Result<(), Error> {
+        Self::touch(env);
+        Self::get_admin(env)?.require_auth();
+        Ok(pausable::pause(env, flags, until, pausable::POOL_MASK)?)
+    }
+
+    /// Clear the pause bits named by `flags`.
+    ///
+    /// Clearing bits that are not set is accepted, and any unpause also clears
+    /// a timed pause. Requires admin authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the pool has no admin address
+    /// stored, and [`Error::InvalidPauseFlags`] if `flags` is zero or holds a
+    /// bit the pool does not recognize.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the pool.
+    pub fn unpause(env: &Env, flags: u32) -> Result<(), Error> {
+        Self::touch(env);
+        Self::get_admin(env)?.require_auth();
+        Ok(pausable::unpause(env, flags, pausable::POOL_MASK)?)
+    }
+
+    /// Get the pool's pause bits and the ledger at which withdrawals reopen.
+    pub fn get_pause_state(env: &Env) -> PauseState {
+        Self::touch(env);
+        pausable::get_state(env)
     }
 
     // ========== ASP Contract Functions ==========
@@ -645,6 +726,11 @@ impl PoolGvkContract {
     ) -> Result<(), Error> {
         Self::touch(env);
         sender.require_auth();
+
+        if pausable::is_paused(env, pausable::shape_bit(env, &ext_data.ext_amount)) {
+            return Err(Error::Paused);
+        }
+
         bump_dependency(env, &Self::get_verifier(env)?);
         let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_membership_proofs(policy_flags) {
