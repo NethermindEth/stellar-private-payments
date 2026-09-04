@@ -1,5 +1,7 @@
 //! Async per-pool private payments API
 
+use anyhow::Context;
+
 use crate::{
     planner::{SpendableNote, Transact},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
@@ -62,7 +64,7 @@ impl<S> PrivatePool<S> {
     ) -> Result<Self, Error> {
         config.validate()?;
         let fetcher = StateFetcher::new(rpc.clone(), config.contract_config.clone())
-            .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
+            .context("state fetcher")?;
         Ok(Self {
             rpc,
             core: PoolCore::new(config.clone())?,
@@ -90,7 +92,7 @@ impl<S: Storage> PrivatePool<S> {
             .map(|note| note.amount)
             .try_fold(NoteAmount::ZERO, |sum, amount| {
                 sum.checked_add(amount)
-                    .ok_or_else(|| Error::Other("wallet balance overflow".into()))
+                    .ok_or_else(|| Error::Other(anyhow::anyhow!("wallet balance overflow")))
             })
     }
 
@@ -116,7 +118,7 @@ impl<S: Storage> PrivatePool<S> {
         self.execute(&mut plan)
             .await?
             .pop()
-            .ok_or_else(|| Error::Other("deposit produced no transaction".into()))
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("deposit produced no transaction")))
     }
 
     #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
@@ -152,7 +154,7 @@ impl<S: Storage> PrivatePool<S> {
         self.execute(&mut plan)
             .await?
             .pop()
-            .ok_or_else(|| Error::Other("transact produced no transaction".into()))
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("transact produced no transaction")))
     }
 
     #[tracing::instrument(skip(self, req), fields(correlation_id = %correlation_id_or_new()))]
@@ -162,9 +164,9 @@ impl<S: Storage> PrivatePool<S> {
     ) -> Result<Option<DisclosureReceipt>, Error> {
         tracing::info!(selected_commitments = ?Sensitive(&req.selected_commitments), "disclose started");
         if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
-            return Err(Error::Other(
-                "selective disclosure requires 1..=4 selected commitments".into(),
-            ));
+            return Err(Error::Other(anyhow::anyhow!(
+                "selective disclosure requires 1..=4 selected commitments"
+            )));
         }
 
         let selected_commitments = req.selected_commitments;
@@ -174,21 +176,21 @@ impl<S: Storage> PrivatePool<S> {
                 .fetcher
                 .contracts_data_for_pool(&self.config.pool_contract_id)
                 .await
-                .map_err(|e| Error::Other(format!("fetch chain context: {e:#}")))?;
+                .context("fetch chain context")?;
 
             let pool = data.pools.into_iter().next().ok_or_else(|| {
-                Error::Other(format!(
+                Error::Other(anyhow::anyhow!(
                     "pool {} not found in contract state",
                     self.config.pool_contract_id
                 ))
             })?;
             let pool_root = pool
                 .merkle_root
-                .ok_or_else(|| Error::Other("pool merkle_root not fetched".into()))?;
+                .ok_or_else(|| Error::Other(anyhow::anyhow!("pool merkle_root not fetched")))?;
             let pool_next_index = pool
                 .merkle_next_index
                 .parse::<u32>()
-                .map_err(|e| Error::Other(format!("invalid pool merkle_next_index: {e}")))?;
+                .context("invalid pool merkle_next_index")?;
 
             let inputs_req = DisclosureInputsRequest {
                 user_address: self.config.user_address.as_str().to_string(),
@@ -259,7 +261,7 @@ impl<S: Storage> PrivatePool<S> {
                 &chain_config.signer_address,
             )
             .await
-            .map_err(|e| Error::Other(format!("simulate transaction: {e:#}")))?;
+            .context("simulate transaction")?;
 
         Ok(())
     }
@@ -339,11 +341,12 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn submit(&self, signed_tx: SignedTransaction) -> Result<String, Error> {
         let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
-            .map_err(|e| Error::Other(format!("invalid signed transaction xdr: {e}")))?;
+            .context("invalid signed transaction xdr")?;
 
         submit_tx(&self.rpc, &envelope)
             .await
-            .map_err(|e| Error::Other(format!("submit transaction: {e:#}")))
+            .context("submit transaction")
+            .map_err(Into::into)
     }
 
     pub async fn confirm(&self, hash: &str) -> Result<TransactionResult, Error> {
@@ -388,7 +391,9 @@ impl<S: Storage> PrivatePool<S> {
         plan: &mut PreparedTransactionPlan,
     ) -> Result<PreparedTransaction, Error> {
         if plan.is_complete() {
-            return Err(Error::Other("transaction plan is complete".into()));
+            return Err(Error::Other(anyhow::anyhow!(
+                "transaction plan is complete"
+            )));
         }
         self.ensure_synced().await?;
 
@@ -426,7 +431,8 @@ impl<S: Storage> PrivatePool<S> {
                 self.config.user_address.as_str(),
             )
             .await
-            .map_err(|e| Error::Other(format!("fetch chain context: {e:#}")))
+            .context("fetch chain context")
+            .map_err(Into::into)
     }
 
     async fn execute(

@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use crate::types::{
     ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup, SignerAddress,
 };
@@ -36,8 +38,7 @@ impl<S: Storage> Client<S> {
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
-        let rpc = RpcClient::new(rpc_url.as_ref())
-            .map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
+        let rpc = RpcClient::new(rpc_url.as_ref()).context("rpc error")?;
         Ok(Self {
             rpc,
             storage,
@@ -165,7 +166,8 @@ impl<S: Storage> Client<S> {
     /// Chain-state accessor for this deployment.
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
         StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
-            .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))
+            .context("state fetcher")
+            .map_err(Into::into)
     }
 
     async fn ensure_synced(&self) -> Result<(), Error> {

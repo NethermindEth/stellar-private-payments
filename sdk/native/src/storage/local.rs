@@ -1,5 +1,7 @@
 use std::{cell::RefCell, collections::HashSet, path::PathBuf};
 
+use anyhow::Context;
+
 use crate::{
     chain::ContractDataStorage,
     planner::SpendableNote,
@@ -33,8 +35,7 @@ pub struct LocalStorage {
 impl LocalStorage {
     pub fn open(storage_path: &str) -> Result<Self, Error> {
         let path = PathBuf::from(storage_path);
-        let db = SqliteStorage::connect_file(&path)
-            .map_err(|e| Error::Other(format!("open storage: {e:#}")))?;
+        let db = SqliteStorage::connect_file(&path).context("open storage")?;
         Ok(Self {
             path,
             db: RefCell::new(db),
@@ -73,8 +74,7 @@ impl ContractDataStorage for LocalStorage {
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<Self, Error> {
-        let db = SqliteStorage::connect_file(self.path.as_path())
-            .map_err(|e| Error::Other(format!("fork storage: {e:#}")))?;
+        let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
         Ok(Self {
             path: self.path.clone(),
             db: RefCell::new(db),
@@ -171,9 +171,9 @@ impl Storage for LocalStorage {
         let entry = self
             .storage()
             .lookup_public_key_by_address(address)
-            .map_err(|e| Error::Other(format!("lookup recipient: {e:#}")))?
+            .context("lookup recipient")?
             .ok_or_else(|| {
-                Error::Other(format!(
+                Error::Other(anyhow::anyhow!(
                     "recipient {address} not found in the public key registry; \
                      they must register keys on-chain"
                 ))
@@ -188,13 +188,13 @@ impl Storage for LocalStorage {
     async fn clear_indexing_cursors(&self) -> Result<(), Error> {
         self.storage_mut()
             .clear_indexing_cursors()
-            .map_err(|e| Error::Other(e.to_string()))
+            .map_err(Error::Other)
     }
 
     async fn clamp_last_fully_indexed_ledger(&self, max_ledger: u32) -> Result<(), Error> {
         self.storage_mut()
             .clamp_last_fully_indexed_ledger(max_ledger)
-            .map_err(|e| Error::Other(e.to_string()))
+            .map_err(Error::Other)
     }
 
     async fn list_pool_gvk_events(
@@ -205,7 +205,7 @@ impl Storage for LocalStorage {
     ) -> Result<Vec<crate::gvk::GvkEvent>, Error> {
         self.storage()
             .list_pool_gvk_events(pool_contract_id, after, limit)
-            .map_err(|e| Error::Other(e.to_string()))
+            .map_err(Error::Other)
     }
 
     async fn pool_has_commitments(
@@ -215,6 +215,6 @@ impl Storage for LocalStorage {
     ) -> Result<HashSet<Field>, Error> {
         self.storage()
             .pool_has_commitments(pool_contract_id, commitments)
-            .map_err(|e| Error::Other(e.to_string()))
+            .map_err(Error::Other)
     }
 }

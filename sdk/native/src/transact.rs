@@ -1,6 +1,7 @@
 //! Transact witness input building and prepared-transaction types.
 
 use crate::{
+    Error,
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
     planner::Transact,
     state::{SqliteStorage, StoredUserKeys},
@@ -123,9 +124,11 @@ pub(crate) fn transact_request_from_step(
 pub fn build_transact_params(
     storage: &SqliteStorage,
     req: &TransactRequest,
-) -> Result<BuildTransactParams> {
+) -> Result<BuildTransactParams, Error> {
     if req.input_commitments.len() > 2 {
-        anyhow::bail!("transact input_commitments must have length 0..=2");
+        return Err(Error::Other(anyhow::anyhow!(
+            "transact input_commitments must have length 0..=2"
+        )));
     }
 
     let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
@@ -170,9 +173,9 @@ pub fn build_transact_params(
         let note_pk = req.out_recipient_note_pubkeys[i].clone();
         let enc_pk = req.out_recipient_encryption_pubkeys[i].clone();
         if note_pk.is_some() != enc_pk.is_some() {
-            anyhow::bail!(
+            return Err(Error::Other(anyhow::anyhow!(
                 "output {i}: recipient_note_pubkey and recipient_encryption_pubkey must both be set or both be null"
-            );
+            )));
         }
         outputs.push(TransactOutput {
             amount: req.output_amounts[i],
@@ -204,7 +207,7 @@ pub fn build_transact_params(
 pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
-) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field)> {
+) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field), Error> {
     let StoredUserKeys {
         note_keypair: NoteKeyPair {
             private,
@@ -214,9 +217,7 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = storage.get_user_keys(user_address)?.ok_or_else(|| {
-        anyhow::anyhow!("address {user_address} should generate privacy keys and ASP secret first")
-    })?;
+    } = crate::storage::map_user_keys(storage, user_address)?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }
@@ -229,7 +230,7 @@ fn build_membership_proof(
     aspmem_root: Field,
     aspmem_ledger: u32,
     asp_depth: u32,
-) -> Result<Result<AspMembershipProof, AspMembershipSync>> {
+) -> Result<Result<AspMembershipProof, AspMembershipSync>, Error> {
     let user_leaf = asp_membership_leaf(note_pubkey, &membership_blinding)?;
     let user_leaf_index = match storage.check_asp_membership_precondition(
         aspmem_contract_id,

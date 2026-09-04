@@ -1,5 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
+use anyhow::Context;
+
 use crate::{
     types::{CircuitStem, DisclosureReceipt},
     zk::flows::TransactParams,
@@ -29,9 +31,9 @@ pub struct LocalProver {
 impl LocalProver {
     pub fn from_artifacts(artifacts: &[(CircuitStem, ProverArtifacts)]) -> Result<Self, Error> {
         if artifacts.is_empty() {
-            return Err(Error::Other(
-                "at least one transact circuit is required".into(),
-            ));
+            return Err(Error::Other(anyhow::anyhow!(
+                "at least one transact circuit is required"
+            )));
         }
         Self::from_all_artifacts(artifacts, &[])
     }
@@ -40,9 +42,9 @@ impl LocalProver {
         artifacts: &[(&'static RegisteredCircuit, ProverArtifacts)],
     ) -> Result<Self, Error> {
         if artifacts.is_empty() {
-            return Err(Error::Other(
-                "at least one disclosure circuit is required".into(),
-            ));
+            return Err(Error::Other(anyhow::anyhow!(
+                "at least one disclosure circuit is required"
+            )));
         }
         Self::from_all_artifacts(&[], artifacts)
     }
@@ -52,7 +54,9 @@ impl LocalProver {
         disclosure_artifacts: &[(&'static RegisteredCircuit, ProverArtifacts)],
     ) -> Result<Self, Error> {
         if transact_artifacts.is_empty() && disclosure_artifacts.is_empty() {
-            return Err(Error::Other("at least one circuit is required".into()));
+            return Err(Error::Other(anyhow::anyhow!(
+                "at least one circuit is required"
+            )));
         }
 
         let mut transact = HashMap::with_capacity(transact_artifacts.len());
@@ -62,9 +66,9 @@ impl LocalProver {
                 &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
-            .map_err(|e| Error::Other(format!("init prover for {stem}: {e:#}")))?;
+            .context(format!("init prover for {stem}"))?;
             if transact.insert(*stem, engine).is_some() {
-                return Err(Error::Other(format!(
+                return Err(Error::Other(anyhow::anyhow!(
                     "duplicate transact circuit for {stem}"
                 )));
             }
@@ -77,9 +81,9 @@ impl LocalProver {
                 &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
-            .map_err(|e| Error::Other(format!("init prover for {}: {e:#}", circuit.name)))?;
+            .context(format!("init prover for {}", circuit.name))?;
             if disclosure.insert(circuit.name, engine).is_some() {
-                return Err(Error::Other(format!(
+                return Err(Error::Other(anyhow::anyhow!(
                     "duplicate disclosure circuit for {}",
                     circuit.name
                 )));
@@ -97,9 +101,12 @@ impl LocalProver {
         self.transact
             .borrow_mut()
             .get_mut(&stem)
-            .ok_or_else(|| Error::Other(format!("no transact prover configured for {stem}")))?
+            .ok_or_else(|| {
+                Error::Other(anyhow::anyhow!("no transact prover configured for {stem}"))
+            })?
             .prove_transact(params)
-            .map_err(|e| Error::Other(format!("prove: {e:#}")))
+            .context("prove")
+            .map_err(Into::into)
     }
 }
 
@@ -113,23 +120,24 @@ impl Prover for LocalProver {
         &self,
         params: DisclosureProveParams,
     ) -> Result<DisclosureReceipt, Error> {
-        let note_count = u32::try_from(params.notes.len())
-            .map_err(|_| Error::Other("disclosure note count out of range".into()))?;
+        let note_count =
+            u32::try_from(params.notes.len()).context("disclosure note count out of range")?;
         let circuit = find_circuit_by_notes(note_count).ok_or_else(|| {
-            Error::Other(format!(
+            Error::Other(anyhow::anyhow!(
                 "no disclosure circuit registered for {note_count} note(s)"
             ))
         })?;
         let mut disclosure = self.disclosure.borrow_mut();
         let engine = disclosure.get_mut(circuit.name).ok_or_else(|| {
-            Error::Other(format!(
+            Error::Other(anyhow::anyhow!(
                 "no disclosure prover configured for {}",
                 circuit.name
             ))
         })?;
         engine
             .prove_disclosure(params, circuit)
-            .map_err(|e| Error::Other(format!("prove disclosure: {e:#}")))
+            .context("prove disclosure")
+            .map_err(Into::into)
     }
 
     async fn verify_disclosure_proof(
@@ -138,16 +146,17 @@ impl Prover for LocalProver {
         expected_vk_hash: &str,
     ) -> Result<bool, Error> {
         let circuit = validate_registered_receipt(receipt, expected_vk_hash)
-            .map_err(|e| Error::Other(format!("validate disclosure receipt: {e:#}")))?;
+            .context("validate disclosure receipt")?;
         let disclosure = self.disclosure.borrow();
         let engine = disclosure.get(circuit.name).ok_or_else(|| {
-            Error::Other(format!(
+            Error::Other(anyhow::anyhow!(
                 "no disclosure verifier configured for {}",
                 circuit.name
             ))
         })?;
         engine
             .verify_disclosure(receipt, expected_vk_hash)
-            .map_err(|e| Error::Other(format!("verify disclosure proof: {e:#}")))
+            .context("verify disclosure proof")
+            .map_err(Into::into)
     }
 }

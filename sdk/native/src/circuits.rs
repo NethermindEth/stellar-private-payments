@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use anyhow::Context;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -61,7 +62,7 @@ impl CircuitLockfile {
         let want = Self::expected_hash_hex(hashes, kind)?;
         let got = Self::sha256_hex(bytes);
         if got != want {
-            return Err(Error::other(format!(
+            return Err(Error::other(anyhow::anyhow!(
                 "hash mismatch {stem}/{kind}: want {want} got {got}"
             )));
         }
@@ -71,10 +72,10 @@ impl CircuitLockfile {
     pub fn artifact_sha256(&self, stem: &str, kind: &str) -> Result<[u8; 32], Error> {
         let hashes = self.entry(stem)?;
         let hex = Self::expected_hash_hex(hashes, kind)?;
-        let bytes = hex::decode(hex)
-            .map_err(|e| Error::other(format!("invalid hash hex for {stem}/{kind}: {e}")))?;
+        let bytes =
+            hex::decode(hex).with_context(|| format!("invalid hash hex for {stem}/{kind}"))?;
         if bytes.len() != 32 {
-            return Err(Error::other(format!(
+            return Err(Error::other(anyhow::anyhow!(
                 "expected 32-byte hash for {stem}/{kind}, got {} hex chars",
                 hex.len()
             )));
@@ -85,9 +86,11 @@ impl CircuitLockfile {
     }
 
     fn entry(&self, stem: &str) -> Result<&CircuitHashes, Error> {
-        self.circuits
-            .get(stem)
-            .ok_or_else(|| Error::other(format!("stem {stem} is not in embedded circuits.json")))
+        self.circuits.get(stem).ok_or_else(|| {
+            Error::other(anyhow::anyhow!(
+                "stem {stem} is not in embedded circuits.json"
+            ))
+        })
     }
 
     fn expected_hash_hex<'a>(hashes: &'a CircuitHashes, kind: &str) -> Result<&'a str, Error> {
@@ -95,7 +98,9 @@ impl CircuitLockfile {
             "r1cs" => Ok(hashes.r1cs.as_str()),
             "graph.bin" => Ok(hashes.graph.as_str()),
             "proving_key.bin" => Ok(hashes.proving_key.as_str()),
-            other => Err(Error::other(format!("unknown artifact kind: {other}"))),
+            other => Err(Error::other(anyhow::anyhow!(
+                "unknown artifact kind: {other}"
+            ))),
         }
     }
 
@@ -106,7 +111,8 @@ impl CircuitLockfile {
 
 pub fn circuit_lock() -> Result<CircuitLockfile, Error> {
     serde_json::from_str(CIRCUITS_JSON)
-        .map_err(|e| Error::other(format!("parse embedded circuits.json: {e}")))
+        .context("parse embedded circuits.json")
+        .map_err(Into::into)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -118,6 +124,7 @@ mod store {
         path::{Component, Path, PathBuf},
     };
 
+    use anyhow::Context;
     use flate2::read::GzDecoder;
     use tar::Archive;
 
@@ -150,7 +157,7 @@ mod store {
 
         pub async fn ensure(&self) -> Result<(), Error> {
             let lock = circuit_lock()?;
-            fs::create_dir_all(&self.dir).map_err(|e| Error::other(e.to_string()))?;
+            fs::create_dir_all(&self.dir).map_err(Error::other)?;
             if self.ready(&lock) {
                 return Ok(());
             }
@@ -161,18 +168,18 @@ mod store {
                 .send()
                 .await
                 .and_then(|r| r.error_for_status())
-                .map_err(|e| Error::other(format!("download {url}: {e}")))?
+                .with_context(|| format!("download {url}"))?
                 .bytes()
                 .await
-                .map_err(|e| Error::other(format!("download {url}: {e}")))?;
+                .with_context(|| format!("download {url}"))?;
 
             unpack_tar_gz(&bytes, &self.dir, &allowed_names(&lock))?;
             if self.ready(&lock) {
                 Ok(())
             } else {
-                Err(Error::other(
-                    "downloaded circuit artifacts do not match embedded circuits.json",
-                ))
+                Err(Error::other(anyhow::anyhow!(
+                    "downloaded circuit artifacts do not match embedded circuits.json"
+                )))
             }
         }
 
@@ -228,10 +235,9 @@ mod store {
     ) -> Result<ProverArtifacts, Error> {
         let read = |kind: &str| -> Result<Vec<u8>, Error> {
             let path = dir.join(CircuitLockfile::artifact_file_name(stem, kind));
-            let bytes = fs::read(&path)
-                .map_err(|e| Error::other(format!("read {}: {e}", path.display())))?;
+            let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             lock.verify_artifact(stem, kind, &bytes)
-                .map_err(|e| Error::other(format!("{}: {e}", path.display())))?;
+                .with_context(|| path.display().to_string())?;
             Ok(bytes)
         };
         Ok(ProverArtifacts {
@@ -265,15 +271,11 @@ mod store {
 
     fn unpack_tar_gz(bytes: &[u8], dest: &Path, allowed: &HashSet<String>) -> Result<(), Error> {
         let mut archive = Archive::new(GzDecoder::new(Cursor::new(bytes)));
-        let entries = archive
-            .entries()
-            .map_err(|e| Error::other(format!("read circuits.tar.gz: {e}")))?;
+        let entries = archive.entries().context("read circuits.tar.gz")?;
         for entry in entries {
-            let mut entry = entry.map_err(|e| Error::other(format!("circuits.tar.gz: {e}")))?;
+            let mut entry = entry.context("circuits.tar.gz")?;
             let name = {
-                let path = entry
-                    .path()
-                    .map_err(|e| Error::other(format!("circuits.tar.gz: {e}")))?;
+                let path = entry.path().context("circuits.tar.gz")?;
                 tar_basename(&path).map(str::to_owned)
             };
             let Some(name) = name else {
@@ -284,7 +286,7 @@ mod store {
             }
             entry
                 .unpack(dest.join(&name))
-                .map_err(|e| Error::other(format!("extract {name}: {e}")))?;
+                .with_context(|| format!("extract {name}"))?;
         }
         Ok(())
     }

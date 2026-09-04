@@ -29,12 +29,19 @@ pub enum Error {
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
+    /// Local storage has no privacy keys for this address. This says nothing
+    /// about on-chain registration status — it may mean the address was
+    /// never set up locally, or that local storage was reset or restored
+    /// without them.
+    #[error("no privacy keys found in local storage for {user_address}")]
+    UserKeysNotFound { user_address: String },
+
     #[error("{0}")]
-    Other(String),
+    Other(#[from] anyhow::Error),
 }
 
 impl Error {
-    pub fn other(msg: impl Into<String>) -> Self {
+    pub fn other(msg: impl Into<anyhow::Error>) -> Self {
         Self::Other(msg.into())
     }
 }
