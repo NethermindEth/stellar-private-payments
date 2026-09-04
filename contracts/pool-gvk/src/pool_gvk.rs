@@ -592,9 +592,15 @@ impl PoolGvkContract {
             }
         }
 
-        let is_valid = client.verify(&proof.proof, &public_inputs);
-
-        Ok(is_valid)
+        // `try_verify`, not `verify`. `Groth16Error` and this contract's
+        // `Error` are separate `#[repr(u32)]` enums whose codes overlap.
+        // Catch verifier rejections here so callers always receive pool-gvk's
+        // own error domain rather than decoding a verifier code as a pool
+        // error.
+        match client.try_verify(&proof.proof, &public_inputs) {
+            Ok(Ok(is_valid)) => Ok(is_valid),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the GVK mode, for internal use where the getter's `Result`
