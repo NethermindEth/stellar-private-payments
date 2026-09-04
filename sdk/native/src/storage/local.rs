@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf};
+use std::{cell::RefCell, collections::HashSet, path::PathBuf};
 
 use crate::{
     chain::ContractDataStorage,
@@ -208,12 +208,13 @@ impl Storage for LocalStorage {
             .map_err(|e| Error::Other(e.to_string()))
     }
 
-    async fn list_pool_commitment_hashes(
+    async fn pool_has_commitments(
         &self,
         pool_contract_id: &str,
-    ) -> Result<Vec<Field>, Error> {
+        commitments: &[Field],
+    ) -> Result<HashSet<Field>, Error> {
         self.storage()
-            .list_pool_commitment_hashes(pool_contract_id)
+            .pool_has_commitments(pool_contract_id, commitments)
             .map_err(|e| Error::Other(e.to_string()))
     }
 }

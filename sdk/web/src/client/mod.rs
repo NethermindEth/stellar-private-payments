@@ -5,6 +5,7 @@ mod account;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod e2e_tests;
 mod execute;
+mod gvk;
 mod pool;
 
 use std::{rc::Rc, str::FromStr};
@@ -41,6 +42,7 @@ use crate::{
 use gloo_worker::Spawnable;
 
 pub use account::Account;
+pub use gvk::GvkAudit;
 pub use pool::PrivatePool;
 
 pub(crate) fn pool_err(error: Error) -> JsError {

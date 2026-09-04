@@ -24,7 +24,7 @@ use crate::{
 use anyhow::{Result, anyhow, bail};
 use ark_bn254::Fr as Scalar;
 use ark_ff::Zero;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
 use taceo_poseidon2::bn254::t4;
 
 /// Domain separation for the `r` derivation chain.
@@ -45,7 +45,8 @@ pub struct GvkNote {
 }
 
 /// The subset of note secrets an admin recovers by decryption.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GvkRecoveredNote {
     pub pk: Field,
     pub amount: Field,
@@ -53,7 +54,8 @@ pub struct GvkRecoveredNote {
 }
 
 /// Admin-recovered note secrets verified against an on-chain commitment.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GvkAuditedNote {
     pub note: GvkRecoveredNote,
     pub commitment: Field,
@@ -121,6 +123,23 @@ impl GvkRecoveredNote {
     pub fn amount(&self) -> Result<NoteAmount> {
         NoteAmount::try_from(self.amount)
     }
+
+    /// Recomputed pool commitment, or `None` for dummy (zero-amount) notes.
+    pub fn commitment_field(&self) -> Option<Field> {
+        let amount = self.amount().ok()?;
+        if amount.is_zero() {
+            return None;
+        }
+
+        let computed = crypto::compute_commitment(
+            &self.amount.to_le_bytes(),
+            &self.pk.to_le_bytes(),
+            &self.blinding.to_le_bytes(),
+        )
+        .ok()?;
+        let computed_le: [u8; 32] = computed.as_slice().try_into().ok()?;
+        Field::try_from_le_bytes(computed_le).ok()
+    }
 }
 
 impl GlobalViewKeyCiphertext {
@@ -157,68 +176,12 @@ impl GlobalViewKeyCiphertext {
     }
 }
 
-/// Decrypt `ciphertext` and return the recovered note when its recomputed
-/// commitment appears in `candidate_commitments`.
-///
-/// Used for traceable-mode nullifier events, which carry a spent-note
-/// ciphertext but not the commitment itself.
-pub fn try_decrypt_against_commitments(
-    d_priv: &Field,
-    ciphertext: &GlobalViewKeyCiphertext,
-    candidate_commitments: impl IntoIterator<Item = Field>,
-) -> Option<GvkAuditedNote> {
-    let commitments: HashSet<Field> = candidate_commitments.into_iter().collect();
-    try_decrypt_against_commitment_set(d_priv, ciphertext, &commitments)
-}
-
-/// Like [`try_decrypt_against_commitments`], but accepts a pre-built set so
-/// pool-wide audits hash each recovered note once.
-pub fn try_decrypt_against_commitment_set(
-    d_priv: &Field,
-    ciphertext: &GlobalViewKeyCiphertext,
-    candidate_commitments: &HashSet<Field>,
-) -> Option<GvkAuditedNote> {
-    let recovered = ciphertext.decrypt(d_priv).ok()?;
-    audited_from_recovered_in_set(recovered, candidate_commitments)
-}
-
-pub(crate) fn commitment_field_for_recovered(recovered: &GvkRecoveredNote) -> Option<Field> {
-    let amount = recovered.amount().ok()?;
-    if amount.is_zero() {
-        return None;
-    }
-
-    let computed = crypto::compute_commitment(
-        &recovered.amount.to_le_bytes(),
-        &recovered.pk.to_le_bytes(),
-        &recovered.blinding.to_le_bytes(),
-    )
-    .ok()?;
-    let computed_le: [u8; 32] = computed.as_slice().try_into().ok()?;
-    Field::try_from_le_bytes(computed_le).ok()
-}
-
 fn audited_from_recovered(
     recovered: GvkRecoveredNote,
     expected_commitment: &Field,
 ) -> Option<GvkAuditedNote> {
-    let computed = commitment_field_for_recovered(&recovered)?;
+    let computed = recovered.commitment_field()?;
     if computed != *expected_commitment {
-        return None;
-    }
-
-    Some(GvkAuditedNote {
-        note: recovered,
-        commitment: computed,
-    })
-}
-
-fn audited_from_recovered_in_set(
-    recovered: GvkRecoveredNote,
-    candidate_commitments: &HashSet<Field>,
-) -> Option<GvkAuditedNote> {
-    let computed = commitment_field_for_recovered(&recovered)?;
-    if !candidate_commitments.contains(&computed) {
         return None;
     }
 

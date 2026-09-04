@@ -19,6 +19,8 @@ use crate::{
 
 mod local;
 
+use std::collections::HashSet;
+
 pub use local::LocalStorage;
 
 pub(crate) fn map_build_params(
@@ -203,9 +205,10 @@ pub trait Storage: crate::chain::ContractDataStorage {
         limit: u32,
     ) -> Result<Vec<GvkEvent>, Error>;
 
-    /// Every pool commitment hash, for traceable nullifier audit.
-    async fn list_pool_commitment_hashes(
+    /// Subset of `commitments` registered for `pool_contract_id`.
+    async fn pool_has_commitments(
         &self,
         pool_contract_id: &str,
-    ) -> Result<Vec<Field>, Error>;
+        commitments: &[Field],
+    ) -> Result<HashSet<Field>, Error>;
 }

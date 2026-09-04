@@ -17,6 +17,22 @@ CIRCUIT_ARTIFACTS=(
   policy_tx_2_2_B.r1cs
   policy_tx_2_2_AB.graph.bin
   policy_tx_2_2_AB.r1cs
+  policy_tx_2_2_gvk_V.graph.bin
+  policy_tx_2_2_gvk_V.r1cs
+  policy_tx_2_2_gvk_T.graph.bin
+  policy_tx_2_2_gvk_T.r1cs
+  policy_tx_2_2_A_gvk_V.graph.bin
+  policy_tx_2_2_A_gvk_V.r1cs
+  policy_tx_2_2_A_gvk_T.graph.bin
+  policy_tx_2_2_A_gvk_T.r1cs
+  policy_tx_2_2_B_gvk_V.graph.bin
+  policy_tx_2_2_B_gvk_V.r1cs
+  policy_tx_2_2_B_gvk_T.graph.bin
+  policy_tx_2_2_B_gvk_T.r1cs
+  policy_tx_2_2_AB_gvk_V.graph.bin
+  policy_tx_2_2_AB_gvk_V.r1cs
+  policy_tx_2_2_AB_gvk_T.graph.bin
+  policy_tx_2_2_AB_gvk_T.r1cs
   selectiveDisclosure_1.graph.bin
   selectiveDisclosure_1.r1cs
   selectiveDisclosure_2.graph.bin
@@ -59,6 +75,14 @@ KEYS=(
   policy_tx_2_2_A_proving_key.bin
   policy_tx_2_2_B_proving_key.bin
   policy_tx_2_2_AB_proving_key.bin
+  policy_tx_2_2_gvk_V_proving_key.bin
+  policy_tx_2_2_gvk_T_proving_key.bin
+  policy_tx_2_2_A_gvk_V_proving_key.bin
+  policy_tx_2_2_A_gvk_T_proving_key.bin
+  policy_tx_2_2_B_gvk_V_proving_key.bin
+  policy_tx_2_2_B_gvk_T_proving_key.bin
+  policy_tx_2_2_AB_gvk_V_proving_key.bin
+  policy_tx_2_2_AB_gvk_T_proving_key.bin
   selectiveDisclosure_1_proving_key.bin
   selectiveDisclosure_2_proving_key.bin
   selectiveDisclosure_3_proving_key.bin

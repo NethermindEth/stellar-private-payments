@@ -494,6 +494,29 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 }
             })?
         }
+        StorageWorkerRequest::ListPoolGvkEvents {
+            pool_contract_id,
+            after,
+            limit,
+        } => {
+            tracing::trace!("[{WORKER_NAME}] list pool gvk events for {pool_contract_id}");
+            let events =
+                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
+            StorageWorkerResponse::PoolGvkEvents(events)
+        }
+        StorageWorkerRequest::PoolHasCommitments {
+            pool_contract_id,
+            commitments,
+        } => {
+            tracing::trace!(
+                "[{WORKER_NAME}] verify {} pool commitment(s) for {pool_contract_id}",
+                commitments.len()
+            );
+            let found = with_storage!(s =>
+                s.pool_has_commitments(&pool_contract_id, &commitments)?
+            )?;
+            StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
+        }
     };
     Ok(resp)
 }
@@ -936,22 +959,50 @@ impl Storage for StorageBridge {
 
     async fn list_pool_gvk_events(
         &self,
-        _pool_contract_id: &str,
-        _after: Option<(u32, String)>,
-        _limit: u32,
+        pool_contract_id: &str,
+        after: Option<(u32, String)>,
+        limit: u32,
     ) -> Result<Vec<stellar_private_payments::gvk::GvkEvent>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        match self
+            .call(
+                StorageWorkerRequest::ListPoolGvkEvents {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    after,
+                    limit,
+                },
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolGvkEvents(events)) => Ok(events),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response listing pool gvk events: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
-    async fn list_pool_commitment_hashes(
+    async fn pool_has_commitments(
         &self,
-        _pool_contract_id: &str,
-    ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        pool_contract_id: &str,
+        commitments: &[stellar_private_payments::types::Field],
+    ) -> Result<std::collections::HashSet<stellar_private_payments::types::Field>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::PoolHasCommitments {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    commitments: commitments.to_vec(),
+                },
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolHasCommitments(found)) => Ok(found.into_iter().collect()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response verifying pool commitments: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 }
 
