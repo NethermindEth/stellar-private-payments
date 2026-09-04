@@ -43,6 +43,7 @@ pub fn ensure_schema(storage_path: &Path) -> Result<()> {
 pub fn seed_prove_wallet(
     storage_path: &Path,
     pool_contract_id: &str,
+    token_contract_id: &str,
     asp_membership_contract_id: &str,
     user_address: &str,
     network: &str,
@@ -164,6 +165,7 @@ pub fn seed_prove_wallet(
     chain_snapshot_from_storage(
         storage_path,
         pool_contract_id,
+        token_contract_id,
         asp_membership_contract_id,
         network,
     )
@@ -173,6 +175,7 @@ pub fn seed_prove_wallet(
 pub fn apply_proved_step(
     storage_path: &Path,
     pool_contract_id: &str,
+    token_contract_id: &str,
     asp_membership_contract_id: &str,
     user_address: &str,
     network: &str,
@@ -206,6 +209,7 @@ pub fn apply_proved_step(
     let chain = chain_snapshot_from_storage(
         storage_path,
         pool_contract_id,
+        token_contract_id,
         asp_membership_contract_id,
         network,
     )?;
@@ -276,6 +280,7 @@ pub fn apply_proved_step(
     chain_snapshot_from_storage(
         storage_path,
         pool_contract_id,
+        token_contract_id,
         asp_membership_contract_id,
         network,
     )
@@ -284,6 +289,7 @@ pub fn apply_proved_step(
 fn chain_snapshot_from_storage(
     storage_path: &Path,
     pool_contract_id: &str,
+    token_contract_id: &str,
     asp_membership_contract_id: &str,
     _network: &str,
 ) -> Result<TransactChainContext> {
@@ -308,6 +314,7 @@ fn chain_snapshot_from_storage(
         pool_root,
         pool_next_index,
         pool_merkle_levels: POOL_MERKLE_LEVELS,
+        token_contract_id: token_contract_id.to_string(),
         asp_membership_levels: ASP_MEMBERSHIP_LEVELS,
         asp_membership_root,
         asp_membership_contract_id: asp_membership_contract_id.to_string(),

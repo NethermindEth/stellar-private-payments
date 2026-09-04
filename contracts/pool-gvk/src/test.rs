@@ -5,6 +5,7 @@ extern crate alloc;
 use crate::{
     Error, ExtData, PoolGvkContract, PoolGvkContractClient, Proof,
     gvk::{self, BabyJubJubPoint, GvkCiphertext, TRACEABLE, VIEW_ONLY},
+    hash_ext_data,
     merkle_with_history::MerkleDataKey,
     policy,
     pool_gvk::DataKey,
@@ -23,7 +24,6 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events},
-    xdr::ToXdr,
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
 
@@ -424,14 +424,14 @@ fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32) -> ExtData {
     }
 }
 
-fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
+/// Computes the same domain-bound hash `internal_transact` checks the proof
+/// against: `pool`'s own address plus `token`, folded in exactly as
+/// `hash_ext_data` does on-chain. Delegates to the real function (run inside
+/// `pool`'s own contract frame, so `env.current_contract_address()` resolves
+/// to `pool`) rather than reimplementing the encoding, so this can never
+/// silently drift from production behavior.
+fn compute_ext_hash(env: &Env, pool: &Address, token: &Address, ext: &ExtData) -> BytesN<32> {
+    env.as_contract(pool, || hash_ext_data(env, ext, token))
 }
 
 /// Create a mock Groth16 proof for testing: a dummy proof with valid curve
@@ -504,6 +504,7 @@ fn asp_roots(setup: &TestSetup) -> (U256, U256) {
 fn mk_transact_proof(
     env: &Env,
     pool: &PoolGvkContractClient,
+    token: &Address,
     asp_membership_root: U256,
     asp_non_membership_root: U256,
     nullifier: u32,
@@ -511,7 +512,7 @@ fn mk_transact_proof(
 ) -> (Proof, ExtData) {
     let root = pool.get_root();
     let ext = mk_ext_data(env, Address::generate(env), 0);
-    let ext_hash = compute_ext_hash(env, &ext);
+    let ext_hash = compute_ext_hash(env, &pool.address, token, &ext);
     let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
         mk_input_ciphertexts(env, 1)
     } else {
@@ -576,6 +577,7 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -622,6 +624,7 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -739,7 +742,7 @@ fn transact_rejects_bad_public_amount() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
 
     let proof = Proof {
@@ -782,7 +785,7 @@ fn transact_rejects_non_canonical_nullifier() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
 
     let proof = Proof {
@@ -828,7 +831,7 @@ fn transact_rejects_non_canonical_output_commitment() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
 
     let proof = Proof {
@@ -874,7 +877,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
     let one = U256::from_u32(&env, 1);
 
@@ -963,8 +966,15 @@ fn transact_errors_when_policy_flags_unset() {
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
-    let (proof, ext) =
-        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB8, VIEW_ONLY);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xB8,
+        VIEW_ONLY,
+    );
 
     assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
@@ -991,8 +1001,15 @@ fn transact_rejects_wrong_output_gvk_ciphertext_count() {
         let sender = Address::generate(&env);
         let (member_root, non_member_root) = asp_roots(&setup);
 
-        let (mut proof, ext) =
-            mk_transact_proof(&env, &pool, member_root, non_member_root, 0xC1, gvk_mode);
+        let (mut proof, ext) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root,
+            non_member_root,
+            0xC1,
+            gvk_mode,
+        );
         // Only one output ciphertext instead of the required two.
         let mut wrong_outputs = Vec::new(&env);
         wrong_outputs.push_back(mk_ciphertext(&env, 1, 2, 3, 4, 5));
@@ -1026,8 +1043,15 @@ fn transact_rejects_wrong_input_gvk_ciphertext_count_when_traceable() {
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
 
-    let (mut proof, ext) =
-        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xC2, TRACEABLE);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC2,
+        TRACEABLE,
+    );
     // Traceable mode requires one input ciphertext per nullifier (one here);
     // leave it empty instead.
     proof.input_gvk_ciphertexts = Vec::new(&env);
@@ -1056,8 +1080,15 @@ fn transact_rejects_input_gvk_ciphertexts_present_when_view_only() {
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
 
-    let (mut proof, ext) =
-        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xC3, VIEW_ONLY);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC3,
+        VIEW_ONLY,
+    );
     // View-only requires zero input ciphertexts; smuggle one in.
     proof.input_gvk_ciphertexts = mk_input_ciphertexts(&env, 1);
 
@@ -1086,8 +1117,15 @@ fn transact_rejects_non_canonical_gvk_ciphertext_field() {
         let sender = Address::generate(&env);
         let (member_root, non_member_root) = asp_roots(&setup);
 
-        let (mut proof, ext) =
-            mk_transact_proof(&env, &pool, member_root, non_member_root, 0xC4, gvk_mode);
+        let (mut proof, ext) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root,
+            non_member_root,
+            0xC4,
+            gvk_mode,
+        );
         let mut bad_output = proof.output_gvk_ciphertexts.get(0).expect("output ct 0");
         bad_output.c1 = bn256_modulus(&env);
         proof.output_gvk_ciphertexts.set(0, bad_output);
@@ -1121,8 +1159,15 @@ fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
     let (member_root, non_member_root) = asp_roots(&setup);
     let one = U256::from_u32(&env, 1);
 
-    let (mut proof, ext) =
-        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xC5, VIEW_ONLY);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC5,
+        VIEW_ONLY,
+    );
     let mut boundary_output = proof.output_gvk_ciphertexts.get(0).expect("output ct 0");
     boundary_output.c1 = bn256_modulus(&env).sub(&one);
     proof.output_gvk_ciphertexts.set(0, boundary_output);
@@ -1165,7 +1210,15 @@ fn transact_with_admin_view_key(
     env.mock_all_auths();
     let sender = Address::generate(env);
 
-    let (proof, ext) = mk_transact_proof(env, &pool, member_root, non_member_root, 0xC6, VIEW_ONLY);
+    let (proof, ext) = mk_transact_proof(
+        env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC6,
+        VIEW_ONLY,
+    );
 
     let result = pool.try_transact(&proof, &ext, &sender);
     assert!(result.is_err(), "expected transact to fail: {result:?}");
@@ -1527,10 +1580,14 @@ fn build_gvk_transact(
     let admin_view_key = mk_point(&env, 1, 2);
     let levels = 3u32;
 
-    // Root is a pure function of `levels` (the empty-tree root), so it can be
-    // read off a throwaway pool sharing the same `levels`, before the
-    // real, fixture-matched verifier address is known.
-    let throwaway_id = register_pool_gvk(
+    // Registered once, with a placeholder verifier, purely to learn this
+    // pool's final address and genesis root before the fixture-matched
+    // `TestVerifier` can be built: `ext_data_hash` is now bound to this
+    // pool's own address (see `hash_ext_data`), so the address has to exist
+    // before the toy-circuit public inputs, and so the fixture itself, can
+    // be computed. The stored verifier is overwritten below once the real
+    // one exists; nothing else about the pool changes.
+    let pool_id = register_pool_gvk(
         &env,
         &setup,
         U256::from_u32(&env, maximum_deposit_amount),
@@ -1539,10 +1596,10 @@ fn build_gvk_transact(
         admin_view_key.clone(),
         gvk_mode,
     );
-    let root = PoolGvkContractClient::new(&env, &throwaway_id).get_root();
+    let root = PoolGvkContractClient::new(&env, &pool_id).get_root();
 
     let ext = mk_ext_data(&env, Address::generate(&env), ext_amount);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
         mk_input_ciphertexts(&env, 1)
     } else {
@@ -1573,23 +1630,17 @@ fn build_gvk_transact(
     let (vk_bytes, real_proof) = groth16_fixture_for(&env, &values);
     proof.proof = real_proof;
 
+    // Swap in the fixture-matched verifier now that it exists. `pool_id`
+    // itself does not change, so `ext_hash` (already bound to it) stays
+    // valid; there is no public setter for the verifier, so this pokes the
+    // same storage key the constructor wrote directly.
     let verifier_id = env.register(TestVerifier, (vk_bytes,));
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Verifier, &verifier_id);
+    });
 
-    let pool_id = env.register(
-        PoolGvkContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            verifier_id,
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            U256::from_u32(&env, maximum_deposit_amount),
-            levels,
-            0u32,
-            admin_view_key,
-            gvk_mode,
-        ),
-    );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -1751,7 +1802,7 @@ fn transact_rejects_deposit_over_maximum() {
         output_commitment0: U256::from_u32(&env, 0x01),
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: compute_ext_hash(&env, &ext),
+        ext_data_hash: compute_ext_hash(&env, &pool_id, &setup.token, &ext),
         asp_membership_root,
         asp_non_membership_root,
         output_gvk_ciphertexts: mk_output_ciphertexts(&env),

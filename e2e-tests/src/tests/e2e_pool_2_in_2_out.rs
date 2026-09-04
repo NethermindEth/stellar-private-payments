@@ -66,13 +66,23 @@ fn transact_fixture(
     let env = test_env();
     let recipient = Address::generate(&env);
 
+    // Deployed before the hash: `hash_ext_data` binds the hash to the pool's
+    // own address and configured token, so both must exist first. Witness
+    // generation below needs the resulting hash as a circuit input, which is
+    // why deployment moves ahead of it here rather than staying next to
+    // `sync_contract_state`.
+    env.mock_all_auths();
+    let contracts = deploy_contracts(&env);
+
     let ext_data = ExtData {
         recipient,
         ext_amount: I256::from_i32(&env, ext_amount),
         encrypted_output0: Bytes::new(&env),
         encrypted_output1: Bytes::new(&env),
     };
-    let ext_data_hash_bytes = hash_ext_data(&env, &ext_data);
+    let ext_data_hash_bytes = env.as_contract(&contracts.pool, || {
+        hash_ext_data(&env, &ext_data, &contracts.token)
+    });
     let ext_data_hash_bigint = bytes32_to_bigint(&ext_data_hash_bytes);
 
     let case = TxCase::new(
@@ -132,8 +142,6 @@ fn transact_fixture(
     )?;
     assert!(result.verified, "Proof should verify locally");
 
-    env.mock_all_auths();
-    let contracts = deploy_contracts(&env);
     let roots = sync_contract_state(
         &env,
         &contracts,

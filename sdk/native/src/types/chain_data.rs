@@ -131,6 +131,10 @@ pub struct TransactChainContext {
     pub pool_root: Field,
     pub pool_next_index: u32,
     pub pool_merkle_levels: u32,
+    /// This pool's own configured token contract, fetched from the pool's
+    /// own on-chain state (`PoolInfo::token`). Feeds `ext_data_hash`'s
+    /// domain binding; never accepted from caller input.
+    pub token_contract_id: String,
     pub asp_membership_levels: u32,
     pub asp_membership_root: Field,
     pub asp_membership_contract_id: String,
@@ -163,6 +167,7 @@ pub fn transact_chain_context_from_state(
         pool_root,
         pool_next_index,
         pool_merkle_levels: pool.merkle_levels,
+        token_contract_id: pool.token,
         asp_membership_levels: data.asp_membership.levels,
         asp_membership_root: data.asp_membership.root,
         asp_membership_contract_id: data.asp_membership.contract_id,

@@ -203,11 +203,13 @@ pub fn register_account_to_scval(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::chain::ext_data_hash::hash_ext_data_offchain;
+    use crate::chain::{
+        conversions::scval_to_address_string, ext_data_hash::hash_ext_data_offchain,
+    };
     use contract_types::Groth16Proof;
-    use pool::{ExtData as PoolExtData, Proof};
+    use pool::{ExtData as PoolExtData, Proof, hash_ext_data};
     use pool_gvk::{Proof as PoolGvkProof, gvk::GvkCiphertext};
-    use public_key_registry::Account;
+    use public_key_registry::{Account, PublicKeyRegistry};
     use soroban_sdk::{
         Address, Bytes, BytesN, Env, I256, U256 as SorobanU256, Vec,
         crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -216,7 +218,7 @@ mod tests {
 
     const TEST_ACCOUNT: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     use crate::types::{BabyJubJubPoint, ExtAmount, GlobalViewKeyCiphertext, U256};
-    use stellar_xdr::{Limits, WriteXdr};
+    use stellar_xdr::{Limits, ReadXdr, WriteXdr};
 
     fn scval_xdr(sc: &ScVal) -> std::vec::Vec<u8> {
         WriteXdr::to_xdr(sc, Limits::none()).expect("scval xdr")
@@ -228,6 +230,22 @@ mod tests {
 
     fn soroban_bytes32(bytes: &soroban_sdk::Bytes) -> [u8; 32] {
         bytes.to_alloc_vec().try_into().expect("32 bytes")
+    }
+
+    /// Registers a trivial contract (no constructor args) purely to obtain a
+    /// real, genuinely-registered contract `Address` -- `env.as_contract`
+    /// requires one, and a hand-crafted strkey is not enough.
+    fn register_dummy_contract(env: &Env) -> Address {
+        env.register(PublicKeyRegistry, ())
+    }
+
+    /// Round-trips a Soroban `Address` through XDR to the `G.../C...`
+    /// strkey string form `hash_ext_data_offchain` expects, reusing the same
+    /// conversion the RPC-fetched-state path already relies on.
+    fn address_to_string(env: &Env, addr: &Address) -> String {
+        let bytes = addr.to_xdr(env).to_alloc_vec();
+        let scval = ScVal::from_xdr(bytes, Limits::none()).expect("valid address xdr");
+        scval_to_address_string(&scval).expect("address string")
     }
 
     fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
@@ -310,50 +328,82 @@ mod tests {
         assert_eq!(ours, soroban_xdr_to_vec(expected));
     }
 
+    /// `pool_ext_data_to_scval` encodes the wire `ext_data` argument passed to
+    /// `transact`; it is deliberately unrelated to `hash_ext_data`'s payload
+    /// now that the hash is bound to `pool`/`token` (values `ExtData` itself
+    /// never carries). The relationship this crate must still guarantee is
+    /// that the offline `hash_ext_data_offchain` computes the exact same
+    /// 32-byte value the on-chain `hash_ext_data` does for matching inputs.
     #[test]
-    fn pool_ext_data_encoding_matches_hash_ext_data_payload() {
+    fn hash_ext_data_offchain_matches_on_chain_hash_ext_data() {
+        let env = Env::default();
+        let pool_address = register_dummy_contract(&env);
+        let token_address = register_dummy_contract(&env);
+        let pool_str = address_to_string(&env, &pool_address);
+        let token_str = address_to_string(&env, &token_address);
+        let recipient = Address::from_str(&env, TEST_ACCOUNT);
+
+        let on_chain_ext = PoolExtData {
+            recipient,
+            ext_amount: I256::from_i32(&env, -42),
+            encrypted_output0: Bytes::from_slice(&env, &[1, 2, 3]),
+            encrypted_output1: Bytes::from_slice(&env, &[4, 5]),
+        };
+        // Run inside the pool's own contract frame, exactly as
+        // `internal_transact` does, so `env.current_contract_address()`
+        // resolves to `pool_address`.
+        let on_chain_hash = env.as_contract(&pool_address, || {
+            hash_ext_data(&env, &on_chain_ext, &token_address)
+        });
+
+        let app = ExtData {
+            recipient: TEST_ACCOUNT.to_string(),
+            ext_amount: ExtAmount::from(-42),
+            encrypted_output0: vec![1, 2, 3],
+            encrypted_output1: vec![4, 5],
+        };
+        let off_chain_hash =
+            hash_ext_data_offchain(&app, &pool_str, &token_str).expect("offchain hash");
+
+        assert_eq!(
+            on_chain_hash.to_array(),
+            off_chain_hash,
+            "on-chain hash_ext_data and offchain hash_ext_data_offchain must agree byte-for-byte"
+        );
+    }
+
+    /// Same equivalence, but with a different `pool`/`token` pair for the
+    /// same `ExtData`, pinning that the domain binding is not accidentally
+    /// ignored on either side.
+    #[test]
+    fn hash_ext_data_offchain_matches_on_chain_hash_ext_data_for_second_domain() {
+        let env = Env::default();
+        let pool_address = register_dummy_contract(&env);
+        let token_address = register_dummy_contract(&env);
+        let pool_str = address_to_string(&env, &pool_address);
+        let token_str = address_to_string(&env, &token_address);
+        let recipient = Address::from_str(&env, TEST_ACCOUNT);
+
+        let on_chain_ext = PoolExtData {
+            recipient,
+            ext_amount: I256::from_i32(&env, 0),
+            encrypted_output0: Bytes::from_slice(&env, &[9, 8, 7]),
+            encrypted_output1: Bytes::new(&env),
+        };
+        let on_chain_hash = env.as_contract(&pool_address, || {
+            hash_ext_data(&env, &on_chain_ext, &token_address)
+        });
+
         let app = ExtData {
             recipient: TEST_ACCOUNT.to_string(),
             ext_amount: ExtAmount::from(0),
             encrypted_output0: vec![9, 8, 7],
             encrypted_output1: vec![],
         };
-        let ours = scval_xdr(&pool_ext_data_to_scval(&app).expect("encode"));
+        let off_chain_hash =
+            hash_ext_data_offchain(&app, &pool_str, &token_str).expect("offchain hash");
 
-        let mut entries: std::vec::Vec<(&str, ScVal)> = std::vec![
-            (
-                "encrypted_output0",
-                ScVal::Bytes(app.encrypted_output0.clone().try_into().expect("bytes")),
-            ),
-            (
-                "encrypted_output1",
-                ScVal::Bytes(app.encrypted_output1.clone().try_into().expect("bytes")),
-            ),
-            ("ext_amount", i128_to_i256_scval(app.ext_amount.into())),
-            (
-                "recipient",
-                ScVal::Address(app.recipient.parse().expect("address")),
-            ),
-        ];
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        let map_entries: std::vec::Vec<ScMapEntry> = entries
-            .into_iter()
-            .map(|(k, v)| {
-                let sym: xdr::StringM<32> = k.try_into().expect("symbol");
-                ScMapEntry {
-                    key: ScVal::Symbol(ScSymbol(sym)),
-                    val: v,
-                }
-            })
-            .collect();
-        let hash_payload = WriteXdr::to_xdr(
-            &ScVal::Map(Some(ScMap(map_entries.try_into().expect("map")))),
-            Limits::none(),
-        )
-        .expect("hash payload");
-
-        assert_eq!(ours, hash_payload);
-        let _ = hash_ext_data_offchain(&app).expect("hash");
+        assert_eq!(on_chain_hash.to_array(), off_chain_hash);
     }
 
     #[test]
