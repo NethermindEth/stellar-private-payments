@@ -10,7 +10,11 @@ use axum::{
 use http_body_util::BodyExt;
 use jsonrpsee::server::{BatchRequestConfig, Server, ServerConfig, TowerService, stop_channel};
 use metrics::{gauge, histogram};
-use std::{net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tower::Service;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
@@ -33,7 +37,11 @@ impl HttpServer {
     pub(crate) async fn run(self) -> anyhow::Result<()> {
         let state = self.state;
         let governor_conf = GovernorConfigBuilder::default()
-            .per_second(state.cfg.rate_limit_rps.into())
+            .period(
+                Duration::from_secs(1)
+                    .checked_div(state.cfg.rate_limit_rps)
+                    .expect("rate_limit_rps must not be zero"),
+            )
             .burst_size(state.cfg.rate_limit_burst)
             .finish()
             .expect("governor config is valid");
