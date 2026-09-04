@@ -238,8 +238,21 @@ pub struct SimulateTransactionResponse {
     pub transaction_data: Option<String>,
     #[serde(rename = "minResourceFee", default)]
     pub min_resource_fee: Option<String>,
+    /// Present when the simulation's footprint touches an archived entry.
+    /// The entry must be restored before the invocation can succeed.
+    #[serde(rename = "restorePreamble", default)]
+    pub restore_preamble: Option<RestorePreamble>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// The footprint restore a simulation asks for before its invocation can run.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RestorePreamble {
+    #[serde(rename = "minResourceFee")]
+    pub min_resource_fee: String,
+    #[serde(rename = "transactionData")]
+    pub transaction_data: String,
 }
 
 /// Response from Soroban RPC `sendTransaction`.

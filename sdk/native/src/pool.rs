@@ -5,7 +5,9 @@ use crate::{
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
 };
 
-use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
+use crate::chain::{
+    Limits, PreparedSorobanTx, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx,
+};
 
 use crate::{
     PreparedTransaction,
@@ -34,6 +36,33 @@ use crate::{
 };
 
 const POLL_INTERVAL_MS: u32 = 200;
+
+/// Submits the footprint restore a simulation asked for and waits for it to
+/// land, so the caller can prepare the same invocation again against
+/// unarchived entries.
+///
+/// # Errors
+///
+/// Returns [`Error::Other`] if the restore cannot be signed, submitted, or
+/// confirmed. A restore that fails on chain surfaces its result XDR.
+pub(crate) async fn restore_archived_entries(
+    rpc: &RpcClient,
+    signer: &Handle<dyn Signer>,
+    restore_tx_xdr: String,
+) -> Result<(), Error> {
+    let prepared = PreparedSorobanTx {
+        tx_xdr: restore_tx_xdr,
+        ..Default::default()
+    };
+    let signed = signer.sign_soroban_transaction(&prepared).await?;
+    let envelope = TransactionEnvelope::from_xdr_base64(&signed.signed_xdr, Limits::none())
+        .map_err(|e| Error::Other(format!("invalid signed restore transaction xdr: {e}")))?;
+    let hash = submit_tx(rpc, &envelope)
+        .await
+        .map_err(|e| Error::Other(format!("submit restore: {e:#}")))?;
+    confirm_tx(rpc, hash).await?;
+    Ok(())
+}
 const SYNC_MAX_RETRIES: u32 = 50;
 const DISCLOSE_MAX_RETRIES: u32 = 50;
 
@@ -249,11 +278,12 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
         let chain_config = self.core.config();
-        prepared.soroban_tx = self
+        let input = pool_transact_input(prepared);
+        let mut soroban_tx = self
             .fetcher
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
-                &pool_transact_input(prepared),
+                &input,
                 // The signing address becomes the contract's `sender`, the
                 // sequence-number lookup and the envelope source.
                 &chain_config.signer_address,
@@ -261,6 +291,25 @@ impl<S: Storage> PrivatePool<S> {
             .await
             .map_err(|e| Error::Other(format!("simulate transaction: {e:#}")))?;
 
+        if let Some(restore_tx_xdr) = soroban_tx.restore_tx_xdr.take() {
+            restore_archived_entries(&self.rpc, &self.signer, restore_tx_xdr).await?;
+            soroban_tx = self
+                .fetcher
+                .prepare_pool_transact(
+                    &chain_config.pool_contract_id,
+                    &input,
+                    &chain_config.signer_address,
+                )
+                .await
+                .map_err(|e| Error::Other(format!("simulate transaction after restore: {e:#}")))?;
+            if soroban_tx.restore_tx_xdr.is_some() {
+                return Err(Error::Other(
+                    "simulation still asks for a footprint restore after one was submitted".into(),
+                ));
+            }
+        }
+
+        prepared.soroban_tx = soroban_tx;
         Ok(())
     }
 

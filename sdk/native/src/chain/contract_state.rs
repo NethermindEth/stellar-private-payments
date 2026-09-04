@@ -64,6 +64,11 @@ pub struct PreparedSorobanTx {
     /// Ledger number from `simulateTransaction` (`latestLedger`), for auth
     /// expiration.
     pub latest_ledger: u32,
+    /// Base64-encoded XDR of a `RestoreFootprint` transaction the caller must
+    /// submit before this invocation can succeed. `None` when every entry the
+    /// invocation touches is live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_tx_xdr: Option<String>,
 }
 
 impl StateFetcher {

@@ -469,6 +469,7 @@ mod tests {
                 .expect("tx xdr"),
             auth_entries: vec![entry.to_xdr_base64(Limits::none()).expect("auth entry xdr")],
             latest_ledger: 100,
+            restore_tx_xdr: None,
         }
     }
 

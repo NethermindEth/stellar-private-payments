@@ -8,6 +8,7 @@ use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx
 use crate::{
     Error, Handle, PrivatePool, Prover, Signer, Storage,
     chain::RpcClient,
+    pool::restore_archived_entries,
     sync::{SyncHandle, catch_up, confirm_tx},
     types::{PrivatePoolConfig, TransactionResult},
 };
@@ -163,13 +164,28 @@ impl<S: Storage> Account<S> {
 
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
-        let prepared = fetcher
+        let mut prepared = fetcher
             // Registration uses the note-owner address, which is both the
             // registry key and the transaction source. Which it should be when
             // the two identities differ is unsettled.
             .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
             .await
             .map_err(|e| Error::Other(format!("prepare register: {e:#}")))?;
+
+        if let Some(restore_tx_xdr) = prepared.restore_tx_xdr.take() {
+            restore_archived_entries(&self.rpc, &self.signer, restore_tx_xdr).await?;
+            prepared = fetcher
+                .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
+                .await
+                .map_err(|e| Error::Other(format!("prepare register after restore: {e:#}")))?;
+            if prepared.restore_tx_xdr.is_some() {
+                return Err(Error::Other(
+                    "registration still asks for a footprint restore after one was submitted"
+                        .into(),
+                ));
+            }
+        }
+
         let signed = self.signer.sign_soroban_transaction(&prepared).await?;
         let envelope = TransactionEnvelope::from_xdr_base64(&signed.signed_xdr, Limits::none())
             .map_err(|e| Error::Other(format!("invalid signed transaction xdr: {e}")))?;
