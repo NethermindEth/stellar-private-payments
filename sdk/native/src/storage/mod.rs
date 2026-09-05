@@ -40,8 +40,10 @@ pub(crate) fn map_user_keys(
         .get_user_keys(user_address)
         .map_err(|e| Error::Other(e.to_string()))?
         .ok_or_else(|| {
+            // Escapes to CLI output and logs.
             Error::Other(format!(
-                "address {user_address} should generate privacy keys and ASP secret first"
+                "address {} should generate privacy keys and ASP secret first",
+                crate::types::Sensitive(user_address)
             ))
         })
 }
@@ -211,4 +213,28 @@ pub trait Storage: crate::chain::ContractDataStorage {
         pool_contract_id: &str,
         commitments: &[Field],
     ) -> Result<HashSet<Field>, Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_user_keys;
+    use crate::{
+        state::SqliteStorage,
+        types::{lock_reveal_flag, set_reveal_sensitive},
+    };
+
+    const ADDRESS: &str = "GTESTACCOUNTWITHNOSTOREDKEYS";
+
+    #[test]
+    fn missing_user_keys_error_redacts_the_address() {
+        let _guard = lock_reveal_flag();
+        set_reveal_sensitive(false);
+        let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+
+        let err = map_user_keys(&storage, ADDRESS).expect_err("no keys are stored");
+        let rendered = err.to_string();
+
+        assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"), "not redacted: {rendered}");
+    }
 }
