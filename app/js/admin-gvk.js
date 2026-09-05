@@ -2,6 +2,7 @@
  * Global View admin tab — pool decrypt cursor with paginated tx rows.
  */
 
+import * as d3 from 'd3';
 import { client } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 
@@ -14,6 +15,7 @@ const auditBtnEl = document.getElementById('gvkAuditBtn');
 const loadMoreBtnEl = document.getElementById('gvkLoadMoreBtn');
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
 const viewNoteBtnEl = document.getElementById('gvkViewNoteBtn');
+const viewGraphBtnEl = document.getElementById('gvkViewGraphBtn');
 const exportBtnEl = document.getElementById('gvkExportBtn');
 const statusEl = document.getElementById('gvkAuditStatus');
 const emptyEl = document.getElementById('gvkAuditEmpty');
@@ -35,6 +37,7 @@ const state = {
   noteLinks: new Map(),
   filteredVisibleCount: BATCH_SIZE,
   view: 'tx',
+  selectedNoteId: null,
 };
 
 function noteRowId(txIndex, side, slotIndex) {
@@ -107,6 +110,12 @@ let activeNoteSource = null;
 
 function toggleCellHighlight(cells, classes, enabled) {
   for (const cell of cells) {
+    // Tailwind's bg-/text-color utilities don't affect SVG fill/stroke, so
+    // graph marks (circles/lines) get a filter-based highlight instead.
+    if (cell instanceof SVGElement) {
+      cell.style.filter = enabled ? 'brightness(1.6) drop-shadow(0 0 3px rgba(255,255,255,0.7))' : '';
+      continue;
+    }
     for (const className of classes) {
       cell.classList.toggle(className, enabled);
     }
@@ -133,6 +142,45 @@ function clearPkHighlight() {
   activePkHighlight = null;
 }
 
+/**
+ * Graph-only: when hovering a note, reveals the pre-drawn (normally
+ * invisible, pointer-events:none) squares for every note touched by the ONE
+ * relevant tx — both its sibling outputs *and* the inputs it consumed, since
+ * a tx's inputs and outputs share a single ledger. Keyed by exact tx index,
+ * not x-position, since two different txs can share a ledger. Purely a
+ * visual reveal; never intercepts hover itself, so it never competes with
+ * the pk/note-link highlighting above.
+ */
+let activeTxSquareIndex = null;
+
+function txSquareSelector(txIndex) {
+  const escaped = CSS.escape(String(txIndex));
+  return `rect[data-gvk-tx-created="${escaped}"], rect[data-gvk-tx-spent="${escaped}"]`;
+}
+
+function setTxSquaresVisible(txIndex, visible) {
+  if (!resultsEl || txIndex == null) return;
+  for (const square of resultsEl.querySelectorAll(txSquareSelector(txIndex))) {
+    square.style.opacity = visible ? '1' : '0';
+  }
+}
+
+function clearTxSquares() {
+  setTxSquaresVisible(activeTxSquareIndex, false);
+  activeTxSquareIndex = null;
+}
+
+function syncTxSquaresForElement(el) {
+  clearTxSquares();
+  if (!el) return;
+  // Whichever side this specific dot represents (see the tagging rules in
+  // renderGraph) — never both, so we never mix in an unrelated transaction.
+  const txIndex = el.dataset?.gvkTxCreated ?? el.dataset?.gvkTxSpent;
+  if (txIndex == null) return;
+  activeTxSquareIndex = txIndex;
+  setTxSquaresVisible(txIndex, true);
+}
+
 function applyNoteHighlight(cells) {
   clearNoteHighlight();
   activeNoteCells = cells;
@@ -148,6 +196,7 @@ function clearNoteHighlight() {
 function clearAllHighlights() {
   clearPkHighlight();
   clearNoteHighlight();
+  clearTxSquares();
   activeNoteSource = null;
 }
 
@@ -197,20 +246,24 @@ function bindResultHighlights() {
     const pkEl = event.target.closest('[data-gvk-pk]');
     if (pkEl && resultsEl.contains(pkEl)) {
       const pk = pkEl.dataset.gvkPk;
-      if (!pk || pk === activePkHighlight) return;
-      clearAllHighlights();
-      activePkHighlight = pk;
-      setPkHighlight(pk, true);
+      if (pk && pk !== activePkHighlight) {
+        clearAllHighlights();
+        activePkHighlight = pk;
+        setPkHighlight(pk, true);
+      }
+      syncTxSquaresForElement(pkEl);
       return;
     }
 
     const noteCell = event.target.closest('[data-gvk-note-id]');
     if (noteCell && resultsEl.contains(noteCell)) {
       const noteId = noteCell.dataset.gvkNoteId;
-      if (!noteId || noteId === activeNoteSource) return;
-      clearAllHighlights();
-      activeNoteSource = noteId;
-      applyNoteHighlight(noteHighlightFor(noteId));
+      if (noteId && noteId !== activeNoteSource) {
+        clearAllHighlights();
+        activeNoteSource = noteId;
+        applyNoteHighlight(noteHighlightFor(noteId));
+      }
+      syncTxSquaresForElement(noteCell);
       return;
     }
 
@@ -460,13 +513,18 @@ function computeFilteredRows(filters) {
   return state.rows.filter((row) => rowMatchesFilters(row, filters));
 }
 
+/** The tx rows any view/export should use: filtered + paginated, same as the tables. */
+function computeVisibleRows(filters) {
+  const filteredRows = computeFilteredRows(filters);
+  return isFiltersActive(filters) ? filteredRows.slice(0, state.filteredVisibleCount) : state.rows;
+}
+
 function renderResults() {
   if (!resultsEl || !emptyEl) return;
 
   const filters = readFilters();
   const filtersActive = isFiltersActive(filters);
-  const filteredRows = computeFilteredRows(filters);
-  const visibleRows = filtersActive ? filteredRows.slice(0, state.filteredVisibleCount) : state.rows;
+  const visibleRows = computeVisibleRows(filters);
 
   if (state.rows.length === 0) {
     resultsEl.classList.add('hidden');
@@ -484,6 +542,11 @@ function renderResults() {
     return;
   }
 
+  // Measured before clearing resultsEl below: reading layout (clientWidth) once
+  // the container is mid-teardown forces a synchronous reflow while the page
+  // is transiently shorter, which makes the browser clamp/jump scroll position.
+  const containerWidth = resultsEl.clientWidth;
+
   emptyEl.classList.add('hidden');
   resultsEl.classList.remove('hidden');
   clearAllHighlights();
@@ -491,6 +554,8 @@ function renderResults() {
 
   if (state.view === 'note') {
     renderNoteTable(visibleRows);
+  } else if (state.view === 'graph') {
+    renderGraph(visibleRows, containerWidth);
   } else {
     renderTxCards(visibleRows);
   }
@@ -670,6 +735,285 @@ function renderNoteTable(rows) {
   resultsEl.appendChild(wrap);
 }
 
+function noteSortKey(note) {
+  return note.createdLedger ?? note.spentLedger ?? 0;
+}
+
+/** Counts notes per tx index (by the given note key, 'createdTxIndex' or 'spentTxIndex'). */
+/** Counts total notes touched per tx index — both its outputs and the inputs it consumed. */
+function txMemberCounts(notes) {
+  const counts = new Map();
+  const bump = (txIndex) => {
+    if (txIndex == null) return;
+    counts.set(txIndex, (counts.get(txIndex) ?? 0) + 1);
+  };
+  for (const note of notes) {
+    bump(note.createdTxIndex);
+    bump(note.spentTxIndex);
+  }
+  return counts;
+}
+
+function colorForNote(note) {
+  const pk = normalizeFieldKey(note.audited?.note?.pk);
+  if (!pk) return '#64748b';
+  let hash = 0;
+  for (let i = 0; i < pk.length; i += 1) hash = (hash * 31 + pk.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360} 70% 60%)`;
+}
+
+function cellDisplay(value) {
+  if (value && typeof value === 'object' && 'display' in value) return value.display;
+  return value ?? '—';
+}
+
+/** Greedily packs notes into the fewest vertical lanes with no horizontal overlap, in x order. */
+function assignGraphLanes(notes, xScale, minGapPx) {
+  const laneEnds = [];
+  const laneOf = new Map();
+
+  for (const note of notes) {
+    const xStart = xScale(note.createdLedger ?? note.spentLedger);
+    const xEnd = xScale(note.spentLedger ?? note.createdLedger);
+    let lane = laneEnds.findIndex((end) => xStart >= end + minGapPx);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(xEnd);
+    } else {
+      laneEnds[lane] = xEnd;
+    }
+    laneOf.set(note.noteId, lane);
+  }
+
+  return laneOf;
+}
+
+function selectGraphNote(noteId) {
+  state.selectedNoteId = state.selectedNoteId === noteId ? null : noteId;
+  renderResults();
+}
+
+function moveGraphSelection(delta) {
+  const notes = collectNotes(computeVisibleRows(readFilters())).sort((a, b) => noteSortKey(a) - noteSortKey(b));
+  if (notes.length === 0) return;
+
+  const currentIndex = notes.findIndex((note) => note.noteId === state.selectedNoteId);
+  const nextIndex = currentIndex === -1 ? 0 : Math.min(notes.length - 1, Math.max(0, currentIndex + delta));
+  state.selectedNoteId = notes[nextIndex].noteId;
+  renderResults();
+}
+
+function renderGraphDetailPanel(container, notes) {
+  const panel = el('div', 'flex w-64 shrink-0 flex-col rounded-2xl border border-white/8 bg-ink-900/70 p-4 text-xs');
+  const note = notes.find((n) => n.noteId === state.selectedNoteId);
+
+  if (!note) {
+    panel.appendChild(el('p', 'text-slate-500', 'Click a note in the graph to inspect it. Use ← → to step through notes.'));
+    container.appendChild(panel);
+    return;
+  }
+
+  const rows = el('div', 'space-y-3');
+  panel.appendChild(rows);
+
+  const cells = noteCells(note.audited);
+  const spent = note.spentTxIndex != null;
+
+  const addRow = (label, value) => {
+    const row = el('div');
+    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+    row.appendChild(el('div', 'font-mono text-slate-200 break-all', value));
+    rows.appendChild(row);
+  };
+
+  addRow('PK', cellDisplay(cells.pk));
+  addRow('Amount', cellDisplay(cells.amount));
+  addRow('Status', spent ? 'Spent' : 'Unspent');
+  addRow('Commitment', note.commitment ? cellDisplay(truncateHex(note.commitment)) : '—');
+  addRow('Created', txLabel(note.createdTxIndex, note.createdLedger));
+  addRow('Spent', txLabel(note.spentTxIndex, note.spentLedger));
+  addRow('Nullifier', note.nullifier ? cellDisplay(truncateHex(note.nullifier)) : '—');
+
+  const nav = el('div', 'mt-auto flex items-center justify-between gap-2 pt-4');
+  const prevBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', '← Prev');
+  prevBtn.type = 'button';
+  prevBtn.addEventListener('click', () => moveGraphSelection(-1));
+  const nextBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Next →');
+  nextBtn.type = 'button';
+  nextBtn.addEventListener('click', () => moveGraphSelection(1));
+  nav.appendChild(prevBtn);
+  nav.appendChild(nextBtn);
+  panel.appendChild(nav);
+
+  container.appendChild(panel);
+}
+
+/** Timeline scatter: x = ledger. Traceable notes get a creation→spend segment; view-only notes are lone points. */
+// Rough allowance for the detail panel (w-64 + gap-4) sitting beside the graph.
+const GRAPH_SIDE_PANEL_ALLOWANCE = 288;
+
+function renderGraph(rows, containerWidth) {
+  const notes = collectNotes(rows).sort((a, b) => noteSortKey(a) - noteSortKey(b));
+
+  if (state.selectedNoteId && !notes.some((n) => n.noteId === state.selectedNoteId)) {
+    state.selectedNoteId = null;
+  }
+
+  const outer = el('div', 'flex items-stretch gap-4');
+  const graphWrap = el('div', 'min-w-0 flex-1 overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70 p-4');
+  outer.appendChild(graphWrap);
+  resultsEl.appendChild(outer);
+
+  if (notes.length === 0) {
+    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No notes to plot.'));
+    renderGraphDetailPanel(outer, notes);
+    return;
+  }
+
+  const ledgers = notes.flatMap((note) => [note.createdLedger, note.spentLedger].filter((v) => v != null));
+  const minLedger = Math.min(...ledgers);
+  const maxLedger = Math.max(...ledgers);
+  const width = Math.max(640, (containerWidth || 0) - GRAPH_SIDE_PANEL_ALLOWANCE);
+  const padding = 32;
+  const rowHeight = 22;
+  const topPad = 16;
+  const bottomAxis = 28;
+  const minHeight = 360;
+
+  const xScale = d3.scaleLinear()
+    .domain([minLedger, maxLedger === minLedger ? maxLedger + 1 : maxLedger])
+    .range([padding, width - padding])
+    .nice();
+
+  const laneOf = assignGraphLanes(notes, xScale, rowHeight);
+  const laneCount = Math.max(...laneOf.values()) + 1;
+  const contentHeight = laneCount * rowHeight;
+  const height = Math.max(minHeight, topPad + contentHeight + bottomAxis);
+
+  // Center the plotted lanes vertically within the (possibly taller) canvas,
+  // rather than always packing them against the top.
+  const plotAreaHeight = height - bottomAxis - topPad;
+  const yOffset = topPad + Math.max(0, (plotAreaHeight - contentHeight) / 2);
+  const yFor = (note) => yOffset + laneOf.get(note.noteId) * rowHeight + rowHeight / 2;
+
+  const svg = d3.select(graphWrap).append('svg')
+    .attr('width', width)
+    .attr('height', height)
+    .attr('viewBox', `0 0 ${width} ${height}`);
+
+  svg.append('g')
+    .attr('transform', `translate(0, ${height - bottomAxis})`)
+    .call(d3.axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(d3.format('d')))
+    .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
+    .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
+    .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+
+  const spentNotes = notes.filter((note) => note.createdTxIndex != null && note.spentTxIndex != null);
+
+  svg.append('g')
+    .selectAll('line')
+    .data(spentNotes)
+    .join('line')
+    .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
+    .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('x1', (d) => xScale(d.createdLedger))
+    .attr('x2', (d) => xScale(d.spentLedger))
+    .attr('y1', yFor)
+    .attr('y2', yFor)
+    .attr('stroke', colorForNote)
+    .attr('stroke-width', 1.5)
+    .attr('opacity', 0.45);
+
+  // Primary dot: this is the note's creation marker when its creation is
+  // known, so it's tagged for the created-tx group only. For an orphan note
+  // (creation not in the visible set), this dot sits at the spend position
+  // instead, so it's tagged for the spent-tx group instead — never both, so
+  // hovering one marker can't pull in a *different* transaction's squares
+  // from a different ledger.
+  svg.append('g')
+    .selectAll('circle')
+    .data(notes)
+    .join('circle')
+    .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
+    .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('data-gvk-tx-created', (d) => (d.createdTxIndex != null ? d.createdTxIndex : null))
+    .attr('data-gvk-tx-spent', (d) => (d.createdTxIndex == null && d.spentTxIndex != null ? d.spentTxIndex : null))
+    .attr('cx', (d) => xScale(d.createdLedger ?? d.spentLedger))
+    .attr('cy', yFor)
+    .attr('r', (d) => (d.noteId === state.selectedNoteId ? 7 : 5))
+    .attr('fill', colorForNote)
+    .attr('stroke', (d) => (d.noteId === state.selectedNoteId ? '#e0f2fe' : '#0b1220'))
+    .attr('stroke-width', (d) => (d.noteId === state.selectedNoteId ? 2 : 1))
+    .style('cursor', 'pointer')
+    .on('click', (_event, d) => selectGraphNote(d.noteId));
+
+  // Secondary (spend) dot only ever represents the spend event at the spend
+  // ledger, so it's tagged for the spent-tx group only.
+  svg.append('g')
+    .selectAll('circle')
+    .data(spentNotes)
+    .join('circle')
+    .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
+    .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('data-gvk-tx-spent', (d) => d.spentTxIndex)
+    .attr('cx', (d) => xScale(d.spentLedger))
+    .attr('cy', yFor)
+    .attr('r', 4)
+    .attr('fill', '#0b1220')
+    .attr('stroke', colorForNote)
+    .attr('stroke-width', 1.5)
+    .style('cursor', 'pointer')
+    .on('click', (_event, d) => selectGraphNote(d.noteId));
+
+  // Little square around each note touched by a tx that touches more than
+  // one visible note in total — counting BOTH its outputs and the inputs it
+  // consumed, since they share one ledger. Purely decorative
+  // (pointer-events:none) — it never intercepts hover/click itself, so it
+  // can't shadow the pk/note highlighting on the dots above. It's shown
+  // persistently for the tx of the currently selected note, and toggled on
+  // for whatever's hovered by syncTxSquaresForElement (see bindResultHighlights).
+  const selectedNote = notes.find((n) => n.noteId === state.selectedNoteId);
+  const selectedTxIndex = selectedNote?.createdTxIndex ?? selectedNote?.spentTxIndex ?? null;
+  const txCounts = txMemberCounts(notes);
+  const createdGrouped = notes.filter((n) => n.createdTxIndex != null && txCounts.get(n.createdTxIndex) > 1);
+  const spentGrouped = notes.filter((n) => n.spentTxIndex != null && txCounts.get(n.spentTxIndex) > 1);
+  const squareSize = 14;
+
+  svg.append('g')
+    .selectAll('rect')
+    .data(createdGrouped)
+    .join('rect')
+    .attr('data-gvk-tx-created', (d) => d.createdTxIndex)
+    .attr('x', (d) => xScale(d.createdLedger) - squareSize / 2)
+    .attr('y', (d) => yFor(d) - squareSize / 2)
+    .attr('width', squareSize)
+    .attr('height', squareSize)
+    .attr('rx', 3)
+    .attr('fill', 'transparent')
+    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .attr('stroke-width', 1)
+    .style('pointer-events', 'none')
+    .style('opacity', (d) => (selectedTxIndex != null && d.createdTxIndex === selectedTxIndex ? 1 : 0));
+
+  svg.append('g')
+    .selectAll('rect')
+    .data(spentGrouped)
+    .join('rect')
+    .attr('data-gvk-tx-spent', (d) => d.spentTxIndex)
+    .attr('x', (d) => xScale(d.spentLedger) - squareSize / 2)
+    .attr('y', (d) => yFor(d) - squareSize / 2)
+    .attr('width', squareSize)
+    .attr('height', squareSize)
+    .attr('rx', 3)
+    .attr('fill', 'transparent')
+    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .attr('stroke-width', 1)
+    .style('pointer-events', 'none')
+    .style('opacity', (d) => (selectedTxIndex != null && d.spentTxIndex === selectedTxIndex ? 1 : 0));
+
+  renderGraphDetailPanel(outer, notes);
+}
+
 function pushTx(tx) {
   state.txCounter += 1;
   const index = state.txCounter;
@@ -827,9 +1171,9 @@ function updateStatus() {
 }
 
 function updateViewButtons() {
-  const isTx = state.view === 'tx';
-  for (const [btn, active] of [[viewTxBtnEl, isTx], [viewNoteBtnEl, !isTx]]) {
+  for (const [btn, view] of [[viewTxBtnEl, 'tx'], [viewNoteBtnEl, 'note'], [viewGraphBtnEl, 'graph']]) {
     if (!btn) continue;
+    const active = state.view === view;
     btn.setAttribute('aria-pressed', String(active));
     btn.classList.toggle('bg-cyan-400/15', active);
     btn.classList.toggle('text-cyan-100', active);
@@ -948,7 +1292,20 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
 
   viewTxBtnEl?.addEventListener('click', () => setView('tx'));
   viewNoteBtnEl?.addEventListener('click', () => setView('note'));
+  viewGraphBtnEl?.addEventListener('click', () => setView('graph'));
   updateViewButtons();
+
+  document.addEventListener('keydown', (event) => {
+    if (state.view !== 'graph') return;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if (event.key === 'ArrowLeft') {
+      moveGraphSelection(-1);
+      event.preventDefault();
+    } else if (event.key === 'ArrowRight') {
+      moveGraphSelection(1);
+      event.preventDefault();
+    }
+  });
 
   for (const filterEl of [filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl, filterPkEl]) {
     filterEl?.addEventListener('input', () => {
