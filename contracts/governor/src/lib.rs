@@ -61,6 +61,18 @@ pub struct RoleGrant {
     pub member: Address,
 }
 
+/// The role that one target function requires of an undelayed caller.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FnRule {
+    /// The contract the rule covers.
+    pub target: Address,
+    /// The function on that contract.
+    pub function: Symbol,
+    /// The role a caller must hold to invoke it without the queue.
+    pub role: Symbol,
+}
+
 /// The four waiting periods a governor is constructed with.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +132,8 @@ enum DataKey {
     Pending,
     /// The queued call, stored under its hash while it is pending.
     Operation(BytesN<32>),
+    /// The role a target function requires of an undelayed caller.
+    FnRole(Address, Symbol),
 }
 
 /// The errors the governor raises.
@@ -168,12 +182,14 @@ impl Governor {
     /// least 1, and `guardian_pause` exceeds `delay` so that the council can
     /// queue an unpause inside the window. `roles` covers at least one council
     /// address, one recovery address, and one guardian, with no address under
-    /// two roles.
+    /// two roles. `fn_roles` is the permission table, one row per target
+    /// function that a role may call without the queue.
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidConfig`] if any of those conditions fails, or
-    /// if a grant names a symbol that is not one of the four roles.
+    /// if a grant or a table row names a symbol that is not one of the four
+    /// roles.
     ///
     /// # Events
     ///
@@ -186,6 +202,7 @@ impl Governor {
         grace: u32,
         guardian_pause: u32,
         roles: Vec<RoleGrant>,
+        fn_roles: Vec<FnRule>,
     ) -> Result<(), Error> {
         if delay < DELAY_FLOOR || recovery_delay < delay || grace == 0 || guardian_pause <= delay {
             return Err(Error::InvalidConfig);
@@ -210,6 +227,16 @@ impl Governor {
             || access::get_role_member_count(&env, &GUARDIAN) == 0
         {
             return Err(Error::InvalidConfig);
+        }
+
+        let store = env.storage().persistent();
+        for rule in fn_roles.iter() {
+            if !is_known_role(&rule.role) {
+                return Err(Error::InvalidConfig);
+            }
+            let key = DataKey::FnRole(rule.target, rule.function);
+            store.set(&key, &rule.role);
+            bump_entry(&env, &key);
         }
 
         timelock::set_min_delay(&env, delay);
@@ -358,6 +385,39 @@ impl Governor {
         Ok(env.invoke_contract::<Val>(&operation.target, &operation.function, operation.args))
     }
 
+    /// Calls a target function that the permission table opens to the caller's
+    /// role, without the queue.
+    ///
+    /// The table is what lets a compliance owner keep an allowlist current
+    /// without a delay on every write. It never reaches the governor itself,
+    /// so no row can hand out a role or change a delay.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if `target` is the governor itself, or
+    /// if the table holds no row for the target function.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// role the row names.
+    pub fn execute_now(
+        env: Env,
+        target: Address,
+        function: Symbol,
+        args: Vec<Val>,
+        caller: Address,
+    ) -> Result<Val, Error> {
+        bump_instance(&env);
+        caller.require_auth();
+        if target == env.current_contract_address() {
+            return Err(Error::Unauthorized);
+        }
+        let role = read_fn_role(&env, &target, &function).ok_or(Error::Unauthorized)?;
+        access::ensure_role(&env, &role, &caller);
+        Ok(env.invoke_contract::<Val>(&target, &function, args))
+    }
+
     /// Cancels a queued operation, which is named by the call it would make.
     ///
     /// # Panics
@@ -401,6 +461,13 @@ impl Governor {
             grace: setting(&env, &DataKey::Grace),
             guardian_pause: setting(&env, &DataKey::GuardianPause),
         }
+    }
+
+    /// Returns the role one target function requires of an undelayed caller,
+    /// or `None` when the permission table holds no row for it.
+    pub fn get_fn_role(env: Env, target: Address, function: Symbol) -> Option<Symbol> {
+        bump_instance(&env);
+        read_fn_role(&env, &target, &function)
     }
 
     /// Reports whether `member` holds `role`.
@@ -562,6 +629,15 @@ fn setting(env: &Env, key: &DataKey) -> u32 {
         .instance()
         .get(key)
         .unwrap_or_else(|| panic_with_error!(env, Error::InvalidConfig))
+}
+
+/// Reads one permission table row and extends the entry's lifetime.
+fn read_fn_role(env: &Env, target: &Address, function: &Symbol) -> Option<Symbol> {
+    let key = DataKey::FnRole(target.clone(), function.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .inspect(|_| bump_entry(env, &key))
 }
 
 /// Reads the queued operation hashes, treating an absent list as empty.

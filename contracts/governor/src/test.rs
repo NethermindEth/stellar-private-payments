@@ -1,14 +1,15 @@
 #![cfg(test)]
 
 use super::*;
+use asp_membership::{ASPMembership, ASPMembershipClient};
 use soroban_sdk::{
-    Address, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec,
+    Address, BytesN, Env, IntoVal, InvokeError, Symbol, U256, Val, Vec,
     events::Event,
     testutils::{
-        Address as _, Events, Ledger as _,
+        Address as _, Events, Ledger as _, MockAuth, MockAuthInvoke,
         storage::{Instance as _, Persistent as _},
     },
-    vec,
+    vec, xdr,
 };
 use soroban_utils::ttl::EXTEND_TO;
 use stellar_access::access_control::RoleGranted;
@@ -96,10 +97,18 @@ fn register_governor(
     grace: u32,
     guardian_pause: u32,
     roles: Vec<RoleGrant>,
+    fn_roles: Vec<FnRule>,
 ) -> Address {
     env.register(
         Governor,
-        (delay, recovery_delay, grace, guardian_pause, roles),
+        (
+            delay,
+            recovery_delay,
+            grace,
+            guardian_pause,
+            roles,
+            fn_roles,
+        ),
     )
 }
 
@@ -115,6 +124,7 @@ fn setup(env: &Env) -> Setup {
         GRACE,
         GUARDIAN_PAUSE,
         roles(env, &council, &recovery, &guardian),
+        Vec::new(env),
     );
     Setup {
         mock,
@@ -199,6 +209,7 @@ fn constructor_rejects_delay_below_floor() {
         GRACE,
         GUARDIAN_PAUSE,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
 }
 
@@ -218,6 +229,7 @@ fn constructor_rejects_recovery_delay_below_delay() {
         GRACE,
         GUARDIAN_PAUSE,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
 }
 
@@ -237,6 +249,7 @@ fn constructor_rejects_zero_grace() {
         0,
         GUARDIAN_PAUSE,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
 }
 
@@ -256,6 +269,7 @@ fn constructor_rejects_a_guardian_pause_equal_to_the_delay() {
         GRACE,
         DELAY,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
 }
 
@@ -275,7 +289,15 @@ fn constructor_rejects_an_unknown_role() {
         member: stranger,
     });
 
-    register_governor(&env, DELAY, RECOVERY_DELAY, GRACE, GUARDIAN_PAUSE, grants);
+    register_governor(
+        &env,
+        DELAY,
+        RECOVERY_DELAY,
+        GRACE,
+        GUARDIAN_PAUSE,
+        grants,
+        Vec::new(&env),
+    );
 }
 
 #[test]
@@ -303,6 +325,7 @@ fn constructor_rejects_a_missing_council() {
                 member: guardian,
             },
         ],
+        Vec::new(&env),
     );
 }
 
@@ -331,6 +354,7 @@ fn constructor_rejects_a_missing_recovery_holder() {
                 member: guardian,
             },
         ],
+        Vec::new(&env),
     );
 }
 
@@ -359,6 +383,7 @@ fn constructor_rejects_a_missing_guardian() {
                 member: recovery,
             },
         ],
+        Vec::new(&env),
     );
 }
 
@@ -377,7 +402,15 @@ fn constructor_rejects_one_address_under_two_roles() {
         member: council,
     });
 
-    register_governor(&env, DELAY, RECOVERY_DELAY, GRACE, GUARDIAN_PAUSE, grants);
+    register_governor(
+        &env,
+        DELAY,
+        RECOVERY_DELAY,
+        GRACE,
+        GUARDIAN_PAUSE,
+        grants,
+        Vec::new(&env),
+    );
 }
 
 #[test]
@@ -405,6 +438,7 @@ fn constructor_sets_every_getter() {
     assert_eq!(client.get_role_member_count(&OPERATOR), 0);
     assert_eq!(client.get_role_member(&COUNCIL, &0), s.council);
 
+    assert_eq!(client.get_fn_role(&s.mock, &poke(&env)), None);
     assert_eq!(client.get_pending(), Vec::new(&env));
 
     env.mock_all_auths();
@@ -433,6 +467,7 @@ fn constructor_emits_role_granted() {
         GRACE,
         GUARDIAN_PAUSE,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
 
     let events = env.events().all();
@@ -687,6 +722,7 @@ fn schedule_rejects_a_delay_that_overflows_the_ledger() {
         GRACE,
         u32::MAX - 1,
         roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
     );
     env.mock_all_auths();
     // Any non-zero ledger overflows a delay this large, and this one is inside
@@ -1343,5 +1379,297 @@ fn cancel_emits_operation_cancelled() {
     assert_eq!(
         *events.events().last().expect("a cancelled event"),
         expected
+    );
+}
+
+// ----------------------------------------------------------- permission table
+
+struct TableSetup {
+    asp: Address,
+    governor: Address,
+    council: Address,
+    recovery: Address,
+    guardian: Address,
+    operator: Address,
+}
+
+fn insert_leaf(env: &Env) -> Symbol {
+    Symbol::new(env, "insert_leaf")
+}
+
+fn leaf_args(env: &Env, value: u32) -> Vec<Val> {
+    vec![env, U256::from_u32(env, value).into_val(env)]
+}
+
+/// Registers an ASP with a Merkle tree `levels` deep and a governor whose
+/// table lets the operator insert leaves, then hands the ASP over to the
+/// governor the way a deployment does.
+fn table_setup(env: &Env, levels: u32) -> TableSetup {
+    let deployer = Address::generate(env);
+    let asp = env.register(ASPMembership, (deployer, levels));
+    let council = Address::generate(env);
+    let recovery = Address::generate(env);
+    let guardian = Address::generate(env);
+    let operator = Address::generate(env);
+    let mut grants = roles(env, &council, &recovery, &guardian);
+    grants.push_back(RoleGrant {
+        role: OPERATOR,
+        member: operator.clone(),
+    });
+    let governor = register_governor(
+        env,
+        DELAY,
+        RECOVERY_DELAY,
+        GRACE,
+        GUARDIAN_PAUSE,
+        grants,
+        vec![
+            env,
+            FnRule {
+                target: asp.clone(),
+                function: insert_leaf(env),
+                role: OPERATOR,
+            },
+        ],
+    );
+    env.mock_all_auths();
+    ASPMembershipClient::new(env, &asp).update_admin(&governor);
+    TableSetup {
+        asp,
+        governor,
+        council,
+        recovery,
+        guardian,
+        operator,
+    }
+}
+
+#[test]
+fn execute_now_lets_the_operator_call_a_mapped_function() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let asp = ASPMembershipClient::new(&env, &t.asp);
+    let root_before = asp.get_root();
+
+    let args = leaf_args(&env, 7);
+    // Only the operator's own call is authorized, and nothing beneath it, so
+    // the ASP's admin check passes on the governor being its direct invoker.
+    env.mock_auths(&[MockAuth {
+        address: &t.operator,
+        invoke: &MockAuthInvoke {
+            contract: &t.governor,
+            fn_name: "execute_now",
+            args: (
+                t.asp.clone(),
+                insert_leaf(&env),
+                args.clone(),
+                t.operator.clone(),
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    GovernorClient::new(&env, &t.governor).execute_now(
+        &t.asp,
+        &insert_leaf(&env),
+        &args,
+        &t.operator,
+    );
+
+    // The ASP's event struct is private to its crate, so the topic is the
+    // strongest shape this crate can name.
+    let asp_events = env.events().all().filter_by_contract(&t.asp);
+    assert_eq!(asp_events.events().len(), 1);
+    let xdr::ContractEventBody::V0(body) = &asp_events.events()[0].body;
+    assert_eq!(
+        body.topics.first().expect("a topic"),
+        &xdr::ScVal::Symbol(xdr::ScSymbol(
+            "LeafAdded".try_into().expect("a topic symbol")
+        ))
+    );
+    assert_ne!(asp.get_root(), root_before);
+}
+
+#[test]
+fn schedule_rejects_the_guardian_and_the_operator() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    for caller in [&t.guardian, &t.operator] {
+        assert!(matches!(
+            client.try_schedule(
+                &t.asp,
+                &insert_leaf(&env),
+                &leaf_args(&env, 7),
+                &no_predecessor(&env),
+                &salt(&env, 1),
+                caller,
+            ),
+            Err(Ok(Error::Unauthorized))
+        ));
+    }
+    assert!(client.get_pending().is_empty());
+}
+
+#[test]
+fn the_constructor_records_the_permission_table() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    assert_eq!(
+        client.get_fn_role(&t.asp, &insert_leaf(&env)),
+        Some(OPERATOR)
+    );
+    assert_eq!(
+        client.get_fn_role(&t.asp, &Symbol::new(&env, "update_admin")),
+        None
+    );
+
+    env.as_contract(&t.governor, || {
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get_ttl(&DataKey::FnRole(t.asp.clone(), insert_leaf(&env))),
+            EXTEND_TO
+        );
+    });
+}
+
+#[test]
+fn execute_now_rejects_the_operator_on_an_unmapped_function() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let stranger = Address::generate(&env);
+
+    assert!(matches!(
+        client.try_execute_now(
+            &t.asp,
+            &Symbol::new(&env, "update_admin"),
+            &vec![&env, stranger.into_val(&env)],
+            &t.operator,
+        ),
+        Err(Ok(Error::Unauthorized))
+    ));
+}
+
+#[test]
+fn execute_now_rejects_an_unmapped_target() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let mock = env.register(MockTarget, ());
+    let client = GovernorClient::new(&env, &t.governor);
+
+    assert!(matches!(
+        client.try_execute_now(&mock, &poke(&env), &poke_args(&env, 7), &t.operator),
+        Err(Ok(Error::Unauthorized))
+    ));
+}
+
+// A panic raised inside a nested invocation is formatted with the failing
+// frame's events, and the association set provider's leaves are `U256`
+// values, so these two reach the same `ethnum` formatting path the
+// `should_panic` tests above avoid.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn execute_now_rejects_every_role_but_the_one_the_row_names() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    for caller in [&t.council, &t.guardian, &t.recovery] {
+        assert!(matches!(
+            client.try_execute_now(&t.asp, &insert_leaf(&env), &leaf_args(&env, 7), caller),
+            Err(Err(InvokeError::Contract(2000)))
+        ));
+    }
+}
+
+#[test]
+fn execute_now_rejects_the_governor_as_target() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    assert!(matches!(
+        client.try_execute_now(
+            &t.governor,
+            &grant_role_fn(&env),
+            &Vec::new(&env),
+            &t.operator,
+        ),
+        Err(Ok(Error::Unauthorized))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn execute_now_forwards_a_failure_from_the_target() {
+    let env = test_env();
+    // A one-level tree holds two leaves, so the third insertion is refused.
+    let t = table_setup(&env, 1);
+    let client = GovernorClient::new(&env, &t.governor);
+    let asp = ASPMembershipClient::new(&env, &t.asp);
+
+    for value in 1..=2u32 {
+        client.execute_now(
+            &t.asp,
+            &insert_leaf(&env),
+            &leaf_args(&env, value),
+            &t.operator,
+        );
+    }
+    let root_before = asp.get_root();
+
+    assert!(matches!(
+        client.try_execute_now(&t.asp, &insert_leaf(&env), &leaf_args(&env, 3), &t.operator),
+        Err(Err(InvokeError::Contract(2)))
+    ));
+    assert_eq!(asp.get_root(), root_before);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #3001)")]
+fn constructor_rejects_a_table_entry_with_an_unknown_role() {
+    let env = test_env();
+    let mock = env.register(MockTarget, ());
+    let council = Address::generate(&env);
+    let recovery = Address::generate(&env);
+    let guardian = Address::generate(&env);
+
+    register_governor(
+        &env,
+        DELAY,
+        RECOVERY_DELAY,
+        GRACE,
+        GUARDIAN_PAUSE,
+        roles(&env, &council, &recovery, &guardian),
+        vec![
+            &env,
+            FnRule {
+                target: mock,
+                function: poke(&env),
+                role: Symbol::new(&env, "auditor"),
+            },
+        ],
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn execute_now_requires_the_caller_signature() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    env.set_auths(&[]);
+
+    GovernorClient::new(&env, &t.governor).execute_now(
+        &t.asp,
+        &insert_leaf(&env),
+        &leaf_args(&env, 7),
+        &t.operator,
     );
 }
