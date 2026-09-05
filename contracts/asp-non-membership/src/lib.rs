@@ -27,7 +27,7 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{bump_entry, bump_instance, poseidon2_compress, poseidon2_hash2};
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -125,6 +125,7 @@ impl ASPNonMembership {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        bump_instance(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
@@ -242,6 +243,7 @@ impl ASPNonMembership {
         // Get node from storage
         let node_key = DataKey::Node(root.clone());
         let node_data: Vec<U256> = store.get(&node_key).ok_or(Error::KeyNotFound)?;
+        bump_entry(env, &node_key);
 
         // Check if it's a leaf node (3 elements: [1, key, value])
         if node_data.len() == 3
@@ -333,9 +335,11 @@ impl ASPNonMembership {
     /// * `Error::KeyNotFound` - Database operations failed or invalid node
     ///   structure
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
+        bump_instance(&env);
         let store = env.storage().persistent();
         let root: U256 = store
             .get(&DataKey::Root)
+            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
         let key_bits = Self::split_bits(&env, &key);
         Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)
@@ -365,12 +369,15 @@ impl ASPNonMembership {
     /// * `Error::KeyNotFound` - Database operations failed
     #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
+        bump_instance(&env);
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::Admin);
         admin.require_auth();
 
         let root: U256 = store
             .get(&DataKey::Root)
+            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Compute key bits
@@ -419,7 +426,9 @@ impl ASPNonMembership {
         // Insert the new leaf
         let mut rt = Self::hash_leaf(&env, key.clone(), value.clone());
         let leaf_node = vec![&env, U256::from_u32(&env, 1u32), key.clone(), value.clone()];
-        store.set(&DataKey::Node(rt.clone()), &leaf_node);
+        let leaf_key = DataKey::Node(rt.clone());
+        store.set(&leaf_key, &leaf_node);
+        bump_entry(&env, &leaf_key);
 
         // Build up the tree from leaf to root (process siblings in reverse)
         // Siblings are stored from root level (index 0) to leaf level (last
@@ -468,7 +477,9 @@ impl ASPNonMembership {
 
             // Store internal node
             let internal_node = vec![&env, left_hash, right_hash];
-            store.set(&DataKey::Node(rt.clone()), &internal_node);
+            let node_key = DataKey::Node(rt.clone());
+            store.set(&node_key, &internal_node);
+            bump_entry(&env, &node_key);
         }
 
         // Remove the temporary sibling if we added one for collision
@@ -522,10 +533,13 @@ impl ASPNonMembership {
     /// * `Error::KeyNotFound` - Key does not exist in the tree or database
     ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
+        bump_instance(&env);
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::Admin);
         admin.require_auth();
         let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::Root);
 
         // Compute key bits once for both find and delete operations
         let key_bits = Self::split_bits(&env, &key);
@@ -608,7 +622,9 @@ impl ASPNonMembership {
                 // Create and store new internal node
                 rt_new = Self::hash_internal(&env, left_hash.clone(), right_hash.clone());
                 let internal_node = vec![&env, left_hash, right_hash];
-                store.set(&DataKey::Node(rt_new.clone()), &internal_node);
+                let node_key = DataKey::Node(rt_new.clone());
+                store.set(&node_key, &internal_node);
+                bump_entry(&env, &node_key);
             }
         }
 
@@ -654,9 +670,11 @@ impl ASPNonMembership {
         not_found_key: U256,
         not_found_value: U256,
     ) -> Result<bool, Error> {
+        bump_instance(&env);
         let store = env.storage().persistent();
         let root: U256 = store
             .get(&DataKey::Root)
+            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Compute key bits once
@@ -733,9 +751,11 @@ impl ASPNonMembership {
     ///
     /// Returns the current root hash as a U256 value, or zero if empty
     pub fn get_root(env: Env) -> Result<U256, Error> {
+        bump_instance(&env);
         env.storage()
             .persistent()
             .get(&DataKey::Root)
+            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .ok_or(Error::NotInitialized)
     }
 }
