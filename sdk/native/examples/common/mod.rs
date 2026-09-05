@@ -35,7 +35,10 @@ use stellar_private_payments::{
     CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
-    types::{AssetDescriptor, ContractConfig, NoteAmount, PoolConfigEntry, ProverArtifacts},
+    types::{
+        AssetDescriptor, ContractConfig, GvkAuthoritySetting, GvkMode, NoteAmount, PoolConfigEntry,
+        ProverArtifacts,
+    },
 };
 
 /// Initialize a `tracing_subscriber` formatter driven by `RUST_LOG`.
@@ -409,6 +412,68 @@ pub fn require_funded_for_pool(
                 address
             );
         }
+    }
+    Ok(())
+}
+
+/// First GVK-enabled pool: `SPP_POOL_CONTRACT_ID` when set, otherwise the first
+/// enabled pool with `gvkMode != off`.
+pub fn select_gvk_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> {
+    let id = env_or("SPP_POOL_CONTRACT_ID", "");
+    if !id.is_empty() {
+        let pool = config.pool(&id).map_err(|e| e.to_string())?;
+        if pool.gvk_mode == GvkMode::Off {
+            return Err(format!("pool {id} is not a pool-gvk deployment"));
+        }
+        return Ok(pool);
+    }
+    config
+        .enabled_pools()
+        .find(|pool| pool.gvk_mode != GvkMode::Off)
+        .ok_or_else(|| "no GVK-enabled pool in deployment config".to_string())
+}
+
+/// Load the operator GVK authority key from the wallet, generating and
+/// persisting a new one when missing. Set `SPP_GVK_REGENERATE=1` to replace an
+/// existing key.
+pub fn load_or_create_gvk_authority(storage: &LocalStorage) -> Result<GvkAuthoritySetting, String> {
+    let regenerate = env_or("SPP_GVK_REGENERATE", "") == "1";
+    if !regenerate
+        && let Some(setting) = storage
+            .get_gvk_authority_setting()
+            .map_err(|e| format!("read GVK authority setting: {e}"))?
+    {
+        setting
+            .validate_consistency()
+            .map_err(|e| format!("invalid stored GVK authority key: {e}"))?;
+        return Ok(setting);
+    }
+
+    let setting =
+        GvkAuthoritySetting::generate().map_err(|e| format!("generate GVK authority key: {e}"))?;
+    storage
+        .set_gvk_authority_setting(&setting)
+        .map_err(|e| format!("save GVK authority setting: {e}"))?;
+    Ok(setting)
+}
+
+/// Ensure the wallet's GVK authority public key matches the pool deployment
+/// config.
+pub fn validate_gvk_authority_for_pool(
+    setting: &GvkAuthoritySetting,
+    pool: &PoolConfigEntry,
+) -> Result<(), String> {
+    let configured = pool.gvk_authority_pub_key.as_ref().ok_or_else(|| {
+        format!(
+            "pool {} has no gvkAuthorityPubKey in deployment config",
+            pool.pool_contract_id
+        )
+    })?;
+    if !setting.matches_config(configured) {
+        return Err(format!(
+            "stored GVK authority public key does not match deployment config for pool {}",
+            pool.pool_contract_id
+        ));
     }
     Ok(())
 }
