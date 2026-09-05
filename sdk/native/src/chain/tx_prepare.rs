@@ -176,15 +176,21 @@ mod tests {
 
     struct MockRpc {
         seq: xdr::SequenceNumber,
-        sim: SimulateTransactionResponse,
+        sims: Vec<SimulateTransactionResponse>,
         simulate_calls: AtomicUsize,
     }
 
     impl MockRpc {
         fn new(seq: i64, sim: SimulateTransactionResponse) -> Self {
+            Self::with_sims(seq, vec![sim])
+        }
+
+        /// Answers the nth call with the nth response, repeating the last one
+        /// once the list runs out.
+        fn with_sims(seq: i64, sims: Vec<SimulateTransactionResponse>) -> Self {
             Self {
                 seq: xdr::SequenceNumber(seq),
-                sim,
+                sims,
                 simulate_calls: AtomicUsize::new(0),
             }
         }
@@ -193,8 +199,9 @@ mod tests {
             &self,
             _tx: &xdr::TransactionEnvelope,
         ) -> Result<SimulateTransactionResponse, RpcError> {
-            self.simulate_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.sim.clone())
+            let call = self.simulate_calls.fetch_add(1, Ordering::SeqCst);
+            let last = self.sims.len().saturating_sub(1);
+            Ok(self.sims[call.min(last)].clone())
         }
     }
 
@@ -209,6 +216,7 @@ mod tests {
                     .expect("xdr"),
             ),
             min_resource_fee: Some(resource_fee.to_string()),
+            restore_preamble: None,
             error: None,
         };
         sim.results.push(SimulateHostFunctionResult {
@@ -384,5 +392,46 @@ mod tests {
     #[test]
     fn next_sequence_rejects_overflow() {
         assert!(next_sequence(xdr::SequenceNumber(i64::MAX)).is_err());
+    }
+
+    fn fixture_sim_with_preamble(resource_fee: &str) -> SimulateTransactionResponse {
+        let mut sim = fixture_sim(resource_fee);
+        sim.restore_preamble = Some(crate::chain::rpc::RestorePreamble {
+            min_resource_fee: "400".to_string(),
+            transaction_data: empty_soroban_data()
+                .to_xdr_base64(Limits::none())
+                .expect("xdr"),
+        });
+        sim
+    }
+
+    /// A first simulation that asks for a restore is answered by submitting it
+    /// and preparing again; the second simulation asks for nothing, which is
+    /// what lets the caller stop rather than loop.
+    #[test]
+    fn a_register_simulation_asking_for_a_restore_prepares_twice() {
+        let pk = ed25519::PublicKey([9u8; 32]);
+        let source = pk.to_string();
+        let mock = MockRpc::with_sims(
+            4,
+            vec![fixture_sim_with_preamble("250"), fixture_sim("250")],
+        );
+
+        let first = block_on(prepare_register_with_mock(
+            &mock, &source, [0xAB; 32], [0xEE; 32],
+        ))
+        .expect("prepare register");
+        assert!(
+            first.restore_tx_xdr.is_some(),
+            "first pass asks for a restore"
+        );
+
+        let second = block_on(prepare_register_with_mock(
+            &mock, &source, [0xAB; 32], [0xEE; 32],
+        ))
+        .expect("prepare register after restore");
+
+        assert!(second.restore_tx_xdr.is_none());
+        assert_eq!(mock.simulate_calls.load(Ordering::SeqCst), 2);
     }
 }

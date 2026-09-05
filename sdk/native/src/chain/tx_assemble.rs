@@ -5,7 +5,11 @@ use stellar_xdr::{
     self as xdr, Limits, ReadXdr, SorobanAuthorizationEntry, SorobanTransactionData, WriteXdr,
 };
 
-use super::{contract_state::PreparedSorobanTx, rpc::SimulateTransactionResponse};
+use super::{
+    contract_state::PreparedSorobanTx,
+    rpc::{RestorePreamble, SimulateTransactionResponse},
+    soroban_encode::BASE_FEE,
+};
 
 impl SimulateTransactionResponse {
     /// Returns the first host-function simulation result.
@@ -125,6 +129,61 @@ fn assemble_soroban_transaction(
     }))
 }
 
+/// Builds the `RestoreFootprint` transaction a simulation's restore preamble
+/// asks for.
+///
+/// The restore reuses the invocation's source account and sequence number, so
+/// it takes the sequence the invocation would have used and the retried
+/// invocation takes the one after it.
+///
+/// # Errors
+///
+/// Returns an error if `raw` is not a V1 transaction envelope, if the
+/// preamble's `transactionData` is not valid XDR, if its `minResourceFee` is
+/// not a number, or if the total fee does not fit into `u32`.
+fn restore_footprint_envelope(
+    raw: &xdr::TransactionEnvelope,
+    preamble: &RestorePreamble,
+) -> Result<xdr::TransactionEnvelope> {
+    let xdr::TransactionEnvelope::Tx(v1) = raw else {
+        return Err(anyhow!("expected TransactionEnvelope::Tx"));
+    };
+
+    let soroban_data =
+        SorobanTransactionData::from_xdr_base64(&preamble.transaction_data, Limits::none())
+            .map_err(|e| anyhow!("invalid restorePreamble transactionData xdr: {e}"))?;
+    let resource_fee = preamble.min_resource_fee.parse::<u64>().map_err(|_| {
+        anyhow!(
+            "invalid restorePreamble minResourceFee: {}",
+            preamble.min_resource_fee
+        )
+    })?;
+    let fee: u32 = u64::from(BASE_FEE)
+        .saturating_add(resource_fee)
+        .try_into()
+        .map_err(|_| anyhow!("restore fee does not fit into u32"))?;
+
+    let tx = xdr::Transaction {
+        source_account: v1.tx.source_account.clone(),
+        fee,
+        seq_num: v1.tx.seq_num.clone(),
+        cond: xdr::Preconditions::None,
+        memo: xdr::Memo::None,
+        operations: xdr::VecM::try_from(vec![xdr::Operation {
+            source_account: None,
+            body: xdr::OperationBody::RestoreFootprint(xdr::RestoreFootprintOp {
+                ext: xdr::ExtensionPoint::V0,
+            }),
+        }])?,
+        ext: xdr::TransactionExt::V1(soroban_data),
+    };
+
+    Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+        tx,
+        signatures: xdr::VecM::default(),
+    }))
+}
+
 impl PreparedSorobanTx {
     /// Builds a wallet-ready prepared tx from an unsigned envelope and
     /// simulation.
@@ -135,10 +194,19 @@ impl PreparedSorobanTx {
         let assembled = assemble_soroban_transaction(raw, sim)?;
         let latest_ledger = u32::try_from(sim.latest_ledger)
             .map_err(|_| anyhow!("latestLedger does not fit into u32"))?;
+        let restore_tx_xdr = sim
+            .restore_preamble
+            .as_ref()
+            .map(|preamble| -> Result<String> {
+                let envelope = restore_footprint_envelope(raw, preamble)?;
+                Ok(envelope.to_xdr_base64(Limits::none())?)
+            })
+            .transpose()?;
         Ok(Self {
             tx_xdr: assembled.to_xdr_base64(Limits::none())?,
             auth_entries: sim.auth_entries_base64()?,
             latest_ledger,
+            restore_tx_xdr,
         })
     }
 }
@@ -242,6 +310,7 @@ mod tests {
                     .expect("xdr base64"),
             ),
             min_resource_fee: Some("500".to_string()),
+            restore_preamble: None,
             error: None,
         };
         sim.results
@@ -273,6 +342,7 @@ mod tests {
                     .expect("xdr base64"),
             ),
             min_resource_fee: Some("0".to_string()),
+            restore_preamble: None,
             error: None,
         };
         sim.results
@@ -307,8 +377,140 @@ mod tests {
             results: vec![],
             transaction_data: None,
             min_resource_fee: None,
+            restore_preamble: None,
             error: Some("boom".to_string()),
         };
         assert!(assemble_soroban_transaction(&raw, &sim).is_err());
+    }
+
+    fn preamble(resource_fee: &str) -> RestorePreamble {
+        RestorePreamble {
+            min_resource_fee: resource_fee.to_string(),
+            transaction_data: empty_soroban_data()
+                .to_xdr_base64(Limits::none())
+                .expect("xdr"),
+        }
+    }
+
+    fn sim_with_preamble(preamble: Option<RestorePreamble>) -> SimulateTransactionResponse {
+        let mut sim = SimulateTransactionResponse {
+            latest_ledger: 1,
+            result: None,
+            results: vec![],
+            transaction_data: Some(
+                empty_soroban_data()
+                    .to_xdr_base64(Limits::none())
+                    .expect("xdr"),
+            ),
+            min_resource_fee: Some("500".to_string()),
+            restore_preamble: preamble,
+            error: None,
+        };
+        sim.results
+            .push(crate::chain::rpc::SimulateHostFunctionResult {
+                auth: vec![],
+                retval: None,
+                ..Default::default()
+            });
+        sim
+    }
+
+    #[test]
+    fn a_restore_preamble_yields_a_restore_footprint_transaction() {
+        let raw = empty_envelope();
+
+        let envelope = restore_footprint_envelope(&raw, &preamble("700")).expect("restore tx");
+
+        let xdr::TransactionEnvelope::Tx(v1) = envelope else {
+            panic!("expected v1 envelope");
+        };
+        assert_eq!(v1.tx.operations.len(), 1);
+        assert!(matches!(
+            v1.tx.operations[0].body,
+            xdr::OperationBody::RestoreFootprint(_)
+        ));
+        let TransactionExt::V1(data) = &v1.tx.ext else {
+            panic!("expected soroban transaction data on the restore");
+        };
+        assert_eq!(*data, empty_soroban_data());
+        assert_eq!(v1.tx.fee, BASE_FEE + 700);
+    }
+
+    /// The restore takes the sequence the invocation would have used, so the
+    /// invocation retried after it takes the one following.
+    #[test]
+    fn a_restore_reuses_the_source_and_sequence_of_the_invocation() {
+        let raw = empty_envelope();
+        let xdr::TransactionEnvelope::Tx(original) = &raw else {
+            panic!("expected v1 envelope");
+        };
+
+        let envelope = restore_footprint_envelope(&raw, &preamble("0")).expect("restore tx");
+
+        let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
+            panic!("expected v1 envelope");
+        };
+        assert_eq!(v1.tx.source_account, original.tx.source_account);
+        assert_eq!(v1.tx.seq_num, original.tx.seq_num);
+    }
+
+    #[test]
+    fn a_restore_preamble_with_invalid_transaction_data_is_rejected() {
+        let raw = empty_envelope();
+        let preamble = RestorePreamble {
+            min_resource_fee: "1".to_string(),
+            transaction_data: "not base64 xdr".to_string(),
+        };
+
+        let err = restore_footprint_envelope(&raw, &preamble)
+            .expect_err("a preamble with unreadable transaction data must not assemble");
+
+        assert!(err.to_string().contains("transactionData"), "{err}");
+    }
+
+    #[test]
+    fn a_restore_preamble_with_a_non_numeric_fee_is_rejected() {
+        let raw = empty_envelope();
+        let preamble = RestorePreamble {
+            min_resource_fee: "lots".to_string(),
+            transaction_data: empty_soroban_data()
+                .to_xdr_base64(Limits::none())
+                .expect("xdr"),
+        };
+
+        let err = restore_footprint_envelope(&raw, &preamble)
+            .expect_err("a preamble with a non-numeric fee must not assemble");
+
+        assert!(err.to_string().contains("minResourceFee"), "{err}");
+    }
+
+    #[test]
+    fn a_simulation_with_a_preamble_carries_the_restore_xdr() {
+        let raw = empty_envelope();
+
+        let prepared =
+            PreparedSorobanTx::from_simulation(&raw, &sim_with_preamble(Some(preamble("300"))))
+                .expect("prepare");
+
+        let restore = prepared.restore_tx_xdr.expect("restore xdr");
+        let envelope =
+            xdr::TransactionEnvelope::from_xdr_base64(&restore, Limits::none()).expect("xdr");
+        let xdr::TransactionEnvelope::Tx(v1) = envelope else {
+            panic!("expected v1 envelope");
+        };
+        assert!(matches!(
+            v1.tx.operations[0].body,
+            xdr::OperationBody::RestoreFootprint(_)
+        ));
+    }
+
+    #[test]
+    fn a_simulation_without_a_preamble_leaves_the_restore_xdr_unset() {
+        let raw = empty_envelope();
+
+        let prepared =
+            PreparedSorobanTx::from_simulation(&raw, &sim_with_preamble(None)).expect("prepare");
+
+        assert!(prepared.restore_tx_xdr.is_none());
     }
 }
