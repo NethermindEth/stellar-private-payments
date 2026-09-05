@@ -114,6 +114,17 @@ impl PrivatePool {
         block_on(self.inner.balance())
     }
 
+    /// Simulates the prepared transaction and fills in the fee, the footprint,
+    /// and the authorization entries it needs.
+    ///
+    /// A simulation whose footprint reaches an archived entry submits a
+    /// footprint restore through the signer first, which asks for a signature
+    /// and spends a fee on chain.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Other`] if the simulation fails, or if a restore cannot
+    /// be signed, submitted, or confirmed.
     pub fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
         block_on(self.inner.simulate(prepared))
     }
