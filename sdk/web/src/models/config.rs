@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use stellar_private_payments::types::{
     AssetDescriptor as NativeAssetDescriptor, ContractConfig as NativeContractConfig,
-    PoolConfigEntry as NativePoolConfigEntry,
+    GovernanceConfig as NativeGovernanceConfig, PoolConfigEntry as NativePoolConfigEntry,
 };
 use wasm_bindgen::prelude::*;
 
@@ -152,6 +152,73 @@ impl From<NativePoolConfigEntry> for PoolConfigEntry {
     }
 }
 
+/// Governor addresses and delays recorded in the deployment manifest.
+#[wasm_bindgen]
+pub struct GovernanceConfig {
+    inner: NativeGovernanceConfig,
+}
+
+#[wasm_bindgen]
+impl GovernanceConfig {
+    #[wasm_bindgen(getter)]
+    pub fn governor(&self) -> String {
+        self.inner.governor.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn council(&self) -> String {
+        self.inner.council.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn operator(&self) -> String {
+        self.inner.operator.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn guardian(&self) -> String {
+        self.inner.guardian.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn recovery(&self) -> String {
+        self.inner.recovery.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = ttlKeeper)]
+    pub fn ttl_keeper(&self) -> String {
+        self.inner.ttl_keeper.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn delay(&self) -> u32 {
+        self.inner.delay
+    }
+
+    #[wasm_bindgen(getter, js_name = recoveryDelay)]
+    pub fn recovery_delay(&self) -> u32 {
+        self.inner.recovery_delay
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn grace(&self) -> u32 {
+        self.inner.grace
+    }
+
+    #[wasm_bindgen(getter, js_name = guardianPause)]
+    pub fn guardian_pause(&self) -> u32 {
+        self.inner.guardian_pause
+    }
+}
+
+impl From<&NativeGovernanceConfig> for GovernanceConfig {
+    fn from(inner: &NativeGovernanceConfig) -> Self {
+        Self {
+            inner: inner.clone(),
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct ContractConfig {
     inner: NativeContractConfig,
@@ -207,6 +274,11 @@ impl ContractConfig {
             .cloned()
             .map(PoolConfigEntry::from)
             .collect()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn governance(&self) -> Option<GovernanceConfig> {
+        self.inner.governance.as_ref().map(GovernanceConfig::from)
     }
 
     /// Plain JSON object matching `deployments.json` (for round-trip input).

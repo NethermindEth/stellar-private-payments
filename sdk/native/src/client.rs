@@ -269,6 +269,7 @@ mod signer_is_note_owner_tests {
                 verifiers: Default::default(),
                 public_key_registry: String::new(),
                 pools: Vec::new(),
+                governance: None,
             },
             None,
         )

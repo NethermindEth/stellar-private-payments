@@ -44,6 +44,41 @@ pub struct ContractConfig {
     pub public_key_registry: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
+    /// Governor addresses and delays, absent from a deployment that predates
+    /// the governor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance: Option<GovernanceConfig>,
+}
+
+/// Governor addresses and delays recorded in a deployment manifest.
+///
+/// The deploy script writes every field. The governor is a contract address,
+/// the four role holders and the keeper are the accounts the deployment named,
+/// and the four delays are counts of ledgers, the arguments the governor was
+/// constructed with.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GovernanceConfig {
+    /// Contract that administers the pools and the association set providers.
+    pub governor: String,
+    /// Account holding the council role.
+    pub council: String,
+    /// Account holding the operator role.
+    pub operator: String,
+    /// Account holding the guardian role.
+    pub guardian: String,
+    /// Account holding the recovery role.
+    pub recovery: String,
+    /// Account authorized to submit storage lifetime extensions.
+    pub ttl_keeper: String,
+    /// Ledgers a council operation waits before anyone may execute it.
+    pub delay: u32,
+    /// Ledgers a recovery operation waits.
+    pub recovery_delay: u32,
+    /// Ledgers a ready operation stays executable.
+    pub grace: u32,
+    /// Ledgers a guardian pause holds before the deadline it sets.
+    pub guardian_pause: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -663,5 +698,83 @@ mod pool_config_gvk_tests {
         assert_eq!(parsed.gvk_authority_pub_key, pool.gvk_authority_pub_key);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod contract_config_governance_tests {
+    use super::*;
+
+    /// A deployment manifest with every field the SDK requires and no pools.
+    fn manifest(governance: &str) -> String {
+        format!(
+            r#"{{
+            "network": "testnet",
+            "deployer": "GDEPLOYER",
+            "admin": "GADMIN",
+            "asp_membership": "CASPMEM",
+            "asp_non_membership": "CASPNON",
+            "verifiers": {{"AB": "CVERIFIER"}},
+            "public_key_registry": "CREGISTRY",
+            "pools": []{governance}
+        }}"#
+        )
+    }
+
+    const GOVERNANCE_BLOCK: &str = r#",
+            "governance": {
+                "governor": "CGOVERNOR",
+                "council": "GCOUNCIL",
+                "operator": "GOPERATOR",
+                "guardian": "GGUARDIAN",
+                "recovery": "GRECOVERY",
+                "ttlKeeper": "GKEEPER",
+                "delay": 12,
+                "recoveryDelay": 20,
+                "grace": 5,
+                "guardianPause": 15
+            }"#;
+
+    #[test]
+    fn contract_config_round_trips_with_the_governance_block() -> Result<()> {
+        let config: ContractConfig = serde_json::from_str(&manifest(GOVERNANCE_BLOCK))?;
+        let governance = config
+            .governance
+            .as_ref()
+            .ok_or_else(|| anyhow!("governance block should parse"))?;
+        assert_eq!(governance.governor, "CGOVERNOR");
+        assert_eq!(governance.council, "GCOUNCIL");
+        assert_eq!(governance.ttl_keeper, "GKEEPER");
+        assert_eq!(governance.delay, 12);
+        assert_eq!(governance.recovery_delay, 20);
+        assert_eq!(governance.grace, 5);
+        assert_eq!(governance.guardian_pause, 15);
+
+        let round_tripped: ContractConfig = serde_json::from_str(&serde_json::to_string(&config)?)?;
+        assert_eq!(
+            round_tripped.governance.map(|g| g.governor),
+            Some("CGOVERNOR".to_owned())
+        );
+        Ok(())
+    }
+
+    /// A manifest written before the governor existed still parses, and
+    /// serializing it back leaves the block out.
+    #[test]
+    fn contract_config_parses_without_the_governance_block() -> Result<()> {
+        let config: ContractConfig = serde_json::from_str(&manifest(""))?;
+        assert!(config.governance.is_none());
+        assert!(!serde_json::to_string(&config)?.contains("governance"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_governance_block_missing_the_keeper_fails_to_parse() {
+        let without_keeper = GOVERNANCE_BLOCK.replace("\"ttlKeeper\": \"GKEEPER\",\n", "");
+        assert_ne!(
+            without_keeper, GOVERNANCE_BLOCK,
+            "the keeper field should have been removed"
+        );
+        assert!(serde_json::from_str::<ContractConfig>(&manifest(&without_keeper)).is_err());
     }
 }
