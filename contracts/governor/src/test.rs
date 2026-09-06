@@ -13,7 +13,7 @@ use soroban_sdk::{
 };
 use soroban_utils::{
     pausable::{MUTATIONS, PauseState},
-    ttl::EXTEND_TO,
+    ttl::{EXTEND_TO, THRESHOLD},
 };
 use stellar_access::access_control::RoleGranted;
 use stellar_governance::timelock::{OperationCancelled, OperationExecuted, OperationScheduled};
@@ -1071,7 +1071,7 @@ fn execute_accepts_a_predecessor_that_is_done() {
 }
 
 #[test]
-fn execute_rejects_the_governor_as_target() {
+fn execute_rejects_a_self_operation_with_the_wrong_argument_count() {
     let env = test_env();
     let s = setup(&env);
     env.mock_all_auths();
@@ -1088,7 +1088,7 @@ fn execute_rejects_the_governor_as_target() {
             &no_predecessor(&env),
             &salt(&env, 1),
         ),
-        Err(Ok(Error::Unauthorized))
+        Err(Ok(Error::InvalidArgs))
     ));
     assert_eq!(client.get_pending().len(), 1);
     assert_eq!(client.get_operation_state(&id), OperationStatus::Ready);
@@ -1898,4 +1898,680 @@ fn unpause_requires_the_council_signature() {
     env.set_auths(&[]);
 
     GovernorClient::new(&env, &t.governor).unpause(&t.asp, &MUTATIONS, &t.council);
+}
+
+// ------------------------------------------------------------ self-operations
+
+fn role_args(env: &Env, member: &Address, role: &Symbol) -> Vec<Val> {
+    vec![env, member.into_val(env), role.into_val(env)]
+}
+
+fn fn_role_args(env: &Env, target: &Address, function: &Symbol, role: &Symbol) -> Vec<Val> {
+    vec![
+        env,
+        target.into_val(env),
+        function.into_val(env),
+        role.into_val(env),
+    ]
+}
+
+/// Schedules `function(args)` against the governor from `caller`, advances the
+/// ledger to the operation's ready ledger, and executes it.
+fn try_execute_self(
+    env: &Env,
+    governor: &Address,
+    function: &str,
+    args: &Vec<Val>,
+    byte: u8,
+    caller: &Address,
+) -> Result<Result<Val, soroban_sdk::ConversionError>, Result<Error, InvokeError>> {
+    let client = GovernorClient::new(env, governor);
+    let function = Symbol::new(env, function);
+    let id = client.schedule(
+        governor,
+        &function,
+        args,
+        &no_predecessor(env),
+        &salt(env, byte),
+        caller,
+    );
+    let ready = client
+        .get_pending()
+        .iter()
+        .find(|entry| entry.id == id)
+        .expect("the scheduled operation")
+        .ready_ledger;
+    env.ledger().set_sequence_number(ready);
+    client.try_execute(
+        governor,
+        &function,
+        args,
+        &no_predecessor(env),
+        &salt(env, byte),
+    )
+}
+
+fn execute_self(
+    env: &Env,
+    governor: &Address,
+    function: &str,
+    args: &Vec<Val>,
+    byte: u8,
+    caller: &Address,
+) {
+    try_execute_self(env, governor, function, args, byte, caller)
+        .expect("the operation executes")
+        .expect("a void result");
+}
+
+fn try_cancel_self(
+    env: &Env,
+    governor: &Address,
+    function: &str,
+    args: &Vec<Val>,
+    byte: u8,
+    caller: &Address,
+) -> Result<Result<(), soroban_sdk::ConversionError>, Result<soroban_sdk::Error, InvokeError>> {
+    GovernorClient::new(env, governor).try_cancel(
+        governor,
+        &Symbol::new(env, function),
+        args,
+        &no_predecessor(env),
+        &salt(env, byte),
+        caller,
+    )
+}
+
+#[test]
+fn grant_role_through_the_queue_adds_the_holder() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let second = Address::generate(&env);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &second, &GUARDIAN),
+        1,
+        &s.council,
+    );
+
+    assert!(client.has_role(&second, &GUARDIAN));
+    assert_eq!(client.get_role_member_count(&GUARDIAN), 2);
+    assert_eq!(client.get_role_member(&GUARDIAN, &1), second);
+}
+
+#[test]
+fn revoke_role_through_the_queue_removes_the_only_guardian() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.guardian, &GUARDIAN),
+        1,
+        &s.council,
+    );
+
+    assert!(!client.has_role(&s.guardian, &GUARDIAN));
+    assert_eq!(client.get_role_member_count(&GUARDIAN), 0);
+    assert!(matches!(
+        client.try_pause(&s.mock, &MUTATIONS, &s.guardian),
+        Err(Err(InvokeError::Contract(2000)))
+    ));
+}
+
+#[test]
+fn set_fn_role_through_the_queue_opens_the_fast_path() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let mock = env.register(MockTarget, ());
+    let client = GovernorClient::new(&env, &t.governor);
+
+    execute_self(
+        &env,
+        &t.governor,
+        "set_fn_role",
+        &fn_role_args(&env, &mock, &poke(&env), &OPERATOR),
+        1,
+        &t.council,
+    );
+
+    assert_eq!(client.get_fn_role(&mock, &poke(&env)), Some(OPERATOR));
+    client.execute_now(&mock, &poke(&env), &poke_args(&env, 7), &t.operator);
+    assert_eq!(MockTargetClient::new(&env, &mock).last_poke(), 7);
+}
+
+#[test]
+fn clear_fn_role_through_the_queue_closes_the_fast_path() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    execute_self(
+        &env,
+        &t.governor,
+        "clear_fn_role",
+        &vec![&env, t.asp.into_val(&env), insert_leaf(&env).into_val(&env)],
+        1,
+        &t.council,
+    );
+
+    assert_eq!(client.get_fn_role(&t.asp, &insert_leaf(&env)), None);
+    assert!(matches!(
+        client.try_execute_now(&t.asp, &insert_leaf(&env), &leaf_args(&env, 7), &t.operator),
+        Err(Ok(Error::Unauthorized))
+    ));
+}
+
+#[test]
+fn grant_role_with_an_unknown_role_stays_ready_until_cancelled() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let args = role_args(
+        &env,
+        &Address::generate(&env),
+        &Symbol::new(&env, "auditor"),
+    );
+
+    assert!(matches!(
+        try_execute_self(&env, &s.governor, "grant_role", &args, 1, &s.council),
+        Err(Ok(Error::UnknownRole))
+    ));
+    let id = client
+        .get_pending()
+        .get(0)
+        .expect("one pending operation")
+        .id;
+    assert_eq!(client.get_operation_state(&id), OperationStatus::Ready);
+
+    try_cancel_self(&env, &s.governor, "grant_role", &args, 1, &s.council)
+        .expect("the council cancels")
+        .expect("a void result");
+    assert_eq!(client.get_pending(), Vec::new(&env));
+}
+
+#[test]
+fn grant_role_for_a_holder_changes_nothing() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &s.guardian, &GUARDIAN),
+        1,
+        &s.council,
+    );
+
+    assert_eq!(client.get_role_member_count(&GUARDIAN), 1);
+    assert_eq!(client.get_role_member(&GUARDIAN, &0), s.guardian);
+}
+
+#[test]
+fn grant_role_refuses_a_second_role_for_one_address() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let args = role_args(&env, &s.council, &GUARDIAN);
+
+    assert!(matches!(
+        try_execute_self(&env, &s.governor, "grant_role", &args, 1, &s.council),
+        Err(Ok(Error::RoleInvariant))
+    ));
+    let id = client
+        .get_pending()
+        .get(0)
+        .expect("one pending operation")
+        .id;
+    assert_eq!(client.get_operation_state(&id), OperationStatus::Ready);
+
+    try_cancel_self(&env, &s.governor, "grant_role", &args, 1, &s.council)
+        .expect("the council cancels")
+        .expect("a void result");
+    assert!(!client.has_role(&s.council, &GUARDIAN));
+    assert_eq!(client.get_pending(), Vec::new(&env));
+}
+
+#[test]
+fn revoke_role_for_a_non_holder_panics() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+
+    assert!(matches!(
+        try_execute_self(
+            &env,
+            &s.governor,
+            "revoke_role",
+            &role_args(&env, &Address::generate(&env), &OPERATOR),
+            1,
+            &s.council,
+        ),
+        Err(Err(InvokeError::Contract(2007)))
+    ));
+}
+
+#[test]
+fn revoke_role_keeps_the_last_council_holder_while_recovery_is_empty() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let revoke_council = role_args(&env, &s.council, &COUNCIL);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.recovery, &RECOVERY),
+        1,
+        &s.council,
+    );
+    assert!(matches!(
+        try_execute_self(
+            &env,
+            &s.governor,
+            "revoke_role",
+            &revoke_council,
+            2,
+            &s.council
+        ),
+        Err(Ok(Error::RoleInvariant))
+    ));
+    assert!(client.has_role(&s.council, &COUNCIL));
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &Address::generate(&env), &RECOVERY),
+        3,
+        &s.council,
+    );
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &revoke_council,
+        4,
+        &s.council,
+    );
+
+    assert_eq!(client.get_role_member_count(&COUNCIL), 0);
+}
+
+#[test]
+fn revoke_role_removes_one_of_two_council_holders_while_recovery_is_empty() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let second = Address::generate(&env);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &second, &COUNCIL),
+        1,
+        &s.council,
+    );
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.recovery, &RECOVERY),
+        2,
+        &s.council,
+    );
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.council, &COUNCIL),
+        3,
+        &s.council,
+    );
+
+    assert_eq!(client.get_role_member_count(&COUNCIL), 1);
+    assert!(client.has_role(&second, &COUNCIL));
+}
+
+#[test]
+fn revoke_role_extends_the_ttl_of_the_holder_count() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let second = Address::generate(&env);
+    let count = access::AccessControlStorageKey::RoleAccountsCount(GUARDIAN);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &second, &GUARDIAN),
+        1,
+        &s.council,
+    );
+    // Age the count entry past the point where an extension takes effect. The
+    // role's other entries stay alive, so the revoke can still read them. The
+    // guardian role is the one whose revoke reaches no getter that would
+    // extend the count on its own.
+    let aged = env
+        .ledger()
+        .sequence()
+        .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
+    env.ledger().set_sequence_number(aged);
+    env.as_contract(&s.governor, || {
+        assert!(env.storage().persistent().get_ttl(&count) < THRESHOLD);
+    });
+
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &second, &GUARDIAN),
+        2,
+        &s.council,
+    );
+
+    env.as_contract(&s.governor, || {
+        assert_eq!(env.storage().persistent().get_ttl(&count), EXTEND_TO);
+    });
+}
+
+#[test]
+fn revoke_role_keeps_the_last_recovery_holder_while_the_council_is_empty() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let revoke_recovery = role_args(&env, &s.recovery, &RECOVERY);
+    let council = Address::generate(&env);
+
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.council, &COUNCIL),
+        1,
+        &s.council,
+    );
+    assert!(matches!(
+        try_execute_self(
+            &env,
+            &s.governor,
+            "revoke_role",
+            &revoke_recovery,
+            2,
+            &s.recovery
+        ),
+        Err(Ok(Error::RoleInvariant))
+    ));
+    assert!(client.has_role(&s.recovery, &RECOVERY));
+
+    execute_self(
+        &env,
+        &s.governor,
+        "grant_role",
+        &role_args(&env, &council, &COUNCIL),
+        3,
+        &s.recovery,
+    );
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &revoke_recovery,
+        4,
+        &council,
+    );
+
+    assert_eq!(client.get_role_member_count(&RECOVERY), 0);
+}
+
+// The old operator's refusal is raised inside a call whose arguments hold a
+// `U256` leaf, which reaches the `ethnum` formatting path described above.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn the_council_replaces_the_operator_through_the_queue() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let asp = ASPMembershipClient::new(&env, &t.asp);
+    let operator = Address::generate(&env);
+
+    execute_self(
+        &env,
+        &t.governor,
+        "revoke_role",
+        &role_args(&env, &t.operator, &OPERATOR),
+        1,
+        &t.council,
+    );
+    execute_self(
+        &env,
+        &t.governor,
+        "grant_role",
+        &role_args(&env, &operator, &OPERATOR),
+        2,
+        &t.council,
+    );
+
+    assert!(matches!(
+        client.try_execute_now(&t.asp, &insert_leaf(&env), &leaf_args(&env, 7), &t.operator),
+        Err(Err(InvokeError::Contract(2000)))
+    ));
+    let root_before = asp.get_root();
+    client.execute_now(&t.asp, &insert_leaf(&env), &leaf_args(&env, 7), &operator);
+    assert_ne!(asp.get_root(), root_before);
+}
+
+#[test]
+fn recovery_replaces_a_lost_council() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+    let client = GovernorClient::new(&env, &s.governor);
+    let council = Address::generate(&env);
+    let grant = role_args(&env, &council, &COUNCIL);
+    let scheduled_at = env.ledger().sequence();
+
+    let id = client.schedule(
+        &s.governor,
+        &grant_role_fn(&env),
+        &grant,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+        &s.recovery,
+    );
+    let ready = client
+        .get_pending()
+        .get(0)
+        .expect("one pending operation")
+        .ready_ledger;
+    assert_eq!(ready, scheduled_at.saturating_add(RECOVERY_DELAY));
+    env.ledger().set_sequence_number(ready);
+    env.set_auths(&[]);
+    client.execute(
+        &s.governor,
+        &grant_role_fn(&env),
+        &grant,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+    );
+    assert_eq!(client.get_operation_state(&id), OperationStatus::Done);
+    assert!(client.has_role(&council, &COUNCIL));
+
+    env.mock_all_auths();
+    execute_self(
+        &env,
+        &s.governor,
+        "revoke_role",
+        &role_args(&env, &s.council, &COUNCIL),
+        2,
+        &council,
+    );
+    assert!(!client.has_role(&s.council, &COUNCIL));
+    assert_eq!(client.get_role_member_count(&COUNCIL), 1);
+}
+
+#[test]
+fn execute_rejects_a_self_operation_with_the_wrong_argument_type() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+
+    assert!(matches!(
+        try_execute_self(
+            &env,
+            &s.governor,
+            "grant_role",
+            &vec![&env, 7u32.into_val(&env), GUARDIAN.into_val(&env)],
+            1,
+            &s.council,
+        ),
+        Err(Ok(Error::InvalidArgs))
+    ));
+}
+
+#[test]
+fn update_delay_is_not_a_governor_function() {
+    let env = test_env();
+    let s = setup(&env);
+    env.mock_all_auths();
+
+    assert!(matches!(
+        try_execute_self(
+            &env,
+            &s.governor,
+            "update_delay",
+            &vec![&env, 100u32.into_val(&env)],
+            1,
+            &s.council,
+        ),
+        Err(Ok(Error::UnknownFunction))
+    ));
+    assert_eq!(
+        GovernorClient::new(&env, &s.governor).get_delays().delay,
+        DELAY
+    );
+}
+
+#[test]
+fn the_council_replaces_the_guardian_through_the_queue() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let guardian = Address::generate(&env);
+    let revoke = role_args(&env, &t.guardian, &GUARDIAN);
+    let grant = role_args(&env, &guardian, &GUARDIAN);
+
+    let revoke_fn = Symbol::new(&env, "revoke_role");
+    client.schedule(
+        &t.governor,
+        &revoke_fn,
+        &revoke,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+        &t.council,
+    );
+    client.schedule(
+        &t.governor,
+        &grant_role_fn(&env),
+        &grant,
+        &no_predecessor(&env),
+        &salt(&env, 2),
+        &t.council,
+    );
+
+    assert!(matches!(
+        try_cancel_self(&env, &t.governor, "revoke_role", &revoke, 1, &t.guardian),
+        Err(Ok(e)) if e == host_error(2000)
+    ));
+    assert!(matches!(
+        try_cancel_self(&env, &t.governor, "grant_role", &grant, 2, &t.guardian),
+        Err(Ok(e)) if e == host_error(2000)
+    ));
+    assert_eq!(client.get_pending().len(), 2);
+
+    let ready = client
+        .get_pending()
+        .get(0)
+        .expect("two pending operations")
+        .ready_ledger;
+    env.ledger().set_sequence_number(ready);
+    client.execute(
+        &t.governor,
+        &revoke_fn,
+        &revoke,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+    );
+    client.execute(
+        &t.governor,
+        &grant_role_fn(&env),
+        &grant,
+        &no_predecessor(&env),
+        &salt(&env, 2),
+    );
+
+    client.pause(&t.asp, &MUTATIONS, &guardian);
+    assert_eq!(pause_state(&env, &t).flags, MUTATIONS);
+    assert!(matches!(
+        client.try_pause(&t.asp, &MUTATIONS, &t.guardian),
+        Err(Err(InvokeError::Contract(2000)))
+    ));
+}
+
+#[test]
+fn the_guardian_cannot_cancel_a_table_change() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let update_admin = Symbol::new(&env, "update_admin");
+    let args = fn_role_args(&env, &t.asp, &update_admin, &OPERATOR);
+
+    client.schedule(
+        &t.governor,
+        &Symbol::new(&env, "set_fn_role"),
+        &args,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+        &t.council,
+    );
+
+    assert!(matches!(
+        try_cancel_self(&env, &t.governor, "set_fn_role", &args, 1, &t.guardian),
+        Err(Ok(e)) if e == host_error(2000)
+    ));
+    assert_eq!(client.get_pending().len(), 1);
+
+    try_cancel_self(&env, &t.governor, "set_fn_role", &args, 1, &t.council)
+        .expect("the council cancels")
+        .expect("a void result");
+    assert_eq!(client.get_pending(), Vec::new(&env));
+    assert!(matches!(
+        client.try_execute_now(
+            &t.asp,
+            &update_admin,
+            &vec![&env, Address::generate(&env).into_val(&env)],
+            &t.operator,
+        ),
+        Err(Ok(Error::Unauthorized))
+    ));
 }

@@ -17,8 +17,8 @@
 //! makes the calls that the permission table opens to it.
 #![no_std]
 use soroban_sdk::{
-    Address, BytesN, Env, Symbol, Val, Vec, contract, contractclient, contracterror, contractimpl,
-    contracttype, panic_with_error, symbol_short,
+    Address, BytesN, Env, Symbol, TryFromVal, Val, Vec, contract, contractclient, contracterror,
+    contractimpl, contracttype, panic_with_error, symbol_short,
 };
 use soroban_utils::{bump_entry, bump_instance};
 use stellar_access::access_control as access;
@@ -238,14 +238,11 @@ impl Governor {
             return Err(Error::InvalidConfig);
         }
 
-        let store = env.storage().persistent();
         for rule in fn_roles.iter() {
             if !is_known_role(&rule.role) {
                 return Err(Error::InvalidConfig);
             }
-            let key = DataKey::FnRole(rule.target, rule.function);
-            store.set(&key, &rule.role);
-            bump_entry(&env, &key);
+            set_fn_role(&env, rule.target, rule.function, &rule.role);
         }
 
         timelock::set_min_delay(&env, delay);
@@ -351,21 +348,39 @@ impl Governor {
     /// Anyone may execute. The delay is what protects the call, not the
     /// identity of whoever finally makes it.
     ///
+    /// An operation whose target is the governor itself administers the
+    /// governor. Its function is one of `grant_role` and `revoke_role`, each
+    /// taking a member address and a role symbol, or `set_fn_role` and
+    /// `clear_fn_role`, taking a target address and a function symbol, with
+    /// the role symbol to require for `set_fn_role`. The operation is marked
+    /// done before the call is made, and an error rolls the whole invocation
+    /// back, so a self-operation with bad arguments stays ready until the
+    /// council cancels it.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::Expired`] if the grace window closed, and
-    /// [`Error::Unauthorized`] if the target is the governor itself.
+    /// Returns [`Error::Expired`] if the grace window closed. For a
+    /// self-operation, returns [`Error::UnknownFunction`] if the function is
+    /// not one of the four above, [`Error::InvalidArgs`] if the arguments do
+    /// not decode as that function expects, [`Error::UnknownRole`] if a role
+    /// to grant or require is not one of the four roles, and
+    /// [`Error::RoleInvariant`] if a grant would give a member a second role
+    /// or a revocation would leave no council holder while there is no
+    /// recovery holder, or the reverse.
     ///
     /// # Panics
     ///
     /// Panics with OpenZeppelin's `InvalidOperationState` if the operation is
-    /// not ready, `UnexecutedPredecessor` if its predecessor has not run, and
+    /// not ready, `UnexecutedPredecessor` if its predecessor has not run,
+    /// `RoleNotHeld` if a revocation names a member without the role, and
     /// [`Error::InvalidConfig`] if the governor holds no configuration, which
     /// a constructed governor always does.
     ///
     /// # Events
     ///
-    /// Publishes `OperationExecuted` from the OpenZeppelin timelock.
+    /// Publishes `OperationExecuted` from the OpenZeppelin timelock, and
+    /// `RoleGranted` or `RoleRevoked` from its access control module for a
+    /// role change.
     pub fn execute(
         env: Env,
         target: Address,
@@ -389,7 +404,7 @@ impl Governor {
         forget(&env, &id);
 
         if operation.target == env.current_contract_address() {
-            return Err(Error::Unauthorized);
+            return dispatch_self(&env, &operation.function, &operation.args);
         }
         Ok(env.invoke_contract::<Val>(&operation.target, &operation.function, operation.args))
     }
@@ -646,9 +661,85 @@ fn operation(
     }
 }
 
+/// The four roles the governor defines.
+const ROLES: [Symbol; 4] = [COUNCIL, OPERATOR, GUARDIAN, RECOVERY];
+
 /// Reports whether `role` is one of the four roles the governor defines.
 fn is_known_role(role: &Symbol) -> bool {
-    [COUNCIL, OPERATOR, GUARDIAN, RECOVERY].contains(role)
+    ROLES.contains(role)
+}
+
+/// Performs a ready operation whose target is the governor itself.
+///
+/// Every branch returns a void value, because the operation's effect is read
+/// back through the governor's getters.
+fn dispatch_self(env: &Env, function: &Symbol, args: &Vec<Val>) -> Result<Val, Error> {
+    let governor = env.current_contract_address();
+    if *function == Symbol::new(env, "grant_role") {
+        let (member, role): (Address, Symbol) = decode(env, args, 2)?;
+        if !is_known_role(&role) {
+            return Err(Error::UnknownRole);
+        }
+        if ROLES
+            .iter()
+            .any(|held| *held != role && access::has_role(env, &member, held).is_some())
+        {
+            return Err(Error::RoleInvariant);
+        }
+        grant_role(env, &member, &role, &governor);
+    } else if *function == Symbol::new(env, "revoke_role") {
+        let (member, role): (Address, Symbol) = decode(env, args, 2)?;
+        let last_of = |role: &Symbol, other: &Symbol| {
+            access::get_role_member_count(env, role) == 1
+                && access::get_role_member_count(env, other) == 0
+        };
+        if (role == COUNCIL && last_of(&COUNCIL, &RECOVERY))
+            || (role == RECOVERY && last_of(&RECOVERY, &COUNCIL))
+        {
+            return Err(Error::RoleInvariant);
+        }
+        access::revoke_role_no_auth(env, &member, &role, &governor);
+        // A revoke rewrites the holder count every time, and rewrites the role
+        // enumeration only when it removes a role's last holder.
+        bump_entry(
+            env,
+            &access::AccessControlStorageKey::RoleAccountsCount(role.clone()),
+        );
+        bump_entry(env, &access::AccessControlStorageKey::ExistingRoles);
+    } else if *function == Symbol::new(env, "set_fn_role") {
+        let (target, function, role): (Address, Symbol, Symbol) = decode(env, args, 3)?;
+        if !is_known_role(&role) {
+            return Err(Error::UnknownRole);
+        }
+        set_fn_role(env, target, function, &role);
+    } else if *function == Symbol::new(env, "clear_fn_role") {
+        let (target, function): (Address, Symbol) = decode(env, args, 2)?;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::FnRole(target, function));
+    } else {
+        return Err(Error::UnknownFunction);
+    }
+    Ok(Val::VOID.to_val())
+}
+
+/// Decodes `args` as the `count` positional arguments of type `T`.
+///
+/// The count is checked before the conversion because the host rejects a
+/// vector of the wrong length by trapping the invocation, which would leave
+/// the caller with a host error instead of [`Error::InvalidArgs`].
+fn decode<T: TryFromVal<Env, Val>>(env: &Env, args: &Vec<Val>, count: u32) -> Result<T, Error> {
+    if args.len() != count {
+        return Err(Error::InvalidArgs);
+    }
+    T::try_from_val(env, args.as_val()).map_err(|_| Error::InvalidArgs)
+}
+
+/// Writes one permission table row and extends the entry's lifetime.
+fn set_fn_role(env: &Env, target: Address, function: Symbol, role: &Symbol) {
+    let key = DataKey::FnRole(target, function);
+    env.storage().persistent().set(&key, role);
+    bump_entry(env, &key);
 }
 
 /// Reports whether `function` is one of the role changes a recovery address
