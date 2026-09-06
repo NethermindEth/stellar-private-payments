@@ -17,8 +17,8 @@
 //! makes the calls that the permission table opens to it.
 #![no_std]
 use soroban_sdk::{
-    Address, BytesN, Env, Symbol, Val, Vec, contract, contracterror, contractimpl, contracttype,
-    panic_with_error, symbol_short,
+    Address, BytesN, Env, Symbol, Val, Vec, contract, contractclient, contracterror, contractimpl,
+    contracttype, panic_with_error, symbol_short,
 };
 use soroban_utils::{bump_entry, bump_instance};
 use stellar_access::access_control as access;
@@ -167,6 +167,15 @@ pub enum Error {
     /// The queue already holds as many operations as the caller's role may
     /// leave in it.
     QueueFull = 3010,
+}
+
+/// The pause entry points every contract the governor administers exposes.
+#[contractclient(name = "PausableTargetClient")]
+pub trait PausableTarget {
+    /// Sets `flags`, which stop being honored at `until` when it is given.
+    fn pause(env: Env, flags: u32, until: Option<u32>);
+    /// Clears `flags`.
+    fn unpause(env: Env, flags: u32);
 }
 
 /// The timelocked administrator of the pools and the association set providers.
@@ -444,6 +453,68 @@ impl Governor {
             timelock::hash_operation(&env, &operation(target, function, args, predecessor, salt));
         timelock::cancel_operation(&env, &id);
         forget(&env, &id);
+    }
+
+    /// Pauses `flags` on `target` until the guardian window closes.
+    ///
+    /// The deadline is the current ledger plus the guardian pause the governor
+    /// was constructed with. The target decides what that deadline means: a
+    /// contract with a pause already in force keeps the deadline it has and
+    /// only adds the bits, one whose bits the council cleared while an earlier
+    /// deadline is still ahead refuses the call, and one whose earlier deadline
+    /// has passed takes the new deadline for every bit still set.
+    ///
+    /// That last case widens a pause beyond the bits `flags` names, because a
+    /// lapsed deadline stops a bit being honored without clearing it. Read the
+    /// target's pause state before pausing one shape, and have the council
+    /// clear the stale bits through the queue.
+    ///
+    /// The council pauses without a deadline through the queue, as
+    /// [`Governor::unpause`] describes. `flags` is read in the target's own
+    /// mask.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Overflow`] if the deadline would exceed `u32::MAX`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// guardian role. A target that refuses the pause raises its own error,
+    /// which rolls the call back: `InvalidPauseFlags` when `flags` is zero or
+    /// outside its mask, and `TimedPauseArmed` when its bits were all cleared
+    /// while an earlier deadline is still ahead. Panics with
+    /// [`Error::InvalidConfig`] if the governor holds no configuration, which
+    /// a constructed governor always does.
+    #[only_role(caller, "guardian")]
+    pub fn pause(env: Env, target: Address, flags: u32, caller: Address) -> Result<(), Error> {
+        bump_instance(&env);
+        let until = env
+            .ledger()
+            .sequence()
+            .checked_add(setting(&env, &DataKey::GuardianPause))
+            .ok_or(Error::Overflow)?;
+        PausableTargetClient::new(&env, &target).pause(&flags, &Some(until));
+        Ok(())
+    }
+
+    /// Clears `flags` on `target`.
+    ///
+    /// This is the only pause entry point the council holds. Its pause with
+    /// no deadline is a queued call to the target's own `pause` with `until`
+    /// absent: [`Governor::schedule`] it against the target, then
+    /// [`Governor::execute`] it once the delay has passed. `flags` is read in
+    /// the target's own mask.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// council role, and with the target's `InvalidPauseFlags` if `flags` is
+    /// zero or outside its mask.
+    #[only_role(caller, "council")]
+    pub fn unpause(env: Env, target: Address, flags: u32, caller: Address) {
+        bump_instance(&env);
+        PausableTargetClient::new(&env, &target).unpause(&flags);
     }
 
     /// Returns the four waiting periods the governor was constructed with.

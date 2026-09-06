@@ -11,7 +11,10 @@ use soroban_sdk::{
     },
     vec, xdr,
 };
-use soroban_utils::ttl::EXTEND_TO;
+use soroban_utils::{
+    pausable::{MUTATIONS, PauseState},
+    ttl::EXTEND_TO,
+};
 use stellar_access::access_control::RoleGranted;
 use stellar_governance::timelock::{OperationCancelled, OperationExecuted, OperationScheduled};
 
@@ -1672,4 +1675,227 @@ fn execute_now_requires_the_caller_signature() {
         &leaf_args(&env, 7),
         &t.operator,
     );
+}
+
+// ---------------------------------------------------------------------- pause
+
+fn pause_state(env: &Env, t: &TableSetup) -> PauseState {
+    ASPMembershipClient::new(env, &t.asp).get_pause_state()
+}
+
+#[test]
+fn pause_sets_the_guardian_deadline_on_the_target() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let now = env.ledger().sequence();
+
+    GovernorClient::new(&env, &t.governor).pause(&t.asp, &MUTATIONS, &t.guardian);
+
+    assert_eq!(
+        pause_state(&env, &t),
+        PauseState {
+            flags: MUTATIONS,
+            until: Some(now.saturating_add(GUARDIAN_PAUSE)),
+        }
+    );
+}
+
+#[test]
+fn pause_rejects_every_role_but_the_guardian() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    for caller in [&t.council, &t.recovery, &t.operator] {
+        assert!(matches!(
+            client.try_pause(&t.asp, &MUTATIONS, caller),
+            Err(Err(InvokeError::Contract(2000)))
+        ));
+    }
+    assert_eq!(pause_state(&env, &t), PauseState::default());
+}
+
+#[test]
+fn a_second_guardian_pause_keeps_the_deadline() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let now = env.ledger().sequence();
+
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+    env.ledger().set_sequence_number(now.saturating_add(5));
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+
+    assert_eq!(
+        pause_state(&env, &t).until,
+        Some(now.saturating_add(GUARDIAN_PAUSE))
+    );
+}
+
+// The next two refusals are the association set provider's own errors, raised
+// inside the nested invocation, so they reach the `ethnum` formatting path
+// described above.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn pause_is_refused_after_the_council_cleared_the_window() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+    client.unpause(&t.asp, &MUTATIONS, &t.council);
+    let cleared = pause_state(&env, &t);
+
+    assert!(matches!(
+        client.try_pause(&t.asp, &MUTATIONS, &t.guardian),
+        Err(Err(InvokeError::Contract(8)))
+    ));
+    assert_eq!(pause_state(&env, &t), cleared);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn pause_forwards_the_targets_rejection_of_the_flags() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+
+    assert!(matches!(
+        GovernorClient::new(&env, &t.governor).try_pause(&t.asp, &2, &t.guardian),
+        Err(Err(InvokeError::Contract(7)))
+    ));
+    assert_eq!(pause_state(&env, &t), PauseState::default());
+}
+
+#[test]
+fn pause_is_accepted_at_the_deadline_and_records_a_new_one() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let until = env.ledger().sequence().saturating_add(GUARDIAN_PAUSE);
+
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+    client.unpause(&t.asp, &MUTATIONS, &t.council);
+    env.ledger().set_sequence_number(until);
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+
+    assert_eq!(
+        pause_state(&env, &t),
+        PauseState {
+            flags: MUTATIONS,
+            until: Some(until.saturating_add(GUARDIAN_PAUSE)),
+        }
+    );
+}
+
+#[test]
+fn the_council_pauses_without_a_deadline_through_the_queue() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+    let pause_fn = Symbol::new(&env, "pause");
+    let args = vec![&env, MUTATIONS.into_val(&env), None::<u32>.into_val(&env)];
+
+    client.schedule(
+        &t.asp,
+        &pause_fn,
+        &args,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+        &t.council,
+    );
+    let ready = client
+        .get_pending()
+        .get(0)
+        .expect("one pending operation")
+        .ready_ledger;
+    env.ledger().set_sequence_number(ready);
+    client.execute(
+        &t.asp,
+        &pause_fn,
+        &args,
+        &no_predecessor(&env),
+        &salt(&env, 1),
+    );
+    assert_eq!(
+        pause_state(&env, &t),
+        PauseState {
+            flags: MUTATIONS,
+            until: None,
+        }
+    );
+
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+    assert_eq!(pause_state(&env, &t).until, None);
+
+    client.unpause(&t.asp, &MUTATIONS, &t.council);
+    assert_eq!(pause_state(&env, &t).flags, 0);
+}
+
+#[test]
+fn unpause_rejects_every_role_but_the_council() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    let client = GovernorClient::new(&env, &t.governor);
+
+    client.pause(&t.asp, &MUTATIONS, &t.guardian);
+    for caller in [&t.guardian, &t.recovery, &t.operator] {
+        assert!(matches!(
+            client.try_unpause(&t.asp, &MUTATIONS, caller),
+            Err(Ok(e)) if e == host_error(2000)
+        ));
+    }
+    assert_eq!(pause_state(&env, &t).flags, MUTATIONS);
+
+    client.unpause(&t.asp, &MUTATIONS, &t.council);
+    assert_eq!(pause_state(&env, &t).flags, 0);
+}
+
+#[test]
+fn pause_rejects_a_deadline_that_overflows_the_ledger() {
+    let env = test_env();
+    let mock = env.register(MockTarget, ());
+    let council = Address::generate(&env);
+    let recovery = Address::generate(&env);
+    let guardian = Address::generate(&env);
+    // The guardian pause is fixed at construction, so a deadline beyond
+    // `u32::MAX` needs a governor whose window is near the maximum, on a ledger
+    // inside the lifetime of the entries the call reads.
+    let governor = register_governor(
+        &env,
+        DELAY,
+        RECOVERY_DELAY,
+        GRACE,
+        u32::MAX,
+        roles(&env, &council, &recovery, &guardian),
+        Vec::new(&env),
+    );
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(1_000_000);
+
+    assert!(matches!(
+        GovernorClient::new(&env, &governor).try_pause(&mock, &MUTATIONS, &guardian),
+        Err(Ok(Error::Overflow))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_requires_the_guardian_signature() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    env.set_auths(&[]);
+
+    GovernorClient::new(&env, &t.governor).pause(&t.asp, &MUTATIONS, &t.guardian);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_requires_the_council_signature() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+    env.set_auths(&[]);
+
+    GovernorClient::new(&env, &t.governor).unpause(&t.asp, &MUTATIONS, &t.council);
 }
