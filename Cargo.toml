@@ -58,6 +58,7 @@ futures = { version = "0.3.33", default-features = false, features = ["async-awa
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
+governor = { path = "contracts/governor" }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 js-sys = "0.3"
 log = { version = "0.4", default-features = false }

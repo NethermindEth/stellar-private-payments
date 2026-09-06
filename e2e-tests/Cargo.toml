@@ -19,6 +19,7 @@ circom-groth16-verifier = { workspace = true }
 circuits = { workspace = true, features = ["std"] }
 # Contract dependencies
 contract-types = { workspace = true }
+governor = { workspace = true }
 num-bigint = { workspace = true }
 pool = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }

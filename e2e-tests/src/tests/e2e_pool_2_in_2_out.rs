@@ -5,9 +5,9 @@
 //! and the verification from the pool contract. That is the pipeline the CLI,
 //! the SDK and the browser use.
 use super::utils::{
-    DeployedContracts, LEAF_PREFIX, LEVELS, NonMembership, TRANSACT_STEMS, build_membership_trees,
-    build_policy_inputs, bytes32_to_bigint, deploy_contracts, generate_proof, prove_with_graph,
-    scalar_to_u256, sync_contract_state, test_env, wrap_groth16_proof,
+    DeployedContracts, LEAF_PREFIX, NonMembership, TRANSACT_STEMS, TransactOutcome,
+    build_membership_trees, build_policy_inputs, deploy_contracts, prove_transaction,
+    prove_with_graph, scalar_to_u256, sync_contract_state, test_env, transact,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -16,21 +16,12 @@ use circuits::test::utils::{
     general::scalar_to_bigint,
     keypair::derive_public_key,
     transaction::{commitment, prepopulated_prefix},
-    transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
+    transaction_case::{InputNote, OutputNote, TxCase},
 };
 use contract_types::Groth16Error;
-use pool::{Error, ExtData, PoolContractClient, Proof, hash_ext_data};
-use soroban_sdk::{
-    Address, Bytes, I256, InvokeError, U256, Vec as SorobanVec, testutils::Address as _,
-};
+use pool::{Error, ExtData, Proof};
+use soroban_sdk::InvokeError;
 use stellar_private_payments::types::PolicyFlags;
-
-/// Result of `PoolContractClient::try_transact`.
-///
-/// The outer error holds the contract error, and the inner one holds a return
-/// value conversion error.
-type TransactOutcome =
-    Result<Result<(), soroban_sdk::ConversionError>, Result<Error, soroban_sdk::InvokeError>>;
 
 /// A pool transaction that is ready for `transact`, with its proof made from
 /// the committed witness graph.
@@ -44,16 +35,12 @@ struct TransactFixture {
 impl TransactFixture {
     /// Send the transaction to the pool contract.
     fn transact(&self) -> TransactOutcome {
-        let sender = Address::generate(&self.env);
-        PoolContractClient::new(&self.env, &self.contracts.pool).try_transact(
-            &self.proof,
-            &self.ext_data,
-            &sender,
-        )
+        transact(&self.env, &self.contracts, &self.proof, &self.ext_data)
     }
 }
 
-/// Build a 2-in/2-out pool transaction and prove it from the witness graph.
+/// Build a 2-in/2-out pool transaction, prove it from the witness graph, and
+/// put the contracts into the state the proof was made against.
 ///
 /// The amounts must balance: `inputs + ext_amount = outputs`. A positive
 /// `ext_amount` is a deposit, and zero is a private transfer.
@@ -62,122 +49,27 @@ fn transact_fixture(
     out_amounts: [u64; 2],
     ext_amount: i32,
 ) -> Result<TransactFixture> {
-    assert!(ext_amount >= 0, "this fixture only covers deposits");
     let env = test_env();
-    let recipient = Address::generate(&env);
-
-    let ext_data = ExtData {
-        recipient,
-        ext_amount: I256::from_i32(&env, ext_amount),
-        encrypted_output0: Bytes::new(&env),
-        encrypted_output1: Bytes::new(&env),
-    };
-    let ext_data_hash_bytes = hash_ext_data(&env, &ext_data);
-    let ext_data_hash_bigint = bytes32_to_bigint(&ext_data_hash_bytes);
-
-    let case = TxCase::new(
-        vec![
-            InputNote {
-                leaf_index: 0,
-                priv_key: Scalar::from(101u64),
-                blinding: Scalar::from(201u64),
-                amount: Scalar::from(in_amounts[0]),
-            },
-            InputNote {
-                leaf_index: 1,
-                priv_key: Scalar::from(102u64),
-                blinding: Scalar::from(211u64),
-                amount: Scalar::from(in_amounts[1]),
-            },
-        ],
-        vec![
-            OutputNote {
-                pub_key: Scalar::from(501u64),
-                blinding: Scalar::from(601u64),
-                amount: Scalar::from(out_amounts[0]),
-            },
-            OutputNote {
-                pub_key: Scalar::from(502u64),
-                blinding: Scalar::from(602u64),
-                amount: Scalar::from(out_amounts[1]),
-            },
-        ],
-    );
-
-    // Pool state. `transact` appends its two outputs past this prefix.
-    let mut leaves = prepopulated_prefix(
-        0xDEAD_BEEFu64,
-        &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-        LEAF_PREFIX,
-    );
-
-    let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
-    let keys = case
-        .inputs
-        .iter()
-        .map(|input| NonMembership {
-            key_non_inclusion: scalar_to_bigint(derive_public_key(input.priv_key)),
-        })
-        .collect::<Vec<_>>();
-
-    let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
-    let public_amount = Scalar::from(u64::try_from(ext_amount).expect("non-negative ext amount"));
-    let result = generate_proof(
-        &case,
-        leaves.clone(),
-        public_amount,
-        &membership_trees,
-        &keys,
-        Some(ext_data_hash_bigint),
-    )?;
-    assert!(result.verified, "Proof should verify locally");
+    let mut proven = prove_transaction(&env, in_amounts, out_amounts, ext_amount)?;
 
     env.mock_all_auths();
     let contracts = deploy_contracts(&env);
     let roots = sync_contract_state(
         &env,
         &contracts,
-        &case,
-        &mut leaves,
-        &membership_trees,
-        &witness,
+        &proven.case,
+        &mut proven.leaves,
+        &proven.membership_trees,
+        &proven.witness,
     );
 
-    let mut input_nullifiers: SorobanVec<U256> = SorobanVec::new(&env);
-    for nullifier in &witness.nullifiers {
-        input_nullifiers.push_back(scalar_to_u256(&env, *nullifier));
-    }
-
-    let proof = Proof {
-        proof: wrap_groth16_proof(&env, result),
-        root: roots.pool_root,
-        input_nullifiers,
-        output_commitment0: scalar_to_u256(&env, output_commitment(&case, 0)),
-        output_commitment1: scalar_to_u256(&env, output_commitment(&case, 1)),
-        public_amount: U256::from_u32(
-            &env,
-            u32::try_from(ext_amount).expect("non-negative ext amount"),
-        ),
-        ext_data_hash: ext_data_hash_bytes,
-        asp_membership_root: roots.asp_membership_root,
-        asp_non_membership_root: roots.asp_non_membership_root,
-    };
-
+    let ext_data = proven.ext_data.clone();
     Ok(TransactFixture {
+        proof: proven.into_proof(&env, &roots),
         env,
         contracts,
-        proof,
         ext_data,
     })
-}
-
-/// Commitment of one output note of a case.
-fn output_commitment(case: &TxCase, index: usize) -> Scalar {
-    commitment(
-        case.outputs[index].amount,
-        case.outputs[index].pub_key,
-        case.outputs[index].blinding,
-    )
 }
 
 /// Keep only the signals that a circuit with these policy flags declares.

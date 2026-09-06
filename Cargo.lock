@@ -2293,6 +2293,7 @@ dependencies = [
  "circom-groth16-verifier",
  "circuits",
  "contract-types",
+ "governor",
  "num-bigint",
  "pool",
  "soroban-sdk",
