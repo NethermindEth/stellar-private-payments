@@ -193,6 +193,13 @@ pub struct LedgerEntryResult {
     pub xdr: String,
     #[serde(rename = "lastModifiedLedgerSeq")]
     pub last_modified_ledger: u32,
+    /// Last ledger at which the entry is still live.
+    ///
+    /// The RPC omits the field for entries that never expire, such as classic
+    /// ledger entries, and sets it to `0` for an archived entry. An archived
+    /// entry is returned; a key that was never written is not.
+    #[serde(rename = "liveUntilLedgerSeq", default)]
+    pub live_until_ledger_seq: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -860,6 +867,33 @@ mod tests {
             .find(|(_, name, _)| *name == "Root")
             .expect("Root spec");
         assert!(root.2);
+    }
+
+    #[test]
+    fn live_until_ledger_seq_decodes_when_present_zero_absent_or_null() {
+        let decode = |entry: serde_json::Value| {
+            serde_json::from_value::<LedgerEntryResult>(entry).expect("entry")
+        };
+        let base = json!({
+            "key": "AAAA",
+            "xdr": "BBBB",
+            "lastModifiedLedgerSeq": 12,
+        });
+
+        let mut present = base.clone();
+        present["liveUntilLedgerSeq"] = json!(3_110_400_u32);
+        assert_eq!(decode(present).live_until_ledger_seq, Some(3_110_400));
+
+        // The RPC's placeholder for an archived entry.
+        let mut archived = base.clone();
+        archived["liveUntilLedgerSeq"] = json!(0);
+        assert_eq!(decode(archived).live_until_ledger_seq, Some(0));
+
+        assert_eq!(decode(base.clone()).live_until_ledger_seq, None);
+
+        let mut null = base;
+        null["liveUntilLedgerSeq"] = json!(null);
+        assert_eq!(decode(null).live_until_ledger_seq, None);
     }
 
     #[test]
