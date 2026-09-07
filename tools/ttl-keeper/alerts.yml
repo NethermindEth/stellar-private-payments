@@ -1,0 +1,51 @@
+groups:
+  - name: ttl-keeper
+    rules:
+      - alert: KeeperRoundsFailing
+        expr: increase(ttl_keeper_round_errors_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The keeper is failing rounds"
+          description: >-
+            A round ended in an error, so no entry it had not already reached was
+            extended. Every other alert here reads a gauge the failed round never
+            updated, so this one fires first.
+
+      - alert: KeeperClassificationMismatch
+        expr: increase(ttl_keeper_classification_mismatch_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The RPC's simulation disagrees with its ledger state"
+          description: >-
+            An extend simulation asked for a restore of a key that getLedgerEntries
+            had reported live. The keeper restored it and carried on. Either the entry
+            expired between the read and the simulation, which a keeper that was down
+            past the threshold sees once, or the RPC no longer reports entry state the
+            way the keeper relies on; check getVersionInfo if it repeats.
+
+      - alert: ContractStorageNearExpiry
+        expr: min by (contract) (ttl_keeper_min_ttl_ledgers) < 518400
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.contract }} has less than 518400 ledgers of storage lifetime left"
+          description: >-
+            An entry of {{ $labels.contract }} is inside the extension threshold and
+            has stayed there for an hour, so the keeper is not extending it. Check
+            whether the keeper is running and whether its account is funded.
+
+      - alert: KeeperBalanceLow
+        expr: ttl_keeper_keeper_balance_stroops < 1000000000
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "The keeper account holds less than 100 XLM"
+          description: >-
+            The keeper pays the resource fee for every extension and restore. Below
+            100 XLM it will start failing rounds, and archived entries need a restore
+            rather than an extension to come back.

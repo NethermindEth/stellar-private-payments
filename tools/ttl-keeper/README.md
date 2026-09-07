@@ -71,6 +71,35 @@ The file is written through a temporary file and a rename, so a round that dies 
 leaves either the previous state or the new one. Delete it to re-read every pool's events
 from its deployment ledger.
 
+## Metrics
+
+`--metrics-bind 127.0.0.1:9095` serves Prometheus metrics on that address. Without the flag
+the keeper records nothing.
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `ttl_keeper_min_ttl_ledgers{contract}` | gauge | Ledgers left on the shortest-lived entry of a contract |
+| `ttl_keeper_keeper_balance_stroops` | gauge | Balance of the keeper account |
+| `ttl_keeper_extended_total` | counter | Keys whose lifetime the keeper has extended |
+| `ttl_keeper_restored_total` | counter | Keys the keeper has restored from the archive |
+| `ttl_keeper_round_errors_total` | counter | Rounds that ended in an error |
+| `ttl_keeper_classification_mismatch_total` | counter | Keys the RPC's simulation called archived after its ledger-state answer called them live |
+
+The minimum-lifetime gauge reports an archived entry the round did not restore as zero, so
+the expiry alert stays raised until a restore lands.
+
+`alerts.yml` holds four Prometheus rules. One fires when a round ends in an error, which is
+the first thing to know because every other rule reads a gauge a failed round never updated.
+One fires on a classification mismatch: an entry expired between the read and the
+simulation, which a keeper that was down past the threshold sees once, or the RPC no longer
+reports entry state the way the keeper relies on, which repeats. The other two fire when a
+contract sits inside the extension threshold for an hour and when the keeper account drops
+below 100 XLM. Load them with:
+
+```bash
+promtool check rules tools/ttl-keeper/alerts.yml
+```
+
 ## What it does not do
 
 The keeper touches only the keys it can enumerate, which are the ones the manifest names plus
