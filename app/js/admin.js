@@ -1,4 +1,4 @@
-import { contract } from '@stellar/stellar-sdk';
+import { contract, nativeToScVal } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
@@ -40,10 +40,7 @@ const state = {
   networkPassphrase: null,
   rpcUrl: null,
   contracts: null,
-  membershipClient: null,
-  nonMembershipClient: null,
-  membershipClientId: null,
-  nonMembershipClientId: null,
+  governorClient: null,
   cryptoReady: false,
 };
 
@@ -157,34 +154,30 @@ function buildSigner() {
   };
 }
 
-async function getMembershipClient(contractId) {
-  if (state.membershipClient && state.membershipClientId === contractId) return state.membershipClient;
-  const signer = buildSigner();
-  state.membershipClient = await contract.Client.from({
-    rpcUrl: state.rpcUrl,
-    networkPassphrase: state.networkPassphrase,
-    publicKey: state.address,
-    signTransaction: signer.signTransaction,
-    signAuthEntry: signer.signAuthEntry,
-    contractId,
-  });
-  state.membershipClientId = contractId;
-  return state.membershipClient;
+function governorId() {
+  return client().contractConfig().governance?.governor ?? null;
 }
 
-async function getNonMembershipClient(contractId) {
-  if (state.nonMembershipClient && state.nonMembershipClientId === contractId) return state.nonMembershipClient;
+async function getGovernorClient() {
+  if (state.governorClient) return state.governorClient;
   const signer = buildSigner();
-  state.nonMembershipClient = await contract.Client.from({
+  state.governorClient = await contract.Client.from({
     rpcUrl: state.rpcUrl,
     networkPassphrase: state.networkPassphrase,
     publicKey: state.address,
     signTransaction: signer.signTransaction,
     signAuthEntry: signer.signAuthEntry,
-    contractId,
+    contractId: governorId(),
   });
-  state.nonMembershipClientId = contractId;
-  return state.nonMembershipClient;
+  return state.governorClient;
+}
+
+const u256 = (value) => nativeToScVal(value, { type: 'u256' });
+
+function failureMessage(err) {
+  return /Error\(Contract, #2000\)/.test(err.message)
+    ? 'the connected wallet is not an operator'
+    : err.message;
 }
 
 async function ensureCryptoReady() {
@@ -249,6 +242,14 @@ async function connect() {
     connectBtn.classList.remove('bg-[linear-gradient(135deg,#74c5ff,#2f6dff)]', 'text-ink-950');
     connectBtn.classList.add('bg-white/[0.05]', 'text-slate-100');
 
+    state.governorClient = null;
+    showToast(`Connected: ${shortAddress(address)}`, 'success');
+
+    if (!governorId()) {
+      setStatus('This deployment has no governor', 'error');
+      return;
+    }
+
     // Enable Action Buttons & remove tooltips
     const actionBtns = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn];
     actionBtns.forEach(btn => {
@@ -256,12 +257,7 @@ async function connect() {
       btn.removeAttribute('title');
     });
 
-    state.membershipClient = null;
-    state.nonMembershipClient = null;
-
     setStatus('Wallet connected', 'ok');
-    showToast(`Connected: ${shortAddress(address)}`, 'success');
-
   } catch (err) {
     if (err.code === 'USER_REJECTED') {
       setStatus('Connection cancelled', 'info');
@@ -276,8 +272,7 @@ function disconnect() {
   state.address = null;
   state.networkPassphrase = null;
   state.rpcUrl = null;
-  state.membershipClient = null;
-  state.nonMembershipClient = null;
+  state.governorClient = null;
 
   walletChip.textContent = 'Connect Freighter';
   connectBtn.removeAttribute('title');
@@ -362,8 +357,13 @@ async function insertMembershipLeaf() {
     const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
 
-    const mClient = await getMembershipClient(contractId);
-    const tx = await mClient.insert_leaf({ leaf: leafValue });
+    const gov = await getGovernorClient();
+    const tx = await gov.execute_now({
+      target: contractId,
+      function: 'insert_leaf',
+      args: [u256(leafValue)],
+      caller: state.address,
+    });
     await tx.signAndSend();
 
     setStatus('The allowlist insert transaction sent', 'ok');
@@ -373,7 +373,7 @@ async function insertMembershipLeaf() {
     await refreshState();
   } catch (err) {
     setStatus('Allowlist insert failed', 'error');
-    showToast(`Allowlist insert failed: ${err.message}`, 'error');
+    showToast(`Allowlist insert failed: ${failureMessage(err)}`, 'error');
   } finally {
     if (state.address) addToAllowlistBtn.disabled = false;
     addToAllowlistBtn.textContent = originalText;
@@ -396,8 +396,13 @@ async function insertNonMembershipLeaf() {
     addToBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Submitting blocklist insert transaction...', 'info');
-    const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.insert_leaf({ key: keyValue, value: valueValue });
+    const gov = await getGovernorClient();
+    const tx = await gov.execute_now({
+      target: contractId,
+      function: 'insert_leaf',
+      args: [u256(keyValue), u256(valueValue)],
+      caller: state.address,
+    });
     await tx.signAndSend();
 
     setStatus('The blocklist insert transaction sent', 'ok');
@@ -406,7 +411,7 @@ async function insertNonMembershipLeaf() {
     await refreshState();
   } catch (err) {
     setStatus('Blocklist insert failed', 'error');
-    showToast(`Blocklist insert failed: ${err.message}`, 'error');
+    showToast(`Blocklist insert failed: ${failureMessage(err)}`, 'error');
   } finally {
     if (state.address) addToBlocklistBtn.disabled = false;
     addToBlocklistBtn.textContent = originalText;
@@ -427,8 +432,13 @@ async function removeNonMembershipLeaf() {
     removeFromBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Submitting blocklist removal transaction...', 'info');
-    const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.delete_leaf({ key: keyValue });
+    const gov = await getGovernorClient();
+    const tx = await gov.execute_now({
+      target: contractId,
+      function: 'delete_leaf',
+      args: [u256(keyValue)],
+      caller: state.address,
+    });
     await tx.signAndSend();
 
     setStatus('The blocklist removal transaction sent', 'ok');
@@ -437,7 +447,7 @@ async function removeNonMembershipLeaf() {
     await refreshState();
   } catch (err) {
     setStatus('User key removal from the blocklist failed', 'error');
-    showToast(`User key removal from the blocklist failed: ${err.message}`, 'error');
+    showToast(`User key removal from the blocklist failed: ${failureMessage(err)}`, 'error');
   } finally {
     if (state.address) removeFromBlocklistBtn.disabled = false;
     removeFromBlocklistBtn.textContent = originalText;
