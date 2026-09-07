@@ -1,15 +1,18 @@
 #![cfg(test)]
 
+extern crate alloc;
+
 use super::*;
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use soroban_sdk::{
-    Address, BytesN, Env, IntoVal, InvokeError, Symbol, U256, Val, Vec,
+    Address, Bytes, BytesN, Env, IntoVal, InvokeError, Symbol, U256, Val, Vec,
     events::Event,
     testutils::{
         Address as _, Events, Ledger as _, MockAuth, MockAuthInvoke,
         storage::{Instance as _, Persistent as _},
     },
-    vec, xdr,
+    vec,
+    xdr::{self, ToXdr},
 };
 use soroban_utils::{
     pausable::{MUTATIONS, PauseState},
@@ -506,6 +509,104 @@ fn the_constructor_extends_the_ttl_of_the_role_entries() {
             EXTEND_TO
         );
     });
+}
+
+/// The governor's storage keys as OpenZeppelin encodes them, in lowercase
+/// hexadecimal XDR.
+///
+/// The same five constants appear in `tools/ttl-keeper/src/keys.rs`, which
+/// rebuilds these keys from their variant names alone because it cannot depend
+/// on the key types. The pair of tests is what ties those names to this
+/// contract: a rename upstream fails the test below, and a wrong name in the
+/// keeper fails the keeper's own.
+const EXISTING_ROLES_XDR: &str = concat!(
+    "0000001000000001000000010000000f0000000d4578697374696e67526f6c65",
+    "73000000",
+);
+const HAS_ROLE_XDR: &str = concat!(
+    "0000001000000001000000030000000f00000007486173526f6c650000000012",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "00000000000000000000000f00000008677561726469616e",
+);
+const ROLE_ACCOUNTS_COUNT_XDR: &str = concat!(
+    "0000001000000001000000020000000f00000011526f6c654163636f756e7473",
+    "436f756e740000000000000f00000008677561726469616e",
+);
+const ROLE_ACCOUNTS_XDR: &str = concat!(
+    "0000001000000001000000020000000f0000000c526f6c654163636f756e7473",
+    "0000001100000001000000020000000f00000005696e64657800000000000003",
+    "000000000000000f00000004726f6c650000000f00000008677561726469616e",
+);
+const OPERATION_LEDGER_XDR: &str = concat!(
+    "0000001000000001000000020000000f0000000f4f7065726174696f6e4c6564",
+    "676572000000000d000000200707070707070707070707070707070707070707",
+    "070707070707070707070707",
+);
+
+/// The role holder the pinned `HasRole` and `RoleAccounts` keys name.
+const PINNED_HOLDER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+/// Asserts that `key` encodes to `expected`, given as lowercase hexadecimal.
+#[track_caller]
+fn assert_key_xdr(env: &Env, key: impl IntoVal<Env, Val>, expected: &str) {
+    assert_eq!(xdr_hex(&key.to_xdr(env)), expected);
+}
+
+/// Returns `bytes` as lowercase hexadecimal.
+fn xdr_hex(bytes: &Bytes) -> alloc::string::String {
+    let len = usize::try_from(bytes.len()).expect("a key shorter than the address space");
+    let mut raw = [0u8; 256];
+    let raw = raw.get_mut(..len).expect("a key under 256 bytes");
+    bytes.copy_into_slice(raw);
+    hex::encode(raw)
+}
+
+#[test]
+fn the_openzeppelin_storage_keys_encode_as_the_keeper_expects() {
+    let env = test_env();
+    let holder = Address::from_str(&env, PINNED_HOLDER);
+    let operation = BytesN::from_array(&env, &[7u8; 32]);
+
+    assert_key_xdr(
+        &env,
+        access::AccessControlStorageKey::ExistingRoles,
+        EXISTING_ROLES_XDR,
+    );
+    assert_key_xdr(
+        &env,
+        access::AccessControlStorageKey::HasRole(holder, GUARDIAN),
+        HAS_ROLE_XDR,
+    );
+    assert_key_xdr(
+        &env,
+        access::AccessControlStorageKey::RoleAccountsCount(GUARDIAN),
+        ROLE_ACCOUNTS_COUNT_XDR,
+    );
+    assert_key_xdr(
+        &env,
+        timelock::TimelockStorageKey::OperationLedger(operation),
+        OPERATION_LEDGER_XDR,
+    );
+}
+
+/// `RoleAccounts` is the one key of the five whose type the access control
+/// module keeps private, so this reads it out of the footprint a constructed
+/// governor leaves behind rather than naming it. The key holds the role and the
+/// index and not the holder, which is what lets it match a fixed encoding.
+#[test]
+fn the_role_enumeration_key_encodes_as_the_keeper_expects() {
+    let env = test_env();
+    let s = setup(&env);
+
+    let found = env.as_contract(&s.governor, || {
+        env.storage()
+            .persistent()
+            .all()
+            .keys()
+            .iter()
+            .any(|key| xdr_hex(&key.to_xdr(&env)) == ROLE_ACCOUNTS_XDR)
+    });
+    assert!(found, "the guardian's enumeration slot is in the footprint");
 }
 
 // ------------------------------------------------------------------- schedule
