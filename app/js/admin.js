@@ -1,4 +1,4 @@
-import { contract, nativeToScVal } from '@stellar/stellar-sdk';
+import { contract, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
@@ -34,6 +34,13 @@ const blocklistPublicKeyInput = document.getElementById('blocklistPublicKey');
 const addToAllowlistBtn = document.getElementById('addToAllowlistBtn');
 const addToBlocklistBtn = document.getElementById('addToBlocklistBtn');
 const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn');
+
+// Governance panels
+const pauseRowsEl = document.getElementById('pauseRows');
+const queueRowsEl = document.getElementById('queueRows');
+const queueNoticeEl = document.getElementById('queueNotice');
+const pauseRowTemplate = document.getElementById('tpl-pause-row');
+const queueRowTemplate = document.getElementById('tpl-queue-row');
 
 const state = {
   address: null,
@@ -174,11 +181,13 @@ async function getGovernorClient() {
 
 const u256 = (value) => nativeToScVal(value, { type: 'u256' });
 
-function failureMessage(err) {
+function failureMessage(err, role = 'an operator') {
   return /Error\(Contract, #2000\)/.test(err.message)
-    ? 'the connected wallet is not an operator'
+    ? `the connected wallet is not ${role}`
     : err.message;
 }
+
+const PAUSE_ROLES = { pause: 'a guardian', unpause: 'a council member' };
 
 async function ensureCryptoReady() {
   if (!state.cryptoReady) {
@@ -297,7 +306,7 @@ function disconnect() {
 async function refreshState() {
   try {
     setStatus('Loading contract state...', 'info');
-    const appState = await client().aspState();
+    const appState = await client().allContractsData();
     const membershipState = appState.aspMembership;
     const nonMembershipState = appState.aspNonMembership;
 
@@ -322,9 +331,115 @@ async function refreshState() {
     nonMembershipRootEl.textContent = nonMembershipState.root || '--';
     nonMembershipRootEl.href = nonMembershipStorageUrl;
 
+    refreshPausePanel(appState);
     setStatus('State loaded', 'ok');
   } catch (err) {
     setStatus('State load error', 'error');
+    return;
+  }
+
+  // The queue is read by simulating against the governor, which fails for
+  // reasons that have nothing to do with the contract state above.
+  try {
+    await refreshQueuePanel();
+  } catch (err) {
+    queueNoticeEl.textContent = 'The queue could not be read.';
+    showToast(`Queue load failed: ${failureMessage(err)}`, 'error');
+  }
+}
+
+function refreshPausePanel(data) {
+  pauseRowsEl.replaceChildren();
+
+  for (const target of [...data.pools, data.aspMembership, data.aspNonMembership]) {
+    const { contractId, contractType, pause } = target;
+    const row = pauseRowTemplate.content.cloneNode(true).firstElementChild;
+
+    row.querySelector('.pause-target').textContent = `${contractType} ${shortAddress(contractId)}`;
+    // A contract writes its pause entry on the first pause, so an absent one
+    // reads the same as a contract that has never been paused. Report what the
+    // contract itself reports in that case, which is no flags set.
+    row.querySelector('.pause-flags').textContent = pause?.flags ?? 0;
+    row.querySelector('.pause-until').textContent = pause?.until ?? '--';
+
+    const flagsInput = row.querySelector('.pause-flags-input');
+    row.querySelector('.pause-btn').addEventListener('click', () => togglePause(contractId, flagsInput, 'pause'));
+    row.querySelector('.unpause-btn').addEventListener('click', () => togglePause(contractId, flagsInput, 'unpause'));
+
+    pauseRowsEl.appendChild(row);
+  }
+}
+
+// Returns the value a contract struct holds under `name`.
+function scField(value, name) {
+  const entry = value.map()?.find((e) => e.key().sym().toString() === name);
+  if (!entry) throw new Error(`the governor's queue entry has no ${name} field`);
+  return entry.val();
+}
+
+// The governor hashes an operation over its own arguments, and `args` is
+// `Vec<Val>`, whose element type the contract spec cannot describe. Decoding
+// through the spec loses what each argument was queued as, so `execute` and
+// `cancel` would name a different operation than the one in the queue. Read
+// the simulation's own XDR and hand the arguments back untouched.
+function pendingOperations(assembled) {
+  return (assembled.simulationData.result.retval.vec() ?? []).map((entry) => {
+    const operation = scField(entry, 'operation');
+    return {
+      id: scField(entry, 'id'),
+      readyLedger: scField(entry, 'ready_ledger').u32(),
+      call: {
+        target: scField(operation, 'target'),
+        function: scField(operation, 'function'),
+        args: scField(operation, 'args').vec() ?? [],
+        predecessor: scField(operation, 'predecessor'),
+        salt: scField(operation, 'salt'),
+      },
+    };
+  });
+}
+
+async function refreshQueuePanel() {
+  queueRowsEl.replaceChildren();
+
+  if (!governorId()) {
+    queueNoticeEl.textContent = 'This deployment has no governor.';
+    return;
+  }
+  // The queue is read by simulation, which needs the wallet's RPC URL and source account.
+  if (!state.address) {
+    const link = document.createElement('a');
+    link.href = Utils.explorerContractStorageUrl(governorId());
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'text-cyan-300/80 transition hover:text-cyan-100 hover:underline';
+    link.textContent = "the governor's stored data";
+    queueNoticeEl.replaceChildren(
+      document.createTextNode('Connect a wallet to read the queue, or read it on '),
+      link,
+    );
+    return;
+  }
+  queueNoticeEl.replaceChildren();
+
+  const gov = await getGovernorClient();
+  const pending = pendingOperations(await gov.get_pending());
+  queueNoticeEl.textContent = pending.length ? '' : 'No pending operations.';
+
+  for (const entry of pending) {
+    const { result: status } = await gov.get_operation_state({ id: entry.id });
+    const row = queueRowTemplate.content.cloneNode(true).firstElementChild;
+
+    row.querySelector('.queue-id').textContent = Utils.truncateHex(entry.id.bytes().toString('hex'));
+    row.querySelector('.queue-target').textContent = shortAddress(scValToNative(entry.call.target));
+    row.querySelector('.queue-function').textContent = scValToNative(entry.call.function);
+    row.querySelector('.queue-ready').textContent = entry.readyLedger;
+    row.querySelector('.queue-state').textContent = status.tag;
+
+    row.querySelector('.queue-execute-btn').addEventListener('click', () => runQueueOperation(entry, 'execute'));
+    row.querySelector('.queue-cancel-btn').addEventListener('click', () => runQueueOperation(entry, 'cancel'));
+
+    queueRowsEl.appendChild(row);
   }
 }
 
@@ -451,6 +566,56 @@ async function removeNonMembershipLeaf() {
   } finally {
     if (state.address) removeFromBlocklistBtn.disabled = false;
     removeFromBlocklistBtn.textContent = originalText;
+  }
+}
+
+async function togglePause(contractId, flagsInput, method) {
+  try {
+    ensureWalletConnected();
+    const flags = parseBigIntInput(flagsInput.value, 'Pause flags');
+    if (flags === null) throw new Error('Pause flags are required');
+    if (flags === 0n) throw new Error('Pause flags must name at least one bit');
+    if (flags > 0xffffffffn) throw new Error('Pause flags must fit in 32 bits');
+
+    setStatus(`Submitting the ${method} transaction...`, 'info');
+    const gov = await getGovernorClient();
+    const tx = await gov[method]({
+      target: contractId,
+      flags: Number(flags),
+      caller: state.address,
+    });
+    await tx.signAndSend();
+
+    setStatus(`The ${method} transaction sent`, 'ok');
+    showToast(`Sent ${method} for ${shortAddress(contractId)}`, 'success');
+    await refreshState();
+  } catch (err) {
+    setStatus(`The ${method} failed`, 'error');
+    showToast(`The ${method} failed: ${failureMessage(err, PAUSE_ROLES[method])}`, 'error');
+  }
+}
+
+async function runQueueOperation(entry, method) {
+  try {
+    ensureWalletConnected();
+    const call = { ...entry.call };
+    if (method === 'cancel') call.caller = state.address;
+
+    setStatus(`Submitting the ${method} transaction...`, 'info');
+    const gov = await getGovernorClient();
+    const tx = await gov[method](call);
+    await tx.signAndSend();
+
+    setStatus(`The ${method} transaction sent`, 'ok');
+    showToast(`Sent ${method} for ${Utils.truncateHex(entry.id.bytes().toString('hex'))}`, 'success');
+    await refreshState();
+  } catch (err) {
+    setStatus(`The ${method} failed`, 'error');
+    // `execute` carries no role gate, so a 2000 raised during one comes from
+    // the target contract and must not be reported against the wallet's
+    // governor role.
+    const message = method === 'cancel' ? failureMessage(err, 'a council member') : err.message;
+    showToast(`The ${method} failed: ${message}`, 'error');
   }
 }
 
