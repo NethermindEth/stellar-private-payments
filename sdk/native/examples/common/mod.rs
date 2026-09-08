@@ -36,8 +36,8 @@ use stellar_private_payments::{
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
-        AssetDescriptor, ContractConfig, GvkAuthoritySetting, GvkMode, NoteAmount, PoolConfigEntry,
-        ProverArtifacts,
+        AssetDescriptor, ContractConfig, GvkAuthoritySetting, GvkMode, NoteAmount,
+        NoteOwnerAddress, PoolConfigEntry, ProverArtifacts, SignerAddress,
     },
 };
 
@@ -229,7 +229,11 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
     })?;
     let signer = build_signer(&secret, &passphrase, &user_address)?;
     client
-        .account(user_address.as_str(), signer)
+        .account(
+            NoteOwnerAddress::new(user_address.as_str()),
+            SignerAddress::new(user_address.as_str()),
+            signer,
+        )
         .map_err(|e| format!("open account session: {e}"))
 }
 

@@ -140,6 +140,14 @@ impl Cli {
             bail!("--database-url must not be empty");
         }
 
+        if self.rate_limit_rps == 0 {
+            bail!("--rate-limit-rps must not be zero");
+        }
+
+        if self.rate_limit_burst == 0 {
+            bail!("--rate-limit-burst must not be zero");
+        }
+
         Ok(())
     }
 

@@ -153,19 +153,30 @@ impl<T: zeroize::Zeroize> zeroize::Zeroize for Secret<T> {
     }
 }
 
+/// Serializes tests that read or write the process-global `REVEAL_SENSITIVE`
+/// flag; unit tests share one process.
+#[cfg(test)]
+static REVEAL_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquires the reveal-flag lock, ignoring poisoning: every caller sets the
+/// flag it needs, so a panicking test leaves no invariant for the next to
+/// repair, and cascading poison errors would hide the real failure.
+#[cfg(test)]
+pub(crate) fn lock_reveal_flag() -> std::sync::MutexGuard<'static, ()> {
+    REVEAL_TEST_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::{EncryptionPrivateKey, KeyDerivationSignature, NotePrivateKey};
-    use std::sync::Mutex;
     use zeroize::Zeroize;
-
-    /// Serializes tests that touch the process-global `REVEAL_SENSITIVE` flag.
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_tier1_sensitive_redaction() {
-        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
+        let _guard = lock_reveal_flag();
         let val = Sensitive::new("sensitive_data".to_string());
 
         // By default, reveal_sensitive should be false
@@ -190,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_tier0_secret_redaction() {
-        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
+        let _guard = lock_reveal_flag();
         let secret_bytes = Secret::new([42u8; 32]);
         let secret_str = Secret::new("very_secret_key".to_string());
 
@@ -206,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_key_types_redaction() {
-        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
+        let _guard = lock_reveal_flag();
         let enc_key = EncryptionPrivateKey([1u8; 32]);
         let note_key = NotePrivateKey([2u8; 32]);
         let signature = KeyDerivationSignature(vec![3u8; 10]);
@@ -232,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_telemetry_config_gating() {
-        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
+        let _guard = lock_reveal_flag();
         let config_reveal = TelemetryConfig {
             level: "debug".to_string(),
             sink: TelemetrySink::Console,
