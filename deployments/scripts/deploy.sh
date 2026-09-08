@@ -348,7 +348,13 @@ load_gvk_authority_pub_key() {
   fi
   [[ -n "$raw" ]] || return 1
   jq -e '.x and .y' >/dev/null <<<"$raw" || die "gvk authority pub key must be JSON with x and y fields"
-  jq -c . <<<"$raw"
+
+  need cargo
+  printf '%s' "$raw" \
+    | cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p gvkey-gen --quiet -- validate >/dev/null \
+    || die "gvk authority pub key failed on-curve/low-order validation (see gvkey-gen error above)"
+
+  GVK_AUTHORITY_PUB_KEY_COMPACT="$(jq -c . <<<"$raw")"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -468,7 +474,7 @@ done
 
 GVK_AUTHORITY_PUB_KEY_COMPACT=""
 if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
-  GVK_AUTHORITY_PUB_KEY_COMPACT="$(load_gvk_authority_pub_key)" \
+  load_gvk_authority_pub_key \
     || die "gvk-viewonly/gvk-traceable pools require --gvk-authority-pubkey or --gvk-authority-pubkey-file"
 elif [[ -n "$GVK_AUTHORITY_PUB_KEY_JSON" || -n "$GVK_AUTHORITY_PUB_KEY_FILE" ]]; then
   die "gvk authority pub key was provided but no pool uses gvk-viewonly or gvk-traceable"
