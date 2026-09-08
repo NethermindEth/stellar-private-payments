@@ -22,7 +22,7 @@ pub(crate) use conversions::{
     scval_to_u32, scval_to_u64, scval_to_u256,
 };
 pub(crate) use ext_data_hash::hash_ext_data_offchain;
-pub(crate) use indexer::Indexer;
+pub(crate) use indexer::{Indexer, IndexerError};
 pub(crate) use rpc::Error as RpcError;
 pub(crate) use submit::{TxConfirmStatus, confirm_tx, submit_tx};
 pub(crate) use tx_prepare::PoolTransactInput;

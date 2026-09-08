@@ -32,7 +32,7 @@
 use std::path::PathBuf;
 
 use stellar_private_payments::{
-    CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
+    CircuitStore, Error, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
@@ -276,42 +276,15 @@ pub fn require_onboarded(account: &Account) -> Result<(), String> {
 /// The public Soroban RPC retention window can be shorter than the deployment
 /// history, and the default bootnode handoff can be stale. This detector is
 /// used by examples to turn the failure into a graceful skip message.
-///
-/// Two distinct failure shapes mean "the required history is unavailable":
-///
-/// 1. No bootnode configured: the SDK reports `RPC sync gap: main RPC lacks
-///    history ...`, matched by `sync gap`.
-/// 2. A bootnode is configured but cannot serve the requested range either. The
-///    SDK wraps the indexer's JSON-RPC failure as `bootnode indexer: jsonrpc
-///    error: -32602 - unsupported filters (requested startLedger=...)`, which
-///    contains neither `sync gap` nor `retention`.
-///
-/// Shape 2 is the default path, because the examples configure a bootnode
-/// unless one is explicitly disabled, so it must be matched too or an aged
-/// deployment surfaces a raw JSON-RPC error instead of the skip message.
-///
-/// Matching on message text is unavoidably brittle. The robust alternative is a
-/// dedicated error variant in the SDK, which is deliberately out of scope here:
-/// these examples are fixed without touching production code.
-pub fn is_retention_gap_error(e: &dyn std::error::Error) -> bool {
-    is_retention_gap_message(&e.to_string())
-}
-
-/// Substring test behind [`is_retention_gap_error`], also usable for errors
-/// that have already been flattened to a `String`.
-pub fn is_retention_gap_message(msg: &str) -> bool {
-    let msg = msg.to_lowercase();
-    msg.contains("sync gap")
-        || msg.contains("retention")
-        || msg.contains("unsupported filters")
-        || msg.contains("bootnode indexer")
+pub fn is_retention_gap_error(e: &Error) -> bool {
+    matches!(e, Error::RetentionGap(_))
 }
 
 /// Print the retention-gap skip message and exit 0.
 ///
 /// Call this only after [`is_retention_gap_error`] returns true; the function
 /// never returns to the caller.
-pub fn skip_on_retention_gap(e: &dyn std::error::Error) -> ! {
+pub fn skip_on_retention_gap(e: &Error) -> ! {
     eprintln!("Skipping: the wallet's required history is older than the RPC retention window.");
     eprintln!("The configured bootnode's handoff point may also be stale.");
     eprintln!("Remedies:");
