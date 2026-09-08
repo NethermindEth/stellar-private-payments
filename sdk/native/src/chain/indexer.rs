@@ -16,8 +16,21 @@ pub(crate) struct Indexer<S: ContractDataStorage> {
     min_pool_ledger: u32,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum IndexerError {
+    #[error(transparent)]
+    Rpc(#[from] RpcError),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(client: Client, storage: S, config: &ContractConfig) -> Result<Self> {
+    pub async fn init(
+        client: Client,
+        storage: S,
+        config: &ContractConfig,
+    ) -> Result<Self, IndexerError> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
 
@@ -67,7 +80,7 @@ impl<S: ContractDataStorage> Indexer<S> {
     ///
     /// A full page (`PAGE_SIZE` events) always continues, even at the tip
     /// ledger, because more events may share that ledger.
-    pub async fn fetch_contract_events(&self) -> Result<bool> {
+    pub async fn fetch_contract_events(&self) -> Result<bool, IndexerError> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =

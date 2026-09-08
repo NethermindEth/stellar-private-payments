@@ -66,7 +66,7 @@ impl LocalProver {
                 &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
-            .context(format!("init prover for {stem}"))?;
+            .with_context(|| format!("init prover for {stem}"))?;
             if transact.insert(*stem, engine).is_some() {
                 return Err(Error::Other(anyhow::anyhow!(
                     "duplicate transact circuit for {stem}"
@@ -81,7 +81,7 @@ impl LocalProver {
                 &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
-            .context(format!("init prover for {}", circuit.name))?;
+            .with_context(|| format!("init prover for {}", circuit.name))?;
             if disclosure.insert(circuit.name, engine).is_some() {
                 return Err(Error::Other(anyhow::anyhow!(
                     "duplicate disclosure circuit for {}",
