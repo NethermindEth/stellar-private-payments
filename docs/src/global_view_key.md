@@ -188,9 +188,9 @@ JubJub public key, via `--gvk-authority-pubkey '{"x":"0x..","y":"0x.."}'` or
 ```bash
 deployments/scripts/deploy.sh futurenet \
   --deployer alice \
-  --gvk-authority-pubkey-file ./admin-d.json \
+  --gvk-authority-pubkey-file ./admin-pub.json \
   --pool blocklist:gvk-off:native:CB... \
-  --pool blocklist:gvk-traceable:contract:CC... \
+  --pool allowlist:gvk-traceable:native:CB... \
   --asp-levels 10 \
   --pool-levels 20 \
   --max-deposit 1000000000
