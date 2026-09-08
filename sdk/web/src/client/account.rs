@@ -38,8 +38,10 @@ impl Account {
         self.inner.user_address().to_string()
     }
 
-    /// The account that signs and pays. Equal to [`Self::user_address`] until
-    /// a caller supplies a different `signerAddress`.
+    /// The account that signs and pays. Always equal to
+    /// [`Self::user_address`]: a `signerAddress` that differs does not open a
+    /// session at all, so this never reports an address the rest of the stack
+    /// will not use.
     #[wasm_bindgen(getter, js_name = signerAddress)]
     pub fn signer_address(&self) -> String {
         self.inner.signer_address().to_string()

@@ -8,7 +8,7 @@ use stellar_private_payments::{
     blocking::{Account, Client, PrivatePool},
     types::{
         CircuitStem, ContractConfig, EncryptionPublicKey, Field, GvkMode, NoteAmount,
-        NotePublicKey, PolicyFlags, TransferRecipient,
+        NoteOwnerAddress, NotePublicKey, PolicyFlags, SignerAddress, TransferRecipient,
     },
 };
 
@@ -94,7 +94,11 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     {
         let _ = client.background_sync()?;
     }
-    let account = client.account(USER_ADDRESS, test_signer()?)?;
+    let account = client.account(
+        NoteOwnerAddress::new(USER_ADDRESS),
+        SignerAddress::new(USER_ADDRESS),
+        test_signer()?,
+    )?;
 
     Ok((client, account))
 }

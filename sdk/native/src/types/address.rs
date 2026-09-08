@@ -17,9 +17,26 @@ pub struct NoteOwnerAddress(String);
 /// number is read, the transaction envelope's source, and the address a
 /// wallet is asked to sign with. It has no relationship to any note.
 ///
-/// There is deliberately no conversion to or from [`NoteOwnerAddress`]: the
-/// compiler's refusal is what keeps each call site classified. A caller that
-/// wants both to be the same account constructs each from the same string.
+/// There is deliberately no conversion to or from [`NoteOwnerAddress`], and
+/// neither type is constructible from a bare string by `From`. A caller that
+/// wants both to be the same account names each type:
+///
+/// ```
+/// use stellar_private_payments::types::{NoteOwnerAddress, SignerAddress};
+///
+/// let owner = NoteOwnerAddress::new("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+/// let signer = SignerAddress::new(owner.as_str());
+/// assert_eq!(owner.as_str(), signer.as_str());
+/// ```
+///
+/// Crossing without naming the destination does not compile:
+///
+/// ```compile_fail
+/// use stellar_private_payments::types::{NoteOwnerAddress, SignerAddress};
+///
+/// let owner = NoteOwnerAddress::new("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+/// let signer: SignerAddress = owner.into_string().into();
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignerAddress(String);
 
@@ -55,17 +72,8 @@ macro_rules! address_newtype {
             }
         }
 
-        impl From<String> for $t {
-            fn from(address: String) -> Self {
-                Self(address)
-            }
-        }
-
-        impl From<&str> for $t {
-            fn from(address: &str) -> Self {
-                Self(address.to_string())
-            }
-        }
+        // No `From<String>`/`From<&str>`: they let an owner-derived value
+        // become a `SignerAddress` through an `.into()` naming neither type.
 
         impl AsRef<str> for $t {
             fn as_ref(&self) -> &str {
@@ -94,14 +102,45 @@ mod tests {
         assert!(NoteOwnerAddress::new("").is_empty());
     }
 
-    /// The two types are equal-valued but not interchangeable. This test
-    /// documents the intent; the guarantee is enforced by the absence of any
-    /// `From` impl between them, which a compile-fail test cannot express
-    /// without a trybuild dependency this workspace does not carry.
+    /// `EXISTS` is true iff `T: From<F>`: inherent associated items win over
+    /// trait ones, so it falls back to `NoConversion` when the bound fails.
+    struct ConversionProbe<F, T>(core::marker::PhantomData<(F, T)>);
+
+    trait NoConversion {
+        const EXISTS: bool = false;
+    }
+
+    impl<F, T> NoConversion for ConversionProbe<F, T> {}
+
+    impl<F, T: From<F>> ConversionProbe<F, T> {
+        const EXISTS: bool = true;
+    }
+
+    // `const _` rather than `#[test]`: resolved at type-check, so a reinstated
+    // impl fails to compile rather than reporting a test failure.
+    const _: () = assert!(
+        ConversionProbe::<&str, String>::EXISTS,
+        "probe is broken: it fails to see String: From<&str>"
+    );
+
+    const _: () = assert!(
+        !ConversionProbe::<NoteOwnerAddress, SignerAddress>::EXISTS,
+        "a note owner must not convert into a signing account"
+    );
+    const _: () = assert!(
+        !ConversionProbe::<SignerAddress, NoteOwnerAddress>::EXISTS,
+        "a signing account must not convert into a note owner"
+    );
+
+    const _: () = assert!(!ConversionProbe::<String, NoteOwnerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<&str, NoteOwnerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<String, SignerAddress>::EXISTS);
+    const _: () = assert!(!ConversionProbe::<&str, SignerAddress>::EXISTS);
+
     #[test]
-    fn same_string_yields_two_unrelated_values() {
+    fn crossing_deliberately_still_works_and_names_the_target_type() {
         let owner = NoteOwnerAddress::new(ADDR);
-        let signer = SignerAddress::new(ADDR);
+        let signer = SignerAddress::new(owner.as_str());
         assert_eq!(owner.as_str(), signer.as_str());
     }
 }
