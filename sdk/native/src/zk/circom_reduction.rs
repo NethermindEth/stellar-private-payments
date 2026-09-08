@@ -3,9 +3,9 @@
 //! Implements the witness map used by snarkjs rather than arkworks' default
 //! `LibsnarkReduction`: Circom prepares powers-of-tau in Lagrange form over a
 //! doubled domain, and the H contribution is taken as the odd coefficients of
-//! `(AB − C)` in that domain.  Vendored (WASM builds swap `rayon` for serial
-//! loops only) so upgrades to `circom-compat` / ark-groth16 can be re-audited
-//! against a pinned upstream source.
+//! `(AB − C)` in that domain.  Vendored (the `parallel` feature swaps `rayon`
+//! for serial loops when off) so upgrades to `circom-compat` / ark-groth16 can
+//! be re-audited against a pinned upstream source.
 //!
 //! Upstream reference (`arkworks-rs/circom-compat` @ `7344c75`):
 //!   - `src/circom/qap.rs` (`CircomReduction`)
@@ -15,7 +15,7 @@ use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP, evaluate_constraint
 use ark_poly::EvaluationDomain;
 use ark_relations::gr1cs::{ConstraintSystemRef, SynthesisError};
 use ark_std::{vec, vec::Vec};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// Implements the witness map used by snarkjs. The arkworks witness map
@@ -26,8 +26,8 @@ use rayon::prelude::*;
 /// in that domain. This serves as HZ when computing the C proof element.
 pub struct CircomReduction;
 
-// Native builds keep use `rayon` parallel iterators.
-// WASM builds use the equivalent serial loops.
+// With the `parallel` feature, use `rayon` parallel iterators.
+// Otherwise (including all wasm32 builds), use the equivalent serial loops.
 impl R1CSToQAP for CircomReduction {
     #[allow(clippy::type_complexity)]
     fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(
@@ -52,7 +52,7 @@ impl R1CSToQAP for CircomReduction {
         let mut a = vec![zero; domain_size];
         let mut b = vec![zero; domain_size];
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "parallel")]
         {
             a[..num_constraints]
                 .par_iter_mut()
@@ -64,7 +64,7 @@ impl R1CSToQAP for CircomReduction {
                     *b_i = evaluate_constraint(bt_i, full_assignment);
                 });
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "parallel"))]
         {
             for (((a_i, b_i), at_i), bt_i) in a[..num_constraints]
                 .iter_mut()
@@ -84,7 +84,7 @@ impl R1CSToQAP for CircomReduction {
         }
 
         let mut c = vec![zero; domain_size];
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "parallel")]
         {
             c[..num_constraints]
                 .par_iter_mut()
@@ -94,7 +94,7 @@ impl R1CSToQAP for CircomReduction {
                     *c_i = a_i * b_i;
                 });
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "parallel"))]
         {
             for ((c_i, &a_i), &b_i) in c[..num_constraints].iter_mut().zip(&a).zip(&b) {
                 *c_i = a_i * b_i;
@@ -124,13 +124,13 @@ impl R1CSToQAP for CircomReduction {
         D::distribute_powers_and_mul_by_const(&mut c, root_of_unity, F::one());
         domain.fft_in_place(&mut c);
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "parallel")]
         {
             ab.par_iter_mut()
                 .zip(c)
                 .for_each(|(ab_i, c_i)| *ab_i -= &c_i);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "parallel"))]
         {
             for (ab_i, c_i) in ab.iter_mut().zip(c) {
                 *ab_i -= &c_i;
@@ -150,12 +150,12 @@ impl R1CSToQAP for CircomReduction {
     ) -> Result<Vec<F>, SynthesisError> {
         // the usual H query has domain-1 powers. Z has domain powers. So HZ has
         // 2*domain-1 powers.
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "parallel")]
         let mut scalars = (0..2 * max_power + 1)
             .into_par_iter()
             .map(|i| delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "parallel"))]
         let mut scalars = (0..2 * max_power + 1)
             .map(|i| delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
@@ -165,11 +165,11 @@ impl R1CSToQAP for CircomReduction {
         // generate the lagrange coefficients
         domain.ifft_in_place(&mut scalars);
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "parallel")]
         {
             Ok(scalars.into_par_iter().skip(1).step_by(2).collect())
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "parallel"))]
         {
             Ok(scalars.into_iter().skip(1).step_by(2).collect())
         }
