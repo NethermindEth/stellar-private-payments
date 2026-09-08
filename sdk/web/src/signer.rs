@@ -8,7 +8,7 @@ use stellar_private_payments::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
     },
-    types::{SignedTransaction, SignerAddress},
+    types::{Sensitive, SignedTransaction, SignerAddress},
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -132,7 +132,35 @@ impl WalletSigner {
             .await
             .map_err(|e| wallet_js_error(method, "failed", e))?;
 
-        normalize_sign_result(method, result)
+        let (signature, reported) = normalize_sign_result(method, result)?;
+        self.verify_signer_address(method, reported.as_deref())?;
+        Ok(signature)
+    }
+
+    /// Refuse a signature the wallet produced with an account other than the
+    /// one requested.
+    ///
+    /// Freighter returns success with `signerAddress` set to the *active*
+    /// account when it does not hold the requested one, with no error and no
+    /// indication to the user that a substitution occurred. Comparing the
+    /// reported address against the requested one is what catches that.
+    ///
+    /// A signer that reports no address cannot be checked, and is accepted:
+    /// `WalletSigner` takes any object with the three sign methods, and the
+    /// bare-string return shape carries nothing to compare. Freighter always
+    /// reports one, so its substitution path stays covered.
+    fn verify_signer_address(&self, method: &str, reported: Option<&str>) -> Result<(), JsError> {
+        let Some(reported) = reported else {
+            return Ok(());
+        };
+        if reported == self.signer_address.as_str() {
+            return Ok(());
+        }
+        Err(JsError::new(&format!(
+            "signer.{method}: wallet signed as {}, not the requested {}",
+            Sensitive(reported),
+            Sensitive(self.signer_address.as_str()),
+        )))
     }
 }
 
@@ -187,9 +215,14 @@ fn wallet_sign_error(error: JsError) -> Error {
     }
 }
 
-fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsError> {
+/// Split a wallet reply into its signature and the address the wallet reports
+/// having signed with. A bare-string reply carries no address.
+fn normalize_sign_result(
+    method: &str,
+    result: JsValue,
+) -> Result<(String, Option<String>), JsError> {
     if let Some(s) = result.as_string() {
-        return Ok(s);
+        return Ok((s, None));
     }
 
     let field = match method {
@@ -205,9 +238,16 @@ fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsErro
 
     let value = Reflect::get(&result, &JsValue::from_str(field))
         .map_err(|e| JsError::new(&format!("signer.{method}: missing {field}: {e:?}")))?;
-    value
+    let signature = value
         .as_string()
-        .ok_or_else(|| JsError::new(&format!("signer.{method}: {field} must be a string")))
+        .ok_or_else(|| JsError::new(&format!("signer.{method}: {field} must be a string")))?;
+
+    let reported = Reflect::get(&result, &JsValue::from_str("signerAddress"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .filter(|s| !s.is_empty());
+
+    Ok((signature, reported))
 }
 
 #[async_trait::async_trait(?Send)]
@@ -455,5 +495,110 @@ mod spike_tests {
             96,
             "128 hex chars decode as base64, not as hex"
         );
+    }
+}
+
+/// Tests for the reported-signer check in
+/// [`WalletSigner::verify_signer_address`].
+///
+/// Node mode is sufficient: the wallet is a plain JS object whose methods
+/// resolve immediately, and no browser API is involved.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod signer_address_tests {
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used`
+    // deny is meant for production paths, not assertions.
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+    const REQUESTED: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const SUBSTITUTED: &str = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
+    const SIGNATURE: &str = "c2lnbmF0dXJl";
+
+    /// A wallet whose three sign methods resolve to `js_expr`.
+    fn wallet_returning(js_expr: &str) -> Result<WalletSigner, JsError> {
+        let wallet = Object::new();
+        for method in SIGN_METHODS {
+            let body = format!("return Promise.resolve({js_expr});");
+            let resolving: JsValue = Function::new_no_args(&body).into();
+            Reflect::set(&wallet, &JsValue::from_str(method), &resolving).unwrap();
+        }
+        WalletSigner::new(
+            wallet.into(),
+            PASSPHRASE.to_string(),
+            SignerAddress::new(REQUESTED),
+        )
+    }
+
+    fn error_message(error: JsError) -> String {
+        Reflect::get(&JsValue::from(error), &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap()
+    }
+
+    #[wasm_bindgen_test]
+    async fn a_reply_reporting_the_requested_address_is_accepted() {
+        let wallet = wallet_returning(&format!(
+            "{{ signedMessage: '{SIGNATURE}', signerAddress: '{REQUESTED}' }}"
+        ))
+        .unwrap();
+        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
+    }
+
+    /// Freighter reports success while having signed with whatever account was
+    /// active, because it does not hold the requested one.
+    #[wasm_bindgen_test]
+    async fn a_reply_reporting_a_substituted_address_is_refused() {
+        let wallet = wallet_returning(&format!(
+            "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
+        ))
+        .unwrap();
+        let error = wallet
+            .sign_wallet_message("m")
+            .await
+            .expect_err("a substituted signing account must be refused");
+        assert!(
+            error_message(error).contains("signer.signMessage"),
+            "the message should name the wallet call that was substituted"
+        );
+    }
+
+    /// Addresses are Tier-1, and this message reaches a UI toast.
+    #[wasm_bindgen_test]
+    async fn the_refusal_redacts_both_addresses() {
+        stellar_private_payments::types::set_reveal_sensitive(false);
+        let wallet = wallet_returning(&format!(
+            "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
+        ))
+        .unwrap();
+        let message = error_message(wallet.sign_wallet_message("m").await.unwrap_err());
+        assert!(!message.contains(SUBSTITUTED), "leaked: {message}");
+        assert!(!message.contains(REQUESTED), "leaked: {message}");
+    }
+
+    /// The cancellation classifier substring-matches signer error text; a
+    /// substitution is not a user cancellation and must not read as one.
+    #[wasm_bindgen_test]
+    async fn the_refusal_does_not_read_as_a_cancellation() {
+        let wallet = wallet_returning(&format!(
+            "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
+        ))
+        .unwrap();
+        let message =
+            error_message(wallet.sign_wallet_message("m").await.unwrap_err()).to_ascii_lowercase();
+        for word in ["rejected", "denied", "cancelled"] {
+            assert!(!message.contains(word), "'{word}' in: {message}");
+        }
+    }
+
+    /// A wallet that reports no address carries nothing to compare, and the
+    /// bare-string reply shape is what the e2e stub signers use.
+    #[wasm_bindgen_test]
+    async fn a_reply_without_an_address_is_accepted() {
+        let wallet = wallet_returning(&format!("'{SIGNATURE}'")).unwrap();
+        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
     }
 }
