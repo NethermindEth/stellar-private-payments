@@ -53,6 +53,18 @@ Options:
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
+Governance options (optional as a group; passing any one requires --council,
+--operator, --guardian, --recovery, and --ttl-keeper):
+  --council ADDRESS     Holder of the council role, which queues and cancels operations
+  --operator ADDRESS    Holder of the operator role, which writes the ASP lists
+  --guardian ADDRESS    Holder of the guardian role, which pauses without the queue
+  --recovery ADDRESS    Holder of the recovery role, which queues role changes
+  --ttl-keeper ADDRESS  Account the TTL keeper sends from, recorded in the manifest
+  --delay N             Ledgers a council operation waits (default 360 off mainnet)
+  --recovery-delay N    Ledgers a recovery operation waits (default 720 off mainnet)
+  --grace N             Ledgers a ready operation stays executable (default 17280 off mainnet)
+  --guardian-pause N    Ledgers a guardian pause holds (default 720 off mainnet)
+
 Examples:
   # Mixed policies in one deployment (two verifiers, shared ASP contracts)
   deployments/scripts/deploy.sh futurenet \
@@ -79,6 +91,9 @@ Notes:
   - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
     are taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
+  - With the governance options the governor is deployed after the pools and becomes the
+    admin of both ASPs and every pool. The four role addresses must be distinct, and mainnet
+    requires all four delays.
 USAGE
   exit 2
 }
@@ -103,6 +118,15 @@ POLICY_FLAGS_SUFFIX=""
 POLICY_FLAGS_EXPLICIT=false
 SKIP_INIT=false
 YES=false
+COUNCIL=""
+OPERATOR=""
+GUARDIAN=""
+RECOVERY=""
+TTL_KEEPER=""
+DELAY=""
+RECOVERY_DELAY=""
+GRACE=""
+GUARDIAN_PAUSE=""
 
 policy_suffix_label() {
   if [[ -z "$1" ]]; then
@@ -259,6 +283,15 @@ while [[ $# -gt 0 ]]; do
     --vk-json) VK_JSON="$2"; shift 2 ;;
     --vk-file) VK_FILE="$2"; shift 2 ;;
     --skip-init) SKIP_INIT=true; shift ;;
+    --council) COUNCIL="$2"; shift 2 ;;
+    --operator) OPERATOR="$2"; shift 2 ;;
+    --guardian) GUARDIAN="$2"; shift 2 ;;
+    --recovery) RECOVERY="$2"; shift 2 ;;
+    --ttl-keeper) TTL_KEEPER="$2"; shift 2 ;;
+    --delay) DELAY="$2"; shift 2 ;;
+    --recovery-delay) RECOVERY_DELAY="$2"; shift 2 ;;
+    --grace) GRACE="$2"; shift 2 ;;
+    --guardian-pause) GUARDIAN_PAUSE="$2"; shift 2 ;;
     --yes) YES=true; shift ;;
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
@@ -362,6 +395,66 @@ else
   ADMIN_ADDR="$(resolve_address "$ADMIN")"
 fi
 
+COUNCIL_ADDR=""
+OPERATOR_ADDR=""
+GUARDIAN_ADDR=""
+RECOVERY_ADDR=""
+TTL_KEEPER_ADDR=""
+if [[ -n "$COUNCIL$OPERATOR$GUARDIAN$RECOVERY$TTL_KEEPER$DELAY$RECOVERY_DELAY$GRACE$GUARDIAN_PAUSE" ]]; then
+  [[ "$SKIP_INIT" != "true" ]] || die "the governance options need constructors; drop --skip-init"
+  [[ -n "$COUNCIL" ]] || die "--council is required with the governance options"
+  [[ -n "$OPERATOR" ]] || die "--operator is required with the governance options"
+  [[ -n "$GUARDIAN" ]] || die "--guardian is required with the governance options"
+  [[ -n "$RECOVERY" ]] || die "--recovery is required with the governance options"
+  [[ -n "$TTL_KEEPER" ]] || die "--ttl-keeper is required with the governance options"
+  # The handoff is signed by --deployer, and each target's own admin has to authorize it.
+  [[ -z "$ADMIN" || "$ADMIN_ADDR" == "$DEPLOYER_ADDR" ]] \
+    || die "--admin must be the deployer with the governance options"
+
+  COUNCIL_ADDR="$(resolve_address "$COUNCIL")"
+  OPERATOR_ADDR="$(resolve_address "$OPERATOR")"
+  GUARDIAN_ADDR="$(resolve_address "$GUARDIAN")"
+  RECOVERY_ADDR="$(resolve_address "$RECOVERY")"
+  TTL_KEEPER_ADDR="$(resolve_address "$TTL_KEEPER")"
+  # `resolve_address` echoes an unknown identity back unchanged, and the governor's
+  # constructor is the last thing the run deploys, so a typo would surface only there.
+  for pair in "--council:$COUNCIL_ADDR" "--operator:$OPERATOR_ADDR" "--guardian:$GUARDIAN_ADDR" \
+    "--recovery:$RECOVERY_ADDR" "--ttl-keeper:$TTL_KEEPER_ADDR"; do
+    [[ "${pair#*:}" =~ ^[GC][A-Z0-9]{55}$ ]] \
+      || die "${pair%%:*} does not resolve to an address: '${pair#*:}'"
+  done
+  distinct="$(printf '%s\n' "$COUNCIL_ADDR" "$OPERATOR_ADDR" "$GUARDIAN_ADDR" "$RECOVERY_ADDR" | sort -u | wc -l)"
+  [[ "$distinct" -eq 4 ]] \
+    || die "--council, --operator, --guardian and --recovery must be four distinct addresses"
+
+  if [[ "$NETWORK" == "mainnet" ]]; then
+    [[ -n "$DELAY" ]] || die "--delay is required on mainnet"
+    [[ -n "$RECOVERY_DELAY" ]] || die "--recovery-delay is required on mainnet"
+    [[ -n "$GRACE" ]] || die "--grace is required on mainnet"
+    [[ -n "$GUARDIAN_PAUSE" ]] || die "--guardian-pause is required on mainnet"
+  else
+    DELAY="${DELAY:-360}"
+    RECOVERY_DELAY="${RECOVERY_DELAY:-720}"
+    GRACE="${GRACE:-17280}"
+    GUARDIAN_PAUSE="${GUARDIAN_PAUSE:-720}"
+  fi
+  # Every check below is arithmetic, which reports a bash error rather than ours on a
+  # value like "7d".
+  for pair in "--delay:$DELAY" "--recovery-delay:$RECOVERY_DELAY" "--grace:$GRACE" \
+    "--guardian-pause:$GUARDIAN_PAUSE"; do
+    [[ "${pair#*:}" =~ ^[0-9]+$ ]] || die "${pair%%:*} must be a whole number of ledgers"
+  done
+
+  [[ "$NETWORK" != "mainnet" || "$DELAY" -ge 120960 ]] \
+    || die "--delay below 120960 ledgers (7 days) is refused on mainnet"
+  # The governor's constructor refuses every one of these, and it runs after the pools are
+  # paid for. 12 is its DELAY_FLOOR.
+  [[ "$DELAY" -ge 12 ]] || die "--delay must be at least 12 ledgers"
+  [[ "$GRACE" -gt 0 ]] || die "--grace must be at least one ledger"
+  [[ "$RECOVERY_DELAY" -ge "$DELAY" ]] || die "--recovery-delay must be at least --delay"
+  [[ "$GUARDIAN_PAUSE" -gt "$DELAY" ]] || die "--guardian-pause must exceed --delay"
+fi
+
 get_latest_ledger_seq() {
   local out seq
   out="$(stellar ledger latest --network "$NETWORK" 2>&1)" || {
@@ -398,7 +491,7 @@ build_verifier_wasm_for_suffix() {
 
 step "build contracts"
 mkdir -p "$WASM_DIR"
-for pkg in asp-membership asp-non-membership public-key-registry pool; do
+for pkg in asp-membership asp-non-membership public-key-registry pool governor; do
   stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
     --package "$pkg" >/dev/null
 done
@@ -416,11 +509,13 @@ ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
 ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
 PUBLIC_KEY_REGISTRY_WASM="$WASM_DIR/public_key_registry.wasm"
 POOL_WASM="$WASM_DIR/pool.wasm"
+GOVERNOR_WASM="$WASM_DIR/governor.wasm"
 
 [[ -f "$ASP_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_MEMBERSHIP_WASM"
 [[ -f "$ASP_NON_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_NON_MEMBERSHIP_WASM"
 [[ -f "$PUBLIC_KEY_REGISTRY_WASM" ]] || die "missing wasm: $PUBLIC_KEY_REGISTRY_WASM"
 [[ -f "$POOL_WASM" ]] || die "missing wasm: $POOL_WASM"
+[[ -f "$GOVERNOR_WASM" ]] || die "missing wasm: $GOVERNOR_WASM"
 
 deploy_contract() {
   local name="$1"
@@ -571,36 +666,60 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
   _pool_i=$((_pool_i + 1))
 done
 
-{
-  cat >&2 <<__DEPLOY_SUMMARY__
-
-  ┌─────────────────────────────────────────────────────────────────┐
-  │                    ✅ DEPLOYMENT SUCCESSFUL                      │
-  └─────────────────────────────────────────────────────────────────┘
-
-Deployment complete
-  Network:             $NETWORK
-  Deployer:            $DEPLOYER_ADDR
-  Admin:               $ADMIN_ADDR
-  ASP membership:      $ASP_MEMBERSHIP_ID
-  ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
-  Public key registry: $PUBLIC_KEY_REGISTRY_ID
-  Pools deployed:      ${#POOL_IDS[@]}
-  Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
-__DEPLOY_SUMMARY__
-  _vi=0
-  _vlen="$(array_len VERIFIER_SUFFIX_LIST)"
-  while [[ "$_vi" -lt "$_vlen" ]]; do
-    printf '  Verifier (%s):     %s\n' "$(policy_suffix_label "${VERIFIER_SUFFIX_LIST[$_vi]}")" "${VERIFIER_ID_LIST[$_vi]}" >&2
-    _vi=$((_vi + 1))
-  done
-  _pi=0
-  _plen="$(array_len POOL_IDS)"
-  while [[ "$_pi" -lt "$_plen" ]]; do
-    printf '  Pool[%s] (%s):       %s\n' "$_pi" "$(policy_suffix_label "${POOL_POLICY_SUFFIXES[$_pi]}")" "${POOL_IDS[$_pi]}" >&2
-    _pi=$((_pi + 1))
-  done
+# Every DataKey variant is a unit variant, which the SDK encodes as a one-symbol ScVec, so
+# `stellar contract read --key` cannot address the entry and the key is built as XDR instead.
+read_entry() {
+  local key out
+  key="$(printf '{"vec":[{"symbol":"%s"}]}' "$2" | stellar xdr encode --type ScVal)"
+  # The status is kept so a caller can tell an unreadable entry from a wrong value.
+  out="$(stellar contract read --id "$1" --network "$NETWORK" --durability persistent \
+    --key-xdr "$key" --output json)" || return 1
+  printf '%s' "$out" | tr -d '\n ' | sed 's/""/"/g'
 }
+read_address() { read_entry "$1" "$2" | grep -Eo '"address":"[GC][A-Z0-9]{55}"' | head -1 | cut -d'"' -f4; }
+
+GOVERNOR_ID=""
+handoff_failures=""
+if [[ -n "$COUNCIL_ADDR" ]]; then
+  roles_json="$(jq -cn \
+    --arg council "$COUNCIL_ADDR" --arg operator "$OPERATOR_ADDR" \
+    --arg guardian "$GUARDIAN_ADDR" --arg recovery "$RECOVERY_ADDR" \
+    '[{role:"council",member:$council},{role:"operator",member:$operator},
+      {role:"guardian",member:$guardian},{role:"recovery",member:$recovery}]')"
+  fn_roles_json="$(jq -cn \
+    --arg membership "$ASP_MEMBERSHIP_ID" --arg non_membership "$ASP_NON_MEMBERSHIP_ID" \
+    '[{target:$membership,function:"insert_leaf",role:"operator"},
+      {target:$non_membership,function:"insert_leaf",role:"operator"},
+      {target:$non_membership,function:"delete_leaf",role:"operator"}]')"
+
+  # Nothing from here on is fatal on its own. Every contract above is deployed and paid for,
+  # so the manifest that records them is written first and the failures are reported after.
+  step "deploy governor"
+  GOVERNOR_ID="$(deploy_contract governor "$GOVERNOR_WASM" \
+    --delay "$DELAY" --recovery-delay "$RECOVERY_DELAY" --grace "$GRACE" \
+    --guardian-pause "$GUARDIAN_PAUSE" --roles "$roles_json" --fn-roles "$fn_roles_json")" \
+    || handoff_failures+="  governor: deploy failed"$'\n'
+fi
+
+if [[ -n "$GOVERNOR_ID" ]]; then
+  GOVERNED_IDS=("$ASP_MEMBERSHIP_ID" "$ASP_NON_MEMBERSHIP_ID")
+  _gi=0
+  _glen="$(array_len POOL_IDS)"
+  while [[ "$_gi" -lt "$_glen" ]]; do
+    GOVERNED_IDS+=("${POOL_IDS[$_gi]}")
+    _gi=$((_gi + 1))
+  done
+
+  for target in "${GOVERNED_IDS[@]}"; do
+    step "hand $target to the governor"
+    stellar contract invoke --id "$target" --source-account "$DEPLOYER" --network "$NETWORK" \
+      -- update_admin --new-admin "$GOVERNOR_ID" >/dev/null \
+      || handoff_failures+="  $target: update_admin failed"$'\n'
+  done
+
+  ADMIN_ADDR="$GOVERNOR_ID"
+fi
+
 
 verifiers_json="\"verifiers\":{"
 _vi=0
@@ -627,10 +746,88 @@ while [[ "$_pi" -lt "$_plen" ]]; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
+governance_json=""
+if [[ -n "$GOVERNOR_ID" ]]; then
+  governance_json=",\"governance\":{\"governor\":\"$GOVERNOR_ID\",\"council\":\"$COUNCIL_ADDR\",\"operator\":\"$OPERATOR_ADDR\",\"guardian\":\"$GUARDIAN_ADDR\",\"recovery\":\"$RECOVERY_ADDR\",\"ttlKeeper\":\"$TTL_KEEPER_ADDR\",\"delay\":$DELAY,\"recoveryDelay\":$RECOVERY_DELAY,\"grace\":$GRACE,\"guardianPause\":$GUARDIAN_PAUSE}"
+fi
+
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json$governance_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"
 DEPLOY_JSON_PRETTY="$(printf '%s\n' "$DEPLOY_JSON" | jq .)"
 printf '%s\n' "$DEPLOY_JSON_PRETTY" > "$DEPLOYMENTS_DIR/deployments.json"
+
+if [[ -n "$GOVERNOR_ID" ]]; then
+  step "read the admin of every governed contract back"
+  for target in "${GOVERNED_IDS[@]}"; do
+    if ! admin_now="$(read_address "$target" Admin)"; then
+      handoff_failures+="  $target: could not read Admin"$'\n'
+    elif [[ "$admin_now" != "$GOVERNOR_ID" ]]; then
+      handoff_failures+="  $target: admin is '$admin_now'"$'\n'
+    fi
+  done
+fi
+
+GOVERNANCE_LINE="none"
+GOVERNANCE_ROLES=""
+if [[ -n "$GOVERNOR_ID" ]]; then
+  GOVERNANCE_LINE="governor $GOVERNOR_ID"
+  # Handing the targets over cannot be undone by the deployer, so the run echoes who holds
+  # each role for the operator to read back before anyone relies on it.
+  GOVERNANCE_ROLES="$(printf '  %-20s %s\n' \
+    "Council:" "$COUNCIL_ADDR" "Operator:" "$OPERATOR_ADDR" \
+    "Guardian:" "$GUARDIAN_ADDR" "Recovery:" "$RECOVERY_ADDR" \
+    "TTL keeper:" "$TTL_KEEPER_ADDR")"
+  GOVERNANCE_ROLES+=$'\n'"  re-check with deployments/scripts/verify-deployment.sh $NETWORK"
+fi
+[[ -z "$handoff_failures" ]] || GOVERNANCE_LINE="incomplete, see the end of this run"
+
+if [[ -z "$handoff_failures" ]]; then
+  cat >&2 <<'__DEPLOY_BANNER__'
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                    ✅ DEPLOYMENT SUCCESSFUL                      │
+  └─────────────────────────────────────────────────────────────────┘
+__DEPLOY_BANNER__
+else
+  cat >&2 <<'__DEPLOY_BANNER__'
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │        ⚠️  CONTRACTS DEPLOYED, GOVERNANCE INCOMPLETE             │
+  └─────────────────────────────────────────────────────────────────┘
+__DEPLOY_BANNER__
+fi
+
+{
+  cat >&2 <<__DEPLOY_SUMMARY__
+Deployment complete
+  Network:             $NETWORK
+  Deployer:            $DEPLOYER_ADDR
+  Admin:               $ADMIN_ADDR
+  ASP membership:      $ASP_MEMBERSHIP_ID
+  ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
+  Public key registry: $PUBLIC_KEY_REGISTRY_ID
+  Pools deployed:      ${#POOL_IDS[@]}
+  Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
+  Governance:          $GOVERNANCE_LINE
+$GOVERNANCE_ROLES
+__DEPLOY_SUMMARY__
+  _vi=0
+  _vlen="$(array_len VERIFIER_SUFFIX_LIST)"
+  while [[ "$_vi" -lt "$_vlen" ]]; do
+    printf '  Verifier (%s):     %s\n' "$(policy_suffix_label "${VERIFIER_SUFFIX_LIST[$_vi]}")" "${VERIFIER_ID_LIST[$_vi]}" >&2
+    _vi=$((_vi + 1))
+  done
+  _pi=0
+  _plen="$(array_len POOL_IDS)"
+  while [[ "$_pi" -lt "$_plen" ]]; do
+    printf '  Pool[%s] (%s):       %s\n' "$_pi" "$(policy_suffix_label "${POOL_POLICY_SUFFIXES[$_pi]}")" "${POOL_IDS[$_pi]}" >&2
+    _pi=$((_pi + 1))
+  done
+}
+
 printf '%s\n' "$DEPLOY_JSON_PRETTY"
+
+[[ -z "$handoff_failures" ]] \
+  || die "the manifest is written, but the governance handoff is incomplete:"$'\n'"$handoff_failures"$'\n'"re-check with deployments/scripts/verify-deployment.sh $NETWORK"

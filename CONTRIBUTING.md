@@ -212,6 +212,34 @@ Allowlist + blocklist pool:
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
+#### Governance
+
+The governance flags are optional as a group. Passing any of the nine makes `--council`,
+`--operator`, `--guardian`, `--recovery`, and `--ttl-keeper` required, and the four role
+addresses must be distinct. The script then deploys the governor after the pools and calls
+`update_admin` on both ASPs and every pool, so the governor becomes the admin of each one. It
+reads every target back afterwards and fails with the list of any handoff that did not take.
+The four delays are counts of ledgers: `--delay`, `--recovery-delay`, `--grace`, and
+`--guardian-pause` default to 360, 720, 17280, and 720 off mainnet. Mainnet requires all four
+and refuses a `--delay` below 120960 ledgers, seven days at a five-second close. The manifest
+gains a `governance` block holding the governor id, the five addresses, and the four delays,
+and its `admin` field becomes the governor id.
+
+```sh
+./deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-flags blocklist \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --max-deposit 1000000000 \
+  --pool native:$(stellar contract id asset --asset native --network testnet) \
+  --council <council> \
+  --operator <operator> \
+  --guardian <guardian> \
+  --recovery <recovery> \
+  --ttl-keeper <ttl-keeper>
+```
+
 ### End-to-End Tests
 
 The E2E tests generate real Groth16 proofs and verify them, locally, using contracts and the Soroban-SDK. To run them:
