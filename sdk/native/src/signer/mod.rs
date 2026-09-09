@@ -23,8 +23,8 @@ pub trait Signer {
         prepared: &PreparedSorobanTx,
     ) -> Result<SignedTransaction, Error> {
         let _ = prepared;
-        Err(Error::Other(
-            "signer does not support soroban transactions".into(),
-        ))
+        Err(Error::Other(anyhow::anyhow!(
+            "signer does not support soroban transactions"
+        )))
     }
 }

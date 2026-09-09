@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::Context;
 use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
@@ -34,14 +35,10 @@ impl AliasSigner {
             &self.network_passphrase,
             self.config_dir.as_deref(),
         )
-        .map_err(|e| {
-            Error::Other(format!(
-                "sign transaction for alias `{}`: {e:#}",
-                self.alias
-            ))
-        })?;
+        .with_context(|| format!("sign transaction for alias `{}`", self.alias))?;
         TransactionEnvelope::from_xdr_base64(&signed_xdr, Limits::none())
-            .map_err(|e| Error::Other(format!("decode signed transaction xdr: {e}")))
+            .context("decode signed transaction xdr")
+            .map_err(Into::into)
     }
 }
 
@@ -61,7 +58,7 @@ impl Signer for AliasSigner {
         let envelope = self.sign_prepared_transaction(prepared)?;
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())
-            .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
+            .context("encode signed transaction xdr")?;
         Ok(SignedTransaction { signed_xdr })
     }
 }

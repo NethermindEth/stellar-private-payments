@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use crate::types::{
     ContractConfig, EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance,
     SignerAddress, UserNoteSummary,
@@ -155,27 +157,27 @@ impl<S: Storage> Account<S> {
                     .await?
             }
             _ => {
-                return Err(Error::Other(
-                    "note and encryption public keys must both be provided or both omitted".into(),
-                ));
+                return Err(Error::Other(anyhow::anyhow!(
+                    "note and encryption public keys must both be provided or both omitted"
+                )));
             }
         };
 
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
-            .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
+            .context("state fetcher")?;
         let prepared = fetcher
             // Registration uses the note-owner address, which is both the
             // registry key and the transaction source. Which it should be when
             // the two identities differ is unsettled.
             .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
             .await
-            .map_err(|e| Error::Other(format!("prepare register: {e:#}")))?;
+            .context("prepare register")?;
         let signed = self.signer.sign_soroban_transaction(&prepared).await?;
         let envelope = TransactionEnvelope::from_xdr_base64(&signed.signed_xdr, Limits::none())
-            .map_err(|e| Error::Other(format!("invalid signed transaction xdr: {e}")))?;
+            .context("invalid signed transaction xdr")?;
         let hash = submit_tx(fetcher.rpc(), &envelope)
             .await
-            .map_err(|e| Error::Other(format!("submit register: {e:#}")))?;
+            .context("submit register")?;
         confirm_tx(fetcher.rpc(), hash).await
     }
 

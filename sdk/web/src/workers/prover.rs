@@ -525,10 +525,10 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::TransactPrepared(prepared)) => Ok(prepared),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -541,10 +541,10 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::Disclosure(receipt)) => Ok(receipt),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -564,10 +564,10 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::DisclosureProofVerified(v)) => Ok(v),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 }

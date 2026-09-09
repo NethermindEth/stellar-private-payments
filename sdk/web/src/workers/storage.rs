@@ -712,21 +712,22 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::Saved) => Ok(()),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected process_pending_state response: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
     async fn clear_indexing_cursors(&self) -> Result<(), Error> {
         match self
             .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
-            .await
-            .map_err(|e| Error::Other(e.to_string()))?
+            .await?
         {
             StorageWorkerResponse::Saved => Ok(()),
-            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+            other => Err(Error::Other(anyhow::anyhow!(
+                "unexpected response: {other:?}"
+            ))),
         }
     }
 
@@ -736,16 +737,17 @@ impl Storage for StorageBridge {
                 StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger),
                 2_000,
             )
-            .await
-            .map_err(|e| Error::Other(e.to_string()))?
+            .await?
         {
             StorageWorkerResponse::Saved => Ok(()),
-            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+            other => Err(Error::Other(anyhow::anyhow!(
+                "unexpected response: {other:?}"
+            ))),
         }
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {
-        self.ping().await.map_err(|e| Error::Other(e.to_string()))
+        Ok(self.ping().await?)
     }
 
     async fn spendable_notes(
@@ -770,10 +772,10 @@ impl Storage for StorageBridge {
                     amount: n.amount,
                 })
                 .collect()),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading spendable notes: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -793,10 +795,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading notes: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -816,10 +818,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::PortfolioBalances(balances)) => Ok(balances),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading portfolio balances: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -836,10 +838,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading user notes: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -860,10 +862,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::OperationalFeed(list)) => Ok(list),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading operational feed: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -883,10 +885,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::RecipientLookup(lookup)) => Ok(lookup),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response looking up recipient: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -899,10 +901,10 @@ impl Storage for StorageBridge {
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
                 Err(Error::MembershipSync(status))
             }
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response building transact params: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -918,18 +920,18 @@ impl Storage for StorageBridge {
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
                 Err(Error::MembershipSync(status))
             }
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response building disclosure inputs: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         let _ = user_address;
-        Err(Error::Other(
-            "full stored user keys are not available on the storage bridge; use asp_secret".into(),
-        ))
+        Err(Error::Other(anyhow::anyhow!(
+            "full stored user keys are not available on the storage bridge; use asp_secret"
+        )))
     }
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
@@ -941,12 +943,14 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::AspSecret(secret)) => secret
-                .ok_or_else(|| Error::Other("ASP secret not found in worker storage".into()))
+                .ok_or_else(|| {
+                    Error::Other(anyhow::anyhow!("ASP secret not found in worker storage"))
+                })
                 .map(|asp| asp.membership_blinding),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading ASP secret: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -962,14 +966,15 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::UserKeys(keys)) => {
-                let keys = keys
-                    .ok_or_else(|| Error::Other("user keys not found in worker storage".into()))?;
+                let keys = keys.ok_or_else(|| {
+                    Error::Other(anyhow::anyhow!("user keys not found in worker storage"))
+                })?;
                 Ok((keys.note_keypair.public, keys.encryption_keypair.public))
             }
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response loading user keys: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -994,17 +999,17 @@ impl Storage for StorageBridge {
         {
             Ok(StorageWorkerResponse::RecipientLookup(lookup)) => {
                 let entry = lookup.entry.ok_or_else(|| {
-                    Error::Other(format!(
+                    Error::Other(anyhow::anyhow!(
                         "recipient {address} not found in the public key registry; \
                          they must register keys on-chain"
                     ))
                 })?;
                 Ok((entry.note_key, entry.encryption_key))
             }
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response looking up recipient: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -1026,10 +1031,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::PoolGvkEvents(events)) => Ok(events),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response listing pool gvk events: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 
@@ -1049,10 +1054,10 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::PoolHasCommitments(found)) => Ok(found.into_iter().collect()),
-            Ok(other) => Err(Error::Other(format!(
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response verifying pool commitments: {other:?}"
             ))),
-            Err(e) => Err(Error::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e)),
         }
     }
 }
