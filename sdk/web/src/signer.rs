@@ -63,12 +63,8 @@ impl WalletSigner {
         &self,
         prepared: &PreparedSorobanTx,
     ) -> Result<TransactionEnvelope, JsError> {
-        let steps = auth_sign_steps(
-            prepared,
-            &self.network_passphrase,
-            self.signer_address.as_str(),
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
+        let steps = auth_sign_steps(prepared, &self.network_passphrase, &self.signer_address)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         let mut auth_signatures = Vec::with_capacity(steps.len());
         for step in &steps {
@@ -84,9 +80,8 @@ impl WalletSigner {
             ));
         }
 
-        let tx_b64 =
-            unsigned_tx_for_signing(prepared, self.signer_address.as_str(), &auth_signatures)
-                .map_err(|e| JsError::new(&e.to_string()))?;
+        let tx_b64 = unsigned_tx_for_signing(prepared, &self.signer_address, &auth_signatures)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         let signed_b64 = self
             .call("signTransaction", &[tx_b64.as_str().into()])

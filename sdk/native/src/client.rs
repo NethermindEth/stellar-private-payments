@@ -277,7 +277,8 @@ mod signer_is_note_owner_tests {
 
     fn test_signer(address: &str) -> Handle<dyn Signer> {
         Handle::from_box(Box::new(
-            LocalSigner::new(SECRET, PASSPHRASE, address).expect("build signer"),
+            LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
+                .expect("build signer"),
         ) as Box<dyn Signer>)
     }
 

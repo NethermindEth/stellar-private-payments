@@ -28,6 +28,7 @@ use stellar_xdr::{
 };
 
 use super::{contract_state::PreparedSorobanTx, conversions::scval_to_address_string};
+use crate::types::SignerAddress;
 
 /// Auth validity
 ///
@@ -157,17 +158,17 @@ impl LocalSigner {
         &self,
         prepared: &PreparedSorobanTx,
         network_passphrase: &str,
-        user_address: &str,
+        signer_address: &SignerAddress,
     ) -> Result<TransactionEnvelope> {
-        if self.public_key() != user_address {
-            bail!("secret key does not match user_address");
+        if self.public_key() != signer_address.as_str() {
+            bail!("secret key does not match signer_address");
         }
-        let steps = auth_sign_steps(prepared, network_passphrase, user_address)?;
+        let steps = auth_sign_steps(prepared, network_passphrase, signer_address)?;
         let mut auth_signatures = Vec::with_capacity(steps.len());
         for step in &steps {
             auth_signatures.push((step.entry_index, self.sign_auth_preimage(&step.preimage)?));
         }
-        let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)?;
+        let tx_b64 = unsigned_tx_for_signing(prepared, signer_address, &auth_signatures)?;
         let envelope = TransactionEnvelope::from_xdr_base64(&tx_b64, Limits::none())
             .context("invalid tx xdr")?;
         self.sign_transaction(envelope, network_passphrase)
@@ -190,18 +191,18 @@ impl AuthSignStep {
     }
 }
 
-/// Auth preimage steps required for `user_address` on a prepared transaction.
+/// Auth preimage steps required for `signer_address` on a prepared transaction.
 pub fn auth_sign_steps(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
-    user_address: &str,
+    signer_address: &SignerAddress,
 ) -> Result<Vec<AuthSignStep>> {
     let expiration = auth_expiration_ledger(prepared);
     let mut steps = Vec::new();
     for (entry_index, entry_b64) in prepared.auth_entries.iter().enumerate() {
         let entry = SorobanAuthorizationEntry::from_xdr_base64(entry_b64, Limits::none())
             .context("invalid auth entry xdr")?;
-        if needs_wallet_auth(&entry, user_address)? {
+        if needs_wallet_auth(&entry, signer_address.as_str())? {
             steps.push(AuthSignStep {
                 entry_index,
                 preimage: soroban_auth_preimage(&entry, network_passphrase, expiration)?,
@@ -214,13 +215,14 @@ pub fn auth_sign_steps(
 /// Unsigned transaction envelope (base64) with signed auth entries attached.
 pub fn unsigned_tx_for_signing(
     prepared: &PreparedSorobanTx,
-    user_address: &str,
+    signer_address: &SignerAddress,
     auth_signatures: &[(usize, Signature)],
 ) -> Result<String> {
     let expiration = auth_expiration_ledger(prepared);
-    let public_key: ed25519::PublicKey = user_address
+    let public_key: ed25519::PublicKey = signer_address
+        .as_str()
         .parse()
-        .context("invalid user address strkey")?;
+        .context("invalid signer address strkey")?;
     let mut sigs_by_index: std::collections::BTreeMap<usize, Signature> =
         auth_signatures.iter().copied().collect();
 
@@ -229,7 +231,7 @@ pub fn unsigned_tx_for_signing(
     for (entry_index, entry_b64) in prepared.auth_entries.iter().enumerate() {
         let mut entry = SorobanAuthorizationEntry::from_xdr_base64(entry_b64, Limits::none())
             .context("invalid auth entry xdr")?;
-        if needs_wallet_auth(&entry, user_address)? {
+        if needs_wallet_auth(&entry, signer_address.as_str())? {
             needs_patch = true;
             let signature = sigs_by_index
                 .remove(&entry_index)
@@ -435,14 +437,15 @@ mod tests {
         LocalSigner::from_seed([7u8; 32])
     }
 
-    fn test_prepared_tx(user_address: &str) -> PreparedSorobanTx {
+    fn test_prepared_tx(signer_address: &SignerAddress) -> PreparedSorobanTx {
         use stellar_xdr::{
             AccountId, InvokeContractArgs, PublicKey, ScAddress, ScSymbol,
             SorobanAddressCredentials, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
             SorobanAuthorizedInvocation, SorobanCredentials, Uint256, VecM, WriteXdr,
         };
 
-        let public_key: ed25519::PublicKey = user_address.parse().expect("parse address");
+        let public_key: ed25519::PublicKey =
+            signer_address.as_str().parse().expect("parse address");
         let wallet = ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
             public_key.0,
         ))));
@@ -509,16 +512,17 @@ mod tests {
     #[test]
     fn sign_prepared_transaction() {
         let signer = test_signer();
-        let user_address = signer.public_key().to_string();
-        let prepared = test_prepared_tx(&user_address);
+        let signer_address = SignerAddress::new(signer.public_key());
+        let prepared = test_prepared_tx(&signer_address);
 
-        let steps = auth_sign_steps(&prepared, TEST_PASSPHRASE, &user_address).expect("auth steps");
+        let steps =
+            auth_sign_steps(&prepared, TEST_PASSPHRASE, &signer_address).expect("auth steps");
         assert_eq!(steps.len(), 1);
 
         let signed = signer
-            .sign_prepared_transaction(&prepared, TEST_PASSPHRASE, &user_address)
+            .sign_prepared_transaction(&prepared, TEST_PASSPHRASE, &signer_address)
             .expect("sign prepared tx");
-        verify_tx(&signed, TEST_PASSPHRASE, &user_address, 0).expect("verify tx");
+        verify_tx(&signed, TEST_PASSPHRASE, signer_address.as_str(), 0).expect("verify tx");
 
         let xdr::TransactionEnvelope::Tx(v1) = &signed else {
             panic!("expected v1 envelope");
