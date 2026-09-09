@@ -10,6 +10,7 @@ use super::{
         BASE_FEE, pool_ext_data_to_scval, pool_gvk_proof_to_scval, pool_proof_to_scval,
         register_account_to_scval,
     },
+    tx_assemble::build_invoke_contract_tx_envelope,
 };
 
 /// Prover output needed to prepare a pool `transact` invocation.
@@ -69,7 +70,7 @@ impl StateFetcher {
         );
 
         let seq = self.account_sequence(source_account).await?;
-        let raw = Self::build_invoke_contract_tx_envelope(
+        let raw = build_invoke_contract_tx_envelope(
             source_account,
             seq,
             BASE_FEE,
@@ -107,7 +108,7 @@ impl StateFetcher {
 
         let payer = payer.as_str();
         let seq = self.account_sequence(payer).await?;
-        let raw = Self::build_invoke_contract_tx_envelope(
+        let raw = build_invoke_contract_tx_envelope(
             payer,
             seq,
             BASE_FEE,
@@ -451,7 +452,7 @@ mod tests {
         let ext_scval = pool_ext_data_to_scval(&ext).expect("ext scval");
         let sender_scval = xdr::ScVal::Address(source.parse().expect("address"));
 
-        let raw = StateFetcher::build_invoke_contract_tx_envelope(
+        let raw = build_invoke_contract_tx_envelope(
             &source,
             next_sequence(mock.seq.clone()).expect("next seq"),
             BASE_FEE,

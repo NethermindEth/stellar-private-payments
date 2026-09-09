@@ -5,11 +5,11 @@ use super::{
     },
     rpc::{Client, ContractDataBulkRequest},
     soroban_encode::BASE_FEE,
+    tx_assemble::build_invoke_contract_tx_envelope,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str::FromStr};
-use stellar_strkey::ed25519;
+use std::collections::HashMap;
 use stellar_xdr::{self as xdr, ReadXdr};
 
 use crate::types::{
@@ -668,7 +668,7 @@ impl StateFetcher {
         source_account: &str,
         key: Field,
     ) -> Result<xdr::TransactionEnvelope> {
-        Self::build_invoke_contract_tx_envelope(
+        build_invoke_contract_tx_envelope(
             source_account,
             xdr::SequenceNumber(0),
             BASE_FEE,
@@ -684,7 +684,7 @@ impl StateFetcher {
         source_account: &str,
         root: Field,
     ) -> Result<xdr::TransactionEnvelope> {
-        Self::build_invoke_contract_tx_envelope(
+        build_invoke_contract_tx_envelope(
             source_account,
             xdr::SequenceNumber(0),
             BASE_FEE,
@@ -700,7 +700,7 @@ impl StateFetcher {
         source_account: &str,
         nullifier: Field,
     ) -> Result<xdr::TransactionEnvelope> {
-        Self::build_invoke_contract_tx_envelope(
+        build_invoke_contract_tx_envelope(
             source_account,
             xdr::SequenceNumber(0),
             BASE_FEE,
@@ -709,53 +709,6 @@ impl StateFetcher {
             vec![field_to_scval_u256(nullifier)],
             Vec::new(),
         )
-    }
-
-    pub(crate) fn build_invoke_contract_tx_envelope(
-        source_account: &str,
-        seq_num: xdr::SequenceNumber,
-        fee: u32,
-        contract_id: &str,
-        function: &str,
-        args: Vec<xdr::ScVal>,
-        auth_entries: Vec<xdr::SorobanAuthorizationEntry>,
-    ) -> Result<xdr::TransactionEnvelope> {
-        let source = Self::muxed_account_from_g(source_account)?;
-        let contract_address = Self::contract_scaddress_from_str(contract_id)?;
-        let function_name =
-            xdr::ScSymbol::try_from(function).map_err(|_| anyhow!("invalid function name"))?;
-        let args = xdr::VecM::try_from(args)?;
-
-        let invoke_args = xdr::InvokeContractArgs {
-            contract_address,
-            function_name,
-            args,
-        };
-        let host_function = xdr::HostFunction::InvokeContract(invoke_args);
-        let invoke_op = xdr::InvokeHostFunctionOp {
-            host_function,
-            auth: xdr::VecM::try_from(auth_entries)?,
-        };
-        let op = xdr::Operation {
-            source_account: None,
-            body: xdr::OperationBody::InvokeHostFunction(invoke_op),
-        };
-
-        let operations = xdr::VecM::try_from(vec![op])?;
-        let tx = xdr::Transaction {
-            source_account: source,
-            fee,
-            seq_num,
-            cond: xdr::Preconditions::None,
-            memo: xdr::Memo::None,
-            operations,
-            ext: xdr::TransactionExt::V0,
-        };
-
-        Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
-            tx,
-            signatures: xdr::VecM::default(),
-        }))
     }
 
     fn parse_find_result(val: &xdr::ScVal) -> Result<ParsedFindResult> {
@@ -828,18 +781,6 @@ impl StateFetcher {
             not_found_value,
             is_old0,
         })
-    }
-
-    fn muxed_account_from_g(account: &str) -> Result<xdr::MuxedAccount> {
-        let pk = ed25519::PublicKey::from_string(account)?;
-        Ok(xdr::MuxedAccount::Ed25519(xdr::Uint256(pk.0)))
-    }
-
-    fn contract_scaddress_from_str(contract_id: &str) -> Result<xdr::ScAddress> {
-        let contract = stellar_strkey::Contract::from_str(contract_id)?;
-        Ok(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
-            contract.0,
-        ))))
     }
 }
 

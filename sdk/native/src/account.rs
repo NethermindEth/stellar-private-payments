@@ -1,9 +1,9 @@
 use crate::types::{
-    ContractConfig, EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance,
-    SignerAddress, UserNoteSummary,
+    AssetDescriptor, ContractConfig, EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey,
+    PortfolioBalance, SignerAddress, UserNoteSummary,
 };
 
-use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
+use crate::chain::{Limits, ReadXdr, RpcError, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     Error, Handle, PrivatePool, Prover, Signer, Storage,
@@ -93,6 +93,36 @@ impl<S: Storage> Account<S> {
                 &self.contract_config.portfolio_pools(),
             )
             .await
+    }
+
+    /// This account's classical on-chain balance of `asset`, in its smallest
+    /// unit (stroops for native XLM).
+    ///
+    /// This is the classical account balance, not the
+    /// shielded balance held in a pool — see [`crate::PrivatePool::balance`]
+    /// for that.
+    pub async fn balance(&self, asset: &AssetDescriptor) -> Result<u128, Error> {
+        match asset {
+            AssetDescriptor::Native => {
+                match self.rpc.get_account(self.user_address.as_str()).await {
+                    Ok(entry) => u128::try_from(entry.balance).map_err(|_| {
+                        Error::Other(format!("negative account balance: {}", entry.balance))
+                    }),
+                    Err(RpcError::NotFound("Account", _)) => Err(Error::AccountNotFound {
+                        address: self.user_address.as_str().to_string(),
+                    }),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            AssetDescriptor::Classic { code, issuer } => Ok(self
+                .rpc
+                .get_trustline_balance(self.user_address.as_str(), code, issuer)
+                .await?),
+            AssetDescriptor::Contract { contract_id, .. } => Ok(self
+                .rpc
+                .get_token_balance(contract_id, self.user_address.as_str())
+                .await?),
+        }
     }
 
     /// Locally derived note and encryption public keys for this account.

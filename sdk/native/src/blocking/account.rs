@@ -1,8 +1,8 @@
 //! Sync wrapper around [`crate::Account`] via a shared Tokio runtime.
 
 use crate::types::{
-    EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance, SignerAddress,
-    UserNoteSummary,
+    AssetDescriptor, EncryptionPublicKey, Field, NoteOwnerAddress, NotePublicKey, PortfolioBalance,
+    SignerAddress, UserNoteSummary,
 };
 
 use crate::{
@@ -49,6 +49,12 @@ impl Account {
 
     pub fn portfolio(&self) -> Result<Vec<PortfolioBalance>, Error> {
         block_on(self.inner.portfolio())
+    }
+
+    /// This account's classical on-chain balance of `asset`, in its smallest
+    /// unit (stroops for native XLM).
+    pub fn balance(&self, asset: &AssetDescriptor) -> Result<u128, Error> {
+        block_on(self.inner.balance(asset))
     }
 
     pub fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {

@@ -31,7 +31,7 @@ use stellar_private_payments::{Error, PreparedTransaction};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::init_tracing()?;
 
-    let (client, account, pool, _config, pool_config) = match common::init_transact_session() {
+    let (_client, account, pool, _config, pool_config) = match common::init_transact_session() {
         Ok(session) => session,
         Err(e) if e.contains("circuit artifacts") => {
             eprintln!("Skipping: {e}");
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let amount = common::amount()?;
 
-    common::require_funded_for_pool(&client, &account, &pool_config, amount)?;
+    common::require_funded_for_pool(&account, &pool_config, amount);
 
     println!("Pool:      {}", pool_config.pool_contract_id);
     println!("Asset:     {}", pool_config.token_label());
