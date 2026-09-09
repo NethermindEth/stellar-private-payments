@@ -164,10 +164,15 @@ impl<S: Storage> Account<S> {
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
         let prepared = fetcher
-            // Registration uses the note-owner address, which is both the
-            // registry key and the transaction source. Which it should be when
-            // the two identities differ is unsettled.
-            .prepare_register(self.user_address.as_str(), note_pk.0, enc_pk.0)
+            // The owner is the registration; the signer only pays for it. When
+            // the two differ the simulation returns an auth entry for the
+            // owner, which the signer cannot supply on its own.
+            .prepare_register(
+                &self.user_address,
+                &self.signer_address,
+                note_pk.0,
+                enc_pk.0,
+            )
             .await
             .map_err(|e| Error::Other(format!("prepare register: {e:#}")))?;
         let signed = self.signer.sign_soroban_transaction(&prepared).await?;
