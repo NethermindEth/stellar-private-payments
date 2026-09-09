@@ -1,6 +1,6 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
-use crate::types::{ExtData, SignerAddress};
+use crate::types::{ExtData, NoteOwnerAddress, SignerAddress};
 use anyhow::{Result, anyhow};
 use stellar_xdr::{self as xdr};
 
@@ -85,17 +85,30 @@ impl StateFetcher {
 
     /// Simulates `register` on the configured public key registry contract and
     /// returns unsigned XDR + auth entries for the wallet.
+    ///
+    /// `owner` is the registration itself: it becomes the `Account.owner`
+    /// argument, which the registry uses as its storage key and, at
+    /// `require_auth()`, as the address that must authorize the call. `payer`
+    /// only carries the transaction: its sequence number is read and it
+    /// sources the envelope, so it pays the fee.
+    ///
+    /// The two may differ, but a delegate cannot register on its own. When
+    /// they do differ the simulation returns an auth entry for `owner`, and
+    /// the wallet must collect that signature in addition to `payer`'s
+    /// signature on the envelope.
     pub async fn prepare_register(
         &self,
-        source_account: &str,
+        owner: &NoteOwnerAddress,
+        payer: &SignerAddress,
         note_key: [u8; 32],
         encryption_key: [u8; 32],
     ) -> Result<PreparedSorobanTx> {
-        let account_scval = register_account_to_scval(source_account, encryption_key, note_key)?;
+        let account_scval = register_account_to_scval(owner.as_str(), encryption_key, note_key)?;
 
-        let seq = self.account_sequence(source_account).await?;
+        let payer = payer.as_str();
+        let seq = self.account_sequence(payer).await?;
         let raw = Self::build_invoke_contract_tx_envelope(
-            source_account,
+            payer,
             seq,
             BASE_FEE,
             &self.contract_config().public_key_registry,
@@ -132,15 +145,21 @@ mod tests {
     use super::*;
     use crate::{
         chain::{
+            RpcClient,
             rpc::{Error as RpcError, SimulateHostFunctionResult, SimulateTransactionResponse},
             tx_assemble::test_fixtures::{empty_envelope, empty_soroban_data},
         },
-        types::ContractConfig,
+        types::{ContractConfig, NoteOwnerAddress, SignerAddress},
     };
     use futures::executor::block_on;
+    use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use stellar_strkey::ed25519;
     use stellar_xdr::{Limits, ReadXdr, WriteXdr};
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_string_contains, method},
+    };
 
     const TEST_CONFIG_JSON: &str = r#"{
         "network": "test",
@@ -219,25 +238,56 @@ mod tests {
         sim
     }
 
-    async fn prepare_register_with_mock(
-        mock: &MockRpc,
-        source_account: &str,
-        note_key: [u8; 32],
-        encryption_key: [u8; 32],
-    ) -> Result<PreparedSorobanTx> {
-        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
-        let account_scval = register_account_to_scval(source_account, encryption_key, note_key)?;
-        let raw = StateFetcher::build_invoke_contract_tx_envelope(
-            source_account,
-            next_sequence(mock.seq.clone())?,
-            BASE_FEE,
-            &config.public_key_registry,
-            "register",
-            vec![account_scval],
-            Vec::new(),
-        )?;
-        let sim = mock.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+    fn account_id(address: &str) -> xdr::AccountId {
+        let pk = ed25519::PublicKey::from_string(address).expect("strkey");
+        xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(pk.0)))
+    }
+
+    /// A minimal `AccountEntry` for `address`, sitting at `seq`, base64-encoded
+    /// the way `getLedgerEntries` returns it.
+    fn account_entry_xdr(address: &str, seq: i64) -> String {
+        let entry = xdr::AccountEntry {
+            account_id: account_id(address),
+            balance: 0,
+            seq_num: xdr::SequenceNumber(seq),
+            num_sub_entries: 0,
+            inflation_dest: None,
+            flags: 0,
+            home_domain: xdr::String32::default(),
+            thresholds: xdr::Thresholds([1, 0, 0, 0]),
+            signers: xdr::VecM::default(),
+            ext: xdr::AccountEntryExt::V0,
+        };
+        xdr::LedgerEntryData::Account(entry)
+            .to_xdr_base64(Limits::none())
+            .expect("ledger entry xdr")
+    }
+
+    fn ledger_key_xdr(address: &str) -> String {
+        xdr::LedgerKey::Account(xdr::LedgerKeyAccount {
+            account_id: account_id(address),
+        })
+        .to_xdr_base64(Limits::none())
+        .expect("ledger key xdr")
+    }
+
+    /// The `owner` entry of an encoded registry `Account` map.
+    fn owner_of_register_arg(arg: &xdr::ScVal) -> xdr::ScAddress {
+        let xdr::ScVal::Map(Some(map)) = arg else {
+            panic!("expected the register argument to be a map");
+        };
+        for xdr::ScMapEntry { key, val } in map.iter() {
+            let xdr::ScVal::Symbol(name) = key else {
+                continue;
+            };
+            if name.to_utf8_string().expect("symbol") == "owner" {
+                let xdr::ScVal::Address(addr) = val else {
+                    panic!("owner should be an address");
+                };
+                return addr.clone();
+            }
+        }
+        panic!("register argument has no owner entry");
     }
 
     #[test]
@@ -257,31 +307,91 @@ mod tests {
         assert_eq!(v1.tx.fee, 600);
     }
 
-    #[test]
-    fn prepare_register_uses_mocked_simulation() {
-        let pk = ed25519::PublicKey([7u8; 32]);
-        let source = pk.to_string();
-        let mock = MockRpc::new(9, fixture_sim("250"));
-        let prepared = block_on(prepare_register_with_mock(
-            &mock, &source, [0xAB; 32], [0xEE; 32],
-        ))
-        .expect("prepare register");
+    /// The owner is the registration; the payer only carries it. Drives the
+    /// real `prepare_register` against a mocked RPC so the routing of each
+    /// identity is asserted on production code, not on a re-implementation.
+    #[tokio::test]
+    async fn prepare_register_registers_owner_and_sources_from_payer() {
+        let owner_key = ed25519::PublicKey([1u8; 32]).to_string();
+        let payer_key = ed25519::PublicKey([2u8; 32]).to_string();
+        let owner = NoteOwnerAddress::new(owner_key.as_str());
+        let payer = SignerAddress::new(payer_key.as_str());
+        assert_ne!(owner.as_str(), payer.as_str(), "the pair must differ");
 
-        assert_eq!(mock.simulate_calls.load(Ordering::SeqCst), 1);
-        assert!(prepared.auth_entries.is_empty());
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getLedgerEntries"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "entries": [{
+                        "key": ledger_key_xdr(payer.as_str()),
+                        "xdr": account_entry_xdr(payer.as_str(), 41),
+                        "lastModifiedLedgerSeq": 1,
+                    }],
+                    "latestLedger": 1,
+                },
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("simulateTransaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": fixture_sim("250"),
+            })))
+            .mount(&server)
+            .await;
+
+        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let fetcher = StateFetcher::new(RpcClient::new(&server.uri()).expect("rpc client"), config)
+            .expect("state fetcher");
+
+        let prepared = fetcher
+            .prepare_register(&owner, &payer, [0xAB; 32], [0xEE; 32])
+            .await
+            .expect("prepare register");
 
         let env = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
             .expect("xdr");
         let xdr::TransactionEnvelope::Tx(v1) = env else {
             panic!("expected v1 envelope");
         };
-        // Account is at seq 9; the new tx must use seq + 1 = 10 (txBAD_SEQ
-        // otherwise).
-        assert_eq!(v1.tx.seq_num, xdr::SequenceNumber(10));
+
+        // The payer sources the envelope and pays the fee.
+        assert_eq!(
+            v1.tx.source_account,
+            xdr::MuxedAccount::Ed25519(xdr::Uint256(
+                ed25519::PublicKey::from_string(payer.as_str())
+                    .expect("strkey")
+                    .0
+            )),
+        );
         assert_eq!(v1.tx.fee, 350);
 
-        let op = &v1.tx.operations[0];
-        let xdr::OperationBody::InvokeHostFunction(invoke) = &op.body else {
+        // The payer's sequence number is the one that was read: the mocked
+        // account sits at 41, so the tx must go out at 42 (txBAD_SEQ
+        // otherwise).
+        assert_eq!(v1.tx.seq_num, xdr::SequenceNumber(42));
+        let seq_request = server
+            .received_requests()
+            .await
+            .expect("recorded requests")
+            .into_iter()
+            .find(|r| String::from_utf8_lossy(&r.body).contains("getLedgerEntries"))
+            .expect("a getLedgerEntries call");
+        let body: serde_json::Value =
+            serde_json::from_slice(&seq_request.body).expect("request json");
+        assert_eq!(
+            body["params"]["keys"][0].as_str().expect("ledger key"),
+            ledger_key_xdr(payer.as_str()),
+            "the sequence number must be read for the payer, not the owner",
+        );
+
+        // The owner is what gets registered.
+        let xdr::OperationBody::InvokeHostFunction(invoke) = &v1.tx.operations[0].body else {
             panic!("expected invoke");
         };
         let xdr::HostFunction::InvokeContract(args) = &invoke.host_function else {
@@ -289,6 +399,11 @@ mod tests {
         };
         assert_eq!(args.function_name.to_string(), "register");
         assert_eq!(args.args.len(), 1);
+        assert_eq!(
+            owner_of_register_arg(&args.args[0]),
+            owner.as_str().parse::<xdr::ScAddress>().expect("address"),
+            "the registry key must be the owner, not the payer",
+        );
     }
 
     #[test]
