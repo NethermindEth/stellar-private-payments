@@ -34,6 +34,7 @@ use std::path::PathBuf;
 use stellar_private_payments::{
     CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
+    chain,
     chain::LocalSigner as StellarSigner,
     types::{
         AssetDescriptor, ContractConfig, NoteAmount, NoteOwnerAddress, PoolConfigEntry,
@@ -87,9 +88,9 @@ pub fn network_passphrase(network: &str) -> Option<String> {
         return Some(value);
     }
     match network {
-        "testnet" => Some("Test SDF Network ; September 2015".to_string()),
-        "public" => Some("Public Global Stellar Network ; September 2015".to_string()),
-        "futurenet" => Some("Test SDF Future Network ; December 2023".to_string()),
+        "testnet" => Some(chain::TESTNET_PASSPHRASE.to_string()),
+        "public" => Some(chain::MAINNET_PASSPHRASE.to_string()),
+        "futurenet" => Some(chain::FUTURENET_PASSPHRASE.to_string()),
         _ => None,
     }
 }
