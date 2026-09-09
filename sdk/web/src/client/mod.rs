@@ -209,6 +209,11 @@ impl Client {
 
     /// Bind a wallet signer, derive privacy keys when missing, and return an
     /// [`Account`] session.
+    ///
+    /// `signerAddress` may name an account other than the note owner; that
+    /// session signs and pays while the owner holds the notes. Deriving the
+    /// owner's keys is the one part of opening a session that the owner alone
+    /// can do, so it — and only it — refuses a divergent pair.
     pub async fn account(&self, options: JsValue, signer: JsValue) -> Result<Account, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let opts = AccountOptions::from_value(options)?;
@@ -220,7 +225,6 @@ impl Client {
                     .map(str::to_string)
                     .unwrap_or_else(|| user_address.clone()),
             );
-            ensure_signer_is_note_owner(&user_address, &signer_address).map_err(pool_err)?;
             let wallet_signer = WalletSigner::new(
                 signer,
                 opts.network_passphrase().to_string(),
@@ -228,6 +232,14 @@ impl Client {
             )?;
 
             if !self.user_keys_exist(&user_address).await? {
+                // The derivation signature *is* the note secret. WalletSigner
+                // asks the wallet for the account it signs with, so on a
+                // divergent pair the wallet would sign with the payer and the
+                // payer's keypair would be filed under the owner's address —
+                // wrong keys, silently, and persisted. Refuse instead. An
+                // owner whose keys already exist skips this and delegates.
+                ensure_signer_is_note_owner(&user_address, wallet_signer.signer_address())
+                    .map_err(pool_err)?;
                 let message =
                     stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
                 let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
@@ -441,13 +453,12 @@ impl Client {
     }
 }
 
-/// Refuse a session whose signing account is not the note owner.
+/// Refuse key derivation on a session that signs with an account other than
+/// the note owner.
 ///
-/// The native client refuses the same pair, but only once the wallet has
-/// already been asked to sign the derivation message and the resulting keys
-/// have been filed under the owner. This runs first, so a rejected pair costs
-/// no signature request and writes nothing. It raises the native error rather
-/// than a parallel message, so the two cannot drift.
+/// Checked before the wallet is asked for the derivation signature, so a
+/// divergent pair costs no signature request and writes nothing. It raises the
+/// native error rather than a parallel message, so the two cannot drift.
 fn ensure_signer_is_note_owner(
     user_address: &str,
     signer_address: &SignerAddress,
@@ -502,28 +513,48 @@ async fn resolve_user_address(
         .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
 }
 
-#[cfg(test)]
+// `wasm_bindgen_test`, not `test`: this crate's suite runs under the
+// wasm32 harness, which does not collect plain `#[test]` functions.
+#[cfg(all(test, target_arch = "wasm32"))]
 mod signer_is_note_owner_tests {
     use super::*;
+    use wasm_bindgen_test::*;
 
     const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
 
-    #[test]
+    #[wasm_bindgen_test]
     fn the_owner_signing_for_itself_is_accepted() {
         assert!(ensure_signer_is_note_owner(OWNER, &SignerAddress::new(OWNER)).is_ok());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn a_delegate_signing_for_the_owner_is_refused() {
         let error = ensure_signer_is_note_owner(OWNER, &SignerAddress::new(DELEGATE))
-            .expect_err("a signer that is not the note owner must not open a session");
+            .expect_err("a payer that is not the note owner must not derive the owner's keys");
         match &error {
             Error::SignerIsNotNoteOwner { owner, signer } => {
                 assert_eq!(owner, OWNER);
                 assert_eq!(signer, DELEGATE);
             }
             other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
+        }
+    }
+
+    /// The app classifies a wallet cancellation by substring, and this refusal
+    /// reaches the same handler. It must not read like one.
+    #[wasm_bindgen_test]
+    fn the_refusal_does_not_read_as_a_wallet_cancellation() {
+        let rendered = ensure_signer_is_note_owner(OWNER, &SignerAddress::new(DELEGATE))
+            .expect_err("a divergent pair must be refused")
+            .to_string()
+            .to_ascii_lowercase();
+
+        for word in ["rejected", "denied", "cancelled", "canceled"] {
+            assert!(
+                !rendered.contains(word),
+                "{word:?} would be read as a wallet cancellation: {rendered}"
+            );
         }
     }
 }
