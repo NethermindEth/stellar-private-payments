@@ -21,7 +21,7 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
-import { AppStorage } from './app-storage.js';
+import { AppStorage, storageCall } from './app-storage.js';
 
 export { DisclosureRequest };
 
@@ -75,6 +75,23 @@ export function circuitsBaseUrl() {
 
 function bindAppStorage(sdkStorage) {
     appStorageInstance = new AppStorage(sdkStorage);
+}
+
+/**
+ * Tell the worker which key binding this deployment requires.
+ *
+ * Fixed per deployment, never a per-user choice. Absent in the deployment file
+ * means the payer is the owner, which is the v1 binding. If the config cannot
+ * be read we configure nothing: every route that touches key material then
+ * refuses with a clear error, which is the same fail-closed behaviour as the
+ * native handle. Defaulting to v1 here would instead accept a v1 row on a
+ * deployment that requires v2 — the unbound material this binding exists to
+ * keep out.
+ */
+async function configureStorageBinding(sdkStorage) {
+    const config = await loadDeploymentConfig();
+    const required = config?.signer_may_differ_from_owner ? 'V2' : 'V1';
+    await storageCall(sdkStorage, { ConfigureBinding: required }, 5_000);
 }
 
 function wrapSdkClient(sdk) {
@@ -170,7 +187,23 @@ export function disposeClient() {
 export async function ensureStorage() {
     await ensureWasmInit();
     if (!storageHandle) {
-        storageHandle = await Storage.open();
+        const handle = await Storage.open();
+        try {
+            await configureStorageBinding(handle);
+        } catch (err) {
+            // Publish nothing on failure. Assigning storageHandle first would
+            // make the next call skip this block and hand back a null
+            // AppStorage, and leaving the worker running would keep its OPFS
+            // handles held — which surfaces to the next page as a spurious
+            // "another tab is using this app's local database".
+            try {
+                await handle.call('Pause', 1_000);
+            } catch {
+                // Best-effort release; the original failure is what matters.
+            }
+            throw err;
+        }
+        storageHandle = handle;
         bindAppStorage(storageHandle);
         installStoragePauseOnUnload();
     }

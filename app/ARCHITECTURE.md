@@ -194,11 +194,29 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 ## Keypair derivation
 
-Keys are derived deterministically from Freighter wallet signatures:
+Keys are derived deterministically from Freighter wallet signatures. Which
+construction is used is a fixed property of the deployment
+(`signer_may_differ_from_owner` in `deployments.json`, default `false`) —
+never a per-user or per-session choice:
+
+**v1 (split-free deployments, the default and permanent for them):**
 
 1. User signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`).
 2. The worker derives the BN254 note identity keypair and the X25519 encryption keypair from that signature using domain-separated hashes.
 3. Derived keys are stored in SQLite; the signature is not persisted.
+
+**v2 (deployments that separate the fee-paying signer from the note owner):**
+
+1. User signs `key_derivation_message_v2(ownerAddress)`, which names the owner address in the signed text so it is recognisable in the wallet's approval dialog.
+2. Before deriving anything, the worker verifies the signature against the owner address's own Ed25519 public key (decoded from the `G...` address) — this, not which account the wallet claims to have signed with, is what stops a differently-signing payer from producing the owner's keys.
+3. The worker derives owner-bound keypairs using domain-separated hashes that also fold in the verified owner public key, and stores them alongside a discriminator recording which construction produced the row.
+
+A stored row's discriminator is checked against the deployment's required
+binding on every read; a row from the wrong construction is refused rather
+than used, and refusing never re-derives or overwrites it. v1 is not a
+legacy path pending removal — a split-free deployment must keep deriving it
+forever, so a reinstall regenerates the keys an existing account already
+holds.
 
 Signatures are prompted during onboarding so the app can scan for notes addressed to the user.
 

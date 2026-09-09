@@ -38,6 +38,11 @@ impl<S: Storage> Client<S> {
     ) -> Result<Self, Error> {
         let rpc = RpcClient::new(rpc_url.as_ref())
             .map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
+        // One place, so no construction site has to remember: every reader
+        // that returns key material consults this, and an unconfigured handle
+        // refuses rather than accepting a row the deployment does not require.
+        let mut storage = storage;
+        storage.set_required_binding(contract_config.required_binding());
         Ok(Self {
             rpc,
             storage,
@@ -269,6 +274,7 @@ mod signer_is_note_owner_tests {
                 verifiers: Default::default(),
                 public_key_registry: String::new(),
                 pools: Vec::new(),
+                signer_may_differ_from_owner: false,
             },
             None,
         )

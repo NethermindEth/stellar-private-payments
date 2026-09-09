@@ -5367,6 +5367,7 @@ dependencies = [
  "anyhow",
  "rusqlite",
  "serde_json",
+ "sha2 0.11.0",
  "stellar-private-payments",
  "tracing",
  "tracing-subscriber",

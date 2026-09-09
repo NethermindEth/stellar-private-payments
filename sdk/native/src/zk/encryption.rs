@@ -16,12 +16,12 @@
 //! ```text
 //! Freighter Wallet (Ed25519)
 //!        │
-//!        └── signMessage("Privacy Pool Key Derivation [v2]")
+//!        └── signMessage("Privacy Pool Key Derivation [v1]")
 //!                   │
-//!                   ├── SHA-256("privacy-pool/note-key/v2" || sig)
+//!                   ├── SHA-256("privacy-pool/note-key/v1" || sig)
 //!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
 //!                   │
-//!                   └── SHA-256("privacy-pool/encryption-key/v2" || sig)
+//!                   └── SHA-256("privacy-pool/encryption-key/v1" || sig)
 //!                              └── X25519 Encryption Keypair
 //! ```
 //! Note: the original scheme had separate signatures for spending and
@@ -29,6 +29,26 @@
 //! accepting some associated risks like a user signing the message at a scam
 //! website (2 separate signatures could create a safety pause to stop and
 //! think)
+//!
+//! ## v2: owner-bound derivation
+//!
+//! Deployments with the owner/payer split enabled additionally bind every
+//! branch to the owner account's identity, so a delegate payer's signature
+//! can never be replayed to derive the owner's key material:
+//!
+//! ```text
+//! Owner Wallet (Ed25519)
+//!        │
+//!        └── signMessage("Privacy Pool Key Derivation [v2] owner=<G-address>")
+//!                   │  verified locally against the owner's decoded public key
+//!                   │  (see `verify_owner_signature`) before any derivation
+//!                   │
+//!                   ├── SHA-256("privacy-pool/note-key/v2" || 0 || owner_pubkey || 0 || 0 || sig)
+//!                   ├── SHA-256("privacy-pool/encryption-key/v2" || 0 || owner_pubkey || 0 || 0 || sig)
+//!                   └── SHA-256("privacy-pool/asp-secret/v2" || 0 || owner_pubkey || 0 || network || 0 || sig)
+//! ```
+//! v1 remains the permanent, correct derivation for split-free deployments
+//! and is unchanged by the above.
 use crate::{
     types::{
         EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, Field,
@@ -41,6 +61,7 @@ use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
+use ed25519_dalek::{Signature as DalekSignature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -48,13 +69,29 @@ use x25519_dalek::{PublicKey, StaticSecret};
 // These MUST remain constant for backwards compatibility.
 
 /// Message signed to derive both privacy keypairs.
+///
+/// Permanent for every deployment that does not enable the owner/payer split
+/// (`ContractConfig::signer_may_differ_from_owner == false`, the default).
+/// Not deprecated: such a deployment must keep deriving v1 so a reinstall
+/// regenerates the keys an existing account already holds, per the standing
+/// constraint that no existing account may be required to re-derive. See
+/// [`crate::zk::encryption::derive_encryption_and_note_keypairs_v2`] for the
+/// owner-bound construction split-enabled deployments use instead.
 pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
 const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
 const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v1";
 
-/// Keypairs derivation
+/// Keypairs derivation.
+///
+/// Production-required and permanent, not a legacy path pending removal:
+/// every deployment with `signer_may_differ_from_owner == false` (the
+/// default) derives with this function forever, called from
+/// cli/src/onboard.rs's V1 branch and sdk/web/src/workers/storage.rs's V1
+/// branch. A stored v1 row is the correct, permanent binding for such a
+/// deployment, since the signer-must-equal-owner guard already made every
+/// such row owner-bound before the owner-bound (v2) construction existed.
 pub fn derive_encryption_and_note_keypairs(
     signature: KeyDerivationSignature,
 ) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
@@ -75,6 +112,12 @@ pub fn derive_encryption_and_note_keypairs(
 
 /// Deterministically derive the account-scoped ASP membership blinding from
 /// the wallet signature plus a stable network context.
+///
+/// Production-required and permanent for every deployment that does not
+/// enable the owner/payer split, for the same reason as
+/// [`derive_encryption_and_note_keypairs`]: called from the same two V1
+/// branches (cli/src/onboard.rs, sdk/web/src/workers/storage.rs) and not a
+/// candidate for removal while any split-free deployment exists.
 pub fn derive_membership_blinding(
     signature: &KeyDerivationSignature,
     network_context: &str,
@@ -198,6 +241,204 @@ fn hash_signature_with_domain_and_context(
     hasher.update([0u8]);
     hasher.update(signature);
     hasher.finalize().into()
+}
+
+// --- Owner-bound (v2) derivation ---
+//
+// Additive alongside v1 above: same three key branches, same signature
+// shape, but every branch also binds to the owner account's identity so a
+// delegate payer's signature can never be replayed to derive the owner's
+// key material. v1 stays the permanent, correct derivation for split-free
+// deployments; callers choose between the two starting in phase 3.
+
+/// SEP-53 prefix applied by both signing paths (the Stellar CLI's `message
+/// sign`, `cli/src/stellar_cli.rs:105`, and the Freighter/wallet
+/// `signMessage` API) before hashing and signing. Verifying against this
+/// reconstruction in [`verify_owner_signature`] is how the two platforms'
+/// agreement is checked at runtime rather than assumed from a doc comment.
+const SEP53_MESSAGE_PREFIX: &str = "Stellar Signed Message:\n";
+
+const NOTE_KEY_DOMAIN_V2: &[u8] = b"privacy-pool/note-key/v2";
+const ENCRYPTION_KEY_DOMAIN_V2: &[u8] = b"privacy-pool/encryption-key/v2";
+const MEMBERSHIP_BLINDING_DOMAIN_V2: &[u8] = b"privacy-pool/asp-secret/v2";
+
+/// Builds the v2 key-derivation message for `owner_address`: a single ASCII
+/// line with no leading or trailing whitespace, carrying the owner's
+/// G-address so it is recognisable in a wallet approval dialog. The network
+/// is deliberately absent — including it would make note and encryption
+/// keys network-dependent, which only the membership blinding branch is.
+pub fn key_derivation_message_v2(owner_address: &str) -> String {
+    format!("Privacy Pool Key Derivation [v2] owner={owner_address}")
+}
+
+/// Verifies that `signature` is a genuine Ed25519 signature by
+/// `owner_address` over the SEP-53-framed digest of `message` —
+/// `SHA-256("Stellar Signed Message:\n" || message)` — and returns the
+/// owner's decoded 32-byte public key on success.
+///
+/// This local verification is the binding's real mechanism. Directing a
+/// wallet's signing request at the owner address is not sufficient on its
+/// own: nothing on the web path confirms the wallet honoured that request
+/// rather than signing as whoever is actually connected. Callers must
+/// reject a signature that fails this check and derive nothing from it.
+pub fn verify_owner_signature(
+    owner_address: &str,
+    message: &str,
+    signature: &KeyDerivationSignature,
+) -> Result<[u8; 32]> {
+    let KeyDerivationSignature(sig_bytes) = signature;
+    let sig_bytes: &[u8; 64] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("Signature must be 64 bytes (Ed25519)"))?;
+
+    let owner_pubkey = stellar_strkey::ed25519::PublicKey::from_string(owner_address)
+        .map_err(|_| anyhow!("invalid owner address strkey"))?;
+    let verifying_key = VerifyingKey::from_bytes(&owner_pubkey.0)
+        .map_err(|e| anyhow!("invalid verifying key: {e}"))?;
+
+    let mut preimage = Vec::with_capacity(SEP53_MESSAGE_PREFIX.len().saturating_add(message.len()));
+    preimage.extend_from_slice(SEP53_MESSAGE_PREFIX.as_bytes());
+    preimage.extend_from_slice(message.as_bytes());
+    let digest: [u8; 32] = Sha256::digest(&preimage).into();
+
+    let dalek_signature = DalekSignature::from_bytes(sig_bytes);
+    verifying_key
+        .verify(&digest, &dalek_signature)
+        .map_err(|_| {
+            anyhow!("the wallet returned a signature that does not verify against the note owner")
+        })?;
+
+    Ok(owner_pubkey.0)
+}
+
+/// NUL-framed, owner-bound analogue of
+/// [`hash_signature_with_domain_and_context`]:
+/// `SHA-256(domain || 0x00 || owner_pubkey || 0x00 || context || 0x00 ||
+/// signature)`. Used for every v2 branch so that a v1 signature — hashed
+/// without an owner — can never coincide with v2 output, and so two owners with
+/// identical signature bytes diverge on every branch.
+fn hash_signature_with_domain_owner_and_context(
+    signature: &[u8],
+    domain: &[u8],
+    owner_pubkey: &[u8; 32],
+    context: &[u8],
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update([0u8]);
+    hasher.update(owner_pubkey);
+    hasher.update([0u8]);
+    hasher.update(context);
+    hasher.update([0u8]);
+    hasher.update(signature);
+    hasher.finalize().into()
+}
+
+/// Owner-bound (v2) note private key derivation. See
+/// [`derive_note_private_key`] for the unbound v1 analogue, which is
+/// unchanged and remains the correct derivation for split-free deployments.
+fn derive_note_private_key_v2(
+    signature: &KeyDerivationSignature,
+    owner_pubkey: &[u8; 32],
+) -> Result<NotePrivateKey> {
+    let KeyDerivationSignature(signature) = signature;
+    if signature.len() != 64 {
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
+    }
+
+    let key = hash_signature_with_domain_owner_and_context(
+        signature,
+        NOTE_KEY_DOMAIN_V2,
+        owner_pubkey,
+        &[],
+    );
+
+    let field = Fr::from_le_bytes_mod_order(&key[..]);
+
+    let mut result = [0u8; 32];
+    field
+        .serialize_compressed(&mut result[..])
+        .expect("Serialization failed");
+
+    Ok(NotePrivateKey(result))
+}
+
+/// Owner-bound (v2) X25519 encryption keypair derivation. See
+/// [`derive_keypair_from_signature`] for the unbound v1 analogue.
+fn derive_keypair_from_signature_v2(
+    signature: &KeyDerivationSignature,
+    owner_pubkey: &[u8; 32],
+) -> Result<EncryptionKeyPair> {
+    let KeyDerivationSignature(signature) = signature;
+    if signature.len() != 64 {
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
+    }
+
+    let seed = hash_signature_with_domain_owner_and_context(
+        signature,
+        ENCRYPTION_KEY_DOMAIN_V2,
+        owner_pubkey,
+        &[],
+    );
+
+    let secret = StaticSecret::from(seed);
+    let public = PublicKey::from(&secret);
+
+    Ok(EncryptionKeyPair {
+        private: EncryptionPrivateKey(secret.to_bytes()),
+        public: EncryptionPublicKey(public.to_bytes()),
+    })
+}
+
+/// Owner-bound (v2) note and encryption keypair derivation. See
+/// [`derive_encryption_and_note_keypairs`] for the unbound v1 analogue,
+/// which is unchanged and remains the correct binding for deployments
+/// that do not separate the payer from the owner.
+pub fn derive_encryption_and_note_keypairs_v2(
+    signature: &KeyDerivationSignature,
+    owner_pubkey: &[u8; 32],
+) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
+    let note_private_key = derive_note_private_key_v2(signature, owner_pubkey)?;
+    let pubkey = derive_public_key(&note_private_key.0)?;
+    let note_public_key = NotePublicKey(
+        pubkey
+            .try_into()
+            .map_err(|e: Vec<u8>| anyhow::anyhow!("Expected 32 bytes, but got {}", e.len()))?,
+    );
+    let note_keypair = NoteKeyPair {
+        private: note_private_key,
+        public: note_public_key,
+    };
+    let encryption_keypair = derive_keypair_from_signature_v2(signature, owner_pubkey)?;
+    Ok((note_keypair, encryption_keypair))
+}
+
+/// Owner-bound (v2) ASP membership blinding derivation. See
+/// [`derive_membership_blinding`] for the unbound v1 analogue.
+pub fn derive_membership_blinding_v2(
+    signature: &KeyDerivationSignature,
+    owner_pubkey: &[u8; 32],
+    network_context: &str,
+) -> Result<Field> {
+    let KeyDerivationSignature(signature) = signature;
+    if signature.len() != 64 {
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
+    }
+
+    let key = hash_signature_with_domain_owner_and_context(
+        signature,
+        MEMBERSHIP_BLINDING_DOMAIN_V2,
+        owner_pubkey,
+        network_context.as_bytes(),
+    );
+    let field = Fr::from_le_bytes_mod_order(&key);
+
+    let mut result = [0u8; 32];
+    field
+        .serialize_compressed(&mut result[..])
+        .expect("Serialization failed");
+    Field::try_from_le_bytes(result)
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -455,6 +696,72 @@ mod tests {
         let second = derive_membership_blinding(&KeyDerivationSignature(vec![9u8; 64]), "testnet")
             .expect("derivation failed");
         assert_ne!(first.to_le_bytes(), second.to_le_bytes());
+    }
+
+    #[test]
+    fn two_owners_same_signature_diverge() {
+        let signature = KeyDerivationSignature(vec![11u8; 64]);
+        let owner_a = [1u8; 32];
+        let owner_b = [2u8; 32];
+
+        let (note_a, enc_a) = derive_encryption_and_note_keypairs_v2(&signature, &owner_a)
+            .expect("owner a derivation failed");
+        let (note_b, enc_b) = derive_encryption_and_note_keypairs_v2(&signature, &owner_b)
+            .expect("owner b derivation failed");
+        assert_ne!(note_a.private.0, note_b.private.0);
+        assert_ne!(enc_a.private.0, enc_b.private.0);
+
+        let blinding_a = derive_membership_blinding_v2(&signature, &owner_a, "testnet")
+            .expect("owner a blinding failed");
+        let blinding_b = derive_membership_blinding_v2(&signature, &owner_b, "testnet")
+            .expect("owner b blinding failed");
+        assert_ne!(blinding_a.to_le_bytes(), blinding_b.to_le_bytes());
+    }
+
+    #[test]
+    fn v1_signature_cannot_produce_v2_material() {
+        let signature = KeyDerivationSignature(vec![12u8; 64]);
+        let owner = [3u8; 32];
+
+        let v1_note = derive_note_private_key(&signature).expect("v1 note derivation failed");
+        let v1_enc =
+            derive_keypair_from_signature(&signature).expect("v1 encryption derivation failed");
+        let v1_blinding = derive_membership_blinding(&signature, "testnet")
+            .expect("v1 blinding derivation failed");
+
+        let (v2_note, v2_enc) = derive_encryption_and_note_keypairs_v2(&signature, &owner)
+            .expect("v2 derivation failed");
+        let v2_blinding = derive_membership_blinding_v2(&signature, &owner, "testnet")
+            .expect("v2 blinding derivation failed");
+
+        assert_ne!(v1_note.0, v2_note.private.0);
+        assert_ne!(v1_enc.private.0, v2_enc.private.0);
+        assert_ne!(v1_blinding.to_le_bytes(), v2_blinding.to_le_bytes());
+    }
+
+    #[test]
+    fn sep53_preimage_matches_a_pinned_vector() {
+        use ed25519_dalek::{Signer as _, SigningKey};
+
+        // Fixed test seed; this is not a real account key.
+        let signing_key = SigningKey::from_bytes(&[42u8; 32]);
+        let owner_address =
+            stellar_strkey::ed25519::PublicKey(signing_key.verifying_key().to_bytes())
+                .to_string()
+                .to_string();
+
+        let message = key_derivation_message_v2(&owner_address);
+        let mut preimage = Vec::new();
+        preimage.extend_from_slice(SEP53_MESSAGE_PREFIX.as_bytes());
+        preimage.extend_from_slice(message.as_bytes());
+        let digest: [u8; 32] = Sha256::digest(&preimage).into();
+
+        let signature = signing_key.sign(&digest);
+        let signature = KeyDerivationSignature(signature.to_bytes().to_vec());
+
+        let recovered_owner = verify_owner_signature(&owner_address, &message, &signature)
+            .expect("genuine signature must verify against the pinned SEP-53 reconstruction");
+        assert_eq!(recovered_owner, signing_key.verifying_key().to_bytes());
     }
 
     #[test]

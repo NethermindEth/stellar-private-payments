@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashSet, path::PathBuf};
 use crate::{
     chain::ContractDataStorage,
     planner::SpendableNote,
-    state::{SqliteStorage, StoredUserKeys},
+    state::{BindingVersion, SqliteStorage, StoredUserKeys},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
         OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata,
@@ -28,6 +28,11 @@ use crate::{
 pub struct LocalStorage {
     path: PathBuf,
     db: RefCell<SqliteStorage>,
+    /// The deployment's required key binding, held here so that `fork` - which
+    /// opens a fresh connection rather than cloning one - can carry it onto
+    /// the new handle. Without this a forked session silently reverts to an
+    /// unconfigured handle, and every account session is a fork.
+    required_binding: Option<BindingVersion>,
 }
 
 impl LocalStorage {
@@ -38,7 +43,22 @@ impl LocalStorage {
         Ok(Self {
             path,
             db: RefCell::new(db),
+            required_binding: None,
         })
+    }
+
+    /// Bind this handle, and every handle forked from it, to the deployment's
+    /// required key binding.
+    pub fn with_required_binding(mut self, required: BindingVersion) -> Self {
+        self.set_required_binding(required);
+        self
+    }
+
+    /// Set the deployment's required key binding on this handle and its
+    /// underlying connection.
+    pub fn set_required_binding(&mut self, required: BindingVersion) {
+        self.required_binding = Some(required);
+        self.db.borrow_mut().set_required_binding(required);
     }
 
     pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
@@ -73,11 +93,18 @@ impl ContractDataStorage for LocalStorage {
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<Self, Error> {
-        let db = SqliteStorage::connect_file(self.path.as_path())
+        let mut db = SqliteStorage::connect_file(self.path.as_path())
             .map_err(|e| Error::Other(format!("fork storage: {e:#}")))?;
+        // A fork opens a fresh connection, so the requirement must be carried
+        // over explicitly; every account session is a fork of the client's
+        // handle, so losing it here would unconfigure every session.
+        if let Some(required) = self.required_binding {
+            db.set_required_binding(required);
+        }
         Ok(Self {
             path: self.path.clone(),
             db: RefCell::new(db),
+            required_binding: self.required_binding,
         })
     }
 
@@ -145,6 +172,10 @@ impl Storage for LocalStorage {
             &self.storage(),
             req,
         ))
+    }
+
+    fn set_required_binding(&mut self, required: BindingVersion) {
+        LocalStorage::set_required_binding(self, required);
     }
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {

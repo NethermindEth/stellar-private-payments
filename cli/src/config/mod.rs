@@ -133,7 +133,12 @@ impl CliConfig {
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
         let path = self.db_path();
-        SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
+        let mut storage = SqliteStorage::connect_file(&path)
+            .with_context(|| format!("open {}", path.display()))?;
+        // Every reader that returns key material consults the handle, so the
+        // deployment's requirement is set here rather than at each call site.
+        storage.set_required_binding(self.deployment.required_binding());
+        Ok(storage)
     }
 }
 

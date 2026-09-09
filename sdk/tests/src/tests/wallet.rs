@@ -2,7 +2,7 @@
 //! [`stellar_private_payments::blocking::PrivatePool`].
 
 use crate::{
-    pool::{test_account, test_pool},
+    pool::{USER_ADDRESS, test_account, test_pool},
     seed::seeded_user_public_keys,
 };
 use stellar_private_payments::types::NoteAmount;
@@ -79,7 +79,7 @@ fn user_public_keys_on_account() {
     let account = test_account(Some(&[2, 3, 5])).expect("test account");
 
     let (note, enc) = account.user_public_keys().expect("user public keys");
-    let (expected_note, expected_enc) = seeded_user_public_keys().expect("seeded keys");
+    let (expected_note, expected_enc) = seeded_user_public_keys(USER_ADDRESS).expect("seeded keys");
 
     assert_eq!(note.0, expected_note.0);
     assert_eq!(enc.0, expected_enc.0);

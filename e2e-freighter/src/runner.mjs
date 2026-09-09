@@ -89,8 +89,38 @@ export async function launch({ userDataDir, headless = true, video = false } = {
   try {
     const appOrigin = new URL(requireAppUrl()).origin;
     const page = context.pages()[0] || (await context.newPage());
+    // The grant is refused while the page sits on about:blank, whose origin is
+    // opaque, so it must actually reach the app origin first. Without a real
+    // grant the app's `navigator.storage.persisted()` falls back to Chrome's
+    // own heuristics, and the onboarding wizard's storage step re-fires
+    // whenever they happen not to have granted it — a flaky wizard on top of
+    // every test that assumes onboarding is done. A dev server mid-rebuild
+    // refuses the connection for a moment, and swallowing that leaves the page
+    // opaque and the grant failing for a reason its error never mentions, so
+    // retry and say so if it never lands.
+    let navigated = false;
+    for (let attempt = 0; attempt < 5 && !navigated; attempt += 1) {
+      try {
+        await page.goto(appOrigin);
+        navigated = page.url().startsWith(appOrigin);
+      } catch (navErr) {
+        log.warn(
+          `launch: ${appOrigin} not reachable yet (attempt ${attempt + 1}/5): ${navErr.message}`,
+        );
+        await page.waitForTimeout(500);
+      }
+    }
+    if (!navigated) {
+      log.warn(`launch: giving up on ${appOrigin}; page is at ${page.url()}`);
+    }
     const cdp = await context.newCDPSession(page);
     await cdp.send('Browser.grantPermissions', { origin: appOrigin, permissions: ['durableStorage'] });
+    const persisted = await page
+      .evaluate(() => navigator.storage?.persisted?.() ?? false)
+      .catch(() => false);
+    if (!persisted) {
+      log.warn('launch: durableStorage granted but navigator.storage.persisted() is still false');
+    }
   } catch (err) {
     log.warn('launch: could not grant durableStorage permission:', err.message);
   }
@@ -176,6 +206,17 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
 
   // The caller completes onboarding before continuing with the scenario.
   if (await isOnboardingWizardVisible(page)) {
+    // Name the gate that re-fired: a wizard opening on an already-onboarded
+    // profile fails every test that assumes onboarding is done, and which
+    // step re-fired is the whole diagnosis.
+    const steps = await page
+      .evaluate(() =>
+        [...document.querySelectorAll('#onboarding-steps [data-step]')].map(
+          (el) => `${el.dataset.step}=${el.dataset.state}`,
+        ),
+      )
+      .catch((e) => [`evaluate failed: ${e.message}`]);
+    log.info(`connectApp: wizard steps -> ${steps.join(', ')}`);
     log.info('connectApp: onboarding wizard is open — returning for the caller to drive it');
   } else {
     // An address can render before the runtime and selected pool are usable.
