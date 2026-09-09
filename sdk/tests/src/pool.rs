@@ -38,7 +38,10 @@ const TEST_CONFIG_JSON: &str = r#"{
 
 const POOL_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const ASP_MEMBERSHIP_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
-const USER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+/// `pub(crate)` so sibling test modules (e.g. `tests::wallet`) can derive the
+/// same expected keys via `seed::seeded_user_public_keys` rather than
+/// hardcoding a second copy of this address.
+pub(crate) const USER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 /// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])` (stellar signer unit
 /// tests).
 const TEST_SIGNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";

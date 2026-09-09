@@ -55,8 +55,28 @@ impl WalletSigner {
         &self.signer_address
     }
 
-    pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
-        self.call("signMessage", &[message.into()]).await
+    /// Ask the wallet to sign `message` as `address`, and report back both the
+    /// signature and the account the wallet says it signed with.
+    ///
+    /// Key derivation is directed at the note owner rather than at the payer
+    /// this signer was built for, so it cannot reuse [`Self::wallet_opts`].
+    /// The returned signer address is advisory: the caller may reject an
+    /// obvious mismatch cheaply, but a wallet that misreports it is caught by
+    /// verifying the signature itself against the owner's public key.
+    pub(crate) async fn sign_wallet_message_as(
+        &self,
+        address: &str,
+        message: &str,
+    ) -> Result<String, JsError> {
+        let opts = Object::new();
+        let _ = Reflect::set(&opts, &"address".into(), &JsValue::from_str(address));
+        let _ = Reflect::set(
+            &opts,
+            &"networkPassphrase".into(),
+            &self.network_passphrase.clone().into(),
+        );
+        self.call_reporting_signer("signMessage", &[message.into()], opts, address)
+            .await
     }
 
     pub(crate) async fn sign_prepared_transaction(
@@ -128,7 +148,7 @@ impl WalletSigner {
             .map_err(|e| wallet_js_error(method, "failed", e))?;
 
         let (signature, reported) = normalize_sign_result(method, result)?;
-        self.verify_signer_address(method, reported.as_deref())?;
+        self.verify_signer_address(method, reported.as_deref(), self.signer_address.as_str())?;
         Ok(signature)
     }
 
@@ -144,18 +164,62 @@ impl WalletSigner {
     /// `WalletSigner` takes any object with the three sign methods, and the
     /// bare-string return shape carries nothing to compare. Freighter always
     /// reports one, so its substitution path stays covered.
-    fn verify_signer_address(&self, method: &str, reported: Option<&str>) -> Result<(), JsError> {
+    /// `expected` is the account the request was directed at: the payer for
+    /// ordinary signing, the note owner for key derivation. Both need the same
+    /// guarantee, so both go through here.
+    fn verify_signer_address(
+        &self,
+        method: &str,
+        reported: Option<&str>,
+        expected: &str,
+    ) -> Result<(), JsError> {
         let Some(reported) = reported else {
             return Ok(());
         };
-        if reported == self.signer_address.as_str() {
+        if reported == expected {
             return Ok(());
         }
         Err(JsError::new(&format!(
             "signer.{method}: wallet signed as {}, not the requested {}",
             Sensitive(reported),
-            Sensitive(self.signer_address.as_str()),
+            Sensitive(expected),
         )))
+    }
+
+    /// Like [`Self::call`] but with caller-supplied options, returning the
+    /// wallet's reported signer address alongside the signature instead of
+    /// discarding it.
+    async fn call_reporting_signer(
+        &self,
+        method: &str,
+        extra_args: &[JsValue],
+        opts: Object,
+        expected: &str,
+    ) -> Result<String, JsError> {
+        let func: Function = Reflect::get(&self.signer, &JsValue::from_str(method))
+            .map_err(|e| JsError::new(&format!("signer.{method}: {e:?}")))?
+            .dyn_into()
+            .map_err(|_| JsError::new(&format!("signer.{method} must be a function")))?;
+
+        let js_args = Array::new();
+        for arg in extra_args {
+            js_args.push(arg);
+        }
+        js_args.push(&opts.into());
+
+        let promise_val = func
+            .apply(&self.signer, &js_args)
+            .map_err(|e| wallet_js_error(method, "failed", e))?;
+        let promise: Promise = promise_val
+            .dyn_into()
+            .map_err(|_| JsError::new(&format!("signer.{method} must return a Promise")))?;
+        let result = JsFuture::from(promise)
+            .await
+            .map_err(|e| wallet_js_error(method, "failed", e))?;
+
+        let (signature, reported) = normalize_sign_result(method, result)?;
+        self.verify_signer_address(method, reported.as_deref(), expected)?;
+        Ok(signature)
     }
 }
 
@@ -540,7 +604,10 @@ mod signer_address_tests {
             "{{ signedMessage: '{SIGNATURE}', signerAddress: '{REQUESTED}' }}"
         ))
         .unwrap();
-        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
+        assert_eq!(
+            wallet.sign_wallet_message_as(REQUESTED, "m").await.unwrap(),
+            SIGNATURE
+        );
     }
 
     /// Freighter reports success while having signed with whatever account was
@@ -552,7 +619,7 @@ mod signer_address_tests {
         ))
         .unwrap();
         let error = wallet
-            .sign_wallet_message("m")
+            .sign_wallet_message_as(REQUESTED, "m")
             .await
             .expect_err("a substituted signing account must be refused");
         assert!(
@@ -569,7 +636,12 @@ mod signer_address_tests {
             "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
         ))
         .unwrap();
-        let message = error_message(wallet.sign_wallet_message("m").await.unwrap_err());
+        let message = error_message(
+            wallet
+                .sign_wallet_message_as(REQUESTED, "m")
+                .await
+                .unwrap_err(),
+        );
         assert!(!message.contains(SUBSTITUTED), "leaked: {message}");
         assert!(!message.contains(REQUESTED), "leaked: {message}");
     }
@@ -582,8 +654,13 @@ mod signer_address_tests {
             "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
         ))
         .unwrap();
-        let message =
-            error_message(wallet.sign_wallet_message("m").await.unwrap_err()).to_ascii_lowercase();
+        let message = error_message(
+            wallet
+                .sign_wallet_message_as(REQUESTED, "m")
+                .await
+                .unwrap_err(),
+        )
+        .to_ascii_lowercase();
         for word in ["rejected", "denied", "cancelled"] {
             assert!(!message.contains(word), "'{word}' in: {message}");
         }
@@ -594,6 +671,9 @@ mod signer_address_tests {
     #[wasm_bindgen_test]
     async fn a_reply_without_an_address_is_accepted() {
         let wallet = wallet_returning(&format!("'{SIGNATURE}'")).unwrap();
-        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
+        assert_eq!(
+            wallet.sign_wallet_message_as(REQUESTED, "m").await.unwrap(),
+            SIGNATURE
+        );
     }
 }

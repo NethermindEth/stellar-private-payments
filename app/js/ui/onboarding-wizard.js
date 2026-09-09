@@ -274,8 +274,18 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
-    const keysExist = !!storedPublicKeys?.noteKeypair?.public;
+    // Ask the metadata route, not the key-material one. getUserPublicKeys
+    // returns null both when no keys exist and when the stored keys were
+    // derived for a different deployment configuration, so reading its null as
+    // "no keys" would offer the keys step to an account whose derivation will
+    // then be refused.
+    const keyBinding = await storage.keyBindingStatus(address).catch(() => null);
+    const keysExist = keyBinding === 'Acceptable';
+    // Only once the status says the stored keys are usable here: on a mismatch
+    // this route returns null, which must not be read as "no keys".
+    const storedPublicKeys = keysExist
+        ? await storage.getUserPublicKeys(address).catch(() => null)
+        : null;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
     const registryLookup = await client().recipientLookup(address).catch(() => null);
@@ -326,7 +336,7 @@ export async function runOnboardingWizard({
     closeBtn.onclick = cancelOnboarding;
 
     const state = {
-        keys: keysExist
+        keys: keysExist && storedPublicKeys
             ? {
                 pubKey: storedPublicKeys.noteKeypair.public,
                 encryptionKeypair: { publicKey: storedPublicKeys.encryptionKeypair.public },

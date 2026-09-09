@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
+use sha2::{Digest, Sha256};
 use stellar_private_payments::{
     state::SqliteStorage,
     types::{
@@ -19,15 +20,34 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 pub const TEST_NETWORK: &str = "test";
 const TEST_LEDGER: u32 = 1;
 
-fn test_derivation_signature() -> KeyDerivationSignature {
-    KeyDerivationSignature(vec![42u8; 64])
+/// A deterministic stand-in for a wallet's SEP-53 signature, keyed on the
+/// owner address rather than a shared constant.
+///
+/// This is not a real Ed25519 signature and nothing here verifies it as one -
+/// v1 derivation only hashes these 64 bytes as key-derivation material. Two
+/// SHA-256 outputs supply the 64 bytes every v1 derivation function requires
+/// (`signature.len() != 64` is an error on every branch), and keying on
+/// `owner_address` is what makes distinct seeded accounts produce distinct
+/// keys: a single shared constant here previously made every seeded account
+/// share identical note, encryption and blinding material regardless of
+/// which address it was filed under.
+fn test_derivation_signature(owner_address: &str) -> KeyDerivationSignature {
+    let mut bytes = Vec::with_capacity(64);
+    bytes.extend_from_slice(&Sha256::digest([owner_address.as_bytes(), b":0"].concat()));
+    bytes.extend_from_slice(&Sha256::digest([owner_address.as_bytes(), b":1"].concat()));
+    KeyDerivationSignature(bytes)
 }
 
-pub fn seeded_user_public_keys() -> Result<(
+/// The note/encryption public keys [`seed_prove_wallet`] and
+/// [`apply_proved_step`] derive for `owner_address`, for tests to assert
+/// against without re-deriving by hand.
+pub fn seeded_user_public_keys(
+    owner_address: &str,
+) -> Result<(
     stellar_private_payments::types::NotePublicKey,
     stellar_private_payments::types::EncryptionPublicKey,
 )> {
-    let signature = test_derivation_signature();
+    let signature = test_derivation_signature(owner_address);
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature)?;
     Ok((note_keypair.public, encryption_keypair.public))
@@ -52,7 +72,7 @@ pub fn seed_prove_wallet(
 
     let mut storage = SqliteStorage::connect_file(storage_path).context("open seeded database")?;
 
-    let signature = test_derivation_signature();
+    let signature = test_derivation_signature(user_address);
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
     let membership_blinding = encryption::derive_membership_blinding(&signature, network)?;
@@ -166,6 +186,7 @@ pub fn seed_prove_wallet(
         pool_contract_id,
         asp_membership_contract_id,
         network,
+        user_address,
     )
 }
 
@@ -180,7 +201,7 @@ pub fn apply_proved_step(
 ) -> Result<TransactChainContext> {
     use stellar_private_payments::zk::notes;
 
-    let signature = test_derivation_signature();
+    let signature = test_derivation_signature(user_address);
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
 
@@ -208,6 +229,7 @@ pub fn apply_proved_step(
         pool_contract_id,
         asp_membership_contract_id,
         network,
+        user_address,
     )?;
     let mut leaf_index = chain.pool_next_index;
 
@@ -278,6 +300,7 @@ pub fn apply_proved_step(
         pool_contract_id,
         asp_membership_contract_id,
         network,
+        user_address,
     )
 }
 
@@ -286,10 +309,11 @@ fn chain_snapshot_from_storage(
     pool_contract_id: &str,
     asp_membership_contract_id: &str,
     _network: &str,
+    user_address: &str,
 ) -> Result<TransactChainContext> {
     let storage =
         SqliteStorage::connect_file(storage_path).context("open storage for chain snapshot")?;
-    let signature = test_derivation_signature();
+    let signature = test_derivation_signature(user_address);
     let (note_keypair, _) = encryption::derive_encryption_and_note_keypairs(signature)?;
     let note_pubkey_field = Field::try_from_le_bytes(*note_keypair.public.as_ref())?;
 

@@ -1,7 +1,7 @@
 use crate::protocol::{
     AdminASPRequest, AspSecret, CorrelatedRequest, DisclaimerStatePayload, DisclosureInputs,
-    DisclosureInputsRequest, PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest,
-    StorageWorkerResponse, UserKeys,
+    DisclosureInputsRequest, KeyBindingStatus, PublicEncryptionKeyPair, PublicNoteKeyPair,
+    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -16,7 +16,10 @@ use stellar_private_payments::{
     chain::ContractDataStorage,
     disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
     planner::SpendableNote,
-    state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
+    state::{
+        BindingVersion, KeyBinding, KeyLookup, SqliteStorage, StoredUserKeys,
+        process_local_state_batch,
+    },
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
@@ -25,7 +28,11 @@ use stellar_private_payments::{
     },
     zk::{
         crypto::asp_membership_leaf,
-        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
+        encryption::{
+            derive_encryption_and_note_keypairs, derive_encryption_and_note_keypairs_v2,
+            derive_membership_blinding, derive_membership_blinding_v2, key_derivation_message_v2,
+            verify_owner_signature,
+        },
         flows::TransactParams,
     },
 };
@@ -66,8 +73,27 @@ thread_local! {
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    /// The key binding this deployment requires, set once by the client at
+    /// startup. Held here rather than taken from each request so that no
+    /// caller can select the unverified v1 derivation path on a deployment
+    /// that requires owner-bound keys.
+    static REQUIRED_BINDING: RefCell<Option<BindingVersion>> = const { RefCell::new(None) };
     #[cfg(target_arch = "wasm32")]
     static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
+}
+
+/// The key binding this deployment requires, or an error naming the omission.
+///
+/// Every route that touches key material - the reads as well as the write -
+/// takes the requirement from here rather than from its request. A
+/// request-supplied value would let a caller pick, and a default would be
+/// worse still: falling back to v1 ACCEPTS a v1 row on a deployment that
+/// requires v2, which is the unbound material this binding exists to keep out.
+/// Unconfigured therefore refuses, matching the native handle.
+fn configured_binding() -> Result<BindingVersion> {
+    REQUIRED_BINDING
+        .with(|cell| *cell.borrow())
+        .ok_or_else(|| anyhow!("the deployment's key binding requirement has not been configured"))
 }
 
 macro_rules! with_storage {
@@ -177,6 +203,13 @@ async fn init() -> Result<(), JsError> {
         }
     };
 
+    // A ConfigureBinding may have arrived before storage was installed; carry
+    // the requirement onto the new handle so the readers that run in this
+    // worker never fall back to the v1 default.
+    let mut storage = storage;
+    if let Some(required) = REQUIRED_BINDING.with(|cell| *cell.borrow()) {
+        storage.set_required_binding(required);
+    }
     STORAGE.with(|s| {
         *s.borrow_mut() = Some(storage);
     });
@@ -304,15 +337,122 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
             StorageWorkerResponse::Saved
         }
+        StorageWorkerRequest::ConfigureBinding(required) => {
+            let required: BindingVersion = required.into();
+            REQUIRED_BINDING.with(|cell| {
+                let mut slot = cell.borrow_mut();
+                match *slot {
+                    // Refuse a conflicting re-configure: the requirement is a
+                    // property of the deployment, so a second, different value
+                    // is either a bug or an attempt to relax it.
+                    Some(existing) if existing != required => Err(anyhow!(
+                        "the key binding requirement is already configured and cannot be changed"
+                    )),
+                    _ => {
+                        *slot = Some(required);
+                        Ok(())
+                    }
+                }
+            })?;
+            // The readers that run inside this worker - the spend witness, the
+            // disclosure inputs and background note attribution - consult the
+            // storage handle rather than this thread-local, so it must carry
+            // the same requirement.
+            STORAGE.with(|s| {
+                if let Some(storage) = s.borrow_mut().as_mut() {
+                    storage.set_required_binding(required);
+                }
+            });
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
             tracing::trace!(
                 "[{WORKER_NAME}] deriving and saving user keys for the account {}",
                 Sensitive(&address)
             );
-            let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(signature.clone())?;
-            let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
-            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
+            // The worker is the authoritative gate, not the client: this arm
+            // accepts an (address, signature) pair from anything that can post
+            // to it, so the pair is correlated here rather than trusted. The
+            // requirement comes from the worker's own configuration for the
+            // same reason - a request-supplied value would let a caller pick
+            // the v1 path, which performs no signature verification, and plant
+            // key material under an owner's address.
+            let required = configured_binding()?;
+            match with_storage!(s => s.get_user_keys_bound(&address, required)?)? {
+                // (iii) already bound acceptably: a replay must not insert a
+                // second row. `get_user_keys` takes the newest row, so an
+                // extra insert would shadow the one this account's notes are
+                // encrypted under.
+                KeyLookup::Found(_) => {
+                    tracing::trace!(
+                        "[{WORKER_NAME}] acceptable keys already present for the account {}",
+                        Sensitive(&address)
+                    );
+                    return Ok(StorageWorkerResponse::Saved);
+                }
+                // (iv) a row exists that this deployment cannot use. Refuse
+                // without writing: overwriting or inserting alongside would
+                // hide usable key material behind unusable material.
+                KeyLookup::Mismatch(_) => {
+                    return Err(anyhow!(
+                        "these privacy keys were derived for a different deployment \
+                         configuration and cannot be used here"
+                    ));
+                }
+                KeyLookup::Absent => {}
+            }
+
+            let (note_keypair, encryption_keypair, membership_blinding, binding) = match required {
+                // (i) v1: the split-free construction, unchanged.
+                BindingVersion::V1 => {
+                    let (note_keypair, encryption_keypair) =
+                        derive_encryption_and_note_keypairs(signature.clone())?;
+                    let membership_blinding =
+                        derive_membership_blinding(&signature, &network_context)?;
+                    (
+                        note_keypair,
+                        encryption_keypair,
+                        membership_blinding,
+                        KeyBinding {
+                            version: BindingVersion::V1,
+                            bound_owner: None,
+                        },
+                    )
+                }
+                // (i)/(ii) v2: verify the signature against the address it is
+                // being filed under before deriving anything from it. A
+                // signature from any other key produces no key material and
+                // no row.
+                BindingVersion::V2 => {
+                    let message = key_derivation_message_v2(&address);
+                    let owner_pubkey = verify_owner_signature(&address, &message, &signature)?;
+                    let (note_keypair, encryption_keypair) =
+                        derive_encryption_and_note_keypairs_v2(&signature, &owner_pubkey)?;
+                    let membership_blinding =
+                        derive_membership_blinding_v2(&signature, &owner_pubkey, &network_context)?;
+                    (
+                        note_keypair,
+                        encryption_keypair,
+                        membership_blinding,
+                        KeyBinding {
+                            version: BindingVersion::V2,
+                            bound_owner: Some(address.clone()),
+                        },
+                    )
+                }
+            };
+
+            match binding.version {
+                // v1 keeps the original write path exactly, DEFAULT-ing the
+                // discriminator, so nothing about a split-free deployment's
+                // stored state changes.
+                BindingVersion::V1 => {
+                    with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
+                }
+                BindingVersion::V2 => {
+                    with_storage_mut!(s => s.save_encryption_and_note_keypairs_bound(&address, &note_keypair, &encryption_keypair, &membership_blinding, &binding)?)?;
+                }
+            }
             tracing::trace!(
                 "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
                 Sensitive(&address)
@@ -357,7 +497,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch user keys for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            // Key-material route: returns nothing for a row this deployment
+            // cannot use, and deliberately does not report the stored binding.
+            // Status questions go to KeyBindingStatus, so no path returns
+            // secrets in order to answer one.
+            let required = configured_binding()?;
+            let opt = with_storage!(s => s.get_user_keys_bound(&address, required)?)?.into_found();
             if opt.is_some() {
                 tracing::trace!(
                     "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
@@ -383,10 +528,35 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            let required = configured_binding()?;
+            let opt = with_storage!(s => s.get_user_keys_bound(&address, required)?)?.into_found();
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
+        }
+        StorageWorkerRequest::KeyBindingStatus(address) => {
+            tracing::trace!(
+                "[{WORKER_NAME}] key binding status for the account {}",
+                Sensitive(&address)
+            );
+            // Metadata-only: reads the binding columns, never a key blob.
+            let required = configured_binding()?;
+            let status = match with_storage!(s => s.key_binding(&address)?)? {
+                None => KeyBindingStatus::Absent,
+                Some(binding) => {
+                    if binding.version == required
+                        && (binding.version == BindingVersion::V1
+                            || binding.bound_owner.as_deref() == Some(address.as_str()))
+                    {
+                        KeyBindingStatus::Acceptable
+                    } else {
+                        KeyBindingStatus::Mismatch {
+                            stored: binding.version.into(),
+                        }
+                    }
+                }
+            };
+            StorageWorkerResponse::KeyBindingStatus(status)
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
             tracing::trace!(
@@ -615,6 +785,28 @@ impl Clone for StorageBridge {
 impl StorageBridge {
     pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
         Self { bridge }
+    }
+
+    /// Tell the worker which binding this deployment requires.
+    ///
+    /// Must be sent before any request that touches key material. The worker
+    /// holds the only copy of the requirement and every route reads it from
+    /// there, so this bridge deliberately keeps none of its own: a second copy
+    /// could go stale, and defaulting one would accept a v1 row on a
+    /// deployment that requires v2.
+    pub(crate) async fn configure_binding(&self, required: BindingVersion) -> Result<()> {
+        match self
+            .call(
+                StorageWorkerRequest::ConfigureBinding(required.into()),
+                5_000,
+            )
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!(
+                "unexpected response configuring binding: {other:?}"
+            )),
+        }
     }
 
     pub(crate) async fn call(
@@ -923,6 +1115,15 @@ impl Storage for StorageBridge {
             ))),
             Err(e) => Err(Error::Other(e.to_string())),
         }
+    }
+
+    fn set_required_binding(&mut self, required: BindingVersion) {
+        // The worker holds the single copy and every route that touches key
+        // material reads it from there, so there is nothing to store here. The
+        // client configures it with `configure_binding`, which is async and so
+        // can actually reach the worker; a copy on this side could only go
+        // stale, and a defaulted one would be worse than none.
+        let _ = required;
     }
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {

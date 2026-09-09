@@ -3,7 +3,7 @@
 use crate::{
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
     planner::Transact,
-    state::{SqliteStorage, StoredUserKeys},
+    state::{KeyLookup, SqliteStorage, StoredUserKeys},
     types::{
         AspMembershipProof, AspMembershipSync, AspNonMembershipProof, BabyJubJubPoint,
         EncryptionKeyPair, EncryptionPublicKey, ExtAmount, ExtData, Field, GlobalViewKeyCiphertext,
@@ -214,13 +214,24 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = storage.get_user_keys(user_address)?.ok_or_else(|| {
+        ..
+    } = match storage.get_user_keys_bound(user_address, storage.require_binding()?)? {
+        KeyLookup::Found(keys) => keys,
         // Escapes to a UI toast and the telemetry ring buffer.
-        anyhow::anyhow!(
-            "address {} should generate privacy keys and ASP secret first",
-            crate::types::Sensitive(user_address)
-        )
-    })?;
+        KeyLookup::Absent => {
+            return Err(anyhow::anyhow!(
+                "address {} should generate privacy keys and ASP secret first",
+                crate::types::Sensitive(user_address)
+            ));
+        }
+        KeyLookup::Mismatch(_) => {
+            return Err(anyhow::anyhow!(
+                "the privacy keys stored for address {} were derived for a different deployment \
+                 configuration and cannot be used here",
+                crate::types::Sensitive(user_address)
+            ));
+        }
+    };
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }
@@ -368,7 +379,10 @@ mod tests {
     fn missing_user_keys_error_redacts_the_address() {
         let _guard = lock_reveal_flag();
         set_reveal_sensitive(false);
-        let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        // v1 is the split-free binding these fixtures represent; an
+        // unconfigured handle now refuses to read key material at all.
+        storage.set_required_binding(crate::state::BindingVersion::V1);
 
         let err = load_user_key_material(&storage, ADDRESS).expect_err("no keys are stored");
         let rendered = format!("{err:#}");

@@ -183,9 +183,27 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 
 ### Privacy keys
 
+Two key-derivation bindings exist, selected per deployment by
+`ContractConfig::signer_may_differ_from_owner` (default `false`) — never by
+the user or by a runtime flag:
+
+| Binding | Deployments that use it | Wallet signs | Owner presence verified? |
+|---------|--------------------------|--------------|---------------------------|
+| v1 (`zk::encryption::KEY_DERIVATION_MESSAGE`, unbound) | Every deployment that does not enable the owner/payer split — the default, and permanent for such deployments | The constant `KEY_DERIVATION_MESSAGE` | No: the derivation trusts whatever signature it is given. Correct for these deployments because `Client::account` already requires the signer and note owner to be the same address. |
+| v2 (`zk::encryption::key_derivation_message_v2`, owner-bound) | Deployments with `signer_may_differ_from_owner = true` | `key_derivation_message_v2(owner_address)`, naming the owner | Yes: `verify_owner_signature` checks the signature against the owner address's own Ed25519 public key before anything is derived, so a differently-signing payer cannot produce the owner's keys. |
+
+`ContractConfig::required_binding()` reports which one a given deployment
+needs; storage reads and writes go through the bound accessors
+(`Storage::get_user_keys_bound`, `Storage::save_encryption_and_note_keypairs_bound`)
+so a row derived for the wrong binding is never returned as usable key
+material. v1 is not a legacy path pending removal — a split-free deployment
+must keep deriving it forever, so a reinstall regenerates the keys an
+existing account already holds.
+
 | API | Role |
 |-----|------|
-| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::KEY_DERIVATION_MESSAGE` | v1 wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::key_derivation_message_v2(owner_address)` | v2 wallet message, naming the owner it binds to |
 | `Account::user_public_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
 | `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |

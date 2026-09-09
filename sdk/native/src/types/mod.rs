@@ -44,6 +44,15 @@ pub struct ContractConfig {
     pub public_key_registry: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
+    /// Whether this deployment separates the fee-paying signer from the note
+    /// owner.
+    ///
+    /// Fixed per deployment, never a per-user choice. It selects which key
+    /// binding the deployment requires: owner-bound v2 when true, v1 when
+    /// false. Absent in a deployment file means false, so existing files
+    /// keep parsing and keep their current behaviour unchanged.
+    #[serde(default)]
+    pub signer_may_differ_from_owner: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,6 +355,19 @@ impl From<&PoolConfigEntry> for PortfolioPoolEntry {
 }
 
 impl ContractConfig {
+    /// Which key binding this deployment requires.
+    ///
+    /// A deployment accepts exactly the binding it derives, so that any
+    /// stored state it accepts is state it can regenerate from the owner's
+    /// secret alone after a clean install.
+    pub fn required_binding(&self) -> crate::state::BindingVersion {
+        if self.signer_may_differ_from_owner {
+            crate::state::BindingVersion::V2
+        } else {
+            crate::state::BindingVersion::V1
+        }
+    }
+
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
         self.pools.iter().filter(|p| p.enabled)
     }

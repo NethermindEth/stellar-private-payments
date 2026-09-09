@@ -25,8 +25,7 @@ import {
     requestAccess,
     setAllowed,
     signAuthEntry,
-    signTransaction,
-    signMessage
+    signTransaction
 } from '@stellar/freighter-api';
 
 import { verifySignerAddress } from './wallet-signer-guard.js';

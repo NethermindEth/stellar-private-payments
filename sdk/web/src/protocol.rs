@@ -15,6 +15,7 @@ pub use stellar_private_payments::{
 
 use stellar_private_payments::{
     gvk::GvkEvent,
+    state::BindingVersion,
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
@@ -50,6 +51,51 @@ pub struct AspSecret {
     pub membership_blinding: Field,
 }
 
+/// Which key binding a request requires, mirrored across the worker boundary.
+///
+/// A deployment requires exactly the binding it derives, so this is a function
+/// of the deployment's configuration and never a per-user choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RequiredBinding {
+    V1,
+    V2,
+}
+
+impl From<RequiredBinding> for BindingVersion {
+    fn from(required: RequiredBinding) -> Self {
+        match required {
+            RequiredBinding::V1 => BindingVersion::V1,
+            RequiredBinding::V2 => BindingVersion::V2,
+        }
+    }
+}
+
+impl From<BindingVersion> for RequiredBinding {
+    fn from(version: BindingVersion) -> Self {
+        match version {
+            BindingVersion::V1 => RequiredBinding::V1,
+            BindingVersion::V2 => RequiredBinding::V2,
+        }
+    }
+}
+
+/// Metadata-only answer to "can this account's stored keys be used here?".
+///
+/// Carries no key material and no address in any variant: it exists so the
+/// client and the UI can tell "no keys yet" from "keys exist but were derived
+/// for a different deployment configuration" without a status question ever
+/// travelling over a route that returns secrets.
+// No serde rename: the rest of this protocol crosses the JS boundary with
+// variant names as written - StorageWorkerRequest/Response and RequiredBinding
+// all do - and the JS side matches on exactly those, so renaming only this
+// enum would make every JS comparison silently fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyBindingStatus {
+    Absent,
+    Acceptable,
+    Mismatch { stored: RequiredBinding },
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisclaimerStatePayload {
@@ -72,6 +118,15 @@ pub enum StorageWorkerRequest {
     },
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
+    /// Set the key binding this deployment requires. Sent once by the client
+    /// at startup; a later attempt to set a different value is refused, so the
+    /// requirement cannot be relaxed by a subsequent request.
+    ConfigureBinding(RequiredBinding),
+    /// Derive and store an account's privacy keys.
+    ///
+    /// Deliberately does NOT carry the required binding: the worker takes that
+    /// from its own configuration. A caller-supplied value would let a request
+    /// select the unverified v1 path on a deployment that requires v2.
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
@@ -82,6 +137,8 @@ pub enum StorageWorkerRequest {
     },
     UserKeys(Address),
     AspSecret(Address),
+    /// Metadata-only binding probe. Never returns key material.
+    KeyBindingStatus(Address),
     UserNotes(Address, u32),
     PortfolioBalances {
         address: Address,
@@ -145,6 +202,7 @@ pub enum StorageWorkerResponse {
     Setting(Option<String>),
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
+    KeyBindingStatus(KeyBindingStatus),
     UserNotes(Vec<UserNoteSummary>),
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),

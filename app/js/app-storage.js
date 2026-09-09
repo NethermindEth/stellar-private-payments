@@ -30,6 +30,9 @@ export async function storageCall(storage, request, timeoutMs = 5_000) {
 export class AppStorage {
     #storage;
 
+    /**
+     * @param {object} storage SDK storage handle.
+     */
     constructor(storage) {
         this.#storage = storage;
     }
@@ -71,13 +74,36 @@ export class AppStorage {
         return response.DisclaimerState ?? null;
     }
 
-    /** Whether privacy keys are stored locally for an address (onboarding only). */
-    async userKeysExist(address) {
-        const response = await this.#call({ UserKeys: address }, 1_000);
-        return response.UserKeys != null;
+    /**
+     * Binding status for an address: 'Absent', 'Acceptable', or a
+     * `{ Mismatch: { stored } }` object.
+     *
+     * The deployment's requirement lives in the worker, which every route that
+     * touches key material reads from, so this carries no binding of its own:
+     * a second copy here could only go stale, and defaulting one would accept
+     * a v1 row on a deployment that requires v2.
+     *
+     * Metadata only — this route never returns key material, which is what
+     * lets the UI tell "not onboarded yet" from "keys exist but were derived
+     * for a different deployment configuration". Asking the key-material
+     * route that question is what previously made the two indistinguishable.
+     */
+    async keyBindingStatus(address) {
+        const response = await this.#call({ KeyBindingStatus: address }, 1_000);
+        return response.KeyBindingStatus ?? null;
     }
 
-    /** Public note/encryption keys only (onboarding; no ASP secret). */
+    /** Whether usable privacy keys are stored locally for an address (onboarding only). */
+    async userKeysExist(address) {
+        return (await this.keyBindingStatus(address)) === 'Acceptable';
+    }
+
+    /**
+     * Public note/encryption keys only (onboarding; no ASP secret).
+     *
+     * Request this only once {@link keyBindingStatus} reports 'Acceptable':
+     * on a mismatch it returns null, which must not be read as "no keys".
+     */
     async getUserPublicKeys(address) {
         const response = await this.#call({ UserKeys: address }, 1_000);
         return response.UserKeys ?? null;

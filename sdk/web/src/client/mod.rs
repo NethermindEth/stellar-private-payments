@@ -15,10 +15,12 @@ use stellar_private_payments::{
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
+    state::BindingVersion,
     types::{
         ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress,
         NotePublicKey, SignerAddress,
     },
+    zk::encryption::key_derivation_message_v2,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -31,7 +33,7 @@ use crate::{
         DisclosureVerificationReport, OperationalFeedItem, RecipientLookup,
         VerifyDisclosureOptions, operational_feed_items,
     },
-    protocol::{StorageWorkerRequest, StorageWorkerResponse},
+    protocol::{KeyBindingStatus, StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
     storage::Storage,
     workers::{
@@ -126,6 +128,14 @@ impl Client {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         let contract_config = parse_contract_config(contract_config)?;
+        // Configure the worker before anything can ask it to read or derive.
+        // It holds the only copy: every route that touches key material takes
+        // the requirement from there rather than from a request, so a caller
+        // can neither select a weaker binding nor be served by a stale one.
+        storage_bridge
+            .configure_binding(contract_config.required_binding())
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let circuits_base_url = require_circuits_base_url(circuits_base_url)?;
         let prover = ProverBridge::new(
             ProverWorker::spawner()
@@ -227,13 +237,35 @@ impl Client {
                 signer_address,
             )?;
 
-            if !self.user_keys_exist(&user_address).await? {
-                let message =
-                    stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
-                let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
-                let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
-                self.derive_save_user_keys(user_address.clone(), signature)
-                    .await?;
+            // Three-way, mirroring the worker: absent derives, acceptable
+            // skips, and a row derived for a different deployment
+            // configuration is refused without deriving or writing anything.
+            let required = self.contract_config.required_binding();
+            match self.key_binding_status(&user_address).await? {
+                KeyBindingStatus::Acceptable => {}
+                KeyBindingStatus::Mismatch { .. } => {
+                    return Err(JsError::new(
+                        "these privacy keys were derived for a different deployment \
+                         configuration and cannot be used here",
+                    ));
+                }
+                KeyBindingStatus::Absent => {
+                    let message = match required {
+                        BindingVersion::V1 => {
+                            stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE
+                                .to_string()
+                        }
+                        BindingVersion::V2 => key_derivation_message_v2(&user_address),
+                    };
+                    // Directed at the note owner, never at the payer: the
+                    // owner's secret is what the keys must be a function of.
+                    let sig_hex = wallet_signer
+                        .sign_wallet_message_as(&user_address, &message)
+                        .await?;
+                    let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
+                    self.derive_save_user_keys(user_address.clone(), signature)
+                        .await?;
+                }
             }
 
             Ok(Account::new(Rc::new(
@@ -403,11 +435,16 @@ impl Client {
             .map_err(pool_err)
     }
 
-    async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
-        let req = StorageWorkerRequest::UserKeys(address.to_string());
+    /// Metadata-only binding probe.
+    ///
+    /// Deliberately does not go through the `UserKeys` route: that route
+    /// returns key material, and asking it a status question is what made an
+    /// unusable account indistinguishable from an un-onboarded one. This
+    /// carries no key material in any outcome.
+    async fn key_binding_status(&self, address: &str) -> Result<KeyBindingStatus, JsError> {
+        let req = StorageWorkerRequest::KeyBindingStatus(address.to_string());
         match self.storage_request(req, 1_000).await? {
-            StorageWorkerResponse::UserKeys(Some(_)) => Ok(true),
-            StorageWorkerResponse::UserKeys(None) => Ok(false),
+            StorageWorkerResponse::KeyBindingStatus(status) => Ok(status),
             other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
         }
     }

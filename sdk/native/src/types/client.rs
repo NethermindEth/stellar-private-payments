@@ -130,6 +130,7 @@ mod split_tests {
                 verifiers: Default::default(),
                 public_key_registry: String::new(),
                 pools: Vec::new(),
+                signer_may_differ_from_owner: false,
             },
             pool_contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
             user_address: NoteOwnerAddress::new(user),

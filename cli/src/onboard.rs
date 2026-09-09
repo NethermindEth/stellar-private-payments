@@ -10,9 +10,11 @@ use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use stellar_private_payments::{
-    state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
+    state::{BindingVersion, DEFAULT_BOOTNODE_URL, KeyBinding, KeyLookup, SqliteStorage},
     zk::encryption::{
-        KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
+        KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs,
+        derive_encryption_and_note_keypairs_v2, derive_membership_blinding,
+        derive_membership_blinding_v2, key_derivation_message_v2, verify_owner_signature,
     },
 };
 
@@ -34,6 +36,11 @@ const REGISTRATION_TEXT: &str = "If you register now, other users can transfer t
     address without asking for note and encryption public keys out of band. \
     Note: this is different from an ASP provider registration which should be handled separately \
     according to the procedures of a specific provider.";
+// Names the remedy without naming which binding is stored or required, and
+// avoids the app-level cancellation classifier's substrings ("rejected",
+// "denied", "cancelled").
+const WRONG_BINDING_TEXT: &str = "these privacy keys were derived for a different deployment \
+    configuration and cannot be used here";
 
 /// Non-interactive overrides for `onboard`.
 #[derive(Debug, Default)]
@@ -57,11 +64,20 @@ pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
             account.alias
         );
     }
-    if storage.get_user_keys(&account.address)?.is_none() {
-        bail!(
-            "Privacy keys are not set up. Run: spp onboard --account {}",
-            account.alias
-        );
+    match storage.get_user_keys_bound(&account.address, config.deployment.required_binding())? {
+        KeyLookup::Found(_) => {}
+        KeyLookup::Absent => {
+            bail!(
+                "Privacy keys are not set up. Run: spp onboard --account {}",
+                account.alias
+            );
+        }
+        KeyLookup::Mismatch(_) => {
+            bail!(
+                "{WRONG_BINDING_TEXT}. Run: spp onboard --account {}",
+                account.alias
+            );
+        }
     }
     Ok(())
 }
@@ -94,15 +110,29 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
         say(interactive, "Disclaimer accepted.");
     }
 
-    // 4. Derive privacy keys.
-    if storage.get_user_keys(&account.address)?.is_some() {
-        say(interactive, "Privacy keys already present.");
-    } else {
-        if interactive {
-            println!("\n{KEYS_TEXT}");
+    // 4. Derive privacy keys. Three-way, mirroring the worker write matrix:
+    // an acceptable row is a no-op (a replay must not shadow it), an
+    // unacceptable row is refused outright (deriving and writing nothing -
+    // falling through to derivation here would insert a second row that
+    // shadows the one the account's notes may be under), and only a missing
+    // row derives.
+    match storage.get_user_keys_bound(&account.address, config.deployment.required_binding())? {
+        KeyLookup::Found(_) => {
+            say(interactive, "Privacy keys already present.");
         }
-        derive_and_save_keys(config, &account, &mut storage)?;
-        say(interactive, "Privacy keys derived and stored.");
+        KeyLookup::Mismatch(_) => {
+            bail!(
+                "{WRONG_BINDING_TEXT}. Run: spp onboard --account {}",
+                account.alias
+            );
+        }
+        KeyLookup::Absent => {
+            if interactive {
+                println!("\n{KEYS_TEXT}");
+            }
+            derive_and_save_keys(config, &account, &mut storage)?;
+            say(interactive, "Privacy keys derived and stored.");
+        }
     }
 
     // 5. Bootnode.
@@ -120,30 +150,77 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
 
 /// Delegate the SEP-53 key-derivation signature to the Stellar CLI (the secret
 /// never enters this process) and store the derived privacy keys.
+///
+/// The CLI only ever opens a session where the signer is the account itself
+/// (0.3: `Session::new` passes `account.address` as both identities), so
+/// `--sign-with-key account.alias` already directs the request at the owner
+/// on both bindings; nothing here chooses a different signer.
 fn derive_and_save_keys(
     config: &CliConfig,
     account: &Account,
     storage: &mut SqliteStorage,
 ) -> Result<()> {
-    let signature = stellar_cli::sign_message(
-        &account.alias,
-        KEY_DERIVATION_MESSAGE,
-        config.stellar_config_dir.as_deref(),
-    )
-    .context("derive privacy-key signature via stellar CLI")?;
+    match config.deployment.required_binding() {
+        BindingVersion::V1 => {
+            let signature = stellar_cli::sign_message(
+                &account.alias,
+                KEY_DERIVATION_MESSAGE,
+                config.stellar_config_dir.as_deref(),
+            )
+            .context("derive privacy-key signature via stellar CLI")?;
 
-    let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
-        .context("derive privacy keypairs from wallet signature")?;
-    let membership_blinding = derive_membership_blinding(&signature, &config.deployment.network)?;
+            let (note_keypair, encryption_keypair) =
+                derive_encryption_and_note_keypairs(signature.clone())
+                    .context("derive privacy keypairs from wallet signature")?;
+            let membership_blinding =
+                derive_membership_blinding(&signature, &config.deployment.network)?;
 
-    storage
-        .save_encryption_and_note_keypairs(
-            &account.address,
-            &note_keypair,
-            &encryption_keypair,
-            &membership_blinding,
-        )
-        .context("save privacy keys to local wallet database")
+            storage
+                .save_encryption_and_note_keypairs(
+                    &account.address,
+                    &note_keypair,
+                    &encryption_keypair,
+                    &membership_blinding,
+                )
+                .context("save privacy keys to local wallet database")
+        }
+        BindingVersion::V2 => {
+            let message = key_derivation_message_v2(&account.address);
+            let signature = stellar_cli::sign_message(
+                &account.alias,
+                &message,
+                config.stellar_config_dir.as_deref(),
+            )
+            .context("derive privacy-key signature via stellar CLI")?;
+
+            // Local verification is the binding's real mechanism, not the
+            // alias directing the request at the owner: reject and derive
+            // nothing if the signature does not verify against the owner.
+            let owner_pubkey = verify_owner_signature(&account.address, &message, &signature)?;
+
+            let (note_keypair, encryption_keypair) =
+                derive_encryption_and_note_keypairs_v2(&signature, &owner_pubkey)
+                    .context("derive privacy keypairs from wallet signature")?;
+            let membership_blinding = derive_membership_blinding_v2(
+                &signature,
+                &owner_pubkey,
+                &config.deployment.network,
+            )?;
+
+            storage
+                .save_encryption_and_note_keypairs_bound(
+                    &account.address,
+                    &note_keypair,
+                    &encryption_keypair,
+                    &membership_blinding,
+                    &KeyBinding {
+                        version: BindingVersion::V2,
+                        bound_owner: Some(account.address.clone()),
+                    },
+                )
+                .context("save privacy keys to local wallet database")
+        }
+    }
 }
 
 fn configure_bootnode(
