@@ -83,7 +83,7 @@ pub use account::Account;
 pub use circuits::CircuitStore;
 pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
 pub use client::Client;
-pub use error::{Error, PlanExecutionError};
+pub use error::{Error, PlanExecutionError, RetentionGap};
 pub use handle::Handle;
 pub use pool::PrivatePool;
 pub use prover::{LocalProver, Prover};

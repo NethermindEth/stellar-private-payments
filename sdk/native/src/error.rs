@@ -1,4 +1,5 @@
 use crate::{
+    chain::IndexerError,
     planner::{PlanError, SpendSessionError},
     types::{AspMembershipSync, Sensitive},
 };
@@ -12,6 +13,9 @@ pub enum Error {
 
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
+
+    #[error("RPC error")]
+    Rpc(#[from] crate::chain::RpcError),
 
     #[error(transparent)]
     Plan(#[from] PlanError),
@@ -50,8 +54,20 @@ pub enum Error {
     )]
     UserKeysNotFound { user_address: String },
 
+    #[error("event history is unavailable: {0}")]
+    RetentionGap(#[from] RetentionGap),
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RetentionGap {
+    #[error("main RPC is missing event history and no fallback bootnode is configured")]
+    SyncGap,
+
+    #[error("configured bootnode failed to fill retention gap: {0}")]
+    BootnodeFailed(String),
 }
 
 /// Multi-tx plan stopped after one or more steps had already confirmed
@@ -93,6 +109,15 @@ impl PlanExecutionError {
         match self.cause.as_ref() {
             Error::PlanExecution(inner) => inner.cause(),
             other => other,
+        }
+    }
+}
+
+impl From<IndexerError> for Error {
+    fn from(ierr: IndexerError) -> Self {
+        match ierr {
+            IndexerError::Rpc(e) => e.into(),
+            IndexerError::Other(e) => e.into(),
         }
     }
 }
