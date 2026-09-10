@@ -1,8 +1,9 @@
 use stellar_private_payments::types::{
     AspMembership as NativeAspMembership, AspNonMembership as NativeAspNonMembership,
     ContractsStateData as NativeContractsStateData,
-    OperationalFeedItem as NativeOperationalFeedItem, PoolInfo as NativePoolInfo,
-    PublicKeyEntry as NativePublicKeyEntry, RecipientLookup as NativeRecipientLookup,
+    OperationalFeedItem as NativeOperationalFeedItem, PauseState as NativePauseState,
+    PoolInfo as NativePoolInfo, PublicKeyEntry as NativePublicKeyEntry,
+    RecipientLookup as NativeRecipientLookup,
 };
 use wasm_bindgen::prelude::*;
 
@@ -134,6 +135,33 @@ pub(crate) fn operational_feed_items(
     values.into_iter().map(OperationalFeedItem::from).collect()
 }
 
+/// The pause bits a contract has set and the ledger a timed pause ends at.
+#[wasm_bindgen]
+pub struct PauseState {
+    inner: NativePauseState,
+}
+
+#[wasm_bindgen]
+impl PauseState {
+    #[wasm_bindgen(getter)]
+    pub fn flags(&self) -> u32 {
+        self.inner.flags
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn until(&self) -> Option<u32> {
+        self.inner.until
+    }
+}
+
+impl From<&NativePauseState> for PauseState {
+    fn from(inner: &NativePauseState) -> Self {
+        Self {
+            inner: inner.clone(),
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct AspMembership {
     inner: NativeAspMembership,
@@ -185,6 +213,11 @@ impl AspMembership {
     pub fn used_slots(&self) -> String {
         self.inner.used_slots.clone()
     }
+
+    #[wasm_bindgen(getter)]
+    pub fn pause(&self) -> Option<PauseState> {
+        self.inner.pause.as_ref().map(PauseState::from)
+    }
 }
 
 impl From<NativeAspMembership> for AspMembership {
@@ -228,6 +261,11 @@ impl AspNonMembership {
     #[wasm_bindgen(getter)]
     pub fn admin(&self) -> String {
         self.inner.admin.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn pause(&self) -> Option<PauseState> {
+        self.inner.pause.as_ref().map(PauseState::from)
     }
 }
 
@@ -335,6 +373,11 @@ impl PoolInfo {
             .admin_view_key
             .as_ref()
             .map(BabyJubJubPoint::from)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn pause(&self) -> Option<PauseState> {
+        self.inner.pause.as_ref().map(PauseState::from)
     }
 }
 

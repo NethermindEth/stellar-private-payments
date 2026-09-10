@@ -5,7 +5,9 @@ use crate::{
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
 };
 
-use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
+use crate::chain::{
+    Limits, PreparedSorobanTx, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx,
+};
 
 use crate::{
     PreparedTransaction,
@@ -34,6 +36,50 @@ use crate::{
 };
 
 const POLL_INTERVAL_MS: u32 = 200;
+
+/// Submits the footprint restore a simulation asked for and waits for it to
+/// land, so the caller can prepare the same invocation again against
+/// unarchived entries.
+///
+/// # Errors
+///
+/// Returns [`Error::Other`] if the restore cannot be signed, submitted, or
+/// confirmed. A restore that fails on chain surfaces its result XDR.
+pub(crate) async fn restore_archived_entries(
+    rpc: &RpcClient,
+    signer: &Handle<dyn Signer>,
+    restore_tx_xdr: String,
+) -> Result<(), Error> {
+    let prepared = PreparedSorobanTx {
+        tx_xdr: restore_tx_xdr,
+        ..Default::default()
+    };
+    let signed = signer.sign_soroban_transaction(&prepared).await?;
+    let envelope = TransactionEnvelope::from_xdr_base64(&signed.signed_xdr, Limits::none())
+        .map_err(|e| Error::Other(format!("invalid signed restore transaction xdr: {e}")))?;
+    let hash = submit_tx(rpc, &envelope)
+        .await
+        .map_err(|e| Error::Other(format!("submit restore: {e:#}")))?;
+    confirm_tx(rpc, hash).await?;
+    Ok(())
+}
+
+/// Refuses a preparation that still asks for a footprint restore once one has
+/// been submitted, which is what stops a caller from restoring in a loop and
+/// paying a fee on every pass.
+///
+/// # Errors
+///
+/// Returns [`Error::Other`] if `prepared` carries a second restore request.
+pub(crate) fn refuse_second_restore(prepared: &PreparedSorobanTx) -> Result<(), Error> {
+    if prepared.restore_tx_xdr.is_some() {
+        return Err(Error::Other(
+            "preparation still asks for a footprint restore after one was submitted".into(),
+        ));
+    }
+    Ok(())
+}
+
 const SYNC_MAX_RETRIES: u32 = 50;
 const DISCLOSE_MAX_RETRIES: u32 = 50;
 
@@ -247,13 +293,28 @@ impl<S: Storage> PrivatePool<S> {
         .await
     }
 
+    /// Simulates the prepared transaction and fills in the fee, the footprint,
+    /// and the authorization entries it needs.
+    ///
+    /// A simulation whose footprint reaches an archived entry cannot price the
+    /// call, so this submits a footprint restore through the signer, waits for
+    /// it to confirm, and simulates again. That path asks the signer for a
+    /// signature and spends a fee on chain, which is the one way this call
+    /// changes ledger state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Other`] if the simulation fails, if a restore cannot be
+    /// signed, submitted, or confirmed, or if the second simulation still asks
+    /// for one.
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
         let chain_config = self.core.config();
-        prepared.soroban_tx = self
+        let input = pool_transact_input(prepared);
+        let mut soroban_tx = self
             .fetcher
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
-                &pool_transact_input(prepared),
+                &input,
                 // The signing address becomes the contract's `sender`, the
                 // sequence-number lookup and the envelope source.
                 &chain_config.signer_address,
@@ -261,6 +322,21 @@ impl<S: Storage> PrivatePool<S> {
             .await
             .map_err(|e| Error::Other(format!("simulate transaction: {e:#}")))?;
 
+        if let Some(restore_tx_xdr) = soroban_tx.restore_tx_xdr.take() {
+            restore_archived_entries(&self.rpc, &self.signer, restore_tx_xdr).await?;
+            soroban_tx = self
+                .fetcher
+                .prepare_pool_transact(
+                    &chain_config.pool_contract_id,
+                    &input,
+                    &chain_config.signer_address,
+                )
+                .await
+                .map_err(|e| Error::Other(format!("simulate transaction after restore: {e:#}")))?;
+            refuse_second_restore(&soroban_tx)?;
+        }
+
+        prepared.soroban_tx = soroban_tx;
         Ok(())
     }
 
@@ -491,5 +567,24 @@ impl<S: Storage> PrivatePool<S> {
             .user_public_keys(self.config.user_address.as_str())
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// The guard is the only thing between an RPC that keeps answering with a
+    /// preamble and a caller that submits a restore on every pass, so both
+    /// call sites route their refusal through it.
+    #[test]
+    fn a_second_restore_request_is_refused() {
+        let prepared = PreparedSorobanTx {
+            restore_tx_xdr: Some("AAAA".to_string()),
+            ..Default::default()
+        };
+
+        assert!(refuse_second_restore(&prepared).is_err());
+        assert!(refuse_second_restore(&PreparedSorobanTx::default()).is_ok());
     }
 }
