@@ -1,0 +1,28 @@
+[package]
+name = "governor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+# workspace
+soroban-utils = { workspace = true }
+
+# external
+soroban-sdk = { workspace = true }
+stellar-access = { workspace = true }
+stellar-governance = { workspace = true }
+stellar-macros = { workspace = true }
+
+[dev-dependencies]
+# external
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[lints]
+workspace = true
