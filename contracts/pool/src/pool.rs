@@ -24,7 +24,10 @@ use soroban_sdk::{
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
 use soroban_utils::{
-    AdminError, bump_dependency, bump_entry, bump_instance, constants::bn256_modulus, get_admin,
+    AdminError, bump_dependency, bump_entry, bump_instance,
+    constants::bn256_modulus,
+    get_admin,
+    pausable::{self, PauseError, PauseState},
 };
 
 // Re-exported rather than merely imported so `pool::ExtData` and
@@ -65,6 +68,22 @@ pub enum Error {
     NonCanonicalPublicInput = 13,
     /// Unsupported policy flag bits.
     InvalidPolicyFlags = 14,
+    /// Transactions of this shape are paused.
+    Paused = 15,
+    /// Pause flags were zero, or held a bit the pool does not recognize.
+    InvalidPauseFlags = 16,
+    /// A timed pause was asked for after every bit was cleared, while the
+    /// earlier deadline is still ahead.
+    TimedPauseArmed = 17,
+}
+
+impl From<PauseError> for Error {
+    fn from(e: PauseError) -> Self {
+        match e {
+            PauseError::InvalidFlags => Error::InvalidPauseFlags,
+            PauseError::TimedPauseArmed => Error::TimedPauseArmed,
+        }
+    }
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -429,7 +448,8 @@ impl PoolContract {
     ///
     /// This is the main entry point for users to interact with the pool.
     /// If `ext_amount > 0`, tokens are transferred from the sender to the pool
-    /// before processing the transaction.
+    /// before processing the transaction. The shape of the transaction, read
+    /// from the sign of `ext_data.ext_amount`, must not be paused.
     ///
     /// # Arguments
     ///
@@ -439,9 +459,20 @@ impl PoolContract {
     /// * `sender` - Address of the transaction sender (must authorize funding
     ///   transaction)
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Returns `Ok(())` on success, or an error if validation fails
+    /// Returns [`Error::Paused`] if the transaction's shape is paused,
+    /// [`Error::NotInitialized`] if the token, the verifier, the policy flags,
+    /// the maximum deposit, or an ASP address the policy needs is not stored,
+    /// [`Error::UnknownRoot`] if `proof.root` is not in the root history,
+    /// [`Error::AlreadySpentNullifier`] if an input nullifier is spent,
+    /// [`Error::WrongExtHash`] if `ext_data` does not hash to
+    /// `proof.ext_data_hash`, [`Error::WrongExtAmount`] if
+    /// `proof.public_amount` does not match `ext_data.ext_amount`,
+    /// [`Error::InvalidProof`] if an ASP root in the proof differs from
+    /// that ASP's current root or the verifier rejects the proof, and
+    /// [`Error::MerkleTreeFull`], [`Error::NextIndexNotEven`], or
+    /// [`Error::Overflow`] if the output commitments cannot be inserted.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -450,6 +481,11 @@ impl PoolContract {
     ) -> Result<(), Error> {
         Self::touch(env);
         sender.require_auth();
+
+        if pausable::is_paused(env, pausable::shape_bit(env, &ext_data.ext_amount)) {
+            return Err(Error::Paused);
+        }
+
         bump_dependency(env, &Self::get_verifier(env)?);
         let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_membership_proofs(policy_flags) {
@@ -689,6 +725,72 @@ impl PoolContract {
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         Self::touch(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
+    }
+
+    /// Pauses the transaction shapes named by `flags`.
+    ///
+    /// The bits are `DEPOSITS`, `TRANSFERS`, and `WITHDRAWALS` from
+    /// [`soroban_utils::pausable`]. Passing `Some(until)` promises that every
+    /// set bit stops being honored at that ledger. `Some(until)` joins a pause
+    /// already in force without moving its deadline, and is refused on a pool
+    /// whose bits were all cleared while an earlier `until` is still in the
+    /// future. Requires admin authorization.
+    ///
+    /// Once an earlier `until` has passed, `Some(until)` records the new
+    /// deadline for every bit still set, including the bits that deadline
+    /// released, because a lapsed deadline stops a bit being honored without
+    /// clearing it. Read [`PoolContract::get_pause_state`] and clear stale bits
+    /// with [`PoolContract::unpause`] before pausing one shape, or the call
+    /// freezes the other shapes an earlier pause left set.
+    ///
+    /// A pause stops `transact` and nothing else. Administration keeps working
+    /// throughout: `update_admin`, `update_asp_membership`,
+    /// `update_asp_non_membership`, `unpause`, and every getter answer while
+    /// the pool is fully paused, so an operator can repoint or hand over a
+    /// paused pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the pool has no admin address
+    /// stored, [`Error::InvalidPauseFlags`] if `flags` is zero or holds a bit
+    /// outside the three above, and [`Error::TimedPauseArmed`] if `until` is
+    /// `Some` while no bit is set and an earlier `until` is still in the
+    /// future.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the pool.
+    pub fn pause(env: &Env, flags: u32, until: Option<u32>) -> Result<(), Error> {
+        Self::touch(env);
+        get_admin(env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::pause(env, flags, until, pausable::POOL_MASK)?)
+    }
+
+    /// Clears the pause bits named by `flags`.
+    ///
+    /// Clearing bits that are not set is accepted, and a timed pause's `until`
+    /// stays in place. Requires admin authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the pool has no admin address
+    /// stored, and [`Error::InvalidPauseFlags`] if `flags` is zero or holds a
+    /// bit the pool does not recognize.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the pool.
+    pub fn unpause(env: &Env, flags: u32) -> Result<(), Error> {
+        Self::touch(env);
+        get_admin(env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::unpause(env, flags, pausable::POOL_MASK)?)
+    }
+
+    /// Returns the pool's pause bits and the ledger at which they stop being
+    /// honored.
+    pub fn get_pause_state(env: &Env) -> PauseState {
+        Self::touch(env);
+        pausable::get_state(env)
     }
 
     // ========== ASP Contract Functions ==========

@@ -9,7 +9,9 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
 use soroban_utils::{
-    AdminError, bump_entry, bump_instance, get_admin, get_zeroes, poseidon2_compress,
+    AdminError, bump_entry, bump_instance, get_admin, get_zeroes,
+    pausable::{self, PauseError, PauseState},
+    poseidon2_compress,
 };
 
 /// Storage keys for contract persistent data
@@ -45,6 +47,22 @@ pub enum Error {
     NotInitialized = 4,
     /// Arithmetic overflow occurred
     Overflow = 5,
+    /// Tree mutations are paused.
+    Paused = 6,
+    /// Pause flags were zero, or held a bit the contract does not recognize.
+    InvalidPauseFlags = 7,
+    /// A timed pause was asked for after every bit was cleared, while the
+    /// earlier deadline is still ahead.
+    TimedPauseArmed = 8,
+}
+
+impl From<PauseError> for Error {
+    fn from(e: PauseError) -> Self {
+        match e {
+            PauseError::InvalidFlags => Error::InvalidPauseFlags,
+            PauseError::TimedPauseArmed => Error::TimedPauseArmed,
+        }
+    }
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -132,6 +150,62 @@ impl ASPMembership {
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
+    /// Pauses tree mutations.
+    ///
+    /// The only bit the contract honors is `MUTATIONS` from
+    /// [`soroban_utils::pausable`]. Passing `Some(until)` promises that it
+    /// stops being honored at that ledger. A second timed pause during the
+    /// window keeps the stored `until`, and a timed pause is refused on a
+    /// contract whose bit was cleared while `until` is still ahead. Requires
+    /// admin authorization.
+    ///
+    /// A pause stops `insert_leaf` and nothing else. `update_admin`,
+    /// `unpause`, `get_root`, and `hash_pair` answer while the contract is
+    /// paused, so an operator can hand over a paused contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored, [`Error::InvalidPauseFlags`] if `flags` is zero or holds a bit
+    /// other than `MUTATIONS`, and [`Error::TimedPauseArmed`] if `until` is
+    /// `Some` while the bit is clear and an earlier `until` is still in the
+    /// future.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the contract.
+    pub fn pause(env: Env, flags: u32, until: Option<u32>) -> Result<(), Error> {
+        bump_instance(&env);
+        get_admin(&env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::pause(&env, flags, until, pausable::MUTATIONS)?)
+    }
+
+    /// Clears the pause bits named by `flags`.
+    ///
+    /// Clearing bits that are not set is accepted, and a timed pause's `until`
+    /// stays in place. Requires admin authorization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored, and [`Error::InvalidPauseFlags`] if `flags` is zero or holds a
+    /// bit other than `MUTATIONS`.
+    ///
+    /// # Events
+    ///
+    /// Publishes [`soroban_utils::pausable::PauseChanged`] from the contract.
+    pub fn unpause(env: Env, flags: u32) -> Result<(), Error> {
+        bump_instance(&env);
+        get_admin(&env, &DataKey::Admin)?.require_auth();
+        Ok(pausable::unpause(&env, flags, pausable::MUTATIONS)?)
+    }
+
+    /// Returns the contract's pause bits.
+    pub fn get_pause_state(env: Env) -> PauseState {
+        bump_instance(&env);
+        pausable::get_state(&env)
+    }
+
     /// Get the current Merkle root
     ///
     /// Returns the current root hash of the Merkle tree.
@@ -185,14 +259,18 @@ impl ASPMembership {
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract is missing the admin
-    /// address or any tree state the insertion reads,
-    /// [`Error::MerkleTreeFull`] if the tree is at capacity, and
-    /// [`Error::Overflow`] if the next leaf index would exceed `u64::MAX`.
+    /// address or any tree state the insertion reads, [`Error::Paused`] if
+    /// mutations are paused, [`Error::MerkleTreeFull`] if the tree is at
+    /// capacity, and [`Error::Overflow`] if the next leaf index would exceed
+    /// `u64::MAX`.
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         bump_instance(&env);
-        let store = env.storage().persistent();
         get_admin(&env, &DataKey::Admin)?.require_auth();
+        if pausable::is_paused(&env, pausable::MUTATIONS) {
+            return Err(Error::Paused);
+        }
 
+        let store = env.storage().persistent();
         let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
         bump_entry(&env, &DataKey::Levels);
         let actual_index: u64 = store
