@@ -6,4 +6,5 @@
 mod coherence;
 mod e2e_pool_2_in_2_out;
 mod e2e_pool_2tx_plan;
+mod governance;
 pub mod utils;

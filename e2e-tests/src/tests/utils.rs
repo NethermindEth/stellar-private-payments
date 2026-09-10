@@ -12,13 +12,15 @@ use circuits::test::utils::{
     sparse_merkle_tree::prepare_smt_proof_with_overrides,
     transaction::{commitment, prepopulated_prefix},
     transaction_case::{
-        TransactionWitness, TxCase, build_base_inputs, prepare_transaction_witness,
+        InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
+        prepare_transaction_witness,
     },
 };
+use governor::{FnRule, Governor, RoleGrant};
 use num_bigint::{BigInt, BigUint};
-use pool::{PoolContract, PoolContractClient};
+use pool::{ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256,
+    Address, Bytes, BytesN, Env, I256, Symbol, U256, Vec as SorobanVec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
@@ -178,6 +180,9 @@ pub fn prove_with_graph(stem: &str, inputs: &Inputs) -> Result<ProofResult> {
 pub struct DeployedContracts {
     /// Address of the pool contract
     pub pool: Address,
+    /// Address every constructor was given as administrator. A deployment that
+    /// later rotates the role keeps this as the address it rotated away from.
+    pub deployer: Address,
     /// Address of the ASP membership contract
     pub asp_membership: Address,
     /// Address of the ASP non-membership contract
@@ -198,7 +203,7 @@ pub struct DeployedContracts {
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
 pub fn deploy_contracts(env: &Env) -> DeployedContracts {
-    let admin = Address::generate(env);
+    let deployer = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
 
@@ -207,18 +212,18 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
     let asp_membership = env.register(
         ASPMembership,
         (
-            admin.clone(),
+            deployer.clone(),
             u32::try_from(ASP_MEMBERSHIP_LEVELS).expect("ASP_MEMBERSHIP_LEVELS fits in u32"),
         ),
     );
 
-    let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
+    let asp_non_membership = env.register(ASPNonMembership, (deployer.clone(),));
 
     let max_deposit = U256::from_u32(env, MAX_DEPOSIT);
     let pool = env.register(
         PoolContract,
         (
-            admin,
+            deployer.clone(),
             token_address.clone(),
             verifier_address.clone(),
             asp_membership.clone(),
@@ -233,6 +238,118 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
         pool,
         asp_membership,
         asp_non_membership,
+        deployer,
+    }
+}
+
+/// Ledgers a council operation waits before anyone may execute it.
+pub const GOV_DELAY: u32 = governor::DELAY_FLOOR;
+
+/// Ledgers a recovery operation waits, above [`GOV_DELAY`].
+pub const GOV_RECOVERY_DELAY: u32 = 20;
+
+/// Ledgers a ready operation stays executable.
+pub const GOV_GRACE: u32 = 5;
+
+/// Ledgers a guardian pause holds, above [`GOV_DELAY`] so that the council can
+/// queue its own pause inside the window.
+pub const GOV_GUARDIAN_PAUSE: u32 = 15;
+
+/// A deployment whose contracts are administered by a governor.
+pub struct GovernedContracts {
+    /// The pool and the two association set providers.
+    pub contracts: DeployedContracts,
+    /// The governor that administers all three.
+    pub governor: Address,
+    /// Holds the council role, so it queues, cancels, and unpauses.
+    pub council: Address,
+    /// Holds the operator role, so it writes to the association sets without
+    /// waiting out a delay.
+    pub operator: Address,
+    /// Holds the guardian role, so it pauses without the queue.
+    pub guardian: Address,
+    /// Holds the recovery role, so it replaces a lost council.
+    pub recovery: Address,
+}
+
+/// Deploys the contracts and hands each one's administrator role to a governor.
+///
+/// The permission table opens the association set writes to the operator role
+/// and nothing else, so every other change goes through the queue.
+///
+/// The rotation needs each contract's current administrator to authorize it, so
+/// call `Env::mock_all_auths` first.
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment
+///
+/// # Returns
+///
+/// The deployed addresses together with the governor and its role holders
+pub fn deploy_governed_contracts(env: &Env) -> GovernedContracts {
+    let contracts = deploy_contracts(env);
+    let council = Address::generate(env);
+    let operator = Address::generate(env);
+    let guardian = Address::generate(env);
+    let recovery = Address::generate(env);
+
+    let mut roles = SorobanVec::new(env);
+    for (role, member) in [
+        (governor::COUNCIL, &council),
+        (governor::OPERATOR, &operator),
+        (governor::GUARDIAN, &guardian),
+        (governor::RECOVERY, &recovery),
+    ] {
+        roles.push_back(RoleGrant {
+            role,
+            member: member.clone(),
+        });
+    }
+
+    let insert_leaf = Symbol::new(env, "insert_leaf");
+    let fn_roles = soroban_sdk::vec![
+        env,
+        FnRule {
+            target: contracts.asp_membership.clone(),
+            function: insert_leaf.clone(),
+            role: governor::OPERATOR,
+        },
+        FnRule {
+            target: contracts.asp_non_membership.clone(),
+            function: insert_leaf,
+            role: governor::OPERATOR,
+        },
+        FnRule {
+            target: contracts.asp_non_membership.clone(),
+            function: Symbol::new(env, "delete_leaf"),
+            role: governor::OPERATOR,
+        },
+    ];
+
+    let governor_address = env.register(
+        Governor,
+        (
+            GOV_DELAY,
+            GOV_RECOVERY_DELAY,
+            GOV_GRACE,
+            GOV_GUARDIAN_PAUSE,
+            roles,
+            fn_roles,
+        ),
+    );
+
+    PoolContractClient::new(env, &contracts.pool).update_admin(&governor_address);
+    ASPMembershipClient::new(env, &contracts.asp_membership).update_admin(&governor_address);
+    ASPNonMembershipClient::new(env, &contracts.asp_non_membership).update_admin(&governor_address);
+
+    GovernedContracts {
+        contracts,
+        governor: governor_address,
+        council,
+        operator,
+        guardian,
+        recovery,
     }
 }
 
@@ -566,6 +683,175 @@ pub fn generate_proof(
     prove_with_graph(POLICY_STEM, &inputs)
 }
 
+/// Result of `PoolContractClient::try_transact`.
+///
+/// The outer error holds the contract error, and the inner one holds a return
+/// value conversion error.
+pub type TransactOutcome =
+    Result<Result<(), soroban_sdk::ConversionError>, Result<pool::Error, soroban_sdk::InvokeError>>;
+
+/// Sends a proven transaction to a pool from a freshly generated sender.
+pub fn transact(
+    env: &Env,
+    contracts: &DeployedContracts,
+    proof: &Proof,
+    ext_data: &ExtData,
+) -> TransactOutcome {
+    let sender = Address::generate(env);
+    PoolContractClient::new(env, &contracts.pool).try_transact(proof, ext_data, &sender)
+}
+
+/// Commitment of one output note of a case.
+pub fn output_commitment(case: &TxCase, index: usize) -> Scalar {
+    commitment(
+        case.outputs[index].amount,
+        case.outputs[index].pub_key,
+        case.outputs[index].blinding,
+    )
+}
+
+/// A proven 2-in/2-out pool transaction, before any contract holds the state
+/// the proof was made against.
+///
+/// A test deploys its contracts, writes the association set entries however it
+/// means to write them, calls [`sync_contract_state`] or [`sync_pool_state`],
+/// and passes the roots it gets back to [`ProvenTransaction::into_proof`].
+pub struct ProvenTransaction {
+    /// The transaction the proof covers.
+    pub case: TxCase,
+    /// Pool leaves the proof was made against. [`sync_pool_state`] writes the
+    /// input commitments into them.
+    pub leaves: Vec<Scalar>,
+    /// Nullifiers, public keys, and root the circuit derived.
+    pub witness: TransactionWitness,
+    /// Frozen membership trees the proof committed to.
+    pub membership_trees: Vec<MembershipTreeProof>,
+    /// External data the proof is bound to.
+    pub ext_data: ExtData,
+    result: ProofResult,
+    ext_data_hash: BytesN<32>,
+    public_amount: Scalar,
+}
+
+impl ProvenTransaction {
+    /// Assemble the pool's `Proof` from the roots the contracts now hold.
+    pub fn into_proof(self, env: &Env, roots: &SyncedRoots) -> Proof {
+        let mut input_nullifiers: SorobanVec<U256> = SorobanVec::new(env);
+        for nullifier in &self.witness.nullifiers {
+            input_nullifiers.push_back(scalar_to_u256(env, *nullifier));
+        }
+
+        Proof {
+            proof: wrap_groth16_proof(env, self.result),
+            root: roots.pool_root.clone(),
+            input_nullifiers,
+            output_commitment0: scalar_to_u256(env, output_commitment(&self.case, 0)),
+            output_commitment1: scalar_to_u256(env, output_commitment(&self.case, 1)),
+            public_amount: scalar_to_u256(env, self.public_amount),
+            ext_data_hash: self.ext_data_hash,
+            asp_membership_root: roots.asp_membership_root.clone(),
+            asp_non_membership_root: roots.asp_non_membership_root.clone(),
+        }
+    }
+}
+
+/// Proves one 2-in/2-out pool transaction from the committed witness graph.
+///
+/// The amounts must balance: `inputs + ext_amount = outputs`. A positive
+/// `ext_amount` is a deposit, a negative one a withdrawal, and zero a private
+/// transfer.
+///
+/// # Panics
+///
+/// Panics if the proof does not verify against its own verification key, which
+/// means the amounts do not describe a valid transaction.
+///
+/// # Errors
+///
+/// Returns an error if the witness cannot be computed or the proof cannot be
+/// generated.
+pub fn prove_transaction(
+    env: &Env,
+    in_amounts: [u64; 2],
+    out_amounts: [u64; 2],
+    ext_amount: i32,
+) -> Result<ProvenTransaction> {
+    let ext_data = ExtData {
+        recipient: Address::generate(env),
+        ext_amount: I256::from_i32(env, ext_amount),
+        encrypted_output0: Bytes::new(env),
+        encrypted_output1: Bytes::new(env),
+    };
+    let ext_data_hash = hash_ext_data(env, &ext_data);
+
+    let case = TxCase::new(
+        vec![
+            InputNote {
+                leaf_index: 0,
+                priv_key: Scalar::from(101u64),
+                blinding: Scalar::from(201u64),
+                amount: Scalar::from(in_amounts[0]),
+            },
+            InputNote {
+                leaf_index: 1,
+                priv_key: Scalar::from(102u64),
+                blinding: Scalar::from(211u64),
+                amount: Scalar::from(in_amounts[1]),
+            },
+        ],
+        vec![
+            OutputNote {
+                pub_key: Scalar::from(501u64),
+                blinding: Scalar::from(601u64),
+                amount: Scalar::from(out_amounts[0]),
+            },
+            OutputNote {
+                pub_key: Scalar::from(502u64),
+                blinding: Scalar::from(602u64),
+                amount: Scalar::from(out_amounts[1]),
+            },
+        ],
+    );
+
+    // `transact` appends its two outputs past this prefix.
+    let leaves = prepopulated_prefix(
+        0xDEAD_BEEFu64,
+        &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+        LEAF_PREFIX,
+    );
+    let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
+    let keys = case
+        .inputs
+        .iter()
+        .map(|input| NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(input.priv_key)),
+        })
+        .collect::<Vec<_>>();
+
+    let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
+    let public_amount = Scalar::from(ext_amount);
+    let result = generate_proof(
+        &case,
+        leaves.clone(),
+        public_amount,
+        &membership_trees,
+        &keys,
+        Some(bytes32_to_bigint(&ext_data_hash)),
+    )?;
+    assert!(result.verified, "Proof should verify locally");
+
+    Ok(ProvenTransaction {
+        case,
+        leaves,
+        witness,
+        membership_trees,
+        ext_data,
+        result,
+        ext_data_hash,
+        public_amount,
+    })
+}
+
 /// Merkle roots of the contracts after a state sync
 pub struct SyncedRoots {
     /// Pool commitment root, which must equal the root inside the proof
@@ -608,27 +894,57 @@ pub fn sync_contract_state(
     witness: &TransactionWitness,
 ) -> SyncedRoots {
     let asp_membership_client = ASPMembershipClient::new(env, &contracts.asp_membership);
+    for leaf in allowlist_leaves(case, membership_trees, witness) {
+        asp_membership_client.insert_leaf(&scalar_to_u256(env, leaf));
+    }
+
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &contracts.asp_non_membership);
-
-    // Membership tree: rebuild the frozen leaves the proof used.
-    let mut memb_leaves = membership_trees[0].leaves.clone();
-    for (i, tree) in membership_trees.iter().enumerate().take(case.inputs.len()) {
-        memb_leaves[tree.index] = poseidon2_hash2(
-            witness.public_keys[i],
-            tree.blinding,
-            Some(Scalar::from(1u64)),
-        );
-    }
-    for leaf in &memb_leaves {
-        asp_membership_client.insert_leaf(&scalar_to_u256(env, *leaf));
-    }
-
-    // Non-membership tree: insert the same sparse Merkle tree overrides.
     for (key, value) in non_membership_overrides_from_pubs(&witness.public_keys) {
         asp_non_membership_client
             .insert_leaf(&bigint_to_u256(env, &key), &bigint_to_u256(env, &value));
     }
 
+    sync_pool_state(env, contracts, case, leaves, witness)
+}
+
+/// Returns the allowlist leaves a proof was made against.
+///
+/// The circuit froze one membership tree and proved each input's public key
+/// against it, so the contract only matches the proof once it holds these
+/// leaves in this order.
+pub fn allowlist_leaves(
+    case: &TxCase,
+    membership_trees: &[MembershipTreeProof],
+    witness: &TransactionWitness,
+) -> Vec<Scalar> {
+    let mut leaves = membership_trees[0].leaves.clone();
+    for (i, tree) in membership_trees.iter().enumerate().take(case.inputs.len()) {
+        leaves[tree.index] = poseidon2_hash2(
+            witness.public_keys[i],
+            tree.blinding,
+            Some(Scalar::from(1u64)),
+        );
+    }
+    leaves
+}
+
+/// Writes the pool commitments the proof was made against and returns the three
+/// roots the pool checks.
+///
+/// The association set contracts must already hold their own leaves, because
+/// the returned roots are read back from them.
+///
+/// # Panics
+///
+/// Panics if the pool root does not equal the circuit root, because the
+/// on-chain verification cannot succeed in that state.
+pub fn sync_pool_state(
+    env: &Env,
+    contracts: &DeployedContracts,
+    case: &TxCase,
+    leaves: &mut [Scalar],
+    witness: &TransactionWitness,
+) -> SyncedRoots {
     // Pool tree: write the input commitments, then insert the leaves in pairs.
     for note in &case.inputs {
         let pub_key = derive_public_key(note.priv_key);
@@ -655,8 +971,9 @@ pub fn sync_contract_state(
 
     SyncedRoots {
         pool_root,
-        asp_membership_root: asp_membership_client.get_root(),
-        asp_non_membership_root: asp_non_membership_client.get_root(),
+        asp_membership_root: ASPMembershipClient::new(env, &contracts.asp_membership).get_root(),
+        asp_non_membership_root: ASPNonMembershipClient::new(env, &contracts.asp_non_membership)
+            .get_root(),
     }
 }
 
