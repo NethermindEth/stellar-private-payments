@@ -6,10 +6,14 @@ use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, U256, Vec,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    Address, Bytes, Env, IntoVal, U256, Val, Vec,
+    testutils::{
+        Address as _, Ledger as _, MockAuth, MockAuthInvoke,
+        storage::{Instance as _, Persistent as _},
+    },
     vec,
 };
+use soroban_utils::ttl::{EXTEND_TO, THRESHOLD};
 use taceo_poseidon2::bn254::t2;
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -665,4 +669,88 @@ fn test_leaf_added_event_exact_shape() {
     }
     .to_xdr(&env, &contract_id);
     assert_eq!(events.events()[0], expected);
+}
+
+fn entry_ttl<K>(env: &Env, contract: &Address, key: &K) -> u32
+where
+    K: IntoVal<Env, Val>,
+{
+    env.as_contract(contract, || env.storage().persistent().get_ttl(key))
+}
+
+fn instance_ttl(env: &Env, contract: &Address) -> u32 {
+    env.as_contract(contract, || env.storage().instance().get_ttl())
+}
+
+/// Advances the ledger far enough that every entry sitting at [`EXTEND_TO`]
+/// drops below [`THRESHOLD`], so a later bump is visible as a jump back up.
+fn decay_below_threshold(env: &Env) {
+    let target = env
+        .ledger()
+        .sequence()
+        .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
+    env.ledger().set_sequence_number(target);
+}
+
+#[test]
+fn test_insert_leaf_extends_touched_entries() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1));
+
+    assert_eq!(instance_ttl(&env, &contract_id), EXTEND_TO);
+    for key in [
+        DataKey::Root,
+        DataKey::NextIndex,
+        DataKey::FilledSubtrees(0),
+        DataKey::Zeroes(1),
+    ] {
+        assert_eq!(
+            entry_ttl(&env, &contract_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+}
+
+#[test]
+fn test_get_root_extends_root_and_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    client.get_root();
+
+    assert_eq!(instance_ttl(&env, &contract_id), EXTEND_TO);
+    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::Root), EXTEND_TO);
+}
+
+/// A refused insertion rolls back its storage changes, and a TTL extension is
+/// one of them, so a full tree does not keep paying rent on failed calls.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_full_tree_insert_fails_without_extending() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 1u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1));
+    client.insert_leaf(&U256::from_u32(&env, 2));
+    decay_below_threshold(&env);
+    let before = entry_ttl(&env, &contract_id, &DataKey::NextIndex);
+
+    let err = client
+        .try_insert_leaf(&U256::from_u32(&env, 3))
+        .expect_err("a full tree must refuse a third leaf");
+
+    assert_eq!(err, Ok(Error::MerkleTreeFull));
+    assert_ne!(before, EXTEND_TO);
+    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::NextIndex), before);
 }

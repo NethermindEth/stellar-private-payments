@@ -20,12 +20,19 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Events},
+    testutils::{
+        Address as _, Events, Ledger as _,
+        storage::{Instance as _, Persistent as _},
+    },
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    constants::bn256_modulus,
+    ttl::{EXTEND_TO, THRESHOLD},
+    utils::MockToken,
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -1466,13 +1473,14 @@ fn ark_fr_from_bytesn32(v: &BytesN<32>) -> ArkFr {
 
 /// Independently mirrors `PoolGvkContract::verify_proof`'s public-input
 /// assembly order (ciphertext tail first, then `D, nonce, root,
-/// publicAmount, extDataHash, inputNullifier[], outputCommitment[]` — no ASP
-/// roots, since every test using this helper registers with `policy_flags =
-/// 0`) so the toy-circuit fixture and the real contract call are checked
-/// against the same sequence without one implementation calling the other.
+/// publicAmount, extDataHash, inputNullifier[], outputCommitment[]`, then one
+/// ASP root per input nullifier for each policy bit `policy_flags` sets) so
+/// the toy-circuit fixture and the real contract call are checked against the
+/// same sequence without one implementation calling the other.
 fn expected_ark_public_inputs(
     proof: &Proof,
     admin_view_key: &BabyJubJubPoint,
+    policy_flags: u32,
 ) -> alloc::vec::Vec<ArkFr> {
     let mut ciphertexts: alloc::vec::Vec<GvkCiphertext> = alloc::vec::Vec::new();
     for ct in proof.input_gvk_ciphertexts.iter() {
@@ -1510,6 +1518,17 @@ fn expected_ark_public_inputs(
     result.push(ark_fr_from_u256(&proof.output_commitment0));
     result.push(ark_fr_from_u256(&proof.output_commitment1));
 
+    if policy::requires_membership_proofs(policy_flags) {
+        for _ in 0..proof.input_nullifiers.len() {
+            result.push(ark_fr_from_u256(&proof.asp_membership_root));
+        }
+    }
+    if policy::requires_non_membership_proofs(policy_flags) {
+        for _ in 0..proof.input_nullifiers.len() {
+            result.push(ark_fr_from_u256(&proof.asp_non_membership_root));
+        }
+    }
+
     result
 }
 
@@ -1522,6 +1541,32 @@ fn build_gvk_transact(
     ext_amount: i32,
     maximum_deposit_amount: u32,
 ) -> (Env, PoolGvkContractClient<'static>, Proof, ExtData, Address) {
+    let f =
+        build_gvk_transact_with_policy(gvk_mode, nullifier, ext_amount, maximum_deposit_amount, 0);
+    (f.env, f.pool, f.proof, f.ext, f.sender)
+}
+
+/// A pool, its verifier, and a ready-to-submit transaction for it.
+struct GvkTransactFixture {
+    env: Env,
+    pool: PoolGvkContractClient<'static>,
+    proof: Proof,
+    ext: ExtData,
+    sender: Address,
+    verifier: Address,
+    setup: TestSetup,
+}
+
+/// Same as [`build_gvk_transact`], additionally taking the pool's ASP policy
+/// flags and handing back the verifier address and the shared contract set, so
+/// a caller can assert on the instances the call is expected to extend.
+fn build_gvk_transact_with_policy(
+    gvk_mode: u32,
+    nullifier: u32,
+    ext_amount: i32,
+    maximum_deposit_amount: u32,
+    policy_flags: u32,
+) -> GvkTransactFixture {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let admin_view_key = mk_point(&env, 1, 2);
@@ -1563,13 +1608,13 @@ fn build_gvk_transact(
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount,
         ext_data_hash: ext_hash,
-        asp_membership_root: U256::from_u32(&env, 0),
-        asp_non_membership_root: U256::from_u32(&env, 0),
+        asp_membership_root: setup.asp_membership_client.get_root(),
+        asp_non_membership_root: setup.asp_non_membership_client.get_root(),
         output_gvk_ciphertexts: mk_output_ciphertexts(&env),
         input_gvk_ciphertexts,
     };
 
-    let values = expected_ark_public_inputs(&proof, &admin_view_key);
+    let values = expected_ark_public_inputs(&proof, &admin_view_key, policy_flags);
     let (vk_bytes, real_proof) = groth16_fixture_for(&env, &values);
     proof.proof = real_proof;
 
@@ -1580,12 +1625,12 @@ fn build_gvk_transact(
         (
             setup.admin.clone(),
             setup.token.clone(),
-            verifier_id,
+            verifier_id.clone(),
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
             U256::from_u32(&env, maximum_deposit_amount),
             levels,
-            0u32,
+            policy_flags,
             admin_view_key,
             gvk_mode,
         ),
@@ -1594,7 +1639,15 @@ fn build_gvk_transact(
     env.mock_all_auths();
     let sender = Address::generate(&env);
 
-    (env, pool, proof, ext, sender)
+    GvkTransactFixture {
+        env,
+        pool,
+        proof,
+        ext,
+        sender,
+        verifier: verifier_id,
+        setup,
+    }
 }
 
 /// Runs a full successful `transact` for `gvk_mode`, using a `TestVerifier`
@@ -1780,4 +1833,175 @@ fn transact_rejects_replayed_nullifier() {
         matches!(second, Err(Ok(Error::AlreadySpentNullifier))),
         "expected replaying the same nullifier to be rejected, got {second:?}"
     );
+}
+
+fn entry_ttl<K>(env: &Env, contract: &Address, key: &K) -> u32
+where
+    K: IntoVal<Env, Val>,
+{
+    env.as_contract(contract, || env.storage().persistent().get_ttl(key))
+}
+
+fn instance_ttl(env: &Env, contract: &Address) -> u32 {
+    env.as_contract(contract, || env.storage().instance().get_ttl())
+}
+
+/// Advances the ledger far enough that every entry sitting at [`EXTEND_TO`]
+/// drops below [`THRESHOLD`], so a later bump is visible as a jump back up.
+fn decay_below_threshold(env: &Env) {
+    let target = env
+        .ledger()
+        .sequence()
+        .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
+    env.ledger().set_sequence_number(target);
+}
+
+#[test]
+fn transact_extends_instance_config_and_nullifier_ttl() {
+    let nullifier = 0xE5;
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, nullifier, 0, 1000);
+    let pool_id = pool.address.clone();
+
+    pool.transact(&proof, &ext, &sender);
+
+    assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
+    for key in [
+        DataKey::Token,
+        DataKey::PolicyFlags,
+        DataKey::Nullifier(U256::from_u32(&env, nullifier)),
+    ] {
+        assert_eq!(
+            entry_ttl(&env, &pool_id, &key),
+            EXTEND_TO,
+            "{key:?} should have been extended"
+        );
+    }
+}
+
+#[test]
+fn transact_extends_admin_view_key_and_gvk_mode() {
+    let (env, pool, proof, ext, sender) = build_gvk_transact(TRACEABLE, 0xE6, 0, 1000);
+    let pool_id = pool.address.clone();
+
+    pool.transact(&proof, &ext, &sender);
+
+    assert_eq!(entry_ttl(&env, &pool_id, &DataKey::AdminViewKey), EXTEND_TO);
+    assert_eq!(entry_ttl(&env, &pool_id, &DataKey::GvkMode), EXTEND_TO);
+}
+
+#[test]
+fn transact_extends_linked_contract_instances() {
+    let f = build_gvk_transact_with_policy(
+        VIEW_ONLY,
+        0xE7,
+        0,
+        1000,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let env = &f.env;
+    // Building the fixture read both ASP roots, which extended their
+    // instances. Decay first: without this the assertions below hold before
+    // `transact` even runs.
+    //
+    // Each ASP instance is reachable by two paths here, `bump_dependency` and
+    // the ASP's own `bump_instance` during the root cross-call, so what this
+    // pins is the invariant that every linked instance survives the call, not
+    // which of the two extended it. The verifier has only the one path.
+    decay_below_threshold(env);
+
+    f.pool.transact(&f.proof, &f.ext, &f.sender);
+
+    assert_eq!(instance_ttl(env, &f.verifier), EXTEND_TO);
+    assert_eq!(
+        instance_ttl(env, &f.setup.asp_membership_address),
+        EXTEND_TO
+    );
+    assert_eq!(
+        instance_ttl(env, &f.setup.asp_non_membership_address),
+        EXTEND_TO
+    );
+}
+
+#[test]
+fn transact_on_an_open_pool_leaves_asp_instances_alone() {
+    let f = build_gvk_transact_with_policy(VIEW_ONLY, 0xE8, 0, 1000, 0);
+    let env = &f.env;
+    // Building the fixture read both ASP roots, which extended their
+    // instances. Decay first, or `membership_before` is already EXTEND_TO and
+    // the assertions below cannot fail.
+    decay_below_threshold(env);
+    let membership_before = instance_ttl(env, &f.setup.asp_membership_address);
+    let non_membership_before = instance_ttl(env, &f.setup.asp_non_membership_address);
+    assert_ne!(membership_before, EXTEND_TO);
+
+    f.pool.transact(&f.proof, &f.ext, &f.sender);
+
+    assert_eq!(instance_ttl(env, &f.verifier), EXTEND_TO);
+    assert_eq!(
+        instance_ttl(env, &f.setup.asp_membership_address),
+        membership_before
+    );
+    assert_eq!(
+        instance_ttl(env, &f.setup.asp_non_membership_address),
+        non_membership_before
+    );
+}
+
+/// A failed invocation rolls back its storage changes, and a TTL extension is
+/// one of them, so the pool pays no rent for a call it refused.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn failed_transact_rolls_back_the_ttl_extension() {
+    let (env, pool, mut proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE9, 0, 1000);
+    let pool_id = pool.address.clone();
+    proof.root = U256::from_u32(&env, 0xFF);
+    let before = instance_ttl(&env, &pool_id);
+
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("an unknown root must be refused");
+
+    assert_eq!(err, Ok(Error::UnknownRoot));
+    assert_ne!(before, EXTEND_TO);
+    assert_eq!(instance_ttl(&env, &pool_id), before);
+}
+
+/// The spent check must not extend a nullifier entry that does not exist,
+/// because the host rejects an extension of a missing key.
+#[test]
+fn is_spent_on_an_unknown_nullifier_does_not_panic() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    assert!(!pool.is_spent(&U256::from_u32(&env, 0xBEEF)));
+}
+
+#[test]
+fn getters_extend_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    pool.get_root();
+
+    assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
 }
