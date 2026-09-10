@@ -391,21 +391,23 @@ impl PoolContract {
         }
     }
 
-    /// Hash external data using Keccak256
+    /// Hash external data using Keccak256, bound to this pool and its token
     ///
-    /// Serializes the external data to XDR, hashes it with Keccak256,
-    /// and reduces the result modulo the BN256 field size.
+    /// Serializes the external data together with this contract's own
+    /// address and configured token to XDR, hashes with Keccak256, and
+    /// reduces the result modulo the BN256 field size.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
     /// * `ext` - The external data to hash
+    /// * `token` - This pool's own configured token address
     ///
     /// # Returns
     ///
     /// Returns the 32-byte hash of the external data
-    fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
-        hash_ext_data(env, ext)
+    fn hash_ext_data(env: &Env, ext: &ExtData, token: &Address) -> BytesN<32> {
+        hash_ext_data(env, ext, token)
     }
 
     /// Execute a shielded transaction with deposit handling
@@ -484,8 +486,13 @@ impl PoolContract {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-        // 3. External data hash check
-        let ext_hash = Self::hash_ext_data(env, &ext_data);
+        // 3. External data hash check. Bound to this pool's own contract
+        // address and its own configured token, both read from this
+        // contract's own state rather than from caller input, so a hash
+        // computed for a different pool or a different pool's token cannot
+        // match here.
+        let token = Self::get_token(env)?;
+        let ext_hash = Self::hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }
