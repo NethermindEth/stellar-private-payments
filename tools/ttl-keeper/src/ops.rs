@@ -12,11 +12,8 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     time::Duration,
 };
-use stellar_private_payments::chain::{Client, LocalSigner};
+use stellar_private_payments::chain::{BASE_FEE, Client, LocalSigner, apply_simulated_resources};
 use stellar_xdr::{self as xdr, LedgerKey, Limits, ReadXdr, WriteXdr};
-
-/// Fee in stroops the transaction pays on top of the simulated resource fee.
-const BASE_FEE: u32 = 100;
 
 /// Attempts to read a transaction's outcome before giving up.
 const CONFIRM_ATTEMPTS: u32 = 30;
@@ -408,35 +405,12 @@ fn simulated(
             .to_vec(),
         None => Vec::new(),
     };
-    let envelope = with_simulated_resources(&raw, data, resource_fee)?;
+    let envelope = apply_simulated_resources(&raw, data, resource_fee)?;
     Ok(Simulated {
         envelope,
         keys,
         restore_first,
     })
-}
-
-/// Applies the resource estimate a simulation returned to `raw`.
-fn with_simulated_resources(
-    raw: &xdr::TransactionEnvelope,
-    data: xdr::SorobanTransactionData,
-    resource_fee: u64,
-) -> Result<xdr::TransactionEnvelope> {
-    let xdr::TransactionEnvelope::Tx(v1) = raw else {
-        bail!("expected a v1 transaction envelope");
-    };
-    let fee: u32 = u64::from(BASE_FEE)
-        .saturating_add(resource_fee)
-        .try_into()
-        .map_err(|_| anyhow!("transaction fee does not fit into u32"))?;
-
-    let mut tx = v1.tx.clone();
-    tx.fee = fee;
-    tx.ext = xdr::TransactionExt::V1(data);
-    Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
-        tx,
-        signatures: xdr::VecM::default(),
-    }))
 }
 
 /// Signs, submits, and confirms a simulated lifetime transaction.
@@ -670,7 +644,8 @@ mod tests {
         let xdr::TransactionEnvelope::Tx(v1) = &simulated.envelope else {
             panic!("expected a v1 envelope");
         };
-        assert_eq!(v1.tx.fee, 600);
+        // An extend pays the base fee above what the simulation priced.
+        assert_eq!(v1.tx.fee, BASE_FEE + 500);
     }
 
     /// An extend whose simulation carries a restore preamble names a key the

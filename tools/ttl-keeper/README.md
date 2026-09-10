@@ -115,13 +115,14 @@ The non-membership tree's nodes are named only inside their parents' stored valu
 walk cannot descend past an archived node. A subtree archived several levels deep is restored
 one level per round, which at the default interval is one hour per level.
 
-The public key registry is the largest gap. The keeper extends the registry's contract
-instance and its wasm, but not the `Registration(address)` entry each user writes when they
-publish their keys, because those addresses appear only in the registry's own events and the
-keeper does not read them. `contracts/public-key-registry` bumps no lifetimes of its own
-either, so a registration that goes untouched for the archival window is lost and the user
-has to register again. Until the keeper pages those events, a deployment with real users
-needs its own job for that contract.
+The public key registry's per-user entries, one `Registration(address)` per user, are not kept
+alive, and do not need to be. Senders resolve a recipient's keys from the registry's events,
+which the indexer and the bootnode store, and the only contract code that reads the entry is
+`register` itself, as the check that suppresses a duplicate event. A user who re-registers
+after the entry has archived restores it through the SDK, which honors the simulation's
+restore preamble, at the cost of one small transaction. A client syncing without the bootnode
+sees only the registrations inside the RPC's retention window, which is a bootnode dependency
+rather than a lifetime one.
 
 A restore and an extend are independent phases. A restore that fails, for want of fee or
 balance or an RPC that is down, is logged and counted, and the extend phase still runs; the

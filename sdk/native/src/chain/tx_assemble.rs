@@ -129,6 +129,55 @@ fn assemble_soroban_transaction(
     }))
 }
 
+/// Applies a simulation's resource estimate to `raw`.
+///
+/// The returned envelope pays [`BASE_FEE`] on top of `resource_fee`, carries
+/// `data` as its Soroban transaction extension, and holds no signatures,
+/// because a changed fee invalidates any signature the envelope arrived with.
+///
+/// # Errors
+///
+/// Returns an error if `raw` is not a V1 transaction envelope, or if the total
+/// fee does not fit into `u32`.
+pub fn apply_simulated_resources(
+    raw: &xdr::TransactionEnvelope,
+    data: SorobanTransactionData,
+    resource_fee: u64,
+) -> Result<xdr::TransactionEnvelope> {
+    let xdr::TransactionEnvelope::Tx(v1) = raw else {
+        return Err(anyhow!("expected TransactionEnvelope::Tx"));
+    };
+    let mut tx = v1.tx.clone();
+    set_simulated_price(&mut tx, data, resource_fee)?;
+    Ok(unsigned_envelope(tx))
+}
+
+/// Sets the fee and the Soroban extension a simulation priced.
+///
+/// # Errors
+///
+/// Returns an error if the total fee does not fit into `u32`.
+fn set_simulated_price(
+    tx: &mut xdr::Transaction,
+    data: SorobanTransactionData,
+    resource_fee: u64,
+) -> Result<()> {
+    tx.fee = u64::from(BASE_FEE)
+        .saturating_add(resource_fee)
+        .try_into()
+        .map_err(|_| anyhow!("transaction fee does not fit into u32"))?;
+    tx.ext = xdr::TransactionExt::V1(data);
+    Ok(())
+}
+
+/// Wraps a transaction as an envelope with no signatures.
+fn unsigned_envelope(tx: xdr::Transaction) -> xdr::TransactionEnvelope {
+    xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+        tx,
+        signatures: xdr::VecM::default(),
+    })
+}
+
 /// Builds the `RestoreFootprint` transaction a simulation's restore preamble
 /// asks for.
 ///
@@ -145,10 +194,6 @@ fn restore_footprint_envelope(
     raw: &xdr::TransactionEnvelope,
     preamble: &RestorePreamble,
 ) -> Result<xdr::TransactionEnvelope> {
-    let xdr::TransactionEnvelope::Tx(v1) = raw else {
-        return Err(anyhow!("expected TransactionEnvelope::Tx"));
-    };
-
     let soroban_data =
         SorobanTransactionData::from_xdr_base64(&preamble.transaction_data, Limits::none())
             .map_err(|e| anyhow!("invalid restorePreamble transactionData xdr: {e}"))?;
@@ -158,25 +203,19 @@ fn restore_footprint_envelope(
             preamble.min_resource_fee
         )
     })?;
-    let fee: u32 = u64::from(BASE_FEE)
-        .saturating_add(resource_fee)
-        .try_into()
-        .map_err(|_| anyhow!("restore fee does not fit into u32"))?;
 
+    let xdr::TransactionEnvelope::Tx(v1) = raw else {
+        return Err(anyhow!("expected TransactionEnvelope::Tx"));
+    };
     let mut tx = v1.tx.clone();
-    tx.fee = fee;
     tx.operations = xdr::VecM::try_from(vec![xdr::Operation {
         source_account: None,
         body: xdr::OperationBody::RestoreFootprint(xdr::RestoreFootprintOp {
             ext: xdr::ExtensionPoint::V0,
         }),
     }])?;
-    tx.ext = xdr::TransactionExt::V1(soroban_data);
-
-    Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
-        tx,
-        signatures: xdr::VecM::default(),
-    }))
+    set_simulated_price(&mut tx, soroban_data, resource_fee)?;
+    Ok(unsigned_envelope(tx))
 }
 
 impl PreparedSorobanTx {
@@ -429,6 +468,45 @@ mod tests {
         };
         assert_eq!(*data, empty_soroban_data());
         assert_eq!(v1.tx.fee, BASE_FEE + 700);
+    }
+
+    /// The keeper calls this on every extend and restore, so both of its error
+    /// arms are reachable from outside the SDK.
+    #[test]
+    fn applying_resources_refuses_an_envelope_that_is_not_v1() {
+        let v0 = xdr::TransactionEnvelope::TxV0(xdr::TransactionV0Envelope {
+            tx: xdr::TransactionV0 {
+                source_account_ed25519: xdr::Uint256([0u8; 32]),
+                fee: 100,
+                seq_num: xdr::SequenceNumber(0),
+                time_bounds: None,
+                memo: xdr::Memo::None,
+                operations: xdr::VecM::default(),
+                ext: xdr::TransactionV0Ext::V0,
+            },
+            signatures: xdr::VecM::default(),
+        });
+
+        let err = apply_simulated_resources(&v0, empty_soroban_data(), 0).expect_err("not v1");
+
+        assert!(err.to_string().contains("expected TransactionEnvelope::Tx"));
+    }
+
+    #[test]
+    fn the_priced_fee_fills_u32_and_errors_one_stroop_past_it() {
+        let raw = empty_envelope();
+        let headroom = u64::from(u32::MAX - BASE_FEE);
+
+        let envelope =
+            apply_simulated_resources(&raw, empty_soroban_data(), headroom).expect("fits");
+        let xdr::TransactionEnvelope::Tx(v1) = envelope else {
+            panic!("expected v1 envelope");
+        };
+        assert_eq!(v1.tx.fee, u32::MAX);
+
+        let err = apply_simulated_resources(&raw, empty_soroban_data(), headroom + 1)
+            .expect_err("one stroop past u32");
+        assert!(err.to_string().contains("does not fit into u32"));
     }
 
     /// The restore takes the sequence the invocation would have used, so the

@@ -15,7 +15,7 @@ use metrics::{counter, gauge};
 use state::State;
 use std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf, time::Duration};
 use stellar_private_payments::{
-    chain::{Client, LocalSigner},
+    chain::{Client, FUTURENET_PASSPHRASE, LocalSigner, MAINNET_PASSPHRASE, TESTNET_PASSPHRASE},
     types::ContractConfig,
 };
 use stellar_xdr::{self as xdr, LedgerKey};
@@ -153,9 +153,9 @@ async fn main() -> Result<()> {
 /// Returns an error if `network` is not one this keeper knows a passphrase for.
 fn network_passphrase(network: &str) -> Result<&'static str> {
     match network {
-        "public" | "mainnet" => Ok("Public Global Stellar Network ; September 2015"),
-        "testnet" => Ok("Test SDF Network ; September 2015"),
-        "futurenet" => Ok("Test SDF Future Network ; October 2022"),
+        "public" | "mainnet" => Ok(MAINNET_PASSPHRASE),
+        "testnet" => Ok(TESTNET_PASSPHRASE),
+        "futurenet" => Ok(FUTURENET_PASSPHRASE),
         other => bail!("no network passphrase is known for '{other}'"),
     }
 }
@@ -601,7 +601,7 @@ mod tests {
                 &rpc,
                 &bootnode,
                 &signer,
-                "Test SDF Network ; September 2015",
+                TESTNET_PASSPHRASE,
             ))
         });
 

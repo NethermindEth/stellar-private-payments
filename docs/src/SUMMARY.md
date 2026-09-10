@@ -5,6 +5,7 @@
 - [Contributing](./contributing.md)
 - [Security](./security.md)
   - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
+  - [Governance](./governance.md)
 
 - [Selective Disclosure](./disclosure.md)
 - [Global View Key](./global_view_key.md)

@@ -56,6 +56,8 @@ This is [the administrative control panel](https://nethermindeth.github.io/stell
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
 
+Both writes go through the governor and need the connected wallet to hold the operator role; [the governance guide](https://nethermindeth.github.io/stellar-private-payments/docs/governance.html) covers the roles, the delays, and the incident runbook.
+
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
 
 #### Zero-Knowledge Circuits

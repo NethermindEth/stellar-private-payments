@@ -306,7 +306,7 @@ pub fn governor_keys(
 ) -> Result<Vec<LedgerKey>> {
     let governor = address(&governance.governor)?;
     let mut keys = vec![
-        data_key(&governor, "Pending", vec![])?,
+        pending_key(&governor)?,
         // Written once when the governor is constructed, and touched again
         // only on a role change, which makes it the entry most likely to be
         // archived first.
@@ -342,11 +342,7 @@ pub fn governor_keys(
         )?);
     }
     for role in ROLES {
-        keys.push(data_key(
-            &governor,
-            "RoleAccountsCount",
-            vec![symbol(role)?],
-        )?);
+        keys.push(role_count_key(&governor, role)?);
     }
     for (role, count) in role_members {
         for index in 0..*count {
@@ -519,8 +515,20 @@ async fn read_value(client: &Client, key: &LedgerKey) -> Result<Option<xdr::ScVa
         .remove(&encoded))
 }
 
-/// Reads a `u32` a contract stores under `variant`, or `None` when the ledger
-/// no longer holds it.
+/// Looks an already read entry up by its key.
+///
+/// # Errors
+///
+/// Returns an error if the key does not encode.
+fn fetched<'a>(
+    values: &'a BTreeMap<String, xdr::ScVal>,
+    key: &LedgerKey,
+) -> Result<Option<&'a xdr::ScVal>> {
+    Ok(values.get(&key.to_xdr_base64(Limits::none())?))
+}
+
+/// Returns the `u32` a contract stores under `variant`, or `None` when the
+/// ledger no longer holds it.
 ///
 /// An absent entry is the state the keeper exists to repair, so it is not an
 /// error: raising here would abort the round that would have restored it, for
@@ -529,35 +537,74 @@ async fn read_value(client: &Client, key: &LedgerKey) -> Result<Option<xdr::ScVa
 /// # Errors
 ///
 /// Returns an error if the entry is present but is not a `u32`.
-async fn read_u32(
-    client: &Client,
-    contract: &xdr::ScAddress,
-    variant: &str,
+fn fetched_u32(
+    values: &BTreeMap<String, xdr::ScVal>,
+    key: &LedgerKey,
+    what: &str,
 ) -> Result<Option<u32>> {
-    match read_value(client, &data_key(contract, variant, vec![])?).await? {
-        Some(xdr::ScVal::U32(value)) => Ok(Some(value)),
-        Some(other) => bail!("{variant} is {other:?}, expected a u32"),
+    match fetched(values, key)? {
+        Some(xdr::ScVal::U32(value)) => Ok(Some(*value)),
+        Some(other) => bail!("{what} is {other:?}, expected a u32"),
         None => Ok(None),
     }
 }
 
-/// Reads the wasm hash a contract instance runs.
+/// Builds the key of the tree depth a pool or a membership provider stores.
 ///
 /// # Errors
 ///
-/// Returns an error if the instance is absent, or runs a built-in contract
-/// rather than uploaded wasm.
-pub async fn wasm_hash(client: &Client, contract: &xdr::ScAddress) -> Result<Option<xdr::Hash>> {
-    let Some(value) = read_value(client, &instance_key(contract)).await? else {
-        return Ok(None);
-    };
+/// Returns an error if the variant is too long to be a Soroban symbol.
+fn levels_key(contract: &xdr::ScAddress) -> Result<LedgerKey> {
+    data_key(contract, "Levels", vec![])
+}
+
+/// Builds the key of the governor's list of queued operation hashes.
+///
+/// # Errors
+///
+/// Returns an error if the variant is too long to be a Soroban symbol.
+fn pending_key(governor: &xdr::ScAddress) -> Result<LedgerKey> {
+    data_key(governor, "Pending", vec![])
+}
+
+/// Builds the key of how many addresses hold `role`.
+///
+/// # Errors
+///
+/// Returns an error if `role` is too long to be a Soroban symbol.
+fn role_count_key(governor: &xdr::ScAddress, role: &str) -> Result<LedgerKey> {
+    data_key(governor, "RoleAccountsCount", vec![symbol(role)?])
+}
+
+/// Returns the wasm hash a contract instance runs, or `None` when the instance
+/// is absent or runs a built-in contract rather than uploaded wasm.
+///
+/// # Errors
+///
+/// Returns an error if the value is not a contract instance.
+fn instance_wasm(value: Option<&xdr::ScVal>) -> Result<Option<xdr::Hash>> {
     match value {
-        xdr::ScVal::ContractInstance(instance) => match instance.executable {
-            xdr::ContractExecutable::Wasm(hash) => Ok(Some(hash)),
+        None => Ok(None),
+        Some(xdr::ScVal::ContractInstance(instance)) => match &instance.executable {
+            xdr::ContractExecutable::Wasm(hash) => Ok(Some(hash.clone())),
             xdr::ContractExecutable::StellarAsset => Ok(None),
         },
-        other => bail!("contract instance is {other:?}"),
+        Some(other) => bail!("contract instance is {other:?}"),
     }
+}
+
+/// Returns every contract the manifest names.
+fn manifest_contracts(config: &ContractConfig) -> impl Iterator<Item = &str> {
+    config
+        .enabled_pools()
+        .map(|pool| pool.pool_contract_id.as_str())
+        .chain([
+            config.asp_membership.as_str(),
+            config.asp_non_membership.as_str(),
+            config.public_key_registry.as_str(),
+        ])
+        .chain(config.verifiers.values().map(String::as_str))
+        .chain(config.governance.iter().map(|g| g.governor.as_str()))
 }
 
 /// Walks the non-membership tree and returns every node it holds.
@@ -604,57 +651,99 @@ pub async fn non_membership_nodes(
 
 /// Builds every key the keeper is responsible for.
 ///
+/// One batched read answers everything the enumeration needs: every contract's
+/// instance, and the scalars a contract's key list depends on. Reading them per
+/// contract would make a round's setup cost grow with the manifest, and every
+/// extra call is another chance for the round to fail.
+///
 /// # Errors
 ///
-/// Returns an error if the manifest holds an invalid address, or a contract
-/// the manifest names is absent from the ledger.
+/// Returns an error if the manifest holds an invalid address, if the RPC
+/// refuses a read, or if an entry it returns holds a value of the wrong type.
+/// A contract the ledger no longer holds is not an error: it contributes no
+/// code key and the keeper restores what the RPC reports archived.
 pub async fn build(
     client: &Client,
     config: &ContractConfig,
     nullifiers: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<Vec<LedgerKey>> {
+    let mut keys = manifest_contracts(config)
+        .map(|id| Ok(instance_key(&address(id)?)))
+        .collect::<Result<Vec<_>>>()?;
+    keys.extend(scalar_keys(config)?);
+    let values = read_values(client, &keys).await?;
+
+    let nodes = non_membership_nodes(client, &address(&config.asp_non_membership)?).await?;
+
+    assemble(config, nullifiers, &values, &nodes)
+}
+
+/// Returns the entries [`assemble`] looks up by value rather than by name.
+///
+/// # Errors
+///
+/// Returns an error if the manifest holds an invalid address.
+fn scalar_keys(config: &ContractConfig) -> Result<Vec<LedgerKey>> {
     let mut keys = Vec::new();
-    let enabled: Vec<_> = config.pools.iter().filter(|p| p.enabled).collect();
-
-    let mut contracts: Vec<String> = enabled.iter().map(|p| p.pool_contract_id.clone()).collect();
-    contracts.push(config.asp_membership.clone());
-    contracts.push(config.asp_non_membership.clone());
-    contracts.extend(config.verifiers.values().cloned());
-    contracts.push(config.public_key_registry.clone());
-    if let Some(governance) = &config.governance {
-        contracts.push(governance.governor.clone());
+    for pool in config.enabled_pools() {
+        keys.push(levels_key(&address(&pool.pool_contract_id)?)?);
     }
-
-    for contract_id in &contracts {
-        let contract = address(contract_id)?;
-        keys.push(instance_key(&contract));
-        if let Some(hash) = wasm_hash(client, &contract).await? {
-            keys.push(code_key(hash));
+    keys.push(levels_key(&address(&config.asp_membership)?)?);
+    if let Some(governance) = &config.governance {
+        let governor = address(&governance.governor)?;
+        keys.push(pending_key(&governor)?);
+        for role in ROLES {
+            keys.push(role_count_key(&governor, role)?);
         }
     }
+    Ok(keys)
+}
 
-    for pool in &enabled {
+/// Builds the key list from the manifest, the entries already read, and the
+/// nodes the non-membership walk found.
+///
+/// # Errors
+///
+/// Returns an error if the manifest holds an invalid address, or an entry
+/// holds a value of the wrong type.
+fn assemble(
+    config: &ContractConfig,
+    nullifiers: &BTreeMap<String, BTreeSet<String>>,
+    values: &BTreeMap<String, xdr::ScVal>,
+    nodes: &[[u8; 32]],
+) -> Result<Vec<LedgerKey>> {
+    let mut keys = Vec::new();
+
+    for contract_id in manifest_contracts(config) {
+        let instance = instance_key(&address(contract_id)?);
+        if let Some(hash) = instance_wasm(fetched(values, &instance)?)? {
+            keys.push(code_key(hash));
+        }
+        keys.push(instance);
+    }
+
+    let empty = BTreeSet::new();
+    for pool in config.enabled_pools() {
         let contract = address(&pool.pool_contract_id)?;
         // A pool whose `Levels` entry is archived still gets its fixed keys, so
         // the restore that brings the entry back can run.
-        let levels = read_u32(client, &contract, "Levels").await?.unwrap_or(0);
-
-        let empty = BTreeSet::new();
+        let levels = fetched_u32(values, &levels_key(&contract)?, "Levels")?.unwrap_or(0);
         let spent = nullifiers.get(&pool.pool_contract_id).unwrap_or(&empty);
         keys.extend(pool_keys(&contract, levels, spent)?);
     }
 
     let membership = address(&config.asp_membership)?;
-    let levels = read_u32(client, &membership, "Levels").await?.unwrap_or(0);
+    let levels = fetched_u32(values, &levels_key(&membership)?, "Levels")?.unwrap_or(0);
     keys.extend(membership_keys(&membership, levels)?);
 
-    let non_membership = address(&config.asp_non_membership)?;
-    let nodes = non_membership_nodes(client, &non_membership).await?;
-    keys.extend(non_membership_keys(&non_membership, &nodes)?);
+    keys.extend(non_membership_keys(
+        &address(&config.asp_non_membership)?,
+        nodes,
+    )?);
 
     if let Some(governance) = &config.governance {
         let governor = address(&governance.governor)?;
-        let pending = match read_value(client, &data_key(&governor, "Pending", vec![])?).await? {
+        let pending = match fetched(values, &pending_key(&governor)?)? {
             Some(xdr::ScVal::Vec(Some(ids))) => ids
                 .iter()
                 .map(|id| match id {
@@ -669,12 +758,8 @@ pub async fn build(
         };
         let mut role_members = Vec::with_capacity(ROLES.len());
         for role in ROLES {
-            let key = data_key(&governor, "RoleAccountsCount", vec![symbol(role)?])?;
-            let count = match read_value(client, &key).await? {
-                Some(xdr::ScVal::U32(count)) => count,
-                _ => 0,
-            };
-            role_members.push((role.to_owned(), count));
+            let count = fetched_u32(values, &role_count_key(&governor, role)?, role)?;
+            role_members.push((role.to_owned(), count.unwrap_or(0)));
         }
 
         keys.extend(governor_keys(
@@ -1001,6 +1086,143 @@ mod tests {
             .count();
         assert_eq!(code, 1);
         assert_eq!(keys.len(), 2);
+    }
+
+    const POOL_A: &str = "CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526";
+    const POOL_B: &str = "CABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAFNSZ";
+    const MEMBERSHIP: &str = "CABQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGCK3";
+    const NON_MEMBERSHIP: &str = "CACAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAINCW";
+    const REGISTRY: &str = "CACQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQLC2U";
+    const GOVERNOR: &str = "CADAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMSST";
+    const WASM: [u8; 32] = [9u8; 32];
+    const POOL_A_LEVELS: u32 = 2;
+    const POOL_B_LEVELS: u32 = 5;
+    const MEMBERSHIP_LEVELS: u32 = 7;
+    const COUNCIL_MEMBERS: u32 = 2;
+
+    fn two_pools_with_governance() -> ContractConfig {
+        let pool = |id: &str, ledger: u32| {
+            format!(
+                r#"{{"poolContractId": "{id}", "tokenContractId": "{POOL_A}",
+                     "deploymentLedger": {ledger}, "enabled": true,
+                     "policyFlags": [], "asset": {{"kind": "native"}}}}"#
+            )
+        };
+        serde_json::from_str(&format!(
+            r#"{{
+                "network": "testnet",
+                "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                "admin": "{GOVERNOR}",
+                "asp_membership": "{MEMBERSHIP}",
+                "asp_non_membership": "{NON_MEMBERSHIP}",
+                "verifiers": {{}},
+                "public_key_registry": "{REGISTRY}",
+                "pools": [{}, {}],
+                "governance": {{
+                    "governor": "{GOVERNOR}",
+                    "council": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                    "operator": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                    "guardian": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                    "recovery": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                    "ttlKeeper": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                    "delay": 1, "recoveryDelay": 2, "grace": 3, "guardianPause": 4
+                }}
+            }}"#,
+            pool(POOL_A, 1),
+            pool(POOL_B, 2),
+        ))
+        .expect("manifest")
+    }
+
+    /// The entries the two batched reads bring back: one instance per contract,
+    /// one `Levels` per tree, and the governor's queue and role counts.
+    fn stored_entries(config: &ContractConfig) -> BTreeMap<String, xdr::ScVal> {
+        let encode = |key: LedgerKey| key.to_xdr_base64(Limits::none()).expect("encode key");
+        let instance = xdr::ScVal::ContractInstance(xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::Wasm(xdr::Hash(WASM)),
+            storage: None,
+        });
+
+        let mut values = BTreeMap::new();
+        for contract_id in manifest_contracts(config) {
+            let contract = address(contract_id).expect("address");
+            values.insert(encode(instance_key(&contract)), instance.clone());
+        }
+
+        // Stored under the very keys `build` reads, so a lookup in `assemble`
+        // that names a different key finds nothing and the assembled
+        // list comes out short. The three role counts the zip leaves
+        // out are the ones a governor with one council holder never
+        // wrote.
+        let operation = xdr::ScVal::Bytes(xdr::ScBytes(
+            hash(5).to_vec().try_into().expect("operation id"),
+        ));
+        let scalars = scalar_keys(config).expect("scalar keys");
+        assert_eq!(
+            scalars.len(),
+            8,
+            "two depths, one depth, the queue, four counts"
+        );
+        for (key, value) in scalars.iter().zip([
+            xdr::ScVal::U32(POOL_A_LEVELS),
+            xdr::ScVal::U32(POOL_B_LEVELS),
+            xdr::ScVal::U32(MEMBERSHIP_LEVELS),
+            xdr::ScVal::Vec(Some(xdr::ScVec::try_from(vec![operation]).expect("vec"))),
+            xdr::ScVal::U32(COUNCIL_MEMBERS),
+        ]) {
+            values.insert(encode(key.clone()), value);
+        }
+        values
+    }
+
+    /// Batching moved the reads, not the enumeration. The same manifest and the
+    /// same stored entries still produce the union of the per-contract lists,
+    /// and each tree keeps the depth its own `Levels` entry gave it.
+    #[test]
+    fn the_batched_reads_assemble_the_same_key_list() {
+        let config = two_pools_with_governance();
+        let values = stored_entries(&config);
+        let nodes = [hash(8)];
+
+        let built = assemble(&config, &BTreeMap::new(), &values, &nodes).expect("assemble");
+
+        let mut expected = vec![code_key(xdr::Hash(WASM))];
+        for contract_id in manifest_contracts(&config) {
+            expected.push(instance_key(&address(contract_id).expect("address")));
+        }
+        for (contract_id, levels) in [(POOL_A, POOL_A_LEVELS), (POOL_B, POOL_B_LEVELS)] {
+            let contract = address(contract_id).expect("address");
+            expected.extend(pool_keys(&contract, levels, &BTreeSet::new()).expect("pool"));
+        }
+        expected.extend(
+            membership_keys(&address(MEMBERSHIP).expect("membership"), MEMBERSHIP_LEVELS)
+                .expect("membership"),
+        );
+        expected.extend(
+            non_membership_keys(&address(NON_MEMBERSHIP).expect("non-membership"), &nodes)
+                .expect("non-membership"),
+        );
+        let role_members = ROLES.map(|role| {
+            let count = if role == "council" {
+                COUNCIL_MEMBERS
+            } else {
+                0
+            };
+            (role.to_owned(), count)
+        });
+        expected.extend(
+            governor_keys(
+                config.governance.as_ref().expect("governance"),
+                &[hash(5)],
+                &permission_rows(&config),
+                &role_members,
+            )
+            .expect("governor"),
+        );
+        expected.sort_unstable();
+        expected.dedup();
+
+        assert_eq!(built, expected);
     }
 
     #[test]
