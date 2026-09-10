@@ -212,6 +212,36 @@ Allowlist + blocklist pool:
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
+#### Deploying with a Global View Key (GVK)
+
+A Global View Key lets the pool admin decrypt and view notes (view-only:
+outputs; traceable: inputs and outputs) — see [Global View
+Key](docs/src/global_view_key.md) for the full scheme. A pool spec's
+`[policy:][gvk-mode:]` prefix accepts `gvk-off` (default), `gvk-viewonly`, or
+`gvk-traceable`, and needs the admin's Baby JubJub public key via
+`--gvk-authority-pubkey-file`. `tools/gvkey-gen` is an optional helper that
+generates and validates one such key, e.g.:
+
+```sh
+cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
+```
+
+Back up `admin-d.json` — the private key cannot be recovered. `gvkey-gen
+generate` can also save the key into a client SDK wallet database via
+`--db PATH`. Multiple pools, mixing a plain pool with a GVK-traceable one, in
+one deployment:
+
+```sh
+./deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --gvk-authority-pubkey-file ./admin-pub.json \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --max-deposit 1000000000 \
+  --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
+  --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
+```
+
 ### End-to-End Tests
 
 The E2E tests generate real Groth16 proofs and verify them, locally, using contracts and the Soroban-SDK. To run them:

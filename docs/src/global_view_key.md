@@ -11,10 +11,10 @@ over Baby JubJub (whose base field is BN254's scalar field, so point operations
 are cheap) with Poseidon2 as the KDF. This avoids the foreign-field arithmetic
 that verifying an off-circuit X25519 ciphertext would require.
 
-> **Scope**: This page documents the circuits and the cryptographic scheme.
-> Contract deployment of `D`, emitting `R/c1/c2/c3` on-chain, and the SDK admin
-> audit helpers (`sdk/native/src/gvk/`, `sdk/native/src/zk/gvk.rs`)
-> are implemented separately. The Rust reference used by circuit tests lives in
+> **Scope**: This page documents the circuits, the cryptographic scheme, the
+> `pool-gvk` contract, deployment, and the SDK admin audit API. There is no
+> CLI or app UI for GVK yet — audit is a Rust library call only. The Rust
+> reference used by circuit tests lives in
 > `circuits/src/test/utils/global_view_key.rs`.
 
 ---
@@ -137,9 +137,117 @@ by the round-trip tests.
 
 ---
 
+## The `pool-gvk` Contract
+
+`contracts/pool-gvk` is a fork of `contracts/pool` that always encrypts every
+output note and, in `TRACEABLE` mode, every input note too. GVK mode is
+mutually exclusive with plain `pool`: to turn GVK off, deploy `pool` instead —
+there is no runtime toggle.
+
+- **`admin_view_key` (`D`) and `gvk_mode` are constructor arguments**, validated
+  once (`gvk::is_valid`, a canonical-range + non-zero check on `D`) and stored
+  immutably. **There is no setter for either.** A rotated-out admin therefore
+  keeps the ability to decrypt every future note, and a leaked private `d`
+  retroactively deanonymizes the pool's whole history — the only recovery is
+  deploying a new pool and migrating.
+- **`transact` rejects a proof whose ciphertext counts don't match the mode**:
+  `output_gvk_ciphertexts` must cover every output always; `input_gvk_ciphertexts`
+  must be empty in `VIEW_ONLY` and cover every input in `TRACEABLE`.
+- **Events carry the ciphertext directly**, unlike plain `pool`'s separate memo
+  event — `NewCommitmentEvent.gvk_ciphertext` is mandatory (every output is
+  always encrypted), `NewNullifierEvent.gvk_ciphertext` is `Some` only in
+  `TRACEABLE` mode.
+- `get_admin_view_key` / `get_gvk_mode` are unauthenticated reads: `D` is a
+  circuit public input published in every proof, so it isn't secret.
+
+---
+
+## Deployment
+
+`deployments/scripts/deploy.sh` deploys one Groth16 verifier per
+**(policy, GVK mode)** combination actually used — the verifying key is baked
+into the WASM, so a pool with a different mode needs a different verifier
+contract — and one `pool-gvk` (or plain `pool`) contract per `--pool` spec.
+
+GVK mode is an optional prefix on a `--pool` spec:
+
+```
+--pool [policy:][gvk-mode:]<ASSET-SPEC>
+```
+
+| `gvk-mode` | Meaning |
+|---|---|
+| `gvk-off` (default) | Deploys plain `pool`, no encryption. |
+| `gvk-viewonly` | Deploys `pool-gvk` with `GvkMode::ViewOnly`. |
+| `gvk-traceable` | Deploys `pool-gvk` with `GvkMode::Traceable`. |
+
+Any pool using `gvk-viewonly` or `gvk-traceable` requires the admin's Baby
+JubJub public key, via `--gvk-authority-pubkey '{"x":"0x..","y":"0x.."}'` or
+`--gvk-authority-pubkey-file PATH`:
+
+```bash
+deployments/scripts/deploy.sh futurenet \
+  --deployer alice \
+  --gvk-authority-pubkey-file ./admin-pub.json \
+  --pool blocklist:gvk-off:native:CB... \
+  --pool allowlist:gvk-traceable:native:CB... \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --max-deposit 1000000000
+```
+
+Per-pool `gvkMode` and `gvkAuthorityPubKey` are recorded in
+`deployments/<network>/deployments.json` alongside `policyFlags`, and the
+verifier map is keyed by circuit suffix (e.g. `B_gvk_T` for a blocklist +
+traceable pool):
+
+```json
+{
+  "verifiers": { "B_gvk_T": "CB53..." },
+  "pools": [{
+    "poolContractId": "CBPFL2...",
+    "policyFlags": ["blocklist"],
+    "gvkMode": "traceable",
+    "gvkAuthorityPubKey": { "x": "0x0003...", "y": "0x2f12..." }
+  }]
+}
+```
+
+**Never lose the admin's private scalar `d`.** It is not stored anywhere by
+the deployment tooling — only the public `D` is. Losing `d` permanently
+disables auditing for that pool; there is no recovery path.
+
+---
+
+## Admin Audit (SDK)
+
+`sdk/native/src/gvk::GvkAudit` walks a pool's on-chain events and decrypts
+every note reachable with the admin's private scalar `d`. It groups each
+`transact` call's commitment/nullifier events back into one record and
+decrypts each ciphertext, using `8d` per [Admin decryption](#admin-decryption-cofactor-8d):
+
+```rust
+let mut audit = GvkAudit::new(storage, pool_contract_id, d_priv);
+while let Some(tx) = audit.next_tx().await? {
+    // tx.ledger, tx.outputs: Vec<GvkOutputSlot>, tx.inputs: Vec<GvkSpentInput>
+}
+```
+
+- `GvkOutputSlot { commitment, note: Option<GvkAuditedNote> }` — `note` is
+  `None` for a dummy output or a ciphertext that fails to decrypt/verify.
+- `GvkSpentInput { nullifier, note: Option<GvkAuditedNote> }` — `note` is
+  `None` for a dummy input, a `VIEW_ONLY` pool (inputs carry no ciphertext),
+  or a decrypt/verify failure.
+
+This is a Rust library API only — there is no `spp` CLI subcommand or app
+view for GVK audit yet.
+
+---
+
 ## Key material provenance
 
 The proving/verifying keys for the GVK circuits are locally generated (see
 `make circuits TESTS=1 REGEN_KEYS=1`) and land in the gitignored `testdata/`.
 As with the other circuits, a trusted ceremony would be required before any
-mainnet deployment.
+mainnet deployment. See `deployments/testnet/circuit_keys/README.md` for the
+committed testnet artifacts and full provenance note.

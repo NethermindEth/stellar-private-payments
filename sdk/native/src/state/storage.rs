@@ -1,10 +1,10 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::types::{
     AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
-    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, LeafAddedEvent, NewCommitmentEvent,
-    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
-    PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary,
-    UserOperation,
+    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
+    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
+    OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup,
+    UserNoteSummary, UserOperation,
 };
 use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
@@ -15,6 +15,7 @@ use std::{collections::HashSet, path::Path};
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
+pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
@@ -397,6 +398,15 @@ impl Storage {
                 url: url.to_string(),
             },
         )
+    }
+
+    pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>> {
+        self.get_setting_json(APP_SETTING_GVK_AUTHORITY)
+    }
+
+    pub fn set_gvk_authority_setting(&mut self, setting: &GvkAuthoritySetting) -> Result<()> {
+        setting.validate_consistency()?;
+        self.set_setting_json(APP_SETTING_GVK_AUTHORITY, setting)
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts

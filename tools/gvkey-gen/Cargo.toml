@@ -1,0 +1,21 @@
+[package]
+name = "gvkey-gen"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Generate, validate, and inspect Global View Key (GVK) admin authority keys"
+
+[[bin]]
+name = "gvkey-gen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+stellar-private-payments.workspace = true
+
+[lints]
+workspace = true
