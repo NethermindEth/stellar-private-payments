@@ -8,7 +8,9 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{bump_entry, bump_instance, get_zeroes, poseidon2_compress};
+use soroban_utils::{
+    AdminError, bump_entry, bump_instance, get_admin, get_zeroes, poseidon2_compress,
+};
 
 /// Storage keys for contract persistent data
 #[contracttype]
@@ -54,6 +56,12 @@ struct LeafAddedEvent {
     index: u64,
     /// New Merkle root after insertion
     root: U256,
+}
+
+impl From<AdminError> for Error {
+    fn from(AdminError::NotInitialized: AdminError) -> Self {
+        Self::NotInitialized
+    }
 }
 
 /// ASP Membership contract
@@ -121,8 +129,7 @@ impl ASPMembership {
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         bump_instance(&env);
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     /// Get the current Merkle root
@@ -184,9 +191,7 @@ impl ASPMembership {
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         bump_instance(&env);
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        bump_entry(&env, &DataKey::Admin);
-        admin.require_auth();
+        get_admin(&env, &DataKey::Admin)?.require_auth();
 
         let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
         bump_entry(&env, &DataKey::Levels);
