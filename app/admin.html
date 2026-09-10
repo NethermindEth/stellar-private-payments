@@ -56,6 +56,8 @@
                         <button type="button" data-target="overview" class="tab-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition">Overview</button>
                         <button type="button" data-target="allowlist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Allowlist</button>
                         <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
+                        <button type="button" data-target="pause" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Pause</button>
+                        <button type="button" data-target="queue" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Queue</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -177,6 +179,53 @@
                 </div>
             </section>
 
+            <!-- 4. Pause Tab -->
+            <section id="pause" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="pause-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Governance</p>
+                    <h2 id="pause-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Pause Control</h2>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
+                    <table class="w-full min-w-[720px] text-left text-sm">
+                        <thead>
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                                <th class="pb-3 pr-4 font-medium" scope="col">Target</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Flags</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Until</th>
+                                <th class="pb-3 font-medium" scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pauseRows" class="divide-y divide-white/5"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 5. Queue Tab -->
+            <section id="queue" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="queue-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Governance</p>
+                    <h2 id="queue-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Timelock Queue</h2>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
+                    <table class="w-full min-w-[840px] text-left text-sm">
+                        <thead>
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                                <th class="pb-3 pr-4 font-medium" scope="col">Operation ID</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Target</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Function</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Ready Ledger</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">State</th>
+                                <th class="pb-3 font-medium" scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queueRows" class="divide-y divide-white/5"></tbody>
+                    </table>
+                    <p id="queueNotice" class="mt-4 text-xs text-slate-400"></p>
+                </div>
+            </section>
+
         </main>
 
         <footer class="mt-8 border-t border-white/10">
@@ -210,6 +259,39 @@
                 <button type="button" class="toast-close mt-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition underline underline-offset-4">Dismiss</button>
             </div>
         </div>
+    </template>
+
+    <!-- Pause Row Template -->
+    <template id="tpl-pause-row">
+        <tr>
+            <td class="pause-target py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="pause-flags py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="pause-until py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="py-3">
+                <div class="flex flex-wrap items-center gap-2">
+                    <input class="pause-flags-input w-24 rounded-lg border border-white/10 bg-ink-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="flags" autocomplete="off" spellcheck="false" aria-label="Pause flags" />
+                    <button type="button" class="pause-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Pause</button>
+                    <button type="button" class="unpause-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Unpause</button>
+                </div>
+            </td>
+        </tr>
+    </template>
+
+    <!-- Queue Row Template -->
+    <template id="tpl-queue-row">
+        <tr>
+            <td class="queue-id py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="queue-target py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="queue-function py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="queue-ready py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="queue-state py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="py-3">
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" class="queue-execute-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Execute</button>
+                    <button type="button" class="queue-cancel-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20">Cancel</button>
+                </div>
+            </td>
+        </tr>
     </template>
 
     <script type="module" src="js/admin.js"></script>
