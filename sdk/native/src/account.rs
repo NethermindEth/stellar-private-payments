@@ -142,11 +142,20 @@ impl<S: Storage> Account<S> {
     }
 
     /// Register this account's public keys on the deployment-wide registry.
+    ///
+    /// # Errors
+    /// Returns [`Error::SignerIsNotNoteOwner`] on a delegated session. The
+    /// registry entry is the owner's, so simulation returns an auth entry
+    /// keyed to the owner; the payer's wallet is only asked to sign for its
+    /// own account and has nothing to put there. Checked before the call so a
+    /// delegated session stops here rather than at an unfillable auth entry.
     pub async fn register_public_keys(
         &self,
         note_public_key: Option<NotePublicKey>,
         encryption_public_key: Option<EncryptionPublicKey>,
     ) -> Result<TransactionResult, Error> {
+        ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
+
         let (note_pk, enc_pk) = match (note_public_key, encryption_public_key) {
             (Some(note), Some(enc)) => (note, enc),
             (None, None) => {
@@ -164,9 +173,8 @@ impl<S: Storage> Account<S> {
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
         let prepared = fetcher
-            // The owner is the registration; the signer only pays for it. When
-            // the two differ the simulation returns an auth entry for the
-            // owner, which the signer cannot supply on its own.
+            // The owner is the registration; the signer only pays for it.
+            // Both are the owner here, per the check above.
             .prepare_register(
                 &self.user_address,
                 &self.signer_address,
@@ -207,5 +215,97 @@ impl<S: Storage> Account<S> {
         self.sync
             .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
             .await
+    }
+}
+
+/// Refuse an operation that needs the note owner's own signature when the
+/// session signs with a different account.
+///
+/// Call this only from the steps whose signature the owner alone can produce.
+/// Opening a session and spending from it are not among them: both run
+/// entirely on the payer's signature.
+pub(crate) fn ensure_signer_is_note_owner(
+    user_address: &NoteOwnerAddress,
+    signer_address: &SignerAddress,
+) -> Result<(), Error> {
+    if signer_address.as_str() == user_address.as_str() {
+        return Ok(());
+    }
+    Err(Error::SignerIsNotNoteOwner {
+        owner: user_address.as_str().to_string(),
+        signer: signer_address.as_str().to_string(),
+    })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod signer_is_note_owner_tests {
+    use super::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    #[test]
+    fn the_owner_signing_for_itself_is_accepted() {
+        let result =
+            ensure_signer_is_note_owner(&NoteOwnerAddress::new(OWNER), &SignerAddress::new(OWNER));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn a_delegate_signing_for_the_owner_is_refused() {
+        let error = ensure_signer_is_note_owner(
+            &NoteOwnerAddress::new(OWNER),
+            &SignerAddress::new(DELEGATE),
+        )
+        .expect_err("a payer that is not the note owner must not produce an owner signature");
+
+        match &error {
+            Error::SignerIsNotNoteOwner { owner, signer } => {
+                assert_eq!(owner, OWNER);
+                assert_eq!(signer, DELEGATE);
+            }
+            other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
+        }
+
+        // Both addresses stay available to code; the rendered string redacts
+        // them. Not asserted here: the reveal flag is a process global that
+        // logging.rs's own tests toggle under a mutex this module cannot reach.
+    }
+
+    /// The app classifies a wallet cancellation by substring. An
+    /// owner-signature refusal is not one, and must not read like one.
+    #[test]
+    fn the_refusal_does_not_read_as_a_wallet_cancellation() {
+        let rendered = ensure_signer_is_note_owner(
+            &NoteOwnerAddress::new(OWNER),
+            &SignerAddress::new(DELEGATE),
+        )
+        .expect_err("a divergent pair must be refused")
+        .to_string()
+        .to_ascii_lowercase();
+
+        for word in ["rejected", "denied", "cancelled", "canceled"] {
+            assert!(
+                !rendered.contains(word),
+                "{word:?} would be read as a wallet cancellation: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_comparison_is_exact() {
+        // Strkeys are canonical; near-misses are different accounts.
+        let owner = NoteOwnerAddress::new(OWNER);
+        for near_miss in [
+            OWNER.to_ascii_lowercase(),
+            format!(" {OWNER}"),
+            String::new(),
+        ] {
+            assert!(
+                ensure_signer_is_note_owner(&owner, &SignerAddress::new(near_miss.as_str()))
+                    .is_err(),
+                "near-miss signer {near_miss:?} must be refused"
+            );
+        }
     }
 }

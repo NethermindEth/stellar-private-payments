@@ -137,10 +137,14 @@ impl<S: Storage> Client<S> {
 
     /// Create an [`Account`] session.
     ///
+    /// `signer_address` need not be `user_address`: the signer pays and
+    /// sources every envelope, the owner holds the notes. The two operations
+    /// that need the owner's own signature check for themselves — see
+    /// [`Account::register_public_keys`] and [`Error::SignerIsNotNoteOwner`].
+    ///
     /// # Errors
-    /// Returns [`Error::SignerIsNotNoteOwner`] if `signer_address` is not the
-    /// same account as `user_address`, or a storage error if the session's
-    /// storage handle cannot be forked.
+    /// Returns a storage error if the session's storage handle cannot be
+    /// forked.
     #[tracing::instrument(
         name = "client_account",
         skip_all,
@@ -152,7 +156,6 @@ impl<S: Storage> Client<S> {
         signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
-        ensure_signer_is_note_owner(&user_address, &signer_address)?;
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,
@@ -178,23 +181,8 @@ impl<S: Storage> Client<S> {
     }
 }
 
-/// Reject a session whose signing account is not the note owner. See
-/// [`Error::SignerIsNotNoteOwner`] for why the two may not differ.
-fn ensure_signer_is_note_owner(
-    user_address: &NoteOwnerAddress,
-    signer_address: &SignerAddress,
-) -> Result<(), Error> {
-    if signer_address.as_str() == user_address.as_str() {
-        return Ok(());
-    }
-    Err(Error::SignerIsNotNoteOwner {
-        owner: user_address.as_str().to_string(),
-        signer: signer_address.as_str().to_string(),
-    })
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod signer_is_note_owner_tests {
+mod divergent_session_tests {
     use super::*;
     use crate::{LocalSigner, LocalStorage};
 
@@ -203,51 +191,6 @@ mod signer_is_note_owner_tests {
     /// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])`.
     const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const PASSPHRASE: &str = "Test SDF Network ; September 2015";
-
-    #[test]
-    fn the_owner_signing_for_itself_is_accepted() {
-        let result =
-            ensure_signer_is_note_owner(&NoteOwnerAddress::new(OWNER), &SignerAddress::new(OWNER));
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn a_delegate_signing_for_the_owner_is_refused() {
-        let error = ensure_signer_is_note_owner(
-            &NoteOwnerAddress::new(OWNER),
-            &SignerAddress::new(DELEGATE),
-        )
-        .expect_err("a signer that is not the note owner must not open a session");
-
-        match &error {
-            Error::SignerIsNotNoteOwner { owner, signer } => {
-                assert_eq!(owner, OWNER);
-                assert_eq!(signer, DELEGATE);
-            }
-            other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
-        }
-
-        // Both addresses stay available to code; the rendered string redacts
-        // them. Not asserted here: the reveal flag is a process global that
-        // logging.rs's own tests toggle under a mutex this module cannot reach.
-    }
-
-    #[test]
-    fn the_comparison_is_exact() {
-        // Strkeys are canonical; near-misses are different accounts.
-        let owner = NoteOwnerAddress::new(OWNER);
-        for near_miss in [
-            OWNER.to_ascii_lowercase(),
-            format!(" {OWNER}"),
-            String::new(),
-        ] {
-            assert!(
-                ensure_signer_is_note_owner(&owner, &SignerAddress::new(near_miss.as_str()))
-                    .is_err(),
-                "near-miss signer {near_miss:?} must be refused"
-            );
-        }
-    }
 
     fn test_client() -> Client<LocalStorage> {
         static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -282,18 +225,20 @@ mod signer_is_note_owner_tests {
         ) as Box<dyn Signer>)
     }
 
-    // Through the public API, so moving or dropping the guard fails here too.
+    // A delegated session signs and pays as one account and owns notes as
+    // another. Nothing here asks for an owner signature, so nothing here has
+    // cause to compare the two.
     #[test]
-    fn client_account_refuses_a_divergent_pair() {
-        let error = test_client()
+    fn client_account_opens_a_divergent_pair() {
+        let account = test_client()
             .account(
                 NoteOwnerAddress::new(OWNER),
                 SignerAddress::new(DELEGATE),
                 test_signer(DELEGATE),
             )
-            .err()
-            .expect("Client::account must refuse a signer that is not the note owner");
-        assert!(matches!(error, Error::SignerIsNotNoteOwner { .. }));
+            .expect("a payer that is not the note owner must still open a session");
+        assert_eq!(account.user_address().as_str(), OWNER);
+        assert_eq!(account.signer_address().as_str(), DELEGATE);
     }
 
     #[test]
