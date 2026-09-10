@@ -63,6 +63,8 @@ governor = { path = "contracts/governor" }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 js-sys = "0.3"
 log = { version = "0.4", default-features = false }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.16.2", default-features = false }
 num-bigint = { version = "0.4.8", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
 pool = { path = "contracts/pool" }

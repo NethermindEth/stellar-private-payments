@@ -18,6 +18,8 @@ stellar-private-payments.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 hex.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus = { workspace = true, features = ["http-listener"] }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 stellar-xdr.workspace = true

@@ -11,8 +11,9 @@ mod state;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use metrics::{counter, gauge};
 use state::State;
-use std::{num::NonZeroUsize, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf, time::Duration};
 use stellar_private_payments::{
     chain::{Client, LocalSigner},
     types::ContractConfig,
@@ -62,6 +63,9 @@ struct Args {
     /// Keys per lifetime transaction.
     #[arg(long, default_value = "100")]
     batch: NonZeroUsize,
+    /// Address to serve Prometheus metrics on. Metrics are off when absent.
+    #[arg(long)]
+    metrics_bind: Option<SocketAddr>,
 }
 
 /// Lowest protocol version whose RPC reports archived entries.
@@ -70,6 +74,25 @@ struct Args {
 /// the way it leaves out a key that was never written, so a keeper running
 /// against such an RPC would never restore anything and never know it.
 const MIN_PROTOCOL: u32 = 23;
+
+/// Ledgers of lifetime left on the shortest-lived entry of each contract.
+const MIN_TTL_LEDGERS: &str = "ttl_keeper_min_ttl_ledgers";
+
+/// Balance of the keeper account, in stroops.
+const KEEPER_BALANCE_STROOPS: &str = "ttl_keeper_keeper_balance_stroops";
+
+/// Keys whose lifetime the keeper has extended.
+const EXTENDED_TOTAL: &str = "ttl_keeper_extended_total";
+
+/// Keys the keeper has restored from the archive.
+const RESTORED_TOTAL: &str = "ttl_keeper_restored_total";
+
+/// Rounds that ended in an error.
+const ROUND_ERRORS_TOTAL: &str = "ttl_keeper_round_errors_total";
+
+/// Keys the RPC's simulation called archived after its ledger-state answer
+/// called them live.
+const CLASSIFICATION_MISMATCH_TOTAL: &str = "ttl_keeper_classification_mismatch_total";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -87,6 +110,13 @@ async fn main() -> Result<()> {
     let secret = std::env::var(&args.keeper_secret_env)
         .with_context(|| format!("read {}", args.keeper_secret_env))?;
     let signer = LocalSigner::from_secret(&secret)?;
+
+    if let Some(bind) = args.metrics_bind {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(bind)
+            .install()
+            .context("install the Prometheus exporter")?;
+    }
 
     let rpc = Client::new(&args.rpc_url)?;
     let bootnode = Client::new(&args.bootnode_url)?;
@@ -138,7 +168,9 @@ async fn round(
     signer: &LocalSigner,
     passphrase: &str,
 ) -> Result<()> {
-    run_round(args, config, rpc, bootnode, signer, passphrase).await
+    run_round(args, config, rpc, bootnode, signer, passphrase)
+        .await
+        .inspect_err(|_| counter!(ROUND_ERRORS_TOTAL).increment(1))
 }
 
 async fn run_round(
@@ -149,6 +181,11 @@ async fn run_round(
     signer: &LocalSigner,
     passphrase: &str,
 ) -> Result<()> {
+    // Read first: an unfunded keeper fails inside the submissions below, and
+    // a balance gauge that only updates on a clean round cannot fire the alert
+    // that exists for exactly that case.
+    report_balance(rpc, signer.public_key()).await;
+
     let mut state = State::load(&args.state_file)?;
     refresh_nullifiers(config, rpc, bootnode, &mut state).await?;
     state.store(&args.state_file)?;
@@ -265,15 +302,17 @@ async fn submit_batches(
     extend_to: Option<u32>,
     submitted: &mut Vec<LedgerKey>,
 ) -> Result<()> {
-    let operation = if extend_to.is_some() {
-        "extend"
+    let (operation, total) = if extend_to.is_some() {
+        ("extend", EXTENDED_TOTAL)
     } else {
-        "restore"
+        ("restore", RESTORED_TOTAL)
     };
 
     for chunk in keys.chunks(args.batch.get()) {
         let mut simulated = simulate_batch(rpc, signer, chunk, extend_to).await?;
         if !simulated.restore_first.is_empty() {
+            let count = u64::try_from(simulated.restore_first.len()).unwrap_or(u64::MAX);
+            counter!(CLASSIFICATION_MISMATCH_TOTAL).increment(count);
             // One occurrence is an entry that expired between the read and the
             // simulation; the alert rule is what notices a repeat.
             tracing::warn!(
@@ -318,6 +357,7 @@ async fn submit_batches(
         }
 
         let hash = ops::send(rpc, signer, passphrase, &simulated).await?;
+        counter!(total).increment(u64::try_from(simulated.keys.len()).unwrap_or(u64::MAX));
         tracing::info!(
             keys = simulated.keys.len(),
             operation,
@@ -424,6 +464,7 @@ fn report_lowest(measurement: &ops::Measurement, extended: &[LedgerKey], extend_
     let lowest = ops::lowest_by_contract(measurement, extended, extend_to);
     for (contract, remaining_ledgers) in &lowest {
         tracing::info!(%contract, remaining_ledgers, "contract_lowest_lifetime");
+        gauge!(MIN_TTL_LEDGERS, "contract" => contract.clone()).set(f64::from(*remaining_ledgers));
     }
     tracing::info!(
         entries = measurement.entries.len(),
@@ -432,9 +473,30 @@ fn report_lowest(measurement: &ops::Measurement, extended: &[LedgerKey], extend_
     );
 }
 
+/// Reports the keeper account's balance, which pays for every extension.
+///
+/// A balance the RPC will not answer for is logged rather than raised: the
+/// round's work is already done, and the alert on a stale gauge is the same
+/// alert as the one on a low balance.
+async fn report_balance(rpc: &Client, address: &str) {
+    match rpc.get_account(address).await {
+        Ok(account) => {
+            // Every Prometheus value is a float. A keeper balance is far below
+            // the 2^53 stroops an f64 represents exactly.
+            #[allow(clippy::cast_precision_loss)]
+            let stroops = account.balance as f64;
+            gauge!(KEEPER_BALANCE_STROOPS).set(stroops);
+        }
+        Err(e) => tracing::warn!(error = %e, "keeper_balance_unavailable"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reserved documentation address, which nothing answers on.
+    const UNROUTABLE: &str = "http://192.0.2.1:1";
 
     #[test]
     fn the_manifest_network_selects_the_passphrase() {
@@ -450,6 +512,28 @@ mod tests {
     }
 
     #[test]
+    fn every_metric_name_is_a_valid_prometheus_name() {
+        let valid = |name: &str| {
+            let mut chars = name.chars();
+            chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == ':')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+        };
+
+        for name in [
+            MIN_TTL_LEDGERS,
+            KEEPER_BALANCE_STROOPS,
+            EXTENDED_TOTAL,
+            RESTORED_TOTAL,
+            ROUND_ERRORS_TOTAL,
+            CLASSIFICATION_MISMATCH_TOTAL,
+        ] {
+            assert!(valid(name), "{name} is not a valid Prometheus name");
+        }
+    }
+
+    #[test]
     fn a_key_is_described_by_contract_variant_and_arguments() {
         let contract = keys::address("CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE")
             .expect("address");
@@ -462,5 +546,71 @@ mod tests {
             keys::data_key(&contract, "Nullifier", vec![keys::u256([7u8; 32])]).expect("key");
         assert!(describe(&nullifier).ends_with(&format!("Nullifier({})", "07".repeat(32))));
         assert!(describe(&keys::instance_key(&contract)).ends_with(" instance"));
+    }
+
+    // A plain test rather than a `tokio::test`: the recorder is installed
+    // around a closure, and the round has to run inside it.
+    #[test]
+    fn a_round_that_cannot_reach_the_network_counts_an_error() {
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+
+        let dir = std::env::temp_dir().join(format!("ttl-keeper-round-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        let config: ContractConfig = serde_json::from_str(
+            r#"{
+                "network": "testnet",
+                "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+                "asp_membership": "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE",
+                "asp_non_membership": "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE",
+                "verifiers": {},
+                "public_key_registry": "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE",
+                "pools": []
+            }"#,
+        )
+        .expect("manifest");
+
+        let args = Args {
+            deployment: PathBuf::from("deployments.json"),
+            rpc_url: UNROUTABLE.to_owned(),
+            bootnode_url: UNROUTABLE.to_owned(),
+            keeper_secret_env: "TTL_KEEPER_SECRET".to_owned(),
+            state_file: dir.join("unreachable.json"),
+            once: true,
+            dry_run: false,
+            interval_secs: 3_600,
+            threshold_ledgers: 518_400,
+            extend_to_ledgers: None,
+            batch: NonZeroUsize::new(100).expect("a non-zero batch"),
+            metrics_bind: None,
+        };
+        let signer = LocalSigner::from_seed([7u8; 32]);
+        let rpc = Client::with_timeout(UNROUTABLE, 1).expect("client");
+        let bootnode = Client::with_timeout(UNROUTABLE, 1).expect("client");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = metrics::with_local_recorder(&recorder, || {
+            runtime.block_on(round(
+                &args,
+                &config,
+                &rpc,
+                &bootnode,
+                &signer,
+                "Test SDF Network ; September 2015",
+            ))
+        });
+
+        assert!(result.is_err());
+        assert!(
+            handle.render().contains(ROUND_ERRORS_TOTAL),
+            "the error counter was not recorded"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }
