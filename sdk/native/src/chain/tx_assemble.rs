@@ -1,4 +1,7 @@
-//! Apply Soroban RPC simulation output to an unsigned transaction envelope.
+//! Build an unsigned invoke-contract transaction envelope, and apply Soroban
+//! RPC simulation output to one.
+
+use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
 use stellar_xdr::{
@@ -6,6 +9,67 @@ use stellar_xdr::{
 };
 
 use super::{contract_state::PreparedSorobanTx, rpc::SimulateTransactionResponse};
+
+/// Builds an unsigned, unsubmitted transaction envelope invoking `function`
+/// on `contract_id`, for read-only simulation.
+pub(crate) fn build_invoke_contract_tx_envelope(
+    source_account: &str,
+    seq_num: xdr::SequenceNumber,
+    fee: u32,
+    contract_id: &str,
+    function: &str,
+    args: Vec<xdr::ScVal>,
+    auth_entries: Vec<xdr::SorobanAuthorizationEntry>,
+) -> Result<xdr::TransactionEnvelope> {
+    let source = muxed_account_from_g(source_account)?;
+    let contract_address = contract_scaddress_from_str(contract_id)?;
+    let function_name =
+        xdr::ScSymbol::try_from(function).map_err(|_| anyhow!("invalid function name"))?;
+    let args = xdr::VecM::try_from(args)?;
+
+    let invoke_args = xdr::InvokeContractArgs {
+        contract_address,
+        function_name,
+        args,
+    };
+    let host_function = xdr::HostFunction::InvokeContract(invoke_args);
+    let invoke_op = xdr::InvokeHostFunctionOp {
+        host_function,
+        auth: xdr::VecM::try_from(auth_entries)?,
+    };
+    let op = xdr::Operation {
+        source_account: None,
+        body: xdr::OperationBody::InvokeHostFunction(invoke_op),
+    };
+
+    let operations = xdr::VecM::try_from(vec![op])?;
+    let tx = xdr::Transaction {
+        source_account: source,
+        fee,
+        seq_num,
+        cond: xdr::Preconditions::None,
+        memo: xdr::Memo::None,
+        operations,
+        ext: xdr::TransactionExt::V0,
+    };
+
+    Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+        tx,
+        signatures: xdr::VecM::default(),
+    }))
+}
+
+fn muxed_account_from_g(account: &str) -> Result<xdr::MuxedAccount> {
+    let pk = stellar_strkey::ed25519::PublicKey::from_str(account)?;
+    Ok(xdr::MuxedAccount::Ed25519(xdr::Uint256(pk.0)))
+}
+
+fn contract_scaddress_from_str(contract_id: &str) -> Result<xdr::ScAddress> {
+    let contract = stellar_strkey::Contract::from_str(contract_id)?;
+    Ok(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
+        contract.0,
+    ))))
+}
 
 impl SimulateTransactionResponse {
     /// Returns the first host-function simulation result.

@@ -32,7 +32,7 @@
 use std::path::PathBuf;
 
 use stellar_private_payments::{
-    CircuitStore, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
+    CircuitStore, Error, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
@@ -362,64 +362,64 @@ pub fn init_transact_session() -> Result<
 
 /// Verify that the wallet account can cover a deposit of `amount` for `pool`.
 ///
-/// Only native (XLM) balances are checked automatically; for other assets the
-/// caller must ensure the account holds enough tokens. If the balance is
-/// insufficient, prints the user address and amount and exits 0.
-pub fn require_funded_for_pool(
-    client: &Client,
-    account: &Account,
-    pool: &PoolConfigEntry,
-    amount: NoteAmount,
-) -> Result<(), String> {
+/// Checks the asset balance for `pool.asset`, and, for non-native assets, that
+/// enough XLM remains to pay transaction fees.
+pub fn require_funded_for_pool(account: &Account, pool: &PoolConfigEntry, amount: NoteAmount) {
     let address = account.user_address();
-    match &pool.asset {
-        AssetDescriptor::Native => {
-            let fetcher = client
-                .state_fetcher()
-                .map_err(|e| format!("state fetcher: {e}"))?;
-            let runtime =
-                tokio::runtime::Runtime::new().map_err(|e| format!("tokio runtime: {e}"))?;
-            // Note-owner, not signer: a deposit pulls tokens from whoever
-            // sends it, so it cannot be delegated to a different account.
-            let entry = match runtime.block_on(fetcher.rpc().get_account(address.as_str())) {
-                Ok(entry) => entry,
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.to_lowercase().contains("not found") {
-                        eprintln!(
-                            "Skipping: account {address} was not found on-chain; fund it with XLM on testnet and re-run this example."
-                        );
-                    } else {
-                        eprintln!(
-                            "Skipping: could not verify funding for {address}: {msg}\nFund the account with XLM on testnet and re-run this example."
-                        );
-                    }
-                    std::process::exit(0);
-                }
-            };
-            let balance = i128::from(entry.balance);
-            // A deposit also pays base/resource fees; require a margin so an
-            // exactly-funded account does not pass this precheck and then fail
-            // on-chain. 0.1 XLM is far above typical Soroban fees.
-            const FEE_BUFFER_STROOPS: i128 = 1_000_000;
-            let needed = i128::try_from(u128::from(amount))
-                .map_err(|_| format!("deposit amount {amount} exceeds native balance range"))?
-                .saturating_add(FEE_BUFFER_STROOPS);
-            if balance < needed {
+
+    let fetch_balance = |asset: &AssetDescriptor, label: &str| -> u128 {
+        match account.balance(asset) {
+            Ok(balance) => balance,
+            Err(Error::AccountNotFound { .. }) => {
                 eprintln!(
-                    "Skipping: account {address} has {balance} stroops but needs at least {needed} stroops to deposit (amount plus a {FEE_BUFFER_STROOPS}-stroop fee buffer)."
+                    "Skipping: account {address} was not found on-chain; fund it with {label} on testnet and re-run this example."
                 );
-                eprintln!("Fund the account with XLM on testnet and re-run this example.");
                 std::process::exit(0);
             }
+            Err(e) => panic!("could not verify {label} funding for {address}: {e}"),
         }
-        _ => {
-            println!(
-                "Note: automatic funding check is not implemented for asset {}; ensure {} is funded.",
-                pool.token_label(),
-                address
-            );
-        }
+    };
+
+    // A deposit also pays base/resource fees in XLM, regardless of which
+    // asset is deposited; require a margin so an exactly-funded account does
+    // not pass this precheck and then fail on-chain. 0.1 XLM is far above
+    // typical Soroban fees.
+    const FEE_BUFFER_STROOPS: u128 = 1_000_000;
+
+    let is_native = matches!(pool.asset, AssetDescriptor::Native);
+    let amount = u128::from(amount);
+
+    // The native balance must cover the fee buffer, plus the deposit amount
+    // itself when the deposited asset *is* native.
+    let native_needed = if is_native {
+        amount.saturating_add(FEE_BUFFER_STROOPS)
+    } else {
+        FEE_BUFFER_STROOPS
+    };
+    let native_balance = fetch_balance(&AssetDescriptor::Native, "XLM");
+    if native_balance < native_needed {
+        let purpose = if is_native {
+            "to deposit (amount plus a fee buffer)"
+        } else {
+            "to pay transaction fees"
+        };
+        eprintln!(
+            "Skipping: account {address} has {native_balance} stroops but needs at least {native_needed} stroops of XLM {purpose}."
+        );
+        eprintln!("Fund the account with XLM on testnet and re-run this example.");
+        std::process::exit(0);
     }
-    Ok(())
+    if is_native {
+        return;
+    }
+
+    let label = pool.token_label();
+    let balance = fetch_balance(&pool.asset, &label);
+    if balance < amount {
+        eprintln!(
+            "Skipping: account {address} has {balance} of {label} but needs at least {amount} to deposit."
+        );
+        eprintln!("Fund the account with {label} on testnet and re-run this example.");
+        std::process::exit(0);
+    }
 }

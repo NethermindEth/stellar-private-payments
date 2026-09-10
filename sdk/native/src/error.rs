@@ -14,6 +14,9 @@ pub enum Error {
     InvalidConfig(String),
 
     #[error(transparent)]
+    Rpc(#[from] crate::chain::RpcError),
+
+    #[error(transparent)]
     Plan(#[from] PlanError),
 
     #[error(transparent)]
@@ -44,6 +47,10 @@ pub enum Error {
         crate::types::Sensitive(owner)
     )]
     SignerIsNotNoteOwner { owner: String, signer: String },
+
+    /// The account has no ledger entry on-chain yet.
+    #[error("account {} not found on-chain", crate::types::Sensitive(address))]
+    AccountNotFound { address: String },
 
     #[error("{0}")]
     Other(String),

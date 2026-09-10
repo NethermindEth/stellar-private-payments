@@ -14,6 +14,8 @@ use stellar_xdr::{
     LedgerKey, LedgerKeyAccount, Limits, PublicKey, ReadXdr, Uint256, WriteXdr,
 };
 
+use super::{soroban_encode::BASE_FEE, tx_assemble::build_invoke_contract_tx_envelope};
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -683,6 +685,91 @@ impl Client {
             _ => Err(Error::UnexpectedScVal(
                 "expected account ledger entry".into(),
             )),
+        }
+    }
+
+    /// Trustline balance of `address` in the classic asset `code:issuer`, in
+    /// its smallest unit.
+    pub async fn get_trustline_balance(
+        &self,
+        address: &str,
+        code: &str,
+        issuer: &str,
+    ) -> Result<u128, Error> {
+        let account_id = AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+            stellar_strkey::ed25519::PublicKey::from_str(address)?.0,
+        )));
+        let issuer_id = AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+            stellar_strkey::ed25519::PublicKey::from_str(issuer)?.0,
+        )));
+        let asset = match code.parse::<xdr::AssetCode4>() {
+            Ok(asset_code) => xdr::TrustLineAsset::CreditAlphanum4(xdr::AlphaNum4 {
+                asset_code,
+                issuer: issuer_id,
+            }),
+            Err(_) => xdr::TrustLineAsset::CreditAlphanum12(xdr::AlphaNum12 {
+                asset_code: code
+                    .parse()
+                    .map_err(|_| Error::UnexpectedScVal(format!("invalid asset code: {code}")))?,
+                issuer: issuer_id,
+            }),
+        };
+        let key = LedgerKey::Trustline(xdr::LedgerKeyTrustLine { account_id, asset });
+        let response = self.get_ledger_entries(&[key]).await?;
+        let entries = response.entries.unwrap_or_default();
+        let Some(entry) = entries.first() else {
+            return Ok(0);
+        };
+        match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())? {
+            LedgerEntryData::Trustline(entry) => u128::try_from(entry.balance).map_err(|_| {
+                Error::UnexpectedScVal(format!("negative trustline balance: {}", entry.balance))
+            }),
+            _ => Err(Error::UnexpectedScVal(
+                "expected trustline ledger entry".into(),
+            )),
+        }
+    }
+
+    /// Balance of `address` reported by the SEP-41 token contract
+    /// `contract_id`.
+    pub async fn get_token_balance(&self, contract_id: &str, address: &str) -> Result<u128, Error> {
+        let arg = address
+            .parse()
+            .map_err(|_| Error::UnexpectedScVal(format!("invalid address: {address}")))?;
+        let tx = build_invoke_contract_tx_envelope(
+            address,
+            xdr::SequenceNumber(0),
+            BASE_FEE,
+            contract_id,
+            "balance",
+            vec![xdr::ScVal::Address(arg)],
+            Vec::new(),
+        )
+        .map_err(|e| Error::UnexpectedScVal(e.to_string()))?;
+
+        let sim = self.simulate_transaction(&tx).await?;
+        let op_result = sim
+            .result
+            .or_else(|| sim.results.into_iter().next())
+            .ok_or_else(|| {
+                Error::UnexpectedScVal("simulateTransaction returned no results".into())
+            })?;
+        let retval_b64 = op_result
+            .retval
+            .or(op_result.xdr)
+            .ok_or_else(|| Error::UnexpectedScVal("simulateTransaction missing retval".into()))?;
+        match xdr::ScVal::from_xdr_base64(&retval_b64, Limits::none())? {
+            xdr::ScVal::I128(parts) => {
+                let value = i128::from(&parts);
+                u128::try_from(value).map_err(|_| {
+                    Error::UnexpectedScVal(format!(
+                        "token contract reported a negative balance: {value}"
+                    ))
+                })
+            }
+            other => Err(Error::UnexpectedScVal(format!(
+                "expected balance() to return i128, got {other:?}"
+            ))),
         }
     }
 
