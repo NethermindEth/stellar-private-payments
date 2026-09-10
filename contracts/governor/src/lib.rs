@@ -17,8 +17,8 @@
 //! makes the calls that the permission table opens to it.
 #![no_std]
 use soroban_sdk::{
-    Address, BytesN, Env, Symbol, Val, Vec, contract, contracterror, contractimpl, contracttype,
-    panic_with_error, symbol_short,
+    Address, BytesN, Env, Symbol, TryFromVal, Val, Vec, contract, contractclient, contracterror,
+    contractimpl, contracttype, panic_with_error, symbol_short,
 };
 use soroban_utils::{bump_entry, bump_instance};
 use stellar_access::access_control as access;
@@ -59,6 +59,18 @@ pub struct RoleGrant {
     pub role: Symbol,
     /// The address that receives the role.
     pub member: Address,
+}
+
+/// The role that one target function requires of an undelayed caller.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FnRule {
+    /// The contract the rule covers.
+    pub target: Address,
+    /// The function on that contract.
+    pub function: Symbol,
+    /// The role a caller must hold to invoke it without the queue.
+    pub role: Symbol,
 }
 
 /// The four waiting periods a governor is constructed with.
@@ -120,6 +132,8 @@ enum DataKey {
     Pending,
     /// The queued call, stored under its hash while it is pending.
     Operation(BytesN<32>),
+    /// The role a target function requires of an undelayed caller.
+    FnRole(Address, Symbol),
 }
 
 /// The errors the governor raises.
@@ -155,6 +169,15 @@ pub enum Error {
     QueueFull = 3010,
 }
 
+/// The pause entry points every contract the governor administers exposes.
+#[contractclient(name = "PausableTargetClient")]
+pub trait PausableTarget {
+    /// Sets `flags`, which stop being honored at `until` when it is given.
+    fn pause(env: Env, flags: u32, until: Option<u32>);
+    /// Clears `flags`.
+    fn unpause(env: Env, flags: u32);
+}
+
 /// The timelocked administrator of the pools and the association set providers.
 #[contract]
 pub struct Governor;
@@ -168,12 +191,14 @@ impl Governor {
     /// least 1, and `guardian_pause` exceeds `delay` so that the council can
     /// queue an unpause inside the window. `roles` covers at least one council
     /// address, one recovery address, and one guardian, with no address under
-    /// two roles.
+    /// two roles. `fn_roles` is the permission table, one row per target
+    /// function that a role may call without the queue.
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidConfig`] if any of those conditions fails, or
-    /// if a grant names a symbol that is not one of the four roles.
+    /// if a grant or a table row names a symbol that is not one of the four
+    /// roles.
     ///
     /// # Events
     ///
@@ -186,6 +211,7 @@ impl Governor {
         grace: u32,
         guardian_pause: u32,
         roles: Vec<RoleGrant>,
+        fn_roles: Vec<FnRule>,
     ) -> Result<(), Error> {
         if delay < DELAY_FLOOR || recovery_delay < delay || grace == 0 || guardian_pause <= delay {
             return Err(Error::InvalidConfig);
@@ -210,6 +236,13 @@ impl Governor {
             || access::get_role_member_count(&env, &GUARDIAN) == 0
         {
             return Err(Error::InvalidConfig);
+        }
+
+        for rule in fn_roles.iter() {
+            if !is_known_role(&rule.role) {
+                return Err(Error::InvalidConfig);
+            }
+            set_fn_role(&env, rule.target, rule.function, &rule.role);
         }
 
         timelock::set_min_delay(&env, delay);
@@ -315,21 +348,39 @@ impl Governor {
     /// Anyone may execute. The delay is what protects the call, not the
     /// identity of whoever finally makes it.
     ///
+    /// An operation whose target is the governor itself administers the
+    /// governor. Its function is one of `grant_role` and `revoke_role`, each
+    /// taking a member address and a role symbol, or `set_fn_role` and
+    /// `clear_fn_role`, taking a target address and a function symbol, with
+    /// the role symbol to require for `set_fn_role`. The operation is marked
+    /// done before the call is made, and an error rolls the whole invocation
+    /// back, so a self-operation with bad arguments stays ready until the
+    /// council cancels it.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::Expired`] if the grace window closed, and
-    /// [`Error::Unauthorized`] if the target is the governor itself.
+    /// Returns [`Error::Expired`] if the grace window closed. For a
+    /// self-operation, returns [`Error::UnknownFunction`] if the function is
+    /// not one of the four above, [`Error::InvalidArgs`] if the arguments do
+    /// not decode as that function expects, [`Error::UnknownRole`] if a role
+    /// to grant or require is not one of the four roles, and
+    /// [`Error::RoleInvariant`] if a grant would give a member a second role
+    /// or a revocation would leave no council holder while there is no
+    /// recovery holder, or the reverse.
     ///
     /// # Panics
     ///
     /// Panics with OpenZeppelin's `InvalidOperationState` if the operation is
-    /// not ready, `UnexecutedPredecessor` if its predecessor has not run, and
+    /// not ready, `UnexecutedPredecessor` if its predecessor has not run,
+    /// `RoleNotHeld` if a revocation names a member without the role, and
     /// [`Error::InvalidConfig`] if the governor holds no configuration, which
     /// a constructed governor always does.
     ///
     /// # Events
     ///
-    /// Publishes `OperationExecuted` from the OpenZeppelin timelock.
+    /// Publishes `OperationExecuted` from the OpenZeppelin timelock, and
+    /// `RoleGranted` or `RoleRevoked` from its access control module for a
+    /// role change.
     pub fn execute(
         env: Env,
         target: Address,
@@ -353,9 +404,42 @@ impl Governor {
         forget(&env, &id);
 
         if operation.target == env.current_contract_address() {
-            return Err(Error::Unauthorized);
+            return dispatch_self(&env, &operation.function, &operation.args);
         }
         Ok(env.invoke_contract::<Val>(&operation.target, &operation.function, operation.args))
+    }
+
+    /// Calls a target function that the permission table opens to the caller's
+    /// role, without the queue.
+    ///
+    /// The table is what lets a compliance owner keep an allowlist current
+    /// without a delay on every write. It never reaches the governor itself,
+    /// so no row can hand out a role or change a delay.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unauthorized`] if `target` is the governor itself, or
+    /// if the table holds no row for the target function.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// role the row names.
+    pub fn execute_now(
+        env: Env,
+        target: Address,
+        function: Symbol,
+        args: Vec<Val>,
+        caller: Address,
+    ) -> Result<Val, Error> {
+        bump_instance(&env);
+        caller.require_auth();
+        if target == env.current_contract_address() {
+            return Err(Error::Unauthorized);
+        }
+        let role = read_fn_role(&env, &target, &function).ok_or(Error::Unauthorized)?;
+        access::ensure_role(&env, &role, &caller);
+        Ok(env.invoke_contract::<Val>(&target, &function, args))
     }
 
     /// Cancels a queued operation, which is named by the call it would make.
@@ -386,6 +470,68 @@ impl Governor {
         forget(&env, &id);
     }
 
+    /// Pauses `flags` on `target` until the guardian window closes.
+    ///
+    /// The deadline is the current ledger plus the guardian pause the governor
+    /// was constructed with. The target decides what that deadline means: a
+    /// contract with a pause already in force keeps the deadline it has and
+    /// only adds the bits, one whose bits the council cleared while an earlier
+    /// deadline is still ahead refuses the call, and one whose earlier deadline
+    /// has passed takes the new deadline for every bit still set.
+    ///
+    /// That last case widens a pause beyond the bits `flags` names, because a
+    /// lapsed deadline stops a bit being honored without clearing it. Read the
+    /// target's pause state before pausing one shape, and have the council
+    /// clear the stale bits through the queue.
+    ///
+    /// The council pauses without a deadline through the queue, as
+    /// [`Governor::unpause`] describes. `flags` is read in the target's own
+    /// mask.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Overflow`] if the deadline would exceed `u32::MAX`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// guardian role. A target that refuses the pause raises its own error,
+    /// which rolls the call back: `InvalidPauseFlags` when `flags` is zero or
+    /// outside its mask, and `TimedPauseArmed` when its bits were all cleared
+    /// while an earlier deadline is still ahead. Panics with
+    /// [`Error::InvalidConfig`] if the governor holds no configuration, which
+    /// a constructed governor always does.
+    #[only_role(caller, "guardian")]
+    pub fn pause(env: Env, target: Address, flags: u32, caller: Address) -> Result<(), Error> {
+        bump_instance(&env);
+        let until = env
+            .ledger()
+            .sequence()
+            .checked_add(setting(&env, &DataKey::GuardianPause))
+            .ok_or(Error::Overflow)?;
+        PausableTargetClient::new(&env, &target).pause(&flags, &Some(until));
+        Ok(())
+    }
+
+    /// Clears `flags` on `target`.
+    ///
+    /// This is the only pause entry point the council holds. Its pause with
+    /// no deadline is a queued call to the target's own `pause` with `until`
+    /// absent: [`Governor::schedule`] it against the target, then
+    /// [`Governor::execute`] it once the delay has passed. `flags` is read in
+    /// the target's own mask.
+    ///
+    /// # Panics
+    ///
+    /// Panics with OpenZeppelin's `Unauthorized` if `caller` does not hold the
+    /// council role, and with the target's `InvalidPauseFlags` if `flags` is
+    /// zero or outside its mask.
+    #[only_role(caller, "council")]
+    pub fn unpause(env: Env, target: Address, flags: u32, caller: Address) {
+        bump_instance(&env);
+        PausableTargetClient::new(&env, &target).unpause(&flags);
+    }
+
     /// Returns the four waiting periods the governor was constructed with.
     ///
     /// # Panics
@@ -401,6 +547,13 @@ impl Governor {
             grace: setting(&env, &DataKey::Grace),
             guardian_pause: setting(&env, &DataKey::GuardianPause),
         }
+    }
+
+    /// Returns the role one target function requires of an undelayed caller,
+    /// or `None` when the permission table holds no row for it.
+    pub fn get_fn_role(env: Env, target: Address, function: Symbol) -> Option<Symbol> {
+        bump_instance(&env);
+        read_fn_role(&env, &target, &function)
     }
 
     /// Reports whether `member` holds `role`.
@@ -508,9 +661,85 @@ fn operation(
     }
 }
 
+/// The four roles the governor defines.
+const ROLES: [Symbol; 4] = [COUNCIL, OPERATOR, GUARDIAN, RECOVERY];
+
 /// Reports whether `role` is one of the four roles the governor defines.
 fn is_known_role(role: &Symbol) -> bool {
-    [COUNCIL, OPERATOR, GUARDIAN, RECOVERY].contains(role)
+    ROLES.contains(role)
+}
+
+/// Performs a ready operation whose target is the governor itself.
+///
+/// Every branch returns a void value, because the operation's effect is read
+/// back through the governor's getters.
+fn dispatch_self(env: &Env, function: &Symbol, args: &Vec<Val>) -> Result<Val, Error> {
+    let governor = env.current_contract_address();
+    if *function == Symbol::new(env, "grant_role") {
+        let (member, role): (Address, Symbol) = decode(env, args, 2)?;
+        if !is_known_role(&role) {
+            return Err(Error::UnknownRole);
+        }
+        if ROLES
+            .iter()
+            .any(|held| *held != role && access::has_role(env, &member, held).is_some())
+        {
+            return Err(Error::RoleInvariant);
+        }
+        grant_role(env, &member, &role, &governor);
+    } else if *function == Symbol::new(env, "revoke_role") {
+        let (member, role): (Address, Symbol) = decode(env, args, 2)?;
+        let last_of = |role: &Symbol, other: &Symbol| {
+            access::get_role_member_count(env, role) == 1
+                && access::get_role_member_count(env, other) == 0
+        };
+        if (role == COUNCIL && last_of(&COUNCIL, &RECOVERY))
+            || (role == RECOVERY && last_of(&RECOVERY, &COUNCIL))
+        {
+            return Err(Error::RoleInvariant);
+        }
+        access::revoke_role_no_auth(env, &member, &role, &governor);
+        // A revoke rewrites the holder count every time, and rewrites the role
+        // enumeration only when it removes a role's last holder.
+        bump_entry(
+            env,
+            &access::AccessControlStorageKey::RoleAccountsCount(role.clone()),
+        );
+        bump_entry(env, &access::AccessControlStorageKey::ExistingRoles);
+    } else if *function == Symbol::new(env, "set_fn_role") {
+        let (target, function, role): (Address, Symbol, Symbol) = decode(env, args, 3)?;
+        if !is_known_role(&role) {
+            return Err(Error::UnknownRole);
+        }
+        set_fn_role(env, target, function, &role);
+    } else if *function == Symbol::new(env, "clear_fn_role") {
+        let (target, function): (Address, Symbol) = decode(env, args, 2)?;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::FnRole(target, function));
+    } else {
+        return Err(Error::UnknownFunction);
+    }
+    Ok(Val::VOID.to_val())
+}
+
+/// Decodes `args` as the `count` positional arguments of type `T`.
+///
+/// The count is checked before the conversion because the host rejects a
+/// vector of the wrong length by trapping the invocation, which would leave
+/// the caller with a host error instead of [`Error::InvalidArgs`].
+fn decode<T: TryFromVal<Env, Val>>(env: &Env, args: &Vec<Val>, count: u32) -> Result<T, Error> {
+    if args.len() != count {
+        return Err(Error::InvalidArgs);
+    }
+    T::try_from_val(env, args.as_val()).map_err(|_| Error::InvalidArgs)
+}
+
+/// Writes one permission table row and extends the entry's lifetime.
+fn set_fn_role(env: &Env, target: Address, function: Symbol, role: &Symbol) {
+    let key = DataKey::FnRole(target, function);
+    env.storage().persistent().set(&key, role);
+    bump_entry(env, &key);
 }
 
 /// Reports whether `function` is one of the role changes a recovery address
@@ -562,6 +791,15 @@ fn setting(env: &Env, key: &DataKey) -> u32 {
         .instance()
         .get(key)
         .unwrap_or_else(|| panic_with_error!(env, Error::InvalidConfig))
+}
+
+/// Reads one permission table row and extends the entry's lifetime.
+fn read_fn_role(env: &Env, target: &Address, function: &Symbol) -> Option<Symbol> {
+    let key = DataKey::FnRole(target.clone(), function.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .inspect(|_| bump_entry(env, &key))
 }
 
 /// Reads the queued operation hashes, treating an absent list as empty.

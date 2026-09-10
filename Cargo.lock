@@ -2881,6 +2881,7 @@ dependencies = [
 name = "governor"
 version = "0.1.0"
 dependencies = [
+ "asp-membership",
  "soroban-sdk",
  "soroban-utils",
  "stellar-access",

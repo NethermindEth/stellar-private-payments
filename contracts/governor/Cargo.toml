@@ -21,6 +21,9 @@ stellar-governance = { workspace = true }
 stellar-macros = { workspace = true }
 
 [dev-dependencies]
+# workspace
+asp-membership = { workspace = true }
+
 # external
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
