@@ -10,7 +10,7 @@ use stellar_private_payments::{
     Handle, LocalProver, LocalStorage, Prover, Signer,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{
-        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, SignerAddress,
+        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
         TransferRecipient,
     },
 };
@@ -24,9 +24,13 @@ pub struct ClientSession {
 impl ClientSession {
     /// Bind wallet + deployment. `readonly` skips circuit artifact load
     /// (balance/notes/sync only).
+    ///
+    /// `owner` holds the notes; the payer that sources and signs every
+    /// envelope comes from [`CliConfig::require_signer`] and is `owner` itself
+    /// unless `--sign-as` named another alias.
     pub fn new(
         config: &CliConfig,
-        account: &Account,
+        owner: &Account,
         network: &StellarNetwork,
         readonly: bool,
     ) -> Result<Self> {
@@ -63,13 +67,7 @@ impl ClientSession {
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
-        let sdk_account = client
-            .account(
-                NoteOwnerAddress::new(account.address.as_str()),
-                SignerAddress::new(account.address.as_str()),
-                alias_signer(config, account, network),
-            )
-            .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
+        let sdk_account = open_account(&client, config, owner, network)?;
 
         Ok(Self {
             client,
@@ -77,19 +75,14 @@ impl ClientSession {
         })
     }
 
+    /// As [`Self::new`], over a disclosure-only client.
     pub fn new_disclosure(
         config: &CliConfig,
-        account: &Account,
+        owner: &Account,
         network: &StellarNetwork,
     ) -> Result<Self> {
         let client = disclosure_client(config, network)?;
-        let sdk_account = client
-            .account(
-                NoteOwnerAddress::new(account.address.as_str()),
-                SignerAddress::new(account.address.as_str()),
-                alias_signer(config, account, network),
-            )
-            .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
+        let sdk_account = open_account(&client, config, owner, network)?;
         Ok(Self {
             client,
             account: sdk_account,
@@ -156,13 +149,41 @@ pub fn disclosure_prover(config: &CliConfig) -> Result<LocalProver> {
         .map_err(|e| anyhow::anyhow!("init disclosure prover: {e}"))
 }
 
+/// Open the SDK session for the two roles: `owner` is the address the notes
+/// belong to, the payer sources and signs the envelopes and is the one whose
+/// alias reaches [`AliasSigner`].
+fn open_account(
+    client: &Client,
+    config: &CliConfig,
+    owner: &Account,
+    network: &StellarNetwork,
+) -> Result<SdkAccount> {
+    let signer = config.require_signer(owner)?;
+    if signer.address != owner.address {
+        log::info!(
+            "Signing as {} for notes owned by {}",
+            Sensitive(&signer.address),
+            Sensitive(&owner.address)
+        );
+    }
+    client
+        .account(
+            NoteOwnerAddress::new(owner.address.as_str()),
+            SignerAddress::new(signer.address.as_str()),
+            alias_signer(config, &signer, network),
+        )
+        .map_err(|e| anyhow::anyhow!("open account session: {e}"))
+}
+
+/// The signer delegates identity to the Stellar CLI keystore, so it needs the
+/// payer's alias and nothing else.
 fn alias_signer(
     config: &CliConfig,
-    account: &Account,
+    signer: &Account,
     network: &StellarNetwork,
 ) -> Handle<dyn Signer> {
     Handle::from_box(Box::new(AliasSigner {
-        alias: account.alias.clone(),
+        alias: signer.alias.clone(),
         rpc_url: network.rpc_url.clone(),
         network_passphrase: network.passphrase.clone(),
         config_dir: config.stellar_config_dir.clone(),

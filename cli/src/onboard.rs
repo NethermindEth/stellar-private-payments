@@ -5,6 +5,9 @@
 //! → explorer → optional public-key registration. Consent gates every protocol
 //! operation; resolving an address via `stellar keys` is not itself an
 //! operation. Step texts are reused from the app.
+//!
+//! Every step here belongs to the note owner, so onboarding refuses a
+//! `--sign-as` payer outright instead of running as the owner anyway.
 
 use std::io::Write;
 
@@ -73,8 +76,12 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     let version = stellar_cli::ensure_installed()?;
     log::info!("Found Stellar CLI: {version}");
 
-    // 2. Resolve the account (via `stellar keys`).
+    // 2. Resolve the account (via `stellar keys`). Onboarding is the owner's
+    //    own errand end to end — the derivation signature *is* the note secret
+    //    — so a `--sign-as` payer is refused here, before consent is recorded
+    //    or any key is derived, rather than being quietly ignored.
     let account = config.require_account()?;
+    config.ensure_owner_signs(&account)?;
     let mut storage = config.open_storage()?;
 
     // 3. Consent.
