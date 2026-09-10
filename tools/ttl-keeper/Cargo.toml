@@ -1,0 +1,29 @@
+[package]
+name = "ttl-keeper"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ttl-keeper"
+path = "src/main.rs"
+
+[dependencies]
+# workspace
+stellar-private-payments.workspace = true
+
+# external
+anyhow.workspace = true
+clap.workspace = true
+hex.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+stellar-xdr.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+[lints]
+workspace = true

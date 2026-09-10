@@ -25,6 +25,7 @@ stellar-macros = { workspace = true }
 asp-membership = { workspace = true }
 
 # external
+hex = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [lints]
