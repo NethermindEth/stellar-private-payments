@@ -80,11 +80,11 @@ impl Client {
         signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account, Error> {
-        Ok(Account::from_inner(self.inner.account(
+        Ok(Account::from_inner(block_on(self.inner.account(
             user_address,
             signer_address,
             signer,
-        )?))
+        ))?))
     }
 
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {

@@ -5,8 +5,9 @@ use crate::{
     planner::SpendableNote,
     state::{SqliteStorage, StoredUserKeys},
     types::{
-        ContractConfig, EncryptionPublicKey, Field, NotePublicKey, OperationalFeedItem,
-        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, UserNoteSummary,
+        ContractConfig, EncryptionKeyPair, EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey,
+        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup,
+        UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -171,6 +172,18 @@ pub trait Storage: crate::chain::ContractDataStorage {
     ) -> Result<Vec<DisclosureInputs>, Error>;
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error>;
+
+    /// Whether privacy keys are already stored for `user_address`.
+    async fn user_keys_exist(&self, user_address: &str) -> Result<bool, Error>;
+
+    /// Persist freshly derived privacy keys for `user_address`.
+    async fn save_user_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error>;
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error>;
 

@@ -177,7 +177,7 @@ fn open_account(
 
 /// The signer delegates identity to the Stellar CLI keystore, so it needs the
 /// payer's alias and nothing else.
-fn alias_signer(
+pub(crate) fn alias_signer(
     config: &CliConfig,
     signer: &Account,
     network: &StellarNetwork,
