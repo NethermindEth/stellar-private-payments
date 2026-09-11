@@ -37,14 +37,21 @@ pub enum Error {
 pub enum MerkleDataKey {
     /// Number of levels in the Merkle tree
     Levels,
-    /// Current position in the root history ring buffer
-    CurrentRootIndex,
     /// Next available index for leaf insertion
     NextIndex,
     /// Subtree hashes at each level (indexed by level)
     FilledSubtree(u32),
     /// Historical roots ring buffer
     Root(u32),
+}
+
+/// Returns the root history slot that holds the root produced by the insertion
+/// that set the leaf counter to `next_index`.
+fn root_index_for(next_index: u64) -> Result<u32, Error> {
+    let slot = (next_index / 2)
+        .checked_rem(u64::from(ROOT_HISTORY_SIZE))
+        .ok_or(Error::Overflow)?;
+    u32::try_from(slot).map_err(|_| Error::Overflow)
 }
 
 /// Merkle Tree with root history for privacy-preserving transactions
@@ -73,7 +80,7 @@ impl MerkleTreeWithHistory {
         let storage = env.storage().persistent();
 
         // Prevent reinitialization
-        if storage.has(&MerkleDataKey::CurrentRootIndex) {
+        if storage.has(&MerkleDataKey::NextIndex) {
             return Err(Error::AlreadyInitialized);
         }
 
@@ -90,7 +97,6 @@ impl MerkleTreeWithHistory {
         // Set initial root to zero hash at top level
         let root_0 = zero_hash(env, levels).ok_or(Error::NotInitialized)?;
         storage.set(&MerkleDataKey::Root(0), &root_0);
-        storage.set(&MerkleDataKey::CurrentRootIndex, &0u32);
         storage.set(&MerkleDataKey::NextIndex, &0u64);
 
         Ok(())
@@ -125,9 +131,6 @@ impl MerkleTreeWithHistory {
             .ok_or(Error::NotInitialized)?;
         let next_index: u64 = storage
             .get(&MerkleDataKey::NextIndex)
-            .ok_or(Error::NotInitialized)?;
-        let mut root_index: u32 = storage
-            .get(&MerkleDataKey::CurrentRootIndex)
             .ok_or(Error::NotInitialized)?;
         let max_leaves = 1u64.checked_shl(levels).ok_or(Error::WrongLevels)?;
 
@@ -167,17 +170,14 @@ impl MerkleTreeWithHistory {
             current_index >>= 1;
         }
 
-        // Update the root history index
-        root_index = root_index.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
-        // Update the root with the computed hash
-        storage.set(&MerkleDataKey::Root(root_index), &current_hash);
-        storage.set(&MerkleDataKey::CurrentRootIndex, &root_index);
-
-        // Update NextIndex
+        // The new root goes in the slot the advanced leaf counter names, which
+        // is the slot `current_root_index` reads back.
+        let new_next_index = next_index.checked_add(2).ok_or(Error::Overflow)?;
         storage.set(
-            &MerkleDataKey::NextIndex,
-            &(next_index.checked_add(2).ok_or(Error::Overflow)?),
+            &MerkleDataKey::Root(root_index_for(new_next_index)?),
+            &current_hash,
         );
+        storage.set(&MerkleDataKey::NextIndex, &new_next_index);
 
         // Return the index of the left leaf
         Ok((
@@ -185,6 +185,25 @@ impl MerkleTreeWithHistory {
             u32::try_from(next_index.checked_add(1).ok_or(Error::Overflow)?)
                 .map_err(|_| Error::MerkleTreeFull)?,
         ))
+    }
+
+    /// Returns the root history slot that holds the current root.
+    ///
+    /// The leaf counter starts at zero and only [`Self::insert_two_leaves`]
+    /// writes it, adding two per insertion. The slot is therefore the counter
+    /// halved and taken modulo the history size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the tree has no leaf counter, and
+    /// [`Error::Overflow`] if the counter does not fit the slot arithmetic.
+    pub fn current_root_index(env: &Env) -> Result<u32, Error> {
+        let next_index: u64 = env
+            .storage()
+            .persistent()
+            .get(&MerkleDataKey::NextIndex)
+            .ok_or(Error::NotInitialized)?;
+        root_index_for(next_index)
     }
 
     /// Check if a root exists in the recent history
@@ -212,9 +231,7 @@ impl MerkleTreeWithHistory {
         }
 
         let storage = env.storage().persistent();
-        let current_root_index: u32 = storage
-            .get(&MerkleDataKey::CurrentRootIndex)
-            .ok_or(Error::NotInitialized)?;
+        let current_root_index = Self::current_root_index(env)?;
 
         // Search the ring buffer for the root
         let mut i = current_root_index;
@@ -247,9 +264,7 @@ impl MerkleTreeWithHistory {
     /// Returns the current Merkle root as U256
     pub fn get_last_root(env: &Env) -> Result<U256, Error> {
         let storage = env.storage().persistent();
-        let current_root_index: u32 = storage
-            .get(&MerkleDataKey::CurrentRootIndex)
-            .ok_or(Error::NotInitialized)?;
+        let current_root_index = Self::current_root_index(env)?;
 
         storage
             .get(&MerkleDataKey::Root(current_root_index))
