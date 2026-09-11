@@ -139,9 +139,10 @@ impl<S: Storage> Client<S> {
     /// Create an [`Account`] session.
     ///
     /// `signer_address` need not be `user_address`: the signer pays and
-    /// sources every envelope, the owner holds the notes. The two operations
-    /// that need the owner's own signature check for themselves — see
-    /// [`Account::register_public_keys`] and [`Error::SignerIsNotNoteOwner`].
+    /// sources every envelope, the owner holds the notes. The operations that
+    /// need the owner's own signature check for themselves — see
+    /// [`Account::derive_privacy_keys`], [`Account::register_public_keys`], and
+    /// [`Error::SignerIsNotNoteOwner`].
     ///
     /// # Errors
     /// Returns a storage error if the session's storage handle cannot be

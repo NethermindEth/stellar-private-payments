@@ -5,17 +5,18 @@ use anyhow::Context;
 use crate::{
     chain::ContractDataStorage,
     planner::SpendableNote,
-    state::{SqliteStorage, StoredUserKeys},
+    state::{SqliteStorage, StoredPrivacyKeys},
+    storage::NoteKeyPair,
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, GvkAuthoritySetting,
-        NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup,
-        SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
+        GvkAuthoritySetting, NotePublicKey, OperationalFeedItem, PortfolioBalance,
+        PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
 
 use super::{
-    Storage, map_build_params, map_user_keys, operational_feed_from_storage,
+    Storage, map_build_params, map_privacy_keys, operational_feed_from_storage,
     pool_notes_from_storage, portfolio_balances_from_storage, recipient_lookup_from_storage,
     spendable_notes_from_storage, user_notes_from_storage,
 };
@@ -159,19 +160,45 @@ impl Storage for LocalStorage {
         ))
     }
 
-    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
-        map_user_keys(&self.storage(), user_address)
+    async fn privacy_keys(&self, user_address: &str) -> Result<StoredPrivacyKeys, Error> {
+        map_privacy_keys(&self.storage(), user_address)
+    }
+
+    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+        Ok(self
+            .storage()
+            .get_privacy_keys(user_address)
+            .context("check stored privacy keys")?
+            .is_some())
+    }
+
+    async fn save_privacy_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error> {
+        Ok(self
+            .storage_mut()
+            .save_encryption_and_note_keypairs(
+                user_address,
+                note_keypair,
+                encryption_keypair,
+                membership_blinding,
+            )
+            .context("save privacy keys")?)
     }
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
-        Ok(map_user_keys(&self.storage(), user_address)?.membership_blinding)
+        Ok(map_privacy_keys(&self.storage(), user_address)?.membership_blinding)
     }
 
     async fn user_public_keys(
         &self,
         user_address: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        let keys = map_user_keys(&self.storage(), user_address)?;
+        let keys = map_privacy_keys(&self.storage(), user_address)?;
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 

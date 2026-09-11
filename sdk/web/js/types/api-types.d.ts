@@ -137,7 +137,8 @@ export interface Account {
   readonly userAddress: string;
   readonly signerAddress: string;
   portfolio(): Promise<PortfolioBalance[]>;
-  userPublicKeys(): Promise<UserPublicKeys>;
+  privacyKeys(): Promise<UserPublicKeys>;
+  derivePrivacyKeys(): Promise<UserPublicKeys>;
   aspSecret(): Promise<string>;
   userNotes(limit: number): Promise<UserNoteSummary[]>;
   isRegistered(): Promise<boolean>;

@@ -3,10 +3,11 @@
 use crate::{
     gvk::GvkEvent,
     planner::SpendableNote,
-    state::{SqliteStorage, StoredUserKeys},
+    state::{SqliteStorage, StoredPrivacyKeys},
     types::{
-        ContractConfig, EncryptionPublicKey, Field, NotePublicKey, OperationalFeedItem,
-        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, UserNoteSummary,
+        ContractConfig, EncryptionKeyPair, EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey,
+        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup,
+        UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -32,13 +33,13 @@ pub(crate) fn map_build_params(
     }
 }
 
-pub(crate) fn map_user_keys(
+pub(crate) fn map_privacy_keys(
     storage: &SqliteStorage,
     user_address: &str,
-) -> Result<StoredUserKeys, Error> {
+) -> Result<StoredPrivacyKeys, Error> {
     storage
-        .get_user_keys(user_address)?
-        .ok_or_else(|| Error::UserKeysNotFound {
+        .get_privacy_keys(user_address)?
+        .ok_or_else(|| Error::PrivacyKeysNotFound {
             user_address: user_address.to_string(),
         })
 }
@@ -151,7 +152,19 @@ pub trait Storage: crate::chain::ContractDataStorage {
         req: &DisclosureInputsRequest,
     ) -> Result<Vec<DisclosureInputs>, Error>;
 
-    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error>;
+    async fn privacy_keys(&self, user_address: &str) -> Result<StoredPrivacyKeys, Error>;
+
+    /// Whether privacy keys are already stored for `user_address`.
+    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error>;
+
+    /// Persist freshly derived privacy keys for `user_address`.
+    async fn save_privacy_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error>;
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error>;
 
@@ -198,7 +211,7 @@ pub trait Storage: crate::chain::ContractDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::map_user_keys;
+    use super::map_privacy_keys;
     use crate::{
         state::SqliteStorage,
         types::{lock_reveal_flag, set_reveal_sensitive},
@@ -207,12 +220,12 @@ mod tests {
     const ADDRESS: &str = "GTESTACCOUNTWITHNOSTOREDKEYS";
 
     #[test]
-    fn missing_user_keys_error_redacts_the_address() {
+    fn missing_privacy_keys_error_redacts_the_address() {
         let _guard = lock_reveal_flag();
         set_reveal_sensitive(false);
         let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
 
-        let err = map_user_keys(&storage, ADDRESS).expect_err("no keys are stored");
+        let err = map_privacy_keys(&storage, ADDRESS).expect_err("no keys are stored");
         let rendered = err.to_string();
 
         assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");

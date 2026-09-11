@@ -54,9 +54,16 @@ impl Account {
     }
 
     /// Locally derived note and encryption public keys for this account.
-    #[wasm_bindgen(js_name = userPublicKeys)]
-    pub async fn user_public_keys(&self) -> Result<UserPublicKeys, JsError> {
-        let keys = self.inner.user_public_keys().await.map_err(pool_err)?;
+    #[wasm_bindgen(js_name = privacyKeys)]
+    pub async fn privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.privacy_keys().await.map_err(pool_err)?;
+        Ok(UserPublicKeys::from(keys))
+    }
+
+    /// Derive and persist this account's privacy keys. Idempotent.
+    #[wasm_bindgen(js_name = derivePrivacyKeys)]
+    pub async fn derive_privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.derive_privacy_keys().await.map_err(pool_err)?;
         Ok(UserPublicKeys::from(keys))
     }
 

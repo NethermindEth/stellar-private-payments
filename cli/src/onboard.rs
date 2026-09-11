@@ -62,7 +62,7 @@ pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
             account.alias
         );
     }
-    if storage.get_user_keys(&account.address)?.is_none() {
+    if storage.get_privacy_keys(&account.address)?.is_none() {
         bail!(
             "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
@@ -104,7 +104,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     }
 
     // 4. Derive privacy keys.
-    if storage.get_user_keys(&account.address)?.is_some() {
+    if storage.get_privacy_keys(&account.address)?.is_some() {
         say(interactive, "Privacy keys already present.");
     } else {
         if interactive {
@@ -316,7 +316,7 @@ mod tests {
 
         assert!(
             storage
-                .get_user_keys(owner.public_key())
+                .get_privacy_keys(owner.public_key())
                 .expect("read keys")
                 .is_some()
         );
@@ -342,7 +342,7 @@ mod tests {
         );
         assert!(
             storage
-                .get_user_keys(owner.public_key())
+                .get_privacy_keys(owner.public_key())
                 .expect("read keys")
                 .is_none()
         );

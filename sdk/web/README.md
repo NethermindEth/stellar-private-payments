@@ -43,7 +43,8 @@ const client = await Client.new({
 await client.backgroundSync();
 
 const account = await client.account({ networkPassphrase }, signer);
-console.log(await account.userPublicKeys());
+await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
+console.log(await account.privacyKeys());
 console.log(await account.isRegistered());
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
@@ -71,7 +72,7 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 |--------|----------------------------------------------------------|
 | `Storage.open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ UserKeys: address }` probe) |
+| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
 
 The package exports a `Storage` namespace with `open` only; `fork` / `call` are on the opened handle.
 
@@ -94,7 +95,7 @@ The package exports a `Storage` namespace with `open` only; `fork` / `call` are 
 | `sync()` | Explicit foreground catch-up |
 | `operationalFeed(limit)` | Recent deployment activity |
 | `recipientLookup(address)` | Recipient registry lookup |
-| `account({ networkPassphrase, userAddress?, signerAddress? }, signer)` | Bind wallet, verify the owner's derivation signature before creating missing keys, return `Account` |
+| `account({ networkPassphrase, userAddress?, signerAddress? }, signer)` | Bind wallet and return `Account` |
 | `aspState()` | On-chain ASP membership state |
 | `allContractsData()` | On-chain pool + ASP state |
 | `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Verify a disclosure receipt (uses this client's prover) |
@@ -113,7 +114,8 @@ Walletless verification — no `Storage` / `Client`. Prover worker URL defaults 
 |--------|-------------|
 | `userAddress` | Connected Stellar address |
 | `portfolio()` | Balances across all enabled pools |
-| `userPublicKeys()` | Note + encryption public keys |
+| `privacyKeys()` | Note + encryption public keys |
+| `derivePrivacyKeys()` | Derive and store privacy keys from the owner's wallet signature |
 | `aspSecret()` | ASP membership blinding |
 | `userNotes(limit)` | Notes across pools (newest first) |
 | `isRegistered()` | On-chain public key registry entry exists |
