@@ -407,7 +407,7 @@ fn insert_two_leaves_extends_touched_entries() {
         MerkleDataKey::Levels,
         MerkleDataKey::NextIndex,
         MerkleDataKey::Root(1),
-        MerkleDataKey::FilledSubtree(1),
+        MerkleDataKey::FilledSubtrees,
     ] {
         assert_eq!(
             entry_ttl(&env, &pool_id, &key),
@@ -422,7 +422,7 @@ fn insert_two_leaves_extends_touched_entries() {
 }
 
 #[test]
-fn the_tree_stores_no_zero_hashes() {
+fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let levels = 8u32;
@@ -434,12 +434,14 @@ fn the_tree_stores_no_zero_hashes() {
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
 
-    env.as_contract(&pool_id, || {
-        let storage = env.storage().persistent();
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
-        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    let filled: Vec<U256> = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::FilledSubtrees)
+            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
     });
+
+    assert_eq!(filled.len(), levels.saturating_sub(1));
 }
 
 #[test]
@@ -598,6 +600,47 @@ fn the_root_slot_wraps_after_ninety_inserts() {
         assert_eq!(slot, 0);
         assert!(!known);
     });
+}
+
+/// An insertion whose whole path consists of right children reads the packed
+/// vector without changing it, so the write back is skipped.
+#[test]
+fn the_filled_subtrees_are_not_rewritten_for_an_all_right_path() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let filled = |id: &Address| -> Vec<U256> {
+        env.as_contract(id, || {
+            env.storage()
+                .persistent()
+                .get(&MerkleDataKey::FilledSubtrees)
+                .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
+        })
+    };
+    for pair in 0..3u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    let before = filled(&pool_id);
+    let root_before = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected a root to exist: {err:?}"))
+    });
+
+    insert_pair(&env, &pool_id, 6, 7);
+
+    let root_after = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected a root to exist: {err:?}"))
+    });
+    assert_eq!(filled(&pool_id), before);
+    assert_ne!(root_after, root_before);
 }
 
 #[test]

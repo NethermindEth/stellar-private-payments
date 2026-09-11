@@ -11,7 +11,7 @@
 //! Authorization should be handled by the calling main contract before invoking
 //! these functions.
 
-use soroban_sdk::{Env, U256, contracttype};
+use soroban_sdk::{Env, U256, Vec, contracttype};
 use soroban_utils::{bump_entry, poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
@@ -39,8 +39,9 @@ pub enum MerkleDataKey {
     Levels,
     /// Next available index for leaf insertion
     NextIndex,
-    /// Subtree hashes at each level (indexed by level)
-    FilledSubtree(u32),
+    /// Left-sibling hashes along the insertion path, element `i` holding the
+    /// hash at level `i + 1`
+    FilledSubtrees,
     /// Historical roots ring buffer
     Root(u32),
 }
@@ -89,10 +90,11 @@ impl MerkleTreeWithHistory {
 
         // Only levels 1 to levels - 1 are ever read back: the leaf level is
         // hashed from the two leaves and the top level is the root itself.
+        let mut filled = Vec::new(env);
         for i in 1..levels {
-            let z = zero_hash(env, i).ok_or(Error::NotInitialized)?;
-            storage.set(&MerkleDataKey::FilledSubtree(i), &z);
+            filled.push_back(zero_hash(env, i).ok_or(Error::NotInitialized)?);
         }
+        storage.set(&MerkleDataKey::FilledSubtrees, &filled);
 
         // Set initial root to zero hash at top level
         let root_0 = zero_hash(env, levels).ok_or(Error::NotInitialized)?;
@@ -152,25 +154,34 @@ impl MerkleTreeWithHistory {
         // two leaves)
         let mut current_index = next_index >> 1;
 
+        let mut filled: Vec<U256> = storage
+            .get(&MerkleDataKey::FilledSubtrees)
+            .ok_or(Error::NotInitialized)?;
+        bump_entry(env, &MerkleDataKey::FilledSubtrees);
+        let mut filled_changed = false;
+
         // Update the tree by recomputing hashes along the path to root
         // Start at level 1 since current_hash is already the parent of the two
         // leaves
         for lvl in 1..levels {
             let is_right = current_index & 1 == 1;
-            let subtree_key = MerkleDataKey::FilledSubtree(lvl);
+            let slot = lvl.checked_sub(1).ok_or(Error::Overflow)?;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = storage.get(&subtree_key).ok_or(Error::NotInitialized)?;
-                bump_entry(env, &subtree_key);
+                let left = filled.get(slot).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                storage.set(&subtree_key, &current_hash);
-                bump_entry(env, &subtree_key);
+                filled.set(slot, current_hash.clone());
+                filled_changed = true;
                 let zero_val = zero_hash(env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, current_hash, zero_val);
             }
             current_index >>= 1;
+        }
+
+        if filled_changed {
+            storage.set(&MerkleDataKey::FilledSubtrees, &filled);
         }
 
         // The new root goes in the slot the advanced leaf counter names, which
