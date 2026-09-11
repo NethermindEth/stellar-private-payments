@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::{
     Error, ExtData, PoolGvkContract, PoolGvkContractClient, Proof,
     gvk::{self, BabyJubJubPoint, GvkCiphertext, TRACEABLE, VIEW_ONLY},
-    merkle_with_history::MerkleDataKey,
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
     policy,
     pool_gvk::DataKey,
 };
@@ -152,15 +152,14 @@ fn pool_gvk_constructor_sets_state() {
             .get(&DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
-    let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+    let root_index = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
     });
 
     assert_eq!(stored_admin, setup.admin);
     assert_eq!(stored_max, max);
-    assert!(has_merkle_root);
+    assert_eq!(root_index, 0);
     assert_eq!(pool.get_admin_view_key(), admin_view_key);
     assert_eq!(pool.get_gvk_mode(), TRACEABLE);
     assert_eq!(

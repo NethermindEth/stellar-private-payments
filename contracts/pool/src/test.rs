@@ -319,15 +319,14 @@ fn pool_constructor_sets_state() {
             .get(&crate::pool::DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
-    let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+    let root_index = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
     });
 
     assert_eq!(stored_admin, setup.admin);
     assert_eq!(stored_max, max);
-    assert!(has_merkle_root);
+    assert_eq!(root_index, 0);
     let _root = pool.get_root();
 }
 
@@ -407,7 +406,6 @@ fn insert_two_leaves_extends_touched_entries() {
     for key in [
         MerkleDataKey::Levels,
         MerkleDataKey::NextIndex,
-        MerkleDataKey::CurrentRootIndex,
         MerkleDataKey::Root(1),
         MerkleDataKey::FilledSubtree(1),
     ] {
@@ -522,9 +520,84 @@ fn get_last_root_extends_the_current_slot() {
         EXTEND_TO
     );
     assert_eq!(
-        entry_ttl(&env, &pool_id, &MerkleDataKey::CurrentRootIndex),
+        entry_ttl(&env, &pool_id, &MerkleDataKey::NextIndex),
         EXTEND_TO
     );
+}
+
+#[test]
+fn the_root_slot_follows_the_leaf_count() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(
+        &env,
+        &setup,
+        &verifier,
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    for nullifier in 1..=3u32 {
+        let (proof, ext) = mk_transact_proof(
+            &env,
+            &pool,
+            member_root.clone(),
+            non_member_root.clone(),
+            nullifier,
+        );
+        pool.transact(&proof, &ext, &Address::generate(&env));
+    }
+    let third_root = pool.get_root();
+
+    let slot = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
+    });
+    let slot_three: U256 = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::Root(3))
+            .unwrap_or_else(|| panic!("expected the third slot to hold a root"))
+    });
+
+    assert_eq!(slot, 3);
+    assert_eq!(slot_three, third_root);
+}
+
+#[test]
+fn the_root_slot_wraps_after_ninety_inserts() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let first_root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected the initial root to exist: {err:?}"))
+    });
+
+    for pair in 0..90u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+
+    env.as_contract(&pool_id, || {
+        let slot = MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"));
+        let known = MerkleTreeWithHistory::is_known_root(&env, &first_root)
+            .unwrap_or_else(|err| panic!("expected the root history to be readable: {err:?}"));
+
+        assert_eq!(slot, 0);
+        assert!(!known);
+    });
 }
 
 #[test]
