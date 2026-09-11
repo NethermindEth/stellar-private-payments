@@ -374,7 +374,7 @@ fn merkle_init_only_once() {
 }
 
 #[test]
-fn the_tree_stores_no_zero_hashes() {
+fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let levels = 8u32;
@@ -386,12 +386,14 @@ fn the_tree_stores_no_zero_hashes() {
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
 
-    env.as_contract(&pool_id, || {
-        let storage = env.storage().persistent();
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
-        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    let filled: Vec<U256> = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::FilledSubtrees)
+            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
     });
+
+    assert_eq!(filled.len(), levels.saturating_sub(1));
 }
 
 #[test]
@@ -459,6 +461,47 @@ fn the_root_slot_wraps_after_ninety_inserts() {
     assert!(!pool.is_known_root(&first_root));
     assert!(pool.is_known_root(&slot_one_root));
     assert!(pool.is_known_root(&slot_eighty_nine_root));
+}
+
+/// An insertion whose whole path consists of right children reads the packed
+/// vector without changing it, so the write back is skipped.
+#[test]
+fn the_filled_subtrees_are_not_rewritten_for_an_all_right_path() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let filled = || -> Vec<U256> {
+        env.as_contract(&pool_id, || {
+            env.storage()
+                .persistent()
+                .get(&MerkleDataKey::FilledSubtrees)
+                .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
+        })
+    };
+    for pair in 0..3u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    let writes_with_a_left_child = env.cost_estimate().resources().write_entries;
+    let before = filled();
+    let root_before = pool.get_root();
+
+    insert_pair(&env, &pool_id, 6, 7);
+
+    let writes_without_a_left_child = env.cost_estimate().resources().write_entries;
+    assert_eq!(
+        writes_without_a_left_child,
+        writes_with_a_left_child.saturating_sub(1)
+    );
+    assert_eq!(filled(), before);
+    assert_ne!(pool.get_root(), root_before);
 }
 
 #[test]

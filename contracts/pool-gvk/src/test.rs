@@ -161,7 +161,7 @@ fn pool_gvk_constructor_sets_state() {
 }
 
 #[test]
-fn the_tree_stores_no_zero_hashes() {
+fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let levels = 8u32;
@@ -175,12 +175,14 @@ fn the_tree_stores_no_zero_hashes() {
         TRACEABLE,
     );
 
-    env.as_contract(&pool_id, || {
-        let storage = env.storage().persistent();
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
-        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    let filled: Vec<U256> = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::FilledSubtrees)
+            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
     });
+
+    assert_eq!(filled.len(), levels.saturating_sub(1));
 }
 
 #[test]
