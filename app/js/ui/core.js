@@ -12,6 +12,10 @@ export const App = {
         wallet: {
             connected: false,
             address: null,
+            // The account asked to sign for the notes `address` owns. Held
+            // apart because the two need not be the same account; with nothing
+            // able to choose one, connecting sets it to the owner.
+            signingAddress: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,

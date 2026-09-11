@@ -4,6 +4,7 @@
  */
 
 import { client, isRuntimeReady } from '../wasm-facade.js';
+import { accountSession } from '../account-session.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -52,9 +53,7 @@ export async function createAppPool() {
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
     if (!poolContract) throw new Error('Pool contract ID not available');
-    await client().openAccount(
-        { networkPassphrase: App.state.wallet.networkPassphrase, userAddress: App.state.wallet.address },
-    );
+    await client().openAccount(accountSession(App.state.wallet));
     const pool = await client().account().pool({ poolContract });
     activeSession = pool;
     activeSessionContractId = poolContract;
