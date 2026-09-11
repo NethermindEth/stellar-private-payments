@@ -5,7 +5,7 @@ use stellar_xdr::{
     self as xdr, Limits, ReadXdr, SorobanAuthorizationEntry, SorobanTransactionData, WriteXdr,
 };
 
-use super::{contract_state::PreparedSorobanTx, rpc::SimulateTransactionResponse};
+use super::{contract_error, contract_state::PreparedSorobanTx, rpc::SimulateTransactionResponse};
 
 impl SimulateTransactionResponse {
     /// Returns the first host-function simulation result.
@@ -60,7 +60,9 @@ impl SimulateTransactionResponse {
     /// in scope.
     pub fn ensure_success(&self, config: Option<&crate::types::ContractConfig>) -> Result<()> {
         if let Some(err) = &self.error {
-            return match crate::chain::contract_error::translate(err, config) {
+            let info = contract_error::translate_events(&self.events, config)
+                .or_else(|| contract_error::translate(err, config));
+            return match info {
                 Some(info) => Err(anyhow!("transaction simulation failed: {info}\n\n{err}")),
                 None => Err(anyhow!("transaction simulation failed: {err}")),
             };
@@ -234,6 +236,25 @@ pub(crate) mod test_fixtures {
 
 #[cfg(test)]
 mod tests {
+    /// A minimal deployment whose single pool is the contract named by the
+    /// error fixtures below, so `classify_contract` can resolve it.
+    const TEST_CONFIG_JSON: &str = r#"{
+        "network": "test",
+        "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "verifiers": {},
+        "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "pools": [{
+            "poolContractId": "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ",
+            "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "deploymentLedger": 1,
+            "enabled": true,
+            "policyFlags": [],
+            "asset": {"kind": "native"}
+        }]
+    }"#;
     use super::*;
     use stellar_xdr::{Limits, TransactionExt, WriteXdr};
     use test_fixtures::{empty_envelope, empty_soroban_data};
@@ -252,6 +273,7 @@ mod tests {
             ),
             min_resource_fee: Some("500".to_string()),
             error: None,
+            events: Vec::new(),
         };
         sim.results
             .push(crate::chain::rpc::SimulateHostFunctionResult {
@@ -283,6 +305,7 @@ mod tests {
             ),
             min_resource_fee: Some("0".to_string()),
             error: None,
+            events: Vec::new(),
         };
         sim.results
             .push(crate::chain::rpc::SimulateHostFunctionResult {
@@ -317,6 +340,7 @@ mod tests {
             transaction_data: None,
             min_resource_fee: None,
             error: Some("boom".to_string()),
+            events: Vec::new(),
         };
         assert!(assemble_soroban_transaction(&raw, &sim, None).is_err());
     }
@@ -326,23 +350,6 @@ mod tests {
     #[test]
     fn ensure_success_reports_readable_message_and_keeps_raw_text() {
         const POOL_ERROR_WITH_EVENT_LOG: &str = "transaction simulation failed: HostError: Error(Contract, #2)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, topics:[error, Error(Contract, #2)], data:\"escalating Ok(ScErrorType::Contract) frame-exit to Err\"";
-        const TEST_CONFIG_JSON: &str = r#"{
-            "network": "test",
-            "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-            "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-            "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-            "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-            "verifiers": {},
-            "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-            "pools": [{
-                "poolContractId": "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ",
-                "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-                "deploymentLedger": 1,
-                "enabled": true,
-                "policyFlags": [],
-                "asset": {"kind": "native"}
-            }]
-        }"#;
 
         let config: crate::types::ContractConfig =
             serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
@@ -353,6 +360,7 @@ mod tests {
             transaction_data: None,
             min_resource_fee: None,
             error: Some(POOL_ERROR_WITH_EVENT_LOG.to_string()),
+            events: Vec::new(),
         };
 
         let err = sim
@@ -362,5 +370,67 @@ mod tests {
         assert!(rendered.contains("This pool is full"), "{rendered}");
         assert!(rendered.contains("pool::MerkleTreeFull"), "{rendered}");
         assert!(rendered.contains(POOL_ERROR_WITH_EVENT_LOG), "{rendered}");
+    }
+
+    /// The structured events are authoritative: the error prose is display
+    /// output, so when the two disagree the typed `DiagnosticEvent` wins.
+    ///
+    /// The text here names `#2` (`MerkleTreeFull`) while the event carries
+    /// `#9` (`AlreadySpentNullifier`), so only the events path can produce
+    /// the expected message.
+    #[test]
+    fn ensure_success_prefers_structured_events_over_the_error_text() {
+        use std::str::FromStr;
+
+        const POOL_ID: &str = "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ";
+        const TEXT_SAYS_MERKLE_TREE_FULL: &str = "HostError: Error(Contract, #2)\n\n   0: [Diagnostic Event] contract:\
+             CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ, \
+             topics:[error, Error(Contract, #2)], data:\"escalating\"";
+
+        let config: crate::types::ContractConfig =
+            serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let event = xdr::DiagnosticEvent {
+            in_successful_contract_call: false,
+            event: xdr::ContractEvent {
+                ext: xdr::ExtensionPoint::V0,
+                contract_id: Some(xdr::ContractId(xdr::Hash(
+                    stellar_strkey::Contract::from_str(POOL_ID)
+                        .expect("strkey")
+                        .0,
+                ))),
+                type_: xdr::ContractEventType::Diagnostic,
+                body: xdr::ContractEventBody::V0(xdr::ContractEventV0 {
+                    topics: vec![
+                        xdr::ScVal::Symbol(xdr::ScSymbol("error".try_into().expect("symbol"))),
+                        xdr::ScVal::Error(xdr::ScError::Contract(9)),
+                    ]
+                    .try_into()
+                    .expect("topics"),
+                    data: xdr::ScVal::Void,
+                }),
+            },
+        };
+
+        let sim = SimulateTransactionResponse {
+            latest_ledger: 0,
+            result: None,
+            results: vec![],
+            transaction_data: None,
+            min_resource_fee: None,
+            error: Some(TEXT_SAYS_MERKLE_TREE_FULL.to_string()),
+            events: vec![event.to_xdr_base64(Limits::none()).expect("xdr")],
+        };
+
+        let rendered = sim
+            .ensure_success(Some(&config))
+            .expect_err("error carries a message")
+            .to_string();
+        assert!(
+            rendered.contains("pool::AlreadySpentNullifier"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("MerkleTreeFull"), "{rendered}");
+        // The raw text is still kept for debugging, even when overridden.
+        assert!(rendered.contains(TEXT_SAYS_MERKLE_TREE_FULL), "{rendered}");
     }
 }

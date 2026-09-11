@@ -10,6 +10,8 @@
 //! [`ContractConfig`], resolves the contract id to a [`ContractKind`] and
 //! looks up a human message (`resolve` / `translate`).
 
+use stellar_xdr::{self as xdr, Limits, ReadXdr};
+
 use crate::types::{ContractConfig, ContractKind};
 
 /// A Soroban contract error recovered from RPC simulation error text.
@@ -325,17 +327,78 @@ pub fn resolve(info: &mut ContractErrorInfo, kind: Option<ContractKind>) {
     }
 }
 
+/// Reads a contract error out of one base64 `DiagnosticEvent`.
+///
+/// Returns `None` for events that are not a contract failure — the topics of
+/// an ordinary contract event carry no `ScVal::Error`.
+fn parse_diagnostic_event(base64: &str) -> Option<ContractErrorInfo> {
+    let event = xdr::DiagnosticEvent::from_xdr_base64(base64, Limits::none()).ok()?;
+    let xdr::ContractEventBody::V0(body) = &event.event.body;
+    let code = body.topics.iter().find_map(|topic| match topic {
+        xdr::ScVal::Error(xdr::ScError::Contract(code)) => Some(*code),
+        _ => None,
+    })?;
+    Some(ContractErrorInfo {
+        code,
+        contract_id: event.event.contract_id.as_ref().map(|id| {
+            stellar_strkey::Contract(id.0.0)
+                .to_string()
+                .as_str()
+                .to_string()
+        }),
+        kind: None,
+        name: None,
+        message: None,
+    })
+}
+
+/// Recovers a contract error from a simulation's diagnostic events.
+///
+/// Preferred over [`parse_contract_error`]: the code arrives as
+/// `ScVal::Error(ScError::Contract(n))` and the contract id as
+/// `ContractEvent::contract_id` — two fields of the *same* event, so they
+/// cannot be mismatched, and nothing depends on how the RPC words its error
+/// text (which is display output, not API).
+///
+/// `events` is in emission order, and a frame fails only after the frames it
+/// called, so the **last** error event is the outermost one — the error the
+/// caller actually received. That is the same frame
+/// [`parse_contract_error`] picks out of the newest-first text log.
+pub fn parse_contract_error_events(events: &[String]) -> Option<ContractErrorInfo> {
+    events
+        .iter()
+        .rev()
+        .find_map(|b64| parse_diagnostic_event(b64))
+}
+
+/// Classifies `info`'s contract id against `config` and fills in the
+/// name/message, when both a config and an id are available.
+fn resolve_against_config(info: &mut ContractErrorInfo, config: Option<&ContractConfig>) {
+    let kind = match (config, &info.contract_id) {
+        (Some(config), Some(contract_id)) => config.classify_contract(contract_id),
+        _ => None,
+    };
+    resolve(info, kind);
+}
+
+/// Like [`translate`], but reads the structured diagnostic events instead of
+/// the error text. Prefer this when the events are available.
+pub fn translate_events(
+    events: &[String],
+    config: Option<&ContractConfig>,
+) -> Option<ContractErrorInfo> {
+    let mut info = parse_contract_error_events(events)?;
+    resolve_against_config(&mut info, config);
+    Some(info)
+}
+
 /// Parses `raw`, classifies the raising contract against `config` (when both
 /// a config and a recovered contract id are available), and resolves the
 /// code to a name/message. Pass `config: None` when no deployment is in
 /// scope — the result is still a parsed, if unresolved, error.
 pub fn translate(raw: &str, config: Option<&ContractConfig>) -> Option<ContractErrorInfo> {
     let mut info = parse_contract_error(raw)?;
-    let kind = match (config, &info.contract_id) {
-        (Some(config), Some(contract_id)) => config.classify_contract(contract_id),
-        _ => None,
-    };
-    resolve(&mut info, kind);
+    resolve_against_config(&mut info, config);
     Some(info)
 }
 
@@ -515,5 +578,210 @@ Event log (newest first):
         let info = parse_contract_error("HostError: Error(Contract, #9)").expect("parses");
         assert_eq!(info.code, 9);
         assert_eq!(info.contract_id, None);
+    }
+
+    const POOL_ID: &str = "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ";
+    const VERIFIER_ID: &str = "CB2O4B67OKQC6J26KBNM3JK5J7SO63MCSRDCTPPNDTZM7HG5NKIASSV3";
+
+    fn contract_id(contract: &str) -> xdr::ContractId {
+        use std::str::FromStr;
+        xdr::ContractId(xdr::Hash(
+            stellar_strkey::Contract::from_str(contract)
+                .expect("strkey")
+                .0,
+        ))
+    }
+
+    fn encode(event: xdr::DiagnosticEvent) -> String {
+        use stellar_xdr::WriteXdr;
+        event.to_xdr_base64(Limits::none()).expect("xdr")
+    }
+
+    /// A `DiagnosticEvent` shaped the way Soroban stamps a failing frame:
+    /// `topics:[error, Error(Contract, #code)]`.
+    fn error_event(contract: &str, code: u32) -> String {
+        encode(xdr::DiagnosticEvent {
+            in_successful_contract_call: false,
+            event: xdr::ContractEvent {
+                ext: xdr::ExtensionPoint::V0,
+                contract_id: Some(contract_id(contract)),
+                type_: xdr::ContractEventType::Diagnostic,
+                body: xdr::ContractEventBody::V0(xdr::ContractEventV0 {
+                    topics: vec![
+                        xdr::ScVal::Symbol(xdr::ScSymbol("error".try_into().expect("symbol"))),
+                        xdr::ScVal::Error(xdr::ScError::Contract(code)),
+                    ]
+                    .try_into()
+                    .expect("topics"),
+                    data: xdr::ScVal::Void,
+                }),
+            },
+        })
+    }
+
+    /// An ordinary contract event, carrying no `ScVal::Error`.
+    fn ordinary_event(contract: &str) -> String {
+        encode(xdr::DiagnosticEvent {
+            in_successful_contract_call: true,
+            event: xdr::ContractEvent {
+                ext: xdr::ExtensionPoint::V0,
+                contract_id: Some(contract_id(contract)),
+                type_: xdr::ContractEventType::Contract,
+                body: xdr::ContractEventBody::V0(xdr::ContractEventV0 {
+                    topics: vec![xdr::ScVal::Symbol(xdr::ScSymbol(
+                        "transfer".try_into().expect("symbol"),
+                    ))]
+                    .try_into()
+                    .expect("topics"),
+                    data: xdr::ScVal::Void,
+                }),
+            },
+        })
+    }
+
+    #[test]
+    fn events_yield_the_code_and_contract_without_reading_any_text() {
+        let info = parse_contract_error_events(&[error_event(POOL_ID, 2)]).expect("parses");
+        assert_eq!(info.code, 2);
+        assert_eq!(info.contract_id, Some(POOL_ID.to_string()));
+    }
+
+    /// Events arrive oldest-first and a frame fails only after the frames it
+    /// called, so a verifier rejection is stamped *before* the pool error it
+    /// causes. The caller received the pool's error, so that is the one to
+    /// report — the same outermost frame the text log yields.
+    #[test]
+    fn events_report_the_outermost_frame_not_the_first_failure() {
+        let events = vec![error_event(VERIFIER_ID, 0), error_event(POOL_ID, 7)];
+        let info = parse_contract_error_events(&events).expect("parses");
+        assert_eq!(info.code, 7);
+        assert_eq!(info.contract_id, Some(POOL_ID.to_string()));
+    }
+
+    #[test]
+    fn events_skip_ordinary_events_to_find_the_failing_frame() {
+        let events = vec![
+            ordinary_event(POOL_ID),
+            error_event(POOL_ID, 9),
+            ordinary_event(VERIFIER_ID),
+        ];
+        let info = parse_contract_error_events(&events).expect("parses");
+        assert_eq!(info.code, 9);
+        assert_eq!(info.contract_id, Some(POOL_ID.to_string()));
+    }
+
+    #[test]
+    fn events_without_a_contract_error_yield_none() {
+        assert_eq!(parse_contract_error_events(&[]), None);
+        assert_eq!(
+            parse_contract_error_events(&[ordinary_event(POOL_ID)]),
+            None
+        );
+        assert_eq!(
+            parse_contract_error_events(&["not base64 xdr".to_string()]),
+            None
+        );
+    }
+
+    /// The structured path and the text path must agree on the same failure,
+    /// since either can be the one that runs.
+    #[test]
+    fn structured_and_text_paths_agree() {
+        let from_events = parse_contract_error_events(&[error_event(POOL_ID, 2)]).expect("events");
+        let from_text = parse_contract_error(POOL_ERROR_WITH_EVENT_LOG).expect("text");
+        assert_eq!(from_events.code, from_text.code);
+        assert_eq!(from_events.contract_id, from_text.contract_id);
+    }
+}
+
+/// Pins the tables in this file against the contracts they mirror.
+///
+/// The tables are hand-written, so nothing stops a contract from gaining an
+/// `Error` variant while the SDK keeps reporting `unrecognized … error #N`,
+/// or from renaming one while the SDK keeps the stale name. These tests
+/// compare both directions against the real `#[contracterror]` enums and
+/// fail until the table is updated.
+///
+/// Gated to non-wasm: the contract crates are dev-dependencies only under
+/// `cfg(not(target_arch = "wasm32"))`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod contract_coherence_tests {
+    use soroban_sdk::InvokeError;
+
+    use super::*;
+
+    /// Codes to probe. Comfortably above the highest code any of the
+    /// contracts define (`pool-gvk`'s 17), so a newly added variant is
+    /// caught rather than skipped.
+    const PROBED_CODES: std::ops::Range<u32> = 0..64;
+
+    /// Asserts the SDK table for `kind` and the contract's `Error` enum
+    /// define exactly the same codes, under exactly the same names.
+    ///
+    /// `variant_for_code` is the contract's generated
+    /// `TryFrom<InvokeError>`, which answers `None` for codes the contract
+    /// does not define. The variant name comes from its `Debug` derive.
+    fn assert_table_matches_contract<E: std::fmt::Debug>(
+        kind: ContractKind,
+        variant_for_code: impl Fn(u32) -> Option<E>,
+    ) {
+        for code in PROBED_CODES {
+            match (variant_for_code(code), describe(kind, code)) {
+                (Some(variant), Some((name, _))) => assert_eq!(
+                    format!("{variant:?}"),
+                    name,
+                    "{}: #{code} is `{variant:?}` in the contract but `{name}` in the SDK table",
+                    kind.as_str(),
+                ),
+                (Some(variant), None) => panic!(
+                    "{} defines #{code} (`{variant:?}`) but the SDK table has no entry for it — \
+                     add one to the table in this file",
+                    kind.as_str(),
+                ),
+                (None, Some((name, _))) => panic!(
+                    "the SDK table claims {}::#{code} is `{name}`, but the contract defines no \
+                     such code — remove or correct the entry",
+                    kind.as_str(),
+                ),
+                (None, None) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn pool_table_matches_the_contract() {
+        assert_table_matches_contract(ContractKind::Pool, |code| {
+            pool::Error::try_from(InvokeError::Contract(code)).ok()
+        });
+    }
+
+    /// `PoolGvk` is looked up as [`POOL_CODES`] plus [`POOL_GVK_EXTRA_CODES`],
+    /// so this also pins that the split still covers the contract's full enum.
+    #[test]
+    fn pool_gvk_table_matches_the_contract() {
+        assert_table_matches_contract(ContractKind::PoolGvk, |code| {
+            pool_gvk::Error::try_from(InvokeError::Contract(code)).ok()
+        });
+    }
+
+    #[test]
+    fn asp_membership_table_matches_the_contract() {
+        assert_table_matches_contract(ContractKind::AspMembership, |code| {
+            asp_membership::Error::try_from(InvokeError::Contract(code)).ok()
+        });
+    }
+
+    #[test]
+    fn asp_non_membership_table_matches_the_contract() {
+        assert_table_matches_contract(ContractKind::AspNonMembership, |code| {
+            asp_non_membership::Error::try_from(InvokeError::Contract(code)).ok()
+        });
+    }
+
+    #[test]
+    fn groth16_verifier_table_matches_the_contract() {
+        assert_table_matches_contract(ContractKind::Groth16Verifier, |code| {
+            contract_types::Groth16Error::try_from(InvokeError::Contract(code)).ok()
+        });
     }
 }

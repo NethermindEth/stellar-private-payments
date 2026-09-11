@@ -229,6 +229,7 @@ mod tests {
             ),
             min_resource_fee: Some(resource_fee.to_string()),
             error: None,
+            events: Vec::new(),
         };
         sim.results.push(SimulateHostFunctionResult {
             auth: vec![],

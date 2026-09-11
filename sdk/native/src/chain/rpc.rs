@@ -240,6 +240,8 @@ pub struct SimulateTransactionResponse {
     pub min_resource_fee: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(deserialize_with = "deserialize_default_from_null", default)]
+    pub events: Vec<String>,
 }
 
 /// Response from Soroban RPC `sendTransaction`.
