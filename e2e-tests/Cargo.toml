@@ -21,6 +21,10 @@ circuits = { workspace = true, features = ["std"] }
 contract-types = { workspace = true }
 num-bigint = { workspace = true }
 pool = { workspace = true }
+pool-core = { workspace = true }
+pool-gvk = { workspace = true }
+public-key-registry = { workspace = true }
+soroban-env-host = "=27.0.1"
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Shared deps
 soroban-utils = { workspace = true, features = ["testutils"] }
