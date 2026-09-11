@@ -11,7 +11,7 @@ members = [
     "tools/ceremony-cli",
     "tools/circuit-compiler",
 ]
-exclude = ["tools/bootnode"]
+exclude = ["tools/bootnode", "integration-tests"]
 resolver = "3"
 
 [workspace.package]
