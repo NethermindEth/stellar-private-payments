@@ -438,23 +438,23 @@ fn governor_rows() -> [Row; 3] {
 ///
 /// A change to what a contract stores updates these in the same commit.
 const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 61, 27),
-    ("pool transact, transfer, blocklist, fresh tree", 57, 25),
-    ("pool transact, withdrawal, blocklist, fresh tree", 60, 27),
-    ("pool transact, transfer, root one transaction old", 144, 24),
+    ("pool transact, deposit, blocklist, fresh tree", 42, 27),
+    ("pool transact, transfer, blocklist, fresh tree", 38, 25),
+    ("pool transact, withdrawal, blocklist, fresh tree", 41, 27),
+    ("pool transact, transfer, root one transaction old", 126, 24),
     (
         "pool transact, transfer, 91 idle days before the call",
-        57,
+        38,
         25,
     ),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        60,
+        41,
         25,
     ),
     ("pool get_root", 4, 0),
     ("pool pause, admin", 6, 2),
-    ("pool-gvk transact, transfer, view-only", 59, 25),
+    ("pool-gvk transact, transfer, view-only", 40, 25),
     ("asp-membership insert_leaf, first leaf", 29, 13),
     ("asp-non-membership insert_leaf, ninth key", 16, 10),
     ("asp-non-membership delete_leaf, one of nine", 16, 7),
@@ -562,7 +562,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (59, 24);
+const EXPECTED_REAL_PROOF: (u32, u32) = (41, 24);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

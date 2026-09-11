@@ -410,7 +410,6 @@ fn insert_two_leaves_extends_touched_entries() {
         MerkleDataKey::CurrentRootIndex,
         MerkleDataKey::Root(1),
         MerkleDataKey::FilledSubtree(1),
-        MerkleDataKey::Zeroes(1),
     ] {
         assert_eq!(
             entry_ttl(&env, &pool_id, &key),
@@ -422,6 +421,27 @@ fn insert_two_leaves_extends_touched_entries() {
         entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
         untouched_before
     );
+}
+
+#[test]
+fn the_tree_stores_no_zero_hashes() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        let storage = env.storage().persistent();
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
+        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    });
 }
 
 #[test]

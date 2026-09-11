@@ -170,6 +170,29 @@ fn pool_gvk_constructor_sets_state() {
 }
 
 #[test]
+fn the_tree_stores_no_zero_hashes() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 7, 11),
+        TRACEABLE,
+    );
+
+    env.as_contract(&pool_id, || {
+        let storage = env.storage().persistent();
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
+        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    });
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #14)")] // InvalidPolicyFlags = 14
 fn pool_gvk_constructor_rejects_invalid_policy_flags() {
     let env = test_env();
