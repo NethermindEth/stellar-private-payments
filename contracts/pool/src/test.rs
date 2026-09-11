@@ -298,6 +298,17 @@ fn test_env() -> Env {
     }
 }
 
+fn insert_pair(env: &Env, pool_id: &Address, left: u32, right: u32) {
+    env.as_contract(pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            env,
+            U256::from_u32(env, left),
+            U256::from_u32(env, right),
+        )
+        .unwrap_or_else(|err| panic!("expected leaf insertion to succeed: {err:?}"));
+    });
+}
+
 #[test]
 fn pool_constructor_sets_state() {
     let env = test_env();
@@ -382,6 +393,25 @@ fn the_tree_stores_no_zero_hashes() {
         assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
         assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
     });
+}
+
+#[test]
+fn is_known_root_finds_the_previous_root_after_one_insert() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let previous = pool.get_root();
+
+    insert_pair(&env, &pool_id, 1, 2);
+
+    assert!(pool.is_known_root(&previous));
 }
 
 #[test]
