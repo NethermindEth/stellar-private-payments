@@ -255,9 +255,9 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
+async function registerNow({ address, signerAddress, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
-    await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+    await client().openAccount({ networkPassphrase, userAddress: address, signerAddress }, signer);
     return client().account().registerPublicKeys({
         notePublicKeyHex: notePublicKey,
         encryptionPublicKeyHex: encryptionPublicKey,
@@ -266,6 +266,9 @@ async function registerNow({ address, notePublicKey, encryptionPublicKey, networ
 
 export async function runOnboardingWizard({
     address,
+    // The account asked to sign, which the caller may hold apart from the note
+    // owner; nothing chooses one today, so the owner signs for itself.
+    signerAddress = address,
     networkPassphrase,
     bootnodeRequired = false,
     signer = new FreighterSigner(),
@@ -483,7 +486,7 @@ export async function runOnboardingWizard({
                         try {
                             derive.disabled = true;
                             await client().openAccount(
-                                { networkPassphrase, userAddress: address },
+                                { networkPassphrase, userAddress: address, signerAddress },
                                 signer,
                             );
                             const result = await client().account().userPublicKeys();
@@ -672,6 +675,7 @@ export async function runOnboardingWizard({
                             register.disabled = true;
                             await registerNow({
                                 address,
+                                signerAddress,
                                 notePublicKey: state.keys.pubKey,
                                 encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
                                 networkPassphrase,
