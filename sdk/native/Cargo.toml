@@ -76,6 +76,8 @@ hex = { workspace = true }
 sha2 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+asp-membership = { workspace = true }
+asp-non-membership = { workspace = true }
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
 pool = { workspace = true }

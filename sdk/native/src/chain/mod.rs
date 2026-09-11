@@ -1,3 +1,4 @@
+mod contract_error;
 mod contract_state;
 mod conversions;
 mod ext_data_hash;
