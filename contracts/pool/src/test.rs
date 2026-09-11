@@ -1,16 +1,17 @@
 use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data,
-    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::Address as _,
+    testutils::{Address as _, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
+    xdr::ToXdr,
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
 
@@ -309,6 +310,21 @@ fn insert_pair(env: &Env, pool_id: &Address, left: u32, right: u32) {
     });
 }
 
+fn tree_state(env: &Env, pool_id: &Address) -> TreeState {
+    env.as_contract(pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::State)
+            .unwrap_or_else(|| panic!("expected the tree state to be stored"))
+    })
+}
+
+/// Keys of every persistent entry in the environment, the footprint an
+/// insertion may touch.
+fn persistent_keys(env: &Env, pool_id: &Address) -> Vec<Val> {
+    env.as_contract(pool_id, || env.storage().persistent().all().keys())
+}
+
 #[test]
 fn pool_constructor_sets_state() {
     let env = test_env();
@@ -386,14 +402,107 @@ fn the_filled_subtrees_are_one_entry() {
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
 
-    let filled: Vec<U256> = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .get(&MerkleDataKey::FilledSubtrees)
-            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
-    });
+    assert_eq!(
+        tree_state(&env, &pool_id).filled_subtrees.len(),
+        levels.saturating_sub(1)
+    );
+}
 
-    assert_eq!(filled.len(), levels.saturating_sub(1));
+/// Insertions rewrite the tree's entry and create no other, so the persistent
+/// keys a transaction touches do not depend on how many leaves the tree holds.
+///
+/// The listing covers every contract in the environment, so the pool is
+/// registered alone, with placeholder addresses for the contracts it names.
+#[test]
+fn the_tree_is_one_persistent_entry() {
+    let env = test_env();
+    let pool_id = env.register(
+        PoolContract,
+        (
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            U256::from_u32(&env, 1000),
+            8u32,
+            policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        ),
+    );
+    let keys_after_init = persistent_keys(&env, &pool_id);
+    let state_key: Val = MerkleDataKey::State.into_val(&env);
+    assert!(keys_after_init.contains(state_key));
+
+    for pair in 0..3u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+
+    assert_eq!(persistent_keys(&env, &pool_id), keys_after_init);
+}
+
+/// The entry's size is part of a transaction's declared footprint too, so it
+/// is fixed at `init` rather than growing with the ring.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 91 Merkle insertions exceed the 6h job limit"
+)]
+fn the_tree_entry_size_is_fixed() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let entry_len = || tree_state(&env, &pool_id).to_xdr(&env).len();
+    let len_after_init = entry_len();
+
+    insert_pair(&env, &pool_id, 0, 1);
+    let len_after_one_pair = entry_len();
+    for pair in 1..=ROOT_HISTORY_SIZE {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+
+    assert_eq!(len_after_one_pair, len_after_init);
+    assert_eq!(entry_len(), len_after_init);
+}
+
+/// Filling every ring slot with the empty root at `init` changes nothing
+/// about when that root stops being known: the ninetieth insertion overwrites
+/// slot zero, where the empty root lived before the slots were prefilled.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+)]
+fn the_empty_root_is_evicted_at_the_ninetieth_insertion() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let empty_root = pool.get_root();
+    assert!(pool.is_known_root(&empty_root));
+
+    for pair in 0..ROOT_HISTORY_SIZE.saturating_sub(1) {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    assert!(pool.is_known_root(&empty_root));
+
+    insert_pair(&env, &pool_id, 178, 179);
+
+    assert!(!pool.is_known_root(&empty_root));
 }
 
 #[test]
@@ -419,12 +528,10 @@ fn the_root_slot_follows_the_leaf_count() {
         MerkleTreeWithHistory::current_root_index(&env)
             .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
     });
-    let slot_three: U256 = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .get(&MerkleDataKey::Root(3))
-            .unwrap_or_else(|| panic!("expected the third slot to hold a root"))
-    });
+    let slot_three = tree_state(&env, &pool_id)
+        .roots
+        .get(3)
+        .unwrap_or_else(|| panic!("expected the third slot to hold a root"));
 
     assert_eq!(slot, 3);
     assert_eq!(slot_three, third_root);
@@ -461,47 +568,6 @@ fn the_root_slot_wraps_after_ninety_inserts() {
     assert!(!pool.is_known_root(&first_root));
     assert!(pool.is_known_root(&slot_one_root));
     assert!(pool.is_known_root(&slot_eighty_nine_root));
-}
-
-/// An insertion whose whole path consists of right children reads the packed
-/// vector without changing it, so the write back is skipped.
-#[test]
-fn the_filled_subtrees_are_not_rewritten_for_an_all_right_path() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-    let filled = || -> Vec<U256> {
-        env.as_contract(&pool_id, || {
-            env.storage()
-                .persistent()
-                .get(&MerkleDataKey::FilledSubtrees)
-                .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
-        })
-    };
-    for pair in 0..3u32 {
-        let left = pair.saturating_mul(2);
-        insert_pair(&env, &pool_id, left, left.saturating_add(1));
-    }
-    let writes_with_a_left_child = env.cost_estimate().resources().write_entries;
-    let before = filled();
-    let root_before = pool.get_root();
-
-    insert_pair(&env, &pool_id, 6, 7);
-
-    let writes_without_a_left_child = env.cost_estimate().resources().write_entries;
-    assert_eq!(
-        writes_without_a_left_child,
-        writes_with_a_left_child.saturating_sub(1)
-    );
-    assert_eq!(filled(), before);
-    assert_ne!(pool.get_root(), root_before);
 }
 
 #[test]
@@ -553,15 +619,9 @@ fn merkle_insert_updates_root_and_index() {
             MerkleTreeWithHistory::is_known_root(&env, &root)
                 .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
         );
-
-        // nextIndex should now be 2 (stored in persistent storage)
-        let next: u64 = env
-            .storage()
-            .persistent()
-            .get(&MerkleDataKey::NextIndex)
-            .unwrap_or_else(|| panic!("expected next index to be stored"));
-        assert_eq!(next, 2);
     });
+
+    assert_eq!(tree_state(&env, &pool_id).next_index, 2);
 }
 
 #[test]

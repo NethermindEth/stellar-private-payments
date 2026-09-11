@@ -384,17 +384,17 @@ fn registry_row() -> Row {
 ///
 /// A change to what a contract stores updates these in the same commit.
 const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 21, 8),
-    ("pool transact, transfer, blocklist, fresh tree", 17, 6),
-    ("pool transact, withdrawal, blocklist, fresh tree", 20, 8),
-    ("pool transact, transfer, root one transaction old", 18, 6),
+    ("pool transact, deposit, blocklist, fresh tree", 18, 6),
+    ("pool transact, transfer, blocklist, fresh tree", 14, 4),
+    ("pool transact, withdrawal, blocklist, fresh tree", 17, 6),
+    ("pool transact, transfer, root one transaction old", 14, 4),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        20,
-        6,
+        17,
+        4,
     ),
-    ("pool get_root", 3, 0),
-    ("pool-gvk transact, transfer, view-only", 19, 6),
+    ("pool get_root", 2, 0),
+    ("pool-gvk transact, transfer, view-only", 16, 4),
     ("asp-membership insert_leaf, first leaf", 17, 13),
     ("asp-non-membership insert_leaf, ninth key", 14, 10),
     ("asp-non-membership delete_leaf, one of nine", 14, 7),
@@ -423,6 +423,24 @@ fn assert_pinned(rows: &[Row]) {
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
+/// Asserts that two rows touched the same number of entries and wrote the
+/// same number of entries and bytes.
+///
+/// A transaction declares its footprint at simulation, so a call whose
+/// footprint depended on the tree's state would fail once another call
+/// landed first. The row against a root one transaction old is that call.
+fn assert_same_footprint(rows: &[Row], left: &str, right: &str) {
+    let footprint = |path: &str| {
+        let r = &rows
+            .iter()
+            .find(|row| row.path == path)
+            .unwrap_or_else(|| panic!("{path}: row not measured"))
+            .resources;
+        (r.memory_read_entries, r.write_entries, r.write_bytes)
+    };
+    assert_eq!(footprint(left), footprint(right), "{left} vs {right}");
+}
+
 fn print_table(rows: &[Row]) {
     println!("{HEADER}");
     for row in rows {
@@ -439,7 +457,8 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     rows.push(deposit.transact("pool transact, deposit, blocklist, fresh tree", 1, AMOUNT));
 
     let transfer = PoolFixture::new(policy::BLOCKLIST_BIT);
-    rows.push(transfer.transact("pool transact, transfer, blocklist, fresh tree", 1, 0));
+    let transfer_row = "pool transact, transfer, blocklist, fresh tree";
+    rows.push(transfer.transact(transfer_row, 1, 0));
 
     let withdrawal = PoolFixture::new(policy::BLOCKLIST_BIT);
     rows.push(withdrawal.transact(
@@ -449,14 +468,12 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     ));
 
     let stale = PoolFixture::new(policy::BLOCKLIST_BIT);
+    let stale_row = "pool transact, transfer, root one transaction old";
     let old_root = stale.client().get_root();
     stale.transact("unmeasured", 1, 0);
     let (proof, ext) = stale.proof(old_root, 3, 0);
     stale.client().transact(&proof, &ext, &stale.sender);
-    rows.push(measure(
-        &stale.env,
-        "pool transact, transfer, root one transaction old",
-    ));
+    rows.push(measure(&stale.env, stale_row));
 
     let both = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
     rows.push(both.transact(
@@ -476,10 +493,11 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 
     print_table(&rows);
     assert_pinned(&rows);
+    assert_same_footprint(&rows, transfer_row, stale_row);
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (20, 6);
+const EXPECTED_REAL_PROOF: (u32, u32) = (17, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

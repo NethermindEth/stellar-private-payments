@@ -6,7 +6,7 @@ use crate::{
     Error, ExtData, PoolGvkContract, PoolGvkContractClient, Proof,
     gvk::{self, BabyJubJubPoint, GvkCiphertext, TRACEABLE, VIEW_ONLY},
     hash_ext_data,
-    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
     pool_gvk::DataKey,
 };
@@ -175,14 +175,14 @@ fn the_filled_subtrees_are_one_entry() {
         TRACEABLE,
     );
 
-    let filled: Vec<U256> = env.as_contract(&pool_id, || {
+    let state: TreeState = env.as_contract(&pool_id, || {
         env.storage()
             .persistent()
-            .get(&MerkleDataKey::FilledSubtrees)
-            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
+            .get(&MerkleDataKey::State)
+            .unwrap_or_else(|| panic!("expected the tree state to be stored"))
     });
 
-    assert_eq!(filled.len(), levels.saturating_sub(1));
+    assert_eq!(state.filled_subtrees.len(), levels.saturating_sub(1));
 }
 
 #[test]

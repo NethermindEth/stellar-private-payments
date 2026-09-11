@@ -7,6 +7,16 @@
 //! - Maintains a ring buffer of recent roots for membership proof verification
 //! - Compatible with the ASP membership Merkle tree implementation
 //!
+//! Everything an insertion mutates lives in one persistent entry,
+//! [`TreeState`], whose size is fixed at [`MerkleTreeWithHistory::init`]. A
+//! Soroban transaction declares the ledger keys it touches and the bytes it
+//! writes when it is simulated, and the host fails it at apply time if it
+//! reaches outside that declaration. A key or an entry size that depended on
+//! the leaf count would change whenever another transaction landed first, so
+//! the second of two transactions simulated against one ledger would fail.
+//! Splitting a field of [`TreeState`] back out into its own entry reintroduces
+//! that failure.
+//!
 //! This module is designed to be used internally by the pool contract.
 //! Authorization should be handled by the calling main contract before invoking
 //! these functions.
@@ -16,9 +26,6 @@ use soroban_utils::{poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
-
-/// Slot the ring buffer wraps to when the search steps back from slot zero
-const LAST_ROOT_SLOT: u32 = ROOT_HISTORY_SIZE - 1;
 
 // Errors
 #[derive(Clone, Debug)]
@@ -31,19 +38,32 @@ pub enum Error {
     Overflow,
 }
 
+/// The tree state an insertion mutates, kept in one persistent entry.
+///
+/// The entry's size is fixed at [`MerkleTreeWithHistory::init`]: `roots`
+/// holds `ROOT_HISTORY_SIZE` slots from the first ledger on, and
+/// `filled_subtrees` holds one hash per level below the root. For the reason
+/// the fields share one entry, see the module documentation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreeState {
+    /// Next available index for leaf insertion.
+    pub next_index: u64,
+    /// Left-sibling hashes along the insertion path, element `i` holding
+    /// the hash at level `i + 1`.
+    pub filled_subtrees: Vec<U256>,
+    /// Root history ring, `ROOT_HISTORY_SIZE` slots from `init` onward.
+    pub roots: Vec<U256>,
+}
+
 /// Storage keys for Merkle tree persistent data
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MerkleDataKey {
     /// Number of levels in the Merkle tree
     Levels,
-    /// Next available index for leaf insertion
-    NextIndex,
-    /// Left-sibling hashes along the insertion path, element `i` holding the
-    /// hash at level `i + 1`
-    FilledSubtrees,
-    /// Historical roots ring buffer
-    Root(u32),
+    /// The [`TreeState`] entry
+    State,
 }
 
 /// Returns the root history slot that holds the root produced by the insertion
@@ -66,14 +86,22 @@ impl MerkleTreeWithHistory {
     /// Initialize the Merkle tree with history
     ///
     /// Creates a new Merkle tree with the specified number of levels. Each
-    /// left sibling starts at the zero hash of its level, and the initial root
-    /// is the zero hash at the top level.
+    /// left sibling starts at the zero hash of its level, and every root
+    /// history slot starts at the zero hash of the top level, which is the
+    /// empty tree's root.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
     /// * `levels` - Number of levels in the Merkle tree (must be in range
     ///   [1..32])
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::WrongLevels`] if `levels` is zero or above 32,
+    /// [`Error::AlreadyInitialized`] if the tree state entry exists, and
+    /// [`Error::NotInitialized`] if the zero-hash table has no entry for a
+    /// level the tree needs.
     pub fn init(env: &Env, levels: u32) -> Result<(), Error> {
         if levels == 0 || levels > 32 {
             return Err(Error::WrongLevels);
@@ -81,7 +109,7 @@ impl MerkleTreeWithHistory {
         let storage = env.storage().persistent();
 
         // Prevent reinitialization
-        if storage.has(&MerkleDataKey::NextIndex) {
+        if storage.has(&MerkleDataKey::State) {
             return Err(Error::AlreadyInitialized);
         }
 
@@ -90,16 +118,28 @@ impl MerkleTreeWithHistory {
 
         // Only levels 1 to levels - 1 are ever read back: the leaf level is
         // hashed from the two leaves and the top level is the root itself.
-        let mut filled = Vec::new(env);
+        let mut filled_subtrees = Vec::new(env);
         for i in 1..levels {
-            filled.push_back(zero_hash(env, i).ok_or(Error::NotInitialized)?);
+            filled_subtrees.push_back(zero_hash(env, i).ok_or(Error::NotInitialized)?);
         }
-        storage.set(&MerkleDataKey::FilledSubtrees, &filled);
 
-        // Set initial root to zero hash at top level
+        // Filling every slot fixes the entry's size before the first
+        // insertion. The empty root is evicted at the ninetieth insertion
+        // either way, since that insertion overwrites slot zero.
         let root_0 = zero_hash(env, levels).ok_or(Error::NotInitialized)?;
-        storage.set(&MerkleDataKey::Root(0), &root_0);
-        storage.set(&MerkleDataKey::NextIndex, &0u64);
+        let mut roots = Vec::new(env);
+        for _ in 0..ROOT_HISTORY_SIZE {
+            roots.push_back(root_0.clone());
+        }
+
+        storage.set(
+            &MerkleDataKey::State,
+            &TreeState {
+                next_index: 0,
+                filled_subtrees,
+                roots,
+            },
+        );
 
         Ok(())
     }
@@ -131,9 +171,10 @@ impl MerkleTreeWithHistory {
         let levels: u32 = storage
             .get(&MerkleDataKey::Levels)
             .ok_or(Error::NotInitialized)?;
-        let next_index: u64 = storage
-            .get(&MerkleDataKey::NextIndex)
+        let mut state: TreeState = storage
+            .get(&MerkleDataKey::State)
             .ok_or(Error::NotInitialized)?;
+        let next_index = state.next_index;
         let max_leaves = 1u64.checked_shl(levels).ok_or(Error::WrongLevels)?;
 
         // NextIndex must be even for two-leaf insertion
@@ -152,11 +193,6 @@ impl MerkleTreeWithHistory {
         // two leaves)
         let mut current_index = next_index >> 1;
 
-        let mut filled: Vec<U256> = storage
-            .get(&MerkleDataKey::FilledSubtrees)
-            .ok_or(Error::NotInitialized)?;
-        let mut filled_changed = false;
-
         // Update the tree by recomputing hashes along the path to root
         // Start at level 1 since current_hash is already the parent of the two
         // leaves
@@ -165,30 +201,27 @@ impl MerkleTreeWithHistory {
             let slot = lvl.checked_sub(1).ok_or(Error::Overflow)?;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left = filled.get(slot).ok_or(Error::NotInitialized)?;
+                let left = state
+                    .filled_subtrees
+                    .get(slot)
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                filled.set(slot, current_hash.clone());
-                filled_changed = true;
+                state.filled_subtrees.set(slot, current_hash.clone());
                 let zero_val = zero_hash(env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, current_hash, zero_val);
             }
             current_index >>= 1;
         }
 
-        if filled_changed {
-            storage.set(&MerkleDataKey::FilledSubtrees, &filled);
-        }
-
         // The new root goes in the slot the advanced leaf counter names, which
         // is the slot `current_root_index` reads back.
-        let new_next_index = next_index.checked_add(2).ok_or(Error::Overflow)?;
-        storage.set(
-            &MerkleDataKey::Root(root_index_for(new_next_index)?),
-            &current_hash,
-        );
-        storage.set(&MerkleDataKey::NextIndex, &new_next_index);
+        state.next_index = next_index.checked_add(2).ok_or(Error::Overflow)?;
+        state
+            .roots
+            .set(root_index_for(state.next_index)?, current_hash);
+        storage.set(&MerkleDataKey::State, &state);
 
         // Return the index of the left leaf
         Ok((
@@ -206,15 +239,10 @@ impl MerkleTreeWithHistory {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotInitialized`] if the tree has no leaf counter, and
+    /// Returns [`Error::NotInitialized`] if the tree has no state entry, and
     /// [`Error::Overflow`] if the counter does not fit the slot arithmetic.
     pub fn current_root_index(env: &Env) -> Result<u32, Error> {
-        let next_index: u64 = env
-            .storage()
-            .persistent()
-            .get(&MerkleDataKey::NextIndex)
-            .ok_or(Error::NotInitialized)?;
-        root_index_for(next_index)
+        root_index_for(Self::state(env)?.next_index)
     }
 
     /// Check if a root exists in the recent history
@@ -222,9 +250,7 @@ impl MerkleTreeWithHistory {
     /// Searches the root history ring buffer to verify if a given root is
     /// valid. This allows proofs generated against recent tree states to be
     /// verified, providing some tolerance for latency between proof
-    /// generation and submission. The search starts at the newest slot and
-    /// walks backwards, so a proof against the root from `k` transactions ago
-    /// reads `k + 1` slots.
+    /// generation and submission.
     ///
     /// # Arguments
     ///
@@ -235,31 +261,17 @@ impl MerkleTreeWithHistory {
     ///
     /// Returns `true` if the root exists in the history buffer, `false`
     /// otherwise. Zero root always returns `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the tree has no state entry.
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
         // Zero root is never valid as define zero in a different way
         if *root == U256::from_u32(env, 0u32) {
             return Ok(false);
         }
 
-        let storage = env.storage().persistent();
-        let current_root_index = Self::current_root_index(env)?;
-
-        // Search the ring buffer for the root
-        let mut i = current_root_index;
-        loop {
-            // roots[i]
-            if let Some(r) = storage.get::<MerkleDataKey, U256>(&MerkleDataKey::Root(i))
-                && &r == root
-            {
-                return Ok(true);
-            }
-            i = i.checked_sub(1).unwrap_or(LAST_ROOT_SLOT);
-            if i == current_root_index {
-                // Break after seeing all roots
-                break;
-            }
-        }
-        Ok(false)
+        Ok(Self::state(env)?.roots.contains(root))
     }
 
     /// Get the current Merkle root
@@ -274,11 +286,10 @@ impl MerkleTreeWithHistory {
     ///
     /// Returns the current Merkle root as U256
     pub fn get_last_root(env: &Env) -> Result<U256, Error> {
-        let storage = env.storage().persistent();
-        let current_root_index = Self::current_root_index(env)?;
-
-        storage
-            .get(&MerkleDataKey::Root(current_root_index))
+        let state = Self::state(env)?;
+        state
+            .roots
+            .get(root_index_for(state.next_index)?)
             .ok_or(Error::NotInitialized)
     }
 
@@ -296,5 +307,17 @@ impl MerkleTreeWithHistory {
     /// The Poseidon2 hash result as U256
     pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
         poseidon2_compress(env, left, right)
+    }
+
+    /// Returns the tree state entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the tree has no state entry.
+    fn state(env: &Env) -> Result<TreeState, Error> {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::State)
+            .ok_or(Error::NotInitialized)
     }
 }
