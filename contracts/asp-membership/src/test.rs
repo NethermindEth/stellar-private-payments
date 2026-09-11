@@ -755,7 +755,6 @@ fn test_insert_leaf_extends_touched_entries() {
         DataKey::Root,
         DataKey::NextIndex,
         DataKey::FilledSubtrees(0),
-        DataKey::Zeroes(1),
     ] {
         assert_eq!(
             entry_ttl(&env, &contract_id, &key),
@@ -763,6 +762,20 @@ fn test_insert_leaf_extends_touched_entries() {
             "{key:?} should have been extended"
         );
     }
+}
+
+#[test]
+fn the_tree_stores_no_sibling_at_the_top_level() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let levels = 3u32;
+    let contract_id = env.register(ASPMembership, (admin, levels));
+
+    env.as_contract(&contract_id, || {
+        let store = env.storage().persistent();
+        assert!(!store.has(&DataKey::FilledSubtrees(levels)));
+        assert!(store.has(&DataKey::FilledSubtrees(0)));
+    });
 }
 
 #[test]
