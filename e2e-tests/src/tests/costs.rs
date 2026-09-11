@@ -441,7 +441,7 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ("pool transact, deposit, blocklist, fresh tree", 42, 27),
     ("pool transact, transfer, blocklist, fresh tree", 38, 25),
     ("pool transact, withdrawal, blocklist, fresh tree", 41, 27),
-    ("pool transact, transfer, root one transaction old", 126, 24),
+    ("pool transact, transfer, root one transaction old", 39, 24),
     (
         "pool transact, transfer, 91 idle days before the call",
         38,

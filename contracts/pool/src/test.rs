@@ -527,6 +527,33 @@ fn get_last_root_extends_the_current_slot() {
     );
 }
 
+#[test]
+fn is_known_root_finds_the_previous_root_after_one_insert() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let verifier = env.register(AcceptingVerifier, ());
+    let pool_id = register_pool_with_verifier(
+        &env,
+        &setup,
+        &verifier,
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+    let previous = pool.get_root();
+
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB0B);
+    pool.transact(&proof, &ext, &Address::generate(&env));
+
+    let known = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::is_known_root(&env, &previous)
+            .unwrap_or_else(|err| panic!("expected the root history to be readable: {err:?}"))
+    });
+    assert!(known);
+}
+
 /// A verifier that accepts every proof.
 ///
 /// The workspace's shared `CircomGroth16Verifier` embeds a verification key

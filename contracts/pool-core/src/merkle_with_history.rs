@@ -17,6 +17,9 @@ use soroban_utils::{bump_entry, poseidon2_compress, zero_hash};
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
 
+/// Slot the ring buffer wraps to when the search steps back from slot zero
+const LAST_ROOT_SLOT: u32 = ROOT_HISTORY_SIZE - 1;
+
 // Errors
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -195,7 +198,9 @@ impl MerkleTreeWithHistory {
     /// Searches the root history ring buffer to verify if a given root is
     /// valid. This allows proofs generated against recent tree states to be
     /// verified, providing some tolerance for latency between proof
-    /// generation and submission.
+    /// generation and submission. The search starts at the newest slot and
+    /// walks backwards, so a proof against the root from `k` transactions ago
+    /// reads `k + 1` slots.
     ///
     /// # Arguments
     ///
@@ -229,7 +234,7 @@ impl MerkleTreeWithHistory {
                 bump_entry(env, &root_key);
                 return Ok(true);
             }
-            i = i.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
+            i = i.checked_sub(1).unwrap_or(LAST_ROOT_SLOT);
             if i == current_root_index {
                 // Break after seeing all roots
                 break;
