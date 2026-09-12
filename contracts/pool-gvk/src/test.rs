@@ -140,7 +140,7 @@ fn pool_gvk_constructor_sets_state() {
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
@@ -482,7 +482,7 @@ fn pool_gvk_update_asp_membership_transfers_control() {
 
     let stored: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPMembership)
             .unwrap_or_else(|| panic!("expected ASP membership address to be stored"))
     });
@@ -510,7 +510,7 @@ fn pool_gvk_update_asp_non_membership_transfers_control() {
 
     let stored: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPNonMembership)
             .unwrap_or_else(|| panic!("expected ASP non-membership address to be stored"))
     });
@@ -1109,7 +1109,7 @@ fn transact_errors_when_policy_flags_unset() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
-        env.storage().persistent().remove(&DataKey::PolicyFlags);
+        env.storage().instance().remove(&DataKey::PolicyFlags);
     });
 
     env.mock_all_auths();
@@ -1997,4 +1997,39 @@ fn transact_rejects_replayed_nullifier() {
         matches!(second, Err(Ok(Error::AlreadySpentNullifier))),
         "expected replaying the same nullifier to be rejected, got {second:?}"
     );
+}
+#[test]
+fn the_configuration_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 7, 11),
+        TRACEABLE,
+    );
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+        for key in [
+            DataKey::Token,
+            DataKey::Verifier,
+            DataKey::MaximumDepositAmount,
+            DataKey::ASPMembership,
+            DataKey::ASPNonMembership,
+            DataKey::PolicyFlags,
+            DataKey::AdminViewKey,
+            DataKey::GvkMode,
+        ] {
+            assert!(instance.has(&key), "{key:?} should live in the instance");
+            assert!(
+                !persistent.has(&key),
+                "{key:?} should not have a persistent entry"
+            );
+        }
+    });
 }
