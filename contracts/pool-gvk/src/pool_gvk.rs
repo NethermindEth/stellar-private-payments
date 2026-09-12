@@ -108,9 +108,15 @@ impl From<MerkleError> for Error {
     }
 }
 
-/// Storage keys for contract persistent data.
+/// Storage keys for contract data.
 ///
 /// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
+/// The configuration the constructor writes, [`DataKey::Token`],
+/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
+/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
+/// [`DataKey::PolicyFlags`], [`DataKey::AdminViewKey`], and
+/// [`DataKey::GvkMode`], lives in the contract's instance entry.
+/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -253,26 +259,15 @@ impl PoolGvkContract {
         }
         Self::validate_admin_view_key(&env, &admin_view_key)?;
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::Token, &token);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Verifier, &verifier);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPMembership, &asp_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPNonMembership, &asp_non_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::PolicyFlags, &policy_flags);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminViewKey, &admin_view_key);
-        env.storage().persistent().set(&DataKey::GvkMode, &gvk_mode);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Token, &token);
+        instance.set(&DataKey::Verifier, &verifier);
+        instance.set(&DataKey::ASPMembership, &asp_membership);
+        instance.set(&DataKey::ASPNonMembership, &asp_non_membership);
+        instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
+        instance.set(&DataKey::PolicyFlags, &policy_flags);
+        instance.set(&DataKey::AdminViewKey, &admin_view_key);
+        instance.set(&DataKey::GvkMode, &gvk_mode);
 
         MerkleTreeWithHistory::init(&env, levels)?;
 
@@ -313,9 +308,8 @@ impl PoolGvkContract {
     pub fn get_admin_view_key(env: &Env) -> Result<BabyJubJubPoint, Error> {
         Self::touch(env);
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::AdminViewKey)
-            .inspect(|_| bump_entry(env, &DataKey::AdminViewKey))
             .ok_or(Error::NotInitialized)
     }
 
@@ -333,9 +327,8 @@ impl PoolGvkContract {
 
     fn load_policy_flags(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::PolicyFlags)
-            .inspect(|_| bump_entry(env, &DataKey::PolicyFlags))
             .ok_or(Error::NotInitialized)
     }
 
@@ -451,18 +444,16 @@ impl PoolGvkContract {
     /// Get the ASP Membership contract address.
     fn get_asp_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPMembership)
-            .inspect(|_| bump_entry(env, &DataKey::ASPMembership))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the ASP Non-Membership contract address.
     fn get_asp_non_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPNonMembership)
-            .inspect(|_| bump_entry(env, &DataKey::ASPNonMembership))
             .ok_or(Error::NotInitialized)
     }
 
@@ -485,27 +476,24 @@ impl PoolGvkContract {
     /// Get the token contract address.
     fn get_token(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Token)
-            .inspect(|_| bump_entry(env, &DataKey::Token))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the maximum deposit amount.
     fn get_maximum_deposit(env: &Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::MaximumDepositAmount)
-            .inspect(|_| bump_entry(env, &DataKey::MaximumDepositAmount))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the verifier contract address.
     fn get_verifier(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Verifier)
-            .inspect(|_| bump_entry(env, &DataKey::Verifier))
             .ok_or(Error::NotInitialized)
     }
 
@@ -717,9 +705,8 @@ impl PoolGvkContract {
     /// wrapping would otherwise need re-mapping.
     fn load_gvk_mode(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::GvkMode)
-            .inspect(|_| bump_entry(env, &DataKey::GvkMode))
             .ok_or(Error::NotInitialized)
     }
 

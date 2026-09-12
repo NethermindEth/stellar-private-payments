@@ -148,7 +148,7 @@ fn pool_gvk_constructor_sets_state() {
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
@@ -1015,7 +1015,7 @@ fn transact_errors_when_policy_flags_unset() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
-        env.storage().persistent().remove(&DataKey::PolicyFlags);
+        env.storage().instance().remove(&DataKey::PolicyFlags);
     });
 
     env.mock_all_auths();
@@ -1916,28 +1916,48 @@ fn transact_extends_instance_config_and_nullifier_ttl() {
     pool.transact(&proof, &ext, &sender);
 
     assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
-    for key in [
-        DataKey::Token,
-        DataKey::PolicyFlags,
-        DataKey::Nullifier(U256::from_u32(&env, nullifier)),
-    ] {
-        assert_eq!(
-            entry_ttl(&env, &pool_id, &key),
-            EXTEND_TO,
-            "{key:?} should have been extended"
-        );
-    }
+    let key = DataKey::Nullifier(U256::from_u32(&env, nullifier));
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &key),
+        EXTEND_TO,
+        "{key:?} should have been extended"
+    );
 }
 
 #[test]
-fn transact_extends_admin_view_key_and_gvk_mode() {
-    let (env, pool, proof, ext, sender) = build_gvk_transact(TRACEABLE, 0xE6, 0, 1000);
-    let pool_id = pool.address.clone();
+fn the_configuration_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 7, 11),
+        TRACEABLE,
+    );
 
-    pool.transact(&proof, &ext, &sender);
-
-    assert_eq!(entry_ttl(&env, &pool_id, &DataKey::AdminViewKey), EXTEND_TO);
-    assert_eq!(entry_ttl(&env, &pool_id, &DataKey::GvkMode), EXTEND_TO);
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+        for key in [
+            DataKey::Token,
+            DataKey::Verifier,
+            DataKey::MaximumDepositAmount,
+            DataKey::ASPMembership,
+            DataKey::ASPNonMembership,
+            DataKey::PolicyFlags,
+            DataKey::AdminViewKey,
+            DataKey::GvkMode,
+        ] {
+            assert!(instance.has(&key), "{key:?} should live in the instance");
+            assert!(
+                !persistent.has(&key),
+                "{key:?} should not have a persistent entry"
+            );
+        }
+    });
 }
 
 #[test]

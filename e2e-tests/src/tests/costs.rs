@@ -454,7 +454,7 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ),
     ("pool get_root", 4, 0),
     ("pool pause, admin", 6, 2),
-    ("pool-gvk transact, transfer, view-only", 20, 6),
+    ("pool-gvk transact, transfer, view-only", 14, 6),
     ("asp-membership insert_leaf, first leaf", 10, 4),
     ("asp-non-membership insert_leaf, ninth key", 16, 10),
     ("asp-non-membership delete_leaf, one of nine", 16, 7),
