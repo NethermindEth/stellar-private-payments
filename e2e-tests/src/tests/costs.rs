@@ -449,13 +449,13 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        15,
+        14,
         6,
     ),
     ("pool get_root", 4, 0),
     ("pool pause, admin", 4, 2),
     ("pool-gvk transact, transfer, view-only", 13, 6),
-    ("asp-membership insert_leaf, first leaf", 8, 4),
+    ("asp-membership insert_leaf, first leaf", 6, 4),
     ("asp-non-membership insert_leaf, ninth key", 14, 10),
     ("asp-non-membership delete_leaf, one of nine", 14, 7),
     ("public-key-registry register, first registration", 4, 2),
@@ -463,7 +463,7 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ("governor execute, pool pause", 6, 4),
     (
         "governor execute_now, operator, membership insert_leaf",
-        11,
+        9,
         4,
     ),
 ];
@@ -562,7 +562,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (15, 6);
+const EXPECTED_REAL_PROOF: (u32, u32) = (14, 6);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

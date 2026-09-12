@@ -82,7 +82,7 @@ fn test_constructor_sets_admin_and_levels() {
     });
     let stored_levels: u32 = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Levels)
             .expect("Levels set in constructor")
     });
@@ -139,7 +139,7 @@ fn test_get_root() {
     // Verify initial root matches what's in storage
     let stored_root: U256 = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .expect("Root set in constructor")
     });
@@ -162,7 +162,7 @@ fn test_get_root() {
     // Verify new root also matches storage
     let stored_new_root: U256 = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .expect("Root set after insert")
     });
@@ -691,7 +691,7 @@ fn test_merkle_consistency() {
     // Get the on-chain root
     let on_chain_root: U256 = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .expect("Root set in constructor")
     });
@@ -712,7 +712,7 @@ fn test_merkle_consistency() {
         // Get the on-chain root
         let on_chain_root: U256 = env.as_contract(&contract_id, || {
             env.storage()
-                .persistent()
+                .instance()
                 .get(&DataKey::Root)
                 .expect("Root updated after insert")
         });
@@ -784,7 +784,7 @@ fn test_insert_leaf_extends_touched_entries() {
     client.insert_leaf(&U256::from_u32(&env, 1));
 
     assert_eq!(instance_ttl(&env, &contract_id), EXTEND_TO);
-    for key in [DataKey::Root, DataKey::NextIndex, DataKey::FilledSubtrees] {
+    for key in [DataKey::NextIndex, DataKey::FilledSubtrees] {
         assert_eq!(
             entry_ttl(&env, &contract_id, &key),
             EXTEND_TO,
@@ -826,7 +826,7 @@ fn the_filled_subtrees_are_one_entry() {
 }
 
 #[test]
-fn test_get_root_extends_root_and_instance() {
+fn test_get_root_extends_the_instance() {
     let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
@@ -835,7 +835,28 @@ fn test_get_root_extends_root_and_instance() {
     client.get_root();
 
     assert_eq!(instance_ttl(&env, &contract_id), EXTEND_TO);
-    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::Root), EXTEND_TO);
+}
+
+#[test]
+fn the_depth_and_root_live_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let levels = 3u32;
+    let contract_id = env.register(ASPMembership, (admin, levels));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1));
+    let root = client.get_root();
+
+    env.as_contract(&contract_id, || {
+        let instance = env.storage().instance();
+        assert_eq!(instance.get::<_, u32>(&DataKey::Levels), Some(levels));
+        assert_eq!(instance.get::<_, U256>(&DataKey::Root), Some(root));
+        let persistent = env.storage().persistent();
+        assert!(!persistent.has(&DataKey::Levels));
+        assert!(!persistent.has(&DataKey::Root));
+    });
 }
 
 /// A refused insertion rolls back its storage changes, and a TTL extension is
