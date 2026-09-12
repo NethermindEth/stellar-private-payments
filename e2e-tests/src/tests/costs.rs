@@ -438,32 +438,32 @@ fn governor_rows() -> [Row; 3] {
 ///
 /// A change to what a contract stores updates these in the same commit.
 const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 17, 8),
-    ("pool transact, transfer, blocklist, fresh tree", 14, 6),
-    ("pool transact, withdrawal, blocklist, fresh tree", 17, 8),
-    ("pool transact, transfer, root one transaction old", 15, 6),
+    ("pool transact, deposit, blocklist, fresh tree", 16, 8),
+    ("pool transact, transfer, blocklist, fresh tree", 13, 6),
+    ("pool transact, withdrawal, blocklist, fresh tree", 16, 8),
+    ("pool transact, transfer, root one transaction old", 14, 6),
     (
         "pool transact, transfer, 91 idle days before the call",
-        14,
+        13,
         6,
     ),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        16,
+        15,
         6,
     ),
     ("pool get_root", 4, 0),
-    ("pool pause, admin", 5, 2),
-    ("pool-gvk transact, transfer, view-only", 14, 6),
-    ("asp-membership insert_leaf, first leaf", 9, 4),
-    ("asp-non-membership insert_leaf, ninth key", 15, 10),
-    ("asp-non-membership delete_leaf, one of nine", 15, 7),
+    ("pool pause, admin", 4, 2),
+    ("pool-gvk transact, transfer, view-only", 13, 6),
+    ("asp-membership insert_leaf, first leaf", 8, 4),
+    ("asp-non-membership insert_leaf, ninth key", 14, 10),
+    ("asp-non-membership delete_leaf, one of nine", 14, 7),
     ("public-key-registry register, first registration", 4, 2),
     ("governor schedule, council, empty queue", 8, 4),
-    ("governor execute, pool pause", 7, 4),
+    ("governor execute, pool pause", 6, 4),
     (
         "governor execute_now, operator, membership insert_leaf",
-        12,
+        11,
         4,
     ),
 ];
@@ -562,7 +562,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (16, 6);
+const EXPECTED_REAL_PROOF: (u32, u32) = (15, 6);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

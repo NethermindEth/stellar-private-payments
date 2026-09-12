@@ -2273,6 +2273,20 @@ fn mk_transact_of(
     (proof, ext)
 }
 
+/// The pause bits live in the instance entry, so the pause call itself is what
+/// keeps them alive.
+#[test]
+fn pause_extends_the_instance() {
+    let env = test_env();
+    let sender = Address::generate(&env);
+    let (_setup, pool) = pausable_pool(&env, &sender);
+    decay_below_threshold(&env);
+
+    pool.pause(&pausable::DEPOSITS, &None);
+
+    assert_eq!(instance_ttl(&env, &pool.address), EXTEND_TO);
+}
+
 #[test]
 fn transact_rejects_deposit_while_deposits_paused() {
     use soroban_sdk::testutils::Events;

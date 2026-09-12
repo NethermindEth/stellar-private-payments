@@ -1,6 +1,6 @@
 //! Pause bits that stop a contract from accepting some of its calls.
 //!
-//! A contract keeps one persistent entry holding a bit set, so a gated call
+//! A contract keeps one instance key holding a bit set, so a gated call
 //! reads a single entry to learn whether it may proceed. The bits belong to the
 //! contract: pools recognize [`DEPOSITS`], [`TRANSFERS`], and [`WITHDRAWALS`],
 //! and the ASP contracts recognize [`MUTATIONS`]. Every caller passes the mask
@@ -20,11 +20,12 @@
 //!
 //! None of these functions authorizes anyone. A contract that exposes a pause
 //! or an unpause is responsible for requiring its administrator's
-//! authorization first.
+//! authorization first. None of them extends a lifetime either: the state
+//! lives in the caller's instance entry, so a contract that exposes a pause is
+//! responsible for extending that entry, as [`crate::ttl::bump_instance`]
+//! does.
 
 use soroban_sdk::{Env, I256, contractevent, contracttype};
-
-use crate::ttl::bump_entry;
 
 /// Pool bit gating deposits.
 pub const DEPOSITS: u32 = 1;
@@ -82,14 +83,10 @@ pub enum PauseError {
 }
 
 /// Returns the stored pause state, or an all-clear state when none is stored.
-///
-/// Extends the entry's lifetime when it exists, so a contract that is called
-/// keeps its own pause state alive.
 pub fn get_state(env: &Env) -> PauseState {
     env.storage()
-        .persistent()
+        .instance()
         .get(&PausableKey::Pause)
-        .inspect(|_| bump_entry(env, &PausableKey::Pause))
         .unwrap_or_default()
 }
 
@@ -196,8 +193,7 @@ fn check_flags(flags: u32, mask: u32) -> Result<(), PauseError> {
 }
 
 fn store(env: &Env, state: &PauseState) {
-    env.storage().persistent().set(&PausableKey::Pause, state);
-    bump_entry(env, &PausableKey::Pause);
+    env.storage().instance().set(&PausableKey::Pause, state);
     PauseChanged {
         flags: state.flags,
         until: state.until,
@@ -208,11 +204,10 @@ fn store(env: &Env, state: &PauseState) {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ttl::{EXTEND_TO, THRESHOLD};
     use soroban_sdk::{
         Address, contract, contracterror, contractimpl,
         events::Event,
-        testutils::{Events, Ledger as _, storage::Persistent as _},
+        testutils::{Events, Ledger as _},
     };
 
     /// Contract-facing form of [`PauseError`], so the probe's failures cross
@@ -583,21 +578,28 @@ mod test {
     }
 
     #[test]
-    fn get_state_extends_the_entry() {
+    fn the_pause_state_lives_in_the_instance() {
         let env = Env::default();
         let (id, client) = probe(&env);
+
         client.pause(&DEPOSITS, &None, &POOL_MASK);
-        let decayed = env
-            .ledger()
-            .sequence()
-            .saturating_add(EXTEND_TO.saturating_sub(THRESHOLD).saturating_add(1));
-        env.ledger().set_sequence_number(decayed);
 
-        client.state();
-
-        let ttl = env.as_contract(&id, || {
-            env.storage().persistent().get_ttl(&PausableKey::Pause)
+        let (stored, in_persistent) = env.as_contract(&id, || {
+            (
+                env.storage()
+                    .instance()
+                    .get::<_, PauseState>(&PausableKey::Pause)
+                    .unwrap_or_else(|| panic!("expected the pause state to be stored")),
+                env.storage().persistent().has(&PausableKey::Pause),
+            )
         });
-        assert_eq!(ttl, EXTEND_TO);
+        assert_eq!(
+            stored,
+            PauseState {
+                flags: DEPOSITS,
+                until: None
+            }
+        );
+        assert!(!in_persistent);
     }
 }
