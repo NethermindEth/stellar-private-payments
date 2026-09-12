@@ -52,6 +52,37 @@ impl<S: Storage> Account<S> {
         }
     }
 
+    /// [`Self::new`], then derives and persists this account's privacy keys
+    /// when `signer_address` is `user_address` and none are stored yet.
+    /// Called from [`crate::Client::account`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn open(
+        rpc: RpcClient,
+        storage: S,
+        prover: Handle<dyn Prover>,
+        user_address: NoteOwnerAddress,
+        signer_address: SignerAddress,
+        signer: Handle<dyn Signer>,
+        sync: SyncHandle,
+        contract_config: ContractConfig,
+    ) -> Result<Self, Error> {
+        let is_owner = signer_address.as_str() == user_address.as_str();
+        let account = Self::new(
+            rpc,
+            storage,
+            prover,
+            user_address,
+            signer_address,
+            signer,
+            sync,
+            contract_config,
+        );
+        if is_owner {
+            account.derive_keys().await?;
+        }
+        Ok(account)
+    }
+
     /// The account that owns the notes.
     pub fn user_address(&self) -> &NoteOwnerAddress {
         &self.user_address
@@ -100,6 +131,44 @@ impl<S: Storage> Account<S> {
         self.storage
             .user_public_keys(self.user_address.as_str())
             .await
+    }
+
+    /// Derive this account's privacy keys from the owner's wallet signature
+    /// and persist them. Idempotent: returns the existing keys unchanged if
+    /// already derived. Called from [`crate::Client::account`].
+    pub(crate) async fn derive_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        if self
+            .storage
+            .user_keys_exist(self.user_address.as_str())
+            .await?
+        {
+            return self.user_public_keys().await;
+        }
+        ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
+
+        let signature = self
+            .signer
+            .sign_message(crate::zk::encryption::KEY_DERIVATION_MESSAGE)
+            .await?;
+        let (note_keypair, encryption_keypair) =
+            crate::zk::encryption::derive_encryption_and_note_keypairs(signature.clone())
+                .map_err(|e| Error::Other(format!("derive privacy keypairs: {e:#}")))?;
+        let membership_blinding = crate::zk::encryption::derive_membership_blinding(
+            &signature,
+            &self.contract_config.network,
+        )
+        .map_err(|e| Error::Other(format!("derive membership blinding: {e:#}")))?;
+
+        self.storage
+            .save_user_keys(
+                self.user_address.as_str(),
+                &note_keypair,
+                &encryption_keypair,
+                &membership_blinding,
+            )
+            .await?;
+
+        Ok((note_keypair.public, encryption_keypair.public))
     }
 
     /// Locally derived ASP membership blinding for this account.
@@ -307,5 +376,112 @@ mod signer_is_note_owner_tests {
                 "near-miss signer {near_miss:?} must be refused"
             );
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod derive_keys_tests {
+    use super::*;
+    use crate::{Client, LocalSigner, LocalStorage, types::ContractConfig};
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    /// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])`.
+    const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+    fn test_client() -> Client<LocalStorage> {
+        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let db = std::env::temp_dir().join(format!(
+            "spp-derive-privacy-keys-{}-{}.sqlite",
+            std::process::id(),
+            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&db);
+        Client::init_readonly(
+            "https://soroban-testnet.stellar.org",
+            LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ContractConfig {
+                network: PASSPHRASE.to_string(),
+                deployer: String::new(),
+                admin: String::new(),
+                asp_membership: String::new(),
+                asp_non_membership: String::new(),
+                verifiers: Default::default(),
+                public_key_registry: String::new(),
+                pools: Vec::new(),
+            },
+            None,
+        )
+        .expect("init client")
+    }
+
+    fn test_signer(address: &str) -> Handle<dyn crate::Signer> {
+        Handle::from_box(Box::new(
+            LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
+                .expect("build signer"),
+        ) as Box<dyn crate::Signer>)
+    }
+
+    /// A signer whose `sign_message` panics: proves a code path never asks it
+    /// to sign.
+    struct PanicOnMessageSigner(Handle<dyn crate::Signer>);
+
+    #[async_trait::async_trait(?Send)]
+    impl crate::Signer for PanicOnMessageSigner {
+        async fn sign_transaction(
+            &self,
+            prepared: &crate::PreparedTransaction,
+        ) -> Result<crate::types::SignedTransaction, Error> {
+            self.0.sign_transaction(prepared).await
+        }
+
+        async fn sign_message(
+            &self,
+            _message: &str,
+        ) -> Result<crate::types::KeyDerivationSignature, Error> {
+            panic!("derive_keys() must not re-derive when keys already exist");
+        }
+    }
+
+    #[tokio::test]
+    async fn client_account_derives_privacy_keys_for_the_owner() {
+        let client = test_client();
+        let account = client
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                test_signer(OWNER),
+            )
+            .await
+            .expect("open account");
+
+        account
+            .user_public_keys()
+            .await
+            .expect("keys were derived and stored during account creation");
+    }
+
+    #[tokio::test]
+    async fn client_account_does_not_re_derive_when_keys_already_exist() {
+        let client = test_client();
+        client
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                test_signer(OWNER),
+            )
+            .await
+            .expect("open account");
+
+        client
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                Handle::from_box(
+                    Box::new(PanicOnMessageSigner(test_signer(OWNER))) as Box<dyn crate::Signer>
+                ),
+            )
+            .await
+            .expect("reopening with existing keys must not re-sign");
     }
 }
