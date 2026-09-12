@@ -129,11 +129,11 @@ pub struct Proof {
 
 /// Storage keys for contract data
 ///
-/// The configuration the constructor writes, [`DataKey::Token`],
-/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
-/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`], and
-/// [`DataKey::PolicyFlags`], lives in the contract's instance entry.
-/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
+/// The configuration the constructor writes, [`DataKey::Admin`],
+/// [`DataKey::Token`], [`DataKey::Verifier`],
+/// [`DataKey::MaximumDepositAmount`], [`DataKey::ASPMembership`],
+/// [`DataKey::ASPNonMembership`], and [`DataKey::PolicyFlags`], lives in the
+/// contract's instance entry. [`DataKey::Nullifier`] is the one persistent key.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -234,8 +234,8 @@ impl PoolContract {
         if !policy::is_valid(policy_flags) {
             return Err(Error::InvalidPolicyFlags);
         }
-        env.storage().persistent().set(&DataKey::Admin, &admin);
         let instance = env.storage().instance();
+        instance.set(&DataKey::Admin, &admin);
         instance.set(&DataKey::Token, &token);
         instance.set(&DataKey::Verifier, &verifier);
         instance.set(&DataKey::ASPMembership, &asp_membership);

@@ -309,7 +309,7 @@ fn pool_constructor_sets_state() {
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&crate::pool::DataKey::Admin)
             .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
@@ -762,6 +762,27 @@ fn transact_extends_instance_config_and_nullifier_ttl() {
         EXTEND_TO,
         "{key:?} should have been extended"
     );
+}
+
+#[test]
+fn the_admin_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage().instance().get(&DataKey::Admin),
+            Some(setup.admin.clone())
+        );
+        assert!(!env.storage().persistent().has(&DataKey::Admin));
+    });
 }
 
 #[test]
@@ -1496,7 +1517,7 @@ fn update_admin_errors_when_admin_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::Admin);
     });
 
@@ -1517,7 +1538,7 @@ fn update_admin_errors_when_admin_unset_emits_nothing() {
     let new_admin = Address::generate(&env);
 
     env.as_contract(&pool_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
         assert_eq!(
             soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin),
             Err(soroban_utils::AdminError::NotInitialized)
@@ -1585,7 +1606,7 @@ fn update_admin_transfers_control() {
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&crate::pool::DataKey::Admin)
             .expect("Admin set in constructor")
     });
@@ -2401,7 +2422,7 @@ fn update_admin_works_while_fully_paused() {
 
     let stored: Address = env.as_contract(&pool.address, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin updated")
     });
@@ -2458,7 +2479,7 @@ fn pause_errors_when_admin_unset() {
     let sender = Address::generate(&env);
     let (_, pool) = pausable_pool(&env, &sender);
     env.as_contract(&pool.address, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert_eq!(

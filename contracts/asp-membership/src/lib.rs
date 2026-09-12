@@ -14,7 +14,11 @@ use soroban_utils::{
     poseidon2_compress, zero_hash,
 };
 
-/// Storage keys for contract persistent data
+/// Storage keys for contract data
+///
+/// [`DataKey::Admin`] is an instance key. [`DataKey::FilledSubtrees`],
+/// [`DataKey::Levels`], [`DataKey::NextIndex`], and [`DataKey::Root`] are
+/// persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -112,7 +116,7 @@ impl ASPMembership {
         }
 
         // Initialize admin and tree parameters
-        store.set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Admin, &admin);
         store.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
 

@@ -41,6 +41,21 @@ fn test_init() {
 }
 
 #[test]
+fn the_admin_lives_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            env.storage().instance().get(&DataKey::Admin),
+            Some(admin.clone())
+        );
+        assert!(!env.storage().persistent().has(&DataKey::Admin));
+    });
+}
+
+#[test]
 fn test_insert_leaf() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -935,7 +950,7 @@ fn test_update_admin_errors_when_admin_unset() {
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert!(matches!(
@@ -957,7 +972,7 @@ fn test_update_admin() {
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin updated")
     });
@@ -1311,7 +1326,7 @@ fn test_pause_errors_when_admin_unset() {
     let client = ASPNonMembershipClient::new(&env, &contract_id);
     env.mock_all_auths();
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert_eq!(

@@ -142,7 +142,7 @@ fn pool_gvk_constructor_sets_state() {
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
@@ -413,7 +413,7 @@ fn pool_gvk_update_admin_transfers_control() {
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
@@ -437,7 +437,7 @@ fn update_admin_errors_when_admin_unset() {
     let new_admin = Address::generate(&env);
 
     env.as_contract(&pool_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert!(matches!(
@@ -1925,6 +1925,29 @@ fn transact_extends_instance_config_and_nullifier_ttl() {
 }
 
 #[test]
+fn the_admin_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 7, 11),
+        TRACEABLE,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage().instance().get(&DataKey::Admin),
+            Some(setup.admin.clone())
+        );
+        assert!(!env.storage().persistent().has(&DataKey::Admin));
+    });
+}
+
+#[test]
 fn the_configuration_lives_in_the_instance() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -2206,7 +2229,7 @@ fn update_admin_works_while_fully_paused() {
 
     let stored: Address = env.as_contract(&pool.address, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin updated")
     });
@@ -2261,7 +2284,7 @@ fn pause_errors_when_admin_unset() {
     let env = test_env();
     let pool = pausable_pool_gvk(&env);
     env.as_contract(&pool.address, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert_eq!(

@@ -32,6 +32,11 @@ use soroban_utils::{
     pausable::{self, PauseError, PauseState},
     poseidon2_compress, poseidon2_hash2,
 };
+
+/// Storage keys for contract data
+///
+/// [`DataKey::Admin`] is an instance key. [`DataKey::Root`] and
+/// [`DataKey::Node`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -129,7 +134,7 @@ impl ASPNonMembership {
     /// Returns `Ok(())` on success
     pub fn __constructor(env: Env, admin: Address) -> Result<(), Error> {
         let store = env.storage().persistent();
-        store.set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Admin, &admin);
         // Initialize with empty root (zero)
         let zero = U256::from_u32(&env, 0u32);
         store.set(&DataKey::Root, &zero);

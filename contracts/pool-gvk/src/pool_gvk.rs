@@ -111,12 +111,12 @@ impl From<MerkleError> for Error {
 /// Storage keys for contract data.
 ///
 /// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
-/// The configuration the constructor writes, [`DataKey::Token`],
-/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
-/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
-/// [`DataKey::PolicyFlags`], [`DataKey::AdminViewKey`], and
-/// [`DataKey::GvkMode`], lives in the contract's instance entry.
-/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
+/// The configuration the constructor writes, [`DataKey::Admin`],
+/// [`DataKey::Token`], [`DataKey::Verifier`],
+/// [`DataKey::MaximumDepositAmount`], [`DataKey::ASPMembership`],
+/// [`DataKey::ASPNonMembership`], [`DataKey::PolicyFlags`],
+/// [`DataKey::AdminViewKey`], and [`DataKey::GvkMode`], lives in the contract's
+/// instance entry. [`DataKey::Nullifier`] is the one persistent key.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -258,8 +258,8 @@ impl PoolGvkContract {
             return Err(Error::InvalidGvkMode);
         }
         Self::validate_admin_view_key(&env, &admin_view_key)?;
-        env.storage().persistent().set(&DataKey::Admin, &admin);
         let instance = env.storage().instance();
+        instance.set(&DataKey::Admin, &admin);
         instance.set(&DataKey::Token, &token);
         instance.set(&DataKey::Verifier, &verifier);
         instance.set(&DataKey::ASPMembership, &asp_membership);

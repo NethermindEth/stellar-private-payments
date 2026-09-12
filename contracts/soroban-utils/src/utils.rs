@@ -5,8 +5,6 @@ use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contracte
 #[cfg(any(test, feature = "testutils"))]
 use soroban_sdk::{contract, contractimpl};
 
-use crate::ttl::bump_entry;
-
 /// Error returned by the shared admin helpers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AdminError {
@@ -24,8 +22,10 @@ pub struct AdminUpdated {
     pub new_admin: Address,
 }
 
-/// Returns the administrator stored under `admin_key` and extends the entry's
-/// lifetime.
+/// Returns the administrator stored under `admin_key`.
+///
+/// The address lives in the contract's instance entry, so it stays readable
+/// for as long as the contract instance does.
 ///
 /// # Errors
 ///
@@ -36,9 +36,8 @@ where
     K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
 {
     env.storage()
-        .persistent()
+        .instance()
         .get(admin_key)
-        .inspect(|_| bump_entry(env, admin_key))
         .ok_or(AdminError::NotInitialized)
 }
 
@@ -70,7 +69,7 @@ where
     let admin = get_admin(env, admin_key)?;
     admin.require_auth();
 
-    env.storage().persistent().set(admin_key, new_admin);
+    env.storage().instance().set(admin_key, new_admin);
     AdminUpdated {
         old_admin: admin,
         new_admin: new_admin.clone(),

@@ -76,7 +76,7 @@ fn test_constructor_sets_admin_and_levels() {
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin set in constructor")
     });
@@ -283,7 +283,7 @@ fn test_update_admin() {
     // Verify admin was set correctly
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin set in constructor")
     });
@@ -296,7 +296,7 @@ fn test_update_admin() {
     // Verify admin was updated in storage
     let stored_admin_after: Address = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin updated")
     });
@@ -357,7 +357,7 @@ fn test_update_admin_errors_when_admin_unset() {
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert!(matches!(
@@ -477,7 +477,7 @@ fn test_insert_leaf_errors_when_admin_unset() {
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     let leaf = U256::from_u32(&env, 100u32);
@@ -794,6 +794,21 @@ fn test_insert_leaf_extends_touched_entries() {
 }
 
 #[test]
+fn the_admin_lives_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            env.storage().instance().get(&DataKey::Admin),
+            Some(admin.clone())
+        );
+        assert!(!env.storage().persistent().has(&DataKey::Admin));
+    });
+}
+
+#[test]
 fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -948,7 +963,7 @@ fn test_pause_errors_when_admin_unset() {
     let client = ASPMembershipClient::new(&env, &contract_id);
     env.mock_all_auths();
     env.as_contract(&contract_id, || {
-        env.storage().persistent().remove(&DataKey::Admin);
+        env.storage().instance().remove(&DataKey::Admin);
     });
 
     assert_eq!(
@@ -1010,7 +1025,7 @@ fn test_update_admin_and_get_root_work_while_paused() {
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Admin)
             .expect("Admin set in constructor")
     });
