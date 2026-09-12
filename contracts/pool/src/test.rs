@@ -404,7 +404,6 @@ fn insert_two_leaves_extends_touched_entries() {
     insert_pair(&env, &pool_id, 1, 2);
 
     for key in [
-        MerkleDataKey::Levels,
         MerkleDataKey::NextIndex,
         MerkleDataKey::Root(1),
         MerkleDataKey::FilledSubtrees,
@@ -419,6 +418,30 @@ fn insert_two_leaves_extends_touched_entries() {
         entry_ttl(&env, &pool_id, &MerkleDataKey::Root(0)),
         untouched_before
     );
+}
+
+#[test]
+fn the_depth_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage()
+                .instance()
+                .get::<_, u32>(&MerkleDataKey::Levels),
+            Some(levels)
+        );
+        assert!(!env.storage().persistent().has(&MerkleDataKey::Levels));
+    });
 }
 
 #[test]
