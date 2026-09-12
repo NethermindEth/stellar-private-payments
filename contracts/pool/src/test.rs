@@ -390,6 +390,30 @@ fn merkle_init_only_once() {
 }
 
 #[test]
+fn the_depth_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage()
+                .instance()
+                .get::<_, u32>(&MerkleDataKey::Levels),
+            Some(levels)
+        );
+        assert!(!env.storage().persistent().has(&MerkleDataKey::Levels));
+    });
+}
+
+#[test]
 fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
