@@ -438,18 +438,18 @@ fn governor_rows() -> [Row; 3] {
 ///
 /// A change to what a contract stores updates these in the same commit.
 const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 22, 8),
-    ("pool transact, transfer, blocklist, fresh tree", 18, 6),
-    ("pool transact, withdrawal, blocklist, fresh tree", 21, 8),
-    ("pool transact, transfer, root one transaction old", 19, 6),
+    ("pool transact, deposit, blocklist, fresh tree", 17, 8),
+    ("pool transact, transfer, blocklist, fresh tree", 14, 6),
+    ("pool transact, withdrawal, blocklist, fresh tree", 17, 8),
+    ("pool transact, transfer, root one transaction old", 15, 6),
     (
         "pool transact, transfer, 91 idle days before the call",
-        18,
+        14,
         6,
     ),
     (
         "pool transact, transfer, allowlist and blocklist, fresh tree",
-        21,
+        16,
         6,
     ),
     ("pool get_root", 4, 0),
@@ -562,7 +562,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (21, 6);
+const EXPECTED_REAL_PROOF: (u32, u32) = (16, 6);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

@@ -315,7 +315,7 @@ fn pool_constructor_sets_state() {
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&crate::pool::DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
@@ -756,17 +756,44 @@ fn transact_extends_instance_config_and_nullifier_ttl() {
     pool.transact(&proof, &ext, &Address::generate(&env));
 
     assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
-    for key in [
-        DataKey::Token,
-        DataKey::PolicyFlags,
-        DataKey::Nullifier(U256::from_u32(&env, nullifier)),
-    ] {
-        assert_eq!(
-            entry_ttl(&env, &pool_id, &key),
-            EXTEND_TO,
-            "{key:?} should have been extended"
-        );
-    }
+    let key = DataKey::Nullifier(U256::from_u32(&env, nullifier));
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &key),
+        EXTEND_TO,
+        "{key:?} should have been extended"
+    );
+}
+
+#[test]
+fn the_configuration_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+        for key in [
+            DataKey::Token,
+            DataKey::Verifier,
+            DataKey::MaximumDepositAmount,
+            DataKey::ASPMembership,
+            DataKey::ASPNonMembership,
+            DataKey::PolicyFlags,
+        ] {
+            assert!(instance.has(&key), "{key:?} should live in the instance");
+            assert!(
+                !persistent.has(&key),
+                "{key:?} should not have a persistent entry"
+            );
+        }
+    });
 }
 
 #[test]
@@ -895,10 +922,8 @@ fn is_spent_on_an_unknown_nullifier_does_not_panic() {
     assert!(!pool.is_spent(&U256::from_u32(&env, 0xBEEF)));
 }
 
-/// The address an admin writes must come off the seven-day fuse with it, or
-/// the pool forgets which ASP it points at.
 #[test]
-fn update_asp_membership_extends_the_written_key() {
+fn update_asp_membership_rewrites_the_instance_key() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool(
@@ -911,17 +936,20 @@ fn update_asp_membership_extends_the_written_key() {
     let pool = PoolContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    pool.update_asp_membership(&Address::generate(&env));
+    let new_asp_membership = Address::generate(&env);
+    pool.update_asp_membership(&new_asp_membership);
 
-    assert_eq!(
-        entry_ttl(&env, &pool_id, &DataKey::ASPMembership),
-        EXTEND_TO
-    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected the membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_membership);
 }
 
-/// Same for the non-membership address.
 #[test]
-fn update_asp_non_membership_extends_the_written_key() {
+fn update_asp_non_membership_rewrites_the_instance_key() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool(
@@ -934,12 +962,16 @@ fn update_asp_non_membership_extends_the_written_key() {
     let pool = PoolContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    pool.update_asp_non_membership(&Address::generate(&env));
+    let new_asp_non_membership = Address::generate(&env);
+    pool.update_asp_non_membership(&new_asp_non_membership);
 
-    assert_eq!(
-        entry_ttl(&env, &pool_id, &DataKey::ASPNonMembership),
-        EXTEND_TO
-    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected the non-membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_non_membership);
 }
 
 /// A nullifier already on file is re-extended by the spent check, so a pool
@@ -1444,7 +1476,7 @@ fn get_policy_flags_errors_when_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
@@ -1576,7 +1608,7 @@ fn transact_errors_when_policy_flags_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
