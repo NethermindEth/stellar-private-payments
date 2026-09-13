@@ -8,11 +8,13 @@ Every transaction follows from what the RPC reports. `getLedgerEntries` returns 
 entry with a `liveUntilLedgerSeq` of `0` and leaves out a key that was never written, so the
 keeper restores exactly the keys reported archived, extends the live keys inside the
 threshold, and never names a key the RPC did not return. It keeps no list of which keys a
-contract writes only under some conditions; the pause state, the governor's queue index, and
-the permission table rows are enumerated like every other key and come back when the RPC says
-they are gone. An archived pause entry does not reopen a pool: a call whose footprint touches
-it fails until the entry is restored, which the SDK does for the next user and the keeper
-does on its next round.
+contract writes only under some conditions; the governor's queue index and the nullifiers a
+pool has spent are enumerated like every other key and come back when the RPC says they are
+gone. A contract's configuration, its administrator, its pause state, and the association
+sets' roots live in its instance entry, which every call to the contract extends, so the
+keeper keeps them alive by keeping the instance alive. An archived instance does not reopen a
+pool: every call to the contract fails until the entry is restored, which the SDK does for the
+next user and the keeper does on its next round.
 
 The RPC has reported entry state this way since protocol 23. The keeper refuses to start
 against an older one, because such an RPC omits archived entries the way it omits never
@@ -103,13 +105,13 @@ promtool check rules tools/ttl-keeper/alerts.yml
 ## What it does not do
 
 The keeper touches only the keys it can enumerate, which are the ones the manifest names plus
-the ones a contract's own state reveals: the pool root ring, the association set trees, the
-governor's queue, and the role table for the four roles in the governance block.
+the ones a contract's own state reveals: each pool's root ring, leaf count, and filled
+subtrees, the nullifiers its events name, the non-membership tree's nodes, and the governor's
+queue and role table.
 
-A permission table row added after deployment is not one of those. Until the manifest names
-its target and function, that row stays alive only through use, and a row nobody calls for
-long enough is archived. The same holds for any contract added to the deployment without
-being written into the manifest.
+A contract added to the deployment without being written into the manifest is not one of
+those. Until the manifest names it, its keys stay alive only through use, and a key nobody
+touches for long enough is archived.
 
 The non-membership tree's nodes are named only inside their parents' stored values, so the
 walk cannot descend past an archived node. A subtree archived several levels deep is restored
