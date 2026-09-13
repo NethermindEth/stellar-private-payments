@@ -1630,13 +1630,43 @@ fn the_constructor_records_the_permission_table() {
         client.get_fn_role(&t.asp, &Symbol::new(&env, "update_admin")),
         None
     );
+}
+
+#[test]
+fn the_permission_table_lives_in_the_instance() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
 
     env.as_contract(&t.governor, || {
-        assert_eq!(
-            env.storage()
-                .persistent()
-                .get_ttl(&DataKey::FnRole(t.asp.clone(), insert_leaf(&env))),
-            EXTEND_TO
+        let key = DataKey::FnRole(t.asp.clone(), insert_leaf(&env));
+        assert_eq!(env.storage().instance().get(&key), Some(OPERATOR));
+        assert!(!env.storage().persistent().has(&key));
+    });
+}
+
+#[test]
+fn clear_fn_role_removes_the_instance_key() {
+    let env = test_env();
+    let t = table_setup(&env, 3);
+
+    execute_self(
+        &env,
+        &t.governor,
+        "clear_fn_role",
+        &vec![
+            &env,
+            t.asp.clone().into_val(&env),
+            insert_leaf(&env).into_val(&env),
+        ],
+        1,
+        &t.council,
+    );
+
+    env.as_contract(&t.governor, || {
+        assert!(
+            !env.storage()
+                .instance()
+                .has(&DataKey::FnRole(t.asp.clone(), insert_leaf(&env)))
         );
     });
 }

@@ -117,6 +117,10 @@ pub enum OperationStatus {
 
 /// Storage keys for contract data the governor owns.
 ///
+/// [`DataKey::RecoveryDelay`], [`DataKey::Grace`], [`DataKey::GuardianPause`],
+/// and [`DataKey::FnRole`] are instance keys. [`DataKey::Pending`] and
+/// [`DataKey::Operation`] are persistent keys.
+///
 /// The minimum delay, the operation ledgers, and the role table live under the
 /// OpenZeppelin crates' own keys.
 #[contracttype]
@@ -133,6 +137,12 @@ enum DataKey {
     /// The queued call, stored under its hash while it is pending.
     Operation(BytesN<32>),
     /// The role a target function requires of an undelayed caller.
+    ///
+    /// Every row shares the instance entry's size budget, which the network
+    /// caps at `contract_data_entry_size_bytes`. The rows are added one at a
+    /// time through the queue, so the table grows only as fast as the council
+    /// executes, but it has no cap of its own and a write past the network's
+    /// limit traps rather than returning an error variant.
     FnRole(Address, Symbol),
 }
 
@@ -715,7 +725,7 @@ fn dispatch_self(env: &Env, function: &Symbol, args: &Vec<Val>) -> Result<Val, E
     } else if *function == Symbol::new(env, "clear_fn_role") {
         let (target, function): (Address, Symbol) = decode(env, args, 2)?;
         env.storage()
-            .persistent()
+            .instance()
             .remove(&DataKey::FnRole(target, function));
     } else {
         return Err(Error::UnknownFunction);
@@ -735,11 +745,11 @@ fn decode<T: TryFromVal<Env, Val>>(env: &Env, args: &Vec<Val>, count: u32) -> Re
     T::try_from_val(env, args.as_val()).map_err(|_| Error::InvalidArgs)
 }
 
-/// Writes one permission table row and extends the entry's lifetime.
+/// Writes one permission table row.
 fn set_fn_role(env: &Env, target: Address, function: Symbol, role: &Symbol) {
-    let key = DataKey::FnRole(target, function);
-    env.storage().persistent().set(&key, role);
-    bump_entry(env, &key);
+    env.storage()
+        .instance()
+        .set(&DataKey::FnRole(target, function), role);
 }
 
 /// Reports whether `function` is one of the role changes a recovery address
@@ -793,13 +803,11 @@ fn setting(env: &Env, key: &DataKey) -> u32 {
         .unwrap_or_else(|| panic_with_error!(env, Error::InvalidConfig))
 }
 
-/// Reads one permission table row and extends the entry's lifetime.
+/// Reads one permission table row.
 fn read_fn_role(env: &Env, target: &Address, function: &Symbol) -> Option<Symbol> {
-    let key = DataKey::FnRole(target.clone(), function.clone());
     env.storage()
-        .persistent()
-        .get(&key)
-        .inspect(|_| bump_entry(env, &key))
+        .instance()
+        .get(&DataKey::FnRole(target.clone(), function.clone()))
 }
 
 /// Reads the queued operation hashes, treating an absent list as empty.

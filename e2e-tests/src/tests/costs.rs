@@ -463,7 +463,7 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ("governor execute, pool pause", 6, 4),
     (
         "governor execute_now, operator, membership insert_leaf",
-        9,
+        8,
         4,
     ),
 ];
