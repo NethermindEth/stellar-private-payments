@@ -26,6 +26,29 @@ macro_rules! get_state {
     };
 }
 
+/// Number of roots a pool keeps for proof verification.
+///
+/// Mirrors `ROOT_HISTORY_SIZE` in
+/// `contracts/pool-core/src/merkle_with_history.rs`; the pool derives the ring
+/// slot rather than storing it, so the SDK derives the same slot to address
+/// the root it wants.
+const ROOT_HISTORY_SIZE: u64 = 90;
+
+/// Returns the root history slot holding the root produced by the insertion
+/// that set the leaf counter to `next_index`.
+///
+/// # Errors
+///
+/// Returns an error if [`ROOT_HISTORY_SIZE`] is zero, or if the slot does not
+/// fit in a `u32`. Neither happens while the constant is 90; both are reported
+/// rather than assumed so that a later value cannot turn either into a panic.
+fn root_slot(next_index: u64) -> Result<u32> {
+    let slot = (next_index / 2)
+        .checked_rem(ROOT_HISTORY_SIZE)
+        .ok_or_else(|| anyhow!("root history size must not be zero"))?;
+    Ok(u32::try_from(slot)?)
+}
+
 pub struct StateFetcher {
     pub(crate) client: Client,
     config: ContractConfig,
@@ -222,39 +245,25 @@ impl StateFetcher {
         for pool in enabled_pools.iter() {
             requests.push(ContractDataBulkRequest {
                 contract_id: &pool.pool_contract_id,
-                enum_keys: vec![
-                    "Admin",
-                    "Token",
-                    "Verifier",
-                    "ASPMembership",
-                    "ASPNonMembership",
-                    "Levels",
-                    "CurrentRootIndex",
-                    "NextIndex",
-                    "MaximumDepositAmount",
-                    "PolicyFlags",
-                ],
-                // `AdminViewKey` and `GvkMode` are written only by
-                // `contracts/pool-gvk`; `Pause` is absent until the first
-                // pause on either pool. A missing entry is expected rather
-                // than an error for all three, so read them below with
-                // `.get(...)`, not `get_state!`.
-                optional_enum_keys: vec!["AdminViewKey", "GvkMode", "Pause"],
+                // The leaf counter is the only setting a pool keeps under
+                // its own ledger key. Everything else, including the
+                // `AdminViewKey` and `GvkMode` that only `contracts/pool-gvk`
+                // writes and the `Pause` bits that appear at the first pause,
+                // rides the instance entry and arrives with it.
+                enum_keys: vec!["NextIndex"],
                 valued_keys: vec![],
             });
         }
 
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_membership.as_str(),
-            enum_keys: vec!["Root", "Levels", "NextIndex", "Admin"],
-            optional_enum_keys: vec!["Pause"],
+            enum_keys: vec!["NextIndex"],
             valued_keys: vec![],
         });
 
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_non_membership.as_str(),
-            enum_keys: vec!["Root", "Admin"],
-            optional_enum_keys: vec!["Pause"],
+            enum_keys: vec![],
             valued_keys: vec![],
         });
 
@@ -267,27 +276,20 @@ impl StateFetcher {
             let (bulk_state, base_latest_ledger) =
                 self.client.get_contract_data_bulk(&requests).await?;
 
-            let mut expected_root_indices: HashMap<String, u32> =
+            let mut expected_next_indices: HashMap<String, u64> =
                 HashMap::with_capacity(enabled_pools.len());
             let mut root_requests = Vec::with_capacity(enabled_pools.len());
             for pool in enabled_pools.iter() {
                 let pool_state = bulk_state
                     .get(&pool.pool_contract_id)
                     .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
-                let current_root_index_val =
-                    pool_state.get("CurrentRootIndex").ok_or_else(|| {
-                        anyhow!(
-                            "missing pool current root index state for {}",
-                            pool.pool_contract_id
-                        )
-                    })?;
-                let current_root_index = scval_to_u32(current_root_index_val)?;
-                expected_root_indices.insert(pool.pool_contract_id.clone(), current_root_index);
+                let next_index =
+                    scval_to_u64(get_state!(pool_state, "NextIndex", pool.pool_contract_id)?)?;
+                expected_next_indices.insert(pool.pool_contract_id.clone(), next_index);
                 root_requests.push(ContractDataBulkRequest {
                     contract_id: &pool.pool_contract_id,
-                    enum_keys: vec!["CurrentRootIndex"],
-                    optional_enum_keys: vec![],
-                    valued_keys: vec![("Root", current_root_index)],
+                    enum_keys: vec!["NextIndex"],
+                    valued_keys: vec![("Root", root_slot(next_index)?)],
                 });
             }
 
@@ -295,13 +297,10 @@ impl StateFetcher {
 
             let mut drift = vec![];
             for pool in enabled_pools.iter() {
-                let expected = expected_root_indices
+                let expected = expected_next_indices
                     .get(&pool.pool_contract_id)
                     .ok_or_else(|| {
-                        anyhow!(
-                            "missing expected current root index state for {}",
-                            pool.pool_contract_id
-                        )
+                        anyhow!("missing expected leaf count for {}", pool.pool_contract_id)
                     })?;
 
                 let check_state = root_state.get(&pool.pool_contract_id).ok_or_else(|| {
@@ -310,11 +309,8 @@ impl StateFetcher {
                         pool.pool_contract_id
                     )
                 })?;
-                let observed = scval_to_u32(get_state!(
-                    check_state,
-                    "CurrentRootIndex",
-                    pool.pool_contract_id
-                )?)?;
+                let observed =
+                    scval_to_u64(get_state!(check_state, "NextIndex", pool.pool_contract_id)?)?;
 
                 if observed != *expected {
                     drift.push(format!(
@@ -343,10 +339,6 @@ impl StateFetcher {
                     .get(&pool.pool_contract_id)
                     .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
 
-                let merkle_current_root_index = pool_state
-                    .get("CurrentRootIndex")
-                    .map(scval_to_u32)
-                    .transpose()?;
                 let merkle_root = root_state
                     .get(&pool.pool_contract_id)
                     .and_then(|state| state.get("Root"))
@@ -360,6 +352,7 @@ impl StateFetcher {
                 let merkle_capacity = 2u64.pow(merkle_levels);
                 let merkle_next_index =
                     scval_to_u64(get_state!(pool_state, "NextIndex", pool.pool_contract_id)?)?;
+                let merkle_current_root_index = Some(root_slot(merkle_next_index)?);
                 let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
                     pool_state,
                     "MaximumDepositAmount",
@@ -862,6 +855,18 @@ impl StateFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pool inserts two leaves per call, so the ring advances one slot every
+    /// two leaves and wraps after [`ROOT_HISTORY_SIZE`] of them. The cases are
+    /// the empty tree, the first call, the last slot before the wrap, and the
+    /// first call after it.
+    #[test]
+    fn root_slot_follows_the_leaf_count() {
+        assert_eq!(root_slot(0).expect("slot for an empty tree"), 0);
+        assert_eq!(root_slot(2).expect("slot after one call"), 1);
+        assert_eq!(root_slot(178).expect("slot at the end of the ring"), 89);
+        assert_eq!(root_slot(180).expect("slot after the ring wraps"), 0);
+    }
 
     fn field(v: u64) -> Field {
         Field(U256::from(v))

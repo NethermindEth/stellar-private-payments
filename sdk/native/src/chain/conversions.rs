@@ -403,6 +403,31 @@ pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContrac
     })
 }
 
+/// Returns the contract settings held in an instance entry's storage map,
+/// each one keyed by the symbol its ledger key names.
+///
+/// A contract addresses a unit `DataKey` variant as a one-element vector
+/// holding the variant's symbol, so an entry under any other key shape was
+/// written by something else and is skipped. An instance with no storage map
+/// yields nothing.
+pub(crate) fn instance_storage_entries(
+    instance: &xdr::ScContractInstance,
+) -> impl Iterator<Item = (String, xdr::ScVal)> + '_ {
+    instance
+        .storage
+        .iter()
+        .flat_map(|map| map.iter())
+        .filter_map(|entry| {
+            let xdr::ScVal::Vec(Some(elements)) = &entry.key else {
+                return None;
+            };
+            let [xdr::ScVal::Symbol(name)] = elements.as_slice() else {
+                return None;
+            };
+            Some((name.to_utf8_string().ok()?, entry.val.clone()))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,5 +514,54 @@ mod tests {
         let err = scval_to_baby_jub_jub_point(&xdr::ScVal::Void)
             .expect_err("non-map ScVal must be rejected");
         assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+
+    #[test]
+    fn instance_storage_entries_reads_one_symbol_vector_keys() {
+        let sym = |s: &str| xdr::ScSymbol(s.try_into().expect("symbol"));
+        let key = |s: &str| {
+            xdr::ScVal::Vec(Some(
+                xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(sym(s))]).expect("key vector"),
+            ))
+        };
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: Some(xdr::ScMap(
+                vec![
+                    xdr::ScMapEntry {
+                        key: key("Levels"),
+                        val: xdr::ScVal::U32(20),
+                    },
+                    xdr::ScMapEntry {
+                        key: key("PolicyFlags"),
+                        val: xdr::ScVal::U32(2),
+                    },
+                    // A bare symbol key is not a DataKey variant, so it is
+                    // skipped rather than flattened.
+                    xdr::ScMapEntry {
+                        key: xdr::ScVal::Symbol(sym("METADATA")),
+                        val: xdr::ScVal::Void,
+                    },
+                ]
+                .try_into()
+                .expect("storage map"),
+            )),
+        };
+
+        let entries: HashMap<String, xdr::ScVal> = instance_storage_entries(&instance).collect();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.get("Levels"), Some(&xdr::ScVal::U32(20)));
+        assert_eq!(entries.get("PolicyFlags"), Some(&xdr::ScVal::U32(2)));
+    }
+
+    #[test]
+    fn instance_storage_entries_yields_nothing_without_a_map() {
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: None,
+        };
+
+        assert_eq!(instance_storage_entries(&instance).count(), 0);
     }
 }

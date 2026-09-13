@@ -1,6 +1,7 @@
 // many parts are taken from https://github.com/stellar/rs-stellar-rpc-client/blob/main/src/lib.rs
 // to make it wasm-compatible
 
+use crate::chain::conversions::instance_storage_entries;
 use http::{Uri, uri::Authority};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_default_from_null;
@@ -76,6 +77,13 @@ struct JsonRpcErrorResponse {
 }
 
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
+
+/// The name a contract's instance entry is reported under.
+///
+/// [`Client::get_contract_data_bulk`] both labels the entry with this name and
+/// recognizes it by the same name when it flattens the settings out of the
+/// entry's storage map, so the two sides cannot drift apart.
+const CONTRACT_INSTANCE_KEY: &str = "__contract_instance";
 
 fn retention_handoff_from_data(data: Option<serde_json::Value>) -> Option<u32> {
     let value = data?;
@@ -212,11 +220,6 @@ pub struct GetLedgerEntriesResponse {
 pub struct ContractDataBulkRequest<'a> {
     pub contract_id: &'a str,
     pub enum_keys: Vec<&'a str>,
-    /// Enum keys that may legitimately be absent: fetched the same way as
-    /// `enum_keys`, but a missing entry is reported as absent rather than as
-    /// `Error::MissingRequiredContractKeys`. Used for keys that only exist on
-    /// some deployments of a contract family.
-    pub optional_enum_keys: Vec<&'a str>,
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
@@ -508,7 +511,6 @@ impl Client {
         &self,
         contract_id: &str,
         enum_keys: &[&'a str],
-        optional_enum_keys: &[&'a str],
         valued_keys: &[(&'a str, u32)],
     ) -> Result<Vec<(LedgerKey, &'a str, bool)>, Error> {
         let contract =
@@ -519,7 +521,6 @@ impl Client {
         let mut out = Vec::with_capacity(
             1usize
                 .saturating_add(enum_keys.len())
-                .saturating_add(optional_enum_keys.len())
                 .saturating_add(valued_keys.len()),
         );
 
@@ -529,16 +530,11 @@ impl Client {
                 key: xdr::ScVal::LedgerKeyContractInstance,
                 durability: xdr::ContractDataDurability::Persistent,
             }),
-            "__contract_instance",
+            CONTRACT_INSTANCE_KEY,
             false,
         ));
 
-        let enum_specs = enum_keys
-            .iter()
-            .map(|variant| (*variant, true))
-            .chain(optional_enum_keys.iter().map(|variant| (*variant, false)));
-
-        for (variant, required) in enum_specs {
+        for variant in enum_keys.iter().copied() {
             let symbol =
                 xdr::ScSymbol::try_from(variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
             let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
@@ -550,7 +546,7 @@ impl Client {
                     durability: xdr::ContractDataDurability::Persistent,
                 }),
                 variant,
-                required,
+                true,
             ));
         }
 
@@ -592,7 +588,6 @@ impl Client {
             let specs = self.build_contract_data_key_specs(
                 request.contract_id,
                 request.enum_keys.as_slice(),
-                request.optional_enum_keys.as_slice(),
                 request.valued_keys.as_slice(),
             )?;
 
@@ -646,10 +641,16 @@ impl Client {
                     continue;
                 };
 
-                result
-                    .entry(meta.contract_id.clone())
-                    .or_default()
-                    .insert(meta.key_name.clone(), data.val);
+                let contract_state = result.entry(meta.contract_id.clone()).or_default();
+                // The instance entry carries the contract's settings in its
+                // storage map, so they land in the same map as the entries
+                // fetched under their own ledger keys.
+                if meta.key_name == CONTRACT_INSTANCE_KEY
+                    && let xdr::ScVal::ContractInstance(instance) = &data.val
+                {
+                    contract_state.extend(instance_storage_entries(instance));
+                }
+                contract_state.insert(meta.key_name.clone(), data.val);
 
                 if meta.required {
                     actual_required
@@ -795,19 +796,13 @@ mod tests {
         ));
     }
 
-    /// `AdminViewKey`/`GvkMode` exist only on `contracts/pool-gvk`
-    /// deployments. Requesting them as required keys makes
-    /// `get_contract_data_bulk` fail for every `contracts/pool` deployment,
-    /// so they must be marked optional.
+    /// The instance entry is fetched for every contract and is the one key
+    /// that is never required: the settings it carries are reported as
+    /// missing under their own names, by the caller that reads them.
     #[test]
-    fn optional_enum_keys_are_not_required() {
+    fn the_instance_entry_is_not_required() {
         let specs = test_client()
-            .build_contract_data_key_specs(
-                TEST_CONTRACT_ID,
-                &["Admin", "PolicyFlags"],
-                &["AdminViewKey", "GvkMode"],
-                &[],
-            )
+            .build_contract_data_key_specs(TEST_CONTRACT_ID, &["NextIndex"], &[])
             .expect("key specs");
 
         let required: Vec<&str> = specs
@@ -821,45 +816,14 @@ mod tests {
             .map(|(_, name, _)| *name)
             .collect();
 
-        assert_eq!(required, vec!["Admin", "PolicyFlags"]);
-        assert_eq!(
-            optional,
-            vec!["__contract_instance", "AdminViewKey", "GvkMode"]
-        );
-    }
-
-    /// Moving a key between `enum_keys` and `optional_enum_keys` must change
-    /// only its required flag, never which ledger entry gets fetched.
-    #[test]
-    fn optional_enum_keys_build_the_same_ledger_key_as_required_ones() {
-        let client = test_client();
-        let as_required = client
-            .build_contract_data_key_specs(TEST_CONTRACT_ID, &["GvkMode"], &[], &[])
-            .expect("required key specs");
-        let as_optional = client
-            .build_contract_data_key_specs(TEST_CONTRACT_ID, &[], &["GvkMode"], &[])
-            .expect("optional key specs");
-
-        let (required_key, required_name, required_flag) =
-            as_required.last().expect("required spec");
-        let (optional_key, optional_name, optional_flag) =
-            as_optional.last().expect("optional spec");
-
-        assert_eq!(required_key, optional_key);
-        assert_eq!(required_name, optional_name);
-        assert!(*required_flag);
-        assert!(!*optional_flag);
+        assert_eq!(required, vec!["NextIndex"]);
+        assert_eq!(optional, vec![CONTRACT_INSTANCE_KEY]);
     }
 
     #[test]
-    fn valued_keys_stay_required_alongside_optional_enum_keys() {
+    fn valued_keys_are_required() {
         let specs = test_client()
-            .build_contract_data_key_specs(
-                TEST_CONTRACT_ID,
-                &["CurrentRootIndex"],
-                &["GvkMode"],
-                &[("Root", 3)],
-            )
+            .build_contract_data_key_specs(TEST_CONTRACT_ID, &["NextIndex"], &[("Root", 3)])
             .expect("key specs");
 
         let root = specs
@@ -900,6 +864,78 @@ mod tests {
     fn parsing_range_error() {
         let msg = "startLedger must be within the ledger range: 1936296 - 2057255";
         assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
+    }
+
+    /// The settings a contract keeps in its instance entry have to reach the
+    /// caller under their own names, which only the flattening branch of
+    /// [`Client::get_contract_data_bulk`] does. Nothing else fetches them, so
+    /// without this the branch could be dropped and every other test in the
+    /// workspace would still pass.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn instance_storage_settings_arrive_under_their_own_names() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+        let contract = stellar_strkey::Contract::from_str(TEST_CONTRACT_ID).expect("contract id");
+        let address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
+        let instance_key = LedgerKey::ContractData(xdr::LedgerKeyContractData {
+            contract: address.clone(),
+            key: xdr::ScVal::LedgerKeyContractInstance,
+            durability: xdr::ContractDataDurability::Persistent,
+        });
+        let levels_key = xdr::ScVal::Vec(Some(
+            xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(
+                xdr::ScSymbol::try_from("Levels").expect("symbol"),
+            )])
+            .expect("key vector"),
+        ));
+        let instance = LedgerEntryData::ContractData(xdr::ContractDataEntry {
+            ext: xdr::ExtensionPoint::V0,
+            contract: address,
+            key: xdr::ScVal::LedgerKeyContractInstance,
+            durability: xdr::ContractDataDurability::Persistent,
+            val: xdr::ScVal::ContractInstance(xdr::ScContractInstance {
+                executable: xdr::ContractExecutable::Wasm(xdr::Hash([7u8; 32])),
+                storage: Some(
+                    xdr::ScMap::try_from(vec![xdr::ScMapEntry {
+                        key: levels_key,
+                        val: xdr::ScVal::U32(20),
+                    }])
+                    .expect("storage map"),
+                ),
+            }),
+        });
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "latestLedger": 4_656_112,
+                    "entries": [{
+                        "key": instance_key.to_xdr_base64(Limits::none()).expect("key xdr"),
+                        "xdr": instance.to_xdr_base64(Limits::none()).expect("entry xdr"),
+                        "lastModifiedLedgerSeq": 4_656_000,
+                        "liveUntilLedgerSeq": 4_700_000,
+                    }],
+                },
+            })))
+            .mount(&server)
+            .await;
+
+        let (state, _) = Client::new(&server.uri())
+            .expect("client")
+            .get_contract_data_bulk(&[ContractDataBulkRequest {
+                contract_id: TEST_CONTRACT_ID,
+                enum_keys: vec![],
+                valued_keys: vec![],
+            }])
+            .await
+            .expect("bulk read");
+
+        let contract_state = state.get(TEST_CONTRACT_ID).expect("contract state");
+        assert_eq!(contract_state.get("Levels"), Some(&xdr::ScVal::U32(20)));
     }
 
     #[cfg(target_arch = "wasm32")]
