@@ -63,17 +63,23 @@ check() {
   fi
 }
 
-# Every DataKey variant is a unit variant, which the SDK encodes as a one-symbol ScVec, so
-# `stellar contract read --key` cannot address the entry and the key is built as XDR instead.
+# A contract's configuration lives in the storage map of its instance entry, addressed by
+# AAAAFA==, the XDR of ScVal::LedgerKeyContractInstance. `stellar contract read` prints the
+# entry as a CSV row whose second field is the JSON value with every quote doubled, so the
+# field is unwrapped before jq sees it.
 read_entry() {
-  local key out
-  key="$(printf '{"vec":[{"symbol":"%s"}]}' "$2" | stellar xdr encode --type ScVal)"
+  local out
   # The status is kept so a caller can tell an unreadable entry from a wrong value.
   out="$(stellar contract read --id "$1" --network "$NETWORK" --durability persistent \
-    --key-xdr "$key" --output json)" || return 1
-  printf '%s' "$out" | tr -d '\n ' | sed 's/""/"/g'
+    --key-xdr AAAAFA== --output json)" || return 1
+  printf '%s' "$out" | tr -d '\n' |
+    sed -e 's/^[^,]*,"//' -e 's/",[0-9][0-9]*,[0-9][0-9]*$//' -e 's/""/"/g'
 }
-read_address() { read_entry "$1" "$2" | grep -Eo '"address":"[GC][A-Z0-9]{55}"' | head -1 | cut -d'"' -f4; }
+# The map keys every setting by a one-symbol vector holding the DataKey variant's name.
+read_address() {
+  read_entry "$1" | jq -r --arg name "$2" \
+    '(.contract_instance.storage // [])[] | select(.key.vec[0].symbol == $name) | .val.address'
+}
 
 # Read-only simulation, so the source account only has to exist on the network.
 governor_call() {
