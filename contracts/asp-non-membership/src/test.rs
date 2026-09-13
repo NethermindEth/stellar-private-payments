@@ -1098,7 +1098,11 @@ fn reachable_nodes(env: &Env, contract: &Address) -> Vec<U256> {
     env.as_contract(contract, || {
         let store = env.storage().persistent();
         let zero = U256::from_u32(env, 0u32);
-        let root: U256 = store.get(&DataKey::Root).expect("Root set in constructor");
+        let root: U256 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Root)
+            .expect("Root set in constructor");
         let mut pending = vec![env, root];
         let mut seen = Vec::new(env);
         while let Some(hash) = pending.pop_back() {
@@ -1169,10 +1173,10 @@ fn test_delete_leaf_extends_rebuilt_nodes() {
     }
 }
 
-/// A blocklist pool reads this root cross-contract on every `transact`, so it
-/// must come off the seven-day fuse with the tree it heads.
+/// A blocklist pool reads this root cross-contract on every `transact`, so the
+/// instance that holds it must come off the seven-day fuse on every read.
 #[test]
-fn test_get_root_extends_root_and_instance() {
+fn test_get_root_extends_the_instance() {
     let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
@@ -1182,7 +1186,23 @@ fn test_get_root_extends_root_and_instance() {
 
     let instance = env.as_contract(&contract_id, || env.storage().instance().get_ttl());
     assert_eq!(instance, EXTEND_TO);
-    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::Root), EXTEND_TO);
+}
+
+#[test]
+fn the_root_lives_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 10u32));
+    let root = client.get_root();
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(env.storage().instance().get(&DataKey::Root), Some(root));
+        assert!(!env.storage().persistent().has(&DataKey::Root));
+    });
 }
 
 #[test]
@@ -1199,7 +1219,11 @@ fn test_find_key_extends_the_path_it_reads() {
     client.insert_leaf(&U256::from_u32(&env, 2u32), &U256::from_u32(&env, 20u32));
     let (root, children): (U256, Vec<U256>) = env.as_contract(&contract_id, || {
         let store = env.storage().persistent();
-        let root: U256 = store.get(&DataKey::Root).expect("Root set after inserts");
+        let root: U256 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Root)
+            .expect("Root set after inserts");
         let children = store
             .get(&DataKey::Node(root.clone()))
             .expect("the root node is stored");

@@ -35,8 +35,8 @@ use soroban_utils::{
 
 /// Storage keys for contract data
 ///
-/// [`DataKey::Admin`] is an instance key. [`DataKey::Root`] and
-/// [`DataKey::Node`] are persistent keys.
+/// [`DataKey::Admin`] and [`DataKey::Root`] are instance keys.
+/// [`DataKey::Node`] is a persistent key.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -133,11 +133,11 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(())` on success
     pub fn __constructor(env: Env, admin: Address) -> Result<(), Error> {
-        let store = env.storage().persistent();
-        env.storage().instance().set(&DataKey::Admin, &admin);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Admin, &admin);
         // Initialize with empty root (zero)
         let zero = U256::from_u32(&env, 0u32);
-        store.set(&DataKey::Root, &zero);
+        instance.set(&DataKey::Root, &zero);
         Ok(())
     }
 
@@ -424,9 +424,10 @@ impl ASPNonMembership {
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
         bump_instance(&env);
         let store = env.storage().persistent();
-        let root: U256 = store
+        let root: U256 = env
+            .storage()
+            .instance()
             .get(&DataKey::Root)
-            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
         let key_bits = Self::split_bits(&env, &key);
         Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)
@@ -464,9 +465,9 @@ impl ASPNonMembership {
         }
 
         let store = env.storage().persistent();
-        let root: U256 = store
+        let instance = env.storage().instance();
+        let root: U256 = instance
             .get(&DataKey::Root)
-            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Compute key bits
@@ -586,7 +587,7 @@ impl ASPNonMembership {
         }
 
         // Update root
-        store.set(&DataKey::Root, &rt);
+        instance.set(&DataKey::Root, &rt);
 
         // Emit event
         LeafInsertedEvent {
@@ -630,8 +631,8 @@ impl ASPNonMembership {
         }
 
         let store = env.storage().persistent();
-        let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
-        bump_entry(&env, &DataKey::Root);
+        let instance = env.storage().instance();
+        let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
         // Compute key bits once for both find and delete operations
         let key_bits = Self::split_bits(&env, &key);
@@ -721,7 +722,7 @@ impl ASPNonMembership {
         }
 
         // Update root
-        store.set(&DataKey::Root, &rt_new);
+        instance.set(&DataKey::Root, &rt_new);
 
         // Emit event
         LeafDeletedEvent {
@@ -764,9 +765,10 @@ impl ASPNonMembership {
     ) -> Result<bool, Error> {
         bump_instance(&env);
         let store = env.storage().persistent();
-        let root: U256 = store
+        let root: U256 = env
+            .storage()
+            .instance()
             .get(&DataKey::Root)
-            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Compute key bits once
@@ -845,9 +847,8 @@ impl ASPNonMembership {
     pub fn get_root(env: Env) -> Result<U256, Error> {
         bump_instance(&env);
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
-            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .ok_or(Error::NotInitialized)
     }
 }
