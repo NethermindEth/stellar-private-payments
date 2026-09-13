@@ -24,23 +24,31 @@ const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const execFileAsync = promisify(execFile);
-// ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]). This is the persistent
-// contract-data key used by both pool contract variants.
-const MAXIMUM_DEPOSIT_KEY_XDR = 'AAAAEAAAAAEAAAABAAAADwAAABRNYXhpbXVtRGVwb3NpdEFtb3VudA==';
+// ScVal::LedgerKeyContractInstance. Both pool contract variants keep
+// MaximumDepositAmount in the instance entry's storage map, under the key
+// ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]).
+const CONTRACT_INSTANCE_KEY_XDR = 'AAAAFA==';
 const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 
 async function readMaximumDepositAmount(poolContractId, rpcUrl) {
   const { stdout } = await execFileAsync('stellar', [
     'contract', 'read',
     '--id', poolContractId,
-    '--key-xdr', MAXIMUM_DEPOSIT_KEY_XDR,
+    '--key-xdr', CONTRACT_INSTANCE_KEY_XDR,
     '--rpc-url', rpcUrl,
     '--network-passphrase', TESTNET_PASSPHRASE,
     '--output', 'json',
   ]);
-  const match = stdout.match(/""u256"":\s*""(\d+)""/);
-  if (!match) throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
-  return BigInt(match[1]);
+  // One CSV row: the key, the entry as JSON with every quote doubled, and two
+  // ledger numbers.
+  const json = stdout
+    .slice(stdout.indexOf(',"') + 2)
+    .replace(/",\d+,\d+\s*$/, '')
+    .replaceAll('""', '"');
+  const entry = (JSON.parse(json).contract_instance.storage ?? [])
+    .find(({ key }) => key.vec?.[0]?.symbol === 'MaximumDepositAmount');
+  if (!entry) throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
+  return BigInt(entry.val.u256);
 }
 
 function stroopsToDecimal(stroops) {
