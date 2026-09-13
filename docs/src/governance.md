@@ -278,11 +278,14 @@ Soroban archives persistent entries nobody renews, and an archived entry fails e
 footprint touches it until it is restored. Three things keep that from happening.
 
 Each contract bumps its own instance on every call, along with the entries that call reads or
-writes; a pool also bumps its verifier's and both ASPs' instances. The `ttl-keeper` service
-covers what no call touches: idle pools, untouched root ring slots, old nullifiers, the sparse
-tree's long tail, and the governor's queue and role table. The SDK covers
-the rest for a user standing in front of an archived entry, by honoring the simulation's restore
-preamble and sending the restore before it retries the call.
+writes; a pool also bumps its verifier's and both ASPs' instances. Everything a contract is
+constructed with, its administrator, its pause state, and the association sets' roots live in
+that instance entry, so a contract in use keeps its whole configuration alive by being used.
+The `ttl-keeper` service covers what no call reaches: the instance and code entry of a contract
+nobody has called, untouched root ring slots, old nullifiers, the sparse tree's long tail, and
+the governor's queue and role table. The SDK covers the rest for a user standing in front of an
+archived entry, by honoring the simulation's restore preamble and sending the restore before it
+retries the call.
 
 Run the keeper against a manifest with a funded account whose address the manifest records as
 `governance.ttlKeeper`:
