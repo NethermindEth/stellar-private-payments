@@ -198,9 +198,35 @@ pub struct DeployedContracts {
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
 pub fn deploy_contracts(env: &Env) -> DeployedContracts {
-    let admin = Address::generate(env);
+    deploy_contracts_with_token(env, env.register(MockToken, ()))
+}
 
-    let token_address = env.register(MockToken, ());
+/// A pool deployment whose token moves balances a test can read.
+pub struct FundedDeployment {
+    /// The pool and its ASP contracts
+    pub contracts: DeployedContracts,
+    /// The Stellar Asset Contract acting as the pool's token
+    pub token: Address,
+}
+
+/// Deploy the pool against a real Stellar Asset Contract.
+///
+/// [`deploy_contracts`] uses [`MockToken`], whose `transfer` is a no-op and
+/// whose `balance` is always zero — enough for tests that only care whether
+/// `transact` succeeds, useless for asserting who paid whom.
+pub fn deploy_contracts_with_real_token(env: &Env) -> FundedDeployment {
+    let issuer = Address::generate(env);
+    let token = env.register_stellar_asset_contract_v2(issuer.clone());
+    let token_address = token.address();
+    FundedDeployment {
+        contracts: deploy_contracts_with_token(env, token_address.clone()),
+        token: token_address,
+    }
+}
+
+/// Deploy the pool and its ASP contracts against an already-registered token.
+pub fn deploy_contracts_with_token(env: &Env, token_address: Address) -> DeployedContracts {
+    let admin = Address::generate(env);
 
     let verifier_address = env.register(CircomGroth16Verifier, ());
 
