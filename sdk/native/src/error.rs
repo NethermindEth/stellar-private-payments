@@ -45,6 +45,26 @@ pub enum Error {
     )]
     SignerIsNotNoteOwner { owner: String, signer: String },
 
+    /// A withdrawal's payout cannot reach the recipient it names.
+    ///
+    /// The pool pays the recipient inside `transact`, so an address that cannot
+    /// hold the asset traps there: for the native asset because the recipient
+    /// is not an account and the payout is below what creating one costs,
+    /// for a classic asset because it holds no trustline. Simulation runs
+    /// immediately before signing and catches it, but reports it as an
+    /// unattributed host error; this names the recipient instead.
+    /// `simulation` carries the raw diagnostics and is deliberately left
+    /// out of the message.
+    // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
+    #[error(
+        "the withdrawal cannot pay {}: the recipient must already be able to hold this asset — an account that exists and, for a classic asset, a trustline for it",
+        crate::types::Sensitive(recipient)
+    )]
+    RecipientCannotReceive {
+        recipient: String,
+        simulation: String,
+    },
+
     #[error("{0}")]
     Other(String),
 }

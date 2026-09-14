@@ -2,7 +2,10 @@
 
 use crate::{
     planner::{SpendableNote, Transact},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
+    types::{
+        EncryptionPublicKey, ExtAmount, ExtData, NoteAmount, NotePublicKey, Sensitive,
+        UserNoteSummary,
+    },
 };
 
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
@@ -249,19 +252,36 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
         let chain_config = self.core.config();
-        prepared.soroban_tx = self
+        let input = pool_transact_input(prepared);
+        prepared.soroban_tx = match self
             .fetcher
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
-                &pool_transact_input(prepared),
+                &input,
                 // The signing address becomes the contract's `sender`, the
                 // sequence-number lookup and the envelope source.
                 &chain_config.signer_address,
             )
             .await
-            .map_err(|e| Error::Other(format!("simulate transaction: {e:#}")))?;
+        {
+            Ok(tx) => tx,
+            Err(e) => {
+                let detail = format!("{e:#}");
+                return Err(self.simulation_error(&input.ext_data, detail));
+            }
+        };
 
         Ok(())
+    }
+
+    fn simulation_error(&self, ext_data: &ExtData, detail: String) -> Error {
+        let token = self
+            .config
+            .contract_config
+            .pool(&self.config.pool_contract_id)
+            .map(|pool| pool.token_contract_id.as_str())
+            .unwrap_or_default();
+        classify_simulation_failure(ext_data, token, detail)
     }
 
     pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit<S>, Error> {
@@ -491,5 +511,182 @@ impl<S: Storage> PrivatePool<S> {
             .user_public_keys(self.config.user_address.as_str())
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
+    }
+}
+
+/// Name the recipient when simulation failed on the payout.
+///
+/// A withdrawal's only token movement is the transfer to `ext_data.recipient`
+/// (`contracts/pool/src/pool.rs:535`). What the RPC returns is a host error and
+/// a page of diagnostics naming neither the recipient nor the reason.
+///
+/// Claiming a recipient is at fault when it is not would send someone to fund
+/// an address that was never the problem, so the bar is deliberately high: the
+/// asset contract must be the contract that raised the error, and that error
+/// must state a condition only the recipient can be in. A transfer the pool
+/// could not fund, a failure anywhere after the payout, and anything else keep
+/// the raw message — the asset contract appears in the event log of a
+/// *successful* transfer too, so its presence alone means nothing.
+fn classify_simulation_failure(
+    ext_data: &ExtData,
+    token_contract_id: &str,
+    detail: String,
+) -> Error {
+    if ext_data.ext_amount < ExtAmount::ZERO
+        && recipient_was_refused(&detail, token_contract_id).is_some()
+    {
+        return Error::RecipientCannotReceive {
+            recipient: ext_data.recipient.clone(),
+            simulation: detail,
+        };
+    }
+    Error::Other(format!("simulate transaction: {detail}"))
+}
+
+/// Conditions in the asset contract that only the recipient can be in.
+///
+/// Kept to what has been observed rather than guessed: the first is what
+/// testnet returns for a payout to an address that is not an account yet
+/// (creating one costs more than the payout), the second is how the classic
+/// asset contract speaks about a missing or insufficient trustline. Anything
+/// not listed here is not attributed to the recipient.
+const RECIPIENT_REFUSALS: &[&str] = &["below minimum balance for new account", "trustline"];
+
+/// The asset contract's own error event, when it names a recipient-side cause.
+///
+/// Diagnostics arrive one event per line, so the error event and its data have
+/// to be found on the same line: a `fn_call` to the asset contract that
+/// succeeded sits on a different line from whatever failed afterwards.
+fn recipient_was_refused<'a>(detail: &'a str, token_contract_id: &str) -> Option<&'a str> {
+    if token_contract_id.is_empty() {
+        return None;
+    }
+    detail.lines().find(|line| {
+        line.contains(&format!("contract:{token_contract_id}"))
+            && line.contains("topics:[error")
+            && RECIPIENT_REFUSALS.iter().any(|cause| line.contains(cause))
+    })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod simulation_failure_tests {
+    use super::*;
+
+    const POOL: &str = "CD2W5LURL6GXAJTZVADMRVZPXIZTTPJH5TBMMQ5G4A6XPCMUJ2OHXZ4L";
+    const TOKEN: &str = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+    const RECIPIENT: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    fn ext_data(ext_amount: i128) -> ExtData {
+        ExtData {
+            recipient: RECIPIENT.to_string(),
+            ext_amount: ExtAmount::from(ext_amount),
+            encrypted_output0: Vec::new(),
+            encrypted_output1: Vec::new(),
+        }
+    }
+
+    /// The shape the RPC actually returns: a host error, then diagnostics in
+    /// which the asset contract is the one that trapped.
+    fn payout_failure() -> String {
+        format!(
+            "transaction simulation failed: HostError: Error(Contract, #14)\n\n\
+             Event log (newest first):\n   \
+             0: [Failed Diagnostic Event (not emitted)] contract:{TOKEN}, topics:[error, \
+             Error(Contract, #14)], data:[\"transfer amount is below minimum balance for new \
+             account\", 500000, 10000000]"
+        )
+    }
+
+    #[test]
+    fn a_withdrawal_that_trapped_in_the_asset_contract_names_the_recipient() {
+        let error = classify_simulation_failure(&ext_data(-500_000), TOKEN, payout_failure());
+        match &error {
+            Error::RecipientCannotReceive {
+                recipient,
+                simulation,
+            } => {
+                assert_eq!(recipient, RECIPIENT);
+                assert!(simulation.contains("Error(Contract, #14)"));
+            }
+            other => panic!("expected RecipientCannotReceive, got {other:?}"),
+        }
+    }
+
+    /// Only a withdrawal pays a recipient. A deposit also touches the asset
+    /// contract, and its failure is the sender's problem, not a recipient's.
+    #[test]
+    fn a_deposit_that_trapped_in_the_asset_contract_is_not_a_recipient_problem() {
+        let error = classify_simulation_failure(&ext_data(500_000), TOKEN, payout_failure());
+        assert!(matches!(error, Error::Other(_)), "got {error:?}");
+    }
+
+    /// The asset contract is in the event log of a *successful* transfer too.
+    /// A withdrawal that paid out and then failed while recording the spend is
+    /// not the recipient's doing, and must not tell anyone to fund it.
+    #[test]
+    fn a_failure_after_the_payout_is_not_blamed_on_the_recipient() {
+        let detail = format!(
+            "transaction simulation failed: HostError: Error(Storage, #5)\n\n\
+             Event log (newest first):\n   \
+             0: [Diagnostic Event] contract:{POOL}, topics:[error, Error(Storage, #5)], \
+             data:\"trying to access past-the-end entry\"\n   \
+             1: [Diagnostic Event] contract:{POOL}, topics:[fn_return, transfer], data:Void\n   \
+             2: [Diagnostic Event] contract:{POOL}, topics:[fn_call, {TOKEN}, transfer], \
+             data:[{POOL}, {RECIPIENT}, 500000]"
+        );
+        let error = classify_simulation_failure(&ext_data(-500_000), TOKEN, detail);
+        assert!(matches!(error, Error::Other(_)), "got {error:?}");
+    }
+
+    /// The asset contract refusing because the *pool* cannot cover the payout
+    /// is a pool problem. Same contract, same call, different party.
+    #[test]
+    fn a_payout_the_pool_cannot_fund_is_not_blamed_on_the_recipient() {
+        let detail = format!(
+            "transaction simulation failed: HostError: Error(Contract, #10)\n\n\
+             Event log (newest first):\n   \
+             0: [Failed Diagnostic Event (not emitted)] contract:{TOKEN}, topics:[error, \
+             Error(Contract, #10)], data:[\"insufficient balance\", 400000, 500000]"
+        );
+        let error = classify_simulation_failure(&ext_data(-500_000), TOKEN, detail);
+        assert!(matches!(error, Error::Other(_)), "got {error:?}");
+    }
+
+    /// The classic-asset half of the same condition.
+    #[test]
+    fn a_recipient_without_a_trustline_is_named() {
+        let detail = format!(
+            "transaction simulation failed: HostError: Error(Contract, #13)\n\n\
+             Event log (newest first):\n   \
+             0: [Failed Diagnostic Event (not emitted)] contract:{TOKEN}, topics:[error, \
+             Error(Contract, #13)], data:[\"trustline missing for account\", {RECIPIENT}]"
+        );
+        let error = classify_simulation_failure(&ext_data(-500_000), TOKEN, detail);
+        assert!(
+            matches!(error, Error::RecipientCannotReceive { .. }),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_failure_elsewhere_in_the_pool_keeps_its_own_message() {
+        let detail = "transaction simulation failed: HostError: Error(Contract, #3)".to_string();
+        let error = classify_simulation_failure(&ext_data(-500_000), TOKEN, detail.clone());
+        match &error {
+            Error::Other(message) => assert!(message.contains(&detail)),
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
+
+    /// The message reaches a UI toast, where a cancellation classifier matches
+    /// on substrings. A payout that cannot land is not a cancellation.
+    #[test]
+    fn the_message_does_not_read_as_a_wallet_cancellation() {
+        let rendered = classify_simulation_failure(&ext_data(-500_000), TOKEN, payout_failure())
+            .to_string()
+            .to_ascii_lowercase();
+        for word in ["rejected", "denied", "cancelled", "canceled"] {
+            assert!(!rendered.contains(word), "{word:?} in: {rendered}");
+        }
     }
 }
