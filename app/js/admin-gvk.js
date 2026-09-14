@@ -2,7 +2,11 @@
  * Global View admin tab — pool decrypt cursor with paginated tx rows.
  */
 
-import * as d3 from 'd3';
+import { axisBottom } from 'd3-axis';
+import { brushX } from 'd3-brush';
+import { format } from 'd3-format';
+import { scaleLinear } from 'd3-scale';
+import { select } from 'd3-selection';
 import { rpc } from '@stellar/stellar-sdk';
 import { client, getCurrentRpcUrl } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -1037,7 +1041,7 @@ function renderGraph(rows, containerWidth) {
   const bottomAxis = 28;
   const minHeight = 360;
 
-  const xScale = d3.scaleLinear()
+  const xScale = scaleLinear()
     .domain([minLedger, maxLedger === minLedger ? maxLedger + 1 : maxLedger])
     .range([padding, width - padding])
     .nice();
@@ -1053,21 +1057,21 @@ function renderGraph(rows, containerWidth) {
   const yOffset = topPad + Math.max(0, (plotAreaHeight - contentHeight) / 2);
   const yFor = (note) => yOffset + laneOf.get(note.noteId) * rowHeight + rowHeight / 2;
 
-  const svg = d3.select(graphWrap).append('svg')
+  const svg = select(graphWrap).append('svg')
     .attr('width', width)
     .attr('height', height)
     .attr('viewBox', `0 0 ${width} ${height}`);
 
   svg.append('g')
     .attr('transform', `translate(0, ${height - bottomAxis})`)
-    .call(d3.axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(d3.format('d')))
+    .call(axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(format('d')))
     .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
     .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
     .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
 
   // Behind the marks (dots keep their own click handler where they overlap
   // the brush's hit area) so drag-to-zoom and click-to-select coexist.
-  const brush = d3.brushX()
+  const brush = brushX()
     .extent([[padding, topPad], [width - padding, height - bottomAxis]])
     .on('end', (event) => {
       if (!event.selection) return;
