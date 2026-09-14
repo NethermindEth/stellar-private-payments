@@ -516,16 +516,16 @@ build_verifier_wasm_for_key() {
   local wasm_name vk_path tmp_vk=""
   wasm_name="$(verifier_wasm_name_for_key "$key")"
 
-  if [[ "$key" == "AB" && -n "$VK_FILE" ]]; then
+  if [[ "$key" == AB* && -n "$VK_FILE" ]]; then
     [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
     vk_path="$VK_FILE"
-  elif [[ "$key" == "AB" && -n "$VK_JSON" ]]; then
+  elif [[ "$key" == AB* && -n "$VK_JSON" ]]; then
     tmp_vk="$(mktemp "${TMPDIR:-/tmp}/deploy-vk.XXXXXX.json")"
     printf '%s' "$VK_JSON" > "$tmp_vk"
     vk_path="$tmp_vk"
   else
     vk_path="$(default_vk_file "$NETWORK" "$key")"
-    [[ -f "$vk_path" ]] || die "VK not found for verifier key '$key': $vk_path (pass --vk-file for plain AB)"
+    [[ -f "$vk_path" ]] || die "VK not found for verifier key '$key': $vk_path (pass --vk-file for AB or AB_gvk_*)"
   fi
 
   step "building verifier WASM for $(policy_suffix_label "$key") from $vk_path"

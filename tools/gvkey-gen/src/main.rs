@@ -152,6 +152,16 @@ fn write_private_file(path: &std::path::Path, contents: &str) -> Result<()> {
 }
 
 fn open_storage(path: &std::path::Path) -> Result<LocalStorage> {
-    LocalStorage::open(&path.to_string_lossy())
-        .with_context(|| format!("open wallet database at {}", path.display()))
+    let is_new = !path.exists();
+    let storage = LocalStorage::open(&path.to_string_lossy())
+        .with_context(|| format!("open wallet database at {}", path.display()))?;
+    // New sqlite files default to a world-readable mode; harden like
+    // `write_private_file`.
+    #[cfg(unix)]
+    if is_new {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("set permissions on {}", path.display()))?;
+    }
+    Ok(storage)
 }

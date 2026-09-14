@@ -180,7 +180,7 @@ impl GvkMode {
 }
 
 /// Operator-stored GVK admin authority key material (local wallet setting)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GvkAuthoritySetting {
     /// Admin authority scalar `d`.
@@ -507,7 +507,10 @@ mod on_chain_mode_tests {
         setting.validate_consistency()?;
         let json = serde_json::to_string(&setting)?;
         let parsed: GvkAuthoritySetting = serde_json::from_str(&json)?;
-        assert_eq!(parsed, setting);
+        assert!(
+            parsed == setting,
+            "round-trip through JSON changed the authority setting"
+        );
         assert_eq!(
             BabyJubJubPoint::from_priv_scalar(&parsed.private_key),
             Some(parsed.public_key)
