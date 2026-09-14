@@ -5,9 +5,9 @@ use crate::{
     planner::SpendableNote,
     state::{SqliteStorage, StoredUserKeys},
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata,
-        UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
+        NoteKeyPair, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
+        RecipientLookup, SyncMetadata, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -149,6 +149,31 @@ impl Storage for LocalStorage {
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         map_user_keys(&self.storage(), user_address)
+    }
+
+    async fn user_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+        Ok(self
+            .storage()
+            .get_user_keys(user_address)
+            .map_err(|e| Error::Other(format!("check stored privacy keys: {e:#}")))?
+            .is_some())
+    }
+
+    async fn save_user_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error> {
+        self.storage_mut()
+            .save_encryption_and_note_keypairs(
+                user_address,
+                note_keypair,
+                encryption_keypair,
+                membership_blinding,
+            )
+            .map_err(|e| Error::Other(format!("save privacy keys: {e:#}")))
     }
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {

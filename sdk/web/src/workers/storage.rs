@@ -19,15 +19,11 @@ use stellar_private_payments::{
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive,
-        SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
+        NoteKeyPair, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
+        RecipientLookup, Sensitive, SyncMetadata, UserNoteSummary,
     },
-    zk::{
-        crypto::asp_membership_leaf,
-        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
-        flows::TransactParams,
-    },
+    zk::{crypto::asp_membership_leaf, flows::TransactParams},
 };
 use tracing::Instrument;
 #[cfg(target_arch = "wasm32")]
@@ -304,14 +300,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
+        StorageWorkerRequest::SaveUserKeys(
+            address,
+            note_keypair,
+            encryption_keypair,
+            membership_blinding,
+        ) => {
             tracing::trace!(
-                "[{WORKER_NAME}] deriving and saving user keys for the account {}",
+                "[{WORKER_NAME}] saving user keys for the account {}",
                 Sensitive(&address)
             );
-            let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(signature.clone())?;
-            let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
@@ -930,6 +928,49 @@ impl Storage for StorageBridge {
         Err(Error::Other(
             "full stored user keys are not available on the storage bridge; use asp_secret".into(),
         ))
+    }
+
+    async fn user_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::UserKeys(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserKeys(keys)) => Ok(keys.is_some()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response checking user keys: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn save_user_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error> {
+        match self
+            .call(
+                StorageWorkerRequest::SaveUserKeys(
+                    user_address.to_string(),
+                    note_keypair.clone(),
+                    encryption_keypair.clone(),
+                    *membership_blinding,
+                ),
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::Saved) => Ok(()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response saving user keys: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {

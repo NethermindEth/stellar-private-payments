@@ -4,8 +4,12 @@ use super::Signer;
 use crate::{
     PreparedTransaction,
     error::Error,
-    types::{SignedTransaction, SignerAddress},
+    types::{KeyDerivationSignature, SignedTransaction, SignerAddress},
 };
+
+/// SEP-53 message prefix, matching the Stellar CLI and browser wallets
+/// (`stellar message sign`, Freighter's `signMessage`).
+const SEP53_PREFIX: &str = "Stellar Signed Message:\n";
 
 /// In-process Ed25519 signer for native CLI and tests.
 pub struct LocalSigner {
@@ -62,5 +66,45 @@ impl Signer for LocalSigner {
             .to_xdr_base64(Limits::none())
             .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
         Ok(SignedTransaction { signed_xdr })
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        let prefixed = format!("{SEP53_PREFIX}{message}");
+        let signature = self.stellar.sign(prefixed.as_bytes());
+        Ok(KeyDerivationSignature(signature.as_bytes().to_vec()))
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    /// Cross-check against a real `stellar message sign` invocation:
+    ///
+    /// ```text
+    /// stellar keys add sep53test --secret-key <<< SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X
+    /// stellar message sign "Privacy Pool Key Derivation [v1]" --sign-with-key sep53test
+    /// ```
+    const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
+    const PUBLIC: &str = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+    const MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
+    const EXPECTED_SIGNATURE_B64: &str =
+        "sVN7t6f95HnWra/b23AqHVVhEXlS2wEBd2Sng7yqHjRKoieWbmbGNnFQST+L08ON4YrUYp9NMaJhdMT0w6jHDg==";
+
+    #[tokio::test]
+    async fn sep53_known_answer() {
+        let signer = LocalSigner::new(
+            SECRET,
+            "Test SDF Network ; September 2015",
+            SignerAddress::new(PUBLIC),
+        )
+        .expect("build signer");
+        let signature = signer.sign_message(MESSAGE).await.expect("sign message");
+        assert_eq!(
+            STANDARD.encode(&signature.0),
+            EXPECTED_SIGNATURE_B64,
+            "must match the SEP-53 signature produced by the real stellar CLI"
+        );
     }
 }

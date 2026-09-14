@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
-    types::SignedTransaction,
+    types::{KeyDerivationSignature, SignedTransaction},
 };
 
 use crate::stellar_cli;
@@ -63,5 +63,10 @@ impl Signer for AliasSigner {
             .to_xdr_base64(Limits::none())
             .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
         Ok(SignedTransaction { signed_xdr })
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        stellar_cli::sign_message(&self.alias, message, self.config_dir.as_deref())
+            .map_err(|e| Error::Other(format!("sign message for alias `{}`: {e:#}", self.alias)))
     }
 }

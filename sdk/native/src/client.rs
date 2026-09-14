@@ -135,28 +135,29 @@ impl<S: Storage> Client<S> {
             .await
     }
 
-    /// Create an [`Account`] session.
+    /// Create an [`Account`] session. When `signer_address` is `user_address`
+    /// and privacy keys are not yet stored, derives and persists them first.
     ///
     /// `signer_address` need not be `user_address`: the signer pays and
-    /// sources every envelope, the owner holds the notes. The two operations
-    /// that need the owner's own signature check for themselves — see
-    /// [`Account::register_public_keys`] and [`Error::SignerIsNotNoteOwner`].
+    /// sources every envelope, the owner holds the notes. Delegated sessions
+    /// skip key derivation — see [`Account::register_public_keys`] and
+    /// [`Error::SignerIsNotNoteOwner`].
     ///
     /// # Errors
     /// Returns a storage error if the session's storage handle cannot be
-    /// forked.
+    /// forked, or an error from key derivation.
     #[tracing::instrument(
         name = "client_account",
         skip_all,
         fields(correlation_id = %correlation_id_or_new())
     )]
-    pub fn account(
+    pub async fn account(
         &self,
         user_address: NoteOwnerAddress,
         signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
-        Ok(Account::new(
+        Account::open(
             self.rpc.clone(),
             self.storage.fork()?,
             self.prover.clone(),
@@ -165,7 +166,8 @@ impl<S: Storage> Client<S> {
             signer,
             self.sync.clone(),
             self.contract_config.clone(),
-        ))
+        )
+        .await
     }
 
     /// Chain-state accessor for this deployment.
@@ -226,29 +228,31 @@ mod divergent_session_tests {
     }
 
     // A delegated session signs and pays as one account and owns notes as
-    // another. Nothing here asks for an owner signature, so nothing here has
-    // cause to compare the two.
-    #[test]
-    fn client_account_opens_a_divergent_pair() {
+    // another; it skips key derivation entirely, so it opens even with no
+    // keys stored for the owner.
+    #[tokio::test]
+    async fn client_account_opens_a_divergent_pair() {
         let account = test_client()
             .account(
                 NoteOwnerAddress::new(OWNER),
                 SignerAddress::new(DELEGATE),
                 test_signer(DELEGATE),
             )
+            .await
             .expect("a payer that is not the note owner must still open a session");
         assert_eq!(account.user_address().as_str(), OWNER);
         assert_eq!(account.signer_address().as_str(), DELEGATE);
     }
 
-    #[test]
-    fn client_account_opens_when_the_owner_signs_for_itself() {
+    #[tokio::test]
+    async fn client_account_opens_when_the_owner_signs_for_itself() {
         let account = test_client()
             .account(
                 NoteOwnerAddress::new(OWNER),
                 SignerAddress::new(OWNER),
                 test_signer(OWNER),
             )
+            .await
             .expect("the owner signing for itself must open a session");
         assert_eq!(account.user_address().as_str(), OWNER);
         assert_eq!(account.signer_address().as_str(), OWNER);

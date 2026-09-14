@@ -16,9 +16,10 @@ pub use stellar_private_payments::{
 use stellar_private_payments::{
     gvk::GvkEvent,
     types::{
-        AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
-        KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
+        AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionKeyPair,
+        EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey, OperationalFeedItem,
+        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
+        UserOperation,
     },
     zk::flows::TransactParams,
 };
@@ -72,7 +73,7 @@ pub enum StorageWorkerRequest {
     },
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
-    DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
+    SaveUserKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     GetSetting(String),

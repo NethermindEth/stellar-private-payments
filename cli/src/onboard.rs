@@ -12,14 +12,12 @@
 use std::io::Write;
 
 use anyhow::{Context, Result, bail};
-use stellar_private_payments::{
-    state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
-    zk::encryption::{
-        KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
-    },
-};
+use stellar_private_payments::state::{DEFAULT_BOOTNODE_URL, SqliteStorage};
 
-use crate::{account::Account, cmd::register, config::CliConfig, explorer, stellar_cli};
+use crate::{
+    account::Account, cmd::register, config::CliConfig, explorer, session::ClientSession,
+    stellar_cli,
+};
 
 // Reused from the web app onboarding wizard / index.html.
 const KEYS_TEXT: &str = "Your wallet is requested to sign one message. That signature derives your \
@@ -108,7 +106,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
         if interactive {
             println!("\n{KEYS_TEXT}");
         }
-        derive_and_save_keys(config, &account, &mut storage)?;
+        derive_and_save_keys(config, &account)?;
         say(interactive, "Privacy keys derived and stored.");
     }
 
@@ -125,32 +123,13 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Delegate the SEP-53 key-derivation signature to the Stellar CLI (the secret
-/// never enters this process) and store the derived privacy keys.
-fn derive_and_save_keys(
-    config: &CliConfig,
-    account: &Account,
-    storage: &mut SqliteStorage,
-) -> Result<()> {
-    let signature = stellar_cli::sign_message(
-        &account.alias,
-        KEY_DERIVATION_MESSAGE,
-        config.stellar_config_dir.as_deref(),
-    )
-    .context("derive privacy-key signature via stellar CLI")?;
-
-    let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
-        .context("derive privacy keypairs from wallet signature")?;
-    let membership_blinding = derive_membership_blinding(&signature, &config.deployment.network)?;
-
-    storage
-        .save_encryption_and_note_keypairs(
-            &account.address,
-            &note_keypair,
-            &encryption_keypair,
-            &membership_blinding,
-        )
-        .context("save privacy keys to local wallet database")
+/// The SEP-53 signature is delegated to the Stellar CLI; the secret never
+/// enters this process. Opening the session as the owner derives and stores
+/// the keys as a side effect of `Account::open`.
+fn derive_and_save_keys(config: &CliConfig, account: &Account) -> Result<()> {
+    let network = config.resolve_network()?;
+    ClientSession::new(config, account, &network, true).context("derive privacy keys")?;
+    Ok(())
 }
 
 fn configure_bootnode(
