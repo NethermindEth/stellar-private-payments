@@ -115,7 +115,7 @@ impl ClientSession {
     ) -> Result<stellar_private_payments::types::TransactionResult> {
         log::info!("Registering public keys");
         self.account
-            .register_public_keys(None, None)
+            .register_public_keys()
             .map_err(|e| anyhow::anyhow!("register public keys: {e}"))
     }
 }

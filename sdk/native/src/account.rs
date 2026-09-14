@@ -184,26 +184,13 @@ impl<S: Storage> Account<S> {
     /// keyed to the owner; the payer's wallet is only asked to sign for its
     /// own account and has nothing to put there. Checked before the call so a
     /// delegated session stops here rather than at an unfillable auth entry.
-    pub async fn register_public_keys(
-        &self,
-        note_public_key: Option<NotePublicKey>,
-        encryption_public_key: Option<EncryptionPublicKey>,
-    ) -> Result<TransactionResult, Error> {
+    pub async fn register_public_keys(&self) -> Result<TransactionResult, Error> {
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
-        let (note_pk, enc_pk) = match (note_public_key, encryption_public_key) {
-            (Some(note), Some(enc)) => (note, enc),
-            (None, None) => {
-                self.storage()
-                    .user_public_keys(self.user_address.as_str())
-                    .await?
-            }
-            _ => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "note and encryption public keys must both be provided or both omitted"
-                )));
-            }
-        };
+        let (note_pk, enc_pk) = self
+            .storage()
+            .user_public_keys(self.user_address.as_str())
+            .await?;
 
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .context("state fetcher")?;

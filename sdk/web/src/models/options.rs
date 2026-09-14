@@ -138,56 +138,6 @@ impl PoolOptions {
 }
 
 #[wasm_bindgen]
-pub struct RegisterPublicKeysOptions {
-    note_public_key_hex: Option<String>,
-    encryption_public_key_hex: Option<String>,
-}
-
-#[wasm_bindgen]
-impl RegisterPublicKeysOptions {
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        note_public_key_hex: Option<String>,
-        encryption_public_key_hex: Option<String>,
-    ) -> Self {
-        Self {
-            note_public_key_hex,
-            encryption_public_key_hex,
-        }
-    }
-
-    #[wasm_bindgen(js_name = fromValue)]
-    pub fn from_value(value: JsValue) -> Result<RegisterPublicKeysOptions, JsError> {
-        if value.is_null() || value.is_undefined() {
-            return Ok(Self {
-                note_public_key_hex: None,
-                encryption_public_key_hex: None,
-            });
-        }
-        #[derive(serde::Deserialize, Default)]
-        #[serde(rename_all = "camelCase")]
-        struct Raw {
-            note_public_key_hex: Option<String>,
-            encryption_public_key_hex: Option<String>,
-        }
-        let raw: Raw = serde_wasm_bindgen::from_value(value)
-            .map_err(|e| JsError::new(&format!("invalid registerPublicKeys options: {e}")))?;
-        Ok(Self {
-            note_public_key_hex: raw.note_public_key_hex,
-            encryption_public_key_hex: raw.encryption_public_key_hex,
-        })
-    }
-
-    pub(crate) fn note_public_key_hex(&self) -> Option<String> {
-        self.note_public_key_hex.clone()
-    }
-
-    pub(crate) fn encryption_public_key_hex(&self) -> Option<String> {
-        self.encryption_public_key_hex.clone()
-    }
-}
-
-#[wasm_bindgen]
 pub struct AccountOptions {
     network_passphrase: String,
     user_address: Option<String>,
