@@ -45,6 +45,33 @@ pub enum Error {
     )]
     SignerIsNotNoteOwner { owner: String, signer: String },
 
+    /// The account that would pay for a transaction is not on the network.
+    ///
+    /// Building an envelope reads the paying account's sequence number, so an
+    /// account that was never funded fails there, as whatever the RPC returned
+    /// for a missing ledger entry. Raised before that read so the account that
+    /// needs funding is named.
+    // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
+    #[error(
+        "paying account {} is not on the network; fund it before it can pay for this transaction",
+        crate::types::Sensitive(payer)
+    )]
+    PayingAccountNotFound { payer: String },
+
+    /// The signed transaction still carries an authorization nobody filled.
+    ///
+    /// Simulation returns one auth entry per address the call requires, and a
+    /// signer fills only the entries for accounts whose keys it holds. A
+    /// delegated registration needs the owner's, which a signer holding the
+    /// payer's key alone cannot produce. Raised instead of submitting a
+    /// transaction the contract would refuse.
+    // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
+    #[error(
+        "this transaction needs {}'s authorization and the signer did not produce it; it must be collected before submission",
+        crate::types::Sensitive(address)
+    )]
+    MissingAuthorization { address: String },
+
     #[error("{0}")]
     Other(String),
 }

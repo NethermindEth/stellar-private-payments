@@ -24,5 +24,9 @@ pub(crate) use conversions::{
 pub(crate) use ext_data_hash::hash_ext_data_offchain;
 pub(crate) use indexer::Indexer;
 pub(crate) use rpc::Error as RpcError;
+#[cfg(test)]
+pub(crate) use signer::verify_tx;
 pub(crate) use submit::{TxConfirmStatus, confirm_tx, submit_tx};
+#[cfg(test)]
+pub(crate) use tx_assemble::test_fixtures;
 pub(crate) use tx_prepare::PoolTransactInput;
