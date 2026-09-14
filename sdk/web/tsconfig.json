@@ -9,5 +9,5 @@
     "allowJs": true,
     "checkJs": false
   },
-  "include": ["js/types/**/*.d.ts", "js/index.js"]
+  "include": ["js/types/**/*.d.ts", "js/types/fixtures/**/*.ts", "js/index.js"]
 }

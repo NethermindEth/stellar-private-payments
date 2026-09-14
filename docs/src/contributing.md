@@ -248,7 +248,7 @@ make release
 
 ### Browser SDK (`sdk/web`)
 
-Standalone npm package (`stellar-private-payments`, alpha). See [`sdk/web/README.md`](sdk/web/README.md).
+Standalone npm package (`stellar-private-payments`). See [`sdk/web/README.md`](sdk/web/README.md).
 
 Requires [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (version must match `Cargo.lock`).
 

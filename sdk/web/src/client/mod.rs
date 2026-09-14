@@ -5,20 +5,19 @@ mod account;
 #[cfg(all(test, target_arch = "wasm32"))]
 mod e2e_tests;
 mod execute;
+mod gvk;
 mod pool;
-mod transact;
 
 use std::{rc::Rc, str::FromStr};
 
-use serde::Deserialize;
 use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
     types::{
-        ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey,
-        SignerAddress,
+        ContractConfig, DisclosureReceipt, Field, KeyDerivationSignature, NoteOwnerAddress,
+        NotePublicKey, SignerAddress,
     },
 };
 use wasm_bindgen::prelude::*;
@@ -27,6 +26,11 @@ use wasm_bindgen_futures::JsFuture;
 use crate::{
     correlation::{new_correlation_id, with_correlation_id},
     deployment::{parse_contract_config, require_circuits_base_url},
+    models::{
+        AccountOptions, ContractConfig as JsContractConfig, ContractsStateData,
+        DisclosureVerificationReport, OperationalFeedItem, RecipientLookup,
+        VerifyDisclosureOptions, operational_feed_items,
+    },
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
     storage::Storage,
@@ -38,6 +42,7 @@ use crate::{
 use gloo_worker::Spawnable;
 
 pub use account::Account;
+pub use gvk::GvkAudit;
 pub use pool::PrivatePool;
 
 pub(crate) fn pool_err(error: Error) -> JsError {
@@ -58,13 +63,6 @@ pub(crate) fn pool_err(error: Error) -> JsError {
     }
 }
 
-pub(crate) fn pool_err_message(error: Error) -> String {
-    match &error {
-        Error::PlanExecution(plan) => plan.cause().to_string(),
-        other => other.to_string(),
-    }
-}
-
 /// Deployment-scoped browser SDK runtime: native [`NativeClient`] plus worker
 /// handles.
 #[wasm_bindgen]
@@ -74,23 +72,6 @@ pub struct Client {
     prover: ProverBridge,
     contract_config: ContractConfig,
     background_sync_stop: Option<BackgroundSyncStop>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AccountOptions {
-    network_passphrase: String,
-    user_address: Option<String>,
-    /// The account that signs and pays. Optional; defaults to `user_address`.
-    signer_address: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VerifyDisclosureOptions {
-    prover_worker_url: Option<String>,
-    contract_config: serde_json::Value,
-    circuits_base_url: String,
 }
 
 #[wasm_bindgen]
@@ -188,8 +169,8 @@ impl Client {
     /// Deployment config used by this client (contract addresses, pools,
     /// network).
     #[wasm_bindgen(js_name = contractConfig)]
-    pub fn contract_config(&self) -> Result<JsValue, JsError> {
-        Ok(serde_wasm_bindgen::to_value(&self.contract_config)?)
+    pub fn contract_config(&self) -> JsContractConfig {
+        JsContractConfig::from(self.contract_config.clone())
     }
 
     /// Start background contract-event sync into local storage.
@@ -228,16 +209,37 @@ impl Client {
 
     /// Bind a wallet signer, derive privacy keys when missing, and return an
     /// [`Account`] session.
+    ///
+    /// `signerAddress` may name an account other than the note owner; that
+    /// session signs and pays while the owner holds the notes. Deriving the
+    /// owner's keys is the one part of opening a session that the owner alone
+    /// can do, so it — and only it — refuses a divergent pair.
     pub async fn account(&self, options: JsValue, signer: JsValue) -> Result<Account, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
-            let user_address = resolve_user_address(&signer, opts.user_address).await?;
+            let opts = AccountOptions::from_value(options)?;
+            let user_address =
+                resolve_user_address(&signer, opts.user_address().map(str::to_string)).await?;
             // Defaults to the note owner. The wallet signs with this account.
-            let signer_address =
-                SignerAddress::new(opts.signer_address.unwrap_or_else(|| user_address.clone()));
-            let wallet_signer = WalletSigner::new(signer, opts.network_passphrase, signer_address)?;
+            let signer_address = SignerAddress::new(
+                opts.signer_address()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| user_address.clone()),
+            );
+            let wallet_signer = WalletSigner::new(
+                signer,
+                opts.network_passphrase().to_string(),
+                signer_address,
+            )?;
 
             if !self.user_keys_exist(&user_address).await? {
+                // The derivation signature *is* the note secret. WalletSigner
+                // asks the wallet for the account it signs with, so on a
+                // divergent pair the wallet would sign with the payer and the
+                // payer's keypair would be filed under the owner's address —
+                // wrong keys, silently, and persisted. Refuse instead. An
+                // owner whose keys already exist skips this and delegates.
+                ensure_signer_is_note_owner(&user_address, wallet_signer.signer_address())
+                    .map_err(pool_err)?;
                 let message =
                     stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
                 let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
@@ -262,42 +264,42 @@ impl Client {
     /// Recent deployment activity (pool events, registry registrations, ASP
     /// updates).
     #[wasm_bindgen(js_name = operationalFeed)]
-    pub async fn operational_feed(&self, limit: u32) -> Result<JsValue, JsError> {
+    pub async fn operational_feed(&self, limit: u32) -> Result<Vec<OperationalFeedItem>, JsError> {
         let feed = self.inner.operational_feed(limit).await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&feed)?)
+        Ok(operational_feed_items(feed))
     }
 
     /// Look up a recipient's registered note and encryption public keys.
     #[wasm_bindgen(js_name = recipientLookup)]
-    pub async fn recipient_lookup(&self, address: String) -> Result<JsValue, JsError> {
+    pub async fn recipient_lookup(&self, address: String) -> Result<RecipientLookup, JsError> {
         let lookup = self
             .inner
             .recipient_lookup(&address)
             .await
             .map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&lookup)?)
+        Ok(RecipientLookup::from(lookup))
     }
 
     /// On-chain ASP membership and non-membership state.
     #[wasm_bindgen(js_name = aspState)]
-    pub async fn asp_state(&self) -> Result<JsValue, JsError> {
+    pub async fn asp_state(&self) -> Result<ContractsStateData, JsError> {
         let fetcher = self.state_fetcher()?;
         let data = fetcher
             .asp_state()
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&data)?)
+        Ok(ContractsStateData::from(data))
     }
 
     /// On-chain state for all enabled pools plus shared ASP contracts.
     #[wasm_bindgen(js_name = allContractsData)]
-    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
+    pub async fn all_contracts_data(&self) -> Result<ContractsStateData, JsError> {
         let fetcher = self.state_fetcher()?;
         let data = fetcher
             .all_contracts_data()
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&data)?)
+        Ok(ContractsStateData::from(data))
     }
 
     /// Verify a selective-disclosure receipt without a wallet session.
@@ -306,7 +308,7 @@ impl Client {
         &self,
         receipt_json: String,
         expected_vk_hash: String,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<DisclosureVerificationReport, JsError> {
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
@@ -314,7 +316,7 @@ impl Client {
         let report = verify_disclosure_receipt(&fetcher, &self.prover, &receipt, &expected_vk_hash)
             .await
             .map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&report)?)
+        Ok(DisclosureVerificationReport::from(report))
     }
 }
 
@@ -350,36 +352,29 @@ pub async fn verify_selective_disclosure_standalone(
     receipt_json: String,
     expected_vk_hash: String,
     options: JsValue,
-) -> Result<JsValue, JsError> {
+) -> Result<DisclosureVerificationReport, JsError> {
     with_correlation_id(new_correlation_id(), async {
         crate::wasm_start();
 
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
-        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
-            return Err(JsError::new(
-                "verifySelectiveDisclosure options with contractConfig and circuitsBaseUrl are required",
-            ));
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-        let contract_config: ContractConfig = serde_json::from_value(opts.contract_config)
-            .map_err(|e| JsError::new(&format!("invalid contractConfig: {e}")))?;
-        let circuits_base_url = require_circuits_base_url(opts.circuits_base_url)?;
+        let opts = VerifyDisclosureOptions::from_value(options)?;
+        let contract_config = opts.contract_config().native().clone();
+        let circuits_base_url = require_circuits_base_url(opts.circuits_base_url().to_string())?;
         let prover_worker_url = opts
-            .prover_worker_url
+            .prover_worker_url()
             .filter(|url| !url.trim().is_empty())
             .ok_or_else(|| {
                 JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
             })?;
         let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
-        let fetcher = StateFetcher::new(rpc, contract_config)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let fetcher =
+            StateFetcher::new(rpc, contract_config).map_err(|e| JsError::new(&e.to_string()))?;
         let prover = ProverBridge::new(
             ProverWorker::spawner()
                 .with_loader(true)
                 .as_module(true)
-                .spawn(&prover_worker_url),
+                .spawn(prover_worker_url),
         );
         prover
             .configure_circuits_base(circuits_base_url)
@@ -393,7 +388,7 @@ pub async fn verify_selective_disclosure_standalone(
         let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
             .await
             .map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&report)?)
+        Ok(DisclosureVerificationReport::from(report))
     })
     .await
 }
@@ -410,9 +405,14 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
+        // Read off the signer rather than AccountOptions: this is the address
+        // the wallet will actually be asked to sign with.
+        let signer_address = wallet_signer.signer_address().clone();
         let signer: Handle<dyn stellar_private_payments::Signer> =
             Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
-        self.inner.account(user_address, signer).map_err(pool_err)
+        self.inner
+            .account(NoteOwnerAddress::new(user_address), signer_address, signer)
+            .map_err(pool_err)
     }
 
     async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
@@ -451,6 +451,25 @@ impl Client {
             .await
             .map_err(|e| JsError::new(&format!("storage worker error: {e}")))
     }
+}
+
+/// Refuse key derivation on a session that signs with an account other than
+/// the note owner.
+///
+/// Checked before the wallet is asked for the derivation signature, so a
+/// divergent pair costs no signature request and writes nothing. It raises the
+/// native error rather than a parallel message, so the two cannot drift.
+fn ensure_signer_is_note_owner(
+    user_address: &str,
+    signer_address: &SignerAddress,
+) -> Result<(), Error> {
+    if signer_address.as_str() == user_address {
+        return Ok(());
+    }
+    Err(Error::SignerIsNotNoteOwner {
+        owner: user_address.to_string(),
+        signer: signer_address.as_str().to_string(),
+    })
 }
 
 async fn resolve_user_address(
@@ -492,4 +511,50 @@ async fn resolve_user_address(
     resolved
         .as_string()
         .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
+}
+
+// `wasm_bindgen_test`, not `test`: this crate's suite runs under the
+// wasm32 harness, which does not collect plain `#[test]` functions.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod signer_is_note_owner_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+
+    #[wasm_bindgen_test]
+    fn the_owner_signing_for_itself_is_accepted() {
+        assert!(ensure_signer_is_note_owner(OWNER, &SignerAddress::new(OWNER)).is_ok());
+    }
+
+    #[wasm_bindgen_test]
+    fn a_delegate_signing_for_the_owner_is_refused() {
+        let error = ensure_signer_is_note_owner(OWNER, &SignerAddress::new(DELEGATE))
+            .expect_err("a payer that is not the note owner must not derive the owner's keys");
+        match &error {
+            Error::SignerIsNotNoteOwner { owner, signer } => {
+                assert_eq!(owner, OWNER);
+                assert_eq!(signer, DELEGATE);
+            }
+            other => panic!("expected SignerIsNotNoteOwner, got {other:?}"),
+        }
+    }
+
+    /// The app classifies a wallet cancellation by substring, and this refusal
+    /// reaches the same handler. It must not read like one.
+    #[wasm_bindgen_test]
+    fn the_refusal_does_not_read_as_a_wallet_cancellation() {
+        let rendered = ensure_signer_is_note_owner(OWNER, &SignerAddress::new(DELEGATE))
+            .expect_err("a divergent pair must be refused")
+            .to_string()
+            .to_ascii_lowercase();
+
+        for word in ["rejected", "denied", "cancelled", "canceled"] {
+            assert!(
+                !rendered.contains(word),
+                "{word:?} would be read as a wallet cancellation: {rendered}"
+            );
+        }
+    }
 }

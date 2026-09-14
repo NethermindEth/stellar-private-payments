@@ -2,3 +2,6 @@ dist/
 node_modules/
 *.tgz
 .trunk-wasm-profile
+
+# Staged wasm-bindgen output (scripts/stage-wasm-types.sh) — never committed.
+js/types/crates/*.d.ts

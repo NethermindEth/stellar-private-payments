@@ -452,22 +452,21 @@ check_env_address_format() {
   else _STATUS="MISSING"; _DETAIL="malformed address for: $(IFS=,; echo "${bad[*]}")"; fi; }
 
 check_env_pool_matches_deployments() {
-  local pool_env pool_json deployments_json; pool_env="$(env_var_value E2E_POOL_CONTRACT)" || pool_env=""
+  local pool_env native_pools deployments_json; pool_env="$(env_var_value E2E_POOL_CONTRACT)" || pool_env=""
   if [ -z "$pool_env" ]; then _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT not set (see env.vars.required)"; return; fi
   deployments_json="$REPO_ROOT/deployments/testnet/deployments.json"
   if [ ! -f "$deployments_json" ]; then _STATUS="MISSING"; _DETAIL="$deployments_json not found"; return; fi
-  pool_json="$(python3 - "$deployments_json" <<'PYEOF'
+  native_pools="$(python3 - "$deployments_json" <<'PYEOF'
 import json, sys
 pools = json.load(open(sys.argv[1]))["pools"]
 native = [p for p in pools if p.get("enabled") and p.get("asset", {}).get("kind") == "native"]
-if len(native) != 1:
-    sys.exit(1)
-print(native[0]["poolContractId"])
+for p in native:
+    print(p["poolContractId"])
 PYEOF
 )"
-  if [ -z "$pool_json" ]; then _STATUS="MISSING"; _DETAIL="could not resolve a single enabled native pool from $deployments_json"; return; fi
-  if [ "$pool_env" = "$pool_json" ]; then _STATUS="OK"; _DETAIL="matches deployments.json ($pool_json)"
-  else _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT ($pool_env) does not match the enabled native pool in deployments.json ($pool_json) — a redeploy invalidated the env file"; fi; }
+  if [ -z "$native_pools" ]; then _STATUS="MISSING"; _DETAIL="could not resolve an enabled native pool from $deployments_json"; return; fi
+  if grep -qxF "$pool_env" <<<"$native_pools"; then _STATUS="OK"; _DETAIL="matches an enabled native pool in deployments.json ($pool_env)"
+  else _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT ($pool_env) is not among the enabled native pools in deployments.json ($(tr '\n' ',' <<<"$native_pools" | sed 's/,$//')) — a redeploy invalidated the env file"; fi; }
 
 check_env_rpc_reachable() {
   local url; url="$(env_var_value E2E_RPC_URL)" || url=""; [ -n "$url" ] || url="https://soroban-testnet.stellar.org"

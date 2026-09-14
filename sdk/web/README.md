@@ -2,7 +2,7 @@
 
 Browser SDK for Stellar Private Payments.
 
-> **Alpha (`0.1.0-alpha.x`)** — not audited and not production-ready.
+> **Work in progress** — not audited and not production-ready.
 
 **`Storage.open`** → **`bootnodeRequired`** → **`Client.new`** → **`backgroundSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
@@ -137,6 +137,9 @@ Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance`
 | `transact(config)` | Low-level pool transact |
 | `disclose(config)` | Selective disclosure (`selectedCommitments` 1..=4); may return `null` if ASP registration is needed |
 | `verifyDisclosure(receipt, expectedVkHash)` | Verify a disclosure receipt in this pool session |
+| `audit(globalViewPrivateKeyHex)` | Open a {@link GvkAudit} cursor (pool-gvk deployments only) |
+
+`GvkAudit.nextTx()` yields decrypted outputs, inputs (traceable pools), and nullifiers per on-chain `transact`, or `null` when exhausted.
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 
@@ -169,25 +172,35 @@ set_log_level('info');
 
 ## TypeScript
 
-Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments/wasm`.
+Public types live under [`js/types/`](./js/types/):
+
+| Module | Role |
+|--------|------|
+| `crates/stellar_private_payments_web.d.ts` | wasm-bindgen domain types + session classes (staged from `dist/` on build; gitignored, never committed) |
+| `api-types.d.ts` | JS facade (`Client.new`, `Account`, options, telemetry) |
+| `index.d.ts` | Package entry — bindgen types + facade |
+
+Low-level wasm classes are available as `WasmClient`, `WasmAccount`, and `WasmStorage`, or via `stellar-private-payments/wasm`.
 
 ```ts
 import init, {
-  Storage,
   Client,
-  verifySelectiveDisclosure,
-  type Account,
-  type WalletSigner,
+  Storage,
+  TX_PROGRESS_EVENT,
+  type ContractConfig,
+  type PoolExecuteResult,
 } from 'stellar-private-payments';
-import { FreighterSigner } from 'stellar-private-payments/freighter';
 ```
 
 After building WASM:
 
 ```bash
 npm run build
+npm run check:bindgen   # wasm exports ⊆ public .d.ts; staged crates/ === dist/
 npm run check:types
 ```
+
+`check:types` and `check:bindgen` both require a full build first: `js/types/crates/stellar_private_payments_web.d.ts` is gitignored and only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
 
 ## Build & publish (maintainers)
 
@@ -217,7 +230,7 @@ CI publishes from `main` when `version` in `package.json` is bumped (see `.githu
 ## npm install (app developers)
 
 ```bash
-npm install stellar-private-payments@alpha
+npm install stellar-private-payments
 ```
 
 One package — no separate circuit hosting or Cargo build. Circuit artifacts ship under `dist/circuits/` and load automatically from the prover worker. Your bundler must serve static files from the package `dist/` tree (same as WASM and workers).

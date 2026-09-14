@@ -305,18 +305,77 @@ pub fn network(name: &str, config_dir: Option<&Path>) -> Result<StellarNetwork> 
 
 /// Enforce alias-only usage: reject raw secret keys and seed phrases so secrets
 /// never appear on the command line or in config.
-pub fn validate_alias(value: &str) -> Result<()> {
+///
+/// `flag` is the option the value came from (`--account`, `--sign-as`), so the
+/// error names the one the user actually typed.
+pub fn validate_alias(flag: &str, value: &str) -> Result<()> {
     if value.chars().any(char::is_whitespace) {
         bail!(
-            "--account must be a `stellar keys` alias name, not a seed phrase; \
+            "{flag} must be a `stellar keys` alias name, not a seed phrase; \
              register one with `stellar keys add`/`stellar keys generate`"
         );
     }
     if value.len() == 56 && value.starts_with('S') {
         bail!(
-            "--account must be a `stellar keys` alias name, not a raw secret key; \
+            "{flag} must be a `stellar keys` alias name, not a raw secret key; \
              register one with `stellar keys add`"
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_alias;
+
+    /// Shaped like a raw secret key: 56 characters starting with `S`.
+    const SECRET_SHAPED: &str = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[test]
+    fn an_alias_name_is_accepted_for_either_flag() {
+        validate_alias("--account", "alice").expect("a plain alias is what both flags want");
+        validate_alias("--sign-as", "payer").expect("a plain alias is what both flags want");
+    }
+
+    #[test]
+    fn a_seed_phrase_is_reported_against_the_flag_it_came_from() {
+        let account = validate_alias("--account", "abandon abandon abandon")
+            .expect_err("a seed phrase must never reach the command line");
+        assert!(
+            account
+                .to_string()
+                .starts_with("--account must be a `stellar keys` alias name, not a seed phrase"),
+            "got: {account}"
+        );
+
+        let sign_as = validate_alias("--sign-as", "abandon abandon abandon")
+            .expect_err("a seed phrase must never reach the command line");
+        assert!(
+            sign_as
+                .to_string()
+                .starts_with("--sign-as must be a `stellar keys` alias name, not a seed phrase"),
+            "got: {sign_as}"
+        );
+    }
+
+    #[test]
+    fn a_raw_secret_key_is_reported_against_the_flag_it_came_from() {
+        let account = validate_alias("--account", SECRET_SHAPED)
+            .expect_err("a raw secret key must never reach the command line");
+        assert!(
+            account
+                .to_string()
+                .starts_with("--account must be a `stellar keys` alias name, not a raw secret key"),
+            "got: {account}"
+        );
+
+        let sign_as = validate_alias("--sign-as", SECRET_SHAPED)
+            .expect_err("a raw secret key must never reach the command line");
+        assert!(
+            sign_as
+                .to_string()
+                .starts_with("--sign-as must be a `stellar keys` alias name, not a raw secret key"),
+            "got: {sign_as}"
+        );
+    }
 }

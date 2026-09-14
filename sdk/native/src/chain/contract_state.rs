@@ -233,7 +233,7 @@ impl StateFetcher {
 
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_membership.as_str(),
-            enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+            enum_keys: vec!["Root", "Levels", "NextIndex", "Admin"],
             optional_enum_keys: vec![],
             valued_keys: vec![],
         });
@@ -378,12 +378,12 @@ impl StateFetcher {
                         "Verifier",
                         pool.pool_contract_id
                     )?)?,
-                    aspmembership: scval_to_address_string(get_state!(
+                    asp_membership: scval_to_address_string(get_state!(
                         pool_state,
                         "ASPMembership",
                         pool.pool_contract_id
                     )?)?,
-                    aspnonmembership: scval_to_address_string(get_state!(
+                    asp_non_membership: scval_to_address_string(get_state!(
                         pool_state,
                         "ASPNonMembership",
                         pool.pool_contract_id
@@ -434,11 +434,6 @@ impl StateFetcher {
                 admin: scval_to_address_string(get_state!(
                     asp_membership_state,
                     "Admin",
-                    asp_membership_id
-                )?)?,
-                admin_insert_only: scval_to_bool(get_state!(
-                    asp_membership_state,
-                    "AdminInsertOnly",
                     asp_membership_id
                 )?)?,
                 capacity: asp_mem_capacity,

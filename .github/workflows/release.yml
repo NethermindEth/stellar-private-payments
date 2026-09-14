@@ -138,6 +138,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         if: steps.registry.outputs.publish == 'true'
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
       - if: steps.registry.outputs.publish == 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
@@ -147,7 +148,7 @@ jobs:
       - if: steps.registry.outputs.publish == 'true'
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
-        run: npm run check:artifacts && npm run check:types
+        run: npm run check:artifacts && npm run check:bindgen && npm run check:types
       - if: steps.registry.outputs.publish == 'true'
         run: npm publish --ignore-scripts --provenance
 

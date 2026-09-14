@@ -1,20 +1,21 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::types::{
     AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
-    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, LeafAddedEvent, NewCommitmentEvent,
-    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
-    PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary,
-    UserOperation,
+    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
+    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
+    OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup,
+    UserNoteSummary, UserOperation,
 };
 use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
+use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
 use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
+pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
@@ -397,6 +398,15 @@ impl Storage {
                 url: url.to_string(),
             },
         )
+    }
+
+    pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>> {
+        self.get_setting_json(APP_SETTING_GVK_AUTHORITY)
+    }
+
+    pub fn set_gvk_authority_setting(&mut self, setting: &GvkAuthoritySetting) -> Result<()> {
+        setting.validate_consistency()?;
+        self.set_setting_json(APP_SETTING_GVK_AUTHORITY, setting)
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts
@@ -1032,19 +1042,35 @@ impl Storage {
         .collect()
     }
 
-    /// Every pool commitment hash, for traceable nullifier audit within a
-    /// cursor.
-    pub fn list_pool_commitment_hashes(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
-        let mut stmt = self.conn.prepare(
+    /// Subset of `commitments` that exist in `pool_contract_id`.
+    pub fn pool_has_commitments(
+        &self,
+        pool_contract_id: &str,
+        commitments: &[Field],
+    ) -> Result<HashSet<Field>> {
+        if commitments.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let placeholders = (0..commitments.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
             "SELECT c.commitment
              FROM pool_commitments c
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE pool.address = ?1
-             ORDER BY c.id ASC",
-        )?;
-        let rows = stmt.query_map(params![pool_contract_id], |row| row.get(0))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+             WHERE pool.address = ?1 AND c.commitment IN ({placeholders})"
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut params: Vec<&dyn rusqlite::types::ToSql> =
+            Vec::with_capacity(1_usize.saturating_add(commitments.len()));
+        params.push(&pool_contract_id);
+        params.extend(commitments.iter().map(|c| c as &dyn rusqlite::types::ToSql));
+        let rows = stmt.query_map(params_from_iter(params), |row| row.get(0))?;
+        rows.collect::<Result<HashSet<_>, _>>().map_err(Into::into)
     }
 
     /// Batch upsert for Public Keys (Address owner and BLOB keys)

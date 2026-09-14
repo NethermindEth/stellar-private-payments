@@ -1,6 +1,6 @@
 import init, {
   Client as WasmClient,
-  PrivatePool,
+  DisclosureRequest,
   Storage as WasmStorage,
   bootnodeRequired as wasmBootnodeRequired,
   deriveAspUserLeaf as wasmDeriveAspUserLeaf,
@@ -13,6 +13,9 @@ import init, {
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
+
+/** @type {'stellar-private-payments:tx-progress'} */
+export const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
 function requireField(value, name) {
   if (value === undefined || value === null) {
@@ -158,6 +161,11 @@ export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
 };
-export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
-export { configureTelemetry, set_log_level, dump_recent_logs, debugLogsEnabled };
+export { DisclosureRequest, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export {
+  configureTelemetry,
+  set_log_level,
+  dump_recent_logs,
+  debugLogsEnabled,
+};
 export { default } from '../dist/stellar_private_payments_web.js';

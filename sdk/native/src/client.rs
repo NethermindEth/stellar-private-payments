@@ -136,6 +136,15 @@ impl<S: Storage> Client<S> {
     }
 
     /// Create an [`Account`] session.
+    ///
+    /// `signer_address` need not be `user_address`: the signer pays and
+    /// sources every envelope, the owner holds the notes. The two operations
+    /// that need the owner's own signature check for themselves — see
+    /// [`Account::register_public_keys`] and [`Error::SignerIsNotNoteOwner`].
+    ///
+    /// # Errors
+    /// Returns a storage error if the session's storage handle cannot be
+    /// forked.
     #[tracing::instrument(
         name = "client_account",
         skip_all,
@@ -143,13 +152,10 @@ impl<S: Storage> Client<S> {
     )]
     pub fn account(
         &self,
-        user_address: impl Into<NoteOwnerAddress>,
+        user_address: NoteOwnerAddress,
+        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
-        let user_address = user_address.into();
-        // The signing account is the note owner until a caller can choose
-        // otherwise.
-        let signer_address = SignerAddress::new(user_address.as_str());
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,
@@ -172,5 +178,79 @@ impl<S: Storage> Client<S> {
         self.sync
             .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
             .await
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod divergent_session_tests {
+    use super::*;
+    use crate::{LocalSigner, LocalStorage};
+
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
+    /// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])`.
+    const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+    fn test_client() -> Client<LocalStorage> {
+        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let db = std::env::temp_dir().join(format!(
+            "spp-signer-owner-{}-{}.sqlite",
+            std::process::id(),
+            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&db);
+        Client::init_readonly(
+            "https://soroban-testnet.stellar.org",
+            LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ContractConfig {
+                network: PASSPHRASE.to_string(),
+                deployer: String::new(),
+                admin: String::new(),
+                asp_membership: String::new(),
+                asp_non_membership: String::new(),
+                verifiers: Default::default(),
+                public_key_registry: String::new(),
+                pools: Vec::new(),
+            },
+            None,
+        )
+        .expect("init client")
+    }
+
+    fn test_signer(address: &str) -> Handle<dyn Signer> {
+        Handle::from_box(Box::new(
+            LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
+                .expect("build signer"),
+        ) as Box<dyn Signer>)
+    }
+
+    // A delegated session signs and pays as one account and owns notes as
+    // another. Nothing here asks for an owner signature, so nothing here has
+    // cause to compare the two.
+    #[test]
+    fn client_account_opens_a_divergent_pair() {
+        let account = test_client()
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(DELEGATE),
+                test_signer(DELEGATE),
+            )
+            .expect("a payer that is not the note owner must still open a session");
+        assert_eq!(account.user_address().as_str(), OWNER);
+        assert_eq!(account.signer_address().as_str(), DELEGATE);
+    }
+
+    #[test]
+    fn client_account_opens_when_the_owner_signs_for_itself() {
+        let account = test_client()
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                test_signer(OWNER),
+            )
+            .expect("the owner signing for itself must open a session");
+        assert_eq!(account.user_address().as_str(), OWNER);
+        assert_eq!(account.signer_address().as_str(), OWNER);
     }
 }

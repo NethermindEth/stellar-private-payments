@@ -7,6 +7,7 @@
 [![Coverage](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml)
 
 [![crates.io](https://img.shields.io/crates/v/stellar-private-payments.svg)](https://crates.io/crates/stellar-private-payments)
+[![npm](https://img.shields.io/npm/v/stellar-private-payments.svg)](https://www.npmjs.com/package/stellar-private-payments)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/stellar_privacy)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/groups/18809039/)
@@ -56,11 +57,6 @@ This is [the administrative control panel](https://nethermindeth.github.io/stell
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
-
-The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
-
-> [!WARNING]
-> Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
 
 #### Zero-Knowledge Circuits
 

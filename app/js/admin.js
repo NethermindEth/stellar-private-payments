@@ -26,11 +26,6 @@ const membershipLevelsEl = document.getElementById('membershipLevels');
 const membershipNextIndexEl = document.getElementById('membershipNextIndex');
 const nonMembershipRootEl = document.getElementById('nonMembershipRoot');
 
-// Admin insert only toggle
-const adminInsertOnlyStatusEl = document.getElementById('adminInsertOnlyStatus');
-const toggleAdminInsertOnlyBtn = document.getElementById('toggleAdminInsertOnlyBtn');
-const openInsertWarningEl = document.getElementById('openInsertWarning');
-
 // Inputs & Action Buttons
 const allowlistPublicKeyInput = document.getElementById('allowlistPublicKey');
 const allowlistAspSecretInput = document.getElementById('allowlistAspSecret');
@@ -50,7 +45,6 @@ const state = {
   membershipClientId: null,
   nonMembershipClientId: null,
   cryptoReady: false,
-  adminInsertOnly: null,
 };
 
 // -----------------------------
@@ -265,7 +259,6 @@ async function connect() {
     state.membershipClient = null;
     state.nonMembershipClient = null;
 
-    updateAdminInsertOnlyDisplay(state.adminInsertOnly);
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
@@ -296,13 +289,12 @@ function disconnect() {
   connectBtn.classList.remove('bg-white/[0.05]', 'text-slate-100');
 
   // Disable Action Buttons & restore tooltips
-  const actionBtns = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, toggleAdminInsertOnlyBtn];
+  const actionBtns = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn];
   actionBtns.forEach(btn => {
     btn.disabled = true;
     btn.title = "Please connect your wallet first";
   });
 
-  updateAdminInsertOnlyDisplay(state.adminInsertOnly);
   setStatus('Wallet disconnected', 'info');
   showToast('Wallet disconnected', 'info');
 }
@@ -332,69 +324,12 @@ async function refreshState() {
     membershipLevelsEl.href = membershipStorageUrl;
     membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
     membershipNextIndexEl.href = membershipStorageUrl;
-    updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
     nonMembershipRootEl.textContent = nonMembershipState.root || '--';
     nonMembershipRootEl.href = nonMembershipStorageUrl;
 
     setStatus('State loaded', 'ok');
   } catch (err) {
-    updateAdminInsertOnlyDisplay(undefined);
     setStatus('State load error', 'error');
-  }
-}
-
-function updateAdminInsertOnlyDisplay(value) {
-  if (value === undefined || value === null) {
-    adminInsertOnlyStatusEl.textContent = '--';
-    toggleAdminInsertOnlyBtn.disabled = true;
-    openInsertWarningEl.classList.add('hidden');
-    return;
-  }
-  state.adminInsertOnly = value;
-  adminInsertOnlyStatusEl.textContent = value ? 'Enabled' : 'Disabled';
-  adminInsertOnlyStatusEl.className = value ? 'font-mono text-sm text-emerald-400' : 'font-mono text-sm text-amber-400';
-  toggleAdminInsertOnlyBtn.textContent = value ? 'Disable' : 'Enable';
-
-  if (state.address) {
-    toggleAdminInsertOnlyBtn.disabled = false;
-    toggleAdminInsertOnlyBtn.removeAttribute('title');
-  } else {
-    toggleAdminInsertOnlyBtn.disabled = true;
-    toggleAdminInsertOnlyBtn.title = "Please connect your wallet first";
-  }
-
-  openInsertWarningEl.classList.toggle('hidden', value);
-}
-
-async function toggleAdminInsertOnly() {
-  const originalText = toggleAdminInsertOnlyBtn.textContent;
-  try {
-    ensureWalletConnected();
-    const contractId = membershipContractInput.value.trim();
-    if (!contractId) throw new Error('Membership contract ID is required');
-    if (state.adminInsertOnly === null || state.adminInsertOnly === undefined) {
-      throw new Error('Cannot toggle: state unknown. Refresh first.');
-    }
-
-    toggleAdminInsertOnlyBtn.disabled = true;
-    toggleAdminInsertOnlyBtn.textContent = 'Processing...';
-
-    const newValue = !state.adminInsertOnly;
-    setStatus(`Setting admin-only insert to ${newValue ? 'enabled' : 'disabled'}...`, 'info');
-
-    const mClient = await getMembershipClient(contractId);
-    const tx = await mClient.set_admin_insert_only({ admin_only: newValue });
-    await tx.signAndSend();
-
-    setStatus('Setting updated', 'ok');
-    showToast(`Admin-only insert ${newValue ? 'enabled' : 'disabled'}`, 'success');
-    await refreshState();
-  } catch (err) {
-    setStatus('Toggle failed', 'error');
-    showToast('Failed to toggle admin-only insert', 'error');
-  } finally {
-    if (state.address) toggleAdminInsertOnlyBtn.disabled = false;
-    toggleAdminInsertOnlyBtn.textContent = originalText;
   }
 }
 
@@ -540,7 +475,6 @@ connectBtn.addEventListener('click', () => {
   }
 });
 refreshBtn.addEventListener('click', refreshState);
-toggleAdminInsertOnlyBtn.addEventListener('click', toggleAdminInsertOnly);
 
 addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
 addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);

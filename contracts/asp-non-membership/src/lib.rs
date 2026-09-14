@@ -119,8 +119,14 @@ impl ASPNonMembership {
     ///
     /// * `env` - The Soroban environment
     /// * `new_admin` - New address that will have permission to modify the tree
-    pub fn update_admin(env: Env, new_admin: Address) {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
+            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
 
     /// Hash a leaf node using Poseidon2

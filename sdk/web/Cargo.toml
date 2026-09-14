@@ -43,6 +43,7 @@ web-sys = { workspace = true }
 sqlite-wasm-rs = { workspace = true }
 sqlite-wasm-vfs = { workspace = true }
 
+
 [dev-dependencies]
 wasm-bindgen-test = { workspace = true }
 

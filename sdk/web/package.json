@@ -1,7 +1,7 @@
 {
   "name": "stellar-private-payments",
-  "version": "0.1.0-alpha.1",
-  "description": "Stellar Private Payments browser SDK (alpha)",
+  "version": "0.1.0",
+  "description": "Stellar Private Payments browser SDK",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -10,8 +10,7 @@
     "directory": "sdk/web"
   },
   "publishConfig": {
-    "access": "public",
-    "tag": "alpha"
+    "access": "public"
   },
   "main": "./js/index.js",
   "types": "./js/types/index.d.ts",
@@ -21,7 +20,7 @@
       "import": "./js/index.js"
     },
     "./wasm": {
-      "types": "./dist/stellar_private_payments_web.d.ts",
+      "types": "./js/types/crates/stellar_private_payments_web.d.ts",
       "import": "./dist/stellar_private_payments_web.js"
     },
     "./freighter": {
@@ -38,8 +37,9 @@
   "scripts": {
     "build": "bash scripts/build.sh",
     "check:artifacts": "node scripts/check-wasm-types.js",
+    "check:bindgen": "node scripts/check-bindgen-types.js",
     "check:types": "tsc -p tsconfig.json",
-    "prepublishOnly": "npm run build && npm run check:artifacts"
+    "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types"
   },
   "peerDependencies": {
     "@stellar/freighter-api": "^6.0.1"

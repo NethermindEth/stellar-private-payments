@@ -29,6 +29,22 @@ pub enum Error {
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
+    /// An operation needs the note owner's own signature, and the session
+    /// signs with a different account.
+    ///
+    /// A session may hold a divergent pair: the payer sources the envelope,
+    /// `sender` and sequence number, and spending needs nothing else. Two
+    /// operations do need the owner itself — key derivation, whose signature
+    /// *is* the note secret, and registration, whose simulated auth entry is
+    /// the owner's. Those raise this; the session as a whole does not.
+    // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
+    #[error(
+        "signing account {} cannot sign for the note owner {}; this step needs the owner's own signature",
+        crate::types::Sensitive(signer),
+        crate::types::Sensitive(owner)
+    )]
+    SignerIsNotNoteOwner { owner: String, signer: String },
+
     #[error("{0}")]
     Other(String),
 }

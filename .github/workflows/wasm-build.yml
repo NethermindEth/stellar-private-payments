@@ -65,6 +65,7 @@ jobs:
       - name: Check SDK artifacts and types
         run: |
           npm run check:artifacts --prefix sdk/web
+          npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
 
       - name: Install app npm dependencies
