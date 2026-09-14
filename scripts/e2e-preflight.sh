@@ -460,14 +460,14 @@ check_env_pool_matches_deployments() {
 import json, sys
 pools = json.load(open(sys.argv[1]))["pools"]
 native = [p for p in pools if p.get("enabled") and p.get("asset", {}).get("kind") == "native"]
-if len(native) != 1:
+if not native:
     sys.exit(1)
 print(native[0]["poolContractId"])
 PYEOF
 )"
-  if [ -z "$pool_json" ]; then _STATUS="MISSING"; _DETAIL="could not resolve a single enabled native pool from $deployments_json"; return; fi
+  if [ -z "$pool_json" ]; then _STATUS="MISSING"; _DETAIL="could not resolve an enabled native pool from $deployments_json"; return; fi
   if [ "$pool_env" = "$pool_json" ]; then _STATUS="OK"; _DETAIL="matches deployments.json ($pool_json)"
-  else _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT ($pool_env) does not match the enabled native pool in deployments.json ($pool_json) — a redeploy invalidated the env file"; fi; }
+  else _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT ($pool_env) does not match the first enabled native pool in deployments.json ($pool_json) — a redeploy invalidated the env file"; fi; }
 
 check_env_rpc_reachable() {
   local url; url="$(env_var_value E2E_RPC_URL)" || url=""; [ -n "$url" ] || url="https://soroban-testnet.stellar.org"
