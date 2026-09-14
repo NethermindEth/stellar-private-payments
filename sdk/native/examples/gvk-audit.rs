@@ -27,7 +27,10 @@ mod common;
 use std::collections::HashMap;
 
 use stellar_private_payments::{
-    GvkAudit, GvkAuditedNote, GvkMode, GvkTxAudit, LocalStorage, Storage, types::Field,
+    LocalStorage, Storage,
+    gvk::{GvkAudit, GvkOutputSlot, GvkSpentInput, GvkTxAudit},
+    types::{Field, GvkMode},
+    zk::gvk::GvkAuditedNote,
 };
 
 const AUDIT_LIMIT: u32 = 20;
@@ -131,34 +134,37 @@ async fn run_audit(
             .map(|kind| format!("{kind} — "))
             .unwrap_or_default();
         println!(
-            "  tx {count}: {prefix}ledger {} — {} outputs, {} inputs, {} nullifiers",
+            "  tx {count}: {prefix}ledger {} — {} outputs, {} inputs",
             tx.ledger,
             tx.outputs.len(),
             tx.inputs.len(),
-            tx.nullifiers.len(),
         );
-        for (i, note) in tx.outputs.iter().enumerate() {
-            println!("    output[{i}]: {}", format_note_line(note));
-            origins.insert(
-                note.commitment,
-                NoteOrigin {
-                    tx: count,
-                    ledger: tx.ledger,
-                    output_index: i,
-                },
-            );
-        }
-        for (i, note) in tx.inputs.iter().enumerate() {
-            let nullifier = tx
-                .nullifiers
-                .get(i)
-                .map(|n| format!("nullifier={}", truncate_hex(n)))
-                .unwrap_or_else(|| "nullifier=—".to_string());
+        for (i, slot) in tx.outputs.iter().enumerate() {
             println!(
-                "    input[{i}]: {} | {} | {}",
-                format_note_line(note),
-                nullifier,
-                format_spent_from(&origins, note.commitment),
+                "    output[{i}]: commitment={} | {}",
+                truncate_hex(&slot.commitment),
+                format_note_line(slot.note.as_ref()),
+            );
+            if let Some(note) = &slot.note {
+                origins.insert(
+                    note.commitment,
+                    NoteOrigin {
+                        tx: count,
+                        ledger: tx.ledger,
+                        output_index: i,
+                    },
+                );
+            }
+        }
+        for (i, slot) in tx.inputs.iter().enumerate() {
+            println!(
+                "    input[{i}]: nullifier={} | {} | {}",
+                truncate_hex(&slot.nullifier),
+                format_note_line(slot.note.as_ref()),
+                slot.note
+                    .as_ref()
+                    .map(|note| format_spent_from(&origins, note.commitment))
+                    .unwrap_or_else(|| "from=unknown".to_string()),
             );
         }
     }
@@ -178,27 +184,34 @@ struct NoteOrigin {
     output_index: usize,
 }
 
-fn sum_amounts(notes: &[GvkAuditedNote]) -> u128 {
-    notes.iter().map(|n| u128::from(n.note.amount())).sum()
+fn sum_output_amounts(slots: &[GvkOutputSlot]) -> u128 {
+    slots
+        .iter()
+        .filter_map(|slot| slot.note.as_ref())
+        .filter_map(|note| note.note.amount().ok())
+        .map(u128::from)
+        .sum()
 }
 
-/// Deposit: no real inputs (dummy slots on deposit). Transfer: inputs ==
-/// outputs. Withdraw: inputs > outputs (public exit; zero-amount outputs are
-/// omitted).
-fn classify_tx(tx: &GvkTxAudit) -> &'static str {
-    let input_sum = sum_amounts(&tx.inputs);
-    let output_sum = sum_amounts(&tx.outputs);
+fn sum_input_amounts(slots: &[GvkSpentInput]) -> u128 {
+    slots
+        .iter()
+        .filter_map(|slot| slot.note.as_ref())
+        .filter_map(|note| note.note.amount().ok())
+        .map(u128::from)
+        .sum()
+}
 
-    if tx.inputs.is_empty() {
-        if output_sum > 0 {
-            return "deposit";
-        }
-        if !tx.nullifiers.is_empty() {
-            return "withdraw";
-        }
-        return "transfer";
+/// Deposit: no real inputs. Withdraw: inputs > outputs (public exit).
+/// Otherwise transfer.
+fn classify_tx(tx: &GvkTxAudit) -> &'static str {
+    let has_real_input = tx.inputs.iter().any(|slot| slot.note.is_some());
+    if !has_real_input {
+        return "deposit";
     }
 
+    let input_sum = sum_input_amounts(&tx.inputs);
+    let output_sum = sum_output_amounts(&tx.outputs);
     if input_sum > output_sum {
         "withdraw"
     } else {
@@ -211,13 +224,15 @@ fn truncate_hex(field: &Field) -> String {
     s.chars().take(9).collect()
 }
 
-fn format_note_line(note: &GvkAuditedNote) -> String {
-    format!(
-        "pk={} amount={} stroops commitment={}",
-        truncate_hex(&note.note.pk),
-        u128::from(note.note.amount()),
-        truncate_hex(&note.commitment),
-    )
+fn format_note_line(note: Option<&GvkAuditedNote>) -> String {
+    match note.and_then(|note| note.note.amount().ok().map(|amount| (note, amount))) {
+        Some((note, amount)) => format!(
+            "pk={} amount={amount} stroops verified_commitment={}",
+            truncate_hex(&note.note.pk),
+            truncate_hex(&note.commitment),
+        ),
+        None => "note=undecryptable".to_string(),
+    }
 }
 
 fn format_spent_from(origins: &HashMap<Field, NoteOrigin>, commitment: Field) -> String {

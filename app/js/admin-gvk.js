@@ -3,8 +3,10 @@
  */
 
 import * as d3 from 'd3';
-import { client } from './wasm-facade.js';
+import { rpc } from '@stellar/stellar-sdk';
+import { client, getCurrentRpcUrl } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
+import { el, formatAmount as formatTokenAmount } from './ui/notes-view.js';
 
 const BATCH_SIZE = 20;
 
@@ -25,6 +27,9 @@ const filterAmountMaxEl = document.getElementById('gvkFilterAmountMax');
 const filterLedgerFromEl = document.getElementById('gvkFilterLedgerFrom');
 const filterLedgerToEl = document.getElementById('gvkFilterLedgerTo');
 const filterPkEl = document.getElementById('gvkFilterPk');
+const filterTimeFromEl = document.getElementById('gvkFilterTimeFrom');
+const filterTimeToEl = document.getElementById('gvkFilterTimeTo');
+const filterTimeHintEl = document.getElementById('gvkFilterTimeHint');
 const filtersClearBtnEl = document.getElementById('gvkFiltersClearBtn');
 
 const state = {
@@ -38,7 +43,114 @@ const state = {
   filteredVisibleCount: BATCH_SIZE,
   view: 'tx',
   selectedNoteId: null,
+  graphNotes: null,
+  ledgerTimeBounds: null,
+  timeFilterLedgers: { from: null, to: null },
 };
+
+const LEDGER_TIME_BOUNDS_TTL_MS = 60_000;
+const TIME_FILTER_HINT_DEFAULT = 'Approximated from ledger close times.';
+
+// getLatestLedger's closeTime and getEvents' oldestLedgerCloseTime are
+// Unix-epoch-second strings, unlike each event's own ledgerClosedAt
+// (RFC3339) — Date.parse can't read the former.
+function parseRpcTimestamp(value) {
+  const trimmed = String(value ?? '').trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms / 1000 : NaN;
+}
+
+async function fetchLedgerTimeBounds() {
+  if (state.ledgerTimeBounds && Date.now() - state.ledgerTimeBounds.fetchedAt < LEDGER_TIME_BOUNDS_TTL_MS) {
+    return state.ledgerTimeBounds;
+  }
+
+  const rpcUrl = getCurrentRpcUrl();
+  if (!rpcUrl) throw new Error('RPC not ready yet');
+  const poolContractId = poolSelectEl?.value?.trim();
+  if (!poolContractId) throw new Error('Select a pool first');
+
+  const server = new rpc.Server(rpcUrl);
+  const latest = await server.getLatestLedger();
+  const startLedger = Math.max(1, latest.sequence - 1);
+  const events = await server.getEvents({
+    startLedger,
+    filters: [{ type: 'contract', contractIds: [poolContractId], topics: [['**']] }],
+    limit: 1,
+  });
+
+  const bounds = {
+    oldest: { ledger: events.oldestLedger, unixTime: parseRpcTimestamp(events.oldestLedgerCloseTime) },
+    latest: { ledger: latest.sequence, unixTime: parseRpcTimestamp(latest.closeTime) },
+    fetchedAt: Date.now(),
+  };
+  if (!Number.isFinite(bounds.oldest.unixTime) || !Number.isFinite(bounds.latest.unixTime)) {
+    throw new Error('RPC returned an unparsable ledger close time');
+  }
+  state.ledgerTimeBounds = bounds;
+  return bounds;
+}
+
+function secondsPerLedger(bounds) {
+  const ledgers = Math.max(1, bounds.latest.ledger - bounds.oldest.ledger);
+  const seconds = Math.max(1, bounds.latest.unixTime - bounds.oldest.unixTime);
+  return seconds / ledgers;
+}
+
+function ledgerForTime(bounds, unixTime) {
+  const period = secondsPerLedger(bounds);
+  const estimated = bounds.latest.ledger + (unixTime - bounds.latest.unixTime) / period;
+  return Math.round(Math.min(bounds.latest.ledger, Math.max(bounds.oldest.ledger, estimated)));
+}
+
+function timeForLedger(bounds, ledger) {
+  return bounds.latest.unixTime + (ledger - bounds.latest.ledger) * secondsPerLedger(bounds);
+}
+
+function parseUtcDatetimeLocal(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value || '');
+  if (!match) return null;
+  const [, y, mo, d, h, mi, s] = match;
+  return Date.UTC(+y, mo - 1, +d, +h, +mi, +(s || 0)) / 1000;
+}
+
+function formatUtcDatetimeLocal(unixTime) {
+  const d = new Date(unixTime * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+async function updateTimeFilterLedgers() {
+  const fromUnix = parseUtcDatetimeLocal(filterTimeFromEl?.value);
+  const toUnix = parseUtcDatetimeLocal(filterTimeToEl?.value);
+
+  if (fromUnix == null && toUnix == null) {
+    state.timeFilterLedgers = { from: null, to: null };
+    if (filterTimeHintEl) filterTimeHintEl.textContent = TIME_FILTER_HINT_DEFAULT;
+    return;
+  }
+
+  try {
+    const bounds = await fetchLedgerTimeBounds();
+    const from = fromUnix != null ? ledgerForTime(bounds, fromUnix) : null;
+    const to = toUnix != null ? ledgerForTime(bounds, toUnix) : null;
+    state.timeFilterLedgers = { from, to };
+    if (filterTimeHintEl) {
+      filterTimeHintEl.textContent =
+        `≈ ledger ${from ?? bounds.oldest.ledger}–${to ?? bounds.latest.ledger} (~${secondsPerLedger(bounds).toFixed(2)}s/ledger)`;
+    }
+  } catch (err) {
+    state.timeFilterLedgers = { from: null, to: null };
+    if (filterTimeHintEl) filterTimeHintEl.textContent = friendlyErrorMessage(err?.message || String(err));
+  }
+}
+
+function combineBound(a, b, pick) {
+  if (a == null) return b;
+  if (b == null) return a;
+  return pick(a, b);
+}
 
 function noteRowId(txIndex, side, slotIndex) {
   return `${txIndex}:${side}:${slotIndex}`;
@@ -82,10 +194,7 @@ function copyToClipboard(cell, text) {
 }
 
 function appendGridCell(grid, value, noteId) {
-  const cellValue = typeof value === 'object' && value != null && 'display' in value
-    ? value
-    : asCell(value);
-  const { display, full, matchPk } = cellValue;
+  const { display, full, matchPk } = asCell(value);
   const cell = el(
     'div',
     'bg-ink-950/70 px-2 py-1.5 font-mono text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis transition-colors',
@@ -151,7 +260,7 @@ function clearPkHighlight() {
  * visual reveal; never intercepts hover itself, so it never competes with
  * the pk/note-link highlighting above.
  */
-let activeTxSquareIndex = null;
+let activeTxSquareIndices = [];
 
 function txSquareSelector(txIndex) {
   const escaped = CSS.escape(String(txIndex));
@@ -166,19 +275,21 @@ function setTxSquaresVisible(txIndex, visible) {
 }
 
 function clearTxSquares() {
-  setTxSquaresVisible(activeTxSquareIndex, false);
-  activeTxSquareIndex = null;
+  for (const txIndex of activeTxSquareIndices) setTxSquaresVisible(txIndex, false);
+  activeTxSquareIndices = [];
+}
+
+function showTxSquares(txIndices) {
+  clearTxSquares();
+  activeTxSquareIndices = txIndices.filter((v) => v != null);
+  for (const txIndex of activeTxSquareIndices) setTxSquaresVisible(txIndex, true);
 }
 
 function syncTxSquaresForElement(el) {
-  clearTxSquares();
-  if (!el) return;
+  if (!el) return clearTxSquares();
   // Whichever side this specific dot represents (see the tagging rules in
   // renderGraph) — never both, so we never mix in an unrelated transaction.
-  const txIndex = el.dataset?.gvkTxCreated ?? el.dataset?.gvkTxSpent;
-  if (txIndex == null) return;
-  activeTxSquareIndex = txIndex;
-  setTxSquaresVisible(txIndex, true);
+  showTxSquares([el.dataset?.gvkTxCreated ?? el.dataset?.gvkTxSpent]);
 }
 
 function applyNoteHighlight(cells) {
@@ -198,6 +309,22 @@ function clearAllHighlights() {
   clearNoteHighlight();
   clearTxSquares();
   activeNoteSource = null;
+}
+
+/** Re-highlights the clicked graph note (and its same-tx siblings), so it stays lit outside of hover. */
+function applySelectionHighlight() {
+  if (state.view !== 'graph' || !state.selectedNoteId) return;
+  const noteId = state.selectedNoteId;
+  const note = state.graphNotes?.find((n) => n.noteId === noteId);
+  if (!note) return;
+  activeNoteSource = noteId;
+  applyNoteHighlight(noteHighlightFor(noteId));
+  showTxSquares([note.createdTxIndex, note.spentTxIndex]);
+}
+
+function restoreBaseHighlight() {
+  clearAllHighlights();
+  applySelectionHighlight();
 }
 
 function noteHighlightFor(noteId) {
@@ -267,11 +394,11 @@ function bindResultHighlights() {
       return;
     }
 
-    clearAllHighlights();
+    restoreBaseHighlight();
   });
 
   resultsEl.addEventListener('mouseleave', () => {
-    clearAllHighlights();
+    restoreBaseHighlight();
   });
 }
 
@@ -288,16 +415,7 @@ function parseFieldAmount(hex) {
 const STROOPS_PER_XLM = 10_000_000n;
 
 function formatAmount(hex) {
-  if (!hex) return '—';
-  const stroops = parseFieldAmount(hex);
-  if (stroops === 0n) return '0 XLM';
-
-  const whole = stroops / STROOPS_PER_XLM;
-  if (whole > 0n) return `${whole.toString()} XLM`;
-
-  const frac = stroops % STROOPS_PER_XLM;
-  const fracStr = frac.toString().padStart(7, '0').replace(/0+$/, '');
-  return `0.${fracStr} XLM`;
+  return hex ? formatTokenAmount(parseFieldAmount(hex)) : '—';
 }
 
 /** @returns {import('stellar-private-payments/types/gvk').GvkAuditedNote | null} */
@@ -307,43 +425,20 @@ function asAuditedNote(value) {
   return null;
 }
 
-/** Normalize output slots (legacy `GvkAuditedNote[]` or `GvkOutputSlot[]`). */
 function normalizedOutputs(tx) {
-  return (tx.outputs ?? []).map((slot, index) => {
-    if (slot?.note === null || slot?.note?.note) {
-      return {
-        index,
-        commitment: slot.commitment ?? null,
-        audited: asAuditedNote(slot.note),
-      };
-    }
-    return {
-      index,
-      commitment: slot?.commitment ?? null,
-      audited: asAuditedNote(slot),
-    };
-  });
+  return (tx.outputs ?? []).map((slot, index) => ({
+    index,
+    commitment: slot?.commitment ?? null,
+    audited: asAuditedNote(slot?.note),
+  }));
 }
 
-/** Normalize input slots (legacy parallel vecs or `GvkSpentInput[]`). */
 function normalizedInputs(tx) {
-  const nullifiers = tx.nullifiers ?? [];
-  const inputs = tx.inputs ?? [];
-
-  return inputs.map((slot, index) => {
-    if (slot?.nullifier != null) {
-      return {
-        index,
-        nullifier: slot.nullifier,
-        audited: asAuditedNote(slot.note),
-      };
-    }
-    return {
-      index,
-      nullifier: nullifiers[index] ?? null,
-      audited: asAuditedNote(slot),
-    };
-  });
+  return (tx.inputs ?? []).map((slot, index) => ({
+    index,
+    nullifier: slot?.nullifier ?? null,
+    audited: asAuditedNote(slot?.note),
+  }));
 }
 
 function sumAuditedAmounts(slots) {
@@ -356,13 +451,9 @@ function sumAuditedAmounts(slots) {
 function classifyTx(tx) {
   const inputSum = sumAuditedAmounts(normalizedInputs(tx));
   const outputSum = sumAuditedAmounts(normalizedOutputs(tx));
-  const nullifierCount = tx.nullifiers?.length
-    ?? normalizedInputs(tx).filter((slot) => slot.nullifier).length;
 
   if (!tx.inputs?.length) {
-    if (outputSum > 0n) return 'deposit';
-    if (nullifierCount > 0) return 'withdraw';
-    return 'transfer';
+    return outputSum > 0n ? 'deposit' : 'transfer';
   }
 
   return inputSum > outputSum ? 'withdraw' : 'transfer';
@@ -384,13 +475,6 @@ function setPanelStatus(message, kind = 'info') {
         ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
         : 'border-white/10 bg-ink-900/70 text-slate-300'
   );
-}
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
 }
 
 function noteCells(audited) {
@@ -472,8 +556,8 @@ function readFilters() {
   return {
     amountMin: toStroops(filterAmountMinEl),
     amountMax: toStroops(filterAmountMaxEl),
-    ledgerFrom: toInt(filterLedgerFromEl),
-    ledgerTo: toInt(filterLedgerToEl),
+    ledgerFrom: combineBound(toInt(filterLedgerFromEl), state.timeFilterLedgers.from, Math.max),
+    ledgerTo: combineBound(toInt(filterLedgerToEl), state.timeFilterLedgers.to, Math.min),
     pk: normalizeFieldKey(filterPkEl?.value),
   };
 }
@@ -561,6 +645,7 @@ function renderResults() {
   }
 
   rebuildNoteLinks();
+  applySelectionHighlight();
 }
 
 function renderTxCards(rows) {
@@ -649,7 +734,7 @@ function collectNotes(rows) {
   const notes = new Map();
   let fallbackKey = 0;
 
-  for (const { tx, index } of rows) {
+  for (const { tx, index, kind } of rows) {
     for (const slot of normalizedOutputs(tx)) {
       const commitment = slot.audited?.commitment ?? slot.commitment ?? null;
       const key = normalizeFieldKey(commitment) ?? `~${fallbackKey++}`;
@@ -658,15 +743,17 @@ function collectNotes(rows) {
         audited: slot.audited,
         createdTxIndex: index,
         createdLedger: tx.ledger,
+        createdKind: kind,
         spentTxIndex: null,
         spentLedger: null,
+        spentKind: null,
         nullifier: null,
         noteId: noteRowId(index, 'output', slot.index),
       });
     }
   }
 
-  for (const { tx, index } of rows) {
+  for (const { tx, index, kind } of rows) {
     for (const slot of normalizedInputs(tx)) {
       const commitmentKey = normalizeFieldKey(slot.audited?.commitment);
       const existing = commitmentKey ? notes.get(commitmentKey) : null;
@@ -674,6 +761,7 @@ function collectNotes(rows) {
       if (existing) {
         existing.spentTxIndex = index;
         existing.spentLedger = tx.ledger;
+        existing.spentKind = kind;
         existing.nullifier = slot.nullifier;
         if (!existing.audited && slot.audited) existing.audited = slot.audited;
         continue;
@@ -685,15 +773,17 @@ function collectNotes(rows) {
         audited: slot.audited,
         createdTxIndex: null,
         createdLedger: null,
+        createdKind: null,
         spentTxIndex: index,
         spentLedger: tx.ledger,
+        spentKind: kind,
         nullifier: slot.nullifier,
         noteId: noteRowId(index, 'input', slot.index),
       });
     }
   }
 
-  return [...notes.values()];
+  return [...notes.values()].filter((note) => note.audited);
 }
 
 function txLabel(txIndex, ledger) {
@@ -757,9 +847,14 @@ function txMemberCounts(notes) {
 function colorForNote(note) {
   const pk = normalizeFieldKey(note.audited?.note?.pk);
   if (!pk) return '#64748b';
-  let hash = 0;
-  for (let i = 0; i < pk.length; i += 1) hash = (hash * 31 + pk.charCodeAt(i)) >>> 0;
-  return `hsl(${hash % 360} 70% 60%)`;
+  let hash = 2166136261;
+  for (let i = 0; i < pk.length; i += 1) {
+    hash ^= pk.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  // Golden-angle step spreads hashes that land close together far apart in hue.
+  const hue = ((hash >>> 0) * 137.508) % 360;
+  return `hsl(${hue} 70% 60%)`;
 }
 
 function cellDisplay(value) {
@@ -793,8 +888,24 @@ function selectGraphNote(noteId) {
   renderResults();
 }
 
+async function applyGraphBrushRange(fromLedger, toLedger) {
+  if (filterLedgerFromEl) filterLedgerFromEl.value = String(fromLedger);
+  if (filterLedgerToEl) filterLedgerToEl.value = String(toLedger);
+  state.filteredVisibleCount = BATCH_SIZE;
+  applyFiltersAndRender();
+
+  try {
+    const bounds = await fetchLedgerTimeBounds();
+    if (filterTimeFromEl) filterTimeFromEl.value = formatUtcDatetimeLocal(timeForLedger(bounds, fromLedger));
+    if (filterTimeToEl) filterTimeToEl.value = formatUtcDatetimeLocal(timeForLedger(bounds, toLedger));
+    await updateTimeFilterLedgers();
+  } catch {
+    // Timestamp fields are best-effort; the ledger filter above already applied.
+  }
+}
+
 function moveGraphSelection(delta) {
-  const notes = collectNotes(computeVisibleRows(readFilters())).sort((a, b) => noteSortKey(a) - noteSortKey(b));
+  const notes = state.graphNotes ?? [];
   if (notes.length === 0) return;
 
   const currentIndex = notes.findIndex((note) => note.noteId === state.selectedNoteId);
@@ -830,8 +941,9 @@ function renderGraphDetailPanel(container, notes) {
   addRow('Amount', cellDisplay(cells.amount));
   addRow('Status', spent ? 'Spent' : 'Unspent');
   addRow('Commitment', note.commitment ? cellDisplay(truncateHex(note.commitment)) : '—');
-  addRow('Created', txLabel(note.createdTxIndex, note.createdLedger));
-  addRow('Spent', txLabel(note.spentTxIndex, note.spentLedger));
+  const withKind = (label, kind) => (kind ? `${label} · ${kind}` : label);
+  addRow('Created', withKind(txLabel(note.createdTxIndex, note.createdLedger), note.createdKind));
+  addRow('Spent', withKind(txLabel(note.spentTxIndex, note.spentLedger), note.spentKind));
   addRow('Nullifier', note.nullifier ? cellDisplay(truncateHex(note.nullifier)) : '—');
 
   const nav = el('div', 'mt-auto flex items-center justify-between gap-2 pt-4');
@@ -849,18 +961,56 @@ function renderGraphDetailPanel(container, notes) {
 }
 
 /** Timeline scatter: x = ledger. Traceable notes get a creation→spend segment; view-only notes are lone points. */
-// Rough allowance for the detail panel (w-64 + gap-4) sitting beside the graph.
-const GRAPH_SIDE_PANEL_ALLOWANCE = 288;
+// Detail panel (w-64 + gap-4) plus graphWrap's own p-4 padding and border.
+const GRAPH_SIDE_PANEL_ALLOWANCE = 256 + 16 + 32 + 2;
+
+function renderGraphLegend() {
+  const wrap = el('div', 'group absolute right-3 top-3 z-10');
+
+  const badge = el(
+    'div',
+    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-[11px] font-semibold text-slate-300',
+    'i',
+  );
+  wrap.appendChild(badge);
+
+  const legend = el(
+    'div',
+    'pointer-events-none absolute right-0 top-7 hidden w-56 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-[10px] leading-tight text-slate-300 backdrop-blur group-hover:block',
+  );
+  wrap.appendChild(legend);
+
+  const addItem = (swatch, text) => {
+    const row = el('div', 'flex items-center gap-2');
+    row.appendChild(swatch);
+    row.appendChild(el('span', '', text));
+    legend.appendChild(row);
+  };
+
+  const dot = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-full ${extra}`);
+  const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] border border-slate-300 ${extra}`);
+  const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
+
+  addItem(dot('bg-cyan-400'), 'Color = note owner (PK)');
+  addItem(dot('bg-cyan-400'), 'Note (creation, or only known position)');
+  addItem(dot('border border-cyan-400 bg-ink-950'), 'Spend position');
+  addItem(line(), 'Held between creation & spend');
+  addItem(square(''), 'Tx output (created here)');
+  addItem(square('rotate-45'), 'Tx input (spent here)');
+
+  return wrap;
+}
 
 function renderGraph(rows, containerWidth) {
   const notes = collectNotes(rows).sort((a, b) => noteSortKey(a) - noteSortKey(b));
+  state.graphNotes = notes;
 
   if (state.selectedNoteId && !notes.some((n) => n.noteId === state.selectedNoteId)) {
     state.selectedNoteId = null;
   }
 
   const outer = el('div', 'flex items-stretch gap-4');
-  const graphWrap = el('div', 'min-w-0 flex-1 overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70 p-4');
+  const graphWrap = el('div', 'relative min-w-0 flex-1 overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70 p-4');
   outer.appendChild(graphWrap);
   resultsEl.appendChild(outer);
 
@@ -870,9 +1020,16 @@ function renderGraph(rows, containerWidth) {
     return;
   }
 
-  const ledgers = notes.flatMap((note) => [note.createdLedger, note.spentLedger].filter((v) => v != null));
-  const minLedger = Math.min(...ledgers);
-  const maxLedger = Math.max(...ledgers);
+  graphWrap.appendChild(renderGraphLegend());
+
+  const { minLedger, maxLedger } = notes.reduce((acc, note) => {
+    for (const ledger of [note.createdLedger, note.spentLedger]) {
+      if (ledger == null) continue;
+      if (ledger < acc.minLedger) acc.minLedger = ledger;
+      if (ledger > acc.maxLedger) acc.maxLedger = ledger;
+    }
+    return acc;
+  }, { minLedger: Infinity, maxLedger: -Infinity });
   const width = Math.max(640, (containerWidth || 0) - GRAPH_SIDE_PANEL_ALLOWANCE);
   const padding = 32;
   const rowHeight = 22;
@@ -907,6 +1064,23 @@ function renderGraph(rows, containerWidth) {
     .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
     .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
     .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+
+  // Behind the marks (dots keep their own click handler where they overlap
+  // the brush's hit area) so drag-to-zoom and click-to-select coexist.
+  const brush = d3.brushX()
+    .extent([[padding, topPad], [width - padding, height - bottomAxis]])
+    .on('end', (event) => {
+      if (!event.selection) return;
+      const [x0, x1] = event.selection;
+      if (x1 - x0 < 4) {
+        brushGroup.call(brush.move, null);
+        return;
+      }
+      const fromLedger = Math.round(xScale.invert(x0));
+      const toLedger = Math.round(xScale.invert(x1));
+      applyGraphBrushRange(Math.min(fromLedger, toLedger), Math.max(fromLedger, toLedger));
+    });
+  const brushGroup = svg.append('g').attr('class', 'gvk-graph-brush').call(brush);
 
   const spentNotes = notes.filter((note) => note.createdTxIndex != null && note.spentTxIndex != null);
 
@@ -965,9 +1139,9 @@ function renderGraph(rows, containerWidth) {
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
 
-  // Little square around each note touched by a tx that touches more than
-  // one visible note in total — counting BOTH its outputs and the inputs it
-  // consumed, since they share one ledger. Purely decorative
+  // Marker around each note touched by a tx that touches more than one
+  // visible note in total — a square for its outputs, a diamond (the same
+  // square, rotated) for the inputs it consumed. Purely decorative
   // (pointer-events:none) — it never intercepts hover/click itself, so it
   // can't shadow the pk/note highlighting on the dots above. It's shown
   // persistently for the tx of the currently selected note, and toggled on
@@ -1005,6 +1179,7 @@ function renderGraph(rows, containerWidth) {
     .attr('width', squareSize)
     .attr('height', squareSize)
     .attr('rx', 3)
+    .attr('transform', (d) => `rotate(45, ${xScale(d.spentLedger)}, ${yFor(d)})`)
     .attr('fill', 'transparent')
     .attr('stroke', 'rgba(226,232,240,0.6)')
     .attr('stroke-width', 1)
@@ -1098,38 +1273,52 @@ function csvEscape(value) {
 }
 
 /** Every note (input and output) across all loaded rows, flattened one-per-row — always the full set, ignoring active filters. */
+function slotToCsvRow(txIndex, tx, side, slot) {
+  return [
+    txIndex,
+    tx.ledger,
+    side,
+    slot.index,
+    slot.audited ? parseFieldAmount(slot.audited.note?.amount).toString() : '',
+    slot.audited?.note?.pk ?? '',
+    slot.audited?.commitment ?? slot.commitment ?? '',
+    side === 'input' ? (slot.nullifier ?? '') : '',
+  ];
+}
+
 function buildNotesCsvRows() {
   const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'commitment', 'nullifier'];
   const rows = [header];
 
   for (const { tx, index } of state.rows) {
-    for (const slot of normalizedOutputs(tx)) {
-      rows.push([
-        index,
-        tx.ledger,
-        'output',
-        slot.index,
-        slot.audited ? parseFieldAmount(slot.audited.note?.amount).toString() : '',
-        slot.audited?.note?.pk ?? '',
-        slot.audited?.commitment ?? slot.commitment ?? '',
-        '',
-      ]);
-    }
-    for (const slot of normalizedInputs(tx)) {
-      rows.push([
-        index,
-        tx.ledger,
-        'input',
-        slot.index,
-        slot.audited ? parseFieldAmount(slot.audited.note?.amount).toString() : '',
-        slot.audited?.note?.pk ?? '',
-        slot.audited?.commitment ?? '',
-        slot.nullifier ?? '',
-      ]);
-    }
+    for (const slot of normalizedOutputs(tx)) rows.push(slotToCsvRow(index, tx, 'output', slot));
+    for (const slot of normalizedInputs(tx)) rows.push(slotToCsvRow(index, tx, 'input', slot));
   }
 
   return rows;
+}
+
+function noteToCsvRow(note) {
+  return [
+    note.createdTxIndex ?? '',
+    note.createdLedger ?? '',
+    note.spentTxIndex ?? '',
+    note.spentLedger ?? '',
+    note.audited?.note?.pk ?? '',
+    note.audited?.note?.amount ? parseFieldAmount(note.audited.note.amount).toString() : '',
+    note.commitment ?? '',
+    note.spentTxIndex != null ? 'spent' : 'unspent',
+    note.nullifier ?? '',
+  ];
+}
+
+/** One row per note (matching the note-view table), instead of one row per input/output slot. */
+function buildNoteViewCsvRows() {
+  const header = [
+    'created_tx_index', 'created_ledger', 'spent_tx_index', 'spent_ledger',
+    'pk', 'amount_stroops', 'commitment', 'status', 'nullifier',
+  ];
+  return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
 }
 
 function downloadCsv(filename, rows) {
@@ -1189,7 +1378,10 @@ function setView(view) {
 }
 
 function setFilterControlsDisabled(disabled) {
-  for (const filterEl of [filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl, filterPkEl, filtersClearBtnEl]) {
+  for (const filterEl of [
+    filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl,
+    filterPkEl, filterTimeFromEl, filterTimeToEl, filtersClearBtnEl,
+  ]) {
     if (filterEl) filterEl.disabled = disabled;
   }
 }
@@ -1281,14 +1473,23 @@ async function startAudit({ reset }) {
   }
 
   if (!state.audit) {
-    state.audit = await client().gvkAudit(poolContractId, privateKey);
+    const wallet = getWalletAccount();
+    if (!wallet) {
+      throw new Error('Connect a wallet before starting a Global View audit');
+    }
+    await client().openAccount(wallet);
+    const pool = await client().account().pool({ poolContract: poolContractId });
+    state.audit = await pool.audit(privateKey);
   }
 
   await fetchBatch(BATCH_SIZE);
 }
 
-export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
+let getWalletAccount = () => null;
+
+export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalletAccount: getWallet }) {
   if (!poolSelectEl) return;
+  if (getWallet) getWalletAccount = getWallet;
 
   viewTxBtnEl?.addEventListener('click', () => setView('tx'));
   viewNoteBtnEl?.addEventListener('click', () => setView('note'));
@@ -1314,10 +1515,23 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     });
   }
 
+  for (const filterEl of [filterTimeFromEl, filterTimeToEl]) {
+    filterEl?.addEventListener('change', async () => {
+      state.filteredVisibleCount = BATCH_SIZE;
+      await updateTimeFilterLedgers();
+      applyFiltersAndRender();
+    });
+  }
+
   filtersClearBtnEl?.addEventListener('click', () => {
-    for (const filterEl of [filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl, filterPkEl]) {
+    for (const filterEl of [
+      filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl,
+      filterPkEl, filterTimeFromEl, filterTimeToEl,
+    ]) {
       if (filterEl) filterEl.value = '';
     }
+    state.timeFilterLedgers = { from: null, to: null };
+    if (filterTimeHintEl) filterTimeHintEl.textContent = TIME_FILTER_HINT_DEFAULT;
     state.filteredVisibleCount = BATCH_SIZE;
     renderResults();
     syncActionButtons();
@@ -1381,7 +1595,8 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       await ensureFullyLoaded();
 
       const poolContractId = poolSelectEl?.value?.trim() || 'pool';
-      downloadCsv(`gvk-notes-${poolContractId.slice(0, 8)}-${Date.now()}.csv`, buildNotesCsvRows());
+      const rows = state.view === 'note' ? buildNoteViewCsvRows() : buildNotesCsvRows();
+      downloadCsv(`gvk-notes-${poolContractId.slice(0, 8)}-${Date.now()}.csv`, rows);
       updateStatus();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');

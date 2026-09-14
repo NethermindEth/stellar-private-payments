@@ -493,7 +493,14 @@ async function init() {
   await loadExplorerSetting();
   await ensureCryptoReady();
   await refreshState();
-  await initGvkAuditPanel({ ensureCryptoReady, showToast });
+  await initGvkAuditPanel({
+    ensureCryptoReady,
+    showToast,
+    getWalletAccount: () =>
+      state.address
+        ? { userAddress: state.address, networkPassphrase: state.networkPassphrase }
+        : null,
+  });
   setStatus('Ready', 'ok');
 }
 

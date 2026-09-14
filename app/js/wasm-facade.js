@@ -98,9 +98,6 @@ function wrapSdkClient(sdk) {
         stopBackgroundSync() {
             sdk.stopBackgroundSync();
         },
-        async gvkAudit(poolContractId, globalViewPrivateKeyHex) {
-            return sdk.gvkAudit(poolContractId, globalViewPrivateKeyHex);
-        },
         async openAccount(
             { networkPassphrase, userAddress, signerAddress },
             signer = new FreighterSigner(),
@@ -260,6 +257,15 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
     }
 
     return client();
+}
+
+/**
+ * The Soroban RPC URL the current runtime was initialized with, or `null`
+ * before {@link initializeRuntime} has run.
+ * @returns {string|null}
+ */
+export function getCurrentRpcUrl() {
+    return currentRpcUrl;
 }
 
 /**
