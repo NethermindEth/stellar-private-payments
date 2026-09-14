@@ -20,7 +20,11 @@
 //!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 //! );
 //! let signer = Handle::from_box(
-//!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
+//!     Box::new(LocalSigner::new(
+//!         "S...",
+//!         "Test SDF Network ; September 2015",
+//!         SignerAddress::new("G..."),
+//!     )?)
 //!         as Box<dyn stellar_private_payments::Signer>,
 //! );
 //!

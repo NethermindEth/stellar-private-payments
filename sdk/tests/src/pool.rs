@@ -118,7 +118,7 @@ fn test_signer() -> Result<Handle<dyn Signer>> {
     Ok(Handle::from_box(Box::new(LocalSigner::new(
         TEST_SIGNER_SECRET,
         "Test SDF Network ; September 2015",
-        USER_ADDRESS,
+        SignerAddress::new(USER_ADDRESS),
     )?) as Box<dyn Signer>))
 }
 

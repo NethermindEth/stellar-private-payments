@@ -1,26 +1,30 @@
 use crate::chain::{Limits, LocalSigner as StellarSigner, PreparedSorobanTx, WriteXdr};
 
 use super::Signer;
-use crate::{PreparedTransaction, error::Error, types::SignedTransaction};
+use crate::{
+    PreparedTransaction,
+    error::Error,
+    types::{SignedTransaction, SignerAddress},
+};
 
 /// In-process Ed25519 signer for native CLI and tests.
 pub struct LocalSigner {
     stellar: StellarSigner,
     network_passphrase: String,
-    user_address: String,
+    signer_address: SignerAddress,
 }
 
 impl LocalSigner {
     pub fn new(
         secret_key: &str,
         network_passphrase: impl Into<String>,
-        user_address: impl Into<String>,
+        signer_address: SignerAddress,
     ) -> Result<Self, Error> {
         Ok(Self {
             stellar: StellarSigner::from_secret(secret_key)
                 .map_err(|e| Error::Other(format!("signer: {e:#}")))?,
             network_passphrase: network_passphrase.into(),
-            user_address: user_address.into(),
+            signer_address,
         })
     }
 
@@ -32,8 +36,8 @@ impl LocalSigner {
         &self.network_passphrase
     }
 
-    pub fn user_address(&self) -> &str {
-        &self.user_address
+    pub fn signer_address(&self) -> &SignerAddress {
+        &self.signer_address
     }
 }
 
@@ -52,7 +56,7 @@ impl Signer for LocalSigner {
     ) -> Result<SignedTransaction, Error> {
         let envelope = self
             .stellar
-            .sign_prepared_transaction(prepared, &self.network_passphrase, &self.user_address)
+            .sign_prepared_transaction(prepared, &self.network_passphrase, &self.signer_address)
             .map_err(|e| Error::Other(format!("sign transaction: {e:#}")))?;
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())

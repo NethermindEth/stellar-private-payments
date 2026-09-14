@@ -28,6 +28,9 @@ import {
     signTransaction,
     signMessage
 } from '@stellar/freighter-api';
+
+import { verifySignerAddress } from './wallet-signer-guard.js';
+
 /**
  * Request wallet access and return the active public key.
  *
@@ -224,6 +227,7 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Transaction signature failed');
     }
+    verifySignerAddress('signTransaction', opts.address, signerAddress);
 
     return { signedTxXdr, signerAddress };
 }
@@ -246,6 +250,7 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Auth entry signature failed');
     }
+    verifySignerAddress('signAuthEntry', opts.address, signerAddress);
 
     return { signedAuthEntry, signerAddress };
 }
@@ -288,6 +293,8 @@ export async function signWalletMessage(message, opts = {}) {
         err.code = 'USER_REJECTED';
         throw err;
     }
+
+    verifySignerAddress('signMessage', freighterOpts.address, signerAddress);
 
     return { signedMessage, signerAddress };
 }

@@ -205,14 +205,14 @@ pub fn user_address_from_secret(secret_key: &str) -> Result<String, String> {
         .to_string())
 }
 
-/// Build a signer handle from a raw secret key, network passphrase, and user
-/// address.
+/// Build a signer handle from a raw secret key, network passphrase, and
+/// signing account.
 pub fn build_signer(
     secret_key: &str,
     network_passphrase: &str,
-    user_address: &str,
+    signer_address: SignerAddress,
 ) -> Result<Handle<dyn Signer>, String> {
-    let signer = LocalSigner::new(secret_key, network_passphrase, user_address)
+    let signer = LocalSigner::new(secret_key, network_passphrase, signer_address)
         .map_err(|e| format!("build signer: {e}"))?;
     Ok(Handle::from_box(Box::new(signer) as Box<dyn Signer>))
 }
@@ -227,7 +227,11 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
     let passphrase = network_passphrase(network).ok_or_else(|| {
         format!("unknown network '{network}'; set SPP_NETWORK_PASSPHRASE explicitly")
     })?;
-    let signer = build_signer(&secret, &passphrase, &user_address)?;
+    let signer = build_signer(
+        &secret,
+        &passphrase,
+        SignerAddress::new(user_address.as_str()),
+    )?;
     client
         .account(
             NoteOwnerAddress::new(user_address.as_str()),
