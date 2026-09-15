@@ -239,17 +239,16 @@ required by most examples; everything else has a sensible default.
 
 | Variable | Default | Required by |
 | --- | --- | --- |
-| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw` |
+| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
+| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
-| `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw`** |
+| `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw`/`plan` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw` and `plan`** |
 | `SPP_REGISTER` | unset | `account_pool` (set to `1` to call `register_public_keys`) |
-| `SPP_VERBOSE_PLAN` | unset | `deposit` (set to `1` for step-by-step logs) |
 
 > `SPP_BOOTNODE_URL` is read directly by the examples and overrides the default
 > public bootnode. Every example that opens a client reads it, not just `sync`.
@@ -292,7 +291,7 @@ cargo run --release --example account_pool
 # Deployment-level sync and operational feed.
 cargo run --release --example sync
 
-# Transaction-count estimation and plan introspection.
+# Transaction-count estimation.
 cargo run --release --example estimate
 
 # Deposit 1 XLM into the pool (proving + submission).
@@ -305,6 +304,10 @@ SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 # recipient exported for `transfer` above, which `withdraw` would otherwise
 # use as the withdrawal destination.
 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
+
+# Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
+# 4 notes, then withdraws all of them step by step).
+env -u SPP_RECIPIENT_ADDRESS cargo run --release --example plan
 ```
 
 Run order for a full demo:
@@ -312,9 +315,10 @@ Run order for a full demo:
 1. `account_pool` to confirm the wallet is onboarded and read the pool config.
 2. `sync` to catch the wallet state up to chain tip.
 3. `deposit` — **run it twice**, so the wallet holds two notes.
-4. `estimate` to inspect the plan cursor after the deposit.
+4. `estimate` to inspect the expected transaction count after the deposit.
 5. `transfer` to send private value to the recipient (spends one note).
 6. `withdraw` to move funds back to a public address (spends the other).
+7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
 > **Each spend consumes a note.** With the default `SPP_AMOUNT_STROOPS`
 > (1 XLM), one `deposit` creates exactly one 1-XLM note, and `transfer` and
@@ -326,8 +330,8 @@ Run order for a full demo:
 > `transfer` and `withdraw` require spendable notes. If the wallet has none,
 > they print a skip message and exit 0. Run `deposit` first.
 
-> **Timing:** `deposit`, `transfer`, and `withdraw` invoke the local Groth16
-> prover. Measured on testnet, a single-transaction operation completes in
+> **Timing:** `deposit`, `transfer`, `withdraw`, and `plan` invoke the local
+> Groth16 prover. Measured on testnet, a single-transaction operation completes in
 > roughly 5–10 seconds end to end: about 2 seconds of proving, with most of the
 > remainder spent waiting for the ledger to close. If one of these runs takes
 > substantially longer, suspect the build rather than the prover —
