@@ -6,8 +6,10 @@ use core::fmt;
 
 /// The account that owns the notes.
 ///
-/// Selects notes and key material from storage, and feeds proof inputs. It
-/// never appears in a transaction envelope.
+/// Selects notes and key material from storage, and feeds proof inputs. It is
+/// never a transaction's source account, though it does appear as a contract
+/// argument where the call is about the owner rather than the payer — the
+/// `Account.owner` passed to `register`, which the registry authorizes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NoteOwnerAddress(String);
 
