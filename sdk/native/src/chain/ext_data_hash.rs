@@ -7,8 +7,12 @@ use stellar_xdr::{Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXd
 
 use crate::chain::conversions::i128_to_i256_scval;
 
-// please refer to hash_ext_data in contracts/pool/src/pool.rs
-pub(crate) fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
+// please refer to hash_ext_data in contracts/pool-core/src/ext_data.rs
+//
+// `pool` and `token` mirror the on-chain domain binding and must name the
+// pool being called and its configured token, or the pool recomputes a
+// different hash and `transact` fails with `WrongExtHash`.
+pub(crate) fn hash_ext_data_offchain(ext: &ExtData, pool: &str, token: &str) -> Result<[u8; 32]> {
     // 1. Prepare ScVal entries
     // Soroban structs serialize to XDR Maps sorted alphabetically by key
     let mut entries: Vec<(&str, ScVal)> = vec![
@@ -21,10 +25,12 @@ pub(crate) fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
             ScVal::Bytes(ext.encrypted_output1.clone().try_into()?),
         ),
         ("ext_amount", i128_to_i256_scval(ext.ext_amount.into())),
+        ("pool", ScVal::Address(pool.parse::<ScAddress>()?)),
         (
             "recipient",
             ScVal::Address(ext.recipient.parse::<ScAddress>()?),
         ),
+        ("token", ScVal::Address(token.parse::<ScAddress>()?)),
     ];
 
     // 2. Sort by key alphabetically
