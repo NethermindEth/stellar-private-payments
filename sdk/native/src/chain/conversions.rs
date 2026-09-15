@@ -222,6 +222,58 @@ pub(crate) fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJub
     })
 }
 
+/// Decoded `pool_core::merkle_with_history::TreeState`, minus
+/// `filled_subtrees` (the contract's own insertion cache; unused here).
+pub(crate) struct PoolTreeState {
+    pub levels: u32,
+    pub next_index: u64,
+    pub roots: Vec<U256>,
+}
+
+/// Decode a packed `pool_core::merkle_with_history::TreeState`
+/// (`{ levels: u32, next_index: u64, filled_subtrees: Vec<U256>, roots:
+/// Vec<U256> }`) from contract storage.
+pub(crate) fn scval_to_pool_tree_state(val: &xdr::ScVal) -> Result<PoolTreeState, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "TreeState: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut levels = None;
+    let mut next_index = None;
+    let mut roots = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "levels" => levels = Some(scval_to_u32(val)?),
+            "next_index" => next_index = Some(scval_to_u64(val)?),
+            "roots" => roots = Some(scval_to_u256_vec(val)?),
+            _ => {}
+        }
+    }
+
+    Ok(PoolTreeState {
+        levels: levels
+            .ok_or_else(|| Error::UnexpectedScVal("TreeState missing field: levels".into()))?,
+        next_index: next_index
+            .ok_or_else(|| Error::UnexpectedScVal("TreeState missing field: next_index".into()))?,
+        roots: roots
+            .ok_or_else(|| Error::UnexpectedScVal("TreeState missing field: roots".into()))?,
+    })
+}
+
+fn scval_to_u256_vec(val: &xdr::ScVal) -> Result<Vec<U256>, Error> {
+    let xdr::ScVal::Vec(Some(items)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "expected ScVal::Vec, found: {val:?}"
+        )));
+    };
+    items.iter().map(scval_to_u256).collect()
+}
+
 /// Decode a `pool-gvk::gvk::GvkCiphertext` from an event or proof field.
 pub fn scval_to_global_view_key_ciphertext(
     val: &xdr::ScVal,

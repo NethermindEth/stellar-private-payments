@@ -1,6 +1,6 @@
 use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof,
-    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, ROOT_HISTORY_SIZE, TreeState},
     policy,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
@@ -311,9 +311,7 @@ fn pool_constructor_sets_state() {
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
     let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+        env.storage().persistent().has(&MerkleDataKey::State)
     });
 
     assert_eq!(stored_admin, setup.admin);
@@ -379,13 +377,13 @@ fn merkle_insert_updates_root_and_index() {
                 .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
         );
 
-        // nextIndex should now be 2 (stored in persistent storage)
-        let next: u64 = env
+        // nextIndex should now be 2 (stored in the packed tree state)
+        let state: TreeState = env
             .storage()
             .persistent()
-            .get(&MerkleDataKey::NextIndex)
-            .unwrap_or_else(|| panic!("expected next index to be stored"));
-        assert_eq!(next, 2);
+            .get(&MerkleDataKey::State)
+            .unwrap_or_else(|| panic!("expected tree state to be stored"));
+        assert_eq!(state.next_index, 2);
     });
 }
 
@@ -460,7 +458,7 @@ fn pool_is_known_root_returns_false_for_zero_root() {
 
 #[cfg_attr(
     miri,
-    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+    ignore = "too slow under Miri: ROOT_HISTORY_SIZE Merkle insertions exceed the 6h job limit"
 )]
 #[test]
 fn pool_is_known_root_returns_false_for_evicted_root() {
@@ -485,7 +483,7 @@ fn pool_is_known_root_returns_false_for_evicted_root() {
     });
     let evicted_root = pool.get_root();
 
-    for i in 0..90u32 {
+    for i in 0..ROOT_HISTORY_SIZE {
         let left = i
             .checked_mul(2)
             .and_then(|value| value.checked_add(3))
@@ -1287,10 +1285,6 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
          duplicate inside one call passes it and is left to the circuit"
     );
 }
-
-/// Number of root history slots the pool keeps. Rotating this many times
-/// evicts a root that was valid when it was recorded.
-const ROOT_HISTORY_SIZE: u32 = 90;
 
 /// Inserts two leaves through the pool's Merkle module, rotating the root
 /// history by one slot. Used to age a root out of history without needing a

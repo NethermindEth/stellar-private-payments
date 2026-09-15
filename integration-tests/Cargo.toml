@@ -1,0 +1,41 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/NethermindEth/stellar-private-transactions"
+license = "Apache-2.0"
+publish = false
+description = "Integration tests against a local Stellar network"
+
+[lib]
+name = "integration_tests"
+path = "src/lib.rs"
+
+[dependencies]
+# workspace
+stellar-private-payments = { path = "../sdk/native", version = "0.1.0" }
+
+# external
+anyhow = { version = "1", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "2.2", default-features = false, features = ["rand_core", "std"] }
+rand = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+stellar-strkey = "0.0.18"
+testcontainers = "0.28"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time"] }
+
+[lints.rust]
+missing_docs = "allow"
+unsafe_code = "deny"
+
+[lints.clippy]
+arithmetic_side_effects = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+needless_return = "deny"
+panicking_overflow_checks = "deny"
+unwrap_used = "deny"
