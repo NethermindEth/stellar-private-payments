@@ -1,5 +1,7 @@
 //! Walletless synchronous selective-disclosure verification.
 
+use anyhow::Context;
+
 use crate::types::{ContractConfig, DisclosureReceipt, DisclosureVerificationReport};
 
 use crate::{
@@ -17,10 +19,8 @@ pub fn verify_disclosure_receipt(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
 ) -> Result<DisclosureVerificationReport, Error> {
-    let rpc =
-        RpcClient::new(rpc_url.as_ref()).map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
-    let fetcher = StateFetcher::new(rpc, contract_config)
-        .map_err(|e| Error::Other(format!("state fetcher error: {e:#}")))?;
+    let rpc = RpcClient::new(rpc_url.as_ref()).context("rpc error")?;
+    let fetcher = StateFetcher::new(rpc, contract_config).context("state fetcher error")?;
     block_on(verify_disclosure_receipt_async(
         &fetcher,
         prover,
