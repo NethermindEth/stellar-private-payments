@@ -6,6 +6,7 @@ import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
+import { accountSession } from '../account-session.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -430,6 +431,7 @@ export const Wallet = {
 
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;
+                App.state.wallet.signingAddress = address;
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
@@ -441,12 +443,13 @@ export const Wallet = {
 
                 await runOnboardingWizard({
                     address,
+                    signerAddress: App.state.wallet.signingAddress,
                     networkPassphrase,
                     bootnodeRequired,
                     signer,
                 });
 
-                await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+                await client().openAccount(accountSession(App.state.wallet), signer);
                 const keys = await client().account().userPublicKeys();
                 App.state.keys.notePublicKey = keys.notePublicKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
@@ -501,6 +504,7 @@ export const Wallet = {
         App.state.wallet = {
             connected: false,
             address: null,
+            signingAddress: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,
