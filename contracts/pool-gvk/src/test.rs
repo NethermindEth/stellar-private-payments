@@ -631,9 +631,9 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     assert!(
         !matches!(
             pool.try_transact(&proof, &ext, &sender),
-            Err(Ok(Error::InvalidProof))
+            Err(Ok(Error::NonCanonicalPublicInput))
         ),
-        "flags={flags} should not require ASP root validation for the ignored field(s)"
+        "expected ASP root field to be skipped for flags={flags}"
     );
 }
 
@@ -1779,5 +1779,50 @@ fn transact_rejects_replayed_nullifier() {
     assert!(
         matches!(second, Err(Ok(Error::AlreadySpentNullifier))),
         "expected replaying the same nullifier to be rejected, got {second:?}"
+    );
+}
+
+/// A verifier rejection must reach the caller as pool-gvk's own `InvalidProof`.
+/// The verifier error enum and this contract's error enum use overlapping
+/// numeric codes, so an untrapped verifier rejection can otherwise surface
+/// as an unrelated pool-gvk error.
+#[test]
+fn transact_reports_verifier_rejection_as_invalid_proof() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+
+    // Policy flags 0: neither ASP root is compared, so neither can produce
+    // the InvalidProof asserted by this test.
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    // Authorization is mocked, so NotAuthorized cannot be a genuine answer.
+    env.mock_all_auths();
+
+    let (proof, ext) =
+        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE5, VIEW_ONLY);
+
+    assert!(
+        !proof.proof.is_empty(),
+        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
+    );
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a proof the verifier refuses must be refused by pool-gvk");
+
+    assert_eq!(
+        err,
+        Ok(Error::InvalidProof),
+        "a verifier rejection must be reported as pool-gvk's InvalidProof"
     );
 }
