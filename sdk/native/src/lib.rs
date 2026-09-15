@@ -7,7 +7,7 @@
 //! ```no_run
 //! use stellar_private_payments::{
 //!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
-//!     types::{CircuitStem, ContractConfig, PolicyFlags},
+//!     types::{CircuitStem, ContractConfig, NoteOwnerAddress, PolicyFlags, SignerAddress},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +20,11 @@
 //!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 //! );
 //! let signer = Handle::from_box(
-//!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
+//!     Box::new(LocalSigner::new(
+//!         "S...",
+//!         "Test SDF Network ; September 2015",
+//!         SignerAddress::new("G..."),
+//!     )?)
 //!         as Box<dyn stellar_private_payments::Signer>,
 //! );
 //!
@@ -31,7 +35,12 @@
 //!     deployment,
 //!     None,
 //! )?;
-//! let account = client.account("G...", signer)?;
+//! // Note owner first, then the signing account.
+//! let account = client.account(
+//!     NoteOwnerAddress::new("G..."),
+//!     SignerAddress::new("G..."),
+//!     signer,
+//! )?;
 //! let pool = account.pool("CA2TZ...")?;
 //!
 //! pool.deposit(10_000_000u128.into()).await?;

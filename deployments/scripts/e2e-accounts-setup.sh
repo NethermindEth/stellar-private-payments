@@ -113,7 +113,7 @@ POOL_CONTRACT="$(python3 - "$DEPLOYMENTS_JSON" <<'EOF'
 import json, sys
 pools = json.load(open(sys.argv[1]))["pools"]
 native = [p for p in pools if p.get("enabled") and p.get("asset", {}).get("kind") == "native"]
-assert len(native) == 1, f"expected exactly one enabled native pool, found {len(native)}"
+assert len(native) >= 1, "expected at least one enabled native pool, found none"
 print(native[0]["poolContractId"])
 EOF
 )" || die "could not resolve the native pool from $DEPLOYMENTS_JSON"

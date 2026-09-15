@@ -55,10 +55,10 @@ jobs:
           workspaces: tools/bootnode
 
       - name: Install cargo-deny
-        run: which cargo-deny || cargo install cargo-deny --locked --version 0.18.9
+        run: which cargo-deny || cargo install cargo-deny --locked --version 0.20.2
 
       - name: Dependency audit
-        run: cargo deny check --config ../../deny.toml
+        run: cargo deny --config ../../deny.toml check
 
       - name: Fmt
         run: cargo +nightly fmt --all -- --check --config-path ../../rustfmt.toml

@@ -1,6 +1,8 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{
+    ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup, SignerAddress,
+};
 
 use crate::{
     BackgroundSync, Error, Handle, Prover, Signer, chain::StateFetcher,
@@ -70,14 +72,19 @@ impl Client {
         block_on(self.inner.recipient_lookup(address))
     }
 
+    /// Blocking mirror of [`crate::Client::account`]; the same
+    /// owner-must-equal-signer rule applies.
     pub fn account(
         &self,
-        user_address: impl Into<NoteOwnerAddress>,
+        user_address: NoteOwnerAddress,
+        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account, Error> {
-        Ok(Account::from_inner(
-            self.inner.account(user_address, signer)?,
-        ))
+        Ok(Account::from_inner(self.inner.account(
+            user_address,
+            signer_address,
+            signer,
+        )?))
     }
 
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {

@@ -12,6 +12,7 @@ export type {
   DisclosureReceipt,
   DisclosureVerificationReport,
   GlobalViewKeyCiphertext,
+  GvkAudit,
   OperationalFeedItem,
   PoolConfigEntry,
   PoolEstimate,

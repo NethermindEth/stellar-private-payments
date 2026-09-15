@@ -1,15 +1,15 @@
 //! [`PrivatePool`] — per-pool session (Rust SDK high-level API).
 
-use std::rc::Rc;
+use std::{rc::Rc, str::FromStr};
 
 use stellar_private_payments::{
     PrivatePool as NativePrivatePool,
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
+    types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey, TransferRecipient},
 };
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    client::{execute::emit, pool_err},
+    client::{execute::emit, gvk::GvkAudit, pool_err},
     correlation::{new_correlation_id, with_correlation_id},
     models::{
         DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport, PoolEstimate,
@@ -189,5 +189,17 @@ impl PrivatePool {
             Ok(DisclosureVerificationReport::from(report))
         })
         .await
+    }
+
+    /// Open an admin audit cursor for this pool.
+    ///
+    /// `globalViewPrivateKeyHex` is the admin authority scalar as a
+    /// `0x`-prefixed field hex string. Requires a pool-gvk deployment with
+    /// GVK enabled.
+    pub async fn audit(&self, global_view_private_key_hex: &str) -> Result<GvkAudit, JsError> {
+        let d_priv = Field::from_str(global_view_private_key_hex.trim())
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let inner = self.inner().audit(d_priv).await.map_err(pool_err)?;
+        Ok(GvkAudit::new(inner))
     }
 }

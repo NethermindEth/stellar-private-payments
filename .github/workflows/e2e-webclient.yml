@@ -73,18 +73,24 @@ jobs:
         env:
           E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
-          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral --accounts a,b
+          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral --accounts a,b,c,d
           set -a
           . deployments/testnet/.e2e-accounts.env
           set +a
           # Mask freshly-generated secrets so they never leak in logs.
           echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
           echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
+          echo "::add-mask::$E2E_ACCOUNT_D_SECRET"
           {
             echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
             echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
             echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
             echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
+            echo "E2E_ACCOUNT_C_ADDRESS=$E2E_ACCOUNT_C_ADDRESS"
+            echo "E2E_ACCOUNT_C_SECRET=$E2E_ACCOUNT_C_SECRET"
+            echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
+            echo "E2E_ACCOUNT_D_SECRET=$E2E_ACCOUNT_D_SECRET"
             echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
           } >> "$GITHUB_ENV"
 
@@ -100,6 +106,23 @@ jobs:
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
+
+          # Keep the fast browser unit tests together. Each ignored E2E test
+          # gets a fresh browser/OPFS database because sync cursors are global
+          # to the database, while note derivation is account-specific.
           bash sdk/web/scripts/e2e-browser-test.sh \
             cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
-            -- --include-ignored
+            -- --skip client::e2e_tests::
+
+          for test_name in \
+            e2e_smoke_client_construction \
+            e2e_seed_deposit_creates_spendable_notes \
+            e2e_deposit_halts_at_signing \
+            e2e_transfer_halts_at_signing \
+            e2e_withdraw_halts_at_signing \
+            e2e_session_account_setup_and_sync
+          do
+            bash sdk/web/scripts/e2e-browser-test.sh \
+              cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+              "$test_name" -- --include-ignored
+          done

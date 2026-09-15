@@ -1,7 +1,10 @@
 use crate::types::{Field, GlobalViewKeyCiphertext};
 
+use serde::{Deserialize, Serialize};
+
 /// Indexed pool-gvk event returned during admin audit.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum GvkEvent {
     Commitment {
         ledger: u32,

@@ -21,6 +21,7 @@ import {
   waitForWalletRuntimeReady,
 } from './appState.mjs';
 import { chromium } from 'playwright';
+import { clearSingletonLocks } from './chrome-locks.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -56,6 +57,12 @@ const log = createLogger('runner');
 
 export async function launch({ userDataDir, headless = true, video = false } = {}) {
   if (!userDataDir) throw new Error('launch: userDataDir is required');
+  // Throws rather than starting a second browser on a profile that something
+  // else still holds.
+  const clearedLocks = clearSingletonLocks(userDataDir);
+  if (clearedLocks.length > 0) {
+    log.warn(`launch: cleared Chrome locks with no live owner (${clearedLocks.join(', ')})`);
+  }
   const contextOptions = {
     headless,
     executablePath: CHROMIUM_PATH,

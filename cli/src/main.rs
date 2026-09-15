@@ -27,6 +27,9 @@ use onboard::OnboardArgs;
         Accounts are managed by the Stellar CLI (`stellar keys`) and passed with \
         --account <alias>; the network (RPC + passphrase) is resolved from the Stellar CLI \
         (`stellar network`). Run `spp onboard` first to accept the disclaimer and derive your keys.\n\n\
+        --account names the account that owns the notes. By default it also sources and pays for \
+        every transaction; pass --sign-as <alias> to hand those to a separate payer. Deriving keys \
+        and registering them need the owner's own signature and refuse a separate payer.\n\n\
         Repository: https://github.com/NethermindEth/stellar-private-payments",
     version
 )]
@@ -59,9 +62,14 @@ struct Cli {
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,
 
-    /// `stellar keys` alias to act as (required by account commands)
+    /// `stellar keys` alias that owns the notes (required by account commands)
     #[arg(long, global = true, env = "STELLAR_ACCOUNT")]
     account: Option<String>,
+
+    /// `stellar keys` alias that sources, signs and pays for every envelope and
+    /// acts as the pool sender (default: --account)
+    #[arg(long, global = true)]
+    sign_as: Option<String>,
 
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
@@ -170,7 +178,8 @@ enum Commands {
         pool: String,
         /// Amount in token units (e.g. 1 or 0.0001)
         amount: String,
-        /// Public recipient (G…); defaults to the signing account
+        /// Public recipient (G…); defaults to the note owner (--account), not
+        /// the payer
         #[arg(long)]
         to: Option<String>,
     },
@@ -262,6 +271,7 @@ fn main() -> Result<()> {
             network: cli.network,
             data_dir: cli.data_dir,
             account: cli.account,
+            sign_as: cli.sign_as,
             stellar_config_dir: cli.stellar_config_dir,
             circuits_dir: cli.circuits_dir,
         },

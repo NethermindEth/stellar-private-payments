@@ -30,6 +30,8 @@ use stellar_private_payments::{
     },
 };
 use tracing::Instrument;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
@@ -47,16 +49,25 @@ enum InitState {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_opfs_locked_error(message: &str) -> bool {
-    message.contains("NoModificationAllowedError")
-        && (message.contains("createSyncAccessHandle")
-            || message.contains("Access Handles cannot be created"))
+fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
+    // `OpfsSAHError`'s `Display`/`Debug` impls use fixed messages and do not
+    // interpolate the wrapped `JsValue`, so the real DOMException (thrown by
+    // the browser when another tab/worker still holds the OPFS sync access
+    // handles) must be inspected directly rather than via `to_string()`.
+    let sqlite_wasm_vfs::sahpool::OpfsSAHError::CreateSyncAccessHandle(js_err) = err else {
+        return false;
+    };
+    js_err
+        .dyn_ref::<web_sys::DomException>()
+        .is_some_and(|e| e.name() == "NoModificationAllowedError")
 }
 
 thread_local! {
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    #[cfg(target_arch = "wasm32")]
+    static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
 }
 
 macro_rules! with_storage {
@@ -106,33 +117,55 @@ pub fn worker_main() {
     );
 }
 
+// A prior page's worker still releases its OPFS sync access handles
+// asynchronously after termination, so a fresh worker started right after a
+// navigation can transiently race that teardown. Retry for a bit before
+// treating the lock as held by a genuinely separate tab/window.
+#[cfg(target_arch = "wasm32")]
+const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
+#[cfg(target_arch = "wasm32")]
+const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
+
 async fn init() -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
     #[cfg(target_arch = "wasm32")]
-    if let Err(e) = sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(
-        &sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default(),
-        true,
-    )
-    .await
     {
-        let error_details = format!("{e:?}");
-        let text = e.to_string();
-        let combined = if text.is_empty() {
-            error_details.clone()
-        } else {
-            format!("{text} {error_details}")
-        };
+        let mut attempt = 0;
+        loop {
+            match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(
+                &sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default(),
+                true,
+            )
+            .await
+            {
+                Ok(util) => {
+                    SAH_POOL.with(|s| *s.borrow_mut() = Some(util));
+                    break;
+                }
+                Err(e) if is_opfs_locked_error(&e) && attempt < OPFS_LOCK_RETRY_ATTEMPTS => {
+                    attempt += 1;
+                    tracing::debug!(
+                        attempt,
+                        "[{WORKER_NAME}] OPFS SAH pool still locked by a previous worker, retrying"
+                    );
+                    TimeoutFuture::new(OPFS_LOCK_RETRY_DELAY_MS).await;
+                }
+                Err(e) => {
+                    let error_details = format!("{e:?}");
 
-        let msg = if is_opfs_locked_error(&combined) {
-            "Another tab or window is using this app's local database. Please close other tabs/windows running this app, then reload this page.".to_string()
-        } else {
-            "Failed to initialize local database storage.".to_string()
-        };
+                    let msg = if is_opfs_locked_error(&e) {
+                        "Another tab or window is using this app's local database. Please close other tabs/windows running this app, then reload this page.".to_string()
+                    } else {
+                        "Failed to initialize local database storage.".to_string()
+                    };
 
-        tracing::error!(details = %error_details, "[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS");
-        INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
-        return Err(JsError::new(&msg));
+                    tracing::error!(details = %error_details, "[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS");
+                    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+                    return Err(JsError::new(&msg));
+                }
+            }
+        }
     }
 
     let storage = match SqliteStorage::connect() {
@@ -187,6 +220,24 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
+        StorageWorkerRequest::Pause => {
+            tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
+            // `pause_vfs` refuses to release handles while SQLite still has
+            // files open on this VFS, so the live connection must be closed
+            // first — this worker is about to be torn down by the browser
+            // anyway, and any in-flight request will simply fail from here on.
+            let dropped_storage = STORAGE.with(|s| s.borrow_mut().take());
+            drop(dropped_storage);
+            #[cfg(target_arch = "wasm32")]
+            SAH_POOL.with(|s| {
+                if let Some(pool) = s.borrow().as_ref()
+                    && let Err(e) = pool.pause_vfs()
+                {
+                    tracing::debug!("[{WORKER_NAME}] pause_vfs failed: {e:#}");
+                }
+            });
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::Ping => {
             tracing::trace!("[{WORKER_NAME}] ping");
             loop {
@@ -493,6 +544,29 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     StorageWorkerResponse::AspMembershipSync(status)
                 }
             })?
+        }
+        StorageWorkerRequest::ListPoolGvkEvents {
+            pool_contract_id,
+            after,
+            limit,
+        } => {
+            tracing::trace!("[{WORKER_NAME}] list pool gvk events for {pool_contract_id}");
+            let events =
+                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
+            StorageWorkerResponse::PoolGvkEvents(events)
+        }
+        StorageWorkerRequest::PoolHasCommitments {
+            pool_contract_id,
+            commitments,
+        } => {
+            tracing::trace!(
+                "[{WORKER_NAME}] verify {} pool commitment(s) for {pool_contract_id}",
+                commitments.len()
+            );
+            let found = with_storage!(s =>
+                s.pool_has_commitments(&pool_contract_id, &commitments)?
+            )?;
+            StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
         }
     };
     Ok(resp)
@@ -936,22 +1010,50 @@ impl Storage for StorageBridge {
 
     async fn list_pool_gvk_events(
         &self,
-        _pool_contract_id: &str,
-        _after: Option<(u32, String)>,
-        _limit: u32,
+        pool_contract_id: &str,
+        after: Option<(u32, String)>,
+        limit: u32,
     ) -> Result<Vec<stellar_private_payments::gvk::GvkEvent>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        match self
+            .call(
+                StorageWorkerRequest::ListPoolGvkEvents {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    after,
+                    limit,
+                },
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolGvkEvents(events)) => Ok(events),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response listing pool gvk events: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
-    async fn list_pool_commitment_hashes(
+    async fn pool_has_commitments(
         &self,
-        _pool_contract_id: &str,
-    ) -> Result<Vec<stellar_private_payments::types::Field>, Error> {
-        Err(Error::Other(
-            "GVK audit requires native LocalStorage".into(),
-        ))
+        pool_contract_id: &str,
+        commitments: &[stellar_private_payments::types::Field],
+    ) -> Result<std::collections::HashSet<stellar_private_payments::types::Field>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::PoolHasCommitments {
+                    pool_contract_id: pool_contract_id.to_string(),
+                    commitments: commitments.to_vec(),
+                },
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PoolHasCommitments(found)) => Ok(found.into_iter().collect()),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response verifying pool commitments: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 }
 
