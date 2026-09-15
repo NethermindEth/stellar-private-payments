@@ -39,6 +39,7 @@ const filtersClearBtnEl = document.getElementById('gvkFiltersClearBtn');
 const state = {
   pools: [],
   audit: null,
+  auditedPoolContractId: null,
   rows: [],
   poolGvkMode: null,
   txCounter: 0,
@@ -163,8 +164,8 @@ function noteRowId(txIndex, side, slotIndex) {
 function truncateHex(value) {
   const s = String(value ?? '').trim();
   if (!s) return { display: '—', full: null };
-  if (s.length <= 11) return { display: s, full: null };
-  return { display: `${s.slice(0, 11)}…`, full: s };
+  if (s.length <= 18) return { display: s, full: null };
+  return { display: `${s.slice(0, 18)}…`, full: s };
 }
 
 function asCell(value) {
@@ -452,14 +453,14 @@ function sumAuditedAmounts(slots) {
   );
 }
 
+/** Mirrors classify_tx in sdk/native/examples/gvk-audit.rs. */
 function classifyTx(tx) {
-  const inputSum = sumAuditedAmounts(normalizedInputs(tx));
+  const inputs = normalizedInputs(tx);
+  const hasRealInput = inputs.some((slot) => slot.audited);
+  if (!hasRealInput) return 'deposit';
+
+  const inputSum = sumAuditedAmounts(inputs);
   const outputSum = sumAuditedAmounts(normalizedOutputs(tx));
-
-  if (!tx.inputs?.length) {
-    return outputSum > 0n ? 'deposit' : 'transfer';
-  }
-
   return inputSum > outputSum ? 'withdraw' : 'transfer';
 }
 
@@ -498,6 +499,9 @@ const COLUMN_WIDTHS = {
   PK: 88,
   Commitment: 96,
   Nullifier: 96,
+  Created: 130,
+  Status: 70,
+  Spent: 130,
 };
 
 function columnWidth(header) {
@@ -577,6 +581,16 @@ function isFiltersActive(filters) {
     || filters.ledgerFrom != null || filters.ledgerTo != null || !!filters.pk;
 }
 
+function noteMatchesAmountAndPk(auditedNote, filters) {
+  if (filters.pk && !normalizeFieldKey(auditedNote?.note?.pk)?.includes(filters.pk)) return false;
+  if (filters.amountMin != null || filters.amountMax != null) {
+    const amount = parseFieldAmount(auditedNote?.note?.amount);
+    if (filters.amountMin != null && amount < filters.amountMin) return false;
+    if (filters.amountMax != null && amount > filters.amountMax) return false;
+  }
+  return true;
+}
+
 function rowMatchesFilters(row, filters) {
   const { tx } = row;
 
@@ -585,16 +599,7 @@ function rowMatchesFilters(row, filters) {
 
   if (filters.amountMin == null && filters.amountMax == null && !filters.pk) return true;
 
-  const notes = txNotes(tx);
-  return notes.some((note) => {
-    if (filters.pk && !normalizeFieldKey(note.note?.pk)?.includes(filters.pk)) return false;
-    if (filters.amountMin != null || filters.amountMax != null) {
-      const amount = parseFieldAmount(note.note?.amount);
-      if (filters.amountMin != null && amount < filters.amountMin) return false;
-      if (filters.amountMax != null && amount > filters.amountMax) return false;
-    }
-    return true;
-  });
+  return txNotes(tx).some((note) => noteMatchesAmountAndPk(note, filters));
 }
 
 function computeFilteredRows(filters) {
@@ -641,9 +646,9 @@ function renderResults() {
   resultsEl.innerHTML = '';
 
   if (state.view === 'note') {
-    renderNoteTable(visibleRows);
+    renderNoteTable(visibleRows, filters);
   } else if (state.view === 'graph') {
-    renderGraph(visibleRows, containerWidth);
+    renderGraph(visibleRows, containerWidth, filters);
   } else {
     renderTxCards(visibleRows);
   }
@@ -657,9 +662,11 @@ function renderTxCards(rows) {
     const { tx, index, kind } = row;
     const outputs = normalizedOutputs(tx);
     const inputs = normalizedInputs(tx);
-    const metaParts = [`${outputs.length} output note(s)`];
+    const realOutputCount = outputs.filter((slot) => slot.audited).length;
+    const realInputCount = inputs.filter((slot) => slot.audited).length;
+    const metaParts = [`${realOutputCount} output note(s)`];
     if (state.poolGvkMode === 'traceable') {
-      metaParts.push(`${inputs.length} input note(s)`);
+      metaParts.push(`${realInputCount} input note(s)`);
     }
     const [outputsMeta, inputsMeta] = metaParts;
 
@@ -794,12 +801,12 @@ function txLabel(txIndex, ledger) {
   return txIndex == null ? '—' : `tx ${txIndex} · ledger ${ledger}`;
 }
 
-function renderNoteTable(rows) {
-  const notes = collectNotes(rows);
+function renderNoteTable(rows, filters) {
+  const notes = collectNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
   const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
-  grid.style.gridTemplateColumns = `repeat(${headers.length}, minmax(0, 1fr))`;
+  grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
     grid.appendChild(el(
@@ -1005,8 +1012,10 @@ function renderGraphLegend() {
   return wrap;
 }
 
-function renderGraph(rows, containerWidth) {
-  const notes = collectNotes(rows).sort((a, b) => noteSortKey(a) - noteSortKey(b));
+function renderGraph(rows, containerWidth, filters) {
+  const notes = collectNotes(rows)
+    .filter((note) => noteMatchesAmountAndPk(note.audited, filters))
+    .sort((a, b) => noteSortKey(a) - noteSortKey(b));
   state.graphNotes = notes;
 
   if (state.selectedNoteId && !notes.some((n) => n.noteId === state.selectedNoteId)) {
@@ -1245,20 +1254,29 @@ async function ensureFullyLoaded() {
   await drainPromise;
 }
 
+function setLoadMoreHighlight(active) {
+  loadMoreBtnEl.classList.toggle('border-white/10', !active);
+  loadMoreBtnEl.classList.toggle('text-slate-300', !active);
+  loadMoreBtnEl.classList.toggle('border-cyan-300/50', active);
+  loadMoreBtnEl.classList.toggle('text-cyan-100', active);
+  loadMoreBtnEl.classList.toggle('bg-cyan-400/10', active);
+}
+
 function updateLoadMoreButton() {
   if (!loadMoreBtnEl) return;
   if (!state.audit) {
     loadMoreBtnEl.disabled = true;
+    setLoadMoreHighlight(false);
     return;
   }
 
   const filters = readFilters();
-  if (isFiltersActive(filters)) {
-    loadMoreBtnEl.disabled = state.filteredVisibleCount >= computeFilteredRows(filters).length;
-    return;
-  }
+  const hasMore = isFiltersActive(filters)
+    ? state.filteredVisibleCount < computeFilteredRows(filters).length
+    : !state.exhausted;
 
-  loadMoreBtnEl.disabled = state.exhausted;
+  loadMoreBtnEl.disabled = !hasMore;
+  setLoadMoreHighlight(hasMore);
 }
 
 function updateExportButton() {
@@ -1349,8 +1367,9 @@ function updateStatus() {
   if (isFiltersActive(filters)) {
     const filteredRows = computeFilteredRows(filters);
     const shown = Math.min(state.filteredVisibleCount, filteredRows.length);
+    const more = shown < filteredRows.length ? ' — more available, click Load more.' : '';
     setPanelStatus(
-      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).`,
+      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}`,
       'ok',
     );
     return;
@@ -1359,7 +1378,7 @@ function updateStatus() {
   if (state.exhausted) {
     setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.`, 'ok');
   } else {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s).`, 'ok');
+    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.`, 'ok');
   }
 }
 
@@ -1430,7 +1449,8 @@ async function populatePools() {
     const assetLabel = pool.asset?.kind === 'native'
       ? 'XLM'
       : pool.asset?.symbol || pool.asset?.code || 'asset';
-    option.textContent = `${assetLabel} · ${pool.gvkMode} · ${pool.poolContractId.slice(0, 8)}…`;
+    const shortId = `${pool.poolContractId.slice(0, 6)}...${pool.poolContractId.slice(-4)}`;
+    option.textContent = `${assetLabel} · ${pool.gvkMode} · ${shortId}`;
     poolSelectEl.appendChild(option);
   }
   poolSelectEl.disabled = false;
@@ -1453,6 +1473,18 @@ async function loadStoredAuthorityKey() {
   }
 }
 
+function resetAuditState() {
+  state.audit = null;
+  state.auditedPoolContractId = null;
+  state.rows = [];
+  state.poolGvkMode = null;
+  state.txCounter = 0;
+  state.exhausted = false;
+  state.filteredVisibleCount = BATCH_SIZE;
+  state.selectedNoteId = null;
+  state.graphNotes = null;
+}
+
 async function startAudit({ reset }) {
   const poolContractId = poolSelectEl?.value?.trim();
   const privateKey = privateKeyEl?.value?.trim();
@@ -1464,15 +1496,8 @@ async function startAudit({ reset }) {
     throw new Error('Enter the authority private key');
   }
 
-  const pool = state.pools.find((entry) => entry.poolContractId === poolContractId);
-  state.poolGvkMode = pool?.gvkMode ?? null;
-
   if (reset) {
-    state.audit = null;
-    state.rows = [];
-    state.txCounter = 0;
-    state.exhausted = false;
-    state.filteredVisibleCount = BATCH_SIZE;
+    resetAuditState();
     renderResults();
   }
 
@@ -1484,6 +1509,9 @@ async function startAudit({ reset }) {
     await client().openAccount(wallet);
     const pool = await client().account().pool({ poolContract: poolContractId });
     state.audit = await pool.audit(privateKey);
+    state.auditedPoolContractId = poolContractId;
+    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+    state.poolGvkMode = poolEntry?.gvkMode ?? null;
   }
 
   await fetchBatch(BATCH_SIZE);
@@ -1526,6 +1554,14 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       applyFiltersAndRender();
     });
   }
+
+  poolSelectEl?.addEventListener('change', () => {
+    if (!state.audit || poolSelectEl.value === state.auditedPoolContractId) return;
+    resetAuditState();
+    renderResults();
+    syncActionButtons();
+    setPanelStatus('Pool changed — click Sync & Audit to load it.', 'info');
+  });
 
   filtersClearBtnEl?.addEventListener('click', () => {
     for (const filterEl of [
