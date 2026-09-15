@@ -23,7 +23,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::constants::bn256_modulus;
+use soroban_utils::{bump_dependency, bump_entry, bump_instance, constants::bn256_modulus};
 
 // Re-exported rather than merely imported so `pool::ExtData` and
 // `pool::hash_ext_data` keep resolving for existing consumers (`e2e-tests`,
@@ -225,6 +225,14 @@ impl PoolContract {
         Ok(())
     }
 
+    /// Extends the TTL of this contract's instance and code entries.
+    ///
+    /// Every public entry point calls this first, so a pool that keeps being
+    /// used never falls behind on rent.
+    fn touch(env: &Env) {
+        bump_instance(env);
+    }
+
     /// Convert a non-negative I256 to i128 with bounds checking
     ///
     /// # Arguments
@@ -270,6 +278,7 @@ impl PoolContract {
         let key = DataKey::Nullifier(n.clone());
         // Presence of the key is the spent flag; value is unused.
         env.storage().persistent().set(&key, &());
+        bump_entry(env, &key);
         Ok(())
     }
 
@@ -431,7 +440,16 @@ impl PoolContract {
         ext_data: ExtData,
         sender: Address,
     ) -> Result<(), Error> {
+        Self::touch(env);
         sender.require_auth();
+        bump_dependency(env, &Self::get_verifier(env)?);
+        let policy_flags = Self::load_policy_flags(env)?;
+        if policy::requires_membership_proofs(policy_flags) {
+            bump_dependency(env, &Self::get_asp_membership(env)?);
+        }
+        if policy::requires_non_membership_proofs(policy_flags) {
+            bump_dependency(env, &Self::get_asp_non_membership(env)?);
+        }
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
@@ -448,7 +466,7 @@ impl PoolContract {
             token_client.transfer(&sender, &this, &amount);
         }
 
-        Self::internal_transact(env, proof, ext_data)
+        Self::internal_transact(env, proof, ext_data, policy_flags)
     }
 
     /// Process a private transaction
@@ -473,7 +491,12 @@ impl PoolContract {
     /// 3. Verify external data hash matches
     /// 4. Verify public amount calculation
     /// 5. Verify zero-knowledge proof
-    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
+    fn internal_transact(
+        env: &Env,
+        proof: Proof,
+        ext_data: ExtData,
+        policy_flags: u32,
+    ) -> Result<(), Error> {
         // 1. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
@@ -498,7 +521,6 @@ impl PoolContract {
         }
 
         // ASP root validation
-        let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_non_membership_proofs(policy_flags) {
             let non_member_root = Self::get_asp_non_membership_root(env)?;
             if non_member_root != proof.asp_non_membership_root {
@@ -567,6 +589,7 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::Token)
+            .inspect(|_| bump_entry(env, &DataKey::Token))
             .ok_or(Error::NotInitialized)
     }
 
@@ -575,6 +598,7 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
+            .inspect(|_| bump_entry(env, &DataKey::MaximumDepositAmount))
             .ok_or(Error::NotInitialized)
     }
 
@@ -583,6 +607,7 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::Verifier)
+            .inspect(|_| bump_entry(env, &DataKey::Verifier))
             .ok_or(Error::NotInitialized)
     }
 
@@ -591,11 +616,13 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::Admin)
+            .inspect(|_| bump_entry(env, &DataKey::Admin))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the pool's ASP policy flags.
     pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
+        Self::touch(env);
         Self::load_policy_flags(env)
     }
 
@@ -603,11 +630,13 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::PolicyFlags)
+            .inspect(|_| bump_entry(env, &DataKey::PolicyFlags))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool
     pub fn get_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         Ok(MerkleTreeWithHistory::get_last_root(env)?)
     }
 
@@ -618,6 +647,7 @@ impl PoolContract {
     /// * `env` - The Soroban environment
     /// * `root` - Pool Merkle root to check
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
+        Self::touch(env);
         Ok(MerkleTreeWithHistory::is_known_root(env, root)?)
     }
 
@@ -634,8 +664,13 @@ impl PoolContract {
     ///
     /// Returns `true` if the nullifier has been spent, `false` otherwise
     pub fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
+        Self::touch(env);
         let key = DataKey::Nullifier(n.clone());
-        Ok(env.storage().persistent().has(&key))
+        let spent = env.storage().persistent().has(&key);
+        if spent {
+            bump_entry(env, &key);
+        }
+        Ok(spent)
     }
 
     /// Update the contract administrator
@@ -653,6 +688,7 @@ impl PoolContract {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        Self::touch(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
@@ -664,6 +700,7 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::ASPMembership)
+            .inspect(|_| bump_entry(env, &DataKey::ASPMembership))
             .ok_or(Error::NotInitialized)
     }
 
@@ -672,6 +709,7 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::ASPNonMembership)
+            .inspect(|_| bump_entry(env, &DataKey::ASPNonMembership))
             .ok_or(Error::NotInitialized)
     }
 
@@ -685,11 +723,13 @@ impl PoolContract {
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
+        Self::touch(env);
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPMembership, &new_asp_membership);
+        bump_entry(env, &DataKey::ASPMembership);
         Ok(())
     }
 
@@ -706,11 +746,13 @@ impl PoolContract {
         env: &Env,
         new_asp_non_membership: Address,
     ) -> Result<(), Error> {
+        Self::touch(env);
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+        bump_entry(env, &DataKey::ASPNonMembership);
         Ok(())
     }
 
@@ -727,6 +769,7 @@ impl PoolContract {
     ///
     /// The current membership Merkle root as U256
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
         Ok(client.get_root())
@@ -745,6 +788,7 @@ impl PoolContract {
     ///
     /// The current non-membership Merkle root as U256
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
         Ok(client.get_root())

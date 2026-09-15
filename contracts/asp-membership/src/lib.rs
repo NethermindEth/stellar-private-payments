@@ -8,7 +8,7 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{get_zeroes, poseidon2_compress};
+use soroban_utils::{bump_entry, bump_instance, get_zeroes, poseidon2_compress};
 
 /// Storage keys for contract persistent data
 #[contracttype]
@@ -120,6 +120,7 @@ impl ASPMembership {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        bump_instance(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
@@ -134,12 +135,15 @@ impl ASPMembership {
     /// # Returns
     /// The current Merkle root as U256
     ///
-    /// # Panics
-    /// Panics if the contract has not been initialized
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if no root is stored.
     pub fn get_root(env: Env) -> Result<U256, Error> {
+        bump_instance(&env);
         env.storage()
             .persistent()
             .get(&DataKey::Root)
+            .inspect(|_| bump_entry(&env, &DataKey::Root))
             .ok_or(Error::NotInitialized)
     }
 
@@ -156,6 +160,7 @@ impl ASPMembership {
     /// # Returns
     /// The Poseidon2 hash result as U256
     pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
+        bump_instance(env);
         poseidon2_compress(env, left, right)
     }
 
@@ -177,14 +182,18 @@ impl ASPMembership {
     /// [`Error::MerkleTreeFull`] if the tree is at capacity, and
     /// [`Error::Overflow`] if the next leaf index would exceed `u64::MAX`.
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
+        bump_instance(&env);
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::Admin);
         admin.require_auth();
 
         let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::Levels);
         let actual_index: u64 = store
             .get(&DataKey::NextIndex)
             .ok_or(Error::NotInitialized)?;
+        bump_entry(&env, &DataKey::NextIndex);
         let mut current_index = actual_index;
 
         // Check if tree is full (capacity is 2^levels leaves)
@@ -196,18 +205,19 @@ impl ASPMembership {
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
             let is_right = current_index & 1 == 1;
+            let subtree_key = DataKey::FilledSubtrees(lvl);
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = store
-                    .get(&DataKey::FilledSubtrees(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let left: U256 = store.get(&subtree_key).ok_or(Error::NotInitialized)?;
+                bump_entry(&env, &subtree_key);
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                let zero_val: U256 = store
-                    .get(&DataKey::Zeroes(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                store.set(&subtree_key, &current_hash);
+                bump_entry(&env, &subtree_key);
+                let zero_key = DataKey::Zeroes(lvl);
+                let zero_val: U256 = store.get(&zero_key).ok_or(Error::NotInitialized)?;
+                bump_entry(&env, &zero_key);
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
@@ -215,6 +225,7 @@ impl ASPMembership {
 
         // Update the root with the computed hash
         store.set(&DataKey::Root, &current_hash);
+        bump_entry(&env, &DataKey::Root);
 
         // Emit event with leaf details
         LeafAddedEvent {

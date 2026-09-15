@@ -24,7 +24,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::constants::bn256_modulus;
+use soroban_utils::{bump_dependency, bump_entry, bump_instance, constants::bn256_modulus};
 
 // Re-exported rather than merely imported so `pool_gvk::ExtData` and
 // `pool_gvk::hash_ext_data` stay part of this crate's surface, mirroring
@@ -284,22 +284,23 @@ impl PoolGvkContract {
     /// input and is published in every proof, so it is not secret. There is
     /// no corresponding setter — see [`DataKey::AdminViewKey`].
     pub fn get_admin_view_key(env: &Env) -> Result<BabyJubJubPoint, Error> {
+        Self::touch(env);
         env.storage()
             .persistent()
             .get(&DataKey::AdminViewKey)
+            .inspect(|_| bump_entry(env, &DataKey::AdminViewKey))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     pub fn get_gvk_mode(env: &Env) -> Result<u32, Error> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::GvkMode)
-            .ok_or(Error::NotInitialized)
+        Self::touch(env);
+        Self::load_gvk_mode(env)
     }
 
     /// Get the pool's ASP policy flags.
     pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
+        Self::touch(env);
         Self::load_policy_flags(env)
     }
 
@@ -307,16 +308,19 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::PolicyFlags)
+            .inspect(|_| bump_entry(env, &DataKey::PolicyFlags))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool.
     pub fn get_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         Ok(MerkleTreeWithHistory::get_last_root(env)?)
     }
 
     /// Check whether a pool Merkle root is still in the recent root history.
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
+        Self::touch(env);
         Ok(MerkleTreeWithHistory::is_known_root(env, root)?)
     }
 
@@ -324,8 +328,13 @@ impl PoolGvkContract {
     ///
     /// Presence of the per-nullifier storage key is the spent flag.
     pub fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
+        Self::touch(env);
         let key = DataKey::Nullifier(n.clone());
-        Ok(env.storage().persistent().has(&key))
+        let spent = env.storage().persistent().has(&key);
+        if spent {
+            bump_entry(env, &key);
+        }
+        Ok(spent)
     }
 
     /// Update the contract administrator. Requires authorization from the
@@ -336,6 +345,7 @@ impl PoolGvkContract {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        Self::touch(&env);
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
@@ -353,6 +363,7 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::ASPMembership)
+            .inspect(|_| bump_entry(env, &DataKey::ASPMembership))
             .ok_or(Error::NotInitialized)
     }
 
@@ -361,11 +372,13 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::ASPNonMembership)
+            .inspect(|_| bump_entry(env, &DataKey::ASPNonMembership))
             .ok_or(Error::NotInitialized)
     }
 
     /// Get the current Merkle root from the ASP Membership contract.
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
         Ok(client.get_root())
@@ -373,6 +386,7 @@ impl PoolGvkContract {
 
     /// Get the current Merkle root from the ASP Non-Membership contract.
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
+        Self::touch(env);
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
         Ok(client.get_root())
@@ -383,6 +397,7 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::Token)
+            .inspect(|_| bump_entry(env, &DataKey::Token))
             .ok_or(Error::NotInitialized)
     }
 
@@ -391,6 +406,7 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
+            .inspect(|_| bump_entry(env, &DataKey::MaximumDepositAmount))
             .ok_or(Error::NotInitialized)
     }
 
@@ -399,7 +415,16 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::Verifier)
+            .inspect(|_| bump_entry(env, &DataKey::Verifier))
             .ok_or(Error::NotInitialized)
+    }
+
+    /// Extends the TTL of this contract's instance and code entries.
+    ///
+    /// Every public entry point calls this first, so a pool that keeps being
+    /// used never falls behind on rent.
+    fn touch(env: &Env) {
+        bump_instance(env);
     }
 
     /// Convert a non-negative I256 to i128 with bounds checking.
@@ -418,6 +443,7 @@ impl PoolGvkContract {
     fn mark_spent(env: &Env, n: &U256) -> Result<(), Error> {
         let key = DataKey::Nullifier(n.clone());
         env.storage().persistent().set(&key, &());
+        bump_entry(env, &key);
         Ok(())
     }
 
@@ -603,6 +629,7 @@ impl PoolGvkContract {
         env.storage()
             .persistent()
             .get(&DataKey::GvkMode)
+            .inspect(|_| bump_entry(env, &DataKey::GvkMode))
             .ok_or(Error::NotInitialized)
     }
 
@@ -616,7 +643,16 @@ impl PoolGvkContract {
         ext_data: ExtData,
         sender: Address,
     ) -> Result<(), Error> {
+        Self::touch(env);
         sender.require_auth();
+        bump_dependency(env, &Self::get_verifier(env)?);
+        let policy_flags = Self::load_policy_flags(env)?;
+        if policy::requires_membership_proofs(policy_flags) {
+            bump_dependency(env, &Self::get_asp_membership(env)?);
+        }
+        if policy::requires_non_membership_proofs(policy_flags) {
+            bump_dependency(env, &Self::get_asp_non_membership(env)?);
+        }
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
@@ -632,13 +668,18 @@ impl PoolGvkContract {
             token_client.transfer(&sender, &this, &amount);
         }
 
-        Self::internal_transact(env, proof, ext_data)
+        Self::internal_transact(env, proof, ext_data, policy_flags)
     }
 
     /// Process a private transaction: validates the proof and all public
     /// inputs, marks nullifiers as spent, processes withdrawals, and inserts
     /// new commitments into the Merkle tree.
-    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
+    fn internal_transact(
+        env: &Env,
+        proof: Proof,
+        ext_data: ExtData,
+        policy_flags: u32,
+    ) -> Result<(), Error> {
         // 1. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
@@ -675,7 +716,6 @@ impl PoolGvkContract {
         }
 
         // ASP root validation
-        let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_non_membership_proofs(policy_flags) {
             let non_member_root = Self::get_asp_non_membership_root(env)?;
             if non_member_root != proof.asp_non_membership_root {
