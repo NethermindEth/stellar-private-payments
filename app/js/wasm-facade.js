@@ -92,6 +92,9 @@ function wrapSdkClient(sdk) {
         async backgroundSync() {
             await sdk.backgroundSync();
         },
+        async sync() {
+            await sdk.sync();
+        },
         stopBackgroundSync() {
             sdk.stopBackgroundSync();
         },
@@ -254,6 +257,15 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
     }
 
     return client();
+}
+
+/**
+ * The Soroban RPC URL the current runtime was initialized with, or `null`
+ * before {@link initializeRuntime} has run.
+ * @returns {string|null}
+ */
+export function getCurrentRpcUrl() {
+    return currentRpcUrl;
 }
 
 /**

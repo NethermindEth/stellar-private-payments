@@ -11,6 +11,16 @@ build = "build.rs"
 [lib]
 name = "stellar_private_payments"
 
+[features]
+# multi-threaded proving
+parallel = [
+    "dep:rayon",
+    "ark-ff/parallel",
+    "ark-groth16/parallel",
+    "ark-poly/parallel",
+    "ark-std/parallel",
+]
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -51,14 +61,10 @@ taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ark-ff = { workspace = true, features = ["parallel"] }
-ark-groth16 = { workspace = true, features = ["parallel"] }
-ark-poly = { workspace = true, features = ["parallel"] }
-ark-std = { workspace = true, features = ["parallel"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
-rayon = { version = "1.10", default-features = false }
+rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
 rusqlite = { workspace = true, features = ["bundled"] }
 tar = "0.4"

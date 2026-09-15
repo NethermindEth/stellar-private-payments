@@ -411,6 +411,108 @@ fn update_admin_requires_admin() {
     pool.update_admin(&Address::generate(&env));
 }
 
+#[test]
+fn pool_gvk_update_asp_membership_transfers_control() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_membership = Address::generate(&env);
+    pool.update_asp_membership(&new_asp_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected ASP membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_membership);
+}
+
+#[test]
+fn pool_gvk_update_asp_non_membership_transfers_control() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_non_membership = Address::generate(&env);
+    pool.update_asp_non_membership(&new_asp_non_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected ASP non-membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_non_membership);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pool_gvk_update_asp_membership_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    pool.update_asp_membership(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pool_gvk_update_asp_non_membership_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 1),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    pool.update_asp_non_membership(&Address::generate(&env));
+}
+
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
     BytesN::from_array(env, &[fill; 32])
 }

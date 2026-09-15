@@ -10,6 +10,7 @@ members = [
     "sdk/web",
     "tools/ceremony-cli",
     "tools/circuit-compiler",
+    "tools/gvkey-gen",
 ]
 exclude = ["tools/bootnode"]
 resolver = "3"
