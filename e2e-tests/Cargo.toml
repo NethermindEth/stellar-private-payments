@@ -24,7 +24,7 @@ pool = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Shared deps
 soroban-utils = { workspace = true, features = ["testutils"] }
-stellar-private-payments = { workspace = true }
+stellar-private-payments = { workspace = true, features = ["parallel"] }
 
 [lints]
 workspace = true

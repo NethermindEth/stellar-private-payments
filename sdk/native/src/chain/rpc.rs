@@ -14,6 +14,11 @@ use stellar_xdr::{
     LedgerKey, LedgerKeyAccount, Limits, PublicKey, ReadXdr, Uint256, WriteXdr,
 };
 
+// https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
+const MAX_CONTRACT_IDS_PER_FILTER: usize = 5;
+const MAX_FILTERS_PER_REQUEST: usize = 5;
+const MAX_FILTER_CONTRACT_IDS: usize = MAX_CONTRACT_IDS_PER_FILTER * MAX_FILTERS_PER_REQUEST;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -51,6 +56,8 @@ pub enum Error {
     },
     #[error("RPC request timed out")]
     Timeout,
+    #[error("too many contract IDs for a single event filter: {0} (max {MAX_FILTER_CONTRACT_IDS})")]
+    TooManyContracts(usize),
 }
 
 // JSON-RPC Plumbing
@@ -428,18 +435,31 @@ impl Client {
         topics: &[TopicFilter],
         limit: Option<usize>,
     ) -> Result<GetEventsResponse, Error> {
-        let mut filters = serde_json::Map::new();
+        if contract_ids.len() > MAX_FILTER_CONTRACT_IDS {
+            return Err(Error::TooManyContracts(contract_ids.len()));
+        }
 
-        event_type
-            .and_then(|t| match t {
-                EventType::All => None,
-                EventType::Contract => Some("contract"),
-                EventType::System => Some("system"),
+        let type_str = event_type.and_then(|t| match t {
+            EventType::All => None,
+            EventType::Contract => Some("contract"),
+            EventType::System => Some("system"),
+        });
+
+        // The RPC caps each filter at MAX_CONTRACT_IDS_PER_FILTER contract
+        // IDs, but a request may carry up to MAX_FILTERS_PER_REQUEST
+        // filters, whose results are merged into one cursor-ordered stream.
+        let filters: Vec<serde_json::Map<String, serde_json::Value>> = contract_ids
+            .chunks(MAX_CONTRACT_IDS_PER_FILTER)
+            .map(|chunk| {
+                let mut f = serde_json::Map::new();
+                if let Some(t) = type_str {
+                    f.insert("type".to_string(), t.into());
+                }
+                f.insert("topics".to_string(), topics.into());
+                f.insert("contractIds".to_string(), chunk.into());
+                f
             })
-            .map(|t| filters.insert("type".to_string(), t.into()));
-
-        filters.insert("topics".to_string(), topics.into());
-        filters.insert("contractIds".to_string(), contract_ids.into());
+            .collect();
 
         let mut pagination = serde_json::Map::new();
         if let Some(limit) = limit {
@@ -447,7 +467,7 @@ impl Client {
         }
 
         let mut params = json!({
-            "filters": [filters],
+            "filters": filters,
             "pagination": pagination,
         });
 
