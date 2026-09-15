@@ -145,9 +145,7 @@ fn pool_gvk_constructor_sets_state() {
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
     let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+        env.storage().persistent().has(&MerkleDataKey::State)
     });
 
     assert_eq!(stored_admin, setup.admin);
