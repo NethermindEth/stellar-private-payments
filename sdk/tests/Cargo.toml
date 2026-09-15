@@ -15,6 +15,9 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 stellar-private-payments = { workspace = true }
+# Matches the version stellar-private-payments builds against, so the envelope
+# types the tests inspect are the ones the SDK produced.
+stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
