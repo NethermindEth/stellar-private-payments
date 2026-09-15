@@ -90,8 +90,10 @@ impl PoolCore {
         enc_pub: EncryptionPublicKey,
         amount: NoteAmount,
     ) -> Result<Transact, Error> {
-        let ext_amount = ExtAmount::try_from(amount).map_err(|_| {
-            Error::Other(anyhow::anyhow!("deposit amount exceeds ext_amount range"))
+        let ext_amount = ExtAmount::try_from(amount).map_err(|e| {
+            Error::Other(anyhow::anyhow!(
+                "deposit amount exceeds ext_amount range: {e}"
+            ))
         })?;
 
         Ok(Transact::new(

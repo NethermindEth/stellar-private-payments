@@ -339,7 +339,10 @@ async fn apply_bootnode_handoff<S: Storage>(
         .await
         .context("handoff sync progress")?;
     storage.clear_indexing_cursors().await?;
-    storage.clamp_last_fully_indexed_ledger(from_ledger).await?;
+    storage
+        .clamp_last_fully_indexed_ledger(from_ledger)
+        .await
+        .context("handoff clamp fully indexed")?;
     tracing::info!(
         from_ledger,
         "bootnode handoff, resuming main RPC from cutoff"
