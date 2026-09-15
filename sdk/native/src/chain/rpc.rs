@@ -709,7 +709,7 @@ impl Client {
     }
 
     /// Trustline balance of `address` in the classic asset `code:issuer`, in
-    /// its smallest unit.
+    /// its smallest unit. Returns 0 if there is no such trustline.
     pub async fn get_trustline_balance(
         &self,
         address: &str,
@@ -751,7 +751,7 @@ impl Client {
     }
 
     /// Balance of `address` reported by the SEP-41 token contract
-    /// `contract_id`.
+    /// `contract_id`. Returns 0 if `address` has no balance.
     pub async fn get_token_balance(&self, contract_id: &str, address: &str) -> Result<u128, Error> {
         let arg = address
             .parse()
