@@ -15,7 +15,12 @@ use super::{encode_0x_hex, parse_0x_hex_32};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[allow(clippy::assign_op_pattern, clippy::manual_div_ceil)]
+// `construct_uint!` (uint 0.10.1, the latest release) expands to
+// `std::isize::MAX` and `<int>::max_value()`, which nightly now marks
+// deprecated. The lint fires on the invocation site, so it has to be allowed
+// here; the UB detection workflow builds with `-Dwarnings` and fails to compile
+// otherwise.
+#[allow(deprecated, clippy::assign_op_pattern, clippy::manual_div_ceil)]
 mod biguint {
     use uint::construct_uint;
     construct_uint! {
