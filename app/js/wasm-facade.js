@@ -133,7 +133,7 @@ function wrapSdkClient(sdk) {
                 aspSecret: () => boundAccount.aspSecret(),
                 userNotes: (limit) => boundAccount.userNotes(limit),
                 isRegistered: () => boundAccount.isRegistered(),
-                registerPublicKeys: (options) => boundAccount.registerPublicKeys(options ?? {}),
+                registerPublicKeys: () => boundAccount.registerPublicKeys(),
                 deriveAspUserLeaf: () => boundAccount.deriveAspUserLeaf(),
                 pool: (options) => boundAccount.pool(options),
             };

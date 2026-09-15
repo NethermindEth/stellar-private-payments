@@ -138,7 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !registered && common::env_or("SPP_REGISTER", "") == "1" {
         println!();
         println!("SPP_REGISTER=1: publishing privacy public keys on-chain...");
-        let result = account.register_public_keys(None, None)?;
+        let result = account.register_public_keys()?;
         println!("Registration tx hash: {}", result.tx_hash);
     }
 

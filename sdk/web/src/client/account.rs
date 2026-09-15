@@ -2,17 +2,14 @@
 
 use std::rc::Rc;
 
-use stellar_private_payments::{
-    Account as NativeAccount,
-    types::{EncryptionPublicKey, NotePublicKey},
-};
+use stellar_private_payments::Account as NativeAccount;
 
 use wasm_bindgen::prelude::*;
 
 use crate::{
     models::{
-        PoolOptions, PortfolioBalance, RegisterPublicKeysOptions, UserNoteSummary, UserPublicKeys,
-        portfolio_balances, user_note_summaries,
+        PoolOptions, PortfolioBalance, UserNoteSummary, UserPublicKeys, portfolio_balances,
+        user_note_summaries,
     },
     workers::storage::StorageBridge,
 };
@@ -92,30 +89,8 @@ impl Account {
 
     /// Register this account's public keys on the deployment-wide registry.
     #[wasm_bindgen(js_name = registerPublicKeys)]
-    pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {
-        let opts = RegisterPublicKeysOptions::from_value(options)?;
-
-        let (note_public_key, encryption_public_key) = match (
-            opts.note_public_key_hex(),
-            opts.encryption_public_key_hex(),
-        ) {
-            (Some(note), Some(enc)) => (
-                Some(NotePublicKey::parse(&note).map_err(|e| JsError::new(&e.to_string()))?),
-                Some(EncryptionPublicKey::parse(&enc).map_err(|e| JsError::new(&e.to_string()))?),
-            ),
-            (None, None) => (None, None),
-            _ => {
-                return Err(JsError::new(
-                    "notePublicKeyHex and encryptionPublicKeyHex must both be set or both omitted",
-                ));
-            }
-        };
-
-        let result = self
-            .inner
-            .register_public_keys(note_public_key, encryption_public_key)
-            .await
-            .map_err(pool_err)?;
+    pub async fn register_public_keys(&self) -> Result<String, JsError> {
+        let result = self.inner.register_public_keys().await.map_err(pool_err)?;
         Ok(result.tx_hash)
     }
 

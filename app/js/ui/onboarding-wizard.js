@@ -255,13 +255,10 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
+async function registerNow({ address, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
     await client().openAccount({ networkPassphrase, userAddress: address }, signer);
-    return client().account().registerPublicKeys({
-        notePublicKeyHex: notePublicKey,
-        encryptionPublicKeyHex: encryptionPublicKey,
-    });
+    return client().account().registerPublicKeys();
 }
 
 export async function runOnboardingWizard({
@@ -670,13 +667,7 @@ export async function runOnboardingWizard({
                                 throw new Error('Derive keys before registration');
                             }
                             register.disabled = true;
-                            await registerNow({
-                                address,
-                                notePublicKey: state.keys.pubKey,
-                                encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
-                                networkPassphrase,
-                                signer,
-                            });
+                            await registerNow({ address, networkPassphrase, signer });
                             state.registered = true;
                             resolve();
                         } catch (error) {

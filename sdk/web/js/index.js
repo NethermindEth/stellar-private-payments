@@ -73,7 +73,7 @@ function wrapAccount(wasmAccount) {
     userNotes: (limit) => wasmAccount.userNotes(limit),
     isRegistered: () => wasmAccount.isRegistered(),
     deriveAspUserLeaf: () => wasmAccount.deriveAspUserLeaf(),
-    registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
+    registerPublicKeys: () => wasmAccount.registerPublicKeys(),
     pool: (options) => wasmAccount.pool(options),
   };
 }
