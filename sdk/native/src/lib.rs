@@ -78,7 +78,7 @@ mod sleep;
 mod storage;
 mod sync;
 
-pub use account::Account;
+pub use account::{Account, ensure_signer_is_note_owner};
 #[cfg(not(target_arch = "wasm32"))]
 pub use circuits::CircuitStore;
 pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
