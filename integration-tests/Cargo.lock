@@ -92,19 +92,16 @@ dependencies = [
  "ark-crypto-primitives-macros",
  "ark-ec",
  "ark-ff 0.6.0",
- "ark-r1cs-std",
  "ark-relations",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
  "blake2",
- "blake3",
  "derivative",
  "digest 0.10.7",
  "fnv",
  "merlin",
  "num-bigint",
- "rayon",
  "sha2 0.10.9",
 ]
 
@@ -137,7 +134,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "rayon",
  "zeroize",
 ]
 
@@ -213,7 +209,6 @@ dependencies = [
  "educe",
  "num-bigint",
  "num-traits",
- "rayon",
  "zeroize",
 ]
 
@@ -322,7 +317,6 @@ dependencies = [
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
- "rayon",
 ]
 
 [[package]]
@@ -338,7 +332,6 @@ dependencies = [
  "educe",
  "fnv",
  "hashbrown 0.17.1",
- "rayon",
 ]
 
 [[package]]
@@ -371,7 +364,6 @@ dependencies = [
  "ark-std 0.6.0",
  "foldhash 0.1.5",
  "indexmap 2.14.2",
- "rayon",
  "tracing",
  "tracing-subscriber",
 ]
@@ -419,7 +411,6 @@ dependencies = [
  "ark-std 0.6.0",
  "digest 0.10.7",
  "num-bigint",
- "rayon",
  "serde_with",
 ]
 
@@ -484,7 +475,6 @@ checksum = "367c9c827ed431bff6868b7aa926e05b16eb46603cc8b6e768e4a5553fa1d155"
 dependencies = [
  "num-traits",
  "rand 0.8.8",
- "rayon",
 ]
 
 [[package]]
@@ -680,19 +670,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
 dependencies = [
  "digest 0.10.7",
-]
-
-[[package]]
-name = "blake3"
-version = "1.8.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
-dependencies = [
- "arrayvec",
- "cc",
- "cfg-if",
- "constant_time_eq",
- "cpufeatures 0.3.1",
 ]
 
 [[package]]
@@ -977,12 +954,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "constant_time_eq"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
-
-[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1046,31 +1017,6 @@ checksum = "8498c871161e1742aaa9d52551b2d6ebdd4c3d45a3be423e3728f33b955be550"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "crossbeam-deque"
-version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-utils"
-version = "0.8.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crunchy"
@@ -3021,26 +2967,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rayon"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3757,7 +3683,6 @@ dependencies = [
  "gloo-timers",
  "hex",
  "http",
- "rayon",
  "reqwest",
  "ruint",
  "rusqlite",
