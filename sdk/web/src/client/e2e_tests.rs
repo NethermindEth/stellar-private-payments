@@ -20,8 +20,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use js_sys::{Function, Object, Reflect};
-use stellar_private_payments::chain::{
-    Limits, LocalSigner as ChainLocalSigner, ReadXdr, TransactionEnvelope, WriteXdr,
+use stellar_private_payments::{
+    chain::{Limits, LocalSigner as ChainLocalSigner, ReadXdr, TransactionEnvelope, WriteXdr},
+    zk::encryption::sep53_payload,
 };
 use wasm_bindgen::{JsValue, closure::Closure};
 use wasm_bindgen_test::*;
@@ -104,15 +105,6 @@ const ACCOUNT_D: TestAccount = TestAccount {
 
 /// Amount moved by the transfer/withdraw flow tests, in stroops.
 const FLOW_AMOUNT_STROOPS: u128 = 500_000;
-
-/// Fixed 64-byte signature blob the stub signer returns from `signMessage`.
-///
-/// Key derivation SHA-256s these bytes with a domain tag and never verifies
-/// them as a real Ed25519 signature, but the length must be exactly 64. Base64,
-/// not hex: `wallet_message_signature_to_bytes` tries base64 first, and 128 hex
-/// chars are themselves valid base64, decoding to 96 bytes.
-const STUB_SIGNATURE_B64: &str =
-    "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpQ==";
 
 /// Build a same-origin `blob:` URL for a worker loader served at
 /// `{STATIC_ORIGIN}/workers/{file}`.
@@ -204,7 +196,7 @@ async fn build_test_client(storage: &Storage) -> Client {
 /// `signAuthEntry` both reject with SEP-0043 `code: -4`, which maps to
 /// `Error::UserRejected` and surfaces to JS as `{status:"failed", code:-4}`.
 fn stub_signer() -> JsValue {
-    signer_with_mode(SignerMode::Sentinel)
+    signer_with_mode(ACCOUNT_A, SignerMode::Sentinel)
 }
 
 /// Which way a test signer answers signing requests.
@@ -216,21 +208,45 @@ enum SignerMode {
     Signing(TestAccount),
 }
 
-/// `signMessage` return, shared by both modes.
-fn sign_message_fn() -> Function {
-    Function::new_with_args(
-        "message, opts",
-        &format!("return Promise.resolve('{STUB_SIGNATURE_B64}');"),
-    )
+/// `signMessage`, shared by both modes: a real SEP-53 signature by `account`.
+///
+/// Key derivation checks the signature against the account's own key, so a
+/// stand-in blob would be refused. The account's secret is only looked up when
+/// a message is actually signed; a session whose keys already exist never asks.
+fn sign_message_fn(account: TestAccount) -> JsValue {
+    Closure::wrap(Box::new(move |message: JsValue, _opts: JsValue| {
+        let message = message.as_string().expect("signMessage takes a string");
+        let signature = test_account_signer(account).sign(&sep53_payload(&message));
+        js_sys::Promise::resolve(&JsValue::from_str(&STANDARD.encode(signature.as_bytes())))
+    })
+        as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>)
+    .into_js_value()
+}
+
+/// The test account's in-process signer, from its compiled-in secret.
+fn test_account_signer(account: TestAccount) -> ChainLocalSigner {
+    let secret = account.secret.unwrap_or_else(|| {
+        panic!(
+            "E2E_ACCOUNT_{}_SECRET not compiled in: run via \
+             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
+            account.label
+        )
+    });
+    ChainLocalSigner::from_secret(secret).unwrap_or_else(|_| {
+        panic!(
+            "E2E_ACCOUNT_{}_SECRET must be a valid S… key",
+            account.label
+        )
+    })
 }
 
 /// Build a test signer object with all three methods `WalletSigner` requires.
-fn signer_with_mode(mode: SignerMode) -> JsValue {
+fn signer_with_mode(account: TestAccount, mode: SignerMode) -> JsValue {
     let signer = Object::new();
     Reflect::set(
         &signer,
         &JsValue::from_str("signMessage"),
-        &sign_message_fn(),
+        &sign_message_fn(account),
     )
     .unwrap();
 
@@ -265,19 +281,7 @@ fn signer_with_mode(mode: SignerMode) -> JsValue {
 
 /// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
 fn install_real_signing(signer: &Object, account: TestAccount) {
-    let secret = account.secret.unwrap_or_else(|| {
-        panic!(
-            "E2E_ACCOUNT_{}_SECRET not compiled in: run via \
-             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-            account.label
-        )
-    });
-    let local = Rc::new(ChainLocalSigner::from_secret(secret).unwrap_or_else(|_| {
-        panic!(
-            "E2E_ACCOUNT_{}_SECRET must be a valid S… key",
-            account.label
-        )
-    }));
+    let local = Rc::new(test_account_signer(account));
 
     // signTransaction(txXdrBase64, opts) -> Promise<signedTxXdrBase64>
     let tx_signer = local.clone();
@@ -373,7 +377,7 @@ async fn open_account_with(
     .unwrap();
 
     client
-        .account(options.into(), signer_with_mode(mode))
+        .account(options.into(), signer_with_mode(account, mode))
         .await
         .expect("account session must open")
 }

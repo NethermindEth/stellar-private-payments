@@ -16,6 +16,7 @@ use stellar_private_payments::{
     state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
     zk::encryption::{
         KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
+        verify_owner_signature,
     },
 };
 
@@ -138,6 +139,8 @@ fn derive_and_save_keys(
         config.stellar_config_dir.as_deref(),
     )
     .context("derive privacy-key signature via stellar CLI")?;
+    verify_owner_signature(&account.address, KEY_DERIVATION_MESSAGE, &signature)
+        .context("check the privacy-key signature against the account")?;
 
     let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
         .context("derive privacy keypairs from wallet signature")?;

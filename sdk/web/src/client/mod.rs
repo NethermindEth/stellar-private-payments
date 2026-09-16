@@ -238,12 +238,24 @@ impl Client {
                 // payer's keypair would be filed under the owner's address —
                 // wrong keys, silently, and persisted. Refuse instead. An
                 // owner whose keys already exist skips this and delegates.
+                //
+                // The address comparison only spares a pointless wallet prompt;
+                // the signature check below is what actually binds the keys to
+                // the owner, whatever account the wallet chose to sign with.
                 ensure_signer_is_note_owner(&user_address, wallet_signer.signer_address())
                     .map_err(pool_err)?;
                 let message =
                     stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
                 let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
-                let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
+                let signature = KeyDerivationSignature(
+                    crate::signer::wallet_message_signature_to_bytes(&sig_hex)?,
+                );
+                stellar_private_payments::zk::encryption::verify_owner_signature(
+                    &user_address,
+                    &message,
+                    &signature,
+                )
+                .map_err(|e| pool_err(e.into()))?;
                 self.derive_save_user_keys(user_address.clone(), signature)
                     .await?;
             }
@@ -427,11 +439,11 @@ impl Client {
     async fn derive_save_user_keys(
         &self,
         address: String,
-        signature: Vec<u8>,
+        signature: KeyDerivationSignature,
     ) -> Result<(), JsError> {
         let req = StorageWorkerRequest::DeriveSaveUserKeys(
             address,
-            KeyDerivationSignature(signature),
+            signature,
             self.contract_config.network.clone(),
         );
         match self.storage_request(req, 5_000).await? {
