@@ -2,6 +2,7 @@ use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data,
     merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
+    pool::DataKey,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
@@ -348,7 +349,7 @@ fn pool_constructor_sets_state() {
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&crate::pool::DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
@@ -390,6 +391,30 @@ fn merkle_init_only_once() {
 }
 
 #[test]
+fn the_depth_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage()
+                .instance()
+                .get::<_, u32>(&MerkleDataKey::Levels),
+            Some(levels)
+        );
+        assert!(!env.storage().persistent().has(&MerkleDataKey::Levels));
+    });
+}
+
+#[test]
 fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -408,7 +433,8 @@ fn the_filled_subtrees_are_one_entry() {
     );
 }
 
-/// Insertions rewrite the tree's entry and create no other, so the persistent
+/// The pool keeps two persistent entries, the administrator and the tree, and
+/// insertions rewrite the tree's entry and create no other, so the persistent
 /// keys a transaction touches do not depend on how many leaves the tree holds.
 ///
 /// The listing covers every contract in the environment, so the pool is
@@ -430,7 +456,10 @@ fn the_tree_is_one_persistent_entry() {
         ),
     );
     let keys_after_init = persistent_keys(&env, &pool_id);
+    let admin_key: Val = crate::pool::DataKey::Admin.into_val(&env);
     let state_key: Val = MerkleDataKey::State.into_val(&env);
+    assert_eq!(keys_after_init.len(), 2);
+    assert!(keys_after_init.contains(admin_key));
     assert!(keys_after_init.contains(state_key));
 
     for pair in 0..3u32 {
@@ -587,6 +616,90 @@ fn is_known_root_finds_the_previous_root_after_one_insert() {
     insert_pair(&env, &pool_id, 1, 2);
 
     assert!(pool.is_known_root(&previous));
+}
+
+#[test]
+fn the_configuration_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+        for key in [
+            DataKey::Token,
+            DataKey::Verifier,
+            DataKey::MaximumDepositAmount,
+            DataKey::ASPMembership,
+            DataKey::ASPNonMembership,
+            DataKey::PolicyFlags,
+        ] {
+            assert!(instance.has(&key), "{key:?} should live in the instance");
+            assert!(
+                !persistent.has(&key),
+                "{key:?} should not have a persistent entry"
+            );
+        }
+    });
+}
+
+#[test]
+fn update_asp_membership_rewrites_the_instance_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_membership = Address::generate(&env);
+    pool.update_asp_membership(&new_asp_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected the membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_membership);
+}
+
+#[test]
+fn update_asp_non_membership_rewrites_the_instance_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_non_membership = Address::generate(&env);
+    pool.update_asp_non_membership(&new_asp_non_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected the non-membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_non_membership);
 }
 
 #[test]
@@ -1042,7 +1155,7 @@ fn get_policy_flags_errors_when_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
@@ -1153,7 +1266,7 @@ fn transact_errors_when_policy_flags_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 

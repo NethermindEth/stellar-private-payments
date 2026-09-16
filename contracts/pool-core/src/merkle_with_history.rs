@@ -56,7 +56,11 @@ pub struct TreeState {
     pub roots: Vec<U256>,
 }
 
-/// Storage keys for Merkle tree persistent data
+/// Storage keys for Merkle tree data
+///
+/// [`MerkleDataKey::Levels`] is an instance key, so the depth rides the
+/// contract instance's lifetime. [`MerkleDataKey::State`] is a persistent
+/// key.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MerkleDataKey {
@@ -114,7 +118,9 @@ impl MerkleTreeWithHistory {
         }
 
         // Store levels
-        storage.set(&MerkleDataKey::Levels, &levels);
+        env.storage()
+            .instance()
+            .set(&MerkleDataKey::Levels, &levels);
 
         // Only levels 1 to levels - 1 are ever read back: the leaf level is
         // hashed from the two leaves and the top level is the root itself.
@@ -168,7 +174,9 @@ impl MerkleTreeWithHistory {
     pub fn insert_two_leaves(env: &Env, leaf_1: U256, leaf_2: U256) -> Result<(u32, u32), Error> {
         let storage = env.storage().persistent();
 
-        let levels: u32 = storage
+        let levels: u32 = env
+            .storage()
+            .instance()
             .get(&MerkleDataKey::Levels)
             .ok_or(Error::NotInitialized)?;
         let mut state: TreeState = storage

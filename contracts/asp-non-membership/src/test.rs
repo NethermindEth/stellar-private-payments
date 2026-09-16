@@ -1053,3 +1053,19 @@ fn test_old_admin_cannot_insert_after_update() {
     }]);
     client.insert_leaf(&key, &value);
 }
+#[test]
+fn the_root_lives_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &U256::from_u32(&env, 10u32));
+    let root = client.get_root();
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(env.storage().instance().get(&DataKey::Root), Some(root));
+        assert!(!env.storage().persistent().has(&DataKey::Root));
+    });
+}

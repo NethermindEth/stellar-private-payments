@@ -10,7 +10,11 @@ use soroban_sdk::{
 };
 use soroban_utils::{poseidon2_compress, zero_hash};
 
-/// Storage keys for contract persistent data
+/// Storage keys for contract data
+///
+/// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
+/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::FilledSubtrees`]
+/// are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -74,10 +78,13 @@ impl ASPMembership {
     ///   [1..32])
     ///
     /// # Returns
-    /// Returns `Ok(())` on success, or an error if already initialized
+    /// Returns `Ok(())` on success
     ///
-    /// # Panics
-    /// Panics if levels is 0 or greater than 32
+    /// # Errors
+    ///
+    /// Returns [`Error::WrongLevels`] if `levels` is zero or above 32, and
+    /// [`Error::NotInitialized`] if the zero hash table has no entry for a
+    /// level the tree needs.
     pub fn __constructor(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
 
@@ -87,7 +94,8 @@ impl ASPMembership {
 
         // Initialize admin and tree parameters
         store.set(&DataKey::Admin, &admin);
-        store.set(&DataKey::Levels, &levels);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
 
         // The top level is the root itself and is never read back as a
@@ -100,7 +108,7 @@ impl ASPMembership {
 
         // Set initial root to the zero hash at the top level
         let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
-        store.set(&DataKey::Root, &root_val);
+        instance.set(&DataKey::Root, &root_val);
 
         Ok(())
     }
@@ -133,11 +141,12 @@ impl ASPMembership {
     /// # Returns
     /// The current Merkle root as U256
     ///
-    /// # Panics
-    /// Panics if the contract has not been initialized
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .ok_or(Error::NotInitialized)
     }
@@ -180,7 +189,10 @@ impl ASPMembership {
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
 
-        let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
+        let instance = env.storage().instance();
+        let levels: u32 = instance
+            .get(&DataKey::Levels)
+            .ok_or(Error::NotInitialized)?;
         let actual_index: u64 = store
             .get(&DataKey::NextIndex)
             .ok_or(Error::NotInitialized)?;
@@ -219,7 +231,7 @@ impl ASPMembership {
         }
 
         // Update the root with the computed hash
-        store.set(&DataKey::Root, &current_hash);
+        instance.set(&DataKey::Root, &current_hash);
 
         // Emit event with leaf details
         LeafAddedEvent {
