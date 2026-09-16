@@ -11,8 +11,8 @@
 //! Authorization should be handled by the calling main contract before invoking
 //! these functions.
 
-use soroban_sdk::{Env, U256, Vec, contracttype};
-use soroban_utils::{get_zeroes, poseidon2_compress};
+use soroban_sdk::{Env, U256, contracttype};
+use soroban_utils::{poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -40,8 +40,6 @@ pub enum MerkleDataKey {
     NextIndex,
     /// Subtree hashes at each level (indexed by level)
     FilledSubtree(u32),
-    /// Zero hash values for each level (indexed by level)
-    Zeroes(u32),
     /// Historical roots ring buffer
     Root(u32),
 }
@@ -56,9 +54,9 @@ pub struct MerkleTreeWithHistory;
 impl MerkleTreeWithHistory {
     /// Initialize the Merkle tree with history
     ///
-    /// Creates a new Merkle tree with the specified number of levels. The tree
-    /// is initialized with precomputed zero hashes at each level, and the
-    /// initial root is set to the zero hash at the top level.
+    /// Creates a new Merkle tree with the specified number of levels. Each
+    /// left sibling starts at the zero hash of its level, and the initial root
+    /// is the zero hash at the top level.
     ///
     /// # Arguments
     ///
@@ -79,18 +77,15 @@ impl MerkleTreeWithHistory {
         // Store levels
         storage.set(&MerkleDataKey::Levels, &levels);
 
-        // Initialize with precomputed zero hashes
-        let zeros: Vec<U256> = get_zeroes(env);
-
-        // Initialize filledSubtrees[i] = zeros(i) for each level
-        for i in 0..=levels {
-            let z: U256 = zeros.get(i).ok_or(Error::NotInitialized)?;
+        // Only levels 1 to levels - 1 are ever read back: the leaf level is
+        // hashed from the two leaves and the top level is the root itself.
+        for i in 1..levels {
+            let z = zero_hash(env, i).ok_or(Error::NotInitialized)?;
             storage.set(&MerkleDataKey::FilledSubtree(i), &z);
-            storage.set(&MerkleDataKey::Zeroes(i), &z);
         }
 
         // Set initial root to zero hash at top level
-        let root_0: U256 = zeros.get(levels).ok_or(Error::NotInitialized)?;
+        let root_0 = zero_hash(env, levels).ok_or(Error::NotInitialized)?;
         storage.set(&MerkleDataKey::Root(0), &root_0);
         storage.set(&MerkleDataKey::CurrentRootIndex, &0u32);
         storage.set(&MerkleDataKey::NextIndex, &0u64);
@@ -163,9 +158,7 @@ impl MerkleTreeWithHistory {
             } else {
                 // Leaf is left child, store it and pair with zero hash
                 storage.set(&MerkleDataKey::FilledSubtree(lvl), &current_hash);
-                let zero_val: U256 = storage
-                    .get(&MerkleDataKey::Zeroes(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let zero_val = zero_hash(env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, current_hash, zero_val);
             }
             current_index >>= 1;
