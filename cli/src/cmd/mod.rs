@@ -1,4 +1,5 @@
 pub mod config;
+pub mod cost;
 pub mod disclaimer;
 pub mod disclosure;
 pub mod feed;

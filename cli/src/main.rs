@@ -188,6 +188,12 @@ enum Commands {
         #[command(subcommand)]
         command: DisclosureCommands,
     },
+    /// Simulated on-chain cost of a transaction, without signing or
+    /// submitting it
+    Cost {
+        #[command(subcommand)]
+        command: CostCommands,
+    },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
     /// Show the license / distribution notice
@@ -228,6 +234,17 @@ enum DisclosureCommands {
         /// Return failure when any disclosed note has already been spent
         #[arg(long)]
         require_unspent: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CostCommands {
+    /// Cost of a deposit into a pool
+    Deposit {
+        /// Pool contract id (C…)
+        pool: String,
+        /// Amount in token units (e.g. 1 or 0.0001)
+        amount: String,
     },
 }
 
@@ -378,6 +395,11 @@ fn main() -> Result<()> {
                 require_unspent,
                 json,
             ),
+        },
+        Commands::Cost { command } => match command {
+            CostCommands::Deposit { pool, amount } => {
+                cmd::cost::deposit(&config, &pool, &amount, json)
+            }
         },
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),

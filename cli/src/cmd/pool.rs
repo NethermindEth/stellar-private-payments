@@ -14,7 +14,7 @@ use crate::{
     session::{ClientSession, parse_amount, parse_transfer_recipient},
 };
 
-fn open_pool(
+pub(crate) fn open_pool(
     config: &CliConfig,
     pool: &str,
 ) -> Result<stellar_private_payments::blocking::PrivatePool> {
