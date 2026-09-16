@@ -1,6 +1,7 @@
 import { Templates } from './ui/templates.js';
 import { Shell, Wallet } from './ui/navigation.js';
 import { Transactions } from './ui/transactions.js';
+import { SigningAccount } from './ui/signing-account.js';
 import { NotesTable } from './ui/notes-table.js';
 import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
@@ -11,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Shell.init();
     Wallet.init();
     Transactions.init();
+    SigningAccount.init();
     NotesTable.init();
     Dashboard.init();
 

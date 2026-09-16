@@ -432,6 +432,7 @@ export const Wallet = {
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;
                 App.state.wallet.signingAddress = address;
+                App.state.wallet.signers = [];
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
@@ -504,6 +505,7 @@ export const Wallet = {
             connected: false,
             address: null,
             signingAddress: null,
+            signers: [],
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,
@@ -577,6 +579,14 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true; // prevent duplicate registrations
+            // Registration needs the owner's own signature, and the bound session
+            // may still sign as an account chosen for a transaction; rebind it.
+            const owner = App.state.wallet.address;
+            await client().openAccount({
+                networkPassphrase: App.state.wallet.networkPassphrase,
+                userAddress: owner,
+                signerAddress: owner,
+            });
             const hash = await client().account().registerPublicKeys({
                 notePublicKeyHex: App.state.keys.notePublicKey,
                 encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,

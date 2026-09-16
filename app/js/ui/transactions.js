@@ -16,6 +16,8 @@ import { OpHistory } from './op-history.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
+import { SigningAccount } from './signing-account.js';
+import { withdrawalLinksAccounts } from '../signing-account.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -96,6 +98,22 @@ function onEnterUnlessBusy(input, button, handler) {
         if (button?.disabled) return;
         handler();
     });
+}
+
+// Names both accounts when another one signs for the owner's notes, so the
+// confirmation says whose balance and signature the transaction uses.
+function signerRows(signer, signerLabel = 'Signed and paid by') {
+    const owner = App.state.wallet.address;
+    if (!signer || signer === owner) return [];
+    return [
+        { label: 'Notes owned by', value: Utils.shortAddress(owner) },
+        { label: signerLabel, value: Utils.shortAddress(signer) },
+    ];
+}
+
+// A public withdrawal names its recipient on-chain and is sent by the signer.
+function linkWarning(signer, owner) {
+    return `This withdrawal is sent by ${Utils.shortAddress(signer)} and pays ${Utils.shortAddress(owner)}. Both addresses appear together on-chain, which links the two accounts.`;
 }
 
 // Builds a confirmation-dialog row with the number of transactions the action
@@ -368,9 +386,11 @@ export const Transactions = {
                 requireWallet();
                 const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
+                const signer = await SigningAccount.forTransaction('move');
                 const pool = selectedPool();
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
@@ -425,6 +445,7 @@ export const Transactions = {
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
+                const signer = await SigningAccount.forTransaction('move');
                 const  pool = selectedPool();
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
@@ -432,6 +453,7 @@ export const Transactions = {
                 const rows = [
                     { label: 'Recipient', value: recipientLabel },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
@@ -490,17 +512,24 @@ export const Transactions = {
                 if (recipient !== App.state.wallet.address && !StrKey.isValidEd25519PublicKey(recipient)) {
                     throw new Error('Invalid Stellar address');
                 }
+                const signer = await SigningAccount.forTransaction('move');
                 const pool = selectedPool();
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
+                const owner = App.state.wallet.address;
+                const warning = withdrawalLinksAccounts({ owner, signer, recipient })
+                    ? linkWarning(signer, owner)
+                    : '';
                 const confirmed = await confirmAction({
                     title: 'Confirm withdrawal',
                     rows,
                     confirmLabel: 'Withdraw',
+                    warning,
                 });
                 if (!confirmed) return;
                 await submitWithdraw(button, amount.value, pool, recipient);
@@ -538,6 +567,7 @@ export const Transactions = {
                     { allowNegative: false },
                 );
                 if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
+                const signer = await SigningAccount.forTransaction('advanced');
                 // Public deposit is value entering the transaction (input, positive);
                 // public withdraw is value leaving it (output, negative). The contract
                 // takes a single signed ext amount.
@@ -559,12 +589,18 @@ export const Transactions = {
                 if (withdraw.value > 0n) {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool)) });
                 }
+                rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
+                const owner = App.state.wallet.address;
+                const warning = withdraw.value > 0n && withdrawalLinksAccounts({ owner, signer, recipient })
+                    ? linkWarning(signer, owner)
+                    : '';
                 const confirmed = await confirmAction({
                     title: 'Confirm advanced transaction',
                     rows,
                     confirmLabel: 'Transact',
+                    warning,
                 });
                 if (!confirmed) return;
 
