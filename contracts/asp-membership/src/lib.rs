@@ -6,7 +6,7 @@
 //! member, and the root serves as a commitment to the entire membership set.
 #![no_std]
 use soroban_sdk::{
-    Address, Env, U256, contract, contracterror, contractevent, contractimpl, contracttype,
+    Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
 use soroban_utils::{poseidon2_compress, zero_hash};
 
@@ -16,8 +16,9 @@ use soroban_utils::{poseidon2_compress, zero_hash};
 enum DataKey {
     /// Administrator address with permissions to modify the tree
     Admin,
-    /// Filled subtree hashes at each level (indexed by level)
-    FilledSubtrees(u32),
+    /// Left-sibling hashes along the insertion path, element `i` holding the
+    /// hash at level `i`
+    FilledSubtrees,
     /// Number of levels in the Merkle tree
     Levels,
     /// Next available index for leaf insertion
@@ -91,10 +92,11 @@ impl ASPMembership {
 
         // The top level is the root itself and is never read back as a
         // sibling, so it is not written.
+        let mut filled = Vec::new(&env);
         for lvl in 0..levels {
-            let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
-            store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
+            filled.push_back(zero_hash(&env, lvl).ok_or(Error::NotInitialized)?);
         }
+        store.set(&DataKey::FilledSubtrees, &filled);
 
         // Set initial root to the zero hash at the top level
         let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
@@ -190,22 +192,30 @@ impl ASPMembership {
         }
         let mut current_hash = leaf.clone();
 
+        let mut filled: Vec<U256> = store
+            .get(&DataKey::FilledSubtrees)
+            .ok_or(Error::NotInitialized)?;
+        let mut filled_changed = false;
+
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
             let is_right = current_index & 1 == 1;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = store
-                    .get(&DataKey::FilledSubtrees(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let left = filled.get(lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
+                filled.set(lvl, current_hash.clone());
+                filled_changed = true;
                 let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
+        }
+
+        if filled_changed {
+            store.set(&DataKey::FilledSubtrees, &filled);
         }
 
         // Update the root with the computed hash

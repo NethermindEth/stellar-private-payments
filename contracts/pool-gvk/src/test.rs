@@ -6,7 +6,7 @@ use crate::{
     Error, ExtData, PoolGvkContract, PoolGvkContractClient, Proof,
     gvk::{self, BabyJubJubPoint, GvkCiphertext, TRACEABLE, VIEW_ONLY},
     hash_ext_data,
-    merkle_with_history::MerkleDataKey,
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
     pool_gvk::DataKey,
 };
@@ -144,15 +144,14 @@ fn pool_gvk_constructor_sets_state() {
             .get(&DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
-    let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+    let root_index = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
     });
 
     assert_eq!(stored_admin, setup.admin);
     assert_eq!(stored_max, max);
-    assert!(has_merkle_root);
+    assert_eq!(root_index, 0);
     assert_eq!(pool.get_admin_view_key(), admin_view_key);
     assert_eq!(pool.get_gvk_mode(), TRACEABLE);
     assert_eq!(
@@ -162,7 +161,7 @@ fn pool_gvk_constructor_sets_state() {
 }
 
 #[test]
-fn the_tree_stores_no_zero_hashes() {
+fn the_filled_subtrees_are_one_entry() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let levels = 8u32;
@@ -176,12 +175,14 @@ fn the_tree_stores_no_zero_hashes() {
         TRACEABLE,
     );
 
-    env.as_contract(&pool_id, || {
-        let storage = env.storage().persistent();
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
-        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
-        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    let state: TreeState = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::State)
+            .unwrap_or_else(|| panic!("expected the tree state to be stored"))
     });
+
+    assert_eq!(state.filled_subtrees.len(), levels.saturating_sub(1));
 }
 
 #[test]
