@@ -33,13 +33,18 @@ export async function run(helpers) {
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
   const signer = process.env.E2E_ACCOUNT_D_ADDRESS;
   assert(signer, 'E2E_ACCOUNT_D_ADDRESS is not set -- source deployments/testnet/.e2e-accounts.env first');
+  const expectedOwner = process.env.E2E_ACCOUNT_C_ADDRESS;
+  assert(expectedOwner, 'E2E_ACCOUNT_C_ADDRESS is not set -- source deployments/testnet/.e2e-accounts.env first');
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const select = page.getByTestId('signing-account-select');
   const owner = await select.locator('option').first().getAttribute('value');
-  assert(owner && owner !== signer, `expected the connected owner as the default signer, not ${owner}`);
+  assert(
+    owner === expectedOwner,
+    `expected account C to own the notes, not ${owner} -- rebuild the profile with e2e-freighter/scripts/setup.sh --force`,
+  );
 
   await select.selectOption('__other__');
   await page.getByTestId('signing-account-input').fill(signer);
