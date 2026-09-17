@@ -204,8 +204,9 @@ fn stub_signer() -> JsValue {
 enum SignerMode {
     /// Reject with the SEP-0043 `code: -4` sentinel.
     Sentinel,
-    /// Produce real Ed25519 signatures for setup transactions.
-    Signing(TestAccount),
+    /// Produce real Ed25519 signatures for setup transactions, as the account
+    /// the signer was built for.
+    Signing,
 }
 
 /// `signMessage`, shared by both modes: a real SEP-53 signature by `account`.
@@ -273,7 +274,7 @@ fn signer_with_mode(account: TestAccount, mode: SignerMode) -> JsValue {
             )
             .unwrap();
         }
-        SignerMode::Signing(account) => install_real_signing(&signer, account),
+        SignerMode::Signing => install_real_signing(&signer, account),
     }
 
     signer.into()
@@ -354,6 +355,14 @@ async fn open_account_with(
     account: TestAccount,
     mode: SignerMode,
 ) -> super::Account {
+    client
+        .account(account_options(account), signer_with_mode(account, mode))
+        .await
+        .expect("account session must open")
+}
+
+/// `Client::account` options naming `account` as the note owner.
+fn account_options(account: TestAccount) -> JsValue {
     let address = account.address.unwrap_or_else(|| {
         panic!(
             "E2E_ACCOUNT_{}_ADDRESS not compiled in: run via \
@@ -375,11 +384,43 @@ async fn open_account_with(
         &JsValue::from_str(address),
     )
     .unwrap();
+    options.into()
+}
 
-    client
-        .account(options.into(), signer_with_mode(account, mode))
-        .await
-        .expect("account session must open")
+/// A wallet that signs the key-derivation message with another account must
+/// not open the owner's session, nor leave keys behind under the owner.
+#[wasm_bindgen_test]
+#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+async fn e2e_foreign_derivation_signature_is_refused() {
+    let storage = open_test_storage().await;
+    let mut client = build_test_client(&storage).await;
+
+    // Twice: had the first refusal stored keys, the second session would find
+    // them, skip derivation, and open.
+    for attempt in ["first", "second"] {
+        let signer = signer_with_mode(ACCOUNT_A, SignerMode::Sentinel);
+        Reflect::set(
+            &signer,
+            &JsValue::from_str("signMessage"),
+            &sign_message_fn(ACCOUNT_B),
+        )
+        .unwrap();
+
+        let error = match client.account(account_options(ACCOUNT_A), signer).await {
+            Ok(_) => panic!("{attempt} session opened on account B's derivation signature"),
+            Err(error) => JsValue::from(error),
+        };
+        let message = Reflect::get(&error, &JsValue::from_str("message"))
+            .unwrap()
+            .as_string()
+            .unwrap_or_default();
+        assert!(
+            message.contains("not made by the note owner"),
+            "{attempt} session refused for another reason: {message}"
+        );
+    }
+
+    client.stop_background_sync();
 }
 
 /// Read the `status` field of a pool execute response.
@@ -443,7 +484,7 @@ fn captured_stages(capture_id: &str) -> Vec<String> {
 ///
 /// Uses `SignerMode::Signing` because this is setup, not a flow under test.
 async fn seed_deposit(client: &Client, test_account: TestAccount, amount: u128) {
-    let account = open_account_with(client, test_account, SignerMode::Signing(test_account)).await;
+    let account = open_account_with(client, test_account, SignerMode::Signing).await;
     let pool = open_pool(&account).await;
 
     let response = pool
@@ -473,7 +514,7 @@ async fn e2e_seed_deposit_creates_spendable_notes() {
 
     client.sync().await.expect("initial sync must succeed");
 
-    let account = open_account_with(&client, ACCOUNT_A, SignerMode::Signing(ACCOUNT_A)).await;
+    let account = open_account_with(&client, ACCOUNT_A, SignerMode::Signing).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
 

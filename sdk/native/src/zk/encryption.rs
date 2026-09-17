@@ -41,7 +41,7 @@ use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
-use ed25519_dalek::{Signature as DalekSignature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature as DalekSignature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -83,8 +83,10 @@ pub fn verify_owner_signature(
         .map_err(|e| anyhow!("note owner key is not a valid Ed25519 key: {e}"))?;
 
     let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
+    // Strict, as the network itself verifies: a small-order owner key or `R`
+    // is refused, where the lenient check accepts forgeries for such a key.
     owner_key
-        .verify(&digest, &DalekSignature::from_bytes(signature))
+        .verify_strict(&digest, &DalekSignature::from_bytes(signature))
         .map_err(|_| anyhow!("the key-derivation signature was not made by the note owner's key"))
 }
 
@@ -497,6 +499,41 @@ mod owner_signature_tests {
         let signature = sign(&other, KEY_DERIVATION_MESSAGE);
         assert!(
             verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
+        );
+    }
+
+    /// The identity point is a valid encoding of a small-order key. Anyone can
+    /// forge a signature for it, over any message, that passes the lenient
+    /// check: `R` the identity and `s` zero.
+    #[test]
+    fn a_forged_signature_for_a_small_order_owner_key_is_refused() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let owner_address = stellar_strkey::ed25519::PublicKey(identity)
+            .to_string()
+            .to_string();
+        let mut forged = vec![0u8; 64];
+        forged[..32].copy_from_slice(&identity);
+        let signature = KeyDerivationSignature(forged);
+        assert!(
+            verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
+        );
+    }
+
+    #[test]
+    fn a_signature_of_the_wrong_length_is_refused() {
+        let (owner, address) = account(1);
+        let mut signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        signature.0.pop();
+        assert!(verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature).is_err());
+    }
+
+    #[test]
+    fn an_owner_that_is_not_an_account_address_is_refused() {
+        let (owner, _) = account(1);
+        let signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        assert!(
+            verify_owner_signature("not-an-address", KEY_DERIVATION_MESSAGE, &signature).is_err()
         );
     }
 
