@@ -20,6 +20,17 @@ export function addSigner(signers = [], address, owner) {
 }
 
 /**
+ * Remove an account from those chosen to sign.
+ *
+ * @param {string[]} signers - Accounts chosen so far.
+ * @param {string} address - The account to remove.
+ * @returns {string[]} A new list.
+ */
+export function removeSigner(signers = [], address) {
+    return signers.filter((signer) => signer !== address);
+}
+
+/**
  * The account that signs the next transaction.
  *
  * The picker's value when it is an account chosen this session; otherwise,
@@ -44,4 +55,45 @@ export function chosenSigner({ selected, owner, signers = [] }) {
  */
 export function withdrawalLinksAccounts({ owner, signer, recipient }) {
     return Boolean(owner && signer && signer !== owner && recipient === owner);
+}
+
+const SIGNERS_KEY_PREFIX = 'poolstellar_signers:';
+
+/**
+ * The accounts the user added to sign for `owner`, kept across sessions.
+ *
+ * Kept per owner, since an account added to sign for one owner may be the
+ * owner itself under another.
+ *
+ * @param {string | null} owner - The note owner.
+ * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
+ * @returns {string[]}
+ */
+export function rememberedSigners(owner, storage = globalThis.localStorage) {
+    if (!owner) return [];
+    try {
+        const stored = JSON.parse(storage?.getItem(SIGNERS_KEY_PREFIX + owner) ?? '[]');
+        if (!Array.isArray(stored)) return [];
+        return stored.reduce((signers, address) => (
+            typeof address === 'string' ? addSigner(signers, address, owner) : signers
+        ), []);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Remember the accounts added to sign for `owner`.
+ *
+ * @param {string | null} owner - The note owner.
+ * @param {string[]} signers
+ * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
+ */
+export function rememberSigners(owner, signers, storage = globalThis.localStorage) {
+    if (!owner) return;
+    try {
+        storage?.setItem(SIGNERS_KEY_PREFIX + owner, JSON.stringify(signers));
+    } catch (e) {
+        console.error('[SigningAccount] rememberSigners failed:', e);
+    }
 }

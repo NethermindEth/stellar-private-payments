@@ -3,10 +3,10 @@
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
  * signMessage, and getNetwork. The additional Freighter-only symbols imported
- * below (WatchWalletChanges, getNetworkDetails, isConnected, isAllowed,
- * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
- * still Draft and defines no connect/permission-gating or watch/change API,
- * so the app relies on Freighter's extension for those capabilities.
+ * below (getNetworkDetails, isConnected, isAllowed, requestAccess, setAllowed)
+ * are intentional adapter extensions: SEP-0043 is still Draft and defines no
+ * connect/permission-gating API, so the app relies on Freighter's extension
+ * for those capabilities.
  *
  * getNetworkDetails is used in place of the SEP-0043-standard getNetwork for
  * a different reason: the app needs the Soroban RPC URL to pick the correct
@@ -17,7 +17,6 @@
  * see getWalletNetwork() below.
  */
 import {
-    WatchWalletChanges,
     getAddress,
     getNetworkDetails,
     isAllowed,
@@ -133,27 +132,6 @@ export async function getWalletAddress() {
         throw new Error("No public key returned");
     }
     return res.address;
-}
-
-/**
- * Watch Freighter for wallet address/network changes.
- * @param {{intervalMs?: number, onChange: function}} opts
- * @returns {function} stop watcher
- */
-export function startWalletWatcher(opts) {
-    const { intervalMs = 3000, onChange } = opts || {};
-    const watcher = new WatchWalletChanges(intervalMs);
-    const res = watcher.watch((info) => {
-        try {
-            onChange?.(info);
-        } catch (e) {
-            console.warn('[Wallet] watch callback failed:', e);
-        }
-    });
-    if (res?.error) {
-        throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
-    }
-    return () => watcher.stop();
 }
 
 /**

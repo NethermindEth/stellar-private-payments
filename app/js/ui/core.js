@@ -16,8 +16,9 @@ export const App = {
             // apart because the two need not be the same account; with nothing
             // able to choose one, connecting sets it to the owner.
             signingAddress: null,
-            // Accounts the user chose to sign with this session, besides the
-            // owner. Freighter switching to one of them is expected.
+            // Accounts the user added to sign with, besides the owner,
+            // remembered per owner across sessions. Freighter switching to one
+            // of them is expected.
             signers: [],
             sorobanRpcUrl: null,
             network: null,

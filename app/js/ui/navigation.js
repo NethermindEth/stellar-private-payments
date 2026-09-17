@@ -1,4 +1,4 @@
-import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { connectWallet, getWalletNetwork } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
@@ -6,7 +6,8 @@ import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
-import { accountSession } from '../account-session.js';
+import { rememberedSigners } from '../signing-account.js';
+import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -271,7 +272,7 @@ export const Shell = {
         });
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
-        document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
+        document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect({ forgetOwner: true }));
         document.getElementById('settings-copy-logs-btn')?.addEventListener('click', async () => {
             try {
                 const logs = await dumpTelemetryLogs();
@@ -398,7 +399,6 @@ export const Shell = {
 
 export const Wallet = {
     _connectPromise: null,
-    _stopWatcher: null,
 
     init() {
         document.getElementById('wallet-btn')?.addEventListener('click', () => {
@@ -422,7 +422,11 @@ export const Wallet = {
             const signer = new FreighterSigner();
 
             try {
-                const address = await connectWallet();
+                const activeAddress = await connectWallet();
+                // The note owner is the account the user connected, not
+                // Freighter's active one: signing as another account makes
+                // that account active. It stays until the user disconnects.
+                const address = rememberedNoteOwner() ?? activeAddress;
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
                 const rpcUrl = sorobanRpcUrl || '';
                 if (!rpcUrl.toLowerCase().includes('testnet')) {
@@ -432,7 +436,7 @@ export const Wallet = {
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;
                 App.state.wallet.signingAddress = address;
-                App.state.wallet.signers = [];
+                App.state.wallet.signers = rememberedSigners(address);
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
@@ -459,12 +463,15 @@ export const Wallet = {
                 renderWallet();
                 App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
                 await createAppPool();
+                rememberNoteOwner(address);
                 document.body.dataset.walletState = 'ready';
-                this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
-                this.disconnect();
+                // Freighter no longer holds the remembered owner, so it could
+                // not sign as it; let the next connection take another.
+                const ownerNotInWallet = /not the requested|signed with a different account/i.test(message);
+                this.disconnect({ forgetOwner: ownerNotInWallet });
                 if (isDbLockedError(message)) {
                     // Blocking condition: another tab/window holds the local DB lock.
                     // Surface it even on auto-connect (the common multi-tab trigger).
@@ -481,23 +488,13 @@ export const Wallet = {
         return this._connectPromise;
     },
 
-    startWatcher() {
-        if (this._stopWatcher) return;
-        this._stopWatcher = startWalletWatcher({
-            intervalMs: 2_000,
-            onChange: async (info) => {
-                if (!App.state.wallet.connected || info?.error) return;
-                if (info.address && info.address !== App.state.wallet.address) {
-                    this.disconnect();
-                    Toast.show('Freighter account changed. Reconnect to continue.', 'info', 6000);
-                }
-            },
-        });
-    },
-
-    disconnect() {
-        this._stopWatcher?.();
-        this._stopWatcher = null;
+    /**
+     * @param {{ forgetOwner?: boolean }} [opts] - `forgetOwner` when the user
+     *   disconnects, so the next connection may take another note owner. A
+     *   failed connection keeps the remembered one.
+     */
+    disconnect({ forgetOwner = false } = {}) {
+        if (forgetOwner) forgetNoteOwner();
         disposeClient();
         closeAppPool();
         clearRevealedAspSecret();

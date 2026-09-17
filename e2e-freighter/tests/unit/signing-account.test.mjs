@@ -4,6 +4,9 @@ import test from 'node:test';
 import {
   addSigner,
   chosenSigner,
+  rememberSigners,
+  rememberedSigners,
+  removeSigner,
   withdrawalLinksAccounts,
 } from '../../../app/js/signing-account.js';
 import { getTransactionErrorMessage } from '../../../app/js/ui/errors.js';
@@ -52,4 +55,34 @@ test('a signature from another account says the chosen account is not in Freight
   for (const message of messages) {
     assert.match(getTransactionErrorMessage(new Error(message), 'Deposit'), /isn't in Freighter/);
   }
+});
+
+function memoryStorage() {
+  const items = new Map();
+  return {
+    getItem: (key) => (items.has(key) ? items.get(key) : null),
+    setItem: (key, value) => items.set(key, String(value)),
+  };
+}
+
+test('accounts added to sign are remembered per owner', () => {
+  const storage = memoryStorage();
+  rememberSigners(OWNER, [SIGNER, STRANGER], storage);
+  assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER, STRANGER]);
+  assert.deepEqual(rememberedSigners(SIGNER, storage), []);
+  assert.deepEqual(rememberedSigners(null, storage), []);
+});
+
+test('a tampered or unreadable list remembers only distinct accounts other than the owner', () => {
+  const storage = memoryStorage();
+  storage.setItem(`poolstellar_signers:${OWNER}`, JSON.stringify([SIGNER, OWNER, 7, SIGNER]));
+  assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER]);
+  storage.setItem(`poolstellar_signers:${OWNER}`, '{not json');
+  assert.deepEqual(rememberedSigners(OWNER, storage), []);
+  assert.deepEqual(rememberedSigners(OWNER, { getItem: () => { throw new Error('blocked'); } }), []);
+});
+
+test('removing an account keeps the others in order', () => {
+  assert.deepEqual(removeSigner([SIGNER, STRANGER], SIGNER), [STRANGER]);
+  assert.deepEqual(removeSigner([STRANGER], SIGNER), [STRANGER]);
 });

@@ -3,19 +3,20 @@
  * on-chain transaction, while the connected account keeps owning the notes.
  *
  * Freighter does not list the accounts it holds, so beyond the owner the
- * choices are accounts the user pasted this session. Freighter signs as a
- * requested account it holds whichever account is active; one it does not hold
- * fails at signing, which is where the user finds out.
+ * choices are accounts the user pasted, remembered per owner across sessions.
+ * Freighter signs as a requested account it holds whichever account is active;
+ * one it does not hold fails at signing, which is where the user finds out.
  *
  * Each picker is a `[data-signing-account]` element. Pasted accounts are shared
- * by all pickers; each keeps its own selection.
+ * by all pickers; each keeps its own selection. The settings drawer lists them
+ * for removal.
  *
  * @module ui/signing-account
  */
 
 import { StrKey, rpc } from '@stellar/stellar-sdk';
 import { getCurrentRpcUrl } from '../wasm-facade.js';
-import { addSigner, chosenSigner } from '../signing-account.js';
+import { addSigner, chosenSigner, rememberSigners, removeSigner } from '../signing-account.js';
 import { App, Utils } from './core.js';
 import { onEnter } from './keys.js';
 
@@ -56,6 +57,61 @@ function render(p, selected = null) {
 
 function renderAll() {
     for (const p of pickers()) render(p);
+    renderSettings();
+}
+
+// Re-render every picker after the shared list changed, keeping each picker's
+// selection unless `overrides` names another for its scope. A selection no
+// longer in the list falls back to the owner.
+function renderKeepingSelections(overrides = {}) {
+    for (const each of pickers()) {
+        render(each, overrides[each.scope] ?? each.select?.value);
+    }
+    renderSettings();
+}
+
+function setSigners(signers) {
+    const owner = App.state.wallet.address;
+    App.state.wallet.signers = signers;
+    rememberSigners(owner, signers);
+}
+
+function renderSettings() {
+    const list = document.getElementById('settings-signing-accounts');
+    const empty = document.getElementById('settings-signing-accounts-empty');
+    if (!list) return;
+    const { address: owner, signers = [] } = App.state.wallet;
+
+    list.replaceChildren(...signers.map((signer) => {
+        const item = document.createElement('li');
+        item.setAttribute('data-testid', 'settings-signing-account');
+        item.className = 'flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-ink-950 px-4 py-3';
+
+        const address = document.createElement('span');
+        address.className = 'min-w-0 break-all font-mono text-xs text-slate-100';
+        address.textContent = signer;
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('data-testid', 'settings-signing-account-remove');
+        remove.setAttribute('aria-label', `Remove ${Utils.shortAddress(signer)}`);
+        remove.className = 'shrink-0 rounded-full border border-rose-400/25 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', () => {
+            setSigners(removeSigner(App.state.wallet.signers, signer));
+            renderKeepingSelections();
+        });
+
+        item.append(address, remove);
+        return item;
+    }));
+
+    if (empty) {
+        empty.textContent = owner
+            ? 'No accounts added. Add one under "Sign and pay with" in Move Funds or Advanced.'
+            : 'Connect a wallet to see the accounts added to sign for it.';
+        empty.classList.toggle('hidden', signers.length > 0);
+    }
 }
 
 function useOtherAccount(p) {
@@ -64,12 +120,9 @@ function useOtherAccount(p) {
         if (p.error) p.error.textContent = 'Enter a valid Stellar address (G…).';
         return;
     }
-    App.state.wallet.signers = addSigner(App.state.wallet.signers, address, App.state.wallet.address);
+    setSigners(addSigner(App.state.wallet.signers, address, App.state.wallet.address));
     // The new account joins every picker; only this one switches to it.
-    for (const each of pickers()) {
-        const keep = each.select?.value;
-        render(each, each.scope === p.scope ? address : keep);
-    }
+    renderKeepingSelections({ [p.scope]: address });
 }
 
 // The signer is the transaction's source account, so it has to exist on the

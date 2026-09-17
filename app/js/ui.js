@@ -6,6 +6,7 @@ import { NotesTable } from './ui/notes-table.js';
 import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
 import { getConnectedAddress } from './wallet.js';
+import { rememberedNoteOwner } from './account-session.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
@@ -19,8 +20,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateLastVisit();
     registerServiceWorker();
 
-    const existingAddress = await getConnectedAddress();
-    if (existingAddress) {
+    // Reconnect on load only to an owner the user connected before. Without
+    // one, connecting would take Freighter's active account as the owner, and
+    // that may be an account last used to sign; wait for the user to connect.
+    if (rememberedNoteOwner() && await getConnectedAddress()) {
         Wallet.connect({ auto: true }).catch(() => {});
     }
 });

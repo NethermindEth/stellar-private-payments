@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { accountSession } from '../../../app/js/account-session.js';
+import {
+  accountSession,
+  forgetNoteOwner,
+  rememberNoteOwner,
+  rememberedNoteOwner,
+} from '../../../app/js/account-session.js';
 
 const OWNER = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const SIGNER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -29,4 +34,29 @@ test('a disconnected session names no account at all', () => {
     accountSession(),
     { networkPassphrase: null, userAddress: null, signerAddress: null },
   );
+});
+
+function memoryStorage() {
+  const items = new Map();
+  return {
+    getItem: (key) => (items.has(key) ? items.get(key) : null),
+    setItem: (key, value) => items.set(key, String(value)),
+    removeItem: (key) => items.delete(key),
+  };
+}
+
+// Signing as another account makes it Freighter's active one, so the owner
+// has to outlive that: it is remembered until the user disconnects.
+test('the connected owner is remembered until forgotten', () => {
+  const storage = memoryStorage();
+  assert.equal(rememberedNoteOwner(storage), null);
+  rememberNoteOwner(OWNER, storage);
+  assert.equal(rememberedNoteOwner(storage), OWNER);
+  forgetNoteOwner(storage);
+  assert.equal(rememberedNoteOwner(storage), null);
+});
+
+test('storage that cannot be read remembers no owner', () => {
+  const broken = { getItem: () => { throw new Error('blocked'); } };
+  assert.equal(rememberedNoteOwner(broken), null);
 });
