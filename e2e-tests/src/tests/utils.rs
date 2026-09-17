@@ -178,6 +178,8 @@ pub fn prove_with_graph(stem: &str, inputs: &Inputs) -> Result<ProofResult> {
 pub struct DeployedContracts {
     /// Address of the pool contract
     pub pool: Address,
+    /// Address of the pool's configured token contract
+    pub token: Address,
     /// Address of the ASP membership contract
     pub asp_membership: Address,
     /// Address of the ASP non-membership contract
@@ -231,6 +233,7 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
 
     DeployedContracts {
         pool,
+        token: token_address,
         asp_membership,
         asp_non_membership,
     }
