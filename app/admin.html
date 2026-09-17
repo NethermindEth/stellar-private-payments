@@ -213,13 +213,16 @@
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="inline-flex items-center gap-1 rounded-full border border-white/10 bg-ink-950/40 p-1" role="tablist" aria-label="Result view">
                         <button type="button" id="gvkViewTxBtn" class="rounded-full bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-100 transition" aria-pressed="true">
-                            Transaction view
+                            Transactions
                         </button>
                         <button type="button" id="gvkViewNoteBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
-                            Note view
+                            Notes
                         </button>
                         <button type="button" id="gvkViewGraphBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
-                            Graph view
+                            Note graph
+                        </button>
+                        <button type="button" id="gvkViewPkGraphBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
+                            Account graph
                         </button>
                     </div>
                     <button type="button" id="gvkExportBtn" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
@@ -243,6 +246,10 @@
                                 <input id="gvkFilterAmountMax" type="number" min="0" step="0.0000001" placeholder="max" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                             </div>
                         </div>
+                        <div class="sm:col-span-2 lg:col-span-3">
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
+                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                        </div>
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterLedgerFrom">Ledger range</label>
                             <div class="mt-2 flex items-center gap-2">
@@ -250,10 +257,6 @@
                                 <span class="text-slate-600">–</span>
                                 <input id="gvkFilterLedgerTo" type="number" min="0" placeholder="to" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                             </div>
-                        </div>
-                        <div class="sm:col-span-2 lg:col-span-2">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
-                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                         </div>
                         <div class="sm:col-span-2 lg:col-span-2">
                             <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterTimeFrom">Time range (UTC)</label>
