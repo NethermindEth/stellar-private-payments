@@ -31,16 +31,35 @@ export function removeSigner(signers = [], address) {
 }
 
 /**
- * The account that signs the next transaction.
+ * Freighter's active account, when it is worth offering as a signer: shared
+ * with the app, and neither the owner nor an account already added.
  *
- * The picker's value when it is an account chosen this session; otherwise,
- * including before a wallet has connected the picker, the owner.
- *
- * @param {{ selected: string | null, owner: string | null, signers?: string[] }} choice
+ * @param {{ active: string | null, owner: string | null, signers?: string[] }} accounts
  * @returns {string | null}
  */
-export function chosenSigner({ selected, owner, signers = [] }) {
-    return selected && signers.includes(selected) ? selected : owner;
+export function activeSuggestion({ active, owner, signers = [] }) {
+    return active && owner && active !== owner && !signers.includes(active) ? active : null;
+}
+
+/**
+ * The account that signs the next transaction.
+ *
+ * The picker's value when it is an added account or Freighter's active account
+ * on offer; otherwise, including before a wallet has connected the picker, the
+ * owner.
+ *
+ * @param {{
+ *   selected: string | null,
+ *   owner: string | null,
+ *   signers?: string[],
+ *   active?: string | null,
+ * }} choice
+ * @returns {string | null}
+ */
+export function chosenSigner({ selected, owner, signers = [], active = null }) {
+    if (!selected) return owner;
+    if (signers.includes(selected)) return selected;
+    return selected === activeSuggestion({ active, owner, signers }) ? selected : owner;
 }
 
 /**

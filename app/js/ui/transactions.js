@@ -400,6 +400,7 @@ export const Transactions = {
                     confirmLabel: 'Deposit',
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
@@ -463,6 +464,7 @@ export const Transactions = {
                     confirmLabel: 'Transfer',
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error', 7000, { origin: 'transfer' });
@@ -532,6 +534,7 @@ export const Transactions = {
                     warning,
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error', 7000, { origin: 'withdraw' });
@@ -603,6 +606,7 @@ export const Transactions = {
                     warning,
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();

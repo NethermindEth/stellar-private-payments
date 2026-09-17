@@ -1,10 +1,11 @@
-import { connectWallet, getWalletNetwork } from '../wallet.js';
+import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
+import { confirmAction } from './confirm.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { rememberedSigners } from '../signing-account.js';
 import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
@@ -246,6 +247,18 @@ function renderSettingsDrawer() {
         revealSensitiveInput.disabled = !debugSupported;
         revealSensitiveInput.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
     }
+    renderOwnerSwitch();
+}
+
+// Offer Freighter's active account as the note owner when it is another one.
+function renderOwnerSwitch() {
+    const box = document.getElementById('settings-owner-switch');
+    if (!box) return;
+    const { connected, address: owner, activeAddress: active } = App.state.wallet;
+    const offered = connected && active && active !== owner ? active : null;
+    box.classList.toggle('hidden', !offered);
+    const label = document.getElementById('settings-owner-switch-address');
+    if (label) label.textContent = offered ? Utils.shortAddress(offered) : '';
 }
 
 export const Shell = {
@@ -273,6 +286,8 @@ export const Shell = {
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
         document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect({ forgetOwner: true }));
+        document.getElementById('settings-owner-switch-btn')?.addEventListener('click', () => Wallet.switchOwner());
+        App.events.addEventListener('wallet:active-changed', renderOwnerSwitch);
         document.getElementById('settings-copy-logs-btn')?.addEventListener('click', async () => {
             try {
                 const logs = await dumpTelemetryLogs();
@@ -399,6 +414,7 @@ export const Shell = {
 
 export const Wallet = {
     _connectPromise: null,
+    _stopWatcher: null,
 
     init() {
         document.getElementById('wallet-btn')?.addEventListener('click', () => {
@@ -411,7 +427,12 @@ export const Wallet = {
         renderWallet();
     },
 
-    async connect({ auto = false } = {}) {
+    /**
+     * @param {{ auto?: boolean, owner?: string | null }} [opts] - `owner` names
+     *   the note owner to connect; otherwise the remembered one, or failing
+     *   that Freighter's active account.
+     */
+    async connect({ auto = false, owner = null } = {}) {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
@@ -426,7 +447,7 @@ export const Wallet = {
                 // The note owner is the account the user connected, not
                 // Freighter's active one: signing as another account makes
                 // that account active. It stays until the user disconnects.
-                const address = rememberedNoteOwner() ?? activeAddress;
+                const address = owner ?? rememberedNoteOwner() ?? activeAddress;
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
                 const rpcUrl = sorobanRpcUrl || '';
                 if (!rpcUrl.toLowerCase().includes('testnet')) {
@@ -437,6 +458,7 @@ export const Wallet = {
                 App.state.wallet.address = address;
                 App.state.wallet.signingAddress = address;
                 App.state.wallet.signers = rememberedSigners(address);
+                App.state.wallet.activeAddress = null;
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
@@ -465,6 +487,7 @@ export const Wallet = {
                 await createAppPool();
                 rememberNoteOwner(address);
                 document.body.dataset.walletState = 'ready';
+                this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
@@ -488,6 +511,45 @@ export const Wallet = {
         return this._connectPromise;
     },
 
+    // Follow Freighter's active account, which the signing pickers and the
+    // owner switch offer. It never changes the owner by itself.
+    startWatcher() {
+        if (this._stopWatcher) return;
+        try {
+            this._stopWatcher = startWalletWatcher({
+                intervalMs: 2_000,
+                onChange: ({ address }) => {
+                    if (!App.state.wallet.connected) return;
+                    App.state.wallet.activeAddress = address;
+                    App.events.dispatchEvent(new CustomEvent('wallet:active-changed', { detail: { address } }));
+                },
+            });
+        } catch (error) {
+            console.warn('[Wallet] active account watcher unavailable:', error);
+        }
+    },
+
+    /**
+     * Make Freighter's active account the note owner, once the user confirms.
+     * The app reconnects as it, onboarding it where it was never set up.
+     */
+    async switchOwner() {
+        const { address: owner, activeAddress: next } = App.state.wallet;
+        if (!next || next === owner) return;
+        const confirmed = await confirmAction({
+            title: 'Change note owner',
+            rows: [
+                { label: 'Current owner', value: Utils.shortAddress(owner) },
+                { label: 'New owner', value: Utils.shortAddress(next) },
+            ],
+            confirmLabel: 'Change owner',
+            warning: 'The app reconnects with the new account owning notes. If it was never set up here, onboarding runs and asks it to sign a message to derive its keys. The current owner\'s keys and notes stay on this device.',
+        });
+        if (!confirmed) return;
+        this.disconnect({ forgetOwner: true });
+        await this.connect({ owner: next }).catch(() => {});
+    },
+
     /**
      * @param {{ forgetOwner?: boolean }} [opts] - `forgetOwner` when the user
      *   disconnects, so the next connection may take another note owner. A
@@ -495,6 +557,8 @@ export const Wallet = {
      */
     disconnect({ forgetOwner = false } = {}) {
         if (forgetOwner) forgetNoteOwner();
+        this._stopWatcher?.();
+        this._stopWatcher = null;
         disposeClient();
         closeAppPool();
         clearRevealedAspSecret();
@@ -503,6 +567,7 @@ export const Wallet = {
             address: null,
             signingAddress: null,
             signers: [],
+            activeAddress: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,
@@ -510,6 +575,7 @@ export const Wallet = {
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
         document.body.dataset.walletState = 'disconnected';
         renderWallet();
+        renderOwnerSwitch();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
     },

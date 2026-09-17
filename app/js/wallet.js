@@ -3,10 +3,10 @@
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
  * signMessage, and getNetwork. The additional Freighter-only symbols imported
- * below (getNetworkDetails, isConnected, isAllowed, requestAccess, setAllowed)
- * are intentional adapter extensions: SEP-0043 is still Draft and defines no
- * connect/permission-gating API, so the app relies on Freighter's extension
- * for those capabilities.
+ * below (WatchWalletChanges, getNetworkDetails, isConnected, isAllowed,
+ * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
+ * still Draft and defines no connect/permission-gating or watch/change API,
+ * so the app relies on Freighter's extension for those capabilities.
  *
  * getNetworkDetails is used in place of the SEP-0043-standard getNetwork for
  * a different reason: the app needs the Soroban RPC URL to pick the correct
@@ -17,6 +17,7 @@
  * see getWalletNetwork() below.
  */
 import {
+    WatchWalletChanges,
     getAddress,
     getNetworkDetails,
     isAllowed,
@@ -132,6 +133,33 @@ export async function getWalletAddress() {
         throw new Error("No public key returned");
     }
     return res.address;
+}
+
+/**
+ * Watch Freighter's active account.
+ *
+ * Freighter shares an account only with sites allowed for it, so the callback
+ * gets an empty address while the active account is not allowed here (or the
+ * wallet is locked), and no address at all when Freighter could not be asked.
+ *
+ * @param {{intervalMs?: number, onChange: function({address: string|null}): void}} opts
+ * @returns {function} stop watcher
+ */
+export function startWalletWatcher(opts) {
+    const { intervalMs = 3000, onChange } = opts || {};
+    const watcher = new WatchWalletChanges(intervalMs);
+    const res = watcher.watch((info) => {
+        if (info?.error) return;
+        try {
+            onChange?.({ address: typeof info?.address === 'string' ? info.address : null });
+        } catch (e) {
+            console.warn('[Wallet] watch callback failed:', e);
+        }
+    });
+    if (res?.error) {
+        throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
+    }
+    return () => watcher.stop();
 }
 
 /**

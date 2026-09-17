@@ -20,6 +20,10 @@ export const App = {
             // remembered per owner across sessions. Freighter switching to one
             // of them is expected.
             signers: [],
+            // Freighter's active account as the watcher last saw it: an
+            // address, '' while Freighter keeps it from this site, or null
+            // before the watcher reported.
+            activeAddress: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,

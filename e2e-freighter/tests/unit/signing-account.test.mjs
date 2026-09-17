@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  activeSuggestion,
   addSigner,
   chosenSigner,
   rememberSigners,
@@ -85,4 +86,19 @@ test('a tampered or unreadable list remembers only distinct accounts other than 
 test('removing an account keeps the others in order', () => {
   assert.deepEqual(removeSigner([SIGNER, STRANGER], SIGNER), [STRANGER]);
   assert.deepEqual(removeSigner([STRANGER], SIGNER), [STRANGER]);
+});
+
+test('Freighter\'s active account is offered only when it is new to the picker', () => {
+  assert.equal(activeSuggestion({ active: STRANGER, owner: OWNER, signers: [SIGNER] }), STRANGER);
+  assert.equal(activeSuggestion({ active: OWNER, owner: OWNER, signers: [SIGNER] }), null);
+  assert.equal(activeSuggestion({ active: SIGNER, owner: OWNER, signers: [SIGNER] }), null);
+  // Freighter keeping its account from the site, or no wallet connected.
+  assert.equal(activeSuggestion({ active: '', owner: OWNER, signers: [] }), null);
+  assert.equal(activeSuggestion({ active: STRANGER, owner: null, signers: [] }), null);
+});
+
+test('the offered active account signs only while Freighter still has it active', () => {
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: STRANGER }), STRANGER);
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: SIGNER }), OWNER);
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: '' }), OWNER);
 });

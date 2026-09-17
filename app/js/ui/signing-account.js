@@ -2,12 +2,17 @@
  * The "Sign and pay with" pickers: which account signs and pays for an
  * on-chain transaction, while the connected account keeps owning the notes.
  *
- * Freighter does not list the accounts it holds, so beyond the owner the
- * choices are accounts the user pasted, remembered per owner across sessions.
+ * Freighter does not list the accounts it holds, only the active one, and that
+ * only once the user allowed it for this site. So beyond the owner the choices
+ * are the accounts added before, remembered per owner across sessions, and
+ * Freighter's active account, offered until it signs a transaction and so
+ * joins them. When Freighter keeps its active account from the app, a picker
+ * option asks for it. Any account can also be pasted.
+ *
  * Freighter signs as a requested account it holds whichever account is active;
  * one it does not hold fails at signing, which is where the user finds out.
  *
- * Each picker is a `[data-signing-account]` element. Pasted accounts are shared
+ * Each picker is a `[data-signing-account]` element. Added accounts are shared
  * by all pickers; each keeps its own selection. The settings drawer lists them
  * for removal.
  *
@@ -16,11 +21,19 @@
 
 import { StrKey, rpc } from '@stellar/stellar-sdk';
 import { getCurrentRpcUrl } from '../wasm-facade.js';
-import { addSigner, chosenSigner, rememberSigners, removeSigner } from '../signing-account.js';
-import { App, Utils } from './core.js';
+import { connectWallet } from '../wallet.js';
+import {
+    activeSuggestion,
+    addSigner,
+    chosenSigner,
+    rememberSigners,
+    removeSigner,
+} from '../signing-account.js';
+import { App, Toast, Utils } from './core.js';
 import { onEnter } from './keys.js';
 
 const OTHER = '__other__';
+const REQUEST_ACTIVE = '__request_active__';
 
 function pickers() {
     return [...document.querySelectorAll('[data-signing-account]')].map((root) => ({
@@ -40,15 +53,29 @@ function picker(scope) {
 function render(p, selected = null) {
     const { select, other, input, error } = p;
     if (!select) return;
-    const { address: owner, signers = [] } = App.state.wallet;
+    const { address: owner, signers = [], activeAddress: active = null } = App.state.wallet;
+    const suggestion = activeSuggestion({ active, owner, signers });
 
     const options = [];
     if (owner) options.push(new Option(`Connected wallet · ${Utils.shortAddress(owner)}`, owner));
     for (const signer of signers) options.push(new Option(Utils.shortAddress(signer), signer));
+    if (suggestion) {
+        options.push(new Option(`Active in Freighter · ${Utils.shortAddress(suggestion)}`, suggestion));
+    }
+    // An empty active address is Freighter keeping its account from this site.
+    if (owner && active === '') {
+        options.push(new Option('Use the account active in Freighter…', REQUEST_ACTIVE));
+    }
     options.push(new Option('Use another account…', OTHER));
     select.replaceChildren(...options);
     select.disabled = !owner;
-    select.value = chosenSigner({ selected, owner, signers }) ?? OTHER;
+
+    // A picker in the middle of pasting an account stays there.
+    if (owner && selected === OTHER) {
+        select.value = OTHER;
+        return;
+    }
+    select.value = chosenSigner({ selected, owner, signers, active }) ?? OTHER;
 
     other?.classList.add('hidden');
     if (input) input.value = '';
@@ -114,6 +141,18 @@ function renderSettings() {
     }
 }
 
+// Ask Freighter to share its active account, and offer it in `p`.
+async function requestActiveAccount(p) {
+    try {
+        const address = await connectWallet();
+        App.state.wallet.activeAddress = address;
+        renderKeepingSelections({ [p.scope]: address });
+    } catch (error) {
+        renderKeepingSelections({ [p.scope]: App.state.wallet.address });
+        Toast.show(error?.message || 'Freighter did not share its active account', 'error');
+    }
+}
+
 function useOtherAccount(p) {
     const address = p.input?.value.trim() ?? '';
     if (!StrKey.isValidEd25519PublicKey(address)) {
@@ -145,6 +184,10 @@ export const SigningAccount = {
     init() {
         for (const p of pickers()) {
             p.select?.addEventListener('change', () => {
+                if (p.select.value === REQUEST_ACTIVE) {
+                    requestActiveAccount(p);
+                    return;
+                }
                 const choosingOther = p.select.value === OTHER;
                 p.other?.classList.toggle('hidden', !choosingOther);
                 if (choosingOther) p.input?.focus();
@@ -155,6 +198,7 @@ export const SigningAccount = {
 
         App.events.addEventListener('wallet:ready', renderAll);
         App.events.addEventListener('wallet:disconnected', renderAll);
+        App.events.addEventListener('wallet:active-changed', () => renderKeepingSelections());
         renderAll();
     },
 
@@ -168,13 +212,29 @@ export const SigningAccount = {
         const select = picker(scope)?.select;
         // Falling back to the owner here would sign as the account the user
         // just moved away from, without the confirmation naming it.
-        if (select?.value === OTHER) {
+        if (select?.value === OTHER || select?.value === REQUEST_ACTIVE) {
             throw new Error('Enter the account to sign and pay with, or pick one from the list.');
         }
-        const { address: owner, signers } = App.state.wallet;
-        const signer = chosenSigner({ selected: select?.value ?? null, owner, signers });
+        const { address: owner, signers, activeAddress: active } = App.state.wallet;
+        const signer = chosenSigner({ selected: select?.value ?? null, owner, signers, active });
         if (signer !== owner) await ensureFunded(signer);
         App.state.wallet.signingAddress = signer;
         return signer;
+    },
+
+    /**
+     * Remember `signer` for the owner once the user confirmed a transaction
+     * with it. This is how Freighter's active account, offered in the picker,
+     * joins the added accounts; one already added, or the owner, is left as
+     * it is.
+     *
+     * @param {string | null} signer - As returned by {@link forTransaction}.
+     */
+    keep(signer) {
+        const { address: owner, signers = [] } = App.state.wallet;
+        const added = addSigner(signers, signer, owner);
+        if (added.length === signers.length) return;
+        setSigners(added);
+        renderKeepingSelections();
     },
 };
