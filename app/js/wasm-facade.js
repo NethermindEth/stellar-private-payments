@@ -4,7 +4,7 @@
  * Lifecycle: `bootnodeCheck` / `bootnodeRequired` → `initializeRuntime` →
  * `client().backgroundSync` → `client().openAccount` → `account().pool`.
  *
- * Privacy key reads use the SDK (`account().userPublicKeys`, `account().aspSecret`, etc.).
+ * Privacy key reads use the SDK (`account().privacyKeys`, `account().aspSecret`, etc.).
  * App-only persistence (disclaimer, explorer, bootnode, op history, key probe) stays on `storage()`.
  */
 
@@ -129,7 +129,8 @@ function wrapSdkClient(sdk) {
             }
             return {
                 portfolio: () => boundAccount.portfolio(),
-                userPublicKeys: () => boundAccount.userPublicKeys(),
+                privacyKeys: () => boundAccount.privacyKeys(),
+                derivePrivacyKeys: () => boundAccount.derivePrivacyKeys(),
                 aspSecret: () => boundAccount.aspSecret(),
                 userNotes: (limit) => boundAccount.userNotes(limit),
                 isRegistered: () => boundAccount.isRegistered(),

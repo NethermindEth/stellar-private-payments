@@ -38,10 +38,8 @@ impl Account {
         self.inner.user_address().to_string()
     }
 
-    /// The account that signs and pays. Always equal to
-    /// [`Self::user_address`]: a `signerAddress` that differs does not open a
-    /// session at all, so this never reports an address the rest of the stack
-    /// will not use.
+    /// The account that signs and pays. May differ from [`Self::user_address`]
+    /// when the note owner delegates signing to another account.
     #[wasm_bindgen(getter, js_name = signerAddress)]
     pub fn signer_address(&self) -> String {
         self.inner.signer_address().to_string()
@@ -54,9 +52,16 @@ impl Account {
     }
 
     /// Locally derived note and encryption public keys for this account.
-    #[wasm_bindgen(js_name = userPublicKeys)]
-    pub async fn user_public_keys(&self) -> Result<UserPublicKeys, JsError> {
-        let keys = self.inner.user_public_keys().await.map_err(pool_err)?;
+    #[wasm_bindgen(js_name = privacyKeys)]
+    pub async fn privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.privacy_keys().await.map_err(pool_err)?;
+        Ok(UserPublicKeys::from(keys))
+    }
+
+    /// Derive and persist this account's privacy keys. Idempotent.
+    #[wasm_bindgen(js_name = derivePrivacyKeys)]
+    pub async fn derive_privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.derive_privacy_keys().await.map_err(pool_err)?;
         Ok(UserPublicKeys::from(keys))
     }
 

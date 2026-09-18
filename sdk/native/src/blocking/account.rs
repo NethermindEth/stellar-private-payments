@@ -57,8 +57,12 @@ impl Account {
         block_on(self.inner.balance(asset))
     }
 
-    pub fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        block_on(self.inner.user_public_keys())
+    pub fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.privacy_keys())
+    }
+
+    pub fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.derive_privacy_keys())
     }
 
     pub fn asp_secret(&self) -> Result<Field, Error> {

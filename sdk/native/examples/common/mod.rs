@@ -257,7 +257,7 @@ pub fn open_account_pool<'a>(
 ///
 /// If not, prints instructions and exits 0.
 pub fn require_onboarded(account: &Account) -> Result<(), String> {
-    match account.user_public_keys() {
+    match account.privacy_keys() {
         Ok(_) => Ok(()),
         Err(e) => {
             let wallet = env_or("SPP_WALLET_PATH", default_wallet_path());

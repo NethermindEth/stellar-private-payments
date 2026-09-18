@@ -477,7 +477,7 @@ export const Wallet = {
                 });
 
                 await client().openAccount(accountSession(App.state.wallet), signer);
-                const keys = await client().account().userPublicKeys();
+                const keys = await client().account().privacyKeys();
                 App.state.keys.notePublicKey = keys.notePublicKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
 

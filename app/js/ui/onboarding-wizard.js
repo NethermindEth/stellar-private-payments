@@ -274,7 +274,7 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
+    const storedPublicKeys = await storage.getPrivacyKeys(address).catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
@@ -486,7 +486,7 @@ export async function runOnboardingWizard({
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await client().account().userPublicKeys();
+                            const result = await client().account().derivePrivacyKeys();
                             state.keys = {
                                 pubKey: result.notePublicKey,
                                 encryptionKeypair: { publicKey: result.encryptionPublicKey },

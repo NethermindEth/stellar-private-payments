@@ -131,10 +131,58 @@ impl<S: Storage> Account<S> {
     }
 
     /// Locally derived note and encryption public keys for this account.
-    pub async fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+    pub async fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        self.storage.privacy_keys(self.user_address.as_str()).await
+    }
+
+    /// Derive this account's privacy keys from the owner's wallet signature
+    /// and persist them. Idempotent: returns the existing keys unchanged if
+    /// already derived. Fails if `signer_address` is not `user_address` — see
+    /// [`Error::SignerIsNotNoteOwner`] — and again if the returned signature
+    /// was not made by the owner's key (a signer may claim an address without
+    /// actually holding it).
+    pub async fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        if self
+            .storage
+            .privacy_keys_exist(self.user_address.as_str())
+            .await?
+        {
+            return self.privacy_keys().await;
+        }
+        ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
+
+        let signature = self
+            .signer
+            .sign_message(crate::zk::encryption::KEY_DERIVATION_MESSAGE)
+            .await?;
+        // The signer only promises to sign *as* `signer_address`; a wallet
+        // implementation can still return a signature made with a different
+        // key. Verify it against the owner before it is trusted to derive
+        // and persist keys under `user_address`.
+        crate::zk::encryption::verify_owner_signature(
+            self.user_address.as_str(),
+            crate::zk::encryption::KEY_DERIVATION_MESSAGE,
+            &signature,
+        )?;
+        let (note_keypair, encryption_keypair) =
+            crate::zk::encryption::derive_encryption_and_note_keypairs(signature.clone())
+                .context("derive privacy keypairs")?;
+        let membership_blinding = crate::zk::encryption::derive_membership_blinding(
+            &signature,
+            &self.contract_config.network,
+        )
+        .context("derive membership blinding")?;
+
         self.storage
-            .user_public_keys(self.user_address.as_str())
-            .await
+            .save_private_keys(
+                self.user_address.as_str(),
+                &note_keypair,
+                &encryption_keypair,
+                &membership_blinding,
+            )
+            .await?;
+
+        Ok((note_keypair.public, encryption_keypair.public))
     }
 
     /// Locally derived ASP membership blinding for this account.
@@ -146,7 +194,7 @@ impl<S: Storage> Account<S> {
     pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
         let note = self
             .storage
-            .user_public_keys(self.user_address.as_str())
+            .privacy_keys(self.user_address.as_str())
             .await?
             .0;
         let blinding = self.storage.asp_secret(self.user_address.as_str()).await?;
@@ -195,7 +243,7 @@ impl<S: Storage> Account<S> {
             (Some(note), Some(enc)) => (note, enc),
             (None, None) => {
                 self.storage()
-                    .user_public_keys(self.user_address.as_str())
+                    .privacy_keys(self.user_address.as_str())
                     .await?
             }
             _ => {
@@ -342,5 +390,154 @@ mod signer_is_note_owner_tests {
                 "near-miss signer {near_miss:?} must be refused"
             );
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod derive_privacy_keys_tests {
+    use super::*;
+    use crate::{Client, LocalSigner, LocalStorage, types::ContractConfig};
+
+    /// The real Stellar address for `SigningKey::from_bytes(&[7u8; 32])` —
+    /// must match `SECRET` for `verify_owner_signature` to accept it.
+    const OWNER: &str = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+    /// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])`.
+    const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+    fn test_client() -> Client<LocalStorage> {
+        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let db = std::env::temp_dir().join(format!(
+            "spp-derive-privacy-keys-{}-{}.sqlite",
+            std::process::id(),
+            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&db);
+        Client::init_readonly(
+            "https://soroban-testnet.stellar.org",
+            LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ContractConfig {
+                network: PASSPHRASE.to_string(),
+                deployer: String::new(),
+                admin: String::new(),
+                asp_membership: String::new(),
+                asp_non_membership: String::new(),
+                verifiers: Default::default(),
+                public_key_registry: String::new(),
+                pools: Vec::new(),
+            },
+            None,
+        )
+        .expect("init client")
+    }
+
+    fn test_signer(address: &str) -> Handle<dyn crate::Signer> {
+        Handle::from_box(Box::new(
+            LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
+                .expect("build signer"),
+        ) as Box<dyn crate::Signer>)
+    }
+
+    /// A signer whose `sign_message` panics: proves a code path never asks it
+    /// to sign.
+    struct PanicOnMessageSigner(Handle<dyn crate::Signer>);
+
+    #[async_trait::async_trait(?Send)]
+    impl crate::Signer for PanicOnMessageSigner {
+        async fn sign_transaction(
+            &self,
+            prepared: &crate::PreparedTransaction,
+        ) -> Result<crate::types::SignedTransaction, Error> {
+            self.0.sign_transaction(prepared).await
+        }
+
+        async fn sign_message(
+            &self,
+            _message: &str,
+        ) -> Result<crate::types::KeyDerivationSignature, Error> {
+            panic!("derive_privacy_keys() must not re-derive when keys already exist");
+        }
+    }
+
+    #[tokio::test]
+    async fn derive_privacy_keys_derives_and_persists_privacy_keys_for_the_owner() {
+        let account = test_client()
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                test_signer(OWNER),
+            )
+            .expect("open account");
+
+        account.derive_privacy_keys().await.expect("derive keys");
+
+        account
+            .privacy_keys()
+            .await
+            .expect("keys were derived and stored");
+    }
+
+    #[tokio::test]
+    async fn derive_privacy_keys_does_not_re_derive_when_keys_already_exist() {
+        let client = test_client();
+        let account = client
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                test_signer(OWNER),
+            )
+            .expect("open account");
+        account.derive_privacy_keys().await.expect("derive keys");
+
+        let account = client
+            .account(
+                NoteOwnerAddress::new(OWNER),
+                SignerAddress::new(OWNER),
+                Handle::from_box(
+                    Box::new(PanicOnMessageSigner(test_signer(OWNER))) as Box<dyn crate::Signer>
+                ),
+            )
+            .expect("open account");
+
+        account
+            .derive_privacy_keys()
+            .await
+            .expect("re-deriving with existing keys must not re-sign");
+    }
+
+    /// `signer_address` is a claim the signer makes about itself, not a proof.
+    /// A session opened with `user_address == signer_address == DELEGATE`
+    /// passes [`ensure_signer_is_note_owner`], but if the signer actually
+    /// signs with OWNER's key underneath, the returned signature was not made
+    /// by DELEGATE's key and must be refused before anything is derived or
+    /// saved under DELEGATE.
+    #[tokio::test]
+    async fn derive_privacy_keys_refuses_a_signature_not_made_by_the_claimed_address() {
+        /// A different, validly-formed owner address — not derived from
+        /// `SECRET`, so `OWNER`'s real signature must not verify against it.
+        const DELEGATE: &str = "GD6ROJBYLKQMOW3E7N4M2YBPUHMZD7PL65VRHRMO24BOVSBV5H3BQRSL";
+
+        let account = test_client()
+            .account(
+                NoteOwnerAddress::new(DELEGATE),
+                SignerAddress::new(DELEGATE),
+                test_signer(OWNER),
+            )
+            .expect("open account");
+
+        let error = account
+            .derive_privacy_keys()
+            .await
+            .expect_err("a signature made by another key must be refused")
+            .to_string();
+        assert!(
+            error.contains("not made by the note owner"),
+            "expected a signature-verification failure, got {error:?}"
+        );
+
+        account
+            .privacy_keys()
+            .await
+            .expect_err("nothing must be persisted under DELEGATE after a refused signature");
     }
 }

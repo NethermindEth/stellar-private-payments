@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Stored privacy public keys:");
-    let (note_key, enc_key) = account.user_public_keys()?;
+    let (note_key, enc_key) = account.privacy_keys()?;
     println!("  note key:        {note_key:?}");
     println!("  encryption key:  {enc_key:?}");
 
