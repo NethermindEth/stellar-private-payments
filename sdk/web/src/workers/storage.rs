@@ -16,7 +16,7 @@ use stellar_private_payments::{
     chain::ContractDataStorage,
     disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
     planner::SpendableNote,
-    state::{SqliteStorage, StoredPrivacyKeys, process_local_state_batch},
+    state::{SqliteStorage, process_local_state_batch},
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
@@ -300,14 +300,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::SavePrivacyKeys(
+        StorageWorkerRequest::SavePrivateKeys(
             address,
             note_keypair,
             encryption_keypair,
             membership_blinding,
         ) => {
             tracing::trace!(
-                "[{WORKER_NAME}] saving privacy keys for the account {}",
+                "[{WORKER_NAME}] saving private keys for the account {}",
                 Sensitive(&address)
             );
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
@@ -355,7 +355,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch privacy keys for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_privacy_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
             if opt.is_some() {
                 tracing::trace!(
                     "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
@@ -381,7 +381,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_privacy_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
@@ -925,13 +925,6 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn privacy_keys(&self, user_address: &str) -> Result<StoredPrivacyKeys, Error> {
-        let _ = user_address;
-        Err(Error::Other(anyhow::anyhow!(
-            "full stored privacy keys are not available on the storage bridge; use asp_secret"
-        )))
-    }
-
     async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
         match self
             .call(
@@ -948,7 +941,7 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn save_privacy_keys(
+    async fn save_private_keys(
         &self,
         user_address: &str,
         note_keypair: &NoteKeyPair,
@@ -957,7 +950,7 @@ impl Storage for StorageBridge {
     ) -> Result<(), Error> {
         match self
             .call(
-                StorageWorkerRequest::SavePrivacyKeys(
+                StorageWorkerRequest::SavePrivateKeys(
                     user_address.to_string(),
                     note_keypair.clone(),
                     encryption_keypair.clone(),
@@ -995,7 +988,7 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn user_public_keys(
+    async fn privacy_keys(
         &self,
         user_address: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
@@ -1007,8 +1000,8 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::PrivacyKeys(keys)) => {
-                let keys = keys.ok_or_else(|| {
-                    Error::Other(anyhow::anyhow!("privacy keys not found in worker storage"))
+                let keys = keys.ok_or_else(|| Error::PrivacyKeysNotFound {
+                    user_address: user_address.to_string(),
                 })?;
                 Ok((keys.note_keypair.public, keys.encryption_keypair.public))
             }
@@ -1020,10 +1013,10 @@ impl Storage for StorageBridge {
     }
 
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, Error> {
-        Ok(self.user_public_keys(user_address).await?.0)
+        Ok(self.privacy_keys(user_address).await?.0)
     }
 
-    async fn registered_public_keys(
+    async fn registered_privacy_keys(
         &self,
         address: &str,
         public_key_registry_contract_id: &str,

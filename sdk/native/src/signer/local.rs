@@ -7,11 +7,8 @@ use crate::{
     PreparedTransaction,
     error::Error,
     types::{KeyDerivationSignature, SignedTransaction, SignerAddress},
+    zk::encryption::sep53_payload,
 };
-
-/// SEP-53 message prefix, matching the Stellar CLI and browser wallets
-/// (`stellar message sign`, Freighter's `signMessage`).
-const SEP53_PREFIX: &str = "Stellar Signed Message:\n";
 
 /// In-process Ed25519 signer for native CLI and tests.
 pub struct LocalSigner {
@@ -70,8 +67,7 @@ impl Signer for LocalSigner {
     }
 
     async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
-        let prefixed = format!("{SEP53_PREFIX}{message}");
-        let signature = self.stellar.sign(prefixed.as_bytes());
+        let signature = self.stellar.sign(&sep53_payload(message));
         Ok(KeyDerivationSignature(signature.as_bytes().to_vec()))
     }
 }

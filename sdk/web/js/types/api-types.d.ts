@@ -103,8 +103,8 @@ export interface AccountOptions {
   networkPassphrase: string;
   userAddress?: string;
   /**
-   * Defaults to `userAddress`. A value differing from `userAddress` is refused
-   * before the wallet is prompted.
+   * Defaults to `userAddress`. May name a different signing account; the
+   * owner still holds the notes.
    */
   signerAddress?: string;
 }

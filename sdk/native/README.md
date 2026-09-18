@@ -185,7 +185,7 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 
 | API | Role |
 |-----|------|
-| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Account::derivePrivacyKeys()`, which signs this internally) |
 | `zk::encryption::sep53_payload(message)` | UTF-8 message prefixed with `Stellar Signed Message:\n`; hash with SHA-256 before Ed25519 signing |
 | `zk::encryption::verify_owner_signature(owner_address, message, &signature)` | Strictly verify a 64-byte SEP-53 signature against the note owner's Stellar `G...` public key |
 | `Account::derive_privacy_keys()` | Derive and persist privacy keys from the owner's wallet signature (idempotent, signature-verified) |
@@ -201,7 +201,7 @@ Custom native onboarding code must call `verify_owner_signature` with
 `derive_encryption_and_note_keypairs` and `derive_membership_blinding` helpers
 do not take an owner address and do not verify ownership themselves. The CLI's
 `spp onboard` command performs this check before creating missing privacy keys;
-the browser SDK does so in `Client.account()`.
+the browser SDK does so in `Account::derivePrivacyKeys()`.
 
 Verification requires the owner's own Ed25519 signature over
 `SHA256(sep53_payload(KEY_DERIVATION_MESSAGE))`. Another account's signature

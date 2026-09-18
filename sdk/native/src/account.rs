@@ -132,9 +132,7 @@ impl<S: Storage> Account<S> {
 
     /// Locally derived note and encryption public keys for this account.
     pub async fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        self.storage
-            .user_public_keys(self.user_address.as_str())
-            .await
+        self.storage.privacy_keys(self.user_address.as_str()).await
     }
 
     /// Derive this account's privacy keys from the owner's wallet signature
@@ -176,7 +174,7 @@ impl<S: Storage> Account<S> {
         .context("derive membership blinding")?;
 
         self.storage
-            .save_privacy_keys(
+            .save_private_keys(
                 self.user_address.as_str(),
                 &note_keypair,
                 &encryption_keypair,
@@ -196,7 +194,7 @@ impl<S: Storage> Account<S> {
     pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
         let note = self
             .storage
-            .user_public_keys(self.user_address.as_str())
+            .privacy_keys(self.user_address.as_str())
             .await?
             .0;
         let blinding = self.storage.asp_secret(self.user_address.as_str()).await?;
@@ -245,7 +243,7 @@ impl<S: Storage> Account<S> {
             (Some(note), Some(enc)) => (note, enc),
             (None, None) => {
                 self.storage()
-                    .user_public_keys(self.user_address.as_str())
+                    .privacy_keys(self.user_address.as_str())
                     .await?
             }
             _ => {

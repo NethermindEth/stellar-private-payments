@@ -73,7 +73,7 @@ pub enum StorageWorkerRequest {
     },
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
-    SavePrivacyKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
+    SavePrivateKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     GetSetting(String),

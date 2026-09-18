@@ -4,7 +4,7 @@ use crate::{
     Error,
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
     planner::Transact,
-    state::{SqliteStorage, StoredPrivacyKeys},
+    state::{SqliteStorage, StoredPrivateKeys},
     types::{
         AspMembershipProof, AspMembershipSync, AspNonMembershipProof, BabyJubJubPoint,
         EncryptionKeyPair, EncryptionPublicKey, ExtAmount, ExtData, Field, GlobalViewKeyCiphertext,
@@ -214,7 +214,7 @@ pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field), Error> {
-    let StoredPrivacyKeys {
+    let StoredPrivateKeys {
         note_keypair: NoteKeyPair {
             private,
             public: note_pub,
@@ -223,7 +223,7 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = crate::storage::map_privacy_keys(storage, user_address)?;
+    } = crate::storage::map_private_keys(storage, user_address)?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }

@@ -150,26 +150,25 @@ Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance`
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`.
 Optional Freighter adapter: `import { FreighterSigner } from 'stellar-private-payments/freighter'` (requires peer `@stellar/freighter-api`).
 
-When privacy keys are missing, `client.account()` asks the note owner to sign
-`Privacy Pool Key Derivation [v1]`. Custom `signMessage(message, opts)`
-implementations must return a real SEP-53 Ed25519 signature: sign the SHA-256
-digest of the UTF-8 bytes of `"Stellar Signed Message:\n" + message` with the
-owner's key. Return the 64 signature bytes as base64, either as a string or as
-`{ signedMessage, signerAddress }`.
+When privacy keys are missing, `account.derivePrivacyKeys()` asks the note
+owner to sign `Privacy Pool Key Derivation [v1]`. Custom `signMessage(message,
+opts)` implementations must return a real SEP-53 Ed25519 signature: sign the
+SHA-256 digest of the UTF-8 bytes of `"Stellar Signed Message:\n" + message`
+with the owner's key. Return the 64 signature bytes as base64, either as a
+string or as `{ signedMessage, signerAddress }`.
 
 The SDK strictly verifies the signature against `userAddress` before deriving
 or storing keys, even when the wallet reports no signer address. A signature
 from another key, over another message, or with an invalid encoding or length
-causes `client.account()` to fail without saving privacy keys. Arbitrary
+causes `derivePrivacyKeys()` to fail without saving privacy keys. Arbitrary
 64-byte test stubs no longer work. If verification fails, check that the wallet
 signed with the owner's account; this failure is not a wallet cancellation.
 
-`signerAddress` defaults to the note owner. Supplying it requires an explicit
-`userAddress`. If the owner's keys are missing, a different `signerAddress` is
-refused before prompting the wallet. Once keys are stored, opening a session
-reuses them without signing or verifying another derivation message, and may
-use a different transaction signer. Existing stored keys are not revalidated
-by this check.
+`signerAddress` defaults to the note owner and may name a different signing
+account; `client.account()` opens the session without deriving or verifying
+keys either way. Once keys are stored, `derivePrivacyKeys()` reuses them
+without signing or verifying another derivation message. Existing stored keys
+are not revalidated by this check.
 
 ## Logging & Diagnostics
 
