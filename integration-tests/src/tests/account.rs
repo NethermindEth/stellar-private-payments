@@ -1,7 +1,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::{AssetDescriptor, NoteAmount};
 
-use super::support::setup;
+use super::support::setup_default;
 use crate::network::LocalNetwork;
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
@@ -9,7 +9,7 @@ const TRANSFER_STROOPS: u128 = 4_000_000;
 
 #[tokio::test]
 async fn user_notes_basic() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
 
     // deposit, 1 note
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -35,8 +35,8 @@ async fn user_notes_basic() -> Result<()> {
 
 #[tokio::test]
 async fn user_notes_transfer() -> Result<()> {
-    let sender = setup().await?;
-    let recipient = setup().await?;
+    let sender = setup_default().await?;
+    let recipient = setup_default().await?;
     recipient.account.register_public_keys(None, None).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -69,7 +69,7 @@ async fn user_notes_transfer() -> Result<()> {
 
 #[tokio::test]
 async fn sync_inline_idempotent() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     session.pool()?.deposit(deposit_amount).await?;
 
@@ -85,7 +85,7 @@ async fn sync_inline_idempotent() -> Result<()> {
 
 #[tokio::test]
 async fn unknown_pool() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let pool_res = session.account.pool("unknown-pool-contract-id");
     assert!(pool_res.is_err());
 
@@ -94,7 +94,7 @@ async fn unknown_pool() -> Result<()> {
 
 #[tokio::test]
 async fn is_registered() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     assert!(!session.account.is_registered().await?);
 
     session.account.register_public_keys(None, None).await?;
@@ -105,7 +105,7 @@ async fn is_registered() -> Result<()> {
 
 #[tokio::test]
 async fn portfolio() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     session.pool()?.deposit(deposit_amount).await?;
 
@@ -127,7 +127,7 @@ async fn portfolio() -> Result<()> {
 
 #[tokio::test]
 async fn balance_native() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let funded_balance = session.account.balance(&AssetDescriptor::Native).await?;
     assert!(
         funded_balance > 0,
@@ -148,7 +148,7 @@ async fn balance_native() -> Result<()> {
 
 #[tokio::test]
 async fn balance_classic() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let network = LocalNetwork::shared().await?;
 
     network
@@ -174,7 +174,7 @@ async fn balance_classic() -> Result<()> {
 
 #[tokio::test]
 async fn balance_contract() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let network = LocalNetwork::shared().await?;
 
     let contract_id = network.deploy_asset_sac("TOK").await?;

@@ -15,6 +15,12 @@ impl TestKeypair {
         }
     }
 
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        Self {
+            signing_key: SigningKey::from_bytes(&seed),
+        }
+    }
+
     /// `G...` public address.
     pub fn address(&self) -> String {
         format!(
