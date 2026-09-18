@@ -28,6 +28,7 @@ import {
     chosenSigner,
     rememberSigners,
     removeSigner,
+    signingPrivacyWarning,
 } from '../signing-account.js';
 import { App, Toast, Utils } from './core.js';
 import { onEnter } from './keys.js';
@@ -43,11 +44,19 @@ function pickers() {
         input: root.querySelector('[data-signing-input]'),
         use: root.querySelector('[data-signing-use]'),
         error: root.querySelector('[data-signing-error]'),
+        warning: root.querySelector('[data-signing-warning]'),
     }));
 }
 
 function picker(scope) {
     return pickers().find((p) => p.scope === scope) ?? null;
+}
+
+function updateWarning(p) {
+    if (!p.warning) return;
+    const warning = signingPrivacyWarning({ owner: App.state.wallet.address, signer: p.select?.value });
+    p.warning.textContent = warning;
+    p.warning.classList.toggle('hidden', !warning);
 }
 
 function render(p, selected = null) {
@@ -56,26 +65,32 @@ function render(p, selected = null) {
     const { address: owner, signers = [], activeAddress: active = null } = App.state.wallet;
     const suggestion = activeSuggestion({ active, owner, signers });
 
-    const options = [];
-    if (owner) options.push(new Option(`Connected wallet · ${Utils.shortAddress(owner)}`, owner));
+    const options = [new Option('Choose an account to sign and pay…', '')];
+    if (owner) {
+        const depositOption = new Option(`Deposit account · ${Utils.shortAddress(owner)}`, owner);
+        depositOption.dataset.privacyWarning = 'true';
+        options.push(depositOption);
+    }
     for (const signer of signers) options.push(new Option(Utils.shortAddress(signer), signer));
     if (suggestion) {
-        options.push(new Option(`Active in Freighter · ${Utils.shortAddress(suggestion)}`, suggestion));
+        options.push(new Option(Utils.shortAddress(suggestion), suggestion));
     }
     // An empty active address is Freighter keeping its account from this site.
     if (owner && active === '') {
         options.push(new Option('Use the account active in Freighter…', REQUEST_ACTIVE));
     }
-    options.push(new Option('Use another account…', OTHER));
+    options.push(new Option('Enter another address…', OTHER));
     select.replaceChildren(...options);
     select.disabled = !owner;
 
     // A picker in the middle of pasting an account stays there.
     if (owner && selected === OTHER) {
         select.value = OTHER;
+        updateWarning(p);
         return;
     }
-    select.value = chosenSigner({ selected, owner, signers, active }) ?? OTHER;
+    select.value = chosenSigner({ selected, owner, signers, active }) ?? '';
+    updateWarning(p);
 
     other?.classList.add('hidden');
     if (input) input.value = '';
@@ -89,7 +104,7 @@ function renderAll() {
 
 // Re-render every picker after the shared list changed, keeping each picker's
 // selection unless `overrides` names another for its scope. A selection no
-// longer in the list falls back to the owner.
+// longer in the list requires a new choice.
 function renderKeepingSelections(overrides = {}) {
     for (const each of pickers()) {
         render(each, overrides[each.scope] ?? each.select?.value);
@@ -101,6 +116,7 @@ function setSigners(signers) {
     const owner = App.state.wallet.address;
     App.state.wallet.signers = signers;
     rememberSigners(owner, signers);
+    App.events.dispatchEvent(new Event('wallet:signers-changed'));
 }
 
 function renderSettings() {
@@ -148,7 +164,7 @@ async function requestActiveAccount(p) {
         App.state.wallet.activeAddress = address;
         renderKeepingSelections({ [p.scope]: address });
     } catch (error) {
-        renderKeepingSelections({ [p.scope]: App.state.wallet.address });
+        renderKeepingSelections({ [p.scope]: '' });
         Toast.show(error?.message || 'Freighter did not share its active account', 'error');
     }
 }
@@ -184,6 +200,7 @@ export const SigningAccount = {
     init() {
         for (const p of pickers()) {
             p.select?.addEventListener('change', () => {
+                updateWarning(p);
                 if (p.select.value === REQUEST_ACTIVE) {
                     requestActiveAccount(p);
                     return;
@@ -207,7 +224,7 @@ export const SigningAccount = {
      *
      * @param {string} scope - The picker's `data-signing-account` value.
      * @param {{ ownerOnly?: boolean }} options - Deposits must be signed by the owner.
-     * @returns {Promise<string>} The signing account; the owner unless another is picked.
+     * @returns {Promise<string>} The explicitly chosen account, or the owner for deposits.
      */
     async forTransaction(scope, { ownerOnly = false } = {}) {
         if (ownerOnly) {
@@ -222,6 +239,7 @@ export const SigningAccount = {
         }
         const { address: owner, signers, activeAddress: active } = App.state.wallet;
         const signer = chosenSigner({ selected: select?.value ?? null, owner, signers, active });
+        if (!signer) throw new Error('Choose an account to sign and pay with.');
         if (signer !== owner) await ensureFunded(signer);
         App.state.wallet.signingAddress = signer;
         return signer;

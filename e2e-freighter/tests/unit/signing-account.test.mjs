@@ -8,6 +8,7 @@ import {
   rememberSigners,
   rememberedSigners,
   removeSigner,
+  signingPrivacyWarning,
   withdrawalLinksAccounts,
 } from '../../../app/js/signing-account.js';
 import { getTransactionErrorMessage } from '../../../app/js/ui/errors.js';
@@ -16,6 +17,13 @@ const OWNER = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const SIGNER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
 const STRANGER = 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ';
 
+test('signing with the deposit account warns independently of the recipient', () => {
+  assert.match(signingPrivacyWarning({ owner: OWNER, signer: OWNER }), /Signing with your deposit account can link this transaction/);
+  assert.equal(signingPrivacyWarning({ owner: OWNER, signer: SIGNER }), '');
+  assert.equal(signingPrivacyWarning({ owner: OWNER, signer: null }), '');
+  assert.equal(signingPrivacyWarning({ owner: null, signer: null }), '');
+});
+
 test('a chosen signer is remembered once, and the owner never is', () => {
   let signers = addSigner([], SIGNER, OWNER);
   signers = addSigner(signers, SIGNER, OWNER);
@@ -23,17 +31,17 @@ test('a chosen signer is remembered once, and the owner never is', () => {
   assert.deepEqual(signers, [SIGNER]);
 });
 
-test('the owner signs unless an account chosen this session is picked', () => {
+test('the owner or another signer must be explicitly selected', () => {
   assert.equal(chosenSigner({ selected: OWNER, owner: OWNER, signers: [SIGNER] }), OWNER);
   assert.equal(chosenSigner({ selected: SIGNER, owner: OWNER, signers: [SIGNER] }), SIGNER);
-  assert.equal(chosenSigner({ selected: null, owner: OWNER, signers: [SIGNER] }), OWNER);
+  assert.equal(chosenSigner({ selected: null, owner: OWNER, signers: [SIGNER] }), null);
 });
 
 // A value that is not in the session's list (a signer from before a reconnect)
-// must not sign; the owner does.
+// must not sign; the user must choose again.
 test('a picked account that was never chosen this session does not sign', () => {
-  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [SIGNER] }), OWNER);
-  assert.equal(chosenSigner({ selected: SIGNER, owner: OWNER, signers: [] }), OWNER);
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [SIGNER] }), null);
+  assert.equal(chosenSigner({ selected: SIGNER, owner: OWNER, signers: [] }), null);
 });
 
 test('a withdrawal to the owner signed by another account links the two', () => {
@@ -109,6 +117,11 @@ test('Freighter\'s active account is offered only when it is new to the picker',
 
 test('the offered active account signs only while Freighter still has it active', () => {
   assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: STRANGER }), STRANGER);
-  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: SIGNER }), OWNER);
-  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: '' }), OWNER);
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: SIGNER }), null);
+  assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: '' }), null);
+});
+
+test('empty or disconnected signer selections require a new choice', () => {
+  assert.equal(chosenSigner({ selected: '', owner: OWNER, signers: [SIGNER] }), null);
+  assert.equal(chosenSigner({ selected: SIGNER, owner: null, signers: [SIGNER] }), null);
 });

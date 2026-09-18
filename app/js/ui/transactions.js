@@ -17,7 +17,8 @@ import { getTransactionErrorMessage } from './errors.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
-import { withdrawalLinksAccounts } from '../signing-account.js';
+import { RecipientAccount } from './recipient-account.js';
+import { signingPrivacyWarning, withdrawalLinksAccounts } from '../signing-account.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -195,7 +196,7 @@ async function submitWithdraw(button, amountValue, pool, recipient) {
             hashes,
         });
         document.getElementById('withdraw-amount').value = '';
-        document.getElementById('withdraw-recipient').value = '';
+        RecipientAccount.reset('withdraw');
     }
 }
 
@@ -343,14 +344,6 @@ export const Transactions = {
         updatePoolLabels();
         updateMoveFundsBalance();
 
-        App.events.addEventListener('wallet:ready', (event) => {
-            const address = event?.detail?.address || App.state.wallet.address;
-            if (!address) return;
-            const withdrawRecipient = document.getElementById('withdraw-recipient');
-            const advancedRecipient = document.getElementById('advanced-public-recipient');
-            if (withdrawRecipient) withdrawRecipient.value = address;
-            if (advancedRecipient) advancedRecipient.value = address;
-        });
     },
 
     buildAdvancedComposer() {
@@ -465,6 +458,7 @@ export const Transactions = {
                     title: 'Confirm transfer',
                     rows,
                     confirmLabel: 'Transfer',
+                    warning: signingPrivacyWarning({ owner: App.state.wallet.address, signer }),
                 });
                 if (!confirmed) return;
                 SigningAccount.keep(signer);
@@ -513,8 +507,9 @@ export const Transactions = {
                 requireWallet();
                 const amount = parseAmount(withdrawAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a withdrawal amount');
-                const recipient = withdrawRecipientInput?.value?.trim() || App.state.wallet.address;
-                if (recipient !== App.state.wallet.address && !StrKey.isValidEd25519PublicKey(recipient)) {
+                const recipient = RecipientAccount.value('withdraw');
+                if (!recipient) throw new Error('Choose a withdrawal recipient or enter another address.');
+                if (!StrKey.isValidEd25519PublicKey(recipient)) {
                     throw new Error('Invalid Stellar address');
                 }
                 const signer = await SigningAccount.forTransaction('move');
@@ -527,9 +522,10 @@ export const Transactions = {
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
                 const owner = App.state.wallet.address;
-                const warning = withdrawalLinksAccounts({ owner, signer, recipient })
-                    ? linkWarning(signer, owner)
-                    : '';
+                const warning = [
+                    signingPrivacyWarning({ owner, signer }),
+                    withdrawalLinksAccounts({ owner, signer, recipient }) ? linkWarning(signer, owner) : '',
+                ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm withdrawal',
                     rows,
@@ -548,7 +544,7 @@ export const Transactions = {
 
         onEnter(withdrawRecipientInput, () => {
             const value = withdrawRecipientInput.value.trim();
-            if (value && !StrKey.isValidEd25519PublicKey(value)) {
+            if (!StrKey.isValidEd25519PublicKey(value)) {
                 Toast.show('Invalid Stellar address', 'error', 4000, { origin: 'withdraw' });
                 return;
             }
@@ -592,8 +588,11 @@ export const Transactions = {
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
                 const pool = selectedPool();
-                const recipient = document.getElementById('advanced-public-recipient')?.value?.trim()
-                    || App.state.wallet.address;
+                const enteredRecipient = RecipientAccount.value('advanced');
+                if (publicAmount < 0n && !enteredRecipient) throw new Error('Choose a withdrawal recipient or enter another address.');
+                if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
+                // The recipient is unused when no public funds leave the pool.
+                const recipient = enteredRecipient || App.state.wallet.address;
 
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
@@ -610,9 +609,10 @@ export const Transactions = {
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
                 const owner = App.state.wallet.address;
-                const warning = withdraw.value > 0n && withdrawalLinksAccounts({ owner, signer, recipient })
-                    ? linkWarning(signer, owner)
-                    : '';
+                const warning = [
+                    publicAmount <= 0n ? signingPrivacyWarning({ owner, signer }) : '',
+                    withdraw.value > 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? linkWarning(signer, owner) : '',
+                ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm advanced transaction',
                     rows,
@@ -646,7 +646,7 @@ export const Transactions = {
                     this.buildAdvancedComposer();
                     document.getElementById('advanced-public-deposit').value = '';
                     document.getElementById('advanced-public-withdraw').value = '';
-                    document.getElementById('advanced-public-recipient').value = '';
+                    RecipientAccount.reset('advanced');
                     updateSignerVisibility();
                 }
             } catch (error) {

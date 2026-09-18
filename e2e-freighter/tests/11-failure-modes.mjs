@@ -90,6 +90,11 @@ export async function run(helpers) {
 
   // (1) Over-withdraw: planner rejects the amount before signing.
   await gotoMoveFlow(page, 'withdraw');
+  const signingSelect = page.getByTestId('signing-account-select');
+  const owner = await signingSelect.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
+  assert(owner && owner !== recipient, 'expected a connected owner distinct from the recipient');
+  await signingSelect.selectOption(owner);
+  await page.locator('#withdraw-recipient-select').selectOption(owner);
   await page.locator('#withdraw-amount').fill(overAmount);
   await page.locator('#btn-withdraw').click();
   await confirmOperation(page, 'Confirm withdrawal');
@@ -165,9 +170,8 @@ export async function run(helpers) {
 
   // (5) Signing account: a pasted value that is not an address is refused in
   // the picker itself and never becomes a choice.
-  const signingSelect = page.getByTestId('signing-account-select');
-  const owner = await signingSelect.locator('option').first().getAttribute('value');
-  assert(owner && owner !== recipient, `expected the connected owner as the default signer, not ${owner}`);
+  await gotoMoveFlow(page, 'withdraw');
+  await page.locator('#withdraw-amount').fill('0.01');
   await signingSelect.selectOption('__other__');
   await page.getByTestId('signing-account-input').fill('GNOTANADDRESS');
   await page.getByTestId('signing-account-use').click();
@@ -179,17 +183,17 @@ export async function run(helpers) {
   );
   log.info('(5) invalid signing account: refused in the picker');
 
-  // (6) "Use another account…" left without an address must not quietly fall
+  // (6) "Enter another address…" left without an address must not quietly fall
   // back to signing as the owner.
-  await page.locator('#deposit-amount').fill('0.01');
-  await page.locator('#btn-deposit').click();
+  await page.locator('#withdraw-amount').fill('0.01');
+  await page.locator('#btn-withdraw').click();
   const noSigner = await waitForToast(page, {
-    origin: 'deposit',
+    origin: 'withdraw',
     predicate: (toast) => /enter the account to sign and pay with/i.test(toast.message),
   });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened without a chosen signer');
   await assertNoApproval(context, 'no signing account entered');
-  await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
+  await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
   log.info('(6) no signing account entered:', noSigner.message);
 
   // (7) A valid account that does not exist on the network cannot be the
@@ -197,18 +201,18 @@ export async function run(helpers) {
   await page.getByTestId('signing-account-input').fill(unregisteredAddress);
   await page.getByTestId('signing-account-use').click();
   assert((await signingSelect.inputValue()) === unregisteredAddress, 'the pasted signing account was not selected');
-  await page.locator('#btn-deposit').click();
+  await page.locator('#btn-withdraw').click();
   const unfunded = await waitForToast(page, {
-    origin: 'deposit',
+    origin: 'withdraw',
     predicate: (toast) => /isn't funded on this network/i.test(toast.message),
   });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for an unfunded signing account');
   await assertNoApproval(context, 'unfunded signing account');
-  await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
+  await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
   log.info('(7) unfunded signing account:', unfunded.message);
 
-  // Back to the owner for the recovery deposit.
-  await signingSelect.selectOption(owner);
+  // Deposits still use the owner regardless of the withdrawal selection.
+  await gotoMoveFlow(page, 'deposit');
 
   const recovery = await deposit(helpers, { logTag, amount: '0.01', rpcUrl });
   assert(recovery.transactionHash !== baseline.transactionHash, 'recovery deposit somehow reused the baseline transaction hash');

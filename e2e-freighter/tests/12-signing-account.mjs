@@ -7,7 +7,7 @@ import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
 import { transactionSourceAccount } from '../src/chain.mjs';
 import { waitForSyncedLedger } from '../src/indexer.mjs';
-import { deposit, withdraw } from '../src/moveFunds.mjs';
+import { deposit, withdraw, waitForToast } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
@@ -41,12 +41,14 @@ export async function run(helpers) {
   await gotoMoveFlow(page, 'withdraw');
 
   const select = page.getByTestId('signing-account-select');
-  const owner = await select.locator('option').first().getAttribute('value');
+  const owner = await select.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
   assert(
     owner === expectedOwner,
     `expected account C to own the notes, not ${owner} -- rebuild the profile with e2e-freighter/scripts/setup.sh --force`,
   );
 
+  assert((await select.inputValue()) === '', 'signer must start without a default');
+  assert((await page.locator('#withdraw-recipient-select').inputValue()) === '', 'recipient must start empty');
   await select.selectOption('__other__');
   await page.getByTestId('signing-account-input').fill(signer);
   await page.getByTestId('signing-account-use').click();
@@ -73,22 +75,39 @@ export async function run(helpers) {
   const noteResult = await noteReady;
   assert(noteResult.notes.matchingNotes.length > 0, 'no deposited note was ready after indexer progress');
 
-  // Withdrawal to the owner (blank recipient) signed by D links the two
+  // Withdrawal to the explicitly entered owner signed by D links the two
   // accounts on-chain, and the confirmation says so.
   await gotoMoveFunds(page);
   await gotoMoveFlow(page, 'withdraw');
   assert((await select.inputValue()) === signer, 'the signing account did not stay on account D');
-  await page.locator('#withdraw-recipient').fill('');
+  await page.locator('#withdraw-recipient-select').selectOption('');
   await page.locator('#withdraw-amount').fill('0.01');
   await select.selectOption(owner);
-  for (const recipient of ['', owner]) {
-    await page.locator('#withdraw-recipient').fill(recipient);
-    const ownerDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
-    assert(/Reusing the same account for deposits and withdrawals/.test(ownerDialog.warning), 'withdrawal signed by and paid to the owner shows no account reuse warning');
-    assert(!/links the two accounts/.test(ownerDialog.warning), 'same-account warning incorrectly describes two accounts');
-  }
-  await page.locator('#withdraw-recipient').fill('');
+  await page.locator('#btn-withdraw').click();
+  await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose a withdrawal recipient/.test(toast.message) });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'blank recipient opened confirmation');
+  await page.locator('#withdraw-recipient-select').selectOption(owner);
+  await select.selectOption('');
+  await page.locator('#btn-withdraw').click();
+  await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose an account to sign and pay with/.test(toast.message) });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'blank signer opened confirmation');
+  await select.selectOption(owner);
+  // Saved accounts can receive funds without pasting an address.
+  assert(await page.getByTestId('signing-account-warning').isVisible(), 'deposit signer should show an immediate privacy warning');
+  await page.locator('#withdraw-recipient-select').selectOption(signer);
+  assert(!(await page.locator('#withdraw-recipient').isVisible()), 'saved recipient should not require an address input');
+  const savedDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
+  assert(/Signing with your deposit account/.test(savedDialog.warning), 'deposit signer needs a warning even with a different recipient');
+
+  // A custom address still uses the same validation and privacy checks.
+  await page.locator('#withdraw-recipient-select').selectOption('__other__');
+  await page.locator('#withdraw-recipient').fill(owner);
+  const ownerDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
+  assert(/Reusing the same account for deposits and withdrawals/.test(ownerDialog.warning), 'withdrawal signed by and paid to the owner shows no account reuse warning');
+  assert(!/links the two accounts/.test(ownerDialog.warning), 'same-account warning incorrectly describes two accounts');
+  await page.locator('#withdraw-recipient-select').selectOption(owner);
   await select.selectOption(signer);
+  assert(!(await page.getByTestId('signing-account-warning').isVisible()), 'signer warning should clear when another account is selected');
   const withdrawDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
   assert(/Signed and paid by/.test(withdrawDialog.text), 'withdrawal confirmation does not name the signing account');
   assert(/links the two accounts/.test(withdrawDialog.warning), 'withdrawal to the owner signed by D shows no linking warning');

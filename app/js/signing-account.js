@@ -44,9 +44,8 @@ export function activeSuggestion({ active, owner, signers = [] }) {
 /**
  * The account that signs the next transaction.
  *
- * The picker's value when it is an added account or Freighter's active account
- * on offer; otherwise, including before a wallet has connected the picker, the
- * owner.
+ * The explicitly selected owner, added account, or Freighter account on offer.
+ * Missing or stale selections require a new choice instead of using the owner.
  *
  * @param {{
  *   selected: string | null,
@@ -57,9 +56,10 @@ export function activeSuggestion({ active, owner, signers = [] }) {
  * @returns {string | null}
  */
 export function chosenSigner({ selected, owner, signers = [], active = null }) {
-    if (!selected) return owner;
+    if (!owner || !selected) return null;
+    if (selected === owner) return owner;
     if (signers.includes(selected)) return selected;
-    return selected === activeSuggestion({ active, owner, signers }) ? selected : owner;
+    return selected === activeSuggestion({ active, owner, signers }) ? selected : null;
 }
 
 /**
@@ -75,6 +75,13 @@ export function chosenSigner({ selected, owner, signers = [], active = null }) {
  */
 export function withdrawalLinksAccounts({ owner, signer, recipient }) {
     return Boolean(owner && signer && recipient === owner);
+}
+
+/** Privacy guidance when the deposit account signs a non-deposit transaction. */
+export function signingPrivacyWarning({ owner, signer }) {
+    return owner && signer === owner
+        ? 'Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy.'
+        : '';
 }
 
 const SIGNERS_KEY_PREFIX = 'poolstellar_signers:';
