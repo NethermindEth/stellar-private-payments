@@ -177,7 +177,6 @@ const exportAliases = new Map([
 const internalWasmExports = new Set([
   'AccountOptions',
   'PoolOptions',
-  'RegisterPublicKeysOptions',
   'VerifyDisclosureOptions',
   // Async/sync init plumbing (public entry re-exports only `default` / `init`).
   'InitInput',

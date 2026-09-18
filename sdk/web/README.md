@@ -118,7 +118,7 @@ Walletless verification — no `Storage` / `Client`. Prover worker URL defaults 
 | `userNotes(limit)` | Notes across pools (newest first) |
 | `isRegistered()` | On-chain public key registry entry exists |
 | `deriveAspUserLeaf()` | ASP membership tree leaf from stored keys |
-| `registerPublicKeys(options?)` | On-chain key registry |
+| `registerPublicKeys()` | On-chain key registry |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`

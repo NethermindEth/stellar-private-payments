@@ -114,12 +114,6 @@ export interface PoolOptions {
   poolContract: string;
 }
 
-/** Options for {@link Account.registerPublicKeys}. */
-export interface RegisterPublicKeysOptions {
-  notePublicKeyHex?: string;
-  encryptionPublicKeyHex?: string;
-}
-
 /** Options for {@link verifySelectiveDisclosure}. */
 export interface VerifyDisclosureOptions {
   contractConfig: ContractConfig | ContractConfigInput;
@@ -142,7 +136,7 @@ export interface Account {
   userNotes(limit: number): Promise<UserNoteSummary[]>;
   isRegistered(): Promise<boolean>;
   deriveAspUserLeaf(): Promise<string>;
-  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
+  registerPublicKeys(): Promise<string>;
   pool(options: PoolOptions): Promise<PrivatePool>;
 }
 
