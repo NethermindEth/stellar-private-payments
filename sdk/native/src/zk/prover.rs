@@ -107,7 +107,7 @@ fn verify_proof_with_processed_vk(
     }
 
     let mut public_inputs = Vec::with_capacity(num_inputs);
-    for chunk in public_inputs_bytes.chunks_exact(FIELD_SIZE) {
+    for chunk in public_inputs_bytes.as_chunks::<FIELD_SIZE>().0 {
         public_inputs.push(bytes_to_scalar(chunk)?);
     }
 
@@ -410,7 +410,7 @@ impl Prover {
 
         // Parse witness elements
         let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
-        for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
+        for chunk in witness_bytes.as_chunks::<FIELD_SIZE>().0 {
             witness.push(bytes_to_scalar(chunk)?);
         }
 
@@ -499,7 +499,7 @@ impl Prover {
         }
 
         let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
-        for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
+        for chunk in witness_bytes.as_chunks::<FIELD_SIZE>().0 {
             witness.push(bytes_to_scalar(chunk)?);
         }
 
