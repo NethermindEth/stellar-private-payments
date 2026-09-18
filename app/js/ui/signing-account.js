@@ -65,7 +65,10 @@ function render(p, selected = null) {
     const { address: owner, signers = [], activeAddress: active = null } = App.state.wallet;
     const suggestion = activeSuggestion({ active, owner, signers });
 
-    const options = [new Option('Choose an account to sign and pay…', '')];
+    const prompt = new Option('Choose an account to sign and pay…', '');
+    prompt.disabled = true;
+    prompt.hidden = true;
+    const options = [prompt];
     if (owner) {
         const depositOption = new Option(`Deposit account · ${Utils.shortAddress(owner)}`, owner);
         depositOption.dataset.privacyWarning = 'true';
