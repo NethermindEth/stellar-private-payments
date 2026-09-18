@@ -702,8 +702,8 @@ async fn open_pool(account: &super::Account) -> super::PrivatePool {
         .expect("pool session must open")
 }
 
-/// A full session against testnet: key derivation from the stub blob, sync, and
-/// a pool state read.
+/// A full session against testnet: key derivation from the owner's SEP-53
+/// signature, sync, and a pool state read.
 #[wasm_bindgen_test]
 #[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_session_account_setup_and_sync() {

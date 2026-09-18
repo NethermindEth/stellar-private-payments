@@ -118,9 +118,14 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
 What `spp onboard` does:
 
 1. Accepts the disclaimer.
-2. Signs the key-derivation message via `stellar keys` (the secret never enters
-   the `spp` process).
-3. Derives and stores the privacy note/encryption keys and ASP blinding.
+2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v1]`
+   via `stellar message sign` using the account alias (the Stellar secret key
+   never enters the `spp` process).
+3. Strictly verifies the SEP-53 signature against the account's own public key,
+   then derives and stores the privacy note/encryption keys and ASP blinding.
+   An invalid signature or one made by another account aborts onboarding
+   without saving privacy keys. Existing keys skip signing, verification, and
+   derivation.
 4. Optionally registers the public keys on-chain so other accounts can transfer
    to this address without knowing the raw keys.
 
