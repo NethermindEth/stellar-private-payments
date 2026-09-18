@@ -1,5 +1,5 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -28,8 +28,7 @@ const membershipNextIndexEl = document.getElementById('membershipNextIndex');
 const nonMembershipRootEl = document.getElementById('nonMembershipRoot');
 
 // Inputs & Action Buttons
-const allowlistPublicKeyInput = document.getElementById('allowlistPublicKey');
-const allowlistAspSecretInput = document.getElementById('allowlistAspSecret');
+const allowlistLeafInput = document.getElementById('allowlistLeaf');
 const blocklistPublicKeyInput = document.getElementById('blocklistPublicKey');
 
 const addToAllowlistBtn = document.getElementById('addToAllowlistBtn');
@@ -344,24 +343,15 @@ async function insertMembershipLeaf() {
     const contractId = membershipContractInput.value.trim();
     if (!contractId) throw new Error('Membership contract ID is required');
 
-    const notePublicKey = allowlistPublicKeyInput.value.trim();
-    if (parseBigIntInput(notePublicKey, 'Public key') === null) {
-      throw new Error('User note public key is required');
-    }
-
-    const aspSecret = allowlistAspSecretInput.value.trim();
-    if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
-      throw new Error('ASP secret is required');
+    const leafValue = parseBigIntInput(allowlistLeafInput.value.trim(), 'Membership leaf');
+    if (leafValue === null) {
+      throw new Error('Membership leaf is required');
     }
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.textContent = 'Processing...';
 
-    setStatus('Computing and submitting allowlist insert transaction...', 'info');
-    await ensureCryptoReady();
-
-    const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
-    const leafValue = BigInt(leafHex);
+    setStatus('Submitting allowlist insert transaction...', 'info');
 
     const mClient = await getMembershipClient(contractId);
     const tx = await mClient.insert_leaf({ leaf: leafValue });
@@ -369,8 +359,7 @@ async function insertMembershipLeaf() {
 
     setStatus('The allowlist insert transaction sent', 'ok');
     showToast('Added to the allowlist successfully', 'success');
-    allowlistPublicKeyInput.value = '';
-    allowlistAspSecretInput.value = '';
+    allowlistLeafInput.value = '';
     await refreshState();
   } catch (err) {
     setStatus('Allowlist insert failed', 'error');

@@ -13,7 +13,6 @@ import init, {
   DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
-  deriveAspUserLeaf as sdkDeriveAspUserLeaf,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
   configureTelemetry,
   dump_recent_logs,
@@ -266,17 +265,6 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
  */
 export function getCurrentRpcUrl() {
     return currentRpcUrl;
-}
-
-/**
- * Derive the ASP membership leaf from explicit public inputs (no account session).
- * @param {string} notePublicKey `0x`-prefixed 32-byte hex
- * @param {string} membershipBlinding `0x`-prefixed 32-byte hex field
- * @returns {Promise<string>} leaf as `0x` hex
- */
-export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
-    await ensureWasmInit();
-    return sdkDeriveAspUserLeaf(notePublicKey, membershipBlinding);
 }
 
 /**

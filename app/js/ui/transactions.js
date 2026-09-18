@@ -607,7 +607,7 @@ export const Transactions = {
         const origin = { Deposit: 'deposit', Transfer: 'transfer', Withdrawal: 'withdraw', 'Advanced transaction': 'advanced' }[label] || 'transaction';
         if (result?.status === 'aspNotReady') {
             Toast.show(
-                'Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.',
+                'Your account is not registered with the ASP yet. Compute your membership leaf locally (account.deriveAspUserLeaf()) and share it with the ASP provider, then try again.',
                 'error',
                 8000,
                 { origin },

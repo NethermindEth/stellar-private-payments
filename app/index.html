@@ -377,8 +377,8 @@
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
-                            <dt class="text-slate-500">ASP Secret</dt>
-                            <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                            <dt class="text-slate-500">ASP Membership Leaf</dt>
+                            <button id="settings-reveal-leaf" type="button" data-revealed="false" aria-label="Reveal ASP membership leaf" title="Reveal ASP membership leaf" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
                                 <svg class="settings-eye h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
                                     <circle cx="12" cy="12" r="3"/>
@@ -389,7 +389,7 @@
                                 </svg>
                             </button>
                         </div>
-                        <dd id="settings-asp-secret" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
+                        <dd id="settings-membership-leaf" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                 </dl>
             </section>
@@ -530,7 +530,7 @@
                             <p>Without granting permanent storage, the browser can delete your local data under storage pressure or across updates.</p>
                             <p>Most of the data (all critical one like keys, secrets and notes) can be restored if it is lost.</p>
                         </div>
-                        <div data-why="keys" class="hidden text-sm text-slate-300">The ASP provider needs your note public key and ASP secret to include you in the allowed list.</div>
+                        <div data-why="keys" class="hidden text-sm text-slate-300">The ASP provider needs your membership leaf to include you in the allowed list. Compute it locally with <code class="font-mono">account.deriveAspUserLeaf()</code> and share only the result — never your note public key or ASP secret.</div>
                         <div data-why="retention" class="hidden space-y-3 text-sm text-slate-300">
                             <p>If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
                             <p>You should understand the risks of using a bootnode (similar to the ones when using a 3d-party-hosted RPC:</p>
@@ -564,10 +564,10 @@
             </div>
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                 <div class="flex items-center justify-between gap-3">
-                    <p class="text-xs text-slate-500">ASP secret</p>
-                    <button data-copy="asp" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
+                    <p class="text-xs text-slate-500">ASP membership leaf</p>
+                    <button data-copy="leaf" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
                 </div>
-                <p data-field="asp" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
+                <p data-field="leaf" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
             </div>
         </div>
     </template>
