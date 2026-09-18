@@ -27,16 +27,8 @@ async fn deployment() -> Result<&'static ContractConfig> {
     DEPLOYMENT
         .get_or_try_init(|| async {
             let network = LocalNetwork::shared().await?;
-            let deployer = TestKeypair::generate();
-            network.fund(&deployer.address()).await?;
             network
-                .deploy(
-                    &deployer.secret(),
-                    MAX_DEPOSIT_STROOPS,
-                    ASP_LEVELS,
-                    POOL_LEVELS,
-                    POLICY_FLAGS,
-                )
+                .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, POLICY_FLAGS)
                 .await
         })
         .await

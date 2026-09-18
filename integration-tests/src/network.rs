@@ -12,6 +12,8 @@ use serde_json::Value;
 use stellar_private_payments::types::ContractConfig;
 use tokio::{process::Command, sync::OnceCell};
 
+use crate::keypair::TestKeypair;
+
 /// Network passphrase `stellar/quickstart --local` always uses.
 pub const NETWORK_PASSPHRASE: &str = "Standalone Network ; February 2017";
 
@@ -26,6 +28,7 @@ static SHARED: OnceCell<LocalNetwork> = OnceCell::const_new();
 /// A `stellar/quickstart` local network, already running externally.
 pub struct LocalNetwork {
     rpc_url: String,
+    admin: TestKeypair,
 }
 
 impl LocalNetwork {
@@ -38,9 +41,15 @@ impl LocalNetwork {
     pub async fn start() -> Result<Self> {
         let network = Self {
             rpc_url: format!("http://localhost:{RPC_PORT}/rpc"),
+            admin: TestKeypair::generate(),
         };
         network.wait_healthy().await?;
+        network.fund(&network.admin.address()).await?;
         Ok(network)
+    }
+
+    pub fn admin(&self) -> &TestKeypair {
+        &self.admin
     }
 
     pub fn rpc_url(&self) -> &str {
@@ -96,7 +105,6 @@ impl LocalNetwork {
     /// concurrent processes with the same args share one deployment.
     pub async fn deploy(
         &self,
-        deployer_secret: &str,
         max_deposit: u128,
         asp_levels: u32,
         pool_levels: u32,
@@ -104,7 +112,8 @@ impl LocalNetwork {
     ) -> Result<ContractConfig> {
         let root = repo_root();
         ensure_local_vk_file(&root)?;
-        deploy_native_asset(deployer_secret).await?;
+        let deployer_secret = self.admin.secret();
+        deploy_native_asset(&deployer_secret).await?;
 
         let key = format!("{max_deposit}-{asp_levels}-{pool_levels}-{policy_flags}");
         let _guard = acquire_deploy_lock(&key).await?;
@@ -117,7 +126,7 @@ impl LocalNetwork {
 
         let output = Command::new(root.join("deployments/scripts/deploy.sh"))
             .arg(STELLAR_CLI_NETWORK)
-            .args(["--deployer", deployer_secret])
+            .args(["--deployer", &deployer_secret])
             .args(["--asp-levels", &asp_levels.to_string()])
             .args(["--pool-levels", &pool_levels.to_string()])
             .args(["--max-deposit", &max_deposit.to_string()])
@@ -145,6 +154,71 @@ impl LocalNetwork {
         })?;
         std::fs::write(deploy_cache_path(&key), &output.stdout).context("write deploy cache")?;
         Ok(config)
+    }
+
+    pub async fn establish_trustline(&self, holder_secret: &str, code: &str) -> Result<()> {
+        let output = Command::new("stellar")
+            .args(["tx", "new", "change-trust"])
+            .args(["--source-account", holder_secret])
+            .args(["--line", &format!("{code}:{}", self.admin.address())])
+            .args(["--network", STELLAR_CLI_NETWORK])
+            .output()
+            .await
+            .context("run stellar tx new change-trust")?;
+        if !output.status.success() {
+            bail!(
+                "stellar tx new change-trust failed ({}):\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn send_classic_payment(
+        &self,
+        dest_addr: &str,
+        code: &str,
+        amount: u128,
+    ) -> Result<()> {
+        let output = Command::new("stellar")
+            .args(["tx", "new", "payment"])
+            .args(["--source-account", &self.admin.secret()])
+            .args(["--destination", dest_addr])
+            .args(["--asset", &format!("{code}:{}", self.admin.address())])
+            .args(["--amount", &amount.to_string()])
+            .args(["--network", STELLAR_CLI_NETWORK])
+            .output()
+            .await
+            .context("run stellar tx new payment")?;
+        if !output.status.success() {
+            bail!(
+                "stellar tx new payment failed ({}):\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn deploy_asset_sac(&self, code: &str) -> Result<String> {
+        let asset = format!("{code}:{}", self.admin.address());
+        let output = Command::new("stellar")
+            .args(["contract", "asset", "deploy", "--asset", &asset])
+            .args(["--source-account", &self.admin.secret()])
+            .args(["--network", STELLAR_CLI_NETWORK])
+            .output()
+            .await
+            .context("run stellar contract asset deploy")?;
+        if !output.status.success() {
+            bail!(
+                "stellar contract asset deploy --asset {asset} failed ({}):\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        extract_contract_id(&String::from_utf8_lossy(&output.stdout))
+            .context("parse contract id from stellar contract asset deploy output")
     }
 }
 
@@ -174,6 +248,14 @@ async fn deploy_native_asset(deployer_secret: &str) -> Result<()> {
     }
     std::fs::write(deploy_cache_path(KEY), b"done").context("write native asset deploy marker")?;
     Ok(())
+}
+
+fn extract_contract_id(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|tok| {
+            tok.len() == 56 && tok.starts_with('C') && tok.chars().all(char::is_alphanumeric)
+        })
+        .map(str::to_string)
 }
 
 fn deploy_lock_path(key: &str) -> PathBuf {
