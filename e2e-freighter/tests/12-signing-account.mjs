@@ -80,6 +80,15 @@ export async function run(helpers) {
   assert((await select.inputValue()) === signer, 'the signing account did not stay on account D');
   await page.locator('#withdraw-recipient').fill('');
   await page.locator('#withdraw-amount').fill('0.01');
+  await select.selectOption(owner);
+  for (const recipient of ['', owner]) {
+    await page.locator('#withdraw-recipient').fill(recipient);
+    const ownerDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
+    assert(/Reusing the same account for deposits and withdrawals/.test(ownerDialog.warning), 'withdrawal signed by and paid to the owner shows no account reuse warning');
+    assert(!/links the two accounts/.test(ownerDialog.warning), 'same-account warning incorrectly describes two accounts');
+  }
+  await page.locator('#withdraw-recipient').fill('');
+  await select.selectOption(signer);
   const withdrawDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
   assert(/Signed and paid by/.test(withdrawDialog.text), 'withdrawal confirmation does not name the signing account');
   assert(/links the two accounts/.test(withdrawDialog.warning), 'withdrawal to the owner signed by D shows no linking warning');

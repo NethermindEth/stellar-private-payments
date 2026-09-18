@@ -40,9 +40,19 @@ test('a withdrawal to the owner signed by another account links the two', () => 
   assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: SIGNER, recipient: OWNER }), true);
 });
 
-test('no link when the owner signs, or the recipient is someone else', () => {
-  assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: OWNER, recipient: OWNER }), false);
+test('a withdrawal warns when owner, signer, and recipient are the same account', () => {
+  assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: OWNER, recipient: OWNER }), true);
+});
+
+test('no owner-recipient warning when the recipient is someone else', () => {
+  assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: OWNER, recipient: STRANGER }), false);
   assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: SIGNER, recipient: STRANGER }), false);
+});
+
+test('incomplete withdrawal accounts do not trigger a warning', () => {
+  assert.equal(withdrawalLinksAccounts({ owner: null, signer: SIGNER, recipient: null }), false);
+  assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: null, recipient: OWNER }), false);
+  assert.equal(withdrawalLinksAccounts({ owner: OWNER, signer: OWNER, recipient: null }), false);
 });
 
 

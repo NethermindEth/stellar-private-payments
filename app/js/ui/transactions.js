@@ -113,6 +113,9 @@ function signerRows(signer, signerLabel = 'Signed and paid by') {
 
 // A public withdrawal names its recipient on-chain and is sent by the signer.
 function linkWarning(signer, owner) {
+    if (signer === owner) {
+        return `This withdrawal is signed by and pays your connected account (${Utils.shortAddress(owner)}). Reusing the same account for deposits and withdrawals can link your activity on-chain.`;
+    }
     return `This withdrawal is sent by ${Utils.shortAddress(signer)} and pays ${Utils.shortAddress(owner)}. Both addresses appear together on-chain, which links the two accounts.`;
 }
 

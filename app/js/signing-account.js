@@ -63,17 +63,18 @@ export function chosenSigner({ selected, owner, signers = [], active = null }) {
 }
 
 /**
- * Whether a withdrawal would publicly link the signing account to the owner.
+ * Whether a withdrawal to the owner needs a privacy warning.
  *
  * A withdrawal names its recipient on-chain and is sent by the signing account,
  * so paying the owner from another account puts both addresses in one
- * transaction.
+ * transaction. When the owner also signs, reusing the same account for deposits
+ * and withdrawals can link its activity on-chain.
  *
  * @param {{ owner: string | null, signer: string | null, recipient: string | null }} withdrawal
  * @returns {boolean}
  */
 export function withdrawalLinksAccounts({ owner, signer, recipient }) {
-    return Boolean(owner && signer && signer !== owner && recipient === owner);
+    return Boolean(owner && signer && recipient === owner);
 }
 
 const SIGNERS_KEY_PREFIX = 'poolstellar_signers:';
