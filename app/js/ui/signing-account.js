@@ -206,9 +206,14 @@ export const SigningAccount = {
      * The account chosen in the `scope` picker, made the session's signer.
      *
      * @param {string} scope - The picker's `data-signing-account` value.
+     * @param {{ ownerOnly?: boolean }} options - Deposits must be signed by the owner.
      * @returns {Promise<string>} The signing account; the owner unless another is picked.
      */
-    async forTransaction(scope) {
+    async forTransaction(scope, { ownerOnly = false } = {}) {
+        if (ownerOnly) {
+            App.state.wallet.signingAddress = App.state.wallet.address;
+            return App.state.wallet.address;
+        }
         const select = picker(scope)?.select;
         // Falling back to the owner here would sign as the account the user
         // just moved away from, without the confirmation naming it.

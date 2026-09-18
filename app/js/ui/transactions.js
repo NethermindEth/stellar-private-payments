@@ -386,7 +386,7 @@ export const Transactions = {
                 requireWallet();
                 const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
-                const signer = await SigningAccount.forTransaction('move');
+                const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
                 const pool = selectedPool();
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
@@ -556,6 +556,17 @@ export const Transactions = {
     },
 
     bindAdvancedTransact() {
+        const depositInput = document.getElementById('advanced-public-deposit');
+        const withdrawInput = document.getElementById('advanced-public-withdraw');
+        const updateSignerVisibility = () => {
+            const deposit = parseAmount(depositInput?.value);
+            const withdraw = parseAmount(withdrawInput?.value);
+            const isDeposit = deposit.ok && withdraw.ok && deposit.value > withdraw.value;
+            document.querySelector('[data-signing-account="advanced"]')?.classList.toggle('hidden', isDeposit);
+        };
+        depositInput?.addEventListener('input', updateSignerVisibility);
+        withdrawInput?.addEventListener('input', updateSignerVisibility);
+        updateSignerVisibility();
         document.getElementById('btn-advanced-transact')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             try {
@@ -570,11 +581,11 @@ export const Transactions = {
                     { allowNegative: false },
                 );
                 if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
-                const signer = await SigningAccount.forTransaction('advanced');
                 // Public deposit is value entering the transaction (input, positive);
                 // public withdraw is value leaving it (output, negative). The contract
                 // takes a single signed ext amount.
                 const publicAmount = deposit.value - withdraw.value;
+                const signer = await SigningAccount.forTransaction('advanced', { ownerOnly: publicAmount > 0n });
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
                 const pool = selectedPool();
@@ -633,6 +644,7 @@ export const Transactions = {
                     document.getElementById('advanced-public-deposit').value = '';
                     document.getElementById('advanced-public-withdraw').value = '';
                     document.getElementById('advanced-public-recipient').value = '';
+                    updateSignerVisibility();
                 }
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });

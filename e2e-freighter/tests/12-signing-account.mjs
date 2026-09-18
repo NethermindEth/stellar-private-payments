@@ -1,7 +1,7 @@
 // Another account signs and pays for the owner's notes. Freighter holds both
 // the owner (account C) and account D; D is chosen in the app's picker and
-// signs without Freighter switching to it. The deposit and the withdrawal
-// back to the owner are each checked on-chain to come from D.
+// signs without Freighter switching to it. Deposits must still come from C;
+// withdrawals are checked on-chain to come from D.
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
@@ -38,6 +38,7 @@ export async function run(helpers) {
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
+  await gotoMoveFlow(page, 'withdraw');
 
   const select = page.getByTestId('signing-account-select');
   const owner = await select.locator('option').first().getAttribute('value');
@@ -51,12 +52,12 @@ export async function run(helpers) {
   await page.getByTestId('signing-account-use').click();
   assert((await select.inputValue()) === signer, 'account D was not selected to sign and pay');
 
-  // Deposit paid by D into the owner's notes.
+  // A previous selection of D must not affect deposits: C signs and pays.
   await gotoMoveFlow(page, 'deposit');
+  assert(!(await select.isVisible()), 'deposit must not offer a signing account picker');
   await page.locator('#deposit-amount').fill('0.01');
   const depositDialog = await readConfirmation(page, { submitSelector: '#btn-deposit', title: 'Confirm deposit' });
-  assert(/Notes owned by/.test(depositDialog.text), 'deposit confirmation does not name the note owner');
-  assert(/Signed and deposit paid by/.test(depositDialog.text), 'deposit confirmation does not name the paying account');
+  assert(!/Signed and deposit paid by/.test(depositDialog.text), 'deposit confirmation offers a separate paying account');
 
   const initialSync = await waitForSyncedLedger(page);
   const noteReady = waitForNotesAfterIndexer(page, {
@@ -65,8 +66,8 @@ export async function run(helpers) {
   });
   const depositResult = await deposit(helpers, { logTag, amount: '0.01', rpcUrl });
   const depositSource = await transactionSourceAccount(depositResult.transactionHash, { rpcUrl });
-  assert(depositSource === signer, `deposit was sent by ${depositSource}, not account D`);
-  log.info('deposit', depositResult.transactionHash.slice(0, 8), 'signed and paid by account D');
+  assert(depositSource === owner, `deposit was sent by ${depositSource}, not the owner (account C)`);
+  log.info('deposit', depositResult.transactionHash.slice(0, 8), 'signed and paid by account C');
 
   await gotoAdvanced(page);
   const noteResult = await noteReady;
@@ -90,6 +91,6 @@ export async function run(helpers) {
   log.info(
     'OK: deposit', depositResult.transactionHash.slice(0, 8),
     'and withdrawal', withdrawResult.transactionHash.slice(0, 8),
-    'signed and paid by account D for the owner\'s notes',
+    'signed by C and D respectively for the owner\'s notes',
   );
 }
