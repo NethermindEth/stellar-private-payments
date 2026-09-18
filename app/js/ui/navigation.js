@@ -9,20 +9,20 @@ import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { accountSession } from '../account-session.js';
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
-let revealedAspSecret = null;
+let revealedMembershipLeaf = null;
 
-function clearRevealedAspSecret() {
-    revealedAspSecret = null;
-    const revealBtn = document.getElementById('settings-reveal-secret');
+function clearRevealedMembershipLeaf() {
+    revealedMembershipLeaf = null;
+    const revealBtn = document.getElementById('settings-reveal-leaf');
     if (revealBtn) revealBtn.dataset.revealed = 'false';
 }
 
-async function fetchAspSecretForUser() {
+async function fetchMembershipLeafForUser() {
     if (!App.state.keys.notePublicKey) {
         throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
     }
-    const secret = await client().account().aspSecret();
-    return secret != null ? String(secret) : null;
+    const leaf = await client().account().deriveAspUserLeaf();
+    return leaf != null ? String(leaf) : null;
 }
 
 function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
@@ -211,15 +211,15 @@ function renderSettingsDrawer() {
     document.getElementById('settings-note-key').textContent = App.state.keys.notePublicKey || '—';
     document.getElementById('settings-enc-key').textContent = App.state.keys.encryptionPublicKey || '—';
     const hasKeys = !!App.state.keys.notePublicKey;
-    const aspMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
-    const aspValue = document.getElementById('settings-asp-secret');
-    const revealBtn = document.getElementById('settings-reveal-secret');
+    const leafMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
+    const leafValue = document.getElementById('settings-membership-leaf');
+    const revealBtn = document.getElementById('settings-reveal-leaf');
     const revealed = revealBtn?.dataset.revealed === 'true';
-    aspValue.textContent = revealed ? (revealedAspSecret || '—') : aspMasked;
+    leafValue.textContent = revealed ? (revealedMembershipLeaf || '—') : leafMasked;
     revealBtn?.classList.toggle('hidden', !hasKeys);
     revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
     revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
-    if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
+    if (revealBtn) revealBtn.title = revealed ? 'Hide ASP membership leaf' : 'Reveal ASP membership leaf';
     document.getElementById('settings-registration-status').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
     const registerBtn = document.getElementById('settings-register-btn');
     if (registerBtn) {
@@ -298,25 +298,25 @@ export const Shell = {
                 Toast.show('Failed to download logs: ' + error.message, 'error');
             }
         });
-        document.getElementById('settings-reveal-secret')?.addEventListener('click', async (e) => {
+        document.getElementById('settings-reveal-leaf')?.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const revealing = btn.dataset.revealed !== 'true';
             if (revealing) {
                 const address = App.state.wallet.address;
                 if (!address) return;
                 try {
-                    revealedAspSecret = await fetchAspSecretForUser();
-                    if (!revealedAspSecret) {
-                        Toast.show('ASP secret not found', 'error');
+                    revealedMembershipLeaf = await fetchMembershipLeafForUser();
+                    if (!revealedMembershipLeaf) {
+                        Toast.show('ASP membership leaf not found', 'error');
                         return;
                     }
                     btn.dataset.revealed = 'true';
                 } catch (error) {
-                    Toast.show(error?.message || 'Failed to load ASP secret', 'error');
+                    Toast.show(error?.message || 'Failed to load ASP membership leaf', 'error');
                     return;
                 }
             } else {
-                clearRevealedAspSecret();
+                clearRevealedMembershipLeaf();
             }
             renderSettingsDrawer();
         });
@@ -325,11 +325,11 @@ export const Shell = {
             'settings-wallet-address': () => App.state.wallet.address,
             'settings-note-key': () => App.state.keys.notePublicKey,
             'settings-enc-key': () => App.state.keys.encryptionPublicKey,
-            'settings-asp-secret': async () => {
-                if (revealedAspSecret) return revealedAspSecret;
+            'settings-membership-leaf': async () => {
+                if (revealedMembershipLeaf) return revealedMembershipLeaf;
                 const address = App.state.wallet.address;
                 if (!address) return null;
-                return fetchAspSecretForUser();
+                return fetchMembershipLeafForUser();
             },
         };
         Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
@@ -499,7 +499,7 @@ export const Wallet = {
         this._stopWatcher = null;
         disposeClient();
         closeAppPool();
-        clearRevealedAspSecret();
+        clearRevealedMembershipLeaf();
         App.state.wallet = {
             connected: false,
             address: null,
@@ -526,7 +526,7 @@ export const Wallet = {
         App.state.ui.settingsOpen = false;
         document.getElementById('settings-drawer')?.classList.add('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.add('hidden');
-        clearRevealedAspSecret();
+        clearRevealedMembershipLeaf();
     },
 
     async saveSettings() {

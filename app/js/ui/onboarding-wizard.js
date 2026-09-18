@@ -452,24 +452,24 @@ export async function runOnboardingWizard({
         if (stepId === 'keys') {
             const secretWrap = document.getElementById('tpl-onboarding-keys').content.firstElementChild.cloneNode(true);
             const noteField = secretWrap.querySelector('[data-field="note"]');
-            const aspField = secretWrap.querySelector('[data-field="asp"]');
+            const leafField = secretWrap.querySelector('[data-field="leaf"]');
             noteField.textContent = state.keys?.pubKey || 'Not available';
-            aspField.textContent = state.keys?.pubKey ? HIDDEN_SECRET_PLACEHOLDER : 'Not available';
+            leafField.textContent = state.keys?.pubKey ? HIDDEN_SECRET_PLACEHOLDER : 'Not available';
             secretWrap.querySelector('[data-copy="note"]').addEventListener('click', () => {
                 if (state.keys?.pubKey) Utils.copyToClipboard(state.keys.pubKey);
             });
-            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', async () => {
+            secretWrap.querySelector('[data-copy="leaf"]').addEventListener('click', async () => {
                 try {
-                    const secret = await client().account().aspSecret();
-                    if (secret != null) Utils.copyToClipboard(String(secret));
+                    const leaf = await client().account().deriveAspUserLeaf();
+                    if (leaf != null) Utils.copyToClipboard(String(leaf));
                 } catch (error) {
-                    setError(error?.message || 'Failed to load ASP secret');
+                    setError(error?.message || 'Failed to load ASP membership leaf');
                 }
             });
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
-                title: 'Derive note keys and ASP secret',
-                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
+                title: 'Derive note keys and ASP membership leaf',
+                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys and ASP secret locally; your ASP membership leaf is computed from them. This does not move funds.',
                 aside: secretWrap,
             });
             renderContent(panel);
@@ -492,7 +492,7 @@ export async function runOnboardingWizard({
                                 encryptionKeypair: { publicKey: result.encryptionPublicKey },
                             };
                             noteField.textContent = result.notePublicKey;
-                            aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
+                            leafField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
