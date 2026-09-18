@@ -112,12 +112,9 @@ function signerRows(signer, signerLabel = 'Signed and paid by') {
     ];
 }
 
-// A public withdrawal names its recipient on-chain and is sent by the signer.
-function linkWarning(signer, owner) {
-    if (signer === owner) {
-        return `This withdrawal is signed by and pays your connected account (${Utils.shortAddress(owner)}). Reusing the same account for deposits and withdrawals can link your activity on-chain.`;
-    }
-    return `This withdrawal is sent by ${Utils.shortAddress(signer)} and pays ${Utils.shortAddress(owner)}. Both addresses appear together on-chain, which links the two accounts.`;
+// Returning funds to the deposit account is a privacy risk regardless of signer.
+function withdrawalRecipientWarning(owner) {
+    return `You are withdrawing to the same account used for deposits (${Utils.shortAddress(owner)}). This can link your withdrawal to your deposits. For better privacy, withdraw to an unrelated account.`;
 }
 
 // Builds a confirmation-dialog row with the number of transactions the action
@@ -523,8 +520,8 @@ export const Transactions = {
                 if (countRow) rows.push(countRow);
                 const owner = App.state.wallet.address;
                 const warning = [
+                    withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
                     signingPrivacyWarning({ owner, signer }),
-                    withdrawalLinksAccounts({ owner, signer, recipient }) ? linkWarning(signer, owner) : '',
                 ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm withdrawal',
@@ -610,8 +607,8 @@ export const Transactions = {
                 rows.push({ label: 'Transactions', value: '1 transaction' });
                 const owner = App.state.wallet.address;
                 const warning = [
+                    publicAmount < 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
                     publicAmount <= 0n ? signingPrivacyWarning({ owner, signer }) : '',
-                    withdraw.value > 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? linkWarning(signer, owner) : '',
                 ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm advanced transaction',

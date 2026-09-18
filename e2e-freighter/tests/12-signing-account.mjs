@@ -75,8 +75,7 @@ export async function run(helpers) {
   const noteResult = await noteReady;
   assert(noteResult.notes.matchingNotes.length > 0, 'no deposited note was ready after indexer progress');
 
-  // Withdrawal to the explicitly entered owner signed by D links the two
-  // accounts on-chain, and the confirmation says so.
+  // Withdrawal to the owner warns about deposit-account reuse with either signer.
   await gotoMoveFunds(page);
   await gotoMoveFlow(page, 'withdraw');
   assert((await select.inputValue()) === signer, 'the signing account did not stay on account D');
@@ -103,14 +102,16 @@ export async function run(helpers) {
   await page.locator('#withdraw-recipient-select').selectOption('__other__');
   await page.locator('#withdraw-recipient').fill(owner);
   const ownerDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
-  assert(/Reusing the same account for deposits and withdrawals/.test(ownerDialog.warning), 'withdrawal signed by and paid to the owner shows no account reuse warning');
-  assert(!/links the two accounts/.test(ownerDialog.warning), 'same-account warning incorrectly describes two accounts');
+  assert(ownerDialog.warning.startsWith('You are withdrawing to the same account used for deposits'), 'deposit-account reuse must be the first warning');
+  assert(/withdraw to an unrelated account/.test(ownerDialog.warning), 'owner withdrawal needs recipient privacy guidance');
+  assert(/Signing with your deposit account/.test(ownerDialog.warning), 'owner signing warning must still be included');
   await page.locator('#withdraw-recipient-select').selectOption(owner);
   await select.selectOption(signer);
   assert(!(await page.getByTestId('signing-account-warning').isVisible()), 'signer warning should clear when another account is selected');
   const withdrawDialog = await readConfirmation(page, { submitSelector: '#btn-withdraw', title: 'Confirm withdrawal' });
   assert(/Signed and paid by/.test(withdrawDialog.text), 'withdrawal confirmation does not name the signing account');
-  assert(/links the two accounts/.test(withdrawDialog.warning), 'withdrawal to the owner signed by D shows no linking warning');
+  assert(withdrawDialog.warning.startsWith('You are withdrawing to the same account used for deposits'), 'a different signer must still warn about the deposit recipient');
+  assert(/withdraw to an unrelated account/.test(withdrawDialog.warning), 'different-signer withdrawal needs recipient privacy guidance');
 
   const withdrawResult = await withdraw(helpers, { logTag, amount: '0.01', rpcUrl, progressTimeoutMs: 180_000 });
   const withdrawSource = await transactionSourceAccount(withdrawResult.transactionHash, { rpcUrl });
