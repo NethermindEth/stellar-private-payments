@@ -169,7 +169,6 @@ fn open_account(
     client
         .account(
             NoteOwnerAddress::new(owner.address.as_str()),
-            SignerAddress::new(signer.address.as_str()),
             alias_signer(config, &signer, network),
         )
         .map_err(|e| anyhow::anyhow!("open account session: {e}"))
@@ -187,6 +186,7 @@ fn alias_signer(
         rpc_url: network.rpc_url.clone(),
         network_passphrase: network.passphrase.clone(),
         config_dir: config.stellar_config_dir.clone(),
+        signer_address: SignerAddress::new(signer.address.as_str()),
     }) as Box<dyn Signer>)
 }
 

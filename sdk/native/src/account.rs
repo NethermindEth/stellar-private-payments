@@ -37,11 +37,11 @@ impl<S: Storage> Account<S> {
         storage: S,
         prover: Handle<dyn Prover>,
         user_address: NoteOwnerAddress,
-        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
         sync: SyncHandle,
         contract_config: ContractConfig,
     ) -> Self {
+        let signer_address = signer.signer_address();
         Self {
             rpc,
             storage,

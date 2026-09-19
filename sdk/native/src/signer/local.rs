@@ -36,14 +36,14 @@ impl LocalSigner {
     pub fn network_passphrase(&self) -> &str {
         &self.network_passphrase
     }
-
-    pub fn signer_address(&self) -> &SignerAddress {
-        &self.signer_address
-    }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Signer for LocalSigner {
+    fn signer_address(&self) -> SignerAddress {
+        self.signer_address.clone()
+    }
+
     async fn sign_transaction(
         &self,
         prepared: &PreparedTransaction,

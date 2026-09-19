@@ -50,11 +50,6 @@ impl WalletSigner {
         })
     }
 
-    /// The account this signer asks the wallet to sign with.
-    pub(crate) fn signer_address(&self) -> &SignerAddress {
-        &self.signer_address
-    }
-
     pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
         self.call("signMessage", &[message.into()]).await
     }
@@ -247,6 +242,11 @@ fn normalize_sign_result(
 
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
+    /// The account this signer asks the wallet to sign with.
+    fn signer_address(&self) -> SignerAddress {
+        self.signer_address.clone()
+    }
+
     async fn sign_transaction(
         &self,
         prepared: &PreparedTransaction,
