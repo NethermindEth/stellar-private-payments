@@ -35,10 +35,8 @@
 //!     deployment,
 //!     None,
 //! )?;
-//! // Note owner first, then the signing account.
 //! let account = client.account(
 //!     NoteOwnerAddress::new("G..."),
-//!     SignerAddress::new("G..."),
 //!     signer,
 //! )?;
 //! let pool = account.pool("CA2TZ...")?;

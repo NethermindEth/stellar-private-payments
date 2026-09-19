@@ -29,19 +29,16 @@ pub struct Account<S: Storage> {
 }
 
 impl<S: Storage> Account<S> {
-    // Bundling these into a struct would trade the lint for an indirection at
-    // the only two call sites, both of which name every field explicitly.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rpc: RpcClient,
         storage: S,
         prover: Handle<dyn Prover>,
         user_address: NoteOwnerAddress,
-        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
         sync: SyncHandle,
         contract_config: ContractConfig,
     ) -> Self {
+        let signer_address = signer.signer_address();
         Self {
             rpc,
             storage,

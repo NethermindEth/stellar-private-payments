@@ -233,11 +233,7 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
         SignerAddress::new(user_address.as_str()),
     )?;
     client
-        .account(
-            NoteOwnerAddress::new(user_address.as_str()),
-            SignerAddress::new(user_address.as_str()),
-            signer,
-        )
+        .account(NoteOwnerAddress::new(user_address.as_str()), signer)
         .map_err(|e| format!("open account session: {e}"))
 }
 

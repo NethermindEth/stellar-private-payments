@@ -11,7 +11,7 @@ mod pool;
 use std::{rc::Rc, str::FromStr};
 
 use stellar_private_payments::{
-    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
+    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle, Signer,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
@@ -242,7 +242,7 @@ impl Client {
                 // The address comparison only spares a pointless wallet prompt;
                 // the signature check below is what actually binds the keys to
                 // the owner, whatever account the wallet chose to sign with.
-                ensure_signer_is_note_owner(&user_address, wallet_signer.signer_address())
+                ensure_signer_is_note_owner(&user_address, &wallet_signer.signer_address())
                     .map_err(pool_err)?;
                 let message =
                     stellar_private_payments::zk::encryption::KEY_DERIVATION_MESSAGE.to_string();
@@ -417,13 +417,10 @@ impl Client {
         wallet_signer: WalletSigner,
         user_address: String,
     ) -> Result<NativeAccount<StorageBridge>, JsError> {
-        // Read off the signer rather than AccountOptions: this is the address
-        // the wallet will actually be asked to sign with.
-        let signer_address = wallet_signer.signer_address().clone();
-        let signer: Handle<dyn stellar_private_payments::Signer> =
-            Handle::from_box(Box::new(wallet_signer) as Box<dyn stellar_private_payments::Signer>);
+        let signer: Handle<dyn Signer> =
+            Handle::from_box(Box::new(wallet_signer) as Box<dyn Signer>);
         self.inner
-            .account(NoteOwnerAddress::new(user_address), signer_address, signer)
+            .account(NoteOwnerAddress::new(user_address), signer)
             .map_err(pool_err)
     }
 

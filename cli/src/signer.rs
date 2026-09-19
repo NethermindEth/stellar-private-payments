@@ -10,7 +10,7 @@ use anyhow::Context;
 use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
-    types::SignedTransaction,
+    types::{SignedTransaction, SignerAddress},
 };
 
 use crate::stellar_cli;
@@ -21,6 +21,7 @@ pub struct AliasSigner {
     pub rpc_url: String,
     pub network_passphrase: String,
     pub config_dir: Option<PathBuf>,
+    pub signer_address: SignerAddress,
 }
 
 impl AliasSigner {
@@ -44,6 +45,10 @@ impl AliasSigner {
 
 #[async_trait::async_trait(?Send)]
 impl Signer for AliasSigner {
+    fn signer_address(&self) -> SignerAddress {
+        self.signer_address.clone()
+    }
+
     async fn sign_transaction(
         &self,
         prepared: &PreparedTransaction,

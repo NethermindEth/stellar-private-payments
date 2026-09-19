@@ -6,7 +6,7 @@ Native Rust client for privacy pool deposits, transfers, withdrawals, and local 
 
 ```
 Client (deployment: sync, operational_feed, recipient_lookup)
-  └─ account(user_address, signer_address, signer) → Account (portfolio, user_notes, user_public_keys, is_registered, register_public_keys, sync, pool)
+  └─ account(user_address, signer) → Account (portfolio, user_notes, user_public_keys, is_registered, register_public_keys, sync, pool)
        └─ pool(id) → PrivatePool (deposit / transfer / withdraw / balance / notes)
 ```
 
@@ -49,12 +49,7 @@ let signer = Handle::from_box(
         as Box<dyn stellar_private_payments::Signer>,
 );
 
-// Note owner first, then the signing account.
-let account = client.account(
-    NoteOwnerAddress::new("G..."),
-    SignerAddress::new("G..."),
-    signer,
-)?;
+let account = client.account(NoteOwnerAddress::new("G..."), signer)?;
 let pool = account.pool("C...")?;
 
 pool.deposit(10_000_000u128.into()).await?;
@@ -156,14 +151,10 @@ For CLI and synchronous hosts, use `stellar_private_payments::blocking`:
 
 ```rust
 use stellar_private_payments::blocking::{Client, Account};
-use stellar_private_payments::types::{NoteOwnerAddress, SignerAddress};
+use stellar_private_payments::types::NoteOwnerAddress;
 
 let client = Client::init(rpc_url, storage, prover, deployment, None)?;
-let account = client.account(
-    NoteOwnerAddress::new("G..."),
-    SignerAddress::new("G..."),
-    signer,
-)?;
+let account = client.account(NoteOwnerAddress::new("G..."), signer)?;
 let portfolio = account.portfolio()?;
 ```
 

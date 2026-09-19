@@ -96,11 +96,7 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     {
         let _ = client.background_sync()?;
     }
-    let account = client.account(
-        NoteOwnerAddress::new(USER_ADDRESS),
-        SignerAddress::new(USER_ADDRESS),
-        test_signer()?,
-    )?;
+    let account = client.account(NoteOwnerAddress::new(USER_ADDRESS), test_signer()?)?;
 
     Ok((client, account))
 }
