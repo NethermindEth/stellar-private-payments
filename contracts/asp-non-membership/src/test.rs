@@ -1139,23 +1139,37 @@ fn test_delete_leaf_extends_rebuilt_nodes() {
     for key in 1u32..=3 {
         client.insert_leaf(&U256::from_u32(&env, key), &U256::from_u32(&env, 10u32));
     }
+    decay_below_threshold(&env);
 
     client.delete_leaf(&U256::from_u32(&env, 2u32));
 
+    assert_eq!(entry_ttl(&env, &contract_id, &DataKey::Root), EXTEND_TO);
+
+    // The delete rebuilds the root and reads the sibling subtree it keeps, so
+    // both internal nodes are extended. The two leaves under that subtree are
+    // never read, so they keep their decayed TTL.
     let nodes = reachable_nodes(&env, &contract_id);
     assert_eq!(nodes.len(), 4, "a root, one internal node, and two leaves");
     for hash in nodes.iter() {
         let key = DataKey::Node(hash);
-        assert_eq!(
-            entry_ttl(&env, &contract_id, &key),
-            EXTEND_TO,
-            "{key:?} should have been extended"
-        );
+        let node: Vec<U256> = env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&key)
+                .expect("a reachable node is still stored")
+        });
+        let ttl = entry_ttl(&env, &contract_id, &key);
+        if node.len() == 2 {
+            assert_eq!(ttl, EXTEND_TO, "{key:?} should have been extended");
+        } else {
+            assert_ne!(ttl, EXTEND_TO, "{key:?} was not read by the delete");
+        }
     }
 }
 
-/// A blocklist pool reads this root cross-contract on every `transact`, so it
-/// must come off the seven-day fuse with the tree it heads.
+/// A blocklist pool reads this root cross-contract on every `transact`, so the
+/// root is extended with the tree it heads rather than lapsing at the
+/// network-minimum TTL.
 #[test]
 fn test_get_root_extends_root_and_instance() {
     let env = test_env();

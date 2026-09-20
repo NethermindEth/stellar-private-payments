@@ -223,11 +223,11 @@ impl MerkleTreeWithHistory {
         loop {
             // roots[i]
             let root_key = MerkleDataKey::Root(i);
-            if let Some(r) = storage.get::<MerkleDataKey, U256>(&root_key)
-                && &r == root
-            {
+            if let Some(r) = storage.get::<MerkleDataKey, U256>(&root_key) {
                 bump_entry(env, &root_key);
-                return Ok(true);
+                if &r == root {
+                    return Ok(true);
+                }
             }
             i = i.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
             if i == current_root_index {
@@ -257,9 +257,10 @@ impl MerkleTreeWithHistory {
         bump_entry(env, &MerkleDataKey::CurrentRootIndex);
 
         let root_key = MerkleDataKey::Root(current_root_index);
-        let root = storage.get(&root_key).ok_or(Error::NotInitialized)?;
-        bump_entry(env, &root_key);
-        Ok(root)
+        storage
+            .get(&root_key)
+            .inspect(|_| bump_entry(env, &root_key))
+            .ok_or(Error::NotInitialized)
     }
 
     /// Hash two U256 values using Poseidon2 compression

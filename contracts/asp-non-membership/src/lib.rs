@@ -565,6 +565,7 @@ impl ASPNonMembership {
         if let Some(last_sibling) = find_result.siblings.last() {
             let node_key = DataKey::Node(last_sibling.clone());
             if let Some(node_data) = store.get::<DataKey, Vec<U256>>(&node_key) {
+                bump_entry(&env, &node_key);
                 // Check if it's a leaf node (3 elements: [1, key, value])
                 if node_data.len() == 3 && node_data.get(0).ok_or(Error::KeyNotFound)? == one {
                     // Last sibling is a leaf - promote it

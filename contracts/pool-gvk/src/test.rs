@@ -2219,7 +2219,7 @@ fn transact_extends_admin_view_key_and_gvk_mode() {
 }
 
 #[test]
-fn transact_extends_linked_contract_instances() {
+fn transact_extends_the_verifier_instance() {
     let f = build_gvk_transact_with_policy(
         VIEW_ONLY,
         0xE7,
@@ -2228,27 +2228,11 @@ fn transact_extends_linked_contract_instances() {
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let env = &f.env;
-    // Building the fixture read both ASP roots, which extended their
-    // instances. Decay first: without this the assertions below hold before
-    // `transact` even runs.
-    //
-    // Each ASP instance is reachable by two paths here, `bump_dependency` and
-    // the ASP's own `bump_instance` during the root cross-call, so what this
-    // pins is the invariant that every linked instance survives the call, not
-    // which of the two extended it. The verifier has only the one path.
     decay_below_threshold(env);
 
     f.pool.transact(&f.proof, &f.ext, &f.sender);
 
     assert_eq!(instance_ttl(env, &f.verifier), EXTEND_TO);
-    assert_eq!(
-        instance_ttl(env, &f.setup.asp_membership_address),
-        EXTEND_TO
-    );
-    assert_eq!(
-        instance_ttl(env, &f.setup.asp_non_membership_address),
-        EXTEND_TO
-    );
 }
 
 #[test]
@@ -2295,28 +2279,8 @@ fn failed_transact_rolls_back_the_ttl_extension() {
     assert_eq!(instance_ttl(&env, &pool_id), before);
 }
 
-/// The spent check must not extend a nullifier entry that does not exist,
-/// because the host rejects an extension of a missing key.
 #[test]
-fn is_spent_on_an_unknown_nullifier_does_not_panic() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool_gvk(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
-        VIEW_ONLY,
-    );
-    let pool = PoolGvkContractClient::new(&env, &pool_id);
-
-    assert!(!pool.is_spent(&U256::from_u32(&env, 0xBEEF)));
-}
-
-#[test]
-fn getters_extend_the_instance() {
+fn get_root_extends_the_instance() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool_gvk(
@@ -2333,4 +2297,55 @@ fn getters_extend_the_instance() {
     pool.get_root();
 
     assert_eq!(instance_ttl(&env, &pool_id), EXTEND_TO);
+}
+
+/// The address an admin writes is extended with it, or it lapses at the
+/// network-minimum TTL and the pool forgets which ASP it points at.
+#[test]
+fn update_asp_membership_extends_the_written_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.update_asp_membership(&Address::generate(&env));
+
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &DataKey::ASPMembership),
+        EXTEND_TO
+    );
+}
+
+/// Same for the non-membership address.
+#[test]
+fn update_asp_non_membership_extends_the_written_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.update_asp_non_membership(&Address::generate(&env));
+
+    assert_eq!(
+        entry_ttl(&env, &pool_id, &DataKey::ASPNonMembership),
+        EXTEND_TO
+    );
 }

@@ -2,8 +2,9 @@
 //!
 //! Every ledger entry carries a time to live (TTL) measured in ledgers, and the
 //! network archives an entry whose TTL reaches zero. Writing an entry does not
-//! refresh its TTL, so a persistent entry created with the network minimum is
-//! archived seven days later unless something extends it. Each helper below
+//! refresh its TTL, so a persistent entry is archived once the network's
+//! minimum persistent TTL runs out (seven days on testnet, 120 on mainnet)
+//! unless something extends it. Each helper below
 //! extends an entry to [`EXTEND_TO`] once fewer than [`THRESHOLD`] ledgers
 //! remain, which keeps the state a contract touches alive for as long
 //! as the contract keeps being called.
@@ -17,13 +18,12 @@ use soroban_sdk::{Address, Env, IntoVal, Val};
 pub const DAY_IN_LEDGERS: u32 = 17_280;
 
 /// Remaining lifetime below which an extension takes effect.
-pub const THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
+pub const THRESHOLD: u32 = 7 * DAY_IN_LEDGERS;
 
-/// Lifetime that an extension targets, equal to the network maximum entry TTL.
+/// Lifetime that an extension targets.
 ///
-/// The host clamps an extension to the network maximum, so this value is safe
-/// on a network whose maximum is lower.
-pub const EXTEND_TO: u32 = 180 * DAY_IN_LEDGERS;
+/// A 30-day target bounds the rent that any one caller pays for an extension.
+pub const EXTEND_TO: u32 = 30 * DAY_IN_LEDGERS;
 
 /// Extends the TTL of the calling contract's instance and code entries.
 pub fn bump_instance(env: &Env) {
