@@ -390,26 +390,54 @@ fn registry_row() -> Row {
     measure(&env, "public-key-registry register, first registration")
 }
 
-/// Entry and write counts every row must report.
+/// What every row must report.
 ///
 /// A change to what a contract stores updates these in the same commit.
-const EXPECTED: &[(&str, u32, u32)] = &[
-    ("pool transact, deposit, blocklist, fresh tree", 11, 6),
-    ("pool transact, transfer, blocklist, fresh tree", 8, 4),
-    ("pool transact, withdrawal, blocklist, fresh tree", 11, 6),
-    ("pool transact, transfer, root one transaction old", 8, 4),
-    (
-        "pool transact, transfer, allowlist and blocklist, fresh tree",
-        9,
-        4,
-    ),
-    ("pool get_root", 2, 0),
-    ("pool-gvk transact, transfer, view-only", 8, 4),
-    ("asp-membership insert_leaf, first leaf", 6, 4),
-    ("asp-non-membership insert_leaf, ninth key", 13, 10),
-    ("asp-non-membership delete_leaf, one of nine", 13, 7),
-    ("public-key-registry register, first registration", 4, 2),
-];
+///
+/// Entries and writes count the footprint; the write bytes and the rent fields
+/// are what the entry and rent fees are charged on, so packing several small
+/// entries into one large one shows up here rather than only in the counts.
+struct Pinned {
+    path: &'static str,
+    entries: u32,
+    writes: u32,
+    write_bytes: u32,
+    rent_bumps: u32,
+    rent_ledger_bytes: i64,
+}
+
+/// Builds [`EXPECTED`] from a row per line.
+///
+/// Each row reads `path => entries, writes, write bytes, rent bumps, rent
+/// ledger-bytes`, the order the table prints them in. The macro keeps the
+/// table legible: a call per row is wrapped over six lines by rustfmt.
+macro_rules! expected {
+    ($($path:literal => $entries:literal, $writes:literal, $write_bytes:literal,
+       $rent_bumps:literal, $rent_ledger_bytes:literal;)*) => {
+        &[$(Pinned {
+            path: $path,
+            entries: $entries,
+            writes: $writes,
+            write_bytes: $write_bytes,
+            rent_bumps: $rent_bumps,
+            rent_ledger_bytes: $rent_ledger_bytes,
+        }),*]
+    };
+}
+
+const EXPECTED: &[Pinned] = expected! {
+    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
+    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_972_009;
+    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
+    "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 10, 4, 4444, 4, 530_972_009;
+    "pool get_root" => 2, 0, 0, 0, 0;
+    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_972_185;
+    "asp-membership insert_leaf, first leaf" => 6, 4, 840, 0, 0;
+    "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
+    "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
+    "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
+};
 
 /// Checks every measured row against [`EXPECTED`], in both directions.
 ///
@@ -421,27 +449,40 @@ fn assert_pinned(rows: &[Row]) {
     let mut mismatches = std::vec::Vec::new();
 
     // A path pinned twice would let one row satisfy both entries.
-    for (i, (path, ..)) in EXPECTED.iter().enumerate() {
-        if EXPECTED[..i].iter().any(|(seen, ..)| seen == path) {
-            mismatches.push(format!("{path}: pinned twice"));
+    for (i, pinned) in EXPECTED.iter().enumerate() {
+        if EXPECTED[..i].iter().any(|seen| seen.path == pinned.path) {
+            mismatches.push(format!("{}: pinned twice", pinned.path));
         }
     }
 
-    for (path, entries, writes) in EXPECTED {
+    for pinned in EXPECTED {
+        let path = pinned.path;
         let measured = rows
             .iter()
-            .filter(|row| row.path == *path)
+            .filter(|row| row.path == path)
             .collect::<std::vec::Vec<_>>();
         match measured.as_slice() {
             [] => mismatches.push(format!("{path}: not measured")),
             [row] => {
-                let (got_entries, got_writes) = (
-                    row.resources.memory_read_entries,
-                    row.resources.write_entries,
+                let r = &row.resources;
+                let got = (
+                    r.memory_read_entries,
+                    r.write_entries,
+                    r.write_bytes,
+                    r.persistent_entry_rent_bumps,
+                    r.persistent_rent_ledger_bytes,
                 );
-                if (got_entries, got_writes) != (*entries, *writes) {
+                let want = (
+                    pinned.entries,
+                    pinned.writes,
+                    pinned.write_bytes,
+                    pinned.rent_bumps,
+                    pinned.rent_ledger_bytes,
+                );
+                if got != want {
                     mismatches.push(format!(
-                        "{path}: pinned {entries} entries and {writes} writes, measured {got_entries} and {got_writes}"
+                        "{path}: pinned {want:?}, measured {got:?} \
+                         (entries, writes, write bytes, rent bumps, rent ledger-bytes)"
                     ));
                 }
             }
@@ -450,7 +491,7 @@ fn assert_pinned(rows: &[Row]) {
     }
 
     for row in rows {
-        if !EXPECTED.iter().any(|(path, ..)| *path == row.path) {
+        if !EXPECTED.iter().any(|pinned| pinned.path == row.path) {
             mismatches.push(format!("{}: no pinned expectation", row.path));
         }
     }
@@ -543,7 +584,7 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (9, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (10, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

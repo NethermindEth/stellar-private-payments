@@ -2364,10 +2364,14 @@ dependencies = [
  "pool-core",
  "pool-gvk",
  "public-key-registry",
+ "serde_json",
  "soroban-env-host",
  "soroban-sdk",
  "soroban-utils",
  "stellar-private-payments",
+ "stellar-xdr",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]

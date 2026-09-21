@@ -30,5 +30,12 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true, features = ["testutils"] }
 stellar-private-payments = { workspace = true, features = ["parallel"] }
 
+[dev-dependencies]
+# Serving a pool's real ledger entries back to the SDK's reader.
+serde_json = { workspace = true, features = ["std"] }
+stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock = { workspace = true }
+
 [lints]
 workspace = true

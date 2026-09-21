@@ -431,6 +431,9 @@ impl PoolContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
+        // The tree entry is rewritten below; keep the configuration it
+        // reads on the same lifetime.
+        pool_core::extend_instance(env);
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);

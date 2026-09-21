@@ -413,9 +413,11 @@ pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContrac
 /// each one keyed by the symbol its ledger key names.
 ///
 /// A contract addresses a unit `DataKey` variant as a one-element vector
-/// holding the variant's symbol, so an entry under any other key shape was
-/// written by something else and is skipped. An instance with no storage map
-/// yields nothing.
+/// holding the variant's symbol. An instance with no storage map yields
+/// nothing.
+///
+/// Entries under other key shapes are valid Soroban instance-storage keys,
+/// but they do not name unit `DataKey` variants and are therefore skipped.
 pub(crate) fn instance_storage_entries(
     instance: &xdr::ScContractInstance,
 ) -> impl Iterator<Item = (String, xdr::ScVal)> + '_ {
@@ -599,12 +601,6 @@ mod tests {
                         key: key("PolicyFlags"),
                         val: xdr::ScVal::U32(2),
                     },
-                    // A bare symbol key is not a DataKey variant, so it is
-                    // skipped rather than flattened.
-                    xdr::ScMapEntry {
-                        key: xdr::ScVal::Symbol(sym("METADATA")),
-                        val: xdr::ScVal::Void,
-                    },
                 ]
                 .try_into()
                 .expect("storage map"),
@@ -616,6 +612,36 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries.get("Levels"), Some(&xdr::ScVal::U32(20)));
         assert_eq!(entries.get("PolicyFlags"), Some(&xdr::ScVal::U32(2)));
+    }
+
+    /// Other key shapes are legitimate instance-storage keys, but they cannot
+    /// be flattened as unit `DataKey` variants and must not break the read.
+    #[test]
+    fn instance_storage_entries_skips_keys_that_are_not_unit_data_key_variants() {
+        let sym = |s: &str| xdr::ScSymbol(s.try_into().expect("symbol"));
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: Some(xdr::ScMap(
+                vec![
+                    xdr::ScMapEntry {
+                        key: xdr::ScVal::Symbol(sym("METADATA")),
+                        val: xdr::ScVal::Void,
+                    },
+                    xdr::ScMapEntry {
+                        key: xdr::ScVal::Vec(Some(
+                            vec![xdr::ScVal::Symbol(sym("Balance")), xdr::ScVal::U32(7)]
+                                .try_into()
+                                .expect("key vector"),
+                        )),
+                        val: xdr::ScVal::I128(xdr::Int128Parts { hi: 0, lo: 10 }),
+                    },
+                ]
+                .try_into()
+                .expect("storage map"),
+            )),
+        };
+
+        assert_eq!(instance_storage_entries(&instance).count(), 0);
     }
 
     #[test]

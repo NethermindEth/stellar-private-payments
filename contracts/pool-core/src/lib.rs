@@ -15,6 +15,7 @@
 pub mod amounts;
 pub mod clients;
 pub mod ext_data;
+pub mod instance;
 pub mod merkle_with_history;
 pub mod policy;
 
@@ -23,3 +24,4 @@ pub use clients::{
     CircomGroth16VerifierClient, CircomGroth16VerifierInterface,
 };
 pub use ext_data::{ExtData, hash_ext_data};
+pub use instance::{INSTANCE_LIFETIME_LEDGERS, extend_instance};

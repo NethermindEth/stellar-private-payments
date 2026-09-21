@@ -4,6 +4,7 @@
 //! proof generation through on-chain verification.
 
 mod coherence;
+mod contract_read_path;
 mod costs;
 mod e2e_pool_2_in_2_out;
 mod e2e_pool_2tx_plan;
