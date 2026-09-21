@@ -74,6 +74,10 @@
     color: #e2e8f0;
   }
 
+  select option[data-privacy-warning="true"] {
+    color: #f87171;
+  }
+
   body {
     background:
       radial-gradient(circle at top, rgba(63, 138, 255, 0.12), transparent 32%),

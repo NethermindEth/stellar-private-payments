@@ -294,7 +294,8 @@ a tight loop.
 | `tests/08-disclose-lifecycle.mjs` | Verify 1/2/3/4-note and spent-note receipts, withdraw again, then re-verify each receipt against current chain state. Requires a locally served app. |
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
-| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, and the pool deposit cap, then complete a successful recovery deposit. |
+| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, the pool deposit cap, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
+| `tests/12-signing-account.mjs` | Pick account D to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw it back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and both transactions are sent by D on-chain. |
 
 ## CI
 

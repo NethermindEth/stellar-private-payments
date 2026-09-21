@@ -186,12 +186,29 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | API | Role |
 |-----|------|
 | `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
+| `zk::encryption::sep53_payload(message)` | UTF-8 message prefixed with `Stellar Signed Message:\n`; hash with SHA-256 before Ed25519 signing |
+| `zk::encryption::verify_owner_signature(owner_address, message, &signature)` | Strictly verify a 64-byte SEP-53 signature against the note owner's Stellar `G...` public key |
 | `Account::user_public_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
 | `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |
 | `crypto::derive_asp_user_leaf(note, blinding)` | Same leaf from explicit inputs (no session) |
 
 Private note/encryption keys stay in storage and are not exposed through the SDK.
+
+Custom native onboarding code must call `verify_owner_signature` with
+`KEY_DERIVATION_MESSAGE` before deriving and saving keys. The low-level
+`derive_encryption_and_note_keypairs` and `derive_membership_blinding` helpers
+do not take an owner address and do not verify ownership themselves. The CLI's
+`spp onboard` command performs this check before creating missing privacy keys;
+the browser SDK does so in `Client.account()`.
+
+Verification requires the owner's own Ed25519 signature over
+`SHA256(sep53_payload(KEY_DERIVATION_MESSAGE))`. Another account's signature
+(including a delegated transaction signer's), a signature over a different
+message, an invalid owner address, or a signature of the wrong length fails.
+Strict verification also refuses small-order owner keys or signature `R`
+points. This check does not change the key derivation algorithm or revalidate
+keys already in storage.
 
 ## Logging & Diagnostics
 

@@ -118,9 +118,14 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
 What `spp onboard` does:
 
 1. Accepts the disclaimer.
-2. Signs the key-derivation message via `stellar keys` (the secret never enters
-   the `spp` process).
-3. Derives and stores the privacy note/encryption keys and ASP blinding.
+2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v1]`
+   via `stellar message sign` using the account alias (the Stellar secret key
+   never enters the `spp` process).
+3. Strictly verifies the SEP-53 signature against the account's own public key,
+   then derives and stores the privacy note/encryption keys and ASP blinding.
+   An invalid signature or one made by another account aborts onboarding
+   without saving privacy keys. Existing keys skip signing, verification, and
+   derivation.
 4. Optionally registers the public keys on-chain so other accounts can transfer
    to this address without knowing the raw keys.
 
@@ -385,18 +390,11 @@ curl -s -X POST https://soroban-testnet.stellar.org \
 
 If `deploymentLedger` is below `oldestLedger`, the deployment has expired.
 
-Past the cliff the examples exit 0 with a retention-gap note and a remedy list.
-Two distinct underlying errors produce it — with no bootnode configured the SDK
-reports `RPC sync gap: main RPC lacks history ...`, and with one configured that
-cannot serve the range you get:
-
-```text
-bootnode indexer: jsonrpc error: -32602 - unsupported filters (requested startLedger=..., cursor=<none>)
-```
-
-Both are infrastructure limits, not example-code faults. **The graceful message
-is not a workaround** — the examples still cannot sync, so they cannot show you
-real state. To actually run them you need one of:
+Past the cliff, the SDK returns `Error::RetentionGap` — with no bootnode
+configured, or with one configured that also can't close the gap — and the
+examples exit 0 with a note and a remedy list. **The graceful message is not a
+workaround** — the examples still cannot sync, so they cannot show you real
+state. To actually run them you need one of:
 
 - A bootnode holding the missing range — see [Local bootnode](#local-bootnode) —
   pointed at by both `spp onboard --bootnode-url` and `SPP_BOOTNODE_URL`.
@@ -408,14 +406,8 @@ Retrying later does **not** help: the window moves forward, not back.
 An already-synced wallet is unaffected, because it syncs incrementally and never
 needs the missing history. This is specifically a first-run problem.
 
-> **Implementation note for maintainers:** the examples classify this condition
-> by matching substrings in the error text (`sync gap`, `retention`,
-> `unsupported filters`, `bootnode indexer`) in
-> `common::is_retention_gap_error`. That is deliberate, not an oversight. The
-> robust alternative is a dedicated error variant in the SDK, but
-> `stellar-private-payments` is consumed by `cli`, `sdk/tests`, and `sdk/web`, so the typed-error change
-> was kept out of scope here. If you add a retention-gap error type to the SDK,
-> switch these detectors to match on it.
+> **Implementation note for maintainers:** `common::is_retention_gap_error`
+> matches on `Error::RetentionGap(_)`.
 
 ### Insufficient funds
 

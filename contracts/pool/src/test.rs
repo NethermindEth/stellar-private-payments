@@ -1,5 +1,5 @@
 use crate::{
-    Error, ExtData, PoolContract, PoolContractClient, Proof,
+    Error, ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data,
     merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
     policy,
 };
@@ -11,7 +11,6 @@ use soroban_sdk::{
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
     token::{Client as TokenClient, StellarAssetClient},
-    xdr::ToXdr,
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
 
@@ -32,14 +31,11 @@ fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32) -> ExtData {
     }
 }
 
-fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
+/// Computes the hash `internal_transact` checks the proof against, by calling
+/// the real `hash_ext_data` inside `pool`'s contract frame rather than
+/// reimplementing the encoding.
+fn compute_ext_hash(env: &Env, pool: &Address, token: &Address, ext: &ExtData) -> BytesN<32> {
+    env.as_contract(pool, || hash_ext_data(env, ext, token))
 }
 
 fn register_mock_token(env: &Env) -> Address {
@@ -125,6 +121,22 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     }
 }
 
+/// Same admin, verifier and ASP contracts as `base`, but a different token.
+fn setup_with_token(env: &Env, base: &TestSetup, token: Address) -> TestSetup {
+    TestSetup {
+        admin: base.admin.clone(),
+        token,
+        verifier: base.verifier.clone(),
+        asp_membership_address: base.asp_membership_address.clone(),
+        asp_non_membership_address: base.asp_non_membership_address.clone(),
+        asp_membership_client: ASPMembershipClient::new(env, &base.asp_membership_address),
+        asp_non_membership_client: ASPNonMembershipClient::new(
+            env,
+            &base.asp_non_membership_address,
+        ),
+    }
+}
+
 fn register_pool(
     env: &Env,
     setup: &TestSetup,
@@ -158,13 +170,14 @@ fn asp_roots(setup: &TestSetup) -> (U256, U256) {
 fn mk_transact_proof(
     env: &Env,
     pool: &PoolContractClient,
+    token: &Address,
     asp_membership_root: U256,
     asp_non_membership_root: U256,
     nullifier: u32,
 ) -> (Proof, ExtData) {
     let root = pool.get_root();
     let ext = mk_ext_data(env, Address::generate(env), 0);
-    let ext_hash = compute_ext_hash(env, &ext);
+    let ext_hash = compute_ext_hash(env, &pool.address, token, &ext);
     let proof = Proof {
         proof: mk_mock_groth16_proof(env),
         root,
@@ -214,6 +227,7 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -251,6 +265,7 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -666,7 +681,7 @@ fn transact_rejects_bad_public_amount() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     // Get actual roots
     let asp_membership_root = setup.asp_membership_client.get_root();
@@ -711,7 +726,7 @@ fn transact_rejects_non_canonical_nullifier() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -925,7 +940,14 @@ fn transact_errors_when_policy_flags_unset() {
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB8);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xB8,
+    );
 
     assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
@@ -953,7 +975,7 @@ fn transact_rejects_non_canonical_output_commitment() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -1000,7 +1022,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -1154,7 +1176,14 @@ fn transact_rejects_replay_of_spent_nullifier() {
     let nullifier = 0xC0FFEE;
     mark_nullifier_spent(&env, &pool_id, &U256::from_u32(&env, nullifier));
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+    );
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("spent nullifier must be refused");
@@ -1173,7 +1202,14 @@ fn transact_rejects_deposit_above_maximum() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD1);
+    let (proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD1,
+    );
     // try_from rather than `as`: the boundary is the whole point of this test,
     // so a value that did not fit i32 must fail loudly instead of wrapping
     // into a negative deposit.
@@ -1199,7 +1235,14 @@ fn transact_accepts_deposit_at_maximum_bound() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD2);
+    let (proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD2,
+    );
     let at_max = i32::try_from(max).expect("max must fit i32");
     let at = mk_ext_data(&env, Address::generate(&env), at_max);
 
@@ -1234,7 +1277,14 @@ fn transact_rejects_zeroed_proof() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE1,
+    );
     proof.proof = Groth16Proof {
         a: G1Affine::from_array(&env, &[0u8; 64]),
         b: G2Affine::from_array(&env, &[0u8; 128]),
@@ -1274,7 +1324,14 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     env.mock_all_auths();
 
     let dup = U256::from_u32(&env, 0xDEAD);
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xDEAD);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xDEAD,
+    );
     proof.input_nullifiers.push_back(dup);
 
     let err = pool
@@ -1319,7 +1376,14 @@ fn transact_rejects_root_never_inserted() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE1,
+    );
     proof.root = U256::from_u32(&env, 0xFF);
 
     let err = pool
@@ -1361,7 +1425,14 @@ fn transact_rejects_evicted_root() {
         rotate_root(&env, &pool_id, left, right);
     }
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE2);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE2,
+    );
     proof.root = evicted_root;
 
     let err = pool
@@ -1392,7 +1463,14 @@ fn transact_reports_unknown_root_before_later_checks() {
         );
     });
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+    );
     proof.root = U256::from_u32(&env, 0xFF);
     proof.ext_data_hash = mk_bytesn32(&env, 0x99);
 
@@ -1415,7 +1493,14 @@ fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE4);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE4,
+    );
     assert_eq!(ext.ext_amount, I256::from_i32(&env, 0));
 
     let err = pool
@@ -1444,7 +1529,14 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
     // Authorization is mocked, so NotAuthorized cannot be a genuine answer.
     env.mock_all_auths();
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE5);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE5,
+    );
     assert!(
         !proof.proof.is_empty(),
         "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
@@ -1486,10 +1578,17 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         Address::generate(&env),
         i32::try_from(deposit_amount).expect("the deposit must fit i32"),
     );
-    let (mut proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE6);
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+    );
     // Everything before verification must pass, or the revert being asserted
     // would be an earlier check rather than the verifier.
-    proof.ext_data_hash = compute_ext_hash(&env, &deposit);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
     proof.public_amount = U256::from_u32(&env, deposit_amount);
 
     assert_eq!(token.balance(&sender), funded);
@@ -1513,4 +1612,79 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// Cross-pool regression test for proof-domain binding.
+///
+/// Pool A and Pool B share a verifier, ASP contracts and tree depth but have
+/// distinct addresses and tokens, as when one verifier is reused across pools
+/// for different assets. Before `hash_ext_data` bound `pool`/`token`, Pool A's
+/// `(proof, ExtData)` cleared every check on Pool B up to the shared
+/// verifier; now Pool B must refuse it at the `ext_data_hash` check.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+
+    // Pool B reuses Pool A's verifier and ASP contracts but a different token.
+    let pool_a_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8, 0);
+    let setup_b = setup_with_token(&env, &setup, register_mock_token(&env));
+    let pool_b_id = register_pool(&env, &setup_b, U256::from_u32(&env, 1000), 8, 0);
+
+    assert_ne!(
+        setup.token, setup_b.token,
+        "the two pools must have distinct token/asset identity"
+    );
+    assert_ne!(
+        pool_a_id, pool_b_id,
+        "the two pools must be distinct contract instances"
+    );
+
+    let pool_a = PoolContractClient::new(&env, &pool_a_id);
+    let pool_b = PoolContractClient::new(&env, &pool_b_id);
+
+    // Equal genesis roots, so the root check cannot be what stops the replay.
+    assert_eq!(
+        pool_a.get_root(),
+        pool_b.get_root(),
+        "genesis roots must collide for this test to be meaningful"
+    );
+
+    env.mock_all_auths();
+    // Policy flags 0: neither ASP root is compared, so an ASP mismatch cannot
+    // masquerade as a domain-binding rejection.
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool_a,
+        &setup.token,
+        U256::from_u32(&env, 0),
+        U256::from_u32(&env, 0),
+        0xF00D,
+    );
+
+    // Baseline: on the pool it was built for, the proof still clears every
+    // check ahead of the verifier and is refused only there.
+    let err_a = pool_a
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof always fails the verifier's pairing check");
+    assert_eq!(
+        err_a,
+        Ok(Error::InvalidProof),
+        "sanity check: Pool A must reach the verifier boundary, not an earlier check"
+    );
+
+    // The same (proof, ext) values, submitted unchanged to Pool B.
+    let err_b = pool_b.try_transact(&proof, &ext, &Address::generate(&env));
+
+    match err_b {
+        // Pool B's own hash differs from Pool A's for the identical `ext`,
+        // so the replay is refused before the verifier is reached.
+        Err(Ok(Error::WrongExtHash)) => {}
+        Err(Ok(Error::InvalidProof)) => panic!(
+            "domain binding missing: Pool B accepted Pool A's ext_data_hash \
+             and reached the verifier boundary ({err_b:?})"
+        ),
+        other => panic!("unexpected result reaching a check this test does not isolate: {other:?}"),
+    }
 }
