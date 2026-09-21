@@ -117,9 +117,14 @@ impl Storage {
     }
 
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
-        MIGRATIONS.to_latest(&mut conn)?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Self::migrate_connection(&mut conn)?;
         Ok(Self { conn })
+    }
+
+    pub(super) fn migrate_connection(conn: &mut Connection) -> Result<()> {
+        MIGRATIONS.to_latest(conn)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(())
     }
 
     pub fn save_events_batch(&mut self, data: &crate::types::ContractsEventData) -> Result<()> {

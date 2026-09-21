@@ -10,6 +10,8 @@ Requires Python 3.11+, Rust, a target C compiler and ar (clang/llvm-ar for WASM)
 Downloads are hash-verified and cached under CARGO_TARGET_DIR. Set
 SQLITE3MC_AMALGAMATION_DIR to verified local sources for an offline build.
 Compiler selection follows CC_<target>, TARGET_CC, CC (and the equivalent AR).
+For musl the selected C compiler also serves as Cargo's linker unless explicitly
+overridden by CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER.
 """
 import argparse
 import hashlib
@@ -179,6 +181,12 @@ def main():
         subprocess.run(ar + ["rcsD", str(archive), *objects], check=True)
         stamp.write_text(json.dumps({"inputs": signature, "sha256": digest(archive)}, indent=2) + "\n")
     env = dict(os.environ, CARGO_TARGET_DIR=str(target_dir), SPP_SQLITE3MC_BUILD=f"{VERSION}:{target}")
+    if target == "x86_64-unknown-linux-musl":
+        linker_variable = "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER"
+        if not env.get(linker_variable):
+            if len(cc) != 1:
+                raise RuntimeError(f"Set {linker_variable} when CC uses a multi-command wrapper")
+            env[linker_variable] = cc[0]
     if wasm:
         config = out / "cargo.toml"
         config.write_text('[target.wasm32-unknown-unknown.wsqlite3]\nrustc-link-search = [' + json.dumps(str(out)) + ']\nrustc-link-lib = ["static=wsqlite3"]\n')
