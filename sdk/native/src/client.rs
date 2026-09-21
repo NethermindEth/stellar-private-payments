@@ -1,8 +1,6 @@
 use anyhow::Context;
 
-use crate::types::{
-    ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup, SignerAddress,
-};
+use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     Account, Error, Handle, Prover, Signer, Storage, SyncMode,
@@ -138,10 +136,11 @@ impl<S: Storage> Client<S> {
 
     /// Create an [`Account`] session.
     ///
-    /// `signer_address` need not be `user_address`: the signer pays and
-    /// sources every envelope, the owner holds the notes. The two operations
-    /// that need the owner's own signature check for themselves — see
-    /// [`Account::register_public_keys`] and [`Error::SignerIsNotNoteOwner`].
+    /// The signer's address need not be `user_address`: the signer pays and
+    /// sources every envelope, the owner holds the notes. The operations that
+    /// need the owner's own signature check for themselves — see
+    /// [`Account::derive_privacy_keys`], [`Account::register_public_keys`], and
+    /// [`Error::SignerIsNotNoteOwner`].
     ///
     /// # Errors
     /// Returns a storage error if the session's storage handle cannot be
@@ -154,7 +153,6 @@ impl<S: Storage> Client<S> {
     pub fn account(
         &self,
         user_address: NoteOwnerAddress,
-        signer_address: SignerAddress,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
         Ok(Account::new(
@@ -162,7 +160,6 @@ impl<S: Storage> Client<S> {
             self.storage.fork()?,
             self.prover.clone(),
             user_address,
-            signer_address,
             signer,
             self.sync.clone(),
             self.contract_config.clone(),
@@ -186,7 +183,7 @@ impl<S: Storage> Client<S> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod divergent_session_tests {
     use super::*;
-    use crate::{LocalSigner, LocalStorage};
+    use crate::{LocalSigner, LocalStorage, types::SignerAddress};
 
     const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
@@ -233,11 +230,7 @@ mod divergent_session_tests {
     #[test]
     fn client_account_opens_a_divergent_pair() {
         let account = test_client()
-            .account(
-                NoteOwnerAddress::new(OWNER),
-                SignerAddress::new(DELEGATE),
-                test_signer(DELEGATE),
-            )
+            .account(NoteOwnerAddress::new(OWNER), test_signer(DELEGATE))
             .expect("a payer that is not the note owner must still open a session");
         assert_eq!(account.user_address().as_str(), OWNER);
         assert_eq!(account.signer_address().as_str(), DELEGATE);
@@ -246,11 +239,7 @@ mod divergent_session_tests {
     #[test]
     fn client_account_opens_when_the_owner_signs_for_itself() {
         let account = test_client()
-            .account(
-                NoteOwnerAddress::new(OWNER),
-                SignerAddress::new(OWNER),
-                test_signer(OWNER),
-            )
+            .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
             .expect("the owner signing for itself must open a session");
         assert_eq!(account.user_address().as_str(), OWNER);
         assert_eq!(account.signer_address().as_str(), OWNER);

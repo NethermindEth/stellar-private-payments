@@ -17,10 +17,18 @@ use soroban_sdk::Env;
 /// Ledgers of instance lifetime an entry point restores.
 ///
 /// This is mainnet's `min_persistent_ttl`, the floor the host bumps a written
-/// persistent entry to, so the instance tracks the tree entry that every
-/// insertion rewrites. It must stay at or below the network's `max_entry_ttl`,
-/// which the host enforces by trapping, so a network configured with a lower
-/// ceiling needs this lowered to match.
+/// persistent entry to there, so on mainnet the instance tracks the tree entry
+/// that every insertion rewrites.
+///
+/// Other networks set that floor lower — testnet uses 120,960 — so there the
+/// instance outlives the tree and the first call after a decay pays rent for
+/// more lifetime than the tree holds. That is deliberate: one constant is worth
+/// more than matching each network's floor, and the overshoot costs rent only
+/// where entries are cheap.
+///
+/// Both networks cap `max_entry_ttl` at 3,110,400 and the host traps above it,
+/// so this must stay at or below that. Values read from testnet and mainnet on
+/// 2026-09-21.
 pub const INSTANCE_LIFETIME_LEDGERS: u32 = 2_073_600;
 
 /// Restores the instance's lifetime when it has decayed below

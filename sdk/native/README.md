@@ -6,7 +6,7 @@ Native Rust client for privacy pool deposits, transfers, withdrawals, and local 
 
 ```
 Client (deployment: sync, operational_feed, recipient_lookup)
-  └─ account(user_address, signer_address, signer) → Account (portfolio, user_notes, user_public_keys, is_registered, register_public_keys, sync, pool)
+  └─ account(user_address, signer) → Account (portfolio, user_notes, privacy_keys, derive_privacy_keys, is_registered, register_public_keys, sync, pool)
        └─ pool(id) → PrivatePool (deposit / transfer / withdraw / balance / notes)
 ```
 
@@ -49,12 +49,7 @@ let signer = Handle::from_box(
         as Box<dyn stellar_private_payments::Signer>,
 );
 
-// Note owner first, then the signing account.
-let account = client.account(
-    NoteOwnerAddress::new("G..."),
-    SignerAddress::new("G..."),
-    signer,
-)?;
+let account = client.account(NoteOwnerAddress::new("G..."), signer)?;
 let pool = account.pool("C...")?;
 
 pool.deposit(10_000_000u128.into()).await?;
@@ -156,14 +151,10 @@ For CLI and synchronous hosts, use `stellar_private_payments::blocking`:
 
 ```rust
 use stellar_private_payments::blocking::{Client, Account};
-use stellar_private_payments::types::{NoteOwnerAddress, SignerAddress};
+use stellar_private_payments::types::NoteOwnerAddress;
 
 let client = Client::init(rpc_url, storage, prover, deployment, None)?;
-let account = client.account(
-    NoteOwnerAddress::new("G..."),
-    SignerAddress::new("G..."),
-    signer,
-)?;
+let account = client.account(NoteOwnerAddress::new("G..."), signer)?;
 let portfolio = account.portfolio()?;
 ```
 
@@ -185,13 +176,31 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 
 | API | Role |
 |-----|------|
-| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
-| `Account::user_public_keys()` | Note + encryption public keys for the bound account |
+| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Account::derivePrivacyKeys()`, which signs this internally) |
+| `zk::encryption::sep53_payload(message)` | UTF-8 message prefixed with `Stellar Signed Message:\n`; hash with SHA-256 before Ed25519 signing |
+| `zk::encryption::verify_owner_signature(owner_address, message, &signature)` | Strictly verify a 64-byte SEP-53 signature against the note owner's Stellar `G...` public key |
+| `Account::derive_privacy_keys()` | Derive and persist privacy keys from the owner's wallet signature (idempotent, signature-verified) |
+| `Account::privacy_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
 | `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |
 | `crypto::derive_asp_user_leaf(note, blinding)` | Same leaf from explicit inputs (no session) |
 
 Private note/encryption keys stay in storage and are not exposed through the SDK.
+
+Custom native onboarding code must call `verify_owner_signature` with
+`KEY_DERIVATION_MESSAGE` before deriving and saving keys. The low-level
+`derive_encryption_and_note_keypairs` and `derive_membership_blinding` helpers
+do not take an owner address and do not verify ownership themselves. The CLI's
+`spp onboard` command performs this check before creating missing privacy keys;
+the browser SDK does so in `Account::derivePrivacyKeys()`.
+
+Verification requires the owner's own Ed25519 signature over
+`SHA256(sep53_payload(KEY_DERIVATION_MESSAGE))`. Another account's signature
+(including a delegated transaction signer's), a signature over a different
+message, an invalid owner address, or a signature of the wrong length fails.
+Strict verification also refuses small-order owner keys or signature `R`
+points. This check does not change the key derivation algorithm or revalidate
+keys already in storage.
 
 ## Logging & Diagnostics
 
@@ -223,4 +232,4 @@ Intermediate transaction lifecycle steps (simulating, submitting, confirming) ar
 
 ## Browser / WASM
 
-See [`../web/README.md`](../web/README.md). JS method names align with Rust where possible (`operationalFeed`, `recipientLookup`, `userPublicKeys`, `isRegistered`).
+See [`../web/README.md`](../web/README.md). JS method names align with Rust where possible (`operationalFeed`, `recipientLookup`, `privacyKeys`, `isRegistered`).

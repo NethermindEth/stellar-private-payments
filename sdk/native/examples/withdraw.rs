@@ -88,11 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Estimating transaction count...");
-    // Intentional duplicate work: `pool.withdraw` below re-fetches spendable
-    // notes and re-runs `prepare_withdraw` internally. We build the plan here
-    // only to show the expected tx count before committing to the real submit.
-    let plan = pool.prepare_withdraw(&notes, amount, &recipient)?;
-    println!("Expected on-chain transactions: {}", plan.tx_count());
+    let estimate = pool.estimate(amount)?;
+    println!("Expected on-chain transactions: {}", estimate.tx_count);
 
     println!();
     println!("Submitting withdrawal (proving may take a while)...");

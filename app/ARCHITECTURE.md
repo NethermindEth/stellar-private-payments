@@ -38,7 +38,7 @@ The WASM layer exposes four JS handles with different scope:
 |--------|-------|----------|
 | **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (app-layer settings only) |
 | **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `backgroundSync`, `operationalFeed`, `recipientLookup`, `account()` |
-| **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
+| **`Account`** | Wallet session (address + signer) | `portfolio`, `privacyKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
 `Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. Free helpers such as `deriveAspUserLeaf(notePublicKey, membershipBlinding)` need neither wallet nor storage.
@@ -73,14 +73,14 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - **Deployment-wide operations:**
   - Background sync via `backgroundSync`.
   - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
-  - Account factory via `account({ networkPassphrase, userAddress? }, signer)`.
+  - Account factory via `account({ networkPassphrase, userAddress?, signerAddress? }, signer)`.
 
 **`Account` (WASM, wasm-bindgen API)**
 
 - Wallet session: thin wrapper over native `Account`.
 - **Account-wide operations:**
-  - Key derivation on first `account()` (Freighter `signMessage` when keys missing in local DB).
-  - Reads: `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`.
+  - `derivePrivacyKeys()` — explicit call, Freighter `signMessage` when keys missing in local DB; the signature is verified against the note owner before keys are derived or saved.
+  - Reads: `portfolio`, `privacyKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`.
   - `registerPublicKeys`.
   - Per-pool sessions via `pool({ poolContract })`.
 
@@ -196,11 +196,14 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 Keys are derived deterministically from Freighter wallet signatures:
 
-1. User signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`).
-2. The worker derives the BN254 note identity keypair and the X25519 encryption keypair from that signature using domain-separated hashes.
-3. Derived keys are stored in SQLite; the signature is not persisted.
+1. The app calls `account.derivePrivacyKeys()` explicitly (during onboarding); the wallet signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`) using SEP-53.
+2. `Account::derive_privacy_keys` calls `verify_owner_signature` to strictly verify the 64-byte Ed25519 signature against the note owner's Stellar `G...` public key before trusting it. The signed digest is `SHA256("Stellar Signed Message:\n" + message)`, using UTF-8 bytes and a newline after the colon. Verification refuses signatures from another key, signatures over another message, invalid lengths or addresses, and small-order owner keys or signature `R` points.
+3. It then derives the BN254 note identity keypair and the X25519 encryption keypair from the verified signature using domain-separated hashes, plus the ASP membership blinding using the network context (main thread on web, not inside the storage worker).
+4. Derived keys are sent to storage and persisted in SQLite; the signature is not persisted. Verification failure stops derivation before any privacy keys are derived or saved.
 
-Signatures are prompted during onboarding so the app can scan for notes addressed to the user.
+Signatures are prompted during onboarding so the app can scan for notes addressed to the user. The derivation algorithm is unchanged. Existing stored keys skip message signing and verification; this check does not retroactively validate them.
+
+The requested transaction signer must match the note owner when keys are missing. This address check avoids an unnecessary wallet prompt, while signature verification catches a wallet signing with another key even if its reply omits or misreports the signer address. Once the owner's keys are stored, a session may use a different transaction signer without a new derivation signature. CLI onboarding uses the same verification helper before creating missing keys.
 
 ## Public key registry
 

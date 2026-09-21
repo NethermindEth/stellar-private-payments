@@ -116,6 +116,7 @@ jobs:
 
           for test_name in \
             e2e_smoke_client_construction \
+            e2e_foreign_derivation_signature_is_refused \
             e2e_seed_deposit_creates_spendable_notes \
             e2e_deposit_halts_at_signing \
             e2e_transfer_halts_at_signing \

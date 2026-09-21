@@ -21,12 +21,10 @@
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
 //!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
-//!
-//!   SPP_VERBOSE_PLAN          default: unset; set to "1" for step-by-step logs
 
 mod common;
 
-use stellar_private_payments::{Error, PreparedTransaction};
+use stellar_private_payments::Error;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::init_tracing()?;
@@ -49,78 +47,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Address:   {}", account.user_address());
     println!();
 
-    // Plan the deposit to report its transaction count. Deliberately *not*
-    // `pool.estimate()`: that is a spend-side estimator which loads the
-    // wallet's spendable notes and asks the planner to cover `amount` from
-    // them, so on a wallet with no notes it fails with `NoSpendableNotes`.
-    // A deposit is input-only and needs no existing notes -- hence
-    // `prepare_deposit`, which takes no wallet at all. This is the same
-    // call the web client's deposit path uses.
-    println!("Planning deposit...");
-    let plan = pool.prepare_deposit(amount).map_err(|e| {
-        if common::is_retention_gap_error(&e) {
-            common::skip_on_retention_gap(&e);
+    println!("Submitting deposit (proving may take a while)...");
+    match pool.deposit(amount) {
+        Ok(result) => {
+            print_result(&result, pool_config.pool_contract_id.as_str());
         }
-        Box::new(e) as Box<dyn std::error::Error>
-    })?;
-    println!("Expected on-chain transactions: {}", plan.tx_count());
-
-    println!();
-    if common::env_or("SPP_VERBOSE_PLAN", "") == "1" {
-        println!("Running verbose deposit pipeline...");
-        run_verbose_deposit(&pool, amount)?;
-    } else {
-        println!("Submitting deposit (proving may take a while)...");
-        match pool.deposit(amount) {
-            Ok(result) => {
-                print_result(&result, pool_config.pool_contract_id.as_str());
-            }
-            Err(e) if common::is_retention_gap_error(&e) => common::skip_on_retention_gap(&e),
-            Err(Error::PlanExecution(e)) => {
-                print_plan_execution_error(&e);
-            }
-            Err(e) => return Err(Box::new(e)),
+        Err(e) if common::is_retention_gap_error(&e) => common::skip_on_retention_gap(&e),
+        Err(Error::PlanExecution(e)) => {
+            print_plan_execution_error(&e);
         }
-    }
-
-    Ok(())
-}
-
-fn run_verbose_deposit(
-    pool: &stellar_private_payments::blocking::PrivatePool,
-    amount: stellar_private_payments::types::NoteAmount,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut plan = pool.prepare_deposit(amount)?;
-    let mut results = Vec::new();
-    while !plan.is_complete() {
-        let step = plan.current_tx();
-        println!("Step {} of {}", step.saturating_add(1), plan.tx_count());
-
-        println!("  proving...");
-        let mut prepared: PreparedTransaction = pool.prove_next(&mut plan)?;
-
-        println!("  simulating...");
-        pool.simulate(&mut prepared)?;
-
-        println!("  signing...");
-        let signed = pool.sign(&prepared)?;
-
-        println!("  submitting...");
-        let hash = pool.submit(signed)?;
-        println!("  submitted tx hash: {hash}");
-
-        println!("  confirming...");
-        let result = pool.confirm(&hash)?;
-        results.push(result);
-    }
-
-    println!();
-    println!(
-        "Verbose pipeline complete. Confirmed transactions: {}",
-        results.len()
-    );
-    for result in results {
-        println!("  - {}", result.tx_hash);
+        Err(e) => return Err(Box::new(e)),
     }
 
     Ok(())

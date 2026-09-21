@@ -1,7 +1,7 @@
 use crate::protocol::{
     AdminASPRequest, AspSecret, CorrelatedRequest, DisclaimerStatePayload, DisclosureInputs,
-    DisclosureInputsRequest, PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest,
-    StorageWorkerResponse, UserKeys,
+    DisclosureInputsRequest, PrivacyKeys, PublicEncryptionKeyPair, PublicNoteKeyPair,
+    StorageWorkerRequest, StorageWorkerResponse,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -16,18 +16,14 @@ use stellar_private_payments::{
     chain::ContractDataStorage,
     disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
     planner::SpendableNote,
-    state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
+    state::{SqliteStorage, process_local_state_batch},
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive,
-        SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
+        NoteKeyPair, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
+        RecipientLookup, Sensitive, SyncMetadata, UserNoteSummary,
     },
-    zk::{
-        crypto::asp_membership_leaf,
-        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
-        flows::TransactParams,
-    },
+    zk::{crypto::asp_membership_leaf, flows::TransactParams},
 };
 use tracing::Instrument;
 #[cfg(target_arch = "wasm32")]
@@ -304,14 +300,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
+        StorageWorkerRequest::SavePrivateKeys(
+            address,
+            note_keypair,
+            encryption_keypair,
+            membership_blinding,
+        ) => {
             tracing::trace!(
-                "[{WORKER_NAME}] deriving and saving user keys for the account {}",
+                "[{WORKER_NAME}] saving private keys for the account {}",
                 Sensitive(&address)
             );
-            let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(signature.clone())?;
-            let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
@@ -352,12 +350,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::UserKeys(address) => {
+        StorageWorkerRequest::PrivacyKeys(address) => {
             tracing::trace!(
-                "[{WORKER_NAME}] fetch user keys for the account {}",
+                "[{WORKER_NAME}] fetch privacy keys for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
             if opt.is_some() {
                 tracing::trace!(
                     "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
@@ -369,7 +367,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     Sensitive(&address)
                 );
             }
-            StorageWorkerResponse::UserKeys(opt.map(|keys| UserKeys {
+            StorageWorkerResponse::PrivacyKeys(opt.map(|keys| PrivacyKeys {
                 note_keypair: PublicNoteKeyPair {
                     public: keys.note_keypair.public,
                 },
@@ -383,7 +381,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
@@ -927,11 +925,47 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
-        let _ = user_address;
-        Err(Error::Other(anyhow::anyhow!(
-            "full stored user keys are not available on the storage bridge; use asp_secret"
-        )))
+    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::PrivacyKeys(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PrivacyKeys(keys)) => Ok(keys.is_some()),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response checking user keys: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn save_private_keys(
+        &self,
+        user_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
+    ) -> Result<(), Error> {
+        match self
+            .call(
+                StorageWorkerRequest::SavePrivateKeys(
+                    user_address.to_string(),
+                    note_keypair.clone(),
+                    encryption_keypair.clone(),
+                    *membership_blinding,
+                ),
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::Saved) => Ok(()),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response saving user keys: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
     }
 
     async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
@@ -954,35 +988,35 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn user_public_keys(
+    async fn privacy_keys(
         &self,
         user_address: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         match self
             .call(
-                StorageWorkerRequest::UserKeys(user_address.to_string()),
+                StorageWorkerRequest::PrivacyKeys(user_address.to_string()),
                 1_000,
             )
             .await
         {
-            Ok(StorageWorkerResponse::UserKeys(keys)) => {
-                let keys = keys.ok_or_else(|| {
-                    Error::Other(anyhow::anyhow!("user keys not found in worker storage"))
+            Ok(StorageWorkerResponse::PrivacyKeys(keys)) => {
+                let keys = keys.ok_or_else(|| Error::PrivacyKeysNotFound {
+                    user_address: user_address.to_string(),
                 })?;
                 Ok((keys.note_keypair.public, keys.encryption_keypair.public))
             }
             Ok(other) => Err(Error::Other(anyhow::anyhow!(
-                "unexpected storage response loading user keys: {other:?}"
+                "unexpected storage response loading privacy keys: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e)),
         }
     }
 
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, Error> {
-        Ok(self.user_public_keys(user_address).await?.0)
+        Ok(self.privacy_keys(user_address).await?.0)
     }
 
-    async fn registered_public_keys(
+    async fn registered_privacy_keys(
         &self,
         address: &str,
         public_key_registry_contract_id: &str,

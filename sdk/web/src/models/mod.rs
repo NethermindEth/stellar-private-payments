@@ -16,9 +16,7 @@ pub use config::ContractConfig;
 pub(crate) use config::contract_config_from_js;
 pub use disclosure::{DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport};
 pub(crate) use options::transact_from_js;
-pub use options::{
-    AccountOptions, PoolOptions, RegisterPublicKeysOptions, VerifyDisclosureOptions,
-};
+pub use options::{AccountOptions, PoolOptions, VerifyDisclosureOptions};
 pub use pool_estimate::PoolEstimate;
 pub(crate) use pool_execute_result::ExecuteOutcome;
 pub use pool_execute_result::PoolExecuteResult;

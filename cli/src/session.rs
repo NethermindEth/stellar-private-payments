@@ -115,7 +115,7 @@ impl ClientSession {
     ) -> Result<stellar_private_payments::types::TransactionResult> {
         log::info!("Registering public keys");
         self.account
-            .register_public_keys(None, None)
+            .register_public_keys()
             .map_err(|e| anyhow::anyhow!("register public keys: {e}"))
     }
 }
@@ -169,14 +169,13 @@ fn open_account(
     client
         .account(
             NoteOwnerAddress::new(owner.address.as_str()),
-            SignerAddress::new(signer.address.as_str()),
             alias_signer(config, &signer, network),
         )
         .map_err(|e| anyhow::anyhow!("open account session: {e}"))
 }
 
-/// The signer delegates identity to the Stellar CLI keystore, so it needs the
-/// payer's alias and nothing else.
+/// The signer delegates identity to the Stellar CLI keystore, so it carries the
+/// payer's alias and address.
 fn alias_signer(
     config: &CliConfig,
     signer: &Account,
@@ -187,6 +186,7 @@ fn alias_signer(
         rpc_url: network.rpc_url.clone(),
         network_passphrase: network.passphrase.clone(),
         config_dir: config.stellar_config_dir.clone(),
+        signer_address: SignerAddress::new(signer.address.as_str()),
     }) as Box<dyn Signer>)
 }
 
