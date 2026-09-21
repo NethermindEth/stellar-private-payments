@@ -24,6 +24,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events},
+    token::{Client as TokenClient, StellarAssetClient},
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
 
@@ -60,6 +61,13 @@ struct TestSetup {
     asp_non_membership_address: Address,
     asp_membership_client: ASPMembershipClient<'static>,
     asp_non_membership_client: ASPNonMembershipClient<'static>,
+}
+
+fn register_funded_token(env: &Env, holder: &Address, amount: i128) -> Address {
+    let token = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let address = token.address();
+    StellarAssetClient::new(env, &address).mint(holder, &amount);
+    address
 }
 
 /// Creates and deploys all contracts needed for testing, including a real
@@ -733,9 +741,9 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     assert!(
         !matches!(
             pool.try_transact(&proof, &ext, &sender),
-            Err(Ok(Error::InvalidProof))
+            Err(Ok(Error::NonCanonicalPublicInput))
         ),
-        "flags={flags} should not require ASP root validation for the ignored field(s)"
+        "expected ASP root field to be skipped for flags={flags}"
     );
 }
 
@@ -1946,5 +1954,136 @@ fn transact_rejects_replayed_nullifier() {
     assert!(
         matches!(second, Err(Ok(Error::AlreadySpentNullifier))),
         "expected replaying the same nullifier to be rejected, got {second:?}"
+    );
+}
+
+/// A verifier rejection must reach the caller as pool-gvk's own `InvalidProof`.
+/// The verifier error enum and this contract's error enum use overlapping
+/// numeric codes, so an untrapped verifier rejection can otherwise surface
+/// as an unrelated pool-gvk error.
+#[test]
+fn transact_reports_verifier_rejection_as_invalid_proof() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+
+    // Policy flags 0: neither ASP root is compared, so neither can produce
+    // the InvalidProof asserted by this test.
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    // Authorization is mocked, so NotAuthorized cannot be a genuine answer.
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE5,
+        VIEW_ONLY,
+    );
+
+    assert!(
+        !proof.proof.is_empty(),
+        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
+    );
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a proof the verifier refuses must be refused by pool-gvk");
+
+    assert_eq!(
+        err,
+        Ok(Error::InvalidProof),
+        "a verifier rejection must be reported as pool-gvk's InvalidProof"
+    );
+}
+
+/// A verifier rejection must roll back the deposit transfer.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 10_000i128;
+
+    setup.token = register_funded_token(&env, &sender, funded);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+        VIEW_ONLY,
+    );
+
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    assert!(
+        !proof.proof.is_empty(),
+        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
+    );
+
+    assert_eq!(token.balance(&sender), funded);
+    assert_eq!(token.balance(&pool_id), 0);
+
+    let err = pool
+        .try_transact(&proof, &deposit, &sender)
+        .expect_err("a deposit carrying a proof the verifier refuses must be refused");
+
+    assert_eq!(
+        err,
+        Ok(Error::InvalidProof),
+        "the transaction must reach verifier rejection"
+    );
+
+    assert_eq!(
+        token.balance(&sender),
+        funded,
+        "a refused deposit must not debit the sender"
+    );
+
+    assert_eq!(
+        token.balance(&pool_id),
+        0,
+        "a refused deposit must not credit the pool"
     );
 }

@@ -2,17 +2,14 @@
 
 use std::rc::Rc;
 
-use stellar_private_payments::{
-    Account as NativeAccount,
-    types::{EncryptionPublicKey, NotePublicKey},
-};
+use stellar_private_payments::Account as NativeAccount;
 
 use wasm_bindgen::prelude::*;
 
 use crate::{
     models::{
-        PoolOptions, PortfolioBalance, RegisterPublicKeysOptions, UserNoteSummary, UserPublicKeys,
-        portfolio_balances, user_note_summaries,
+        PoolOptions, PortfolioBalance, UserNoteSummary, UserPublicKeys, portfolio_balances,
+        user_note_summaries,
     },
     workers::storage::StorageBridge,
 };
@@ -38,10 +35,8 @@ impl Account {
         self.inner.user_address().to_string()
     }
 
-    /// The account that signs and pays. Always equal to
-    /// [`Self::user_address`]: a `signerAddress` that differs does not open a
-    /// session at all, so this never reports an address the rest of the stack
-    /// will not use.
+    /// The account that signs and pays. May differ from [`Self::user_address`]
+    /// when the note owner delegates signing to another account.
     #[wasm_bindgen(getter, js_name = signerAddress)]
     pub fn signer_address(&self) -> String {
         self.inner.signer_address().to_string()
@@ -54,9 +49,16 @@ impl Account {
     }
 
     /// Locally derived note and encryption public keys for this account.
-    #[wasm_bindgen(js_name = userPublicKeys)]
-    pub async fn user_public_keys(&self) -> Result<UserPublicKeys, JsError> {
-        let keys = self.inner.user_public_keys().await.map_err(pool_err)?;
+    #[wasm_bindgen(js_name = privacyKeys)]
+    pub async fn privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.privacy_keys().await.map_err(pool_err)?;
+        Ok(UserPublicKeys::from(keys))
+    }
+
+    /// Derive and persist this account's privacy keys. Idempotent.
+    #[wasm_bindgen(js_name = derivePrivacyKeys)]
+    pub async fn derive_privacy_keys(&self) -> Result<UserPublicKeys, JsError> {
+        let keys = self.inner.derive_privacy_keys().await.map_err(pool_err)?;
         Ok(UserPublicKeys::from(keys))
     }
 
@@ -92,30 +94,8 @@ impl Account {
 
     /// Register this account's public keys on the deployment-wide registry.
     #[wasm_bindgen(js_name = registerPublicKeys)]
-    pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {
-        let opts = RegisterPublicKeysOptions::from_value(options)?;
-
-        let (note_public_key, encryption_public_key) = match (
-            opts.note_public_key_hex(),
-            opts.encryption_public_key_hex(),
-        ) {
-            (Some(note), Some(enc)) => (
-                Some(NotePublicKey::parse(&note).map_err(|e| JsError::new(&e.to_string()))?),
-                Some(EncryptionPublicKey::parse(&enc).map_err(|e| JsError::new(&e.to_string()))?),
-            ),
-            (None, None) => (None, None),
-            _ => {
-                return Err(JsError::new(
-                    "notePublicKeyHex and encryptionPublicKeyHex must both be set or both omitted",
-                ));
-            }
-        };
-
-        let result = self
-            .inner
-            .register_public_keys(note_public_key, encryption_public_key)
-            .await
-            .map_err(pool_err)?;
+    pub async fn register_public_keys(&self) -> Result<String, JsError> {
+        let result = self.inner.register_public_keys().await.map_err(pool_err)?;
         Ok(result.tx_hash)
     }
 

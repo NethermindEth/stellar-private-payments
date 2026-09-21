@@ -55,10 +55,10 @@ pub enum Error {
 
     /// Local storage has no privacy keys for address
     #[error(
-        "no privacy keys found in local storage for {}",
+        "no privacy keys found in local storage for {}; derive privacy keys first",
         Sensitive(user_address)
     )]
-    UserKeysNotFound { user_address: String },
+    PrivacyKeysNotFound { user_address: String },
 
     #[error("event history is unavailable: {0}")]
     RetentionGap(#[from] RetentionGap),

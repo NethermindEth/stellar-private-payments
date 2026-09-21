@@ -5,7 +5,7 @@ use crate::chain::PreparedSorobanTx;
 use crate::{
     PreparedTransaction,
     error::Error,
-    types::{SignedTransaction, SignerAddress},
+    types::{KeyDerivationSignature, SignedTransaction, SignerAddress},
 };
 
 mod local;
@@ -31,6 +31,14 @@ pub trait Signer {
         let _ = prepared;
         Err(Error::Other(anyhow::anyhow!(
             "signer does not support soroban transactions"
+        )))
+    }
+
+    /// SEP-53 signature of `message`.
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        let _ = message;
+        Err(Error::Other(anyhow::anyhow!(
+            "signer does not support message signing"
         )))
     }
 }

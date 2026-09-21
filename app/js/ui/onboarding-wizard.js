@@ -255,13 +255,10 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
+async function registerNow({ address, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
     await client().openAccount({ networkPassphrase, userAddress: address }, signer);
-    return client().account().registerPublicKeys({
-        notePublicKeyHex: notePublicKey,
-        encryptionPublicKeyHex: encryptionPublicKey,
-    });
+    return client().account().registerPublicKeys();
 }
 
 export async function runOnboardingWizard({
@@ -274,7 +271,7 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
+    const storedPublicKeys = await storage.getPrivacyKeys(address).catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
@@ -486,7 +483,7 @@ export async function runOnboardingWizard({
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await client().account().userPublicKeys();
+                            const result = await client().account().derivePrivacyKeys();
                             state.keys = {
                                 pubKey: result.notePublicKey,
                                 encryptionKeypair: { publicKey: result.encryptionPublicKey },
@@ -670,13 +667,7 @@ export async function runOnboardingWizard({
                                 throw new Error('Derive keys before registration');
                             }
                             register.disabled = true;
-                            await registerNow({
-                                address,
-                                notePublicKey: state.keys.pubKey,
-                                encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
-                                networkPassphrase,
-                                signer,
-                            });
+                            await registerNow({ address, networkPassphrase, signer });
                             state.registered = true;
                             resolve();
                         } catch (error) {

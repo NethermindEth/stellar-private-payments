@@ -39,11 +39,11 @@ pub struct DisclaimerState {
 #[derive(Debug, Clone)]
 pub(crate) struct AccountKeys {
     pub account_id: i64,
-    pub keys: StoredUserKeys,
+    pub keys: StoredPrivateKeys,
 }
 
 #[derive(Debug, Clone)]
-pub struct StoredUserKeys {
+pub struct StoredPrivateKeys {
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair,
     pub membership_blinding: Field,
@@ -219,7 +219,7 @@ impl Storage {
             .unwrap_or_default())
     }
 
-    pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
+    pub fn get_private_keys(&self, address: &str) -> Result<Option<StoredPrivateKeys>> {
         self.conn
             .query_row(
                 "SELECT
@@ -241,7 +241,7 @@ impl Storage {
                     let note_pub: NotePublicKey = row.get(3)?;
                     let membership_blinding: Field = row.get(4)?;
 
-                    Ok(StoredUserKeys {
+                    Ok(StoredPrivateKeys {
                         note_keypair: NoteKeyPair {
                             private: note_priv,
                             public: note_pub,
@@ -1350,7 +1350,7 @@ impl Storage {
 
             Ok(AccountKeys {
                 account_id,
-                keys: StoredUserKeys {
+                keys: StoredPrivateKeys {
                     note_keypair: NoteKeyPair {
                         private: note_priv,
                         public: note_pub,
@@ -2033,7 +2033,7 @@ mod tests {
     }
 
     #[test]
-    fn get_user_keys_returns_latest_keypair() -> Result<()> {
+    fn get_private_keys_returns_latest_keypair() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
 
         let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
@@ -2061,7 +2061,7 @@ mod tests {
         )?;
 
         let keys = storage
-            .get_user_keys("GTESTACCOUNT")?
+            .get_private_keys("GTESTACCOUNT")?
             .expect("expected keypairs to exist");
         assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
         assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);

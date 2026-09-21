@@ -274,7 +274,6 @@ fn transact_rejects_tampered_output_commitment() -> Result<()> {
 /// it stays behind `--ignored` and runs in the release CI job.
 #[test]
 #[ignore = "expensive: proves all four transact circuits"]
-#[cfg_attr(miri, ignore)]
 fn all_transact_graphs_prove_and_verify() -> Result<()> {
     let case = TxCase::new(
         vec![

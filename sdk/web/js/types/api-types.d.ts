@@ -103,8 +103,8 @@ export interface AccountOptions {
   networkPassphrase: string;
   userAddress?: string;
   /**
-   * Defaults to `userAddress`. A value differing from `userAddress` is refused
-   * before the wallet is prompted.
+   * Defaults to `userAddress`. May name a different signing account; the
+   * owner still holds the notes.
    */
   signerAddress?: string;
 }
@@ -112,12 +112,6 @@ export interface AccountOptions {
 /** Options for {@link Account.pool}. */
 export interface PoolOptions {
   poolContract: string;
-}
-
-/** Options for {@link Account.registerPublicKeys}. */
-export interface RegisterPublicKeysOptions {
-  notePublicKeyHex?: string;
-  encryptionPublicKeyHex?: string;
 }
 
 /** Options for {@link verifySelectiveDisclosure}. */
@@ -137,12 +131,13 @@ export interface Account {
   readonly userAddress: string;
   readonly signerAddress: string;
   portfolio(): Promise<PortfolioBalance[]>;
-  userPublicKeys(): Promise<UserPublicKeys>;
+  privacyKeys(): Promise<UserPublicKeys>;
+  derivePrivacyKeys(): Promise<UserPublicKeys>;
   aspSecret(): Promise<string>;
   userNotes(limit: number): Promise<UserNoteSummary[]>;
   isRegistered(): Promise<boolean>;
   deriveAspUserLeaf(): Promise<string>;
-  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
+  registerPublicKeys(): Promise<string>;
   pool(options: PoolOptions): Promise<PrivatePool>;
 }
 
