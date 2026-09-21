@@ -4,15 +4,16 @@
 use anyhow::{Context, Result};
 use stellar_private_payments::types::{NoteAmount, TransferRecipient};
 
-use super::support::setup_default;
+use super::support::{deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
 
 #[tokio::test]
 async fn transfer_via_address() -> Result<()> {
-    let sender = setup_default().await?;
-    let recipient = setup_default().await?;
+    let config = deploy_default().await?;
+    let sender = session(config.clone()).await?;
+    let recipient = session(config).await?;
     recipient.account.register_public_keys(None, None).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -40,8 +41,9 @@ async fn transfer_via_address() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_via_keys() -> Result<()> {
-    let sender = setup_default().await?;
-    let recipient = setup_default().await?;
+    let config = deploy_default().await?;
+    let sender = session(config.clone()).await?;
+    let recipient = session(config).await?;
     let (note_public_key, encryption_public_key) = recipient.account.user_public_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
