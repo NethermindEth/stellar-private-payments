@@ -71,7 +71,7 @@ const fn initial_state() -> InitState {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
+pub(super) fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
     // `OpfsSAHError`'s `Display`/`Debug` impls use fixed messages and do not
     // interpolate the wrapped `JsValue`, so the real DOMException (thrown by
     // the browser when another tab/worker still holds the OPFS sync access
@@ -90,6 +90,8 @@ thread_local! {
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(initial_state()) };
     #[cfg(target_arch = "wasm32")]
     static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    static MIGRATION: RefCell<Option<super::storage_migration::BrowserMigration>> = const { RefCell::new(None) };
 }
 
 macro_rules! with_storage {
@@ -278,6 +280,8 @@ fn close_storage() {
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
     #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    MIGRATION.with(|s| s.borrow_mut().take());
+    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
     #[allow(unsafe_code)]
     unsafe {
         // SAFETY: this worker's sole SQLite connection has been dropped above.
@@ -329,6 +333,66 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::OpenMigration { key, create_new } => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = (key, create_new);
+                anyhow::bail!("OPFS migration requires WASM");
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                use stellar_private_payments::state::database_key::DatabaseKey;
+                anyhow::ensure!(
+                    INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
+                    "worker is already opening, open or closed"
+                );
+                anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
+                let mut owned = DatabaseKey::new([0; 32]);
+                owned.copy_from_slice(&key.0);
+                drop(key);
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
+                match super::storage_migration::BrowserMigration::open(owned, create_new).await {
+                    Ok(migration) => {
+                        MIGRATION.with(|s| *s.borrow_mut() = Some(migration));
+                        INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
+                        StorageWorkerResponse::Saved
+                    }
+                    Err(_) => {
+                        close_storage();
+                        anyhow::bail!(
+                            "migration could not be opened; check the key, source and create/open policy"
+                        );
+                    }
+                }
+            }
+        }
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::Migration(action) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = action;
+                anyhow::bail!("OPFS migration requires WASM");
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let result = MIGRATION.with(|s| {
+                    s.borrow_mut()
+                        .as_mut()
+                        .ok_or_else(|| anyhow!("migration is not open"))?
+                        .action(action)
+                });
+                match result {
+                    Ok(state) => StorageWorkerResponse::MigrationState(state),
+                    Err(error) => {
+                        // Failed OPFS writes can leave cached filename mappings
+                        // ahead of durable state. Reacquire pools before retrying.
+                        close_storage();
+                        return Err(error);
+                    }
+                }
+            }
+        }
         #[cfg(feature = "sqlite3mc")]
         StorageWorkerRequest::OpenPlaintext => return open_requested(OpenRequest::Plaintext).await,
         #[cfg(feature = "sqlite3mc")]
@@ -736,6 +800,24 @@ impl Clone for StorageBridge {
 impl StorageBridge {
     pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
         Self { bridge }
+    }
+
+    /// Copy duration depends on database size. Migration commands have no
+    /// request timer; callers can terminate the worker and resume durable state.
+    #[cfg(feature = "sqlite3mc")]
+    pub(crate) async fn call_without_timeout(
+        &self,
+        req: StorageWorkerRequest,
+    ) -> anyhow::Result<StorageWorkerResponse> {
+        let request = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".into()),
+            payload: req,
+        };
+        match self.bridge.fork().run(request).await {
+            StorageWorkerResponse::Error(e) => Err(anyhow!(e)),
+            other => Ok(other),
+        }
     }
 
     pub(crate) async fn call(

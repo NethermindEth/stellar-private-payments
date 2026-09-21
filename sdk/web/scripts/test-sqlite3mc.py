@@ -10,6 +10,7 @@ import argparse
 import functools
 import http.server
 import json
+import runpy
 from pathlib import Path
 import secrets
 import socket
@@ -24,6 +25,7 @@ parser.add_argument("--browser", choices=["chromium", "firefox"], default="chrom
 parser.add_argument("--binary")
 parser.add_argument("--driver")
 parser.add_argument("--plaintext-only", action="store_true")
+parser.add_argument("--migration", action="store_true")
 args = parser.parse_args()
 web = Path(__file__).resolve().parents[1]
 art = args.artifacts.resolve()
@@ -34,6 +36,10 @@ profile.mkdir()
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_args): pass
+    def end_headers(self):
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        super().end_headers()
     def do_GET(self):
         if self.path == "/test.html":
             self.send_response(200)
@@ -132,6 +138,10 @@ try:
         except RuntimeError as error:
             assert "sqlite3mc feature" in str(error)
         checks.append("default build rejects encrypted API")
+        assert js("try{await sdk.Storage.openMigration({keyProvider:async()=>{throw Error('provider should not run');}});return false;}catch(e){return String(e).includes('sqlite3mc feature');}")
+        checks.append("default build rejects migration API")
+    elif args.migration:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-migration.py"))["run"](globals())
     else:
         encrypted(True)
         js("await storage.call({SetSetting:{key:'integration-protected',value_json:JSON.stringify(arguments[0])}});window.fork=storage.fork();return true;", [marker])

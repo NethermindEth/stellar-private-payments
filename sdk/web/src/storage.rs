@@ -77,6 +77,54 @@ impl Storage {
 
 #[wasm_bindgen]
 impl Storage {
+    /// Open the explicit migration coordinator, owning both OPFS pools until
+    /// close. This handle is for migration commands, not application storage.
+    #[cfg(feature = "sqlite3mc")]
+    #[wasm_bindgen(js_name = openMigration)]
+    pub async fn open_migration(
+        worker_url: String,
+        key: Vec<u8>,
+        create_new: bool,
+    ) -> Result<Storage, JsError> {
+        let key = crate::protocol::DatabaseKeyTransport(key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
+        crate::wasm_start();
+        let storage = Self {
+            bridge: StorageBridge::new(
+                StorageWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&worker_url),
+            ),
+        };
+        storage
+            .bridge
+            .call(
+                StorageWorkerRequest::OpenMigration { key, create_new },
+                STORAGE_OPEN_PING_TIMEOUT_MS,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(storage)
+    }
+
+    #[cfg(feature = "sqlite3mc")]
+    #[wasm_bindgen(js_name = migrationAction)]
+    pub async fn migration_action(&self, action: JsValue) -> Result<String, JsError> {
+        let action = serde_wasm_bindgen::from_value(action)?;
+        match self
+            .bridge
+            .call_without_timeout(StorageWorkerRequest::Migration(action))
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?
+        {
+            crate::protocol::StorageWorkerResponse::MigrationState(status) => Ok(status),
+            _ => Err(JsError::new("unexpected migration response")),
+        }
+    }
+
     /// Open the separate encrypted OPFS database. The caller supplies a random
     /// 32-byte key; existing plaintext storage is neither opened nor converted.
     #[cfg(feature = "sqlite3mc")]

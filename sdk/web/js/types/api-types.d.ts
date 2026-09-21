@@ -97,10 +97,35 @@ export interface Storage {
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
 
+export type StorageMigrationStatus = 'copying' | 'prepared' | 'active' | 'cleaning' | 'complete' | 'aborted';
+
+/** Owns both OPFS pools. Close all other storage users (including other tabs)
+ * before opening. Retain a recoverable wrapped key before createNew.
+ * After active/cleaning/complete, close this handle and use Storage.openEncrypted;
+ * never reopen the stale plaintext source. finish explicitly removes that source.
+ * Cleanup cannot erase browser/filesystem snapshots or external backups.
+ * An operation failure closes the worker's pools; close and reopen the migration
+ * handle before retrying so durable mappings are reacquired.
+ * Resume requires a durable control record. An interrupted initial create can
+ * leave unusable control state; opening then fails closed and the untouched
+ * plaintext source remains authoritative. Automatic namespace repair is not provided.
+ */
+export interface StorageMigration {
+  status(): Promise<StorageMigrationStatus>;
+  prepare(): Promise<StorageMigrationStatus>;
+  activate(): Promise<StorageMigrationStatus>;
+  abort(): Promise<StorageMigrationStatus>;
+  /** Restart an aborted migration with the same key and current plaintext data. */
+  restart(): Promise<StorageMigrationStatus>;
+  finish(): Promise<StorageMigrationStatus>;
+  close(): Promise<void>;
+}
+
 /** Encrypted opening requires an opt-in sqlite3mc build and uses separate OPFS storage. */
 export declare const Storage: {
   open(options?: StorageOpenOptions | null): Promise<Storage>;
   openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
+  openMigration(options: EncryptedStorageOpenOptions): Promise<StorageMigration>;
 };
 
 /** Options for {@link Client.new}. */

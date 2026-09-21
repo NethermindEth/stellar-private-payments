@@ -68,6 +68,13 @@ pub enum StorageWorkerRequest {
         key: DatabaseKeyTransport,
         create_new: bool,
     },
+    #[cfg(feature = "sqlite3mc")]
+    OpenMigration {
+        key: DatabaseKeyTransport,
+        create_new: bool,
+    },
+    #[cfg(feature = "sqlite3mc")]
+    Migration(MigrationAction),
     Ping,
     Pause,
     SyncState,
@@ -141,6 +148,17 @@ pub enum StorageWorkerRequest {
     },
 }
 
+#[cfg(feature = "sqlite3mc")]
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MigrationAction {
+    Status,
+    Prepare,
+    Activate,
+    Abort,
+    Restart,
+    Finish,
+}
+
 /// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
 /// zeroized on drop. Browser message serialization can still create other copies.
 #[cfg(feature = "sqlite3mc")]
@@ -164,6 +182,8 @@ impl Drop for DatabaseKeyTransport {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerResponse {
+    #[cfg(feature = "sqlite3mc")]
+    MigrationState(String),
     Pong,
     SyncState(Vec<SyncMetadata>),
     Saved,

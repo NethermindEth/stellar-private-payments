@@ -83,7 +83,11 @@ unsafe extern "C" {
 
 // The caller owns the OPFS pool and checks logical filename absence for CreateNew.
 // Native creation reserves a new path atomically, refusing existing files.
-pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
+/// Open a keyed connection before running application SQL. On WASM, the caller
+/// must own the OPFS pool and check file existence against `purpose` first.
+/// Native paths are reserved atomically for creation. Opens require owner
+/// serialization, including the immutable authentication preflight.
+pub fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
     // A native filesystem filename is never a SQLite URI. An absolute path
     // prevents a literal "file:" filename from selecting a different database.
     #[cfg(not(target_arch = "wasm32"))]

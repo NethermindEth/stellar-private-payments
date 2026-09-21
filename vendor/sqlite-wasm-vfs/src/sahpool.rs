@@ -289,8 +289,17 @@ impl OpfsSAHPool {
                 .map_err(OpfsSAHError::Truncate)?;
         }
 
-        sah.write_with_js_u8_array_and_options(&self.header_buffer, &read_write_options(0.0))
+        let written = sah
+            .write_with_js_u8_array_and_options(&self.header_buffer, &read_write_options(0.0))
             .map_err(OpfsSAHError::Write)?;
+        if written != f64::from(self.header_buffer.length()) {
+            return Err(OpfsSAHError::Generic(
+                "Incomplete filename header write".into(),
+            ));
+        }
+        // Persist filename assignment and deletion before a caller publishes a
+        // migration state that depends on this mapping or truncation.
+        FileSystemSyncAccessHandle::flush(sah).map_err(OpfsSAHError::Flush)?;
 
         Ok(())
     }

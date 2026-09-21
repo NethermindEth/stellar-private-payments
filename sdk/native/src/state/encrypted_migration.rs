@@ -74,7 +74,7 @@ fn check_integrity(conn: &Connection) -> Result<()> {
 
 /// A digest of schema, exact typed values (including rowids), and version headers.
 /// Keep it private to the encrypted control database; it is not a public identifier.
-fn fingerprint(conn: &Connection) -> Result<String> {
+pub fn fingerprint(conn: &Connection) -> Result<String> {
     check_integrity(conn)?;
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(&schema(conn)?)?);

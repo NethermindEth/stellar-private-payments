@@ -6157,6 +6157,7 @@ dependencies = [
  "gloo-timers",
  "gloo-worker",
  "js-sys",
+ "rusqlite",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

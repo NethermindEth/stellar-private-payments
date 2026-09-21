@@ -36,7 +36,11 @@ async function openStorage(options = {}) {
 
 /** Open opt-in encrypted storage using a caller-owned key provider. */
 async function openEncryptedStorage(options) {
-  const open = Reflect.get(WasmStorage, 'openEncrypted');
+  return openKeyedStorage('openEncrypted', options);
+}
+
+async function openKeyedStorage(method, options) {
+  const open = Reflect.get(WasmStorage, method);
   if (typeof open !== 'function') {
     throw new Error('Encrypted storage requires a build with the sqlite3mc feature');
   }
@@ -54,6 +58,30 @@ async function openEncryptedStorage(options) {
   } finally {
     transport.fill(0);
   }
+}
+
+/** Explicit OPFS migration. Close all storage users first, including other tabs. */
+async function openStorageMigration(options) {
+  const storage = await openKeyedStorage('openMigration', options);
+  const action = Reflect.get(storage, 'migrationAction');
+  let closed = false;
+  const call = async (name) => {
+    if (closed) throw new Error('Migration is closed');
+    return action.call(storage, name);
+  };
+  return {
+    status: () => call('Status'),
+    prepare: () => call('Prepare'),
+    activate: () => call('Activate'),
+    abort: () => call('Abort'),
+    restart: () => call('Restart'),
+    finish: () => call('Finish'),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      try { await storage.close(); } finally { storage.free(); }
+    },
+  };
 }
 
 /**
@@ -179,7 +207,7 @@ function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options)
   });
 }
 
-export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage };
+export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage, openMigration: openStorageMigration };
 export const Client = {
   new: newClient,
 };
