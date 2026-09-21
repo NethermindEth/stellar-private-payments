@@ -12,6 +12,8 @@ build = "build.rs"
 name = "stellar_private_payments"
 
 [features]
+# Opt-in engine/key support; use scripts/sqlite3mc.py to select the pinned library.
+sqlite3mc = []
 # multi-threaded proving
 parallel = [
     "dep:rayon",

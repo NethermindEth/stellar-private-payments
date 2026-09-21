@@ -61,6 +61,13 @@ pub struct DisclaimerStatePayload {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
+    #[cfg(feature = "sqlite3mc")]
+    OpenPlaintext,
+    #[cfg(feature = "sqlite3mc")]
+    OpenEncrypted {
+        key: DatabaseKeyTransport,
+        create_new: bool,
+    },
     Ping,
     Pause,
     SyncState,
@@ -132,6 +139,26 @@ pub enum StorageWorkerRequest {
         pool_contract_id: String,
         commitments: Vec<Field>,
     },
+}
+
+/// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
+/// zeroized on drop. Browser message serialization can still create other copies.
+#[cfg(feature = "sqlite3mc")]
+#[derive(Serialize, Deserialize)]
+pub struct DatabaseKeyTransport(pub Vec<u8>);
+
+#[cfg(feature = "sqlite3mc")]
+impl std::fmt::Debug for DatabaseKeyTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DatabaseKey([REDACTED])")
+    }
+}
+
+#[cfg(feature = "sqlite3mc")]
+impl Drop for DatabaseKeyTransport {
+    fn drop(&mut self) {
+        stellar_private_payments::state::database_key::clear_transport(&mut self.0);
+    }
 }
 
 #[allow(clippy::large_enum_variant)]

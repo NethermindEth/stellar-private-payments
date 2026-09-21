@@ -53,3 +53,6 @@ tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
+
+[features]
+sqlite3mc = ["stellar-private-payments/sqlite3mc", "sqlite-wasm-rs/sqlite3mc"]

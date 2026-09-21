@@ -11,7 +11,7 @@ if [ -z "$LOCK_SHA" ]; then
   exit 1
 fi
 
-CIRCOMLIB_DIR="$REPO_ROOT/circuits/src/circomlib"
+CIRCOMLIB_DIR="${CIRCOMLIB_DIR:-$REPO_ROOT/circuits/src/circomlib}"
 if [ ! -d "$CIRCOMLIB_DIR" ]; then
   echo "missing circuits/src/circomlib (build the project first so circomlib is staged)" >&2
   exit 1
@@ -32,7 +32,10 @@ mkdir -p "$TMP_DIR/src/circuits"
 
 # Copy Circom sources + circomlib from the build-staged directory.
 mkdir -p "$TMP_DIR/src/circuits/src"
-cp -R "$REPO_ROOT/circuits/src/"* "$TMP_DIR/src/circuits/src/"
+for source in "$REPO_ROOT/circuits/src/"*; do
+  [ "$(basename "$source")" = circomlib ] || cp -R "$source" "$TMP_DIR/src/circuits/src/"
+done
+cp -R "$CIRCOMLIB_DIR" "$TMP_DIR/src/circuits/src/circomlib"
 
 # circomlib's own devDependencies (snarkjs, ffjavascript, etc.) include
 # GPL-3.0-licensed packages. They are out of scope for the JS license scan as

@@ -3,6 +3,15 @@ use std::{env, fs, path::PathBuf};
 use sha2::{Digest, Sha256};
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SPP_SQLITE3MC_BUILD");
+    if env::var_os("CARGO_FEATURE_SQLITE3MC").is_some() {
+        let expected = format!("2.5.1:{}", env::var("TARGET").expect("TARGET"));
+        assert_eq!(
+            env::var("SPP_SQLITE3MC_BUILD").ok().as_deref(),
+            Some(expected.as_str()),
+            "Build the sqlite3mc feature with python3 scripts/sqlite3mc.py -- <command> to select the pinned encrypted engine"
+        );
+    }
     println!("cargo:rerun-if-changed=src/state/disclaimer.md");
     println!("cargo:rerun-if-changed=circuits.json");
 

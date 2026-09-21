@@ -133,3 +133,5 @@ opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
+# SAH lock reporting and single-handle ownership needed for hot-journal recovery.
+sqlite-wasm-vfs = { path = "vendor/sqlite-wasm-vfs" }

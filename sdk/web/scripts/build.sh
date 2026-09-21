@@ -7,7 +7,14 @@ WEB="$ROOT/sdk/web"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
-ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
+ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROFILE"
+MC_ARGS=()
+if [[ -n "${SPP_SQLITE3MC_BUILD:-}" ]]; then
+  [[ "$SPP_SQLITE3MC_BUILD" == "2.5.1:$TARGET" && -f "${SPP_SQLITE3MC_CONFIG:-}" ]] || {
+    echo "error: build encrypted WASM through scripts/sqlite3mc.py --target $TARGET" >&2; exit 1;
+  }
+  MC_ARGS=(--config "$SPP_SQLITE3MC_CONFIG" --features sqlite3mc)
+fi
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
 case "$PROFILE" in
@@ -26,9 +33,9 @@ echo "==> Verifying circuit artifacts match lockfile..."
 sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" "${MC_ARGS[@]}"
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker "${MC_ARGS[@]}"
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker "${MC_ARGS[@]}"
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
@@ -117,6 +124,10 @@ done
 
 rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
+if [[ -n "${SPP_SQLITE3MC_BUILD:-}" ]]; then
+  mkdir -p "$WEB/dist/licenses"
+  cp "$ROOT/vendor/sqlite3mc-NOTICE.txt" "$WEB/dist/licenses/SQLite3MC.txt"
+fi
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"

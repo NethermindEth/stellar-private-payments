@@ -29,6 +29,8 @@ use crate::{
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
     path: PathBuf,
+    #[cfg(feature = "sqlite3mc")]
+    database_key: Option<std::sync::Arc<crate::state::database_key::DatabaseKey>>,
     db: RefCell<SqliteStorage>,
 }
 
@@ -38,7 +40,28 @@ impl LocalStorage {
         let db = SqliteStorage::connect_file(&path).context("open storage")?;
         Ok(Self {
             path,
+            #[cfg(feature = "sqlite3mc")]
+            database_key: None,
             db: RefCell::new(db),
+        })
+    }
+
+    /// Open encrypted storage after acquiring its key. Provider failure leaves
+    /// the database untouched; forks retain a zeroizing shared key until closed.
+    #[cfg(feature = "sqlite3mc")]
+    pub async fn open_with_key_provider(
+        storage_path: &str,
+        database_id: &str,
+        purpose: crate::state::database_key::OpenPurpose,
+        provider: &(impl crate::state::database_key::DatabaseKeyProvider + ?Sized),
+    ) -> Result<Self, Error> {
+        let key = provider.acquire(database_id, purpose).await?;
+        let path = PathBuf::from(storage_path);
+        let db = SqliteStorage::connect_encrypted(&path, &key, purpose)?;
+        Ok(Self {
+            path,
+            db: RefCell::new(db),
+            database_key: Some(std::sync::Arc::new(key)),
         })
     }
 
@@ -86,9 +109,25 @@ impl ContractDataStorage for LocalStorage {
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<Self, Error> {
+        #[cfg(feature = "sqlite3mc")]
+        if let Some(key) = &self.database_key {
+            let db = SqliteStorage::connect_encrypted(
+                &self.path,
+                key,
+                crate::state::database_key::OpenPurpose::OpenExisting,
+            )
+            .context("fork encrypted storage")?;
+            return Ok(Self {
+                path: self.path.clone(),
+                db: RefCell::new(db),
+                database_key: Some(key.clone()),
+            });
+        }
         let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
         Ok(Self {
             path: self.path.clone(),
+            #[cfg(feature = "sqlite3mc")]
+            database_key: None,
             db: RefCell::new(db),
         })
     }
