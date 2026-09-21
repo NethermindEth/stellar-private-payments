@@ -364,6 +364,27 @@ fn merkle_init_only_once() {
 }
 
 #[test]
+fn the_tree_stores_no_zero_hashes() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        let storage = env.storage().persistent();
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(0)));
+        assert!(!storage.has(&MerkleDataKey::FilledSubtree(levels)));
+        assert!(storage.has(&MerkleDataKey::FilledSubtree(1)));
+    });
+}
+
+#[test]
 fn merkle_insert_updates_root_and_index() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
