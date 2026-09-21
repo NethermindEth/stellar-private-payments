@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use stellar_private_payments::types::{AssetDescriptor, NoteAmount};
 
-use super::support::{deploy_default, session};
-use crate::network::LocalNetwork;
+use super::support::{deploy, deploy_default, session};
+use crate::{network::LocalNetwork, pool::PoolOptions};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
@@ -105,7 +105,7 @@ async fn is_registered() -> Result<()> {
 }
 
 #[tokio::test]
-async fn portfolio() -> Result<()> {
+async fn portfolio_basic() -> Result<()> {
     let session = session(deploy_default().await?).await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     session.pool()?.deposit(deposit_amount).await?;
@@ -122,6 +122,73 @@ async fn portfolio() -> Result<()> {
     );
     assert_eq!(portfolio[0].amount, deposit_amount);
     assert_eq!(portfolio[0].note_count, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn portfolio_multi_pool() -> Result<()> {
+    let config = deploy(&[PoolOptions::NONE, PoolOptions::NONE]).await?;
+    let session = session(config).await?;
+    let pool_a = session.pool_at(0)?;
+    let pool_b = session.pool_at(1)?;
+
+    let amount_a = NoteAmount::from(DEPOSIT_STROOPS);
+    let amount_b = NoteAmount::from(TRANSFER_STROOPS);
+    pool_a.deposit(amount_a).await?;
+    pool_b.deposit(amount_b).await?;
+    pool_b.deposit(amount_b).await?;
+
+    let portfolio = session.account.portfolio().await?;
+    assert_eq!(portfolio.len(), 2, "both deployed pools should be reported");
+
+    let entry_a = portfolio
+        .iter()
+        .find(|entry| entry.pool_contract_id == pool_a.config().pool_contract_id)
+        .context("pool_a missing from portfolio")?;
+    assert_eq!(entry_a.amount, amount_a);
+    assert_eq!(entry_a.note_count, 1);
+
+    let entry_b = portfolio
+        .iter()
+        .find(|entry| entry.pool_contract_id == pool_b.config().pool_contract_id)
+        .context("pool_b missing from portfolio")?;
+    assert_eq!(
+        entry_b.amount,
+        amount_b.checked_add(amount_b).context("two deposits fit")?
+    );
+    assert_eq!(entry_b.note_count, 2);
+
+    let notes = session.account.user_notes(10).await?;
+    assert_eq!(
+        notes.len(),
+        3,
+        "user_notes should aggregate notes across both pools"
+    );
+
+    let notes_a = pool_a.notes().await?;
+    assert_eq!(
+        notes_a.len(),
+        1,
+        "fetching notes for pool_a must not include pool_b's notes"
+    );
+    assert!(
+        notes_a
+            .iter()
+            .all(|note| note.pool_contract_id == pool_a.config().pool_contract_id)
+    );
+
+    let notes_b = pool_b.notes().await?;
+    assert_eq!(
+        notes_b.len(),
+        2,
+        "fetching notes for pool_b must not include pool_a's notes"
+    );
+    assert!(
+        notes_b
+            .iter()
+            .all(|note| note.pool_contract_id == pool_b.config().pool_contract_id)
+    );
 
     Ok(())
 }

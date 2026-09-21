@@ -1,5 +1,6 @@
 mod account;
 mod deposit;
+mod disclosure;
 mod malformed;
 mod pool_gvk;
 mod pool_policy;
