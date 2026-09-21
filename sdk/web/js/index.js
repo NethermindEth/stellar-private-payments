@@ -68,7 +68,8 @@ function wrapAccount(wasmAccount) {
       return wasmAccount.signerAddress;
     },
     portfolio: () => wasmAccount.portfolio(),
-    userPublicKeys: () => wasmAccount.userPublicKeys(),
+    privacyKeys: () => wasmAccount.privacyKeys(),
+    derivePrivacyKeys: () => wasmAccount.derivePrivacyKeys(),
     aspSecret: () => wasmAccount.aspSecret(),
     userNotes: (limit) => wasmAccount.userNotes(limit),
     isRegistered: () => wasmAccount.isRegistered(),

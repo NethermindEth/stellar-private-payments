@@ -349,16 +349,22 @@ async fn open_account(client: &Client, account: TestAccount) -> super::Account {
     open_account_with(client, account, SignerMode::Sentinel).await
 }
 
-/// Open an `Account` session for a test account with an explicit signer mode.
+/// Open an `Account` session for a test account with an explicit signer mode,
+/// deriving and persisting its privacy keys.
 async fn open_account_with(
     client: &Client,
     account: TestAccount,
     mode: SignerMode,
 ) -> super::Account {
-    client
+    let account = client
         .account(account_options(account), signer_with_mode(account, mode))
         .await
-        .expect("account session must open")
+        .expect("account session must open");
+    account
+        .derive_privacy_keys()
+        .await
+        .expect("privacy keys must derive (stub signer answers signMessage)");
+    account
 }
 
 /// `Client::account` options naming `account` as the note owner.
@@ -388,15 +394,16 @@ fn account_options(account: TestAccount) -> JsValue {
 }
 
 /// A wallet that signs the key-derivation message with another account must
-/// not open the owner's session, nor leave keys behind under the owner.
+/// not derive or leave keys behind under the owner. Opening the session
+/// itself always succeeds now — derivation is a separate, explicit call.
 #[wasm_bindgen_test]
 #[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_foreign_derivation_signature_is_refused() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
-    // Twice: had the first refusal stored keys, the second session would find
-    // them, skip derivation, and open.
+    // Twice: had the first refusal stored keys, the second call would find
+    // them, skip derivation, and succeed.
     for attempt in ["first", "second"] {
         let signer = signer_with_mode(ACCOUNT_A, SignerMode::Sentinel);
         Reflect::set(
@@ -406,8 +413,13 @@ async fn e2e_foreign_derivation_signature_is_refused() {
         )
         .unwrap();
 
-        let error = match client.account(account_options(ACCOUNT_A), signer).await {
-            Ok(_) => panic!("{attempt} session opened on account B's derivation signature"),
+        let account = client
+            .account(account_options(ACCOUNT_A), signer)
+            .await
+            .expect("opening the session does not itself derive keys");
+
+        let error = match account.derive_privacy_keys().await {
+            Ok(_) => panic!("{attempt} derivation accepted account B's signature for account A"),
             Err(error) => JsValue::from(error),
         };
         let message = Reflect::get(&error, &JsValue::from_str("message"))
@@ -416,7 +428,7 @@ async fn e2e_foreign_derivation_signature_is_refused() {
             .unwrap_or_default();
         assert!(
             message.contains("not made by the note owner"),
-            "{attempt} session refused for another reason: {message}"
+            "{attempt} derivation refused for another reason: {message}"
         );
     }
 

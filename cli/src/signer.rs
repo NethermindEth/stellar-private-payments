@@ -10,7 +10,7 @@ use anyhow::Context;
 use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
-    types::SignedTransaction,
+    types::{KeyDerivationSignature, SignedTransaction},
 };
 
 use crate::stellar_cli;
@@ -60,5 +60,12 @@ impl Signer for AliasSigner {
             .to_xdr_base64(Limits::none())
             .context("encode signed transaction xdr")?;
         Ok(SignedTransaction { signed_xdr })
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        Ok(
+            stellar_cli::sign_message(&self.alias, message, self.config_dir.as_deref())
+                .with_context(|| format!("sign message for alias `{}`", self.alias))?,
+        )
     }
 }
