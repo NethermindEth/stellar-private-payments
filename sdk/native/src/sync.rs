@@ -7,13 +7,17 @@ use std::{
 
 use crate::{
     chain::{
-        ContractDataStorage, Indexer, RpcError, TxConfirmStatus, confirm_tx as rpc_confirm_tx,
+        ContractDataStorage, Indexer, IndexerError, RpcError, TxConfirmStatus,
+        confirm_tx as rpc_confirm_tx,
     },
     types::{ContractConfig, SyncMetadata},
 };
+use anyhow::Context as _;
 use futures::task::AtomicWaker;
 
-use crate::{Error, Handle, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult};
+use crate::{
+    Error, Handle, RetentionGap, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult,
+};
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
@@ -277,9 +281,9 @@ impl<S: Storage> BackgroundSync<S> {
                     &self.contract_config,
                 )
                 .await
-                .map_err(|e| Error::Other(format!("indexer: {e:#}")))?
+                .context("indexer")?
             }
-            Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
+            Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
         };
 
         loop {
@@ -307,15 +311,15 @@ impl<S: Storage> BackgroundSync<S> {
     }
 }
 
-fn is_retention_handoff(err: &RpcError) -> bool {
-    matches!(err, RpcError::RetentionHandoff { .. })
-}
-
 fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
     match err {
         RpcError::RetentionHandoff { from_ledger } => Some(*from_ledger),
         _ => None,
     }
+}
+
+fn is_rpc_sync_gap(err: &IndexerError) -> bool {
+    matches!(err, IndexerError::Rpc(RpcError::RpcSyncGap(_)))
 }
 
 async fn apply_bootnode_handoff<S: Storage>(
@@ -336,12 +340,12 @@ async fn apply_bootnode_handoff<S: Storage>(
     storage
         .save_sync_progress(metadata, false)
         .await
-        .map_err(|e| Error::Other(format!("handoff sync progress: {e:#}")))?;
+        .context("handoff sync progress")?;
     storage.clear_indexing_cursors().await?;
     storage
         .clamp_last_fully_indexed_ledger(from_ledger)
         .await
-        .map_err(|e| Error::Other(format!("handoff clamp fully indexed: {e:#}")))?;
+        .context("handoff clamp fully indexed")?;
     tracing::info!(
         from_ledger,
         "bootnode handoff, resuming main RPC from cutoff"
@@ -355,16 +359,11 @@ async fn apply_bootnode_handoff_from_err<S: Storage>(
     err: &RpcError,
 ) -> Result<(), Error> {
     let from_ledger = retention_handoff_from_ledger(err).ok_or_else(|| {
-        Error::Other("bootnode handoff missing fromLedger in error data".to_string())
+        Error::Other(anyhow::anyhow!(
+            "bootnode handoff missing fromLedger in error data"
+        ))
     })?;
     apply_bootnode_handoff(storage, contract_config, from_ledger).await
-}
-
-fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
-    matches!(
-        err.downcast_ref::<RpcError>(),
-        Some(RpcError::RpcSyncGap(_))
-    )
 }
 
 /// Probe whether the main RPC needs a historical-sync bootnode.
@@ -379,15 +378,8 @@ pub async fn bootnode_required<S: Storage>(
     match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
         Ok(_) => Ok(false),
         Err(e) if is_rpc_sync_gap(&e) => Ok(true),
-        Err(e) => Err(Error::Other(format!("bootnode probe: {e:#}"))),
+        Err(e) => Err(anyhow::Error::from(e).context("bootnode probe").into()),
     }
-}
-
-fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
-    matches!(
-        err.downcast_ref::<RpcError>(),
-        Some(rpc_err) if is_retention_handoff(rpc_err)
-    )
 }
 
 /// Run indexer rounds until caught up, stopped, or an error.
@@ -398,7 +390,7 @@ async fn catch_up_loop<I, S>(
     indexer: &Indexer<I>,
     storage: &S,
     stop: Option<&AtomicBool>,
-) -> anyhow::Result<()>
+) -> Result<(), Error>
 where
     I: ContractDataStorage,
     S: Storage,
@@ -408,10 +400,7 @@ where
             return Ok(());
         }
         let may_have_more = indexer.fetch_contract_events().await?;
-        storage
-            .process_pending_state()
-            .await
-            .map_err(|e| anyhow::anyhow!("process_pending_state: {e}"))?;
+        storage.process_pending_state().await?;
         if !may_have_more {
             return Ok(());
         }
@@ -427,29 +416,22 @@ async fn bootnode_catch_up<S: Storage>(
     stop: Option<&AtomicBool>,
 ) -> Result<(), Error> {
     let Some(bootnode) = bootnode_url else {
-        return Err(Error::Other(
-            "RPC sync gap: main RPC lacks history; configure a bootnode \
-             or use a different RPC / fresher deployment"
-                .to_string(),
-        ));
+        return Err(RetentionGap::SyncGap.into());
     };
 
     tracing::info!("main RPC sync gap, trying bootnode at {bootnode}");
     storage.clear_indexing_cursors().await?;
 
-    let bootnode_client =
-        RpcClient::new(bootnode).map_err(|e| Error::Other(format!("bootnode rpc: {e:#}")))?;
+    let bootnode_client = RpcClient::new(bootnode).context("bootnode rpc")?;
 
     let bootnode_indexer =
         match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
             Ok(indexer) => indexer,
-            Err(e) if is_retention_handoff_err(&e) => {
-                if let Some(rpc_err) = e.downcast_ref::<RpcError>() {
-                    apply_bootnode_handoff_from_err(storage, contract_config, rpc_err).await?;
-                }
+            Err(IndexerError::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
+                apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
                 return Ok(());
             }
-            Err(e) => return Err(Error::Other(format!("bootnode indexer: {e:#}"))),
+            Err(e) => return Err(RetentionGap::BootnodeFailed(format!("{e:#}")).into()),
         };
 
     let mut consecutive_failures = 0u32;
@@ -467,13 +449,8 @@ async fn bootnode_catch_up<S: Storage>(
                 sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
             // bootnode handoff, use main RPC
-            Err(e)
-                if e.downcast_ref::<RpcError>()
-                    .is_some_and(is_retention_handoff) =>
-            {
-                if let Some(rpc_err) = e.downcast_ref::<RpcError>() {
-                    apply_bootnode_handoff_from_err(storage, contract_config, rpc_err).await?;
-                }
+            Err(Error::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
+                apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
                 return Ok(());
             }
             // bootnode generic error
@@ -483,9 +460,11 @@ async fn bootnode_catch_up<S: Storage>(
                     "bootnode sync round failed ({consecutive_failures}/{BOOTNODE_CATCH_UP_MAX_FAILURES}): {e:#}"
                 );
                 if consecutive_failures >= BOOTNODE_CATCH_UP_MAX_FAILURES {
-                    return Err(Error::Other(format!(
-                        "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors: {e:#}"
-                    )));
+                    return Err(anyhow::Error::from(e)
+                        .context(format!(
+                            "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors"
+                        ))
+                        .into());
                 }
                 sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
@@ -509,13 +488,14 @@ pub(crate) async fn catch_up<S: Storage>(
             bootnode_catch_up(storage, contract_config, bootnode_url, None).await?;
             Indexer::init(rpc.clone(), storage.fork()?, contract_config)
                 .await
-                .map_err(|e| Error::Other(format!("indexer: {e:#}")))?
+                .context("indexer")?
         }
-        Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
+        Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
     };
     catch_up_loop(&indexer, storage, None)
         .await
-        .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))
+        .context("indexer catch-up")
+        .map_err(Into::into)
 }
 
 /// Poll until a submitted transaction succeeds or fails.
@@ -531,7 +511,7 @@ pub(crate) async fn confirm_tx(
         }
         match rpc_confirm_tx(rpc, hash)
             .await
-            .map_err(|e| Error::Other(format!("confirm transaction: {e:#}")))?
+            .context("confirm transaction")?
         {
             TxConfirmStatus::Success => {
                 return Ok(TransactionResult {
@@ -539,10 +519,10 @@ pub(crate) async fn confirm_tx(
                 });
             }
             TxConfirmStatus::Failed { detail } => {
-                return Err(Error::Other(format!("transaction failed{detail}")));
+                return Err(Error::Other(anyhow::anyhow!("transaction failed{detail}")));
             }
             TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
-                return Err(Error::Other(format!(
+                return Err(Error::Other(anyhow::anyhow!(
                     "transaction confirmation timed out after 30s (hash: {hash})"
                 )));
             }
@@ -550,7 +530,7 @@ pub(crate) async fn confirm_tx(
         }
     }
 
-    Err(Error::Other(format!(
+    Err(Error::Other(anyhow::anyhow!(
         "transaction confirmation failed (hash: {hash})"
     )))
 }
@@ -834,13 +814,13 @@ mod tests {
             .fetch_contract_events()
             .await
             .expect_err("bootnode should hand off");
+        let IndexerError::Rpc(rpc_err) = &err else {
+            panic!("expected handoff, got {err:?}");
+        };
         assert!(
-            err.downcast_ref::<RpcError>()
-                .is_some_and(is_retention_handoff),
+            retention_handoff_from_ledger(rpc_err).is_some(),
             "expected handoff, got {err:?}"
         );
-
-        let rpc_err = err.downcast_ref::<RpcError>().expect("rpc error");
         storage
             .apply_handoff(
                 retention_handoff_from_ledger(rpc_err).expect("fromLedger"),

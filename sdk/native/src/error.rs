@@ -1,6 +1,7 @@
 use crate::{
+    chain::IndexerError,
     planner::{PlanError, SpendSessionError},
-    types::AspMembershipSync,
+    types::{AspMembershipSync, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -28,7 +29,7 @@ pub enum Error {
     #[error(transparent)]
     PlanExecution(#[from] PlanExecutionError),
 
-    /// The user rejected the wallet signing request (SEP-0043 error code -4).
+    /// The user rejected the wallet signing request (SEP-0043 error code -4)
     #[error("wallet request rejected by user: {0}")]
     UserRejected(String),
 
@@ -43,23 +44,36 @@ pub enum Error {
     // Escapes to a UI toast, the telemetry ring buffer and CLI logs.
     #[error(
         "signing account {} cannot sign for the note owner {}; this step needs the owner's own signature",
-        crate::types::Sensitive(signer),
-        crate::types::Sensitive(owner)
+        Sensitive(signer),
+        Sensitive(owner)
     )]
     SignerIsNotNoteOwner { owner: String, signer: String },
 
-    /// The account has no ledger entry on-chain yet.
+    /// The account has no ledger entry on-chain yet
     #[error("account {} not found on-chain", crate::types::Sensitive(address))]
     AccountNotFound { address: String },
 
+    /// Local storage has no privacy keys for address
+    #[error(
+        "no privacy keys found in local storage for {}",
+        Sensitive(user_address)
+    )]
+    UserKeysNotFound { user_address: String },
+
+    #[error("event history is unavailable: {0}")]
+    RetentionGap(#[from] RetentionGap),
+
     #[error("{0}")]
-    Other(String),
+    Other(#[from] anyhow::Error),
 }
 
-impl Error {
-    pub fn other(msg: impl Into<String>) -> Self {
-        Self::Other(msg.into())
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum RetentionGap {
+    #[error("main RPC is missing event history and no fallback bootnode is configured")]
+    SyncGap,
+
+    #[error("configured bootnode failed to fill retention gap: {0}")]
+    BootnodeFailed(String),
 }
 
 /// Multi-tx plan stopped after one or more steps had already confirmed
@@ -101,6 +115,15 @@ impl PlanExecutionError {
         match self.cause.as_ref() {
             Error::PlanExecution(inner) => inner.cause(),
             other => other,
+        }
+    }
+}
+
+impl From<IndexerError> for Error {
+    fn from(ierr: IndexerError) -> Self {
+        match ierr {
+            IndexerError::Rpc(e) => e.into(),
+            IndexerError::Other(e) => e.into(),
         }
     }
 }

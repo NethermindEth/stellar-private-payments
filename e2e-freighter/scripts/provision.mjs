@@ -6,7 +6,7 @@
 //
 // Steps:
 //   1. Create/import the Freighter wallet (setup-freighter-profile.mjs)
-//   2. If --add-account: import account B (add-account.mjs)
+//   2. Import account D, the signing account, and make C active again
 //   3. Drive the app's onboarding wizard (complete-onboarding.mjs)
 //   4. Verify the result (verify-onboarded.mjs)
 //
@@ -20,7 +20,6 @@ import { scrub } from '../src/redact.mjs';
 import {
   launch,
   unlockFreighter,
-  switchFreighterAccount,
   connectApp,
   waitForFreighterApproval,
   approveOrWatch,
@@ -35,7 +34,6 @@ const PROFILE_DIR = path.join(PKG_ROOT, '.chrome-profile');
 const EXT_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
 
 const args = process.argv.slice(2);
-const ADD_ACCOUNT = args.includes('--add-account');
 const VERIFY_ONLY = args.includes('--verify');
 const SKIP_WIZARD = args.includes('--skip-wizard');
 
@@ -180,9 +178,52 @@ async function provisionFreighter(context) {
   await page.close();
 }
 
-// ── Step 2: Import account B (add-account.mjs) ──
-async function importAccountB(context) {
-  step('importing account B (E2E_ACCOUNT_D)');
+const shortAddress = (address) => `${address.slice(0, 4)}…${address.slice(-4)}`;
+
+// The row for `address` in Freighter's account list, which it opens, or null.
+// Freighter keeps account keys encrypted, so this list, which names each
+// account by its shortened address, is where a held account shows.
+async function freighterAccountRow(page, address) {
+  await page.click(SEL.accountName, { force: true });
+  const rows = page.locator('.detail-name');
+  await rows.first().waitFor({ state: 'visible', timeout: 10_000 });
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    // The name and the shortened address are siblings under the row.
+    if ((await rows.nth(i).locator('xpath=../..').innerText()).includes(shortAddress(address))) {
+      return rows.nth(i);
+    }
+  }
+  return null;
+}
+
+// Make `address` Freighter's active account, and prove it took.
+async function selectFreighterAccount(page, address) {
+  const short = shortAddress(address);
+  const row = await freighterAccountRow(page, address);
+  if (!row) throw new Error(`no Freighter account row shows ${short}`);
+  await row.click({ force: true });
+
+  const deadline = Date.now() + 10_000;
+  let active = null;
+  while (Date.now() < deadline) {
+    ({ lastUsedAccount: active } = await page.evaluate(
+      () => new Promise((resolve) => chrome.storage.local.get('lastUsedAccount', resolve)),
+    ));
+    if (active === address) return;
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`could not make ${short} the active Freighter account; active is ${active || '(none)'}`);
+}
+
+// ── Step 2: Import account D, the signing account ──
+// Test 12 signs with D for C's notes, so Freighter must hold D, and must have
+// connected D to the app: Freighter will not sign as an account the site is not
+// connected to, and it connects only the active account. Importing makes D
+// active, so the app is connected while it is, and C is made active again
+// before the wizard runs, since the app takes the active account as the note
+// owner when it first connects.
+async function importSigningAccount(context) {
+  step('importing account D (E2E_ACCOUNT_D)');
   const page = await context.newPage();
   await page.goto(`chrome-extension://${EXT_ID}/index.html`);
   await page.waitForTimeout(1000);
@@ -198,8 +239,38 @@ async function importAccountB(context) {
     getRequiredEnv('E2E_FREIGHTER_PASSWORD'),
   );
 
-  step('account B imported');
+  // Selecting C also proves D landed: its row is listed beside C's.
+  const signer = getRequiredEnv('E2E_ACCOUNT_D_ADDRESS');
+  if (!(await freighterAccountRow(page, signer))) {
+    throw new Error(`imported account D not listed in Freighter; expected ${shortAddress(signer)}`);
+  }
+  step('account D imported');
+
+  await connectSigningAccount(context);
+
+  await page.goto(`chrome-extension://${EXT_ID}/index.html`);
+  await page.waitForTimeout(1000);
+  await selectFreighterAccount(page, getRequiredEnv('E2E_ACCOUNT_C_ADDRESS'));
+  step('account C active again');
   await page.close();
+}
+
+// Connect the app while D is active, then close the onboarding it opens for D.
+// Freighter keeps D connected to the app; the app keeps no note owner, because
+// it remembers one only once connecting succeeds.
+async function connectSigningAccount(context) {
+  step('connecting account D to the app');
+  const page = await appPage(context);
+  await connectApp(page, { appUrl: requireAppUrl(), context });
+  if (await page.locator('#onboarding-close-btn').isVisible().catch(() => false)) {
+    await page.locator('#onboarding-close-btn').click();
+  }
+  await page.locator('#wallet-btn').waitFor({ state: 'visible', timeout: 15_000 });
+  const remembered = await page.evaluate(() => localStorage.getItem('poolstellar_note_owner'));
+  if (remembered) {
+    throw new Error(`connecting account D left ${remembered} as the app's note owner`);
+  }
+  step('account D connected to the app');
 }
 
 // ── Step 3: Complete onboarding wizard ──
@@ -237,6 +308,24 @@ async function verifyProfile(context) {
   // even when Freighter would auto-approve the origin. Asserting the button
   // is absent without clicking it can never pass.
   await connectApp(page, { appUrl: requireAppUrl(), context });
+
+  // Test 12 signs with account D for account C's notes: Freighter must hold D,
+  // and the app must own notes as C. Later runs connect as the owner the app
+  // remembers, so a profile onboarded as D fails every signing-account test.
+  const owner = getRequiredEnv('E2E_ACCOUNT_C_ADDRESS');
+  const remembered = await page.evaluate(() => localStorage.getItem('poolstellar_note_owner'));
+  if (remembered !== owner) {
+    throw new Error(`verify: the app's note owner is ${remembered || '(none)'}, not account C (${owner})`);
+  }
+  const extension = await context.newPage();
+  await extension.goto(`chrome-extension://${EXT_ID}/index.html`);
+  await extension.waitForTimeout(1000);
+  const signer = getRequiredEnv('E2E_ACCOUNT_D_ADDRESS');
+  const holdsSigner = Boolean(await freighterAccountRow(extension, signer));
+  await extension.close();
+  if (!holdsSigner) {
+    throw new Error(`verify: Freighter does not hold account D (${signer}); rebuild with setup.sh --force`);
+  }
 
   // What actually matters is that the wizard completion persisted — that is
   // the thing every later headless run depends on skipping.
@@ -283,10 +372,7 @@ async function main() {
   try {
     await unlockFreighter(context);
     await provisionFreighter(context);
-
-    if (ADD_ACCOUNT) {
-      await importAccountB(context);
-    }
+    await importSigningAccount(context);
 
     if (!SKIP_WIZARD) {
       await completeWizard(context);

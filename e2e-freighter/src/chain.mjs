@@ -2,6 +2,7 @@
 // Soroban RPC rather than an eventually consistent UI.
 
 import { createLogger } from './logger.mjs';
+import { encodeAccountAddress } from './strkey.mjs';
 
 const log = createLogger('chain');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,4 +50,38 @@ export async function waitForTransactionSuccess(hash, {
 export async function confirmTransaction(hash, options) {
   const status = await waitForTransactionSuccess(hash, options);
   return { transactionHash: hash, status };
+}
+
+const ENVELOPE_TYPE_TX_V0 = 0;
+const ENVELOPE_TYPE_TX = 2;
+const KEY_TYPE_ED25519 = 0;
+const KEY_TYPE_MUXED_ED25519 = 0x100;
+
+// The source account of a TransactionEnvelope XDR (base64): the account that
+// signed the envelope and paid its fee.
+export function envelopeSourceAccount(envelopeXdr) {
+  const bytes = Buffer.from(envelopeXdr, 'base64');
+  const envelopeType = bytes.readInt32BE(0);
+  if (envelopeType === ENVELOPE_TYPE_TX_V0) return encodeAccountAddress(bytes.subarray(4, 36));
+  if (envelopeType !== ENVELOPE_TYPE_TX) {
+    throw new Error(`envelopeSourceAccount: unsupported envelope type ${envelopeType}`);
+  }
+  const keyType = bytes.readInt32BE(4);
+  if (keyType === KEY_TYPE_ED25519) return encodeAccountAddress(bytes.subarray(8, 40));
+  // MuxedAccount: an 8-byte id precedes the key.
+  if (keyType === KEY_TYPE_MUXED_ED25519) return encodeAccountAddress(bytes.subarray(16, 48));
+  throw new Error(`envelopeSourceAccount: unsupported source account type ${keyType}`);
+}
+
+// The source account of a confirmed transaction, read back from Soroban RPC.
+export async function transactionSourceAccount(hash, { rpcUrl, fetchFn = fetch } = {}) {
+  const res = await fetchFn(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTransaction', params: { hash } }),
+  });
+  const body = await res.json();
+  const envelopeXdr = body?.result?.envelopeXdr;
+  if (!envelopeXdr) throw new Error(`transactionSourceAccount: no envelope for ${hash} (status: ${body?.result?.status})`);
+  return envelopeSourceAccount(envelopeXdr);
 }

@@ -9,7 +9,7 @@ use super::{
 const PROCESS_FETCH_LIMIT: u32 = 50;
 
 pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), Error> {
-    while process_local_state_batch(storage).map_err(|e| Error::Other(e.to_string()))? {}
+    while process_local_state_batch(storage)? {}
     Ok(())
 }
 

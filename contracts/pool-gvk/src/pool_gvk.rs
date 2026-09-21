@@ -340,13 +340,15 @@ impl PoolGvkContract {
             .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
     }
 
+    /// Get the admin address.
+    fn get_admin(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)
+    }
+
     // ========== ASP Contract Functions ==========
-    //
-    // `pool` also exports `update_asp_membership`/`update_asp_non_membership`;
-    // this crate deliberately does not. A `pool-gvk` pool can therefore never
-    // repoint its ASP contracts after construction, unlike a `pool` one — a
-    // deployment-time constraint, not an oversight. Nothing in the repo calls
-    // those two methods today; add them here if that changes.
 
     /// Get the ASP Membership contract address.
     fn get_asp_membership(env: &Env) -> Result<Address, Error> {
@@ -364,7 +366,57 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Update the ASP Membership contract address.
+    ///
+    /// Changes the ASP Membership contract address. Requires admin
+    /// authorization.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `new_asp_membership` - New ASP Membership contract address
+    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env)?;
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPMembership, &new_asp_membership);
+        Ok(())
+    }
+
+    /// Update the ASP Non-Membership contract address.
+    ///
+    /// Changes the ASP Non-Membership contract address. Requires admin
+    /// authorization.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `new_asp_non_membership` - New ASP Non-Membership contract address
+    pub fn update_asp_non_membership(
+        env: &Env,
+        new_asp_non_membership: Address,
+    ) -> Result<(), Error> {
+        let admin = Self::get_admin(env)?;
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+        Ok(())
+    }
+
     /// Get the current Merkle root from the ASP Membership contract.
+    ///
+    /// Makes a cross-contract call to retrieve the current root of the
+    /// membership Merkle tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// The current membership Merkle root as U256
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
@@ -372,6 +424,17 @@ impl PoolGvkContract {
     }
 
     /// Get the current Merkle root from the ASP Non-Membership contract.
+    ///
+    /// Makes a cross-contract call to retrieve the current root of the
+    /// non-membership Sparse Merkle tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// The current non-membership Merkle root as U256
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
@@ -592,9 +655,15 @@ impl PoolGvkContract {
             }
         }
 
-        let is_valid = client.verify(&proof.proof, &public_inputs);
-
-        Ok(is_valid)
+        // `try_verify`, not `verify`. `Groth16Error` and this contract's
+        // `Error` are separate `#[repr(u32)]` enums whose codes overlap.
+        // Catch verifier rejections here so callers always receive pool-gvk's
+        // own error domain rather than decoding a verifier code as a pool
+        // error.
+        match client.try_verify(&proof.proof, &public_inputs) {
+            Ok(Ok(is_valid)) => Ok(is_valid),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the GVK mode, for internal use where the getter's `Result`
@@ -653,16 +722,17 @@ impl PoolGvkContract {
         // `nonce` public input is required to equal (see `verify_proof`),
         // which *binds* the nonce to this transaction's parameters. It does
         // not make the nonce unique: `hash_ext_data` is a deterministic
-        // function of caller-chosen `ExtData`, so two transactions with
-        // identical `ExtData` share a nonce. `globalViewKey.circom` asks the
-        // contract for uniqueness, and this does not provide it — but the
-        // property that matters is upheld elsewhere: the ciphertext's
-        // ephemeral scalar is derived as
-        // `H(pk, amount, blinding, salt, D, nonce, idx)`, and `blinding` is
-        // fresh per output note, so colliding `(R, c)` additionally requires
-        // an identical note *and* salt. Only a prover can arrange that, and
-        // only against their own privacy.
-        let ext_hash = hash_ext_data(env, &ext_data);
+        // function of caller-chosen `ExtData` plus this pool's address and
+        // token, so two transactions with identical `ExtData` on the same
+        // pool share a nonce. `globalViewKey.circom` asks the contract for
+        // uniqueness, and this does not provide it — but the property that
+        // matters is upheld elsewhere: the ciphertext's ephemeral scalar is
+        // derived as `H(pk, amount, blinding, salt, D, nonce, idx)`, and
+        // `blinding` is fresh per output note, so colliding `(R, c)`
+        // additionally requires an identical note *and* salt. Only a prover
+        // can arrange that, and only against their own privacy.
+        let token = Self::get_token(env)?;
+        let ext_hash = hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }

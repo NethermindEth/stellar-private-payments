@@ -19,10 +19,10 @@ import { gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { expectNoFreighterApproval } from '../src/wallet.mjs';
+import { encodeAccountAddress } from '../src/strkey.mjs';
 
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
-const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const execFileAsync = promisify(execFile);
 // ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]). This is the persistent
 // contract-data key used by both pool contract variants.
@@ -49,41 +49,8 @@ function stroopsToDecimal(stroops) {
   return `${whole}.${fraction}`;
 }
 
-function crc16Xmodem(bytes) {
-  let crc = 0;
-  for (const byte of bytes) {
-    crc ^= byte << 8;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
-      crc &= 0xffff;
-    }
-  }
-  return crc;
-}
-
-function base32Encode(bytes) {
-  let value = 0;
-  let bits = 0;
-  let output = '';
-  for (const byte of bytes) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  return bits ? output + BASE32_ALPHABET[(value << (5 - bits)) & 31] : output;
-}
-
 function randomUnregisteredAddress() {
-  const encoded = Buffer.alloc(35);
-  encoded[0] = 6 << 3;
-  randomBytes(32).copy(encoded, 1);
-  const checksum = crc16Xmodem(encoded.subarray(0, 33));
-  encoded[33] = checksum & 0xff;
-  encoded[34] = checksum >>> 8;
-  return base32Encode(encoded);
+  return encodeAccountAddress(randomBytes(32));
 }
 
 async function confirmOperation(page, title) {
@@ -123,6 +90,11 @@ export async function run(helpers) {
 
   // (1) Over-withdraw: planner rejects the amount before signing.
   await gotoMoveFlow(page, 'withdraw');
+  const signingSelect = page.getByTestId('signing-account-select');
+  const owner = await signingSelect.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
+  assert(owner && owner !== recipient, 'expected a connected owner distinct from the recipient');
+  await signingSelect.selectOption(owner);
+  await page.locator('#withdraw-recipient-select').selectOption(owner);
   await page.locator('#withdraw-amount').fill(overAmount);
   await page.locator('#btn-withdraw').click();
   await confirmOperation(page, 'Confirm withdrawal');
@@ -195,6 +167,52 @@ export async function run(helpers) {
   await assertNoApproval(context, 'above-max deposit');
   await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
   log.info(`(4) above max-deposit (${aboveMaximumDeposit} XLM):`, aboveCap.message);
+
+  // (5) Signing account: a pasted value that is not an address is refused in
+  // the picker itself and never becomes a choice.
+  await gotoMoveFlow(page, 'withdraw');
+  await page.locator('#withdraw-amount').fill('0.01');
+  await signingSelect.selectOption('__other__');
+  await page.getByTestId('signing-account-input').fill('GNOTANADDRESS');
+  await page.getByTestId('signing-account-use').click();
+  await page.getByTestId('signing-account-error').filter({ hasText: 'Enter a valid Stellar address' })
+    .waitFor({ state: 'visible', timeout: 5_000 });
+  assert(
+    (await signingSelect.locator('option[value="GNOTANADDRESS"]').count()) === 0,
+    'an invalid pasted address was added to the signing-account list',
+  );
+  log.info('(5) invalid signing account: refused in the picker');
+
+  // (6) "Enter another address…" left without an address must not quietly fall
+  // back to signing as the owner.
+  await page.locator('#withdraw-amount').fill('0.01');
+  await page.locator('#btn-withdraw').click();
+  const noSigner = await waitForToast(page, {
+    origin: 'withdraw',
+    predicate: (toast) => /enter the account to sign and pay with/i.test(toast.message),
+  });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened without a chosen signer');
+  await assertNoApproval(context, 'no signing account entered');
+  await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
+  log.info('(6) no signing account entered:', noSigner.message);
+
+  // (7) A valid account that does not exist on the network cannot be the
+  // transaction's source; stopped before the confirmation and before proving.
+  await page.getByTestId('signing-account-input').fill(unregisteredAddress);
+  await page.getByTestId('signing-account-use').click();
+  assert((await signingSelect.inputValue()) === unregisteredAddress, 'the pasted signing account was not selected');
+  await page.locator('#btn-withdraw').click();
+  const unfunded = await waitForToast(page, {
+    origin: 'withdraw',
+    predicate: (toast) => /isn't funded on this network/i.test(toast.message),
+  });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for an unfunded signing account');
+  await assertNoApproval(context, 'unfunded signing account');
+  await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
+  log.info('(7) unfunded signing account:', unfunded.message);
+
+  // Deposits still use the owner regardless of the withdrawal selection.
+  await gotoMoveFlow(page, 'deposit');
 
   const recovery = await deposit(helpers, { logTag, amount: '0.01', rpcUrl });
   assert(recovery.transactionHash !== baseline.transactionHash, 'recovery deposit somehow reused the baseline transaction hash');

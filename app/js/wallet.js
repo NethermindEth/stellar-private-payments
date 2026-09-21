@@ -136,16 +136,22 @@ export async function getWalletAddress() {
 }
 
 /**
- * Watch Freighter for wallet address/network changes.
- * @param {{intervalMs?: number, onChange: function}} opts
+ * Watch Freighter's active account.
+ *
+ * Freighter shares an account only with sites allowed for it, so the callback
+ * gets an empty address while the active account is not allowed here (or the
+ * wallet is locked), and no address at all when Freighter could not be asked.
+ *
+ * @param {{intervalMs?: number, onChange: function({address: string|null}): void}} opts
  * @returns {function} stop watcher
  */
 export function startWalletWatcher(opts) {
     const { intervalMs = 3000, onChange } = opts || {};
     const watcher = new WatchWalletChanges(intervalMs);
     const res = watcher.watch((info) => {
+        if (info?.error) return;
         try {
-            onChange?.(info);
+            onChange?.({ address: typeof info?.address === 'string' ? info.address : null });
         } catch (e) {
             console.warn('[Wallet] watch callback failed:', e);
         }

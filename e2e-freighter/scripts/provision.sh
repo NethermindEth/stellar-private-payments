@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Provision and snapshot a Freighter profile for e2e tests.
 #
-# Usage: provision.sh [--snapshot|--restore|--verify] [--force] [--add-account]
+# Usage: provision.sh [--snapshot|--restore|--verify] [--force]
 #
 #   --snapshot       Tar the working profile into profile-snapshot.tar.gz (default)
 #   --restore        Restore the snapshot into a fresh temp dir, print path on stdout
 #   --verify         Verify the snapshot without rebuilding
 #   --force          Rebuild the profile even if one verifies fine
-#   --add-account    Also import account B (E2E_ACCOUNT_D_SECRET) during provisioning
 #
 # Merges the former snapshot-profile.sh, prepare-profile.sh, and the
 # provisioning orchestration from setup.sh into a single script.
@@ -24,7 +23,6 @@ SNAPSHOT_FILE="$PKG_ROOT/profile-snapshot.tar.gz"
 PROFILE_DIR="$PKG_ROOT/.chrome-profile"
 MODE="snapshot"
 FORCE=0
-ADD_ACCOUNT_FLAG=""
 VERIFY_FLAG=""
 
 usage() {
@@ -38,7 +36,6 @@ Options:
   --restore        Restore the snapshot into a fresh temp dir, print path on stdout
   --verify         Verify the snapshot without rebuilding
   --force          Rebuild the profile even if one verifies fine
-  --add-account    Also import account B (E2E_ACCOUNT_D_SECRET) during provisioning
   -h, --help       Show this help
 
 Examples:
@@ -55,7 +52,6 @@ while [ $# -gt 0 ]; do
     --restore) MODE="restore"; shift ;;
     --verify) MODE="verify"; shift ;;
     --force) FORCE=1; shift ;;
-    --add-account) ADD_ACCOUNT_FLAG="--add-account"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument '$1'" ;;
   esac
@@ -88,11 +84,7 @@ case "$MODE" in
 
     # Provision the profile
     step "provisioning the Freighter profile"
-    # $ADD_ACCOUNT_FLAG is intentionally unquoted: when empty it must expand to
-    # no argument at all, whereas "$ADD_ACCOUNT_FLAG" would pass an empty string
-    # as a positional argument.
-    # shellcheck disable=SC2086
-    node "$SCRIPT_DIR/provision.mjs" $ADD_ACCOUNT_FLAG
+    node "$SCRIPT_DIR/provision.mjs"
 
     # Snapshot the profile.
     #

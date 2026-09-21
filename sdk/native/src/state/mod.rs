@@ -5,8 +5,8 @@ mod storage;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;
 pub use storage::{
-    APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, DEFAULT_BOOTNODE_URL, Storage,
-    Storage as SqliteStorage, StoredUserKeys,
+    APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, APP_SETTING_GVK_AUTHORITY,
+    DEFAULT_BOOTNODE_URL, Storage, Storage as SqliteStorage, StoredUserKeys,
 };
 
 mod process_local;
