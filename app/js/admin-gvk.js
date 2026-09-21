@@ -829,6 +829,32 @@ function collectNotes(rows) {
 
 const NO_FILTERS = { amountMin: null, amountMax: null, ledgerFrom: null, ledgerTo: null, pk: null };
 
+function amountByPk(slots) {
+  const totals = new Map();
+  for (const slot of slots) {
+    const pk = normalizeFieldKey(slot.audited.note.pk);
+    if (!pk) continue;
+    totals.set(pk, (totals.get(pk) ?? 0n) + parseFieldAmount(slot.audited.note.amount));
+  }
+  return totals;
+}
+
+/**
+ * A withdraw tx's inputs aren't all withdrawn — a PK can withdraw only part
+ * of an input note, with the rest coming back as a new output note to that
+ * same PK (partial withdrawal). Nets each PK's own same-tx outputs out of
+ * its input total so only what actually left the pool counts as withdrawn.
+ */
+function netWithdrawnByPk(inputs, outputs) {
+  const outputTotals = amountByPk(outputs);
+  const net = new Map();
+  for (const [pk, inputTotal] of amountByPk(inputs)) {
+    const ownOutput = outputTotals.get(pk) ?? 0n;
+    if (inputTotal > ownOutput) net.set(pk, inputTotal - ownOutput);
+  }
+  return net;
+}
+
 /**
  * Builds a PK-node / transfer-edge graph out of the given tx rows: one node
  * per public key that owns any note, one edge per (sender PK -> receiver PK)
@@ -889,11 +915,9 @@ function buildPkGraph(rows, filters) {
     }
 
     if (effectiveKind === 'withdraw') {
-      for (const slot of inputs) {
-        const pk = normalizeFieldKey(slot.audited.note.pk);
-        if (!pk) continue;
+      for (const [pk, amount] of netWithdrawnByPk(inputs, outputs)) {
         const node = ensureNode(pk);
-        node.withdrawn += parseFieldAmount(slot.audited.note.amount);
+        node.withdrawn += amount;
         node.withdrawCount += 1;
         node.txIndices.add(index);
       }
@@ -1003,10 +1027,8 @@ function buildPkTimelineEvents(rows, filters) {
     }
 
     if (effectiveKind === 'withdraw') {
-      for (const slot of inputs) {
-        const pk = normalizeFieldKey(slot.audited.note.pk);
-        if (!pk) continue;
-        ensureDot(pk, index, ledger).withdrawn += parseFieldAmount(slot.audited.note.amount);
+      for (const [pk, amount] of netWithdrawnByPk(inputs, outputs)) {
+        ensureDot(pk, index, ledger).withdrawn += amount;
       }
       continue;
     }
@@ -1953,6 +1975,23 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('width', plotWidth)
     .attr('height', rowHeight)
     .attr('fill', laneStripeFill);
+
+  // Behind the marks (same drag-to-zoom-by-ledger-range as the Note graph),
+  // so it and click-to-select coexist — marks appended after it stay on top.
+  const brush = brushX()
+    .extent([[padding, 0], [plotWidth - padding, laneAreaHeight]])
+    .on('end', (event) => {
+      if (!event.selection) return;
+      const [x0, x1] = event.selection;
+      if (x1 - x0 < 4) {
+        brushGroup.call(brush.move, null);
+        return;
+      }
+      const fromLedger = Math.round(xScale.invert(x0));
+      const toLedger = Math.round(xScale.invert(x1));
+      applyGraphBrushRange(Math.min(fromLedger, toLedger), Math.max(fromLedger, toLedger));
+    });
+  const brushGroup = svg.append('g').attr('class', 'gvk-pk-graph-brush').call(brush);
 
   // Hand-drawn shaft + triangular head (not an SVG <marker>, to avoid its scaling/orientation quirks).
   const flowGeoms = flows.map((f) => {
