@@ -648,6 +648,11 @@ impl ProvenTransaction {
 /// transfer. `hash_ext_data` binds the hash to the pool's own address and its
 /// token, so the contracts are deployed before the proof is made.
 ///
+/// `seed` varies the note material, so two transactions proven against one
+/// deployment spend different nullifiers and write different commitments.
+/// Seed 0 is the original fixture. The input leaf indexes stay at 0 and 1: the
+/// seed separates the notes, not their positions in the tree.
+///
 /// # Errors
 ///
 /// Returns an error if the witness cannot be computed or the proof cannot be
@@ -663,7 +668,11 @@ pub fn prove_transaction(
     in_amounts: [u64; 2],
     out_amounts: [u64; 2],
     ext_amount: i32,
+    seed: u64,
 ) -> Result<ProvenTransaction> {
+    // Every note constant sits below the stride, so no two seeds overlap.
+    let note = |base: u64| Scalar::from(base.wrapping_add(seed.wrapping_mul(1_000)));
+
     let ext_data = ExtData {
         recipient: Address::generate(env),
         ext_amount: I256::from_i32(env, ext_amount),
@@ -678,26 +687,26 @@ pub fn prove_transaction(
         vec![
             InputNote {
                 leaf_index: 0,
-                priv_key: Scalar::from(101u64),
-                blinding: Scalar::from(201u64),
+                priv_key: note(101),
+                blinding: note(201),
                 amount: Scalar::from(in_amounts[0]),
             },
             InputNote {
                 leaf_index: 1,
-                priv_key: Scalar::from(102u64),
-                blinding: Scalar::from(211u64),
+                priv_key: note(102),
+                blinding: note(211),
                 amount: Scalar::from(in_amounts[1]),
             },
         ],
         vec![
             OutputNote {
-                pub_key: Scalar::from(501u64),
-                blinding: Scalar::from(601u64),
+                pub_key: note(501),
+                blinding: note(601),
                 amount: Scalar::from(out_amounts[0]),
             },
             OutputNote {
-                pub_key: Scalar::from(502u64),
-                blinding: Scalar::from(602u64),
+                pub_key: note(502),
+                blinding: note(602),
                 amount: Scalar::from(out_amounts[1]),
             },
         ],
@@ -705,11 +714,12 @@ pub fn prove_transaction(
 
     // `transact` appends its two outputs past this prefix.
     let leaves = prepopulated_prefix(
-        0xDEAD_BEEFu64,
+        0xDEAD_BEEFu64 ^ seed,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
         LEAF_PREFIX,
     );
-    let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
+    let membership_trees =
+        build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ seed ^ ((j as u64) << 40));
     let keys = case
         .inputs
         .iter()

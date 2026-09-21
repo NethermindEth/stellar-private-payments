@@ -4,7 +4,9 @@
 
 use ark_bn254::Fr as Scalar;
 use ark_ff::{BigInteger, PrimeField};
-use circuits::core::merkle as circuits_merkle;
+use circuits::{core::merkle as circuits_merkle, test::utils::general::poseidon2_hash3};
+use soroban_sdk::{Env, U256};
+use soroban_utils::{ZERO_HASH_LEVELS, zero_hash};
 use stellar_private_payments::{types::Field, zk::merkle as prover_merkle};
 
 fn scalar_to_field(s: Scalar) -> Field {
@@ -100,4 +102,49 @@ fn empty_prefix_tree_matches_prover() {
         prover.root().expect("prover root"),
         "empty-tree root diverged at depth {DEPTH}"
     );
+}
+
+fn u256_to_scalar(v: &U256) -> Scalar {
+    let mut buf = [0u8; 32];
+    v.to_be_bytes().copy_into_slice(&mut buf);
+    Scalar::from_be_bytes_mod_order(&buf)
+}
+
+/// The zero hashes the contracts compile in must match the circuits'.
+///
+/// `soroban-utils` carries the table as constants and checks it only against
+/// itself: each entry is derived from its neighbour, so a table regenerated
+/// from the wrong seed satisfies every one of those checks. `circuits` holds
+/// the leaf value a second time in `ZERO_LEAF_BE`, with nothing tying the two
+/// crates together. Both are anchored here against the Poseidon2
+/// implementation the circuits use, which is a separate implementation from
+/// the host function the contracts call.
+#[test]
+fn contract_zero_hashes_match_circuits() {
+    let env = Env::default();
+
+    // poseidon2("XLM"): the t=4 permutation over the three ASCII bytes with a
+    // zero domain separator.
+    let xlm = poseidon2_hash3(
+        Scalar::from(u64::from(b'X')),
+        Scalar::from(u64::from(b'L')),
+        Scalar::from(u64::from(b'M')),
+        None,
+    );
+    assert_eq!(
+        circuits_merkle::zero_leaf(),
+        xlm,
+        "the circuits' zero leaf is not poseidon2(\"XLM\")"
+    );
+
+    let mut expected = xlm;
+    for level in 0..ZERO_HASH_LEVELS {
+        let stored = zero_hash(&env, level).expect("zero hash within the table");
+        assert_eq!(
+            u256_to_scalar(&stored),
+            expected,
+            "contract zero hash diverged from the circuits at level {level}"
+        );
+        expected = circuits_merkle::poseidon2_compression(expected, expected);
+    }
 }
