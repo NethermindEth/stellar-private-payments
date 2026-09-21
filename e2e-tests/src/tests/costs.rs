@@ -15,6 +15,15 @@
 //! deployment adds one code entry per distinct Wasm beyond the first, which is
 //! two for a pool call that reaches the verifier and one association set.
 //!
+//! The `Entries` and `Disk entries` columns count different things and are
+//! billed differently. Live Soroban state is held in memory, so reading it
+//! lands in `Entries` and costs nothing: the host bills reads as
+//! `fee_per_disk_read_entry * (disk read entries + write entries)`. `Entries`
+//! still bounds the transaction, because the footprint limit the network
+//! enforces is the sum of disk reads, memory reads and writes. So a change
+//! that moves `Entries` changes what fits in a transaction, and a change that
+//! moves `Disk entries` or `Writes` changes what it costs.
+//!
 //! Two cost terms are out of reach here. The contracts run as native test
 //! contracts, so the contract's own arithmetic is not metered: the instruction
 //! figures cover host work such as storage reads, XDR decoding, hashing, and
@@ -127,9 +136,10 @@ impl Row {
             TEMPORARY_RENT_DENOMINATOR,
         );
         format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             self.path,
             r.memory_read_entries,
+            r.disk_read_entries,
             r.write_entries,
             r.write_bytes,
             r.instructions,
@@ -142,7 +152,7 @@ impl Row {
     }
 }
 
-const HEADER: &str = "| Path | Entries | Writes | Write bytes | Instructions | Memory | Rent bumps | Rent ledger-bytes | Rent fee | Host fee |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+const HEADER: &str = "| Path | Entries | Disk entries | Writes | Write bytes | Instructions | Memory | Rent bumps | Rent ledger-bytes | Rent fee | Host fee |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
 
 /// Reads the resources of the last invocation on `env` into a row.
 fn measure(env: &Env, path: &'static str) -> Row {
@@ -401,25 +411,61 @@ const EXPECTED: &[(&str, u32, u32)] = &[
     ("public-key-registry register, first registration", 4, 2),
 ];
 
+/// Checks every measured row against [`EXPECTED`], in both directions.
+///
+/// Counting the rows is not enough on its own: a duplicated row paired with a
+/// dropped one keeps the totals equal while leaving an entry point unmeasured.
+/// So each pinned path must be measured exactly once, each measured path must
+/// be pinned, and [`EXPECTED`] must name each path only once.
 fn assert_pinned(rows: &[Row]) {
-    assert_eq!(
-        rows.len(),
-        EXPECTED.len(),
-        "every pinned row must be measured"
-    );
     let mut mismatches = std::vec::Vec::new();
-    for row in rows {
-        match EXPECTED.iter().find(|(path, ..)| *path == row.path) {
-            Some((_, entries, writes))
-                if *entries == row.resources.memory_read_entries
-                    && *writes == row.resources.write_entries => {}
-            Some((_, entries, writes)) => mismatches.push(format!(
-                "{}: pinned {entries} entries and {writes} writes, measured {} and {}",
-                row.path, row.resources.memory_read_entries, row.resources.write_entries
-            )),
-            None => mismatches.push(format!("{}: no pinned expectation", row.path)),
+
+    // A path pinned twice would let one row satisfy both entries.
+    for (i, (path, ..)) in EXPECTED.iter().enumerate() {
+        if EXPECTED[..i].iter().any(|(seen, ..)| seen == path) {
+            mismatches.push(format!("{path}: pinned twice"));
         }
     }
+
+    for (path, entries, writes) in EXPECTED {
+        let measured = rows
+            .iter()
+            .filter(|row| row.path == *path)
+            .collect::<std::vec::Vec<_>>();
+        match measured.as_slice() {
+            [] => mismatches.push(format!("{path}: not measured")),
+            [row] => {
+                let (got_entries, got_writes) = (
+                    row.resources.memory_read_entries,
+                    row.resources.write_entries,
+                );
+                if (got_entries, got_writes) != (*entries, *writes) {
+                    mismatches.push(format!(
+                        "{path}: pinned {entries} entries and {writes} writes, measured {got_entries} and {got_writes}"
+                    ));
+                }
+            }
+            many => mismatches.push(format!("{path}: measured {} times", many.len())),
+        }
+    }
+
+    for row in rows {
+        if !EXPECTED.iter().any(|(path, ..)| *path == row.path) {
+            mismatches.push(format!("{}: no pinned expectation", row.path));
+        }
+    }
+
+    // The harness runs against live entries, so nothing should reach disk. A
+    // disk read is what the fee model bills, so it must not appear unnoticed.
+    for row in rows {
+        if row.resources.disk_read_entries != 0 {
+            mismatches.push(format!(
+                "{}: {} disk read entries, expected none",
+                row.path, row.resources.disk_read_entries
+            ));
+        }
+    }
+
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
@@ -509,7 +555,7 @@ const EXPECTED_REAL_PROOF: (u32, u32) = (9, 4);
 fn a_real_proof_transfer_reports_its_pinned_entry_counts() -> Result<()> {
     let env = mainnet_env();
     let contracts = deploy_contracts(&env);
-    let mut proven = prove_transaction(&env, &contracts, [0, 13], [13, 0], 0)?;
+    let mut proven = prove_transaction(&env, &contracts, [0, 13], [13, 0], 0, 0)?;
     let roots = sync_contract_state(
         &env,
         &contracts,
@@ -535,6 +581,42 @@ fn a_real_proof_transfer_reports_its_pinned_entry_counts() -> Result<()> {
         EXPECTED_REAL_PROOF,
         "{}",
         row.path
+    );
+    Ok(())
+}
+
+/// A withdrawal's public amount must carry the same field encoding on both
+/// sides of the proof.
+///
+/// The e2e helper wraps a negative `ext_amount` through the scalar field,
+/// `FIELD_SIZE - |ext_amount|`, and the contract reaches the same value by
+/// subtracting from the modulus. Nothing else covers a negative amount through
+/// `prove_transaction`: the withdrawal row above builds its proof from the
+/// contract helper directly, so the two encodings could drift apart unnoticed.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_withdrawal_encodes_the_public_amount_the_contract_computes() -> Result<()> {
+    // The amounts balance: 13 + (-10) = 3.
+    const WITHDRAWAL: i32 = -10;
+
+    let env = mainnet_env();
+    let contracts = deploy_contracts(&env);
+    let mut proven = prove_transaction(&env, &contracts, [13, 0], [3, 0], WITHDRAWAL, 0)?;
+    let roots = sync_contract_state(
+        &env,
+        &contracts,
+        &proven.case,
+        &mut proven.leaves,
+        &proven.membership_trees,
+        &proven.witness,
+    );
+    let proof = proven.into_proof(&env, &roots);
+
+    assert_eq!(
+        proof.public_amount,
+        pool_core::amounts::calculate_public_amount(&env, I256::from_i32(&env, WITHDRAWAL))
+            .expect("amount within range"),
+        "the proof and the contract must agree on a withdrawal's public amount"
     );
     Ok(())
 }

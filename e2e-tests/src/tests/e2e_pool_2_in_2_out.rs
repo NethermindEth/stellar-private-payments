@@ -52,7 +52,7 @@ fn transact_fixture(
     let env = test_env();
     env.mock_all_auths();
     let contracts = deploy_contracts(&env);
-    let mut proven = prove_transaction(&env, &contracts, in_amounts, out_amounts, ext_amount)?;
+    let mut proven = prove_transaction(&env, &contracts, in_amounts, out_amounts, ext_amount, 0)?;
 
     let roots = sync_contract_state(
         &env,
