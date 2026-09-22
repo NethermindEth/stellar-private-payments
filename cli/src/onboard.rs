@@ -62,7 +62,7 @@ pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
             account.alias
         );
     }
-    if storage.get_user_keys(&account.address)?.is_none() {
+    if storage.get_private_keys(&account.address)?.is_none() {
         bail!(
             "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
@@ -104,7 +104,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     }
 
     // 4. Derive privacy keys.
-    if storage.get_user_keys(&account.address)?.is_some() {
+    if storage.get_private_keys(&account.address)?.is_some() {
         say(interactive, "Privacy keys already present.");
     } else {
         if interactive {
@@ -129,6 +129,9 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
 
 /// Delegate the SEP-53 key-derivation signature to the Stellar CLI (the secret
 /// never enters this process) and store the derived privacy keys.
+///
+/// Duplicates `Account::derive_privacy_keys` in the SDK; should be integrated
+/// as part of a broader refactor.
 fn derive_and_save_keys(
     config: &CliConfig,
     account: &Account,
@@ -171,7 +174,7 @@ fn save_owner_keys(
             &encryption_keypair,
             &membership_blinding,
         )
-        .context("save privacy keys to local wallet database")
+        .context("save private keys to local wallet database")
 }
 
 fn configure_bootnode(
@@ -316,7 +319,7 @@ mod tests {
 
         assert!(
             storage
-                .get_user_keys(owner.public_key())
+                .get_private_keys(owner.public_key())
                 .expect("read keys")
                 .is_some()
         );
@@ -342,7 +345,7 @@ mod tests {
         );
         assert!(
             storage
-                .get_user_keys(owner.public_key())
+                .get_private_keys(owner.public_key())
                 .expect("read keys")
                 .is_none()
         );

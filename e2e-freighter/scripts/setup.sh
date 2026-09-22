@@ -4,7 +4,7 @@
 # Delegates to the consolidated provision.sh, which handles the full
 # provisioning, snapshot, and verification pipeline.
 #
-# Usage: setup.sh [--force] [--add-account]
+# Usage: setup.sh [--force]
 
 set -euo pipefail
 
@@ -17,17 +17,17 @@ REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
 E2E_ENV_FILE="$REPO_ROOT/deployments/testnet/.e2e-accounts.env"
 
 case "${1:-}" in
-  --force|--add-account|"") ;;
+  --force|"") ;;
   -h|--help)
     cat >&2 <<'USAGE'
-Usage: setup.sh [--force] [--add-account]
+Usage: setup.sh [--force]
 
 First-time setup for the e2e-freighter suite, in one command:
 
   1. npm ci (skipped when node_modules exists)
   2. fetch the pinned Freighter extension (if not cached)
-  3. provision the Freighter profile (extension, test account, sidebar mode)
-  4. complete app onboarding, migrate storage to SQLite3MC, and enroll Freighter unlock, HEADED
+  3. provision the Freighter profile (extension, accounts C and D, sidebar mode)
+  4. complete onboarding, migrate storage to SQLite3MC, and enroll Freighter unlock, HEADED
   5. snapshot the result
   6. verify a restored copy works
 
@@ -38,7 +38,6 @@ the generated E2E_FREIGHTER_PASSWORD to the git-ignored account env file;
 you do not need to export or choose a password manually.
 
   --force        Rebuild the profile and snapshot even if one verifies fine.
-  --add-account  Also import account B (E2E_ACCOUNT_D_SECRET).
 USAGE
     exit 0 ;;
   *) die "unknown argument '$1'" ;;
@@ -78,7 +77,6 @@ bash "$SCRIPT_DIR/fetch-extension.sh"
 
 case "${1:-}" in
   --force) exec bash "$SCRIPT_DIR/provision.sh" --force ;;
-  --add-account) exec bash "$SCRIPT_DIR/provision.sh" --add-account ;;
   *)
     step "running the consolidated provision pipeline"
     exec bash "$SCRIPT_DIR/provision.sh" ;;

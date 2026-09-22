@@ -30,3 +30,51 @@ export function accountSession(wallet = {}) {
         signerAddress: wallet.signingAddress ?? userAddress,
     };
 }
+
+const NOTE_OWNER_KEY = 'poolstellar_note_owner';
+
+/**
+ * The note owner the user connected, if one is remembered.
+ *
+ * Freighter's active account cannot stand in for it: signing as another
+ * account makes that account the active one, so the owner is remembered from
+ * the connection instead and kept until the user disconnects.
+ *
+ * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
+ * @returns {string | null}
+ */
+export function rememberedNoteOwner(storage = globalThis.localStorage) {
+    try {
+        return storage?.getItem(NOTE_OWNER_KEY) || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Remember the connected note owner across page loads.
+ *
+ * @param {string} address
+ * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
+ */
+export function rememberNoteOwner(address, storage = globalThis.localStorage) {
+    try {
+        storage?.setItem(NOTE_OWNER_KEY, address);
+    } catch (e) {
+        console.error('[AccountSession] rememberNoteOwner failed:', e);
+    }
+}
+
+/**
+ * Forget the note owner, so the next connection takes Freighter's active
+ * account.
+ *
+ * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
+ */
+export function forgetNoteOwner(storage = globalThis.localStorage) {
+    try {
+        storage?.removeItem(NOTE_OWNER_KEY);
+    } catch (e) {
+        console.error('[AccountSession] forgetNoteOwner failed:', e);
+    }
+}

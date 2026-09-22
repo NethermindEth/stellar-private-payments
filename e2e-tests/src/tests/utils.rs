@@ -12,13 +12,14 @@ use circuits::test::utils::{
     sparse_merkle_tree::prepare_smt_proof_with_overrides,
     transaction::{commitment, prepopulated_prefix},
     transaction_case::{
-        TransactionWitness, TxCase, build_base_inputs, prepare_transaction_witness,
+        InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
+        prepare_transaction_witness,
     },
 };
 use num_bigint::{BigInt, BigUint};
-use pool::{PoolContract, PoolContractClient};
+use pool::{ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256,
+    Address, Bytes, BytesN, Env, I256, U256, Vec as SorobanVec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
@@ -567,6 +568,188 @@ pub fn generate_proof(
         ext_data_hash,
     )?;
     prove_with_graph(POLICY_STEM, &inputs)
+}
+
+/// Result of `PoolContractClient::try_transact`.
+///
+/// The outer error holds the contract error, and the inner one holds a return
+/// value conversion error.
+pub type TransactOutcome =
+    Result<Result<(), soroban_sdk::ConversionError>, Result<pool::Error, soroban_sdk::InvokeError>>;
+
+/// Sends a proven transaction to a pool from a freshly generated sender.
+pub fn transact(
+    env: &Env,
+    contracts: &DeployedContracts,
+    proof: &Proof,
+    ext_data: &ExtData,
+) -> TransactOutcome {
+    let sender = Address::generate(env);
+    PoolContractClient::new(env, &contracts.pool).try_transact(proof, ext_data, &sender)
+}
+
+/// Commitment of one output note of a case.
+fn output_commitment(case: &TxCase, index: usize) -> Scalar {
+    commitment(
+        case.outputs[index].amount,
+        case.outputs[index].pub_key,
+        case.outputs[index].blinding,
+    )
+}
+
+/// A proven 2-in/2-out pool transaction, before the contracts hold the state
+/// the proof was made against.
+///
+/// A test calls [`sync_contract_state`] and passes the roots it gets back to
+/// [`ProvenTransaction::into_proof`].
+pub struct ProvenTransaction {
+    /// The transaction the proof covers.
+    pub case: TxCase,
+    /// Pool leaves the proof was made against. [`sync_contract_state`] writes
+    /// the input commitments into them.
+    pub leaves: Vec<Scalar>,
+    /// Nullifiers, public keys, and root the circuit derived.
+    pub witness: TransactionWitness,
+    /// Frozen membership trees the proof committed to.
+    pub membership_trees: Vec<MembershipTreeProof>,
+    /// External data the proof is bound to.
+    pub ext_data: ExtData,
+    result: ProofResult,
+    ext_data_hash: BytesN<32>,
+    public_amount: Scalar,
+}
+
+impl ProvenTransaction {
+    /// Assembles the pool's `Proof` from the roots the contracts hold.
+    pub fn into_proof(self, env: &Env, roots: &SyncedRoots) -> Proof {
+        let mut input_nullifiers: SorobanVec<U256> = SorobanVec::new(env);
+        for nullifier in &self.witness.nullifiers {
+            input_nullifiers.push_back(scalar_to_u256(env, *nullifier));
+        }
+
+        Proof {
+            proof: wrap_groth16_proof(env, self.result),
+            root: roots.pool_root.clone(),
+            input_nullifiers,
+            output_commitment0: scalar_to_u256(env, output_commitment(&self.case, 0)),
+            output_commitment1: scalar_to_u256(env, output_commitment(&self.case, 1)),
+            public_amount: scalar_to_u256(env, self.public_amount),
+            ext_data_hash: self.ext_data_hash,
+            asp_membership_root: roots.asp_membership_root.clone(),
+            asp_non_membership_root: roots.asp_non_membership_root.clone(),
+        }
+    }
+}
+
+/// Proves one 2-in/2-out pool transaction from the committed witness graph.
+///
+/// The amounts must balance: `inputs + ext_amount = outputs`. A positive
+/// `ext_amount` is a deposit, a negative one a withdrawal, and zero a private
+/// transfer. `hash_ext_data` binds the hash to the pool's own address and its
+/// token, so the contracts are deployed before the proof is made.
+///
+/// `seed` varies the note material, so two transactions proven against one
+/// deployment spend different nullifiers and write different commitments.
+/// Seed 0 is the original fixture. The input leaf indexes stay at 0 and 1: the
+/// seed separates the notes, not their positions in the tree.
+///
+/// # Errors
+///
+/// Returns an error if the witness cannot be computed or the proof cannot be
+/// generated.
+///
+/// # Panics
+///
+/// Panics if the proof does not verify against its own verification key, which
+/// means the amounts do not describe a valid transaction.
+pub fn prove_transaction(
+    env: &Env,
+    contracts: &DeployedContracts,
+    in_amounts: [u64; 2],
+    out_amounts: [u64; 2],
+    ext_amount: i32,
+    seed: u64,
+) -> Result<ProvenTransaction> {
+    // Every note constant sits below the stride, so no two seeds overlap.
+    let note = |base: u64| Scalar::from(base.wrapping_add(seed.wrapping_mul(1_000)));
+
+    let ext_data = ExtData {
+        recipient: Address::generate(env),
+        ext_amount: I256::from_i32(env, ext_amount),
+        encrypted_output0: Bytes::new(env),
+        encrypted_output1: Bytes::new(env),
+    };
+    let ext_data_hash = env.as_contract(&contracts.pool, || {
+        hash_ext_data(env, &ext_data, &contracts.token)
+    });
+
+    let case = TxCase::new(
+        vec![
+            InputNote {
+                leaf_index: 0,
+                priv_key: note(101),
+                blinding: note(201),
+                amount: Scalar::from(in_amounts[0]),
+            },
+            InputNote {
+                leaf_index: 1,
+                priv_key: note(102),
+                blinding: note(211),
+                amount: Scalar::from(in_amounts[1]),
+            },
+        ],
+        vec![
+            OutputNote {
+                pub_key: note(501),
+                blinding: note(601),
+                amount: Scalar::from(out_amounts[0]),
+            },
+            OutputNote {
+                pub_key: note(502),
+                blinding: note(602),
+                amount: Scalar::from(out_amounts[1]),
+            },
+        ],
+    );
+
+    // `transact` appends its two outputs past this prefix.
+    let leaves = prepopulated_prefix(
+        0xDEAD_BEEFu64 ^ seed,
+        &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+        LEAF_PREFIX,
+    );
+    let membership_trees =
+        build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ seed ^ ((j as u64) << 40));
+    let keys = case
+        .inputs
+        .iter()
+        .map(|input| NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(input.priv_key)),
+        })
+        .collect::<Vec<_>>();
+
+    let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
+    let public_amount = Scalar::from(ext_amount);
+    let result = generate_proof(
+        &case,
+        leaves.clone(),
+        public_amount,
+        &membership_trees,
+        &keys,
+        Some(bytes32_to_bigint(&ext_data_hash)),
+    )?;
+    assert!(result.verified, "Proof should verify locally");
+
+    Ok(ProvenTransaction {
+        case,
+        leaves,
+        witness,
+        membership_trees,
+        ext_data,
+        result,
+        ext_data_hash,
+        public_amount,
+    })
 }
 
 /// Merkle roots of the contracts after a state sync

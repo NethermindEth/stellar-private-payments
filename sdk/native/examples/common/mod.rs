@@ -233,11 +233,7 @@ pub fn build_account(client: &Client) -> Result<Account, String> {
         SignerAddress::new(user_address.as_str()),
     )?;
     client
-        .account(
-            NoteOwnerAddress::new(user_address.as_str()),
-            SignerAddress::new(user_address.as_str()),
-            signer,
-        )
+        .account(NoteOwnerAddress::new(user_address.as_str()), signer)
         .map_err(|e| format!("open account session: {e}"))
 }
 
@@ -257,7 +253,7 @@ pub fn open_account_pool<'a>(
 ///
 /// If not, prints instructions and exits 0.
 pub fn require_onboarded(account: &Account) -> Result<(), String> {
-    match account.user_public_keys() {
+    match account.privacy_keys() {
         Ok(_) => Ok(()),
         Err(e) => {
             let wallet = env_or("SPP_WALLET_PATH", default_wallet_path());

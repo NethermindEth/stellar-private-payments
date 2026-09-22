@@ -20,7 +20,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     let session = ClientSession::new(config, &account, &network, true)?;
     let (note, enc) = session
         .account()
-        .user_public_keys()
+        .privacy_keys()
         .map_err(|e| anyhow::anyhow!("privacy keys: {e}"))?;
 
     let note = hex0x(&note)?;

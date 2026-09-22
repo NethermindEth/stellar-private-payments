@@ -16,6 +16,9 @@ import { OpHistory } from './op-history.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
+import { SigningAccount } from './signing-account.js';
+import { RecipientAccount } from './recipient-account.js';
+import { signingPrivacyWarning, withdrawalLinksAccounts } from '../signing-account.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -98,6 +101,22 @@ function onEnterUnlessBusy(input, button, handler) {
     });
 }
 
+// Names both accounts when another one signs for the owner's notes, so the
+// confirmation says whose balance and signature the transaction uses.
+function signerRows(signer, signerLabel = 'Signed and paid by') {
+    const owner = App.state.wallet.address;
+    if (!signer || signer === owner) return [];
+    return [
+        { label: 'Notes owned by', value: Utils.shortAddress(owner) },
+        { label: signerLabel, value: Utils.shortAddress(signer) },
+    ];
+}
+
+// Returning funds to the deposit account is a privacy risk regardless of signer.
+function withdrawalRecipientWarning(owner) {
+    return `You are withdrawing to the same account used for deposits (${Utils.shortAddress(owner)}). This can link your withdrawal to your deposits. For better privacy, withdraw to an unrelated account.`;
+}
+
 // Builds a confirmation-dialog row with the number of transactions the action
 // requires. Best-effort only: a failed estimate must not block the action.
 async function txCountRow(amountValue) {
@@ -174,7 +193,7 @@ async function submitWithdraw(button, amountValue, pool, recipient) {
             hashes,
         });
         document.getElementById('withdraw-amount').value = '';
-        document.getElementById('withdraw-recipient').value = '';
+        RecipientAccount.reset('withdraw');
     }
 }
 
@@ -322,14 +341,6 @@ export const Transactions = {
         updatePoolLabels();
         updateMoveFundsBalance();
 
-        App.events.addEventListener('wallet:ready', (event) => {
-            const address = event?.detail?.address || App.state.wallet.address;
-            if (!address) return;
-            const withdrawRecipient = document.getElementById('withdraw-recipient');
-            const advancedRecipient = document.getElementById('advanced-public-recipient');
-            if (withdrawRecipient) withdrawRecipient.value = address;
-            if (advancedRecipient) advancedRecipient.value = address;
-        });
     },
 
     buildAdvancedComposer() {
@@ -368,9 +379,11 @@ export const Transactions = {
                 requireWallet();
                 const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
+                const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
                 const pool = selectedPool();
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
@@ -380,6 +393,7 @@ export const Transactions = {
                     confirmLabel: 'Deposit',
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
@@ -425,6 +439,7 @@ export const Transactions = {
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
+                const signer = await SigningAccount.forTransaction('move');
                 const  pool = selectedPool();
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
@@ -432,6 +447,7 @@ export const Transactions = {
                 const rows = [
                     { label: 'Recipient', value: recipientLabel },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
@@ -439,8 +455,10 @@ export const Transactions = {
                     title: 'Confirm transfer',
                     rows,
                     confirmLabel: 'Transfer',
+                    warning: signingPrivacyWarning({ owner: App.state.wallet.address, signer }),
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error', 7000, { origin: 'transfer' });
@@ -486,23 +504,33 @@ export const Transactions = {
                 requireWallet();
                 const amount = parseAmount(withdrawAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a withdrawal amount');
-                const recipient = withdrawRecipientInput?.value?.trim() || App.state.wallet.address;
-                if (recipient !== App.state.wallet.address && !StrKey.isValidEd25519PublicKey(recipient)) {
+                const recipient = RecipientAccount.value('withdraw');
+                if (!recipient) throw new Error('Choose a withdrawal recipient or enter another address.');
+                if (!StrKey.isValidEd25519PublicKey(recipient)) {
                     throw new Error('Invalid Stellar address');
                 }
+                const signer = await SigningAccount.forTransaction('move');
                 const pool = selectedPool();
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
                 if (countRow) rows.push(countRow);
+                const owner = App.state.wallet.address;
+                const warning = [
+                    withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
+                    signingPrivacyWarning({ owner, signer }),
+                ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm withdrawal',
                     rows,
                     confirmLabel: 'Withdraw',
+                    warning,
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error', 7000, { origin: 'withdraw' });
@@ -513,7 +541,7 @@ export const Transactions = {
 
         onEnter(withdrawRecipientInput, () => {
             const value = withdrawRecipientInput.value.trim();
-            if (value && !StrKey.isValidEd25519PublicKey(value)) {
+            if (!StrKey.isValidEd25519PublicKey(value)) {
                 Toast.show('Invalid Stellar address', 'error', 4000, { origin: 'withdraw' });
                 return;
             }
@@ -524,6 +552,17 @@ export const Transactions = {
     },
 
     bindAdvancedTransact() {
+        const depositInput = document.getElementById('advanced-public-deposit');
+        const withdrawInput = document.getElementById('advanced-public-withdraw');
+        const updateSignerVisibility = () => {
+            const deposit = parseAmount(depositInput?.value);
+            const withdraw = parseAmount(withdrawInput?.value);
+            const isDeposit = deposit.ok && withdraw.ok && deposit.value > withdraw.value;
+            document.querySelector('[data-signing-account="advanced"]')?.classList.toggle('hidden', isDeposit);
+        };
+        depositInput?.addEventListener('input', updateSignerVisibility);
+        withdrawInput?.addEventListener('input', updateSignerVisibility);
+        updateSignerVisibility();
         document.getElementById('btn-advanced-transact')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             try {
@@ -542,11 +581,15 @@ export const Transactions = {
                 // public withdraw is value leaving it (output, negative). The contract
                 // takes a single signed ext amount.
                 const publicAmount = deposit.value - withdraw.value;
+                const signer = await SigningAccount.forTransaction('advanced', { ownerOnly: publicAmount > 0n });
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
                 const pool = selectedPool();
-                const recipient = document.getElementById('advanced-public-recipient')?.value?.trim()
-                    || App.state.wallet.address;
+                const enteredRecipient = RecipientAccount.value('advanced');
+                if (publicAmount < 0n && !enteredRecipient) throw new Error('Choose a withdrawal recipient or enter another address.');
+                if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
+                // The recipient is unused when no public funds leave the pool.
+                const recipient = enteredRecipient || App.state.wallet.address;
 
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
@@ -559,14 +602,22 @@ export const Transactions = {
                 if (withdraw.value > 0n) {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool)) });
                 }
+                rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
+                const owner = App.state.wallet.address;
+                const warning = [
+                    publicAmount < 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
+                    publicAmount <= 0n ? signingPrivacyWarning({ owner, signer }) : '',
+                ].filter(Boolean).join(' ');
                 const confirmed = await confirmAction({
                     title: 'Confirm advanced transaction',
                     rows,
                     confirmLabel: 'Transact',
+                    warning,
                 });
                 if (!confirmed) return;
+                SigningAccount.keep(signer);
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();
@@ -592,7 +643,8 @@ export const Transactions = {
                     this.buildAdvancedComposer();
                     document.getElementById('advanced-public-deposit').value = '';
                     document.getElementById('advanced-public-withdraw').value = '';
-                    document.getElementById('advanced-public-recipient').value = '';
+                    RecipientAccount.reset('advanced');
+                    updateSignerVisibility();
                 }
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });

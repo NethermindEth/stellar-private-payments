@@ -666,3 +666,16 @@ fn test_leaf_added_event_exact_shape() {
     .to_xdr(&env, &contract_id);
     assert_eq!(events.events()[0], expected);
 }
+#[test]
+fn the_tree_stores_no_sibling_at_the_top_level() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let levels = 3u32;
+    let contract_id = env.register(ASPMembership, (admin, levels));
+
+    env.as_contract(&contract_id, || {
+        let store = env.storage().persistent();
+        assert!(!store.has(&DataKey::FilledSubtrees(levels)));
+        assert!(store.has(&DataKey::FilledSubtrees(0)));
+    });
+}

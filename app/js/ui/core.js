@@ -16,6 +16,14 @@ export const App = {
             // apart because the two need not be the same account; with nothing
             // able to choose one, connecting sets it to the owner.
             signingAddress: null,
+            // Accounts the user added to sign with, besides the owner,
+            // remembered per owner across sessions. Freighter switching to one
+            // of them is expected.
+            signers: [],
+            // Freighter's active account as the watcher last saw it: an
+            // address, '' while Freighter keeps it from this site, or null
+            // before the watcher reported.
+            activeAddress: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,

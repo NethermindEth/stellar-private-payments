@@ -140,8 +140,8 @@ The three commands under the hood, if you'd rather run them yourself:
 #    git-ignored env file. Idempotent; --verify re-checks.
 deployments/scripts/e2e-accounts-setup.sh
 
-# 2. Install deps, build the Freighter profile (pinned extension, test
-#    account, onboarding completed, encrypted database with Freighter unlock),
+# 2. Install deps, build the Freighter profile (pinned extension, accounts
+#    C and D, onboarding completed, encrypted database with Freighter unlock),
 #    snapshot it, verify. Idempotent;
 #    --force rebuilds. The onboarding step needs a desktop session.
 bash e2e-freighter/scripts/setup.sh
@@ -295,8 +295,9 @@ not in a tight loop.
 | `tests/08-disclose-lifecycle.mjs` | Verify 1/2/3/4-note and spent-note receipts, withdraw again, then re-verify each receipt against current chain state. Requires a locally served app. |
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
-| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, and the pool deposit cap, then complete a successful recovery deposit. |
+| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, the pool deposit cap, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
 | `tests/12-encrypted-storage.mjs` | Verify the encrypted profile, download a key backup, reject a wrong password, unlock with real Freighter, and read the same SQLite setting afterward. |
+| `tests/12-signing-account.mjs` | Pick account D to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw it back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and both transactions are sent by D on-chain. |
 
 The provisioned profile is encrypted before it is snapshotted. Every Freighter
 test therefore opens the SQLite3MC database through a real Freighter signature;
@@ -329,8 +330,9 @@ app. Locally the same suite runs via `sdk/web/scripts/e2e-browser-test.sh`.
 
 On pull requests to main it runs the smoke subset (01-connect,
 03-rejection, 05-deposit-transfer, 12-encrypted-storage) as a fast gate; `workflow_dispatch`
-runs the whole suite (01-12). Both build and serve the app **from the
-checked-out commit** on localhost:8000 via `serve-and-run.sh` — the same
+runs every numbered scenario, including both storage and signing-account
+tests. Both build and serve the app **from the checked-out commit** on
+localhost:8000 via `serve-and-run.sh` — the same
 path `make freighter-e2e` uses locally — so a PR is tested against its own
 code, not whatever is deployed. Trigger the full suite with:
 

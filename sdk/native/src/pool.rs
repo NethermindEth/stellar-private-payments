@@ -377,7 +377,7 @@ impl<S: Storage> PrivatePool<S> {
             TransferRecipient::Address(address) => {
                 self.ensure_synced().await?;
                 self.storage
-                    .registered_public_keys(
+                    .registered_privacy_keys(
                         &address,
                         &self.config.contract_config.public_key_registry,
                     )
@@ -422,7 +422,7 @@ impl<S: Storage> PrivatePool<S> {
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {
         let (note_pub, _) = self
             .storage
-            .user_public_keys(self.config.user_address.as_str())
+            .privacy_keys(self.config.user_address.as_str())
             .await?;
         self.fetcher
             .transact_chain_context(
@@ -494,7 +494,7 @@ impl<S: Storage> PrivatePool<S> {
     async fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, Error> {
         let (note_pub, enc_pub) = self
             .storage
-            .user_public_keys(self.config.user_address.as_str())
+            .privacy_keys(self.config.user_address.as_str())
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }

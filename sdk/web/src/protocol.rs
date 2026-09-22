@@ -16,9 +16,10 @@ pub use stellar_private_payments::{
 use stellar_private_payments::{
     gvk::GvkEvent,
     types::{
-        AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
-        KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
+        AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionKeyPair,
+        EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey, OperationalFeedItem,
+        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
+        UserOperation,
     },
     zk::flows::TransactParams,
 };
@@ -39,7 +40,7 @@ pub struct PublicEncryptionKeyPair {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserKeys {
+pub struct PrivacyKeys {
     pub note_keypair: PublicNoteKeyPair,
     pub encryption_keypair: PublicEncryptionKeyPair,
 }
@@ -96,7 +97,7 @@ pub enum StorageWorkerRequest {
     },
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
-    DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
+    SavePrivateKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     GetSetting(String),
@@ -104,7 +105,7 @@ pub enum StorageWorkerRequest {
         key: String,
         value_json: String,
     },
-    UserKeys(Address),
+    PrivacyKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
     PortfolioBalances {
@@ -203,7 +204,7 @@ pub enum StorageWorkerResponse {
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
     Setting(Option<String>),
-    UserKeys(Option<UserKeys>),
+    PrivacyKeys(Option<PrivacyKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
     PortfolioBalances(Vec<PortfolioBalance>),

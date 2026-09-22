@@ -8,7 +8,7 @@ use stellar_private_payments::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
     },
-    types::{Sensitive, SignedTransaction, SignerAddress},
+    types::{KeyDerivationSignature, Sensitive, SignedTransaction, SignerAddress},
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -48,11 +48,6 @@ impl WalletSigner {
             network_passphrase,
             signer_address,
         })
-    }
-
-    /// The account this signer asks the wallet to sign with.
-    pub(crate) fn signer_address(&self) -> &SignerAddress {
-        &self.signer_address
     }
 
     pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
@@ -247,6 +242,11 @@ fn normalize_sign_result(
 
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
+    /// The account this signer asks the wallet to sign with.
+    fn signer_address(&self) -> SignerAddress {
+        self.signer_address.clone()
+    }
+
     async fn sign_transaction(
         &self,
         prepared: &PreparedTransaction,
@@ -268,6 +268,15 @@ impl Signer for WalletSigner {
             .map_err(|e| Error::Other(anyhow::anyhow!("encode signed transaction xdr: {e}")))?;
 
         Ok(SignedTransaction { signed_xdr })
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        let sig = self
+            .sign_wallet_message(message)
+            .await
+            .map_err(wallet_sign_error)?;
+        let bytes = wallet_message_signature_to_bytes(&sig).map_err(wallet_sign_error)?;
+        Ok(KeyDerivationSignature(bytes))
     }
 }
 

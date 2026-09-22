@@ -57,8 +57,12 @@ impl Account {
         block_on(self.inner.balance(asset))
     }
 
-    pub fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        block_on(self.inner.user_public_keys())
+    pub fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.privacy_keys())
+    }
+
+    pub fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.derive_privacy_keys())
     }
 
     pub fn asp_secret(&self) -> Result<Field, Error> {
@@ -78,17 +82,8 @@ impl Account {
     }
 
     /// Register this account's public keys on the deployment-wide registry.
-    ///
-    /// When both key arguments are `None`, loads the keys from local storage.
-    pub fn register_public_keys(
-        &self,
-        note_public_key: Option<NotePublicKey>,
-        encryption_public_key: Option<EncryptionPublicKey>,
-    ) -> Result<TransactionResult, Error> {
-        block_on(
-            self.inner
-                .register_public_keys(note_public_key, encryption_public_key),
-        )
+    pub fn register_public_keys(&self) -> Result<TransactionResult, Error> {
+        block_on(self.inner.register_public_keys())
     }
 
     pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, Error> {

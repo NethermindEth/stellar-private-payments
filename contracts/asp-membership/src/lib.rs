@@ -6,9 +6,9 @@
 //! member, and the root serves as a commitment to the entire membership set.
 #![no_std]
 use soroban_sdk::{
-    Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
+    Address, Env, U256, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{get_zeroes, poseidon2_compress};
+use soroban_utils::{poseidon2_compress, zero_hash};
 
 /// Storage keys for contract persistent data
 #[contracttype]
@@ -18,8 +18,6 @@ enum DataKey {
     Admin,
     /// Filled subtree hashes at each level (indexed by level)
     FilledSubtrees(u32),
-    /// Zero hash values for each level (indexed by level)
-    Zeroes(u32),
     /// Number of levels in the Merkle tree
     Levels,
     /// Next available index for leaf insertion
@@ -91,16 +89,15 @@ impl ASPMembership {
         store.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
 
-        // Initialize an empty tree with zero hashes at each level
-        let zeros: Vec<U256> = get_zeroes(&env);
-        for lvl in 0..=levels {
-            let zero_val = zeros.get(lvl).ok_or(Error::NotInitialized)?;
+        // The top level is the root itself and is never read back as a
+        // sibling, so it is not written.
+        for lvl in 0..levels {
+            let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
             store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
-            store.set(&DataKey::Zeroes(lvl), &zero_val);
         }
 
         // Set initial root to the zero hash at the top level
-        let root_val = zeros.get(levels).ok_or(Error::NotInitialized)?;
+        let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
         store.set(&DataKey::Root, &root_val);
 
         Ok(())
@@ -205,9 +202,7 @@ impl ASPMembership {
             } else {
                 // Leaf is left child, store it and pair with zero hash
                 store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                let zero_val: U256 = store
-                    .get(&DataKey::Zeroes(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;

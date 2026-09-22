@@ -118,12 +118,13 @@ function wrapAccount(wasmAccount) {
       return wasmAccount.signerAddress;
     },
     portfolio: () => wasmAccount.portfolio(),
-    userPublicKeys: () => wasmAccount.userPublicKeys(),
+    privacyKeys: () => wasmAccount.privacyKeys(),
+    derivePrivacyKeys: () => wasmAccount.derivePrivacyKeys(),
     aspSecret: () => wasmAccount.aspSecret(),
     userNotes: (limit) => wasmAccount.userNotes(limit),
     isRegistered: () => wasmAccount.isRegistered(),
     deriveAspUserLeaf: () => wasmAccount.deriveAspUserLeaf(),
-    registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
+    registerPublicKeys: () => wasmAccount.registerPublicKeys(),
     pool: (options) => wasmAccount.pool(options),
   };
 }
