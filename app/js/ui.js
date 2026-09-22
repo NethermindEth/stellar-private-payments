@@ -22,6 +22,10 @@ async function initializeApp() {
     updateLastVisit();
     registerServiceWorker();
 
+    // The HTML is visible before the storage bootstrap imports this module.
+    // Signal that the wallet button and other UI handlers are installed.
+    document.body.dataset.appInitialized = 'true';
+
     // Reconnect on load only to an owner the user connected before. Without
     // one, connecting would take Freighter's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
