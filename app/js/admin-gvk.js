@@ -55,7 +55,6 @@ const state = {
   selectedFlow: null,
   selectedDot: null,
   pkGraphNodes: null,
-  pkGraphEdges: null,
   ledgerTimeBounds: null,
   timeFilterLedgers: { from: null, to: null },
 };
@@ -175,7 +174,7 @@ function truncateHex(value) {
   return { display: `${s.slice(0, 18)}…`, full: s };
 }
 
-/** Short PK label for narrow, fixed-width spots (e.g. the PK graph's lane column): "0x" + 11 hex chars. */
+/** Short PK label for narrow, fixed-width spots (e.g. the PK graph's lane column): "0x" + 13 hex chars. */
 function shortPkLabel(pk) {
   const s = String(pk ?? '').trim();
   if (!s) return '—';
@@ -602,13 +601,15 @@ function isFiltersActive(filters) {
     || filters.ledgerFrom != null || filters.ledgerTo != null || !!filters.pk;
 }
 
-function noteMatchesAmount(auditedNote, filters) {
-  if (filters.amountMin != null || filters.amountMax != null) {
-    const amount = parseFieldAmount(auditedNote?.note?.amount);
-    if (filters.amountMin != null && amount < filters.amountMin) return false;
-    if (filters.amountMax != null && amount > filters.amountMax) return false;
-  }
+function amountMatchesRange(amount, filters) {
+  if (filters.amountMin != null && amount < filters.amountMin) return false;
+  if (filters.amountMax != null && amount > filters.amountMax) return false;
   return true;
+}
+
+function noteMatchesAmount(auditedNote, filters) {
+  if (filters.amountMin == null && filters.amountMax == null) return true;
+  return amountMatchesRange(parseFieldAmount(auditedNote?.note?.amount), filters);
 }
 
 function noteMatchesAmountAndPk(auditedNote, filters) {
@@ -827,6 +828,16 @@ function collectNotes(rows) {
   return [...notes.values()].filter((note) => note.audited);
 }
 
+let fullPkGraphCache = null;
+
+/** The unfiltered graph over every loaded row — rebuilt only when rows are appended or reset. */
+function fullPkGraph() {
+  if (fullPkGraphCache?.rows !== state.rows || fullPkGraphCache.count !== state.rows.length) {
+    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: buildPkGraph(state.rows, NO_FILTERS) };
+  }
+  return fullPkGraphCache.graph;
+}
+
 const NO_FILTERS = { amountMin: null, amountMax: null, ledgerFrom: null, ledgerTo: null, pk: null };
 
 function amountByPk(slots) {
@@ -840,30 +851,33 @@ function amountByPk(slots) {
 }
 
 /**
- * A withdraw tx's inputs aren't all withdrawn — a PK can withdraw only part
- * of an input note, with the rest coming back as a new output note to that
- * same PK (partial withdrawal). Nets each PK's own same-tx outputs out of
- * its input total so only what actually left the pool counts as withdrawn.
+ * Per input PK: what went in, minus what came back as change or went on to
+ * someone else. Computed over the tx's full slot set — hiding one of its notes
+ * with the amount filter must not change the withdrawal; the filter applies to
+ * the resulting amount instead.
  */
-function netWithdrawnByPk(inputs, outputs) {
-  const outputTotals = amountByPk(outputs);
-  const net = new Map();
-  for (const [pk, inputTotal] of amountByPk(inputs)) {
-    const ownOutput = outputTotals.get(pk) ?? 0n;
-    if (inputTotal > ownOutput) net.set(pk, inputTotal - ownOutput);
+function withdrawnByPk(inputs, outputs, filters) {
+  const inputTotals = amountByPk(inputs);
+  const spent = new Map();
+
+  for (const slot of outputs) {
+    const toPk = normalizeFieldKey(slot.audited.note.pk);
+    if (!toPk) continue;
+    const amount = parseFieldAmount(slot.audited.note.amount);
+    // A multi-sender tx doesn't say whose funds went where.
+    const charged = inputTotals.has(toPk) ? [toPk] : inputTotals.keys();
+    for (const pk of charged) spent.set(pk, (spent.get(pk) ?? 0n) + amount);
   }
-  return net;
+
+  const withdrawn = new Map();
+  for (const [pk, inputTotal] of inputTotals) {
+    const amount = inputTotal - (spent.get(pk) ?? 0n);
+    if (amount > 0n && amountMatchesRange(amount, filters)) withdrawn.set(pk, amount);
+  }
+  return withdrawn;
 }
 
-/**
- * Builds a PK-node / transfer-edge graph out of the given tx rows: one node
- * per public key that owns any note, one edge per (sender PK -> receiver PK)
- * pair moved by a transfer tx. Deposits and withdraws have no counterparty
- * PK, so they only ever touch a node's deposited/withdrawn tally — never an
- * edge. `kind` is only computed for traceable pools (see pushTx); for
- * view-only pools every tx is treated like a deposit, since input notes
- * (and therefore any transfer counterparty) aren't decryptable there.
- */
+/** Builds a PK-node / transfer-edge graph out of the given tx rows. Only a deposit has no counterparty PK. */
 function buildPkGraph(rows, filters) {
   const nodes = new Map();
   const edges = new Map();
@@ -874,10 +888,10 @@ function buildPkGraph(rows, filters) {
       node = {
         pk,
         deposited: 0n, depositCount: 0,
+        received: 0n, receivedCount: 0,
         withdrawn: 0n, withdrawCount: 0,
         transferIn: 0n, transferInCount: 0,
         transferOut: 0n, transferOutCount: 0,
-        txIndices: new Set(),
       };
       nodes.set(pk, node);
     }
@@ -888,7 +902,7 @@ function buildPkGraph(rows, filters) {
     const key = `${from}=>${to}`;
     let edge = edges.get(key);
     if (!edge) {
-      edge = { from, to, count: 0, amount: 0n, txIndices: new Set() };
+      edge = { from, to, count: 0, amount: 0n };
       edges.set(key, edge);
     }
     return edge;
@@ -896,53 +910,45 @@ function buildPkGraph(rows, filters) {
 
   // Amount-only; PK visibility is decided after, in filterPkGraphByPk.
   for (const { tx, index, kind } of rows) {
-    const outputs = normalizedOutputs(tx)
-      .filter((slot) => slot.audited && noteMatchesAmount(slot.audited, filters));
-    const inputs = normalizedInputs(tx)
-      .filter((slot) => slot.audited && noteMatchesAmount(slot.audited, filters));
-    const effectiveKind = kind ?? (inputs.length === 0 ? 'deposit' : 'transfer');
+    const allOutputs = normalizedOutputs(tx).filter((slot) => slot.audited);
+    const allInputs = normalizedInputs(tx).filter((slot) => slot.audited);
+    const outputs = allOutputs.filter((slot) => noteMatchesAmount(slot.audited, filters));
+    // View-only pools can't decrypt inputs, so a tx's kind is unknowable
+    // there — its notes count as received, never as a classified deposit.
+    const effectiveKind = kind ?? (allInputs.length === 0 ? 'unknown' : 'transfer');
 
-    if (effectiveKind === 'deposit') {
+    if (effectiveKind === 'deposit' || effectiveKind === 'unknown') {
+      const known = effectiveKind === 'deposit';
       for (const slot of outputs) {
         const pk = normalizeFieldKey(slot.audited.note.pk);
         if (!pk) continue;
         const node = ensureNode(pk);
-        node.deposited += parseFieldAmount(slot.audited.note.amount);
-        node.depositCount += 1;
-        node.txIndices.add(index);
+        const amount = parseFieldAmount(slot.audited.note.amount);
+        if (known) {
+          node.deposited += amount;
+          node.depositCount += 1;
+        } else {
+          node.received += amount;
+          node.receivedCount += 1;
+        }
       }
       continue;
     }
 
-    if (effectiveKind === 'withdraw') {
-      for (const [pk, amount] of netWithdrawnByPk(inputs, outputs)) {
-        const node = ensureNode(pk);
-        node.withdrawn += amount;
-        node.withdrawCount += 1;
-        node.txIndices.add(index);
-      }
-      continue;
-    }
-
-    // Transfer: link every real input PK to every real output PK (excluding
-    // change back to the same PK, which isn't a transfer to anyone).
+    // Senders come off the whole tx, not the amount-filtered notes.
     const inputPks = [...new Set(
-      inputs.map((slot) => normalizeFieldKey(slot.audited.note.pk)).filter(Boolean),
+      allInputs.map((slot) => normalizeFieldKey(slot.audited.note.pk)).filter(Boolean),
     )];
-    for (const pk of inputPks) ensureNode(pk).txIndices.add(index);
 
     for (const slot of outputs) {
       const toPk = normalizeFieldKey(slot.audited.note.pk);
-      if (!toPk) continue;
-      ensureNode(toPk).txIndices.add(index);
+      if (!toPk || inputPks.includes(toPk)) continue; // change, not a transfer
       const amount = parseFieldAmount(slot.audited.note.amount);
 
       for (const fromPk of inputPks) {
-        if (fromPk === toPk) continue;
         const edge = ensureEdge(fromPk, toPk);
         edge.count += 1;
         edge.amount += amount;
-        edge.txIndices.add(index);
 
         const fromNode = ensureNode(fromPk);
         fromNode.transferOut += amount;
@@ -950,6 +956,15 @@ function buildPkGraph(rows, filters) {
         const toNode = ensureNode(toPk);
         toNode.transferIn += amount;
         toNode.transferInCount += 1;
+      }
+    }
+
+    // A withdraw tx can still transfer part of its input to someone else.
+    if (effectiveKind === 'withdraw') {
+      for (const [pk, amount] of withdrawnByPk(allInputs, allOutputs, filters)) {
+        const node = ensureNode(pk);
+        node.withdrawn += amount;
+        node.withdrawCount += 1;
       }
     }
   }
@@ -982,11 +997,6 @@ function filterPkGraphByPk(nodes, edges, pkTerms) {
   return { nodes: nodes.filter((n) => visible.has(n.pk)), edges: keptEdges };
 }
 
-function bigIntToFiniteNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
 /**
  * Per-occurrence view for the PK timeline chart: one "dot" per (PK, tx) pair
  * at that tx's ledger, plus one "flow" per transfer counterparty pair — the
@@ -1000,7 +1010,7 @@ function buildPkTimelineEvents(rows, filters) {
     const key = `${pk}|${txIndex}`;
     let dot = dots.get(key);
     if (!dot) {
-      dot = { pk, txIndex, ledger, deposited: 0n, withdrawn: 0n, transferIn: 0n, transferOut: 0n };
+      dot = { pk, txIndex, ledger, deposited: 0n, received: 0n, withdrawn: 0n, transferIn: 0n, transferOut: 0n };
       dots.set(key, dot);
     }
     return dot;
@@ -1010,45 +1020,44 @@ function buildPkTimelineEvents(rows, filters) {
 
   // Amount-only; PK visibility is decided after, in filterPkTimelineByPk.
   for (const { tx, index, kind } of rows) {
-    const outputs = normalizedOutputs(tx)
-      .filter((slot) => slot.audited && noteMatchesAmount(slot.audited, filters));
-    const inputs = normalizedInputs(tx)
-      .filter((slot) => slot.audited && noteMatchesAmount(slot.audited, filters));
-    const effectiveKind = kind ?? (inputs.length === 0 ? 'deposit' : 'transfer');
+    const allOutputs = normalizedOutputs(tx).filter((slot) => slot.audited);
+    const allInputs = normalizedInputs(tx).filter((slot) => slot.audited);
+    const outputs = allOutputs.filter((slot) => noteMatchesAmount(slot.audited, filters));
+    // See buildPkGraph: a view-only pool's tx kind is unknowable.
+    const effectiveKind = kind ?? (allInputs.length === 0 ? 'unknown' : 'transfer');
     const ledger = tx.ledger;
 
-    if (effectiveKind === 'deposit') {
+    if (effectiveKind === 'deposit' || effectiveKind === 'unknown') {
+      const bucket = effectiveKind === 'deposit' ? 'deposited' : 'received';
       for (const slot of outputs) {
         const pk = normalizeFieldKey(slot.audited.note.pk);
         if (!pk) continue;
-        ensureDot(pk, index, ledger).deposited += parseFieldAmount(slot.audited.note.amount);
+        ensureDot(pk, index, ledger)[bucket] += parseFieldAmount(slot.audited.note.amount);
       }
       continue;
     }
 
-    if (effectiveKind === 'withdraw') {
-      for (const [pk, amount] of netWithdrawnByPk(inputs, outputs)) {
-        ensureDot(pk, index, ledger).withdrawn += amount;
-      }
-      continue;
-    }
-
-    // Transfer: every real input PK that differs from an output's PK shares
-    // that output's ledger as a flow, so both endpoints land at the same x.
+    // See buildPkGraph.
     const inputPks = [...new Set(
-      inputs.map((slot) => normalizeFieldKey(slot.audited.note.pk)).filter(Boolean),
+      allInputs.map((slot) => normalizeFieldKey(slot.audited.note.pk)).filter(Boolean),
     )];
 
     for (const slot of outputs) {
       const toPk = normalizeFieldKey(slot.audited.note.pk);
-      if (!toPk) continue;
+      if (!toPk || inputPks.includes(toPk)) continue; // change, not a transfer
       const amount = parseFieldAmount(slot.audited.note.amount);
 
       for (const fromPk of inputPks) {
-        if (fromPk === toPk) continue;
         ensureDot(fromPk, index, ledger).transferOut += amount;
         ensureDot(toPk, index, ledger).transferIn += amount;
         flows.push({ txIndex: index, ledger, fromPk, toPk, amount });
+      }
+    }
+
+    // A withdraw tx can still transfer part of its input to someone else.
+    if (effectiveKind === 'withdraw') {
+      for (const [pk, amount] of withdrawnByPk(allInputs, allOutputs, filters)) {
+        ensureDot(pk, index, ledger).withdrawn += amount;
       }
     }
   }
@@ -1283,11 +1292,7 @@ function renderGraphDetailPanel(container, notes) {
 const GRAPH_SIDE_PANEL_ALLOWANCE = 256 + 16 + 32 + 2;
 // Shared baseline so the Note graph and Account graph panels don't visibly resize when switching between tabs.
 const GRAPH_PANEL_MIN_HEIGHT = 360;
-// Account graph's outer/panel row is given this exact height (rather than
-// left to stretch to content) so the detail panel can never grow the row —
-// its own history section scrolls internally instead. Matches graphWrap's
-// actual rendered height: p-4 padding (32) + the lanes/axis split (see
-// LANES_VIEWPORT_MAX_HEIGHT below) + axisWrap's pt-1 + border-t (5).
+// Fixed height for the Account graph row, so the detail panel scrolls internally instead of growing it.
 const PK_GRAPH_PANEL_HEIGHT = GRAPH_PANEL_MIN_HEIGHT + 32 + 5;
 
 function renderGraphLegend() {
@@ -1601,10 +1606,16 @@ function renderPkGraphLegend() {
   const triangle = roundedTriangleLegendIcon;
 
   addItem(bar('bg-white/15'), 'Row: a public key (PK); x-axis: ledger (time)');
-  addItem(line('bg-cyan-400/70'), 'Vertical arrow: transfer');
-  addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that PK');
-  addItem(triangle('fill-rose-400', false), 'Triangle up: withdraw');
-  addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
+
+  if (state.poolGvkMode === 'traceable') {
+    addItem(line('bg-cyan-400/70'), 'Vertical arrow: transfer');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that PK');
+    addItem(triangle('fill-rose-400', false), 'Triangle up: withdraw');
+    addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
+  } else {
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that PK');
+    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
+  }
 
   return wrap;
 }
@@ -1635,14 +1646,24 @@ function pkGraphNodeBalance(node) {
   return node.deposited + node.transferIn - node.withdrawn - node.transferOut;
 }
 
+/** A real balance needs spends, which only traceable pools expose; view-only can only total what came in. */
 function pkGraphDetailBalanceRow(node) {
+  const traceable = state.poolGvkMode === 'traceable';
   const row = el('div');
-  row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Current balance'));
-  row.appendChild(el('div', 'font-mono text-sm text-white', formatTokenAmount(pkGraphNodeBalance(node))));
+  row.appendChild(el(
+    'div',
+    'text-[10px] uppercase tracking-wide text-slate-500',
+    traceable ? 'Current balance' : 'Total received',
+  ));
+  row.appendChild(el(
+    'div',
+    'font-mono text-sm text-white',
+    formatTokenAmount(traceable ? pkGraphNodeBalance(node) : node.received + node.deposited + node.transferIn),
+  ));
   return row;
 }
 
-/** The one deposit/withdraw/transfer event that was clicked — its own amount(s), not the PK's running total. */
+/** The one event that was clicked — its own amount(s), not the PK's running total. */
 function pkGraphDetailSelectedDotRow(dot) {
   const row = el('div', 'rounded-lg border border-white/10 bg-ink-950/60 p-2 space-y-1');
 
@@ -1652,10 +1673,17 @@ function pkGraphDetailSelectedDotRow(dot) {
   } else if (dot.withdrawn > 0n) {
     row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-rose-400', 'This withdrawal'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.withdrawn)));
-  } else {
+  } else if (dot.received > 0n) {
+    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.received)));
+    row.appendChild(el('div', 'text-[10px] text-slate-500', 'Origin unknown — view-only pool'));
+  } else if (dot.transferIn > 0n || dot.transferOut > 0n) {
     row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-cyan-400', 'This transfer'));
-    if (dot.transferInCount > 0) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
-    if (dot.transferOutCount > 0) row.appendChild(el('div', 'font-mono text-slate-200', `Sent ${formatTokenAmount(dot.transferOut)}`));
+    if (dot.transferIn > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
+    if (dot.transferOut > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Sent ${formatTokenAmount(dot.transferOut)}`));
+  } else {
+    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(0n)));
   }
 
   row.appendChild(el('div', 'font-mono text-[10px] text-slate-500', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
@@ -1714,6 +1742,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   panel.appendChild(history);
 
   const activityBox = el('div', 'space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-2');
+  if (node.receivedCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Received (origin unknown)', node.received, node.receivedCount));
   if (node.depositCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Deposited', node.deposited, node.depositCount));
   if (node.withdrawCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Withdrawn', node.withdrawn, node.withdrawCount));
   if (node.transferInCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Received (transfers)', node.transferIn, node.transferInCount));
@@ -1799,7 +1828,7 @@ function renderPkGraph(rows, containerWidth, filters) {
   const nodeByPk = new Map(nodes.map((n) => [n.pk, n]));
 
   // Current balance ignores active filters — always the full loaded audit.
-  const fullNodeByPk = new Map(buildPkGraph(state.rows, NO_FILTERS).nodes.map((n) => [n.pk, n]));
+  const fullNodeByPk = new Map(fullPkGraph().nodes.map((n) => [n.pk, n]));
 
   // Chronological (by first appearance) so the lane order reads like a story,
   // stable by PK so the layout doesn't jitter on re-render.
@@ -1813,7 +1842,6 @@ function renderPkGraph(rows, containerWidth, filters) {
     return diff !== 0 ? diff : a.localeCompare(b);
   });
   state.pkGraphNodes = orderedPks.map((pk) => nodeByPk.get(pk)).filter(Boolean);
-  state.pkGraphEdges = edges;
 
   if (state.selectedPk && !orderedPks.includes(state.selectedPk)) {
     state.selectedPk = null;
@@ -2074,7 +2102,9 @@ function renderPkGraph(rows, containerWidth, filters) {
         ? `Deposited ${formatTokenAmount(d.deposited)}`
         : d.withdrawn > 0n
           ? `Withdrawn ${formatTokenAmount(d.withdrawn)}`
-          : null;
+          : d.received > 0n
+            ? `Received ${formatTokenAmount(d.received)} (origin unknown)`
+            : null;
       return [d.pk, `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
     });
 
@@ -2225,13 +2255,14 @@ function buildNoteViewCsvRows() {
 /** One row per transfer edge, plus one row per PK for its deposit/withdraw totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
 function buildPkGraphCsvRows() {
   const header = ['kind', 'from_pk', 'to_pk', 'count', 'amount_stroops'];
-  const { nodes, edges } = buildPkGraph(state.rows, NO_FILTERS);
+  const { nodes, edges } = fullPkGraph();
   const rows = [header];
 
   for (const edge of edges) {
     rows.push(['transfer', edge.from, edge.to, edge.count, edge.amount.toString()]);
   }
   for (const node of nodes) {
+    if (node.receivedCount > 0) rows.push(['received', '', node.pk, node.receivedCount, node.received.toString()]);
     if (node.depositCount > 0) rows.push(['deposit', '', node.pk, node.depositCount, node.deposited.toString()]);
     if (node.withdrawCount > 0) rows.push(['withdraw', node.pk, '', node.withdrawCount, node.withdrawn.toString()]);
   }
@@ -2385,7 +2416,7 @@ function resetAuditState() {
   state.selectedFlow = null;
   state.selectedDot = null;
   state.pkGraphNodes = null;
-  state.pkGraphEdges = null;
+  fullPkGraphCache = null;
 }
 
 async function startAudit({ reset }) {
