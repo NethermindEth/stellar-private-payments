@@ -82,7 +82,7 @@ jobs:
       - name: Test application startup selection
         run: |
           node --test app/tests/storage-startup.test.mjs app/tests/storage-access.test.mjs app/tests/database-backup.test.mjs
-          node --test sdk/web/scripts/test-key-vault.mjs
+          node --test sdk/web/scripts/test-key-vault.mjs sdk/web/scripts/test-wallet-key-vault.mjs
           node --experimental-vm-modules --test sdk/web/scripts/test-key-vault-demo.mjs
       - name: Build application entry points with shared storage state
         run: |
@@ -116,6 +116,7 @@ jobs:
           python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --app-startup --artifacts target/sqlite3mc-checks/chromium-app
           python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --key-vault --artifacts target/sqlite3mc-checks/chromium-key-vault
           python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --app-access --artifacts target/sqlite3mc-checks/chromium-app-access
+          python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --app-wallet --artifacts target/sqlite3mc-checks/chromium-app-wallet
           python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --app-migration --artifacts target/sqlite3mc-checks/chromium-app-migration
           python3 sdk/web/scripts/test-sqlite3mc.py --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --backup --artifacts target/sqlite3mc-checks/chromium-complete-backup
       - name: Test encrypted Firefox storage and migration
@@ -125,6 +126,7 @@ jobs:
           python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --app-startup --artifacts target/sqlite3mc-checks/firefox-app
           python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --key-vault --artifacts target/sqlite3mc-checks/firefox-key-vault
           python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --app-access --artifacts target/sqlite3mc-checks/firefox-app-access
+          python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --app-wallet --artifacts target/sqlite3mc-checks/firefox-app-wallet
           python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --app-migration --artifacts target/sqlite3mc-checks/firefox-app-migration
           python3 sdk/web/scripts/test-sqlite3mc.py --browser firefox --binary "$(command -v firefox)" --driver "$GECKOWEBDRIVER/geckodriver" --backup --artifacts target/sqlite3mc-checks/firefox-complete-backup
       - name: Package verified opt-in SDK

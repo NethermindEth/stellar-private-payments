@@ -21,6 +21,12 @@ export interface WrappedDatabaseKey {
   revision: number;
   password: PasswordKeyEnvelope;
   passkey: PasskeyKeyEnvelope | null;
+  /** Optional for backwards compatibility with password/passkey-only records. */
+  wallet?: { address: string; origin: string; salt: string; iv: string; ciphertext: string } | null;
+}
+export interface DatabaseWalletSigner {
+  getPublicKey(): Promise<string>;
+  signMessage(message: string, options: { address: string }): Promise<{ signedMessage: string; signerAddress?: string }>;
 }
 /** Stores encrypted envelopes only. write must atomically compare and replace
  * the complete expected record, and resolve only after durable commit.
@@ -58,7 +64,7 @@ export declare class DatabaseKeyVault {
     credentials?: Pick<CredentialsContainer, 'create' | 'get'>;
     origin?: string;
   });
-  status(): Promise<{ exists: boolean; passkey: boolean; revision?: number }>;
+  status(): Promise<{ exists: boolean; passkey: boolean; wallet?: boolean; walletAddress?: string; revision?: number }>;
   /** Persist the wrapped random key BEFORE creating the encrypted database.
    * If database creation fails, retain this record and retry with unlockPassword.
    */
@@ -70,4 +76,13 @@ export declare class DatabaseKeyVault {
   resetPasswordWithPasskey(newPassword: string): Promise<void>;
   /** Removes the local wrapper, not the credential stored in Proton/another provider. */
   removePasskey(password: string): Promise<void>;
+  /** Two dedicated SEP-53 signing requests must reproduce the wrapping key.
+   * Password recovery is retained. Wallet signatures must never be disclosed.
+   * The wrapper is bound to origin, account and this vault; backups made before
+   * enrollment retain password recovery but do not gain wallet unlock.
+   */
+  addWallet(password: string, signer: DatabaseWalletSigner): Promise<void>;
+  unlockWallet(signer: DatabaseWalletSigner): Promise<DatabaseKeySession>;
+  /** Removes only this record's wrapper; older backups are unaffected. */
+  removeWallet(password: string): Promise<void>;
 }

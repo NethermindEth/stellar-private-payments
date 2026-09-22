@@ -1,5 +1,6 @@
 import { Storage } from 'stellar-private-payments';
 import { DatabaseKeyVault, IndexedDbKeyStore } from 'stellar-private-payments/key-vault';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { ensureWasmInit, configureStorageStartup, closeStorageForLock, exportEncryptedDatabase } from './wasm-facade.js';
 import { createStorageAccess, DATABASE_ID } from './storage-access.js';
 
@@ -42,6 +43,8 @@ export async function startStorageAccess() {
         <button id="storage-unlock" type="submit">Unlock with password</button>
         <button id="storage-migration-recover" type="button">Recover interrupted migration</button>
         <button id="storage-passkey" type="button">Unlock with passkey</button>
+        <button id="storage-wallet" type="button">Unlock with Freighter</button>
+        <p id="storage-wallet-account" class="text-sm break-all"></p>
         <button id="storage-resume" type="button">Retry interrupted database creation</button>
         <button id="storage-backup" type="button">Download encrypted key backup</button>
         <button id="storage-complete-backup" type="button">Download complete encrypted backup</button>
@@ -62,6 +65,9 @@ export async function startStorageAccess() {
         </section>
         <section id="storage-manage" class="space-y-3">
           <button id="storage-enroll" type="button">Add passkey</button>
+          <button id="storage-wallet-enroll" type="button">Add Freighter wallet unlock</button>
+          <button id="storage-wallet-remove" type="button">Remove wallet unlock</button>
+          <p>Wallet enrollment asks for two signatures of the same dedicated storage message to verify repeatable unlocking. Keep your password and backup for recovery. Never share the storage-unlock signature.</p>
           <label class="block">New password
             <input id="storage-new" type="password" autocomplete="new-password" maxlength="1024" class="mt-1 block w-full rounded border border-slate-500 bg-slate-800 p-2">
           </label>
@@ -129,6 +135,11 @@ export async function startStorageAccess() {
         el('unlock').hidden = !state.exists || unlocked || state.restoring || state.migrating;
         el('migration-recover').hidden = !state.exists || unlocked || state.restoring || state.migrating || state.provisioning;
         el('passkey').hidden = !state.passkey || unlocked || state.restoring || state.migrating;
+        el('wallet').hidden = !state.wallet || unlocked || state.restoring || state.migrating;
+        el('wallet-account').hidden = !state.wallet;
+        el('wallet-account').textContent = state.wallet ? `Storage wallet: ${state.walletAddress}` : '';
+        el('wallet-enroll').hidden = !unlocked || state.wallet;
+        el('wallet-remove').hidden = !unlocked || !state.wallet;
         el('resume').hidden = !state.needsCreation || !state.exists || unlocked;
         el('backup').hidden = !state.exists;
         el('complete-backup').hidden = !unlocked;
@@ -167,7 +178,8 @@ export async function startStorageAccess() {
     async function finishUnlock(passkey) {
         const state = await access.status();
         if (state.provisioning && !savedBackup) throw new Error('Download your encrypted key backup before continuing.');
-        await (passkey ? access.unlockPasskey() : access.unlockPassword(password()));
+        await (passkey === 'wallet' ? access.unlockWallet(new FreighterSigner())
+            : passkey ? access.unlockPasskey() : access.unlockPassword(password()));
         unlocked = true;
         dialog.close();
         resolveReady();
@@ -204,6 +216,15 @@ export async function startStorageAccess() {
         migrationFeedback(await access.activateMigration(password()));
     });
     el('passkey').onclick = () => run(() => finishUnlock(true));
+    el('wallet').onclick = () => run(() => finishUnlock('wallet'));
+    el('wallet-enroll').onclick = () => run(async () => {
+        await vault.addWallet(password(), new FreighterSigner());
+        feedback('Wallet unlock added. Download an updated backup, then lock the database to test wallet unlock.');
+    });
+    el('wallet-remove').onclick = () => run(async () => {
+        await vault.removeWallet(password());
+        feedback('Wallet unlock removed from this browser. Saved older backups still contain their wallet wrapper.');
+    });
     el('backup').onclick = () => run(async () => {
         const text = await access.backup(password());
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));

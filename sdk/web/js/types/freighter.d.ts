@@ -1,4 +1,4 @@
-import type { SignAuthEntryResult, SignMessageResult, SignOptions, SignTransactionResult } from './signer.js';
+import type { SignAuthEntryResult, SignOptions, SignTransactionResult } from './signer.js';
 
 /** Freighter wallet adapter for {@link Client.account}. */
 export declare class FreighterSigner {
@@ -6,5 +6,5 @@ export declare class FreighterSigner {
   getPublicKey(): Promise<string>;
   signTransaction(xdr: string, opts?: SignOptions): Promise<SignTransactionResult>;
   signAuthEntry(xdr: string, opts?: SignOptions): Promise<SignAuthEntryResult>;
-  signMessage(message: string, opts?: SignOptions): Promise<SignMessageResult>;
+  signMessage(message: string, opts?: SignOptions): Promise<{ signedMessage: string; signerAddress?: string }>;
 }

@@ -30,9 +30,10 @@ parser.add_argument("--app-startup", action="store_true")
 parser.add_argument("--key-vault", action="store_true")
 parser.add_argument("--app-access", action="store_true")
 parser.add_argument("--app-migration", action="store_true")
+parser.add_argument("--app-wallet", action="store_true")
 parser.add_argument("--backup", action="store_true")
 args = parser.parse_args()
-args.app_access = args.app_access or args.app_migration
+args.app_access = args.app_access or args.app_migration or args.app_wallet
 web = Path(__file__).resolve().parents[1]
 art = args.artifacts.resolve()
 art.mkdir(parents=True, exist_ok=False)
@@ -59,7 +60,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/javascript")
             self.end_headers()
-            self.wfile.write(b"export class FreighterSigner { constructor() { throw Error('Wallet use is outside this test'); } }")
+            self.wfile.write(b"export class FreighterSigner { getPublicKey() { return window.walletFixture.signer.getPublicKey(); } signMessage(...args) { return window.walletFixture.signer.signMessage(...args); } }" if args.app_wallet else b"export class FreighterSigner { constructor() { throw Error('Wallet use is outside this test'); } }")
         elif (args.app_access or args.backup) and self.path == "/test-access-entry.js":
             self.send_response(200)
             self.send_header("Content-Type", "text/javascript")
@@ -172,7 +173,9 @@ try:
     assert js("return await storage.call({GetSetting:'integration-legacy'});")["Setting"] == '"legacy-preserved"'
     close()
     checks.append("plaintext create, close and worker restart")
-    if args.app_migration:
+    if args.app_wallet:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-app-wallet.py"))["run"](globals())
+    elif args.app_migration:
         runpy.run_path(str(web / "scripts/test-sqlite3mc-app-migration.py"))["run"](globals())
     elif args.backup:
         runpy.run_path(str(web / "scripts/test-sqlite3mc-backup.py"))["run"](globals())

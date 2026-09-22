@@ -116,6 +116,7 @@ export function createStorageAccess({ vault, store, makeVault, selection, open, 
         }),
         unlockPassword: password => exclusive(async () => accept(await vault.unlockPassword(password))),
         unlockPasskey: () => exclusive(async () => accept(await vault.unlockPasskey())),
+        unlockWallet: signer => exclusive(async () => accept(await vault.unlockWallet(signer))),
         backup: password => exclusive(async () => {
             // Read once: authenticate exactly the envelope being exported, even during concurrent changes.
             const record = await store.read(DATABASE_ID);

@@ -44,3 +44,41 @@ export function fakeCredentials(origin = 'https://vault.test') {
   };
   return { state, credentials };
 }
+
+// Synthetic Ed25519 wallet for protocol and browser tests only.
+export async function createWalletSigner(material) {
+  const keys = material ? {
+    privateKey: await crypto.subtle.importKey('jwk', material.privateKey, 'Ed25519', true, ['sign']),
+    publicKey: await crypto.subtle.importKey('jwk', material.publicKey, 'Ed25519', true, ['verify']),
+  } : await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey));
+  const payload = Uint8Array.from([48, ...raw]);
+  let crc = 0;
+  for (const byte of payload) {
+    crc ^= byte << 8;
+    for (let i = 0; i < 8; i++) crc = ((crc << 1) ^ (crc & 0x8000 ? 0x1021 : 0)) & 65535;
+  }
+  const data = [...payload, crc & 255, crc >>> 8];
+  let value = 0, bits = 0, address = '';
+  for (const byte of data) {
+    value = (value << 8) | byte; bits += 8;
+    while (bits >= 5) { bits -= 5; address += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[(value >>> bits) & 31]; }
+  }
+  const state = { calls: [], fault: null };
+  const signer = {
+    getPublicKey: async () => state.fault === 'account' ? 'wrong-account' : address,
+    signMessage: async (message, options) => {
+      state.calls.push({ message, options });
+      if (state.fault === 'cancel') throw new DOMException('Wallet request cancelled', 'NotAllowedError');
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('Stellar Signed Message:\n' + message));
+      const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', keys.privateKey, hash));
+      if (state.fault === 'signature') signature[0] ^= 1;
+      return { signerAddress: state.fault === 'reported-account' ? 'wrong-account' : address,
+        signedMessage: state.fault === 'hex' ? Array.from(signature, b => b.toString(16).padStart(2, '0')).join('') : btoa(String.fromCharCode(...signature)) };
+    },
+  };
+  return { signer, state, address, material: {
+    privateKey: await crypto.subtle.exportKey('jwk', keys.privateKey),
+    publicKey: await crypto.subtle.exportKey('jwk', keys.publicKey),
+  } };
+}

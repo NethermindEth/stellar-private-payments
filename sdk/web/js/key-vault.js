@@ -26,15 +26,21 @@ function fields(value, names) {
     Object.keys(value).sort().join(',') === [...names].sort().join(','), 'Unsupported key metadata');
 }
 function validate(record, databaseId) {
-  fields(record, ['version', 'databaseId', 'vaultId', 'revision', 'password', 'passkey']);
+  fields(record, ['version', 'databaseId', 'vaultId', 'revision', 'password', 'passkey', ...(Object.prototype.hasOwnProperty.call(record ?? {}, 'wallet') ? ['wallet'] : [])]);
   requireValue(record.version === 1 && record.databaseId === databaseId &&
     Number.isSafeInteger(record.revision) && record.revision >= 1, 'Invalid key vault identity or version');
   decode(record.vaultId, 16);
   fields(record.password, ['salt', 'iterations', 'iv', 'ciphertext']);
   decode(record.password.salt, 32);
   requireValue(Number.isSafeInteger(record.password.iterations) && record.password.iterations >= ITERATIONS && record.password.iterations <= 2_000_000, 'Unsupported password work factor');
-  for (const slot of [record.password, record.passkey].filter(Boolean)) {
+  for (const slot of [record.password, record.passkey, record.wallet].filter(Boolean)) {
     decode(slot.iv, 12); decode(slot.ciphertext, 48);
+  }
+  if (record.wallet !== undefined && record.wallet !== null) {
+    fields(record.wallet, ['address', 'origin', 'salt', 'iv', 'ciphertext']);
+    walletPublicKey(record.wallet.address);
+    secureOrigin(record.wallet.origin);
+    decode(record.wallet.salt, 32);
   }
   if (record.passkey !== null) {
     fields(record.passkey, ['credentialId', 'prfSalt', 'origin', 'rpId', 'iv', 'ciphertext']);
@@ -61,8 +67,43 @@ async function passwordKey(password, slot, creating = false) {
   } finally { bytes.fill(0); }
 }
 function associatedData(record, method, slot) {
-  const metadata = method === 'password' ? [slot.salt, slot.iterations] : [slot.credentialId, slot.prfSalt, slot.origin, slot.rpId];
+  const metadata = method === 'password' ? [slot.salt, slot.iterations] : method === 'wallet'
+    ? [slot.address, slot.origin, slot.salt] : [slot.credentialId, slot.prfSalt, slot.origin, slot.rpId];
   return encoder.encode(JSON.stringify([DOMAIN, record.version, record.databaseId, record.vaultId, method, ...metadata]));
+}
+
+function secureOrigin(origin) {
+  let url;
+  try { url = new URL(origin); } catch { fail('wrong-origin', 'Wallet unlock requires HTTPS or localhost'); }
+  if (url.origin !== origin || origin.length > 2048 || (url.protocol !== 'https:' && !(url.protocol === 'http:' && url.hostname === 'localhost'))) {
+    fail('wrong-origin', 'Wallet unlock requires HTTPS or localhost');
+  }
+  return origin;
+}
+function walletPublicKey(address) {
+  requireValue(typeof address === 'string' && /^G[A-Z2-7]{55}$/.test(address), 'Expected a Stellar Ed25519 account address');
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, value = 0;
+  const bytes = [];
+  for (const char of address) {
+    value = (value << 5) | alphabet.indexOf(char); bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((value >>> bits) & 255); }
+  }
+  let crc = 0;
+  for (const byte of bytes.slice(0, 33)) {
+    crc ^= byte << 8;
+    for (let i = 0; i < 8; i++) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 65535;
+  }
+  requireValue(bytes[0] === 48 && bytes[33] === (crc & 255) && bytes[34] === (crc >>> 8), 'Invalid Stellar account checksum');
+  return Uint8Array.from(bytes.slice(1, 33));
+}
+function walletSignature(value) {
+  if (typeof value !== 'string') fail('invalid-signature', 'Wallet returned no message signature');
+  if (/^[0-9a-fA-F]{128}$/.test(value)) return Uint8Array.from(value.match(/../g), byte => parseInt(byte, 16));
+  if (!/^[A-Za-z0-9+/]{86}==$/.test(value)) fail('invalid-signature', 'Invalid wallet signature encoding');
+  const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0));
+  if (btoa(String.fromCharCode(...bytes)) !== value) fail('invalid-signature', 'Noncanonical wallet signature');
+  return bytes;
 }
 async function wrap(record, method, slot, wrappingKey, dataKey) {
   const iv = random(12);
@@ -74,7 +115,10 @@ async function unwrap(record, method, wrappingKey) {
   try {
     return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: decode(slot.iv, 12),
       additionalData: associatedData(record, method, slot), tagLength: 128 }, wrappingKey, decode(slot.ciphertext, 48)));
-  } catch { fail('unlock-failed', 'Cannot unlock: incorrect password/passkey or damaged key metadata'); }
+  } catch {
+    if (method === 'wallet') fail('wallet-unlock-failed', 'Wallet signature could not unlock this database; use your recovery password');
+    fail('unlock-failed', 'Cannot unlock: incorrect password/passkey or damaged key metadata');
+  }
 }
 
 /** IndexedDB stores encrypted envelopes only. Writes resolve after transaction commit. */
@@ -163,7 +207,8 @@ export class DatabaseKeyVault {
     const record = await this.store.read(this.databaseId);
     if (!record) return { exists: false, passkey: false };
     validate(record, this.databaseId);
-    return { exists: true, passkey: record.passkey !== null, revision: record.revision };
+    return { exists: true, passkey: record.passkey !== null, wallet: !!record.wallet,
+      walletAddress: record.wallet?.address, revision: record.revision };
   }
   async save(previous, changes) {
     const next = { ...previous, ...changes, revision: previous.revision + 1 };
@@ -198,6 +243,56 @@ export class DatabaseKeyVault {
     const slot = { salt: encode(random(32)), iterations: ITERATIONS };
     const wrapped = await wrap(record, 'password', slot, await passwordKey(password, slot, true), key);
     await this.save(record, { password: wrapped });
+  }
+  async walletKey(record, slot, signer) {
+    if (secureOrigin(this.origin) !== slot.origin) fail('wrong-origin', 'Wallet unlock belongs to a different site; use your password');
+    if (!signer?.getPublicKey || !signer?.signMessage) fail('wallet-unavailable', 'Wallet message signing is unavailable');
+    if (await signer.getPublicKey() !== slot.address) fail('wrong-wallet', 'Select the wallet account enrolled for this database');
+    const message = ['Stellar Private Payments — unlock local encrypted database',
+      'This signature unlocks local storage. It does not authorize a transaction.',
+      `Domain: ${DOMAIN}/wallet-signature`, `Origin: ${slot.origin}`, `Account: ${slot.address}`,
+      `Database: ${record.databaseId}`, `Vault: ${record.vaultId}`, `Salt: ${slot.salt}`].join('\n');
+    const response = await signer.signMessage(message, { address: slot.address });
+    if (response?.signerAddress !== slot.address) fail('wrong-wallet', 'Wallet signed with a different account');
+    const signature = walletSignature(response.signedMessage);
+    try {
+      const publicKey = await crypto.subtle.importKey('raw', walletPublicKey(slot.address), 'Ed25519', false, ['verify']);
+      const hash = await crypto.subtle.digest('SHA-256', encoder.encode(`Stellar Signed Message:\n${message}`));
+      if (!await crypto.subtle.verify('Ed25519', publicKey, signature, hash)) fail('invalid-signature', 'Wallet signature verification failed');
+      const material = await crypto.subtle.importKey('raw', signature, 'HKDF', false, ['deriveKey']);
+      return await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: decode(slot.salt, 32),
+        info: associatedData(record, 'wallet', slot) }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    } finally { signature.fill(0); }
+  }
+  async addWallet(password, signer) {
+    const record = await this.record();
+    if (record.wallet) fail('already-exists', 'A wallet is already enrolled');
+    const key = await unwrap(record, 'password', await passwordKey(password, record.password));
+    try {
+      const origin = secureOrigin(this.origin);
+      if (!signer?.getPublicKey) fail('wallet-unavailable', 'Wallet message signing is unavailable');
+      const address = await signer.getPublicKey();
+      walletPublicKey(address);
+      const slot = { address, origin, salt: encode(random(32)) };
+      const wrapped = await wrap(record, 'wallet', slot, await this.walletKey(record, slot, signer), key);
+      // A second real signing request must reproduce the key before persistence.
+      const verified = await unwrap({ ...record, wallet: wrapped }, 'wallet', await this.walletKey(record, wrapped, signer));
+      try {
+        if (!key.every((byte, i) => byte === verified[i])) fail('invalid-signature', 'Wallet cannot reproduce the storage wrapping key');
+      } finally { verified.fill(0); }
+      await this.save(record, { wallet: wrapped });
+    } finally { key.fill(0); }
+  }
+  async unlockWallet(signer) {
+    const record = await this.record();
+    if (!record.wallet) fail('missing-wallet', 'No wallet is enrolled for this database');
+    const key = await unwrap(record, 'wallet', await this.walletKey(record, record.wallet, signer));
+    try { return new KeySession(this.databaseId, key); } finally { key.fill(0); }
+  }
+  async removeWallet(password) {
+    const record = await this.record();
+    const key = await unwrap(record, 'password', await passwordKey(password, record.password));
+    try { await this.save(record, { wallet: null }); } finally { key.fill(0); }
   }
   passkeyContext() {
     if (!this.credentials?.create || !this.credentials?.get) fail('passkey-unavailable', 'This browser does not provide WebAuthn');
