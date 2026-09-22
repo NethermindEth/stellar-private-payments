@@ -71,6 +71,8 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
   --outfile="$SDK/js/freighter.js" \
   --alias:@stellar/freighter-api=./app/node_modules/@stellar/freighter-api/build/index.min.js
 
+cp sdk/web/js/key-vault.js "$SDK/js/key-vault.js"
+
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 cp app/404.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
@@ -88,9 +90,7 @@ cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/sourc
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/storage-bootstrap.js app/js/ui.js app/js/admin.js app/js/disclosure.js --bundle --splitting --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --external:stellar-private-payments/key-vault --outdir="$TRUNK_STAGING_DIR/js" --chunk-names="chunks/[name]-[hash]" --format=esm
 
 # Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
 cp app/js/sw.js "$TRUNK_STAGING_DIR/sw.js"

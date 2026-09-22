@@ -39,14 +39,14 @@ async function openEncryptedStorage(options) {
   return openKeyedStorage('openEncrypted', options);
 }
 
-async function openKeyedStorage(method, options) {
+async function openKeyedStorage(method, options, recoverSetup = false) {
   const open = Reflect.get(WasmStorage, method);
   if (typeof open !== 'function') {
     throw new Error('Encrypted storage requires a build with the sqlite3mc feature');
   }
   const provider = requireField(options?.keyProvider, 'keyProvider');
   if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
-  const createNew = options.createNew === true;
+  const createNew = !recoverSetup && options.createNew === true;
   const supplied = await provider('spp.encrypted.db', createNew ? 'create' : 'open');
   if (!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]' || supplied.byteLength !== 32) {
     throw new TypeError('keyProvider must return a 32-byte Uint8Array');
@@ -54,15 +54,15 @@ async function openKeyedStorage(method, options) {
   // Leave the provider's own buffer intact; clear the copy owned by this call.
   const transport = new Uint8Array(supplied);
   try {
-    return await open.call(WasmStorage, options.workerUrl ?? storageWorkerUrl, transport, createNew);
+    return await open.call(WasmStorage, options.workerUrl ?? storageWorkerUrl, transport, createNew, recoverSetup);
   } finally {
     transport.fill(0);
   }
 }
 
 /** Explicit OPFS migration. Close all storage users first, including other tabs. */
-async function openStorageMigration(options) {
-  const storage = await openKeyedStorage('openMigration', options);
+async function openStorageMigration(options, recoverSetup = false) {
+  const storage = await openKeyedStorage('openMigration', options, recoverSetup);
   const action = Reflect.get(storage, 'migrationAction');
   let closed = false;
   const call = async (name) => {
@@ -207,7 +207,29 @@ function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options)
   });
 }
 
-export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage, openMigration: openStorageMigration };
+export const Storage = {
+  supportsEncryption: () => typeof Reflect.get(WasmStorage, 'openEncrypted') === 'function',
+  async exportEncrypted(storage, options) {
+    if (typeof storage?.exportEncrypted !== 'function') throw new Error('Encrypted backup requires a sqlite3mc build');
+    const supplied = await options.keyProvider('spp.encrypted.db', 'open');
+    if ((!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]') || supplied.byteLength !== 32) throw new TypeError('Expected a 32-byte database key');
+    const owned = new Uint8Array(supplied);
+    try { return await storage.exportEncrypted(owned); } finally { owned.fill(0); }
+  },
+  async restoreEncrypted(snapshot, options) {
+    if (typeof WasmStorage.restoreEncrypted !== 'function') throw new Error('Encrypted restore requires a sqlite3mc build');
+    if (!ArrayBuffer.isView(snapshot) || Object.prototype.toString.call(snapshot) !== '[object Uint8Array]') throw new TypeError('Expected encrypted database bytes');
+    const supplied = await options.keyProvider('spp.encrypted.db', 'open');
+    if ((!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]') || supplied.byteLength !== 32) throw new TypeError('Expected a 32-byte database key');
+    const owned = new Uint8Array(supplied);
+    try { await WasmStorage.restoreEncrypted(options.workerUrl ?? storageWorkerUrl, owned, snapshot); }
+    finally { owned.fill(0); }
+  },
+  open: openStorage,
+  openEncrypted: openEncryptedStorage,
+  openMigration: (options) => openStorageMigration(options),
+  recoverMigrationSetup: (options) => openStorageMigration(options, true),
+};
 export const Client = {
   new: newClient,
 };

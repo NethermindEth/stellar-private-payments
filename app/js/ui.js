@@ -6,7 +6,7 @@ import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
 import { getConnectedAddress } from './wallet.js';
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function initializeApp() {
     Templates.init();
     Shell.init();
     Wallet.init();
@@ -21,4 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (existingAddress) {
         Wallet.connect({ auto: true }).catch(() => {});
     }
-});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
+else void initializeApp();

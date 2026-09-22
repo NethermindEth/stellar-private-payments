@@ -6,6 +6,11 @@ import time
 def run(ctx):
     js, snapshot, key, marker = (ctx[n] for n in ["js", "snapshot", "key", "marker"])
     checks = ctx["checks"]
+    # Capture a valid synthetic candidate before fault injection. Ordinary
+    # creation now correctly refuses any existing migration control record.
+    ctx["encrypted"](True)
+    ctx["close"]()
+    candidate_fixture = js("const root=await navigator.storage.getDirectory();const pool=await root.getDirectoryHandle('.opfs-sahpool-encrypted');const opaque=await pool.getDirectoryHandle('.opaque');for await(const [,file] of opaque.entries()){const bytes=new Uint8Array(await(await file.getFile()).arrayBuffer());if(new TextDecoder().decode(bytes.slice(0,512)).split('\\0')[0]==='spp.encrypted.db')return Array.from(bytes);}throw Error('candidate fixture missing');")
 
     def load():
         ctx["load"]()
@@ -13,6 +18,26 @@ def run(ctx):
 
     def open_migration(create=False, supplied=key):
         return js("window.migration=await sdk.Storage.openMigration({workerUrl:'/scripts/test-sqlite3mc-migration-worker.js',createNew:arguments[1],keyProvider:async()=>Uint8Array.from(arguments[0])});return await migration.status();", [list(supplied), create])
+
+    def recover_setup(supplied=key):
+        return js("window.migration=await sdk.Storage.recoverMigrationSetup({workerUrl:'/scripts/test-sqlite3mc-migration-worker.js',keyProvider:async(id,purpose)=>{if(purpose!=='open')throw Error('incorrect purpose');return Uint8Array.from(arguments[0]);}});return await migration.status();", [list(supplied)])
+
+    def interrupt_setup(fault, recovery=False):
+        worker_url = "/scripts/test-sqlite3mc-migration-worker.js?fault=" + fault + "&target=spp.migration.db"
+        method = "recoverMigrationSetup" if recovery else "openMigration"
+        # Install the fault before the first worker request. The page retains
+        # control while SQLite/OPFS is paused inside the worker.
+        js("window.faults=[];window.pendingSetup=sdk.Storage[arguments[0]]({workerUrl:arguments[1],createNew:!arguments[2],keyProvider:async()=>Uint8Array.from(arguments[3])}).then(m=>{window.migration=m;return 'ok';}).catch(e=>String(e));return true;", [method, worker_url, recovery, list(key)])
+        for _ in range(400):
+            if fault in js("return window.faults;"): break
+            time.sleep(.01)
+        else: raise AssertionError("setup fault did not fire: " + fault)
+        if fault in ["quota", "flush-error", "setup-retire-error"]:
+            result = js("return await window.pendingSetup;")
+            assert result != "ok", (fault, "setup unexpectedly succeeded")
+        else:
+            js("for(const w of migrationWorkers)w.terminate();return true;")
+        load()
 
     def action(name):
         return js("return await migration[arguments[0]]();", [name])
@@ -66,6 +91,81 @@ def run(ctx):
 
     for version in [1, 2]:
         original = setup(version)
+        interrupt_setup("setup-before-retire")
+        assert any(".setup-v1-" in f["path"] for f in snapshot())
+        assert open_migration() == "copying"
+        close_migration()
+        assert plaintext_files() == original
+        assert not any(".setup-" in f["path"] for f in snapshot())
+        before = snapshot()
+        expect_error(recover_setup)
+        assert snapshot() == before
+        checks.append(f"schema v{version}: ordinary reopen authenticates committed setup and retires its marker")
+
+        for fault in ["setup-before-marker", "setup-marker-created", "quota", "flush-error",
+                      "during-write", "before-commit", "after-commit", "setup-before-retire",
+                      "setup-retire-error", "setup-after-retire"]:
+            original = setup(version)
+            interrupt_setup(fault)
+            before = snapshot()
+            expect_error(lambda: open_migration(False, bytes(32)))
+            if fault != "setup-before-marker":
+                expect_error(lambda: recover_setup(bytes(32)))
+                assert snapshot() == before, (fault, "wrong key changed setup")
+            if fault == "setup-after-retire":
+                expect_error(recover_setup)
+                assert snapshot() == before
+                assert open_migration() == "copying"
+            else:
+                # A second crash inside recovery must still be retryable.
+                interrupt_setup("during-write", True)
+                retry = snapshot()
+                expect_error(lambda: recover_setup(bytes(32)))
+                assert snapshot() == retry
+                assert recover_setup() == "copying"
+            close_migration()
+            assert plaintext_files() == original
+            assert not any(".setup-" in f["path"] for f in snapshot())
+            # Once initialization is published, recovery must never reset it.
+            before = snapshot()
+            expect_error(recover_setup)
+            assert snapshot() == before
+            open_migration()
+            action("prepare")
+            action("activate")
+            action("finish")
+            close_migration()
+            read_encrypted()
+            assert not any(f.get("protected", False) for f in snapshot())
+            checks.append(f"schema v{version}: {fault} during setup and retry interruption preserve key/source and complete migration")
+
+        for kind in ["source", "candidate", "prepared", "active", "aborted"]:
+            original = setup(version)
+            if kind in ["source", "candidate"]:
+                interrupt_setup("during-write")
+                if kind == "source":
+                    js("window.storage=await sdk.Storage.open();await storage.call({SetSetting:{key:'changed-setup-source',value_json:'true'}});return true;")
+                    ctx["close"]()
+                else:
+                    before_creation = snapshot()
+                    expect_error(lambda: ctx["encrypted"](True))
+                    assert snapshot() == before_creation
+                    # Model an externally introduced candidate without weakening
+                    # the public API or changing the refusal assertions below.
+                    js("const root=await navigator.storage.getDirectory();const pool=await root.getDirectoryHandle('.opfs-sahpool-encrypted');const opaque=await pool.getDirectoryHandle('.opaque');const file=await opaque.getFileHandle('test-injected-candidate',{create:true});const writer=await file.createWritable();await writer.write(Uint8Array.from(arguments[0]));await writer.close();return true;", [candidate_fixture])
+            else:
+                open_migration(True)
+                if kind != "aborted": action("prepare")
+                if kind == "active": action("activate")
+                if kind == "aborted": action("abort")
+                close_migration()
+            before = snapshot()
+            expect_error(recover_setup)
+            assert snapshot() == before, (kind, "invalid recovery changed files")
+            checks.append(f"schema v{version}: initialization recovery refuses {kind} without mutation")
+
+    for version in [1, 2]:
+        original = setup(version)
         assert open_migration(True) == "copying"
         close_migration()
         before = snapshot()
@@ -107,7 +207,7 @@ def run(ctx):
         assert action("finish") == "complete"
         close_migration()
         read_encrypted(True)
-        assert not any(f["protected"] for f in snapshot())
+        assert not any(f.get("protected", False) for f in snapshot())
         checks.append(f"schema v{version}: key failures, abort/restart, pool exclusion, browser restart, post-activation writes and plaintext cleanup")
 
         original = setup(version)
@@ -173,5 +273,5 @@ def run(ctx):
             assert action("finish") == "complete"
             close_migration()
             read_encrypted()
-            assert not any(f["protected"] for f in snapshot())
+            assert not any(f.get("protected", False) for f in snapshot())
             checks.append(f"schema v{version}: recover {fault} during {operation}; wrong key nonmutation and artifact scan passed")

@@ -377,6 +377,180 @@ fn process_death_recovers_every_publication_boundary() -> Result<()> {
     Ok(())
 }
 
+fn kill_setup(f: &Fixture, key: &DatabaseKey, stage: &str, recovery: bool) -> Result<()> {
+    let mut child = Command::new(std::env::current_exe()?)
+        .args([
+            "--ignored",
+            "--exact",
+            "state::encrypted_migration::tests::crash_child",
+            "--nocapture",
+        ])
+        .env("SPP_MIGRATION_TEST_STOP", stage)
+        .env("SPP_MIGRATION_TEST_ROOT", &f.0)
+        .env(
+            "SPP_MIGRATION_TEST_RECOVER",
+            if recovery { "1" } else { "0" },
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("child stdin")
+        .write_all(key.as_ref())?;
+    let mut observed = false;
+    for line in BufReader::new(child.stdout.take().expect("child stdout")).lines() {
+        if line?.contains(&format!("migration-checkpoint:{stage}")) {
+            observed = true;
+            break;
+        }
+    }
+    if !observed {
+        let output = child.wait_with_output()?;
+        anyhow::bail!(
+            "setup child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    child.kill()?;
+    child.wait()?;
+    Ok(())
+}
+
+#[test]
+fn interrupted_initialization_and_recovery_preserve_source_and_key_policy() -> Result<()> {
+    for version in [1, 2] {
+        for stage in [
+            "setup-directory-created",
+            "setup-marker-created",
+            "setup-control-created",
+            "setup-schema-written",
+            "setup-before-commit",
+            "setup-committed",
+            "setup-retired",
+        ] {
+            let f = Fixture::new(version)?;
+            let key = DatabaseKey::generate()?;
+            let original = fs::read(f.source())?;
+            kill_setup(&f, &key, stage, false)?;
+            let before = bytes(&f.0)?;
+            let directories = fs::read_dir(f.migration())?
+                .map(|e| e.map(|e| e.file_name()))
+                .collect::<std::io::Result<Vec<_>>>()?;
+            assert!(NativeMigration::open(f.migration(), DatabaseKey::generate()?).is_err());
+            if stage != "setup-directory-created" {
+                assert!(
+                    NativeMigration::recover_initialization(
+                        f.source(),
+                        f.migration(),
+                        DatabaseKey::generate()?
+                    )
+                    .is_err()
+                );
+                assert_eq!(bytes(&f.0)?, before);
+                assert_eq!(
+                    fs::read_dir(f.migration())?
+                        .map(|e| e.map(|e| e.file_name()))
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                    directories
+                );
+            }
+            let mut migration = if stage == "setup-retired" {
+                assert!(
+                    NativeMigration::recover_initialization(f.source(), f.migration(), owned(&key))
+                        .is_err()
+                );
+                NativeMigration::open(f.migration(), owned(&key))?
+            } else {
+                if stage != "setup-directory-created" {
+                    // Recovery itself may die after discarding only incomplete control files.
+                    kill_setup(&f, &key, "setup-control-cleared", true)?;
+                    let before_retry = bytes(&f.0)?;
+                    assert!(
+                        NativeMigration::recover_initialization(
+                            f.source(),
+                            f.migration(),
+                            DatabaseKey::generate()?
+                        )
+                        .is_err()
+                    );
+                    assert_eq!(bytes(&f.0)?, before_retry);
+                }
+                NativeMigration::recover_initialization(f.source(), f.migration(), owned(&key))?
+            };
+            assert_eq!(migration.status()?, MigrationStatus::Copying);
+            assert_eq!(fs::read(f.source())?, original);
+            assert!(!fs::read_dir(f.migration())?.any(|e| {
+                e.expect("read migration directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".setup-")
+            }));
+            migration.prepare()?;
+            migration.activate()?;
+            migration.finish()?;
+            no_plaintext(&f.0)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn setup_recovery_refuses_changed_source_candidates_and_established_state() -> Result<()> {
+    for mode in ["source", "candidate", "extra", "symlink"] {
+        let f = Fixture::new(2)?;
+        let key = DatabaseKey::generate()?;
+        kill_setup(&f, &key, "setup-control-created", false)?;
+        match mode {
+            "source" => {
+                Connection::open(f.source())?
+                    .execute("INSERT INTO app_settings VALUES('changed','true')", [])?;
+            }
+            "candidate" => fs::write(f.migration().join("encrypted.sqlite"), b"must remain")?,
+            "extra" => fs::write(f.migration().join("other"), b"must remain")?,
+            _ => {
+                fs::remove_file(f.migration().join("migration.sqlite"))?;
+                std::os::unix::fs::symlink(f.source(), f.migration().join("migration.sqlite"))?;
+            }
+        }
+        let before = bytes(&f.0)?;
+        assert!(
+            NativeMigration::recover_initialization(f.source(), f.migration(), owned(&key))
+                .is_err()
+        );
+        assert_eq!(bytes(&f.0)?, before);
+    }
+    for state in [
+        MigrationStatus::Copying,
+        MigrationStatus::Prepared,
+        MigrationStatus::Active,
+        MigrationStatus::Aborted,
+    ] {
+        let f = Fixture::new(2)?;
+        let key = DatabaseKey::generate()?;
+        let mut m = NativeMigration::begin(f.source(), f.migration(), owned(&key))?;
+        if matches!(state, MigrationStatus::Prepared | MigrationStatus::Active) {
+            m.prepare()?;
+        }
+        if state == MigrationStatus::Active {
+            m.activate()?;
+        }
+        if state == MigrationStatus::Aborted {
+            m.abort()?;
+        }
+        drop(m);
+        let before = bytes(&f.0)?;
+        assert!(
+            NativeMigration::recover_initialization(f.source(), f.migration(), owned(&key))
+                .is_err()
+        );
+        assert_eq!(bytes(&f.0)?, before);
+    }
+    Ok(())
+}
+
 #[test]
 fn logical_copy_preserves_typed_rows_triggers_views_and_without_rowid() -> Result<()> {
     let f = Fixture::new(2)?;
@@ -440,8 +614,15 @@ fn crash_child() -> Result<()> {
     let root = PathBuf::from(std::env::var("SPP_MIGRATION_TEST_ROOT")?);
     let mut key = DatabaseKey::new([0; 32]);
     std::io::stdin().read_exact(&mut key[..])?;
-    let mut migration =
-        NativeMigration::begin(root.join("source.db"), root.join("migration"), key)?;
+    let mut migration = if std::env::var("SPP_MIGRATION_TEST_RECOVER").as_deref() == Ok("1") {
+        NativeMigration::recover_initialization(
+            root.join("source.db"),
+            root.join("migration"),
+            key,
+        )?
+    } else {
+        NativeMigration::begin(root.join("source.db"), root.join("migration"), key)?
+    };
     migration.prepare()?;
     migration.activate()?;
     migration.finish()

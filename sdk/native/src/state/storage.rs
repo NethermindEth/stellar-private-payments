@@ -19,7 +19,7 @@ pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[
+pub(super) const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema.sql")),
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
 ];

@@ -212,3 +212,39 @@ pub(crate) fn validate_read_only(path: &Path, key: Option<&DatabaseKey>) -> Resu
     ensure!(pages > 0, "existing database is empty");
     Ok(())
 }
+
+/// Authenticate and fully check a closed/transaction-boundary encrypted snapshot.
+/// Immutable access never performs journal recovery or changes the input.
+pub fn validate_backup(path: &Path, key: &DatabaseKey) -> Result<()> {
+    let conn = validation_connection(path)?;
+    configure(&conn, key)?;
+    let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    ensure!(
+        version >= 1 && version <= i64::try_from(super::storage::MIGRATION_ARRAY.len())?,
+        "unsupported backup schema version"
+    );
+    let mode: String = conn.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
+    ensure!(mode == "delete", "backup requires rollback-journal mode");
+    let mut statement = conn.prepare("PRAGMA integrity_check")?;
+    let results = statement
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ensure!(results == ["ok"], "backup database integrity check failed");
+    ensure!(
+        conn.prepare("PRAGMA foreign_key_check")?
+            .query([])?
+            .next()?
+            .is_none(),
+        "backup foreign-key check failed"
+    );
+    Ok(())
+}
+
+/// Domain-separated restore identity, binding both the key and exact snapshot.
+pub fn backup_restore_tag(key: &DatabaseKey, snapshot: &[u8]) -> String {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2_010::Sha256>::new_from_slice(key.as_ref()).expect("32-byte HMAC key");
+    mac.update(b"spp/database-backup/restore/v1\0");
+    mac.update(snapshot);
+    hex::encode(mac.finalize().into_bytes())
+}

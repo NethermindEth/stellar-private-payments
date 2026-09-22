@@ -26,7 +26,13 @@ parser.add_argument("--binary")
 parser.add_argument("--driver")
 parser.add_argument("--plaintext-only", action="store_true")
 parser.add_argument("--migration", action="store_true")
+parser.add_argument("--app-startup", action="store_true")
+parser.add_argument("--key-vault", action="store_true")
+parser.add_argument("--app-access", action="store_true")
+parser.add_argument("--app-migration", action="store_true")
+parser.add_argument("--backup", action="store_true")
 args = parser.parse_args()
+args.app_access = args.app_access or args.app_migration
 web = Path(__file__).resolve().parents[1]
 art = args.artifacts.resolve()
 art.mkdir(parents=True, exist_ok=False)
@@ -45,7 +51,42 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(b"<!doctype html><title>Storage integration test</title>")
+            self.wfile.write(b'''<!doctype html><title>Storage integration test</title>
+<script type="importmap">{"imports":{"stellar-private-payments":"/js/index.js",
+"stellar-private-payments/freighter":"/test-freighter.js",
+"stellar-private-payments/key-vault":"/js/key-vault.js"}}</script>''')
+        elif (args.app_startup or args.app_access or args.backup) and self.path == "/test-freighter.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write(b"export class FreighterSigner { constructor() { throw Error('Wallet use is outside this test'); } }")
+        elif (args.app_access or args.backup) and self.path == "/test-access-entry.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write(b"""import * as accessUi from '/app/js/storage-access-ui.js';
+import * as facade from '/app/js/wasm-facade.js';
+import * as keyModule from '/js/key-vault.js';
+Object.assign(window, {accessUi, facade, keyModule});""")
+        elif args.app_startup and self.path == "/test-app-entry.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write(b"""import * as facade from '/app/js/wasm-facade.js';
+window.appFacade=facade; window.workerCount=0;
+const Original=Worker;
+window.Worker=class extends Original {
+  constructor(...args) { super(...args); window.workerCount++; }
+};""")
+        elif (args.app_startup or args.app_access or args.backup) and self.path in [
+            "/app/js/wasm-facade.js", "/app/js/storage-startup.js", "/app/js/app-storage.js",
+            "/app/js/storage-access.js", "/app/js/storage-access-ui.js",
+            "/app/js/database-backup.js",
+        ]:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write((web.parents[1] / self.path.lstrip("/")).read_bytes())
         else:
             super().do_GET()
 
@@ -61,7 +102,7 @@ command = [driver, "--port", str(port), "--host", "127.0.0.1"] if firefox else [
 log = (art / "driver.log").open("w")
 process = subprocess.Popen(command, stdout=log, stderr=log)
 url = f"http://127.0.0.1:{port}"
-origin = f"http://127.0.0.1:{server.server_port}/test.html"
+origin = f"http://{'localhost' if args.key_vault or args.app_access else '127.0.0.1'}:{server.server_port}/test.html"
 sid = None
 key = secrets.token_bytes(32)
 marker = "PROTECTED_OPFS_INTEGRATION_01b8af6d"
@@ -111,7 +152,7 @@ def close():
 
 
 def snapshot():
-    return js("const root=await navigator.storage.getDirectory();const result=[];async function walk(d,path){for await(const [name,h] of d.entries()){if(h.kind==='directory'){await walk(h,path+name+'/');}else{const bytes=new Uint8Array(await(await h.getFile()).arrayBuffer());const hash=await crypto.subtle.digest('SHA-256',bytes);result.push({path:path+name,bytes:bytes.length,sha256:Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,'0')).join(''),protected:new TextDecoder().decode(bytes).includes(argumentsMarker)});}}}const argumentsMarker=arguments[0];await walk(root,'');return result.sort((a,b)=>a.path.localeCompare(b.path));", [marker])
+    return js("const root=await navigator.storage.getDirectory();const result=[];async function walk(d,path){for await(const [name,h] of d.entries()){if(h.kind==='directory'){result.push({path:path+name+'/',kind:'directory'});await walk(h,path+name+'/');}else{const bytes=new Uint8Array(await(await h.getFile()).arrayBuffer());const hash=await crypto.subtle.digest('SHA-256',bytes);result.push({path:path+name,bytes:bytes.length,sha256:Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,'0')).join(''),protected:new TextDecoder().decode(bytes).includes(argumentsMarker)});}}}const argumentsMarker=arguments[0];await walk(root,'');return result.sort((a,b)=>a.path.localeCompare(b.path));", [marker])
 
 
 try:
@@ -131,7 +172,17 @@ try:
     assert js("return await storage.call({GetSetting:'integration-legacy'});")["Setting"] == '"legacy-preserved"'
     close()
     checks.append("plaintext create, close and worker restart")
-    if args.plaintext_only:
+    if args.app_migration:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-app-migration.py"))["run"](globals())
+    elif args.backup:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-backup.py"))["run"](globals())
+    elif args.app_access:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-app-access.py"))["run"](globals())
+    elif args.key_vault:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-key-vault.py"))["run"](globals())
+    elif args.app_startup:
+        runpy.run_path(str(web / "scripts/test-sqlite3mc-app-startup.py"))["run"](globals())
+    elif args.plaintext_only:
         try:
             encrypted(True)
             raise AssertionError("default build unexpectedly enables encryption")
@@ -140,6 +191,8 @@ try:
         checks.append("default build rejects encrypted API")
         assert js("try{await sdk.Storage.openMigration({keyProvider:async()=>{throw Error('provider should not run');}});return false;}catch(e){return String(e).includes('sqlite3mc feature');}")
         checks.append("default build rejects migration API")
+        assert js("try{await sdk.Storage.recoverMigrationSetup({keyProvider:async()=>{throw Error('provider should not run');}});return false;}catch(e){return String(e).includes('sqlite3mc feature');}")
+        checks.append("default build rejects setup recovery API")
     elif args.migration:
         runpy.run_path(str(web / "scripts/test-sqlite3mc-migration.py"))["run"](globals())
     else:
@@ -176,7 +229,7 @@ try:
         checks.append("encrypted browser-process restart")
         final = snapshot()
         encrypted_files = [f for f in final if f["path"].startswith(".opfs-sahpool-encrypted/")]
-        assert encrypted_files and not any(f["protected"] for f in encrypted_files)
+        assert encrypted_files and not any(f.get("protected", False) for f in encrypted_files)
         assert [f for f in final if not f["path"].startswith(".opfs-sahpool-encrypted/")] == legacy
         checks.append("encrypted artifact scan and original plaintext byte identity")
     result = {"browser": args.browser, "version": version, "checks": checks, "passed": True}

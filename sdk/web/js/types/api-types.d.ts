@@ -106,9 +106,9 @@ export type StorageMigrationStatus = 'copying' | 'prepared' | 'active' | 'cleani
  * Cleanup cannot erase browser/filesystem snapshots or external backups.
  * An operation failure closes the worker's pools; close and reopen the migration
  * handle before retrying so durable mappings are reacquired.
- * Resume requires a durable control record. An interrupted initial create can
- * leave unusable control state; opening then fails closed and the untouched
- * plaintext source remains authoritative. Automatic namespace repair is not provided.
+ * Resume requires a durable control record. For an interrupted initial create,
+ * recoverMigrationSetup explicitly repairs incomplete control state using the
+ * same key and unchanged plaintext source. Legacy unmarked state fails closed.
  */
 export interface StorageMigration {
   status(): Promise<StorageMigrationStatus>;
@@ -123,9 +123,20 @@ export interface StorageMigration {
 
 /** Encrypted opening requires an opt-in sqlite3mc build and uses separate OPFS storage. */
 export declare const Storage: {
+  /** Authenticated, consistent encrypted snapshot; does not close the storage handle. */
+  exportEncrypted(storage: Storage, options: EncryptedStorageOpenOptions): Promise<Uint8Array>;
+  /** Fresh destination or exact interrupted restore only. Close all storage users first. */
+  restoreEncrypted(snapshot: Uint8Array, options: EncryptedStorageOpenOptions): Promise<void>;
+  supportsEncryption(): boolean;
   open(options?: StorageOpenOptions | null): Promise<Storage>;
   openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
   openMigration(options: EncryptedStorageOpenOptions): Promise<StorageMigration>;
+  /** Repair interrupted initial setup only. Refuses established migrations and
+   * any encrypted candidate. Uses the provider's 'open' purpose and ignores
+   * createNew. Before any setup marker/database exists, a new key can be bound.
+   * If a previous recovery finished but its response was lost, use openMigration.
+   */
+  recoverMigrationSetup(options: EncryptedStorageOpenOptions): Promise<StorageMigration>;
 };
 
 /** Options for {@link Client.new}. */

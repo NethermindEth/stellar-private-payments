@@ -17,6 +17,25 @@ mod tests;
 
 type Schema = Vec<(String, String, Option<String>)>;
 
+/// Authenticate an initialization-only directory entry without exposing the
+/// source digest. Persist it before any control write, and retire it durably
+/// before exposing a coordinator that can create a candidate. Its presence
+/// authorizes explicit recovery of incomplete control files, never user data.
+pub fn initialization_marker(
+    key: &super::database_key::DatabaseKey,
+    platform: &str,
+    source_binding: &[u8],
+) -> String {
+    use hmac::{Hmac, Mac};
+    let mut mac =
+        Hmac::<sha2_010::Sha256>::new_from_slice(key.as_ref()).expect("HMAC accepts a 32-byte key");
+    mac.update(b"spp/database-migration/setup/v1\0");
+    mac.update(platform.as_bytes());
+    mac.update(&[0]);
+    mac.update(source_binding);
+    format!(".setup-v1-{}", hex::encode(mac.finalize().into_bytes()))
+}
+
 fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }

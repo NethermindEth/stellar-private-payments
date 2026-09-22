@@ -1,7 +1,8 @@
 // Test-only worker bootstrap. Never copied into dist or used by application code.
 // Inject I/O failures below SQLite, without adding diagnostic RPCs to the SDK.
-let mode = '';
-let target = '';
+const initialFault = new URL(import.meta.url).searchParams;
+let mode = initialFault.get('fault') || '';
+let target = initialFault.get('target') || '';
 let fired = false;
 const names = new WeakMap();
 function hit(point) {
@@ -13,6 +14,24 @@ function hit(point) {
 function stop(point) {
   if (hit(point)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
 }
+const getDirectory = FileSystemDirectoryHandle.prototype.getDirectoryHandle;
+FileSystemDirectoryHandle.prototype.getDirectoryHandle = async function (name, options) {
+  const setup = name.startsWith('.setup-v1-') && options?.create;
+  if (setup) stop('setup-before-marker');
+  const result = await getDirectory.call(this, name, options);
+  if (setup) stop('setup-marker-created');
+  return result;
+};
+const removeEntry = FileSystemDirectoryHandle.prototype.removeEntry;
+FileSystemDirectoryHandle.prototype.removeEntry = async function (name, options) {
+  if (name.startsWith('.setup-v1-')) {
+    stop('setup-before-retire');
+    if (hit('setup-retire-error')) throw new DOMException('test marker retirement failure', 'UnknownError');
+  }
+  const result = await removeEntry.call(this, name, options);
+  if (name.startsWith('.setup-v1-')) stop('setup-after-retire');
+  return result;
+};
 self.addEventListener('message', e => {
   if (!e.data?.armMigrationFault) return;
   e.stopImmediatePropagation();

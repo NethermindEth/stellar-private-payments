@@ -8,16 +8,46 @@ use sqlite_wasm_vfs::sahpool::{OpfsSAHPoolCfg, OpfsSAHPoolUtil, install};
 use std::path::Path;
 use stellar_private_payments::state::{
     database_key::{self, DatabaseKey, OpenPurpose},
-    encrypted_migration::{copy_plaintext, fingerprint},
+    encrypted_migration::{copy_plaintext, fingerprint, initialization_marker},
 };
 
 use crate::protocol::MigrationAction;
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{FileSystemDirectoryHandle, FileSystemGetDirectoryOptions, WorkerGlobalScope};
 
 const SOURCE: &str = "spp.db";
 const CANDIDATE: &str = "spp.encrypted.db";
 const CONTROL: &str = "spp.migration.db";
 const SOURCE_VFS: &str = "opfs-migration-source";
 const TARGET_VFS: &str = "opfs-migration-target";
+
+/// Ordinary storage must not expose a prepared copy when application metadata
+/// is lost. The encrypted control record is authoritative for activation.
+pub(super) fn check_open(util: &OpfsSAHPoolUtil, key: &DatabaseKey, creating: bool) -> Result<()> {
+    if !util.exists(CONTROL)? {
+        return Ok(());
+    }
+    ensure!(!creating, "migration owns database creation");
+    let control = database_key::open(Path::new(CONTROL), key, OpenPurpose::OpenExisting)?;
+    let value: String =
+        control.query_row("SELECT record FROM migration_state WHERE id=1", [], |r| {
+            r.get(0)
+        })?;
+    let record: Record = serde_json::from_str(&value)?;
+    ensure!(
+        record.version == 1 && record.source_hash.len() == 32,
+        "unsupported migration state"
+    );
+    ensure!(
+        matches!(
+            record.phase,
+            Phase::Active | Phase::Cleaning | Phase::Complete
+        ),
+        "migration requires explicit activation before encrypted storage can open"
+    );
+    Ok(())
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -114,42 +144,76 @@ pub(super) struct BrowserMigration {
 }
 
 impl BrowserMigration {
-    pub(super) async fn open(key: DatabaseKey, create_new: bool) -> Result<Self> {
+    pub(super) async fn open(
+        key: DatabaseKey,
+        create_new: bool,
+        recover_setup: bool,
+    ) -> Result<Self> {
         let source = Pool::acquire(SOURCE_VFS, ".opfs-sahpool").await?;
         let mut target = Pool::acquire(TARGET_VFS, ".opfs-sahpool-encrypted").await?;
         ensure!(
-            target.util.exists(CONTROL)? != create_new,
-            "migration create/open policy does not match existing state"
+            !(create_new && recover_setup),
+            "conflicting initialization policies"
         );
-        if create_new {
-            ensure!(
-                !target.util.exists(CANDIDATE)?,
-                "an encrypted database already exists"
-            );
-            no_journals(&source.util, SOURCE)?;
-            ensure!(
-                source.util.exists(SOURCE)?,
-                "plaintext source does not exist"
-            );
+        let setup = SetupDirectory::open().await?;
+        let markers = setup.markers().await?;
+        let initializing = create_new || recover_setup;
+        if !initializing {
+            ensure!(target.util.exists(CONTROL)?, "migration control is missing");
         }
-        target.add_codec()?;
-        // Validate the source before creating any migration control database.
-        let initial = if create_new {
+        // Validate before publishing the source-bound marker or changing control files.
+        let initial = if initializing {
+            ensure!(
+                target.util.list().iter().all(|name| name == CONTROL
+                    || ["-journal", "-wal", "-shm"]
+                        .iter()
+                        .any(|suffix| name == &format!("{CONTROL}{suffix}"))),
+                "encrypted candidate or unexpected files already exist"
+            );
             let connection = open_source(&source.util)?;
             fingerprint(&connection)?;
-            Some(Record {
+            let record = Record {
                 version: 1,
                 phase: Phase::Copying,
                 source_hash: source_hash(&source.util)?,
                 candidate_hash: None,
-            })
+            };
+            let marker = setup_marker(&key, &record);
+            if create_new {
+                ensure!(
+                    target.util.list().is_empty() && markers.is_empty(),
+                    "migration setup already exists; resume or explicitly recover it"
+                );
+                setup.publish(&marker).await?;
+            } else if markers.is_empty() && target.util.list().is_empty() {
+                // No authenticated state or database was created yet.
+                setup.publish(&marker).await?;
+            } else {
+                ensure!(
+                    markers == [marker.clone()],
+                    "initialization key or source does not match, or setup already completed"
+                );
+                setup.validate(&marker).await?;
+            }
+            if recover_setup {
+                for name in [
+                    format!("{CONTROL}-journal"),
+                    format!("{CONTROL}-wal"),
+                    format!("{CONTROL}-shm"),
+                    CONTROL.into(),
+                ] {
+                    target.util.delete_db(&name)?;
+                }
+            }
+            Some(record)
         } else {
             None
         };
-        let control = database_key::open(
+        target.add_codec()?;
+        let mut control = database_key::open(
             Path::new(CONTROL),
             &key,
-            if create_new {
+            if initializing {
                 OpenPurpose::CreateNew
             } else {
                 OpenPurpose::OpenExisting
@@ -157,11 +221,13 @@ impl BrowserMigration {
         )?;
         control.pragma_update(None, "synchronous", "FULL")?;
         if let Some(record) = initial {
-            control.execute_batch("CREATE TABLE migration_state(id INTEGER PRIMARY KEY CHECK(id=1), record TEXT NOT NULL)")?;
-            control.execute(
+            let tx = control.transaction()?;
+            tx.execute_batch("CREATE TABLE migration_state(id INTEGER PRIMARY KEY CHECK(id=1), record TEXT NOT NULL)")?;
+            tx.execute(
                 "INSERT INTO migration_state VALUES(1,?1)",
                 [serde_json::to_string(&record)?],
             )?;
+            tx.commit()?;
         }
         let migration = Self {
             control,
@@ -169,7 +235,17 @@ impl BrowserMigration {
             target,
             key,
         };
-        migration.record()?;
+        let record = migration.record()?;
+        let marker = setup_marker(&migration.key, &record);
+        let markers = setup.markers().await?;
+        if !markers.is_empty() {
+            ensure!(
+                record.phase == Phase::Copying && markers == [marker.clone()],
+                "unexpected initialization marker"
+            );
+            setup.retire(&marker).await?;
+        }
+        // No candidate-producing operation is exposed until retirement completes.
         Ok(migration)
     }
 
@@ -366,4 +442,89 @@ fn source_hash(pool: &OpfsSAHPoolUtil) -> Result<Vec<u8>> {
     let hash = Sha256::digest(&bytes).to_vec();
     database_key::clear_transport(&mut bytes);
     Ok(hash)
+}
+
+fn setup_marker(key: &DatabaseKey, record: &Record) -> String {
+    initialization_marker(key, "opfs", &record.source_hash)
+}
+
+// Directory entry creation is one OPFS operation: unlike a SQLite page or SAH
+// mapping header, it cannot leave a partially written authentication token.
+// Both pools remain exclusively held throughout marker publication/retirement.
+struct SetupDirectory(FileSystemDirectoryHandle);
+impl SetupDirectory {
+    async fn open() -> Result<Self> {
+        let scope = js_sys::global()
+            .dyn_into::<WorkerGlobalScope>()
+            .map_err(|e| setup_error(e.into()))?;
+        let root: FileSystemDirectoryHandle =
+            JsFuture::from(scope.navigator().storage().get_directory())
+                .await
+                .map_err(setup_error)?
+                .into();
+        Ok(Self(
+            JsFuture::from(root.get_directory_handle(".opfs-sahpool-encrypted"))
+                .await
+                .map_err(setup_error)?
+                .into(),
+        ))
+    }
+
+    async fn markers(&self) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        let iter = self.0.entries();
+        loop {
+            let item: js_sys::IteratorNext = JsFuture::from(iter.next().map_err(setup_error)?)
+                .await
+                .map_err(setup_error)?
+                .into();
+            if item.done() {
+                break;
+            }
+            let entry: js_sys::Array = item.value().into();
+            let name = entry
+                .get(0)
+                .as_string()
+                .ok_or_else(|| anyhow::anyhow!("invalid directory entry"))?;
+            if name.starts_with(".setup-") {
+                names.push(name);
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    async fn publish(&self, name: &str) -> Result<()> {
+        let options = FileSystemGetDirectoryOptions::new();
+        options.set_create(true);
+        JsFuture::from(self.0.get_directory_handle_with_options(name, &options))
+            .await
+            .map_err(setup_error)?;
+        Ok(())
+    }
+
+    async fn validate(&self, name: &str) -> Result<()> {
+        let marker: FileSystemDirectoryHandle = JsFuture::from(self.0.get_directory_handle(name))
+            .await
+            .map_err(setup_error)?
+            .into();
+        let item: js_sys::IteratorNext =
+            JsFuture::from(marker.entries().next().map_err(setup_error)?)
+                .await
+                .map_err(setup_error)?
+                .into();
+        ensure!(item.done(), "initialization marker is not empty");
+        Ok(())
+    }
+
+    async fn retire(&self, name: &str) -> Result<()> {
+        self.validate(name).await?;
+        JsFuture::from(self.0.remove_entry(name))
+            .await
+            .map_err(setup_error)?;
+        Ok(())
+    }
+}
+fn setup_error(_: JsValue) -> anyhow::Error {
+    anyhow::anyhow!("migration initialization directory operation failed")
 }

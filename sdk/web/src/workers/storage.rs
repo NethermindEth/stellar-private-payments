@@ -233,6 +233,20 @@ async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), 
             OpenRequest::Encrypted { key, purpose } => {
                 #[cfg(target_arch = "wasm32")]
                 {
+                    SAH_POOL.with(|p| {
+                        super::storage_migration::check_open(
+                            p.borrow()
+                                .as_ref()
+                                .ok_or_else(|| anyhow!("OPFS unavailable"))?,
+                            &key,
+                            matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::CreateNew),
+                        )?;
+                        super::storage_backup::check_open(
+                            p.borrow()
+                                .as_ref()
+                                .ok_or_else(|| anyhow!("OPFS unavailable"))?,
+                        )
+                    })?;
                     let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
                         Ok(p.borrow()
                             .as_ref()
@@ -241,7 +255,16 @@ async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), 
                     })?;
                     anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
                 }
-                SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
+                let storage = SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)?;
+                #[cfg(target_arch = "wasm32")]
+                SAH_POOL.with(|p| {
+                    super::storage_backup::finish_open(
+                        p.borrow()
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("OPFS unavailable"))?,
+                    )
+                })?;
+                Ok(storage)
             }
         }
     })();
@@ -334,10 +357,74 @@ pub(crate) async fn StorageWorker(
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
         #[cfg(feature = "sqlite3mc")]
-        StorageWorkerRequest::OpenMigration { key, create_new } => {
+        StorageWorkerRequest::ExportEncrypted { key } => {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let _ = (key, create_new);
+                let _ = key;
+                anyhow::bail!("encrypted snapshot requires OPFS");
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                anyhow::ensure!(
+                    INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
+                    "storage is not open"
+                );
+                anyhow::ensure!(key.0.len() == 32, "invalid database key");
+                let mut owned =
+                    stellar_private_payments::state::database_key::DatabaseKey::new([0; 32]);
+                owned.copy_from_slice(&key.0);
+                drop(key);
+                // No await: SQLite writes and this snapshot execute serially in this worker.
+                let bytes = SAH_POOL.with(|p| -> Result<Vec<u8>> {
+                    let borrow = p.borrow();
+                    let pool = borrow.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
+                    anyhow::ensure!(
+                        pool.exists(super::storage_backup::DATABASE)?,
+                        "encrypted database is not open"
+                    );
+                    let bytes = pool.export_db(super::storage_backup::DATABASE)?;
+                    super::storage_backup::validate_export(pool, &owned, &bytes)?;
+                    Ok(bytes)
+                })?;
+                StorageWorkerResponse::EncryptedSnapshot(bytes)
+            }
+        }
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::RestoreEncrypted { key, snapshot } => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = (key, snapshot);
+                anyhow::bail!("encrypted restore requires OPFS");
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                anyhow::ensure!(
+                    INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
+                    "restore needs a fresh worker"
+                );
+                anyhow::ensure!(key.0.len() == 32, "invalid database key");
+                let mut owned =
+                    stellar_private_payments::state::database_key::DatabaseKey::new([0; 32]);
+                owned.copy_from_slice(&key.0);
+                drop(key);
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
+                let result = super::storage_backup::restore(&owned, &snapshot).await;
+                INIT_STATE.with(|s| {
+                    *s.borrow_mut() = InitState::Failed("restore worker finished".into())
+                });
+                result?;
+                StorageWorkerResponse::Saved
+            }
+        }
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::OpenMigration {
+            key,
+            create_new,
+            recover_setup,
+        } => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = (key, create_new, recover_setup);
                 anyhow::bail!("OPFS migration requires WASM");
             }
             #[cfg(target_arch = "wasm32")]
@@ -352,7 +439,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 owned.copy_from_slice(&key.0);
                 drop(key);
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
-                match super::storage_migration::BrowserMigration::open(owned, create_new).await {
+                match super::storage_migration::BrowserMigration::open(
+                    owned,
+                    create_new,
+                    recover_setup,
+                )
+                .await
+                {
                     Ok(migration) => {
                         MIGRATION.with(|s| *s.borrow_mut() = Some(migration));
                         INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);

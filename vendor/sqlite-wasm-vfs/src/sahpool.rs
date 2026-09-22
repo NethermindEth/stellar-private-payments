@@ -534,6 +534,7 @@ impl OpfsSAHPool {
                 .map_err(OpfsSAHError::Write)?;
             }
 
+            FileSystemSyncAccessHandle::flush(sah).map_err(OpfsSAHError::Flush)?;
             Ok(())
         })?
     }

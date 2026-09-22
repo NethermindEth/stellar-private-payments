@@ -62,6 +62,15 @@ pub struct DisclaimerStatePayload {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     #[cfg(feature = "sqlite3mc")]
+    ExportEncrypted {
+        key: DatabaseKeyTransport,
+    },
+    #[cfg(feature = "sqlite3mc")]
+    RestoreEncrypted {
+        key: DatabaseKeyTransport,
+        snapshot: Vec<u8>,
+    },
+    #[cfg(feature = "sqlite3mc")]
     OpenPlaintext,
     #[cfg(feature = "sqlite3mc")]
     OpenEncrypted {
@@ -72,6 +81,7 @@ pub enum StorageWorkerRequest {
     OpenMigration {
         key: DatabaseKeyTransport,
         create_new: bool,
+        recover_setup: bool,
     },
     #[cfg(feature = "sqlite3mc")]
     Migration(MigrationAction),
@@ -182,6 +192,8 @@ impl Drop for DatabaseKeyTransport {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerResponse {
+    #[cfg(feature = "sqlite3mc")]
+    EncryptedSnapshot(Vec<u8>),
     #[cfg(feature = "sqlite3mc")]
     MigrationState(String),
     Pong,
