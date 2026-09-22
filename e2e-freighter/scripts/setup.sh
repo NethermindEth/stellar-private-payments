@@ -13,6 +13,7 @@ step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
 
 case "${1:-}" in
   --force|"") ;;
@@ -36,6 +37,19 @@ USAGE
     exit 0 ;;
   *) die "unknown argument '$1'" ;;
 esac
+
+# A server left running across branch switches can serve an older dist/ while
+# APP_URL still points to it. Reject that before provision.sh clears a working
+# Freighter profile and drives the wrong storage/onboarding flow.
+[ -n "${APP_URL:-}" ] || die "APP_URL is not set; build and serve this checkout first."
+expected_entry="$(sed -n 's/.*<script type="module" src="\([^"]*\)".*/\1/p' "$REPO_ROOT/app/index.html" | tail -n 1)"
+if ! served_html="$(curl -fsSL "$APP_URL")"; then
+  die "APP_URL=$APP_URL is not serving the app; build and serve this checkout first."
+fi
+served_entry="$(sed -n 's/.*<script type="module" src="\([^"]*\)".*/\1/p' <<< "$served_html" | tail -n 1)"
+if [ -z "$expected_entry" ] || [ "$served_entry" != "$expected_entry" ]; then
+  die "APP_URL=$APP_URL serves ${served_entry:-no app entry}, but this checkout expects $expected_entry. Rebuild and serve this branch before provisioning."
+fi
 
 # Provisioning imports Playwright through src/runner.mjs, so dependencies must
 # be installed before running it.
