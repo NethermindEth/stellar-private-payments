@@ -225,6 +225,8 @@ npm run check:types
 
 ## Build & publish (maintainers)
 
+Every browser build includes the pinned SQLite3 Multiple Ciphers backend; `npm run build` and `make serve` configure it automatically. This requires Python 3.11+, Clang, and llvm-ar. Database encryption and plaintext migration remain explicit runtime choices.
+
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
 ```bash

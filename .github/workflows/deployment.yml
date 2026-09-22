@@ -72,7 +72,7 @@ jobs:
         run: mdbook build docs/
 
       - name: Build API documentation
-        run: cargo doc --no-deps --workspace --release
+        run: python3 scripts/sqlite3mc.py -- cargo doc --no-deps --workspace --release
 
       - name: Combine outputs
         run: |

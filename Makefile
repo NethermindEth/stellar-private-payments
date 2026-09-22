@@ -131,4 +131,4 @@ clean:
 
 .PHONY: doc
 doc:
-	mdbook build docs/ && cargo doc --no-deps --workspace && cp -r target/doc docs/book/api && open docs/book/index.html
+	mdbook build docs/ && python3 scripts/sqlite3mc.py -- cargo doc --no-deps --workspace && cp -r target/doc docs/book/api && open docs/book/index.html

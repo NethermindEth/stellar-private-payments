@@ -2,7 +2,7 @@
 """Exercise the built SDK in a fresh, isolated browser profile using WebDriver.
 
 python3 sdk/web/scripts/test-sqlite3mc.py --artifacts /path/to/test-output
-Use --plaintext-only against a default build; --browser firefox --driver PATH
+Use --plaintext-only only for a legacy plaintext-only fixture; --browser firefox --driver PATH
 selects Firefox/geckodriver. Requires the browser and driver to be installed.
 Only synthetic data at an ephemeral localhost origin is used.
 """

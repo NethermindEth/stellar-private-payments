@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned SQLite3MC, then run an opt-in Cargo or browser build command.
+"""Build pinned SQLite3MC, then run a Cargo or browser build command.
 
 Examples:
   python3 scripts/sqlite3mc.py -- cargo test -p stellar-private-payments --lib
@@ -204,7 +204,8 @@ def main():
                    SQLITE3_INCLUDE_DIR=str(include), PKG_CONFIG_LIBDIR=str(pc), PKG_CONFIG_PATH=str(pc), PKG_CONFIG_ALLOW_CROSS="1")
     if Path(command[0]).name == "cargo":
         end = command.index("--") if "--" in command else len(command)
-        command[end:end] = ["--features", "sqlite3mc"] + (["--target", target] if target != host else [])
+        if target != host and "--target" not in command[:end]:
+            command[end:end] = ["--target", target]
     print(f"SQLite3MC {VERSION}, {target}: {digest(archive)}", flush=True)
     return subprocess.run(command, cwd=ROOT, env=env).returncode
 

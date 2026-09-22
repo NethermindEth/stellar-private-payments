@@ -38,7 +38,9 @@ fi
 
 PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
 LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
-if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ]; then
+if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ] || \
+   ! grep -q 'static openEncrypted(' sdk/web/dist/stellar_private_payments_web.js || \
+   [ ! -f sdk/web/dist/licenses/SQLite3MC.txt ]; then
     echo "trunk: building stellar-private-payments-web (WASM_PROFILE=$WASM_PROFILE)..."
     npm run build --prefix sdk/web
     echo "$WASM_PROFILE" > "$PROFILE_MARKER"

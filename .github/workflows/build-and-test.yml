@@ -30,8 +30,8 @@ jobs:
       - name: Build circuit artifacts
         run: make circuits
       - name: Build examples
-        run: cargo build --examples -p stellar-private-payments
+        run: python3 scripts/sqlite3mc.py -- cargo build --examples -p stellar-private-payments
       - name: Build
-        run: cargo test --workspace --no-run
+        run: python3 scripts/sqlite3mc.py -- cargo test --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace
+        run: python3 scripts/sqlite3mc.py -- cargo test --workspace

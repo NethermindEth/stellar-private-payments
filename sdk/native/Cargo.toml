@@ -12,7 +12,8 @@ build = "build.rs"
 name = "stellar_private_payments"
 
 [features]
-# Opt-in engine/key support; use scripts/sqlite3mc.py to select the pinned library.
+# Required engine/key support; scripts/sqlite3mc.py selects the pinned library.
+default = ["sqlite3mc"]
 sqlite3mc = ["dep:hmac", "dep:sha2_010"]
 # multi-threaded proving
 parallel = [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the staged opt-in npm package; optionally create and inspect its archive.
+"""Verify the staged encryption-enabled npm package; optionally create and inspect its archive.
 
 Default mode checks npm's dry-run file list without copying the large circuit
 bundle. --output-directory builds a CI artifact, never publishes it, and checks
@@ -46,7 +46,7 @@ def verify(names, read, notice):
     bindings = read("dist/stellar_private_payments_web.js").decode()
     for method in ["static openEncrypted(", "static openMigration(", "migrationAction("]:
         if method not in bindings:
-            raise ValueError(f"WASM bindings lack {method}; package may contain the default build")
+            raise ValueError(f"WASM bindings lack {method}; package may contain a legacy plaintext-only build")
     if "recoverMigrationSetup" not in read("js/index.js").decode():
         raise ValueError("JavaScript facade lacks initialization recovery")
     for name in ["dist/stellar_private_payments_web_bg.wasm", "dist/workers/storage-worker-module_bg.wasm"]:

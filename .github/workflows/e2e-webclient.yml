@@ -111,7 +111,7 @@ jobs:
           # gets a fresh browser/OPFS database because sync cursors are global
           # to the database, while note derivation is account-specific.
           bash sdk/web/scripts/e2e-browser-test.sh \
-            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+            python3 scripts/sqlite3mc.py --target wasm32-unknown-unknown -- cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
             -- --skip client::e2e_tests::
 
           for test_name in \
@@ -124,6 +124,6 @@ jobs:
             e2e_session_account_setup_and_sync
           do
             bash sdk/web/scripts/e2e-browser-test.sh \
-              cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+              python3 scripts/sqlite3mc.py --target wasm32-unknown-unknown -- cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
               "$test_name" -- --include-ignored
           done
