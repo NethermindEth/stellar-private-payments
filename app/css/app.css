@@ -152,3 +152,65 @@
     animation: slide-in 0.25s ease-out;
   }
 }
+
+/* Database access follows the same surfaces and controls as Profile & Settings. */
+.storage-dialog {
+  margin: auto;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 28px;
+  padding: 24px;
+  background: linear-gradient(180deg, #080e1d, #040914);
+  color: #e2e8f0;
+  font-size: 14px;
+  line-height: 1.6;
+  box-shadow: 0 24px 100px rgb(0 0 0 / 60%);
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.storage-dialog::backdrop { background: rgb(4 9 20 / 72%); backdrop-filter: blur(6px); }
+.storage-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.storage-dialog h2 { margin-top: 5px; font-size: 22px; font-weight: 600; letter-spacing: -.025em; color: #f8fafc; }
+.storage-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: #64748b; }
+.storage-dialog-heading .storage-eyebrow { color: rgb(165 243 252 / 70%); }
+.storage-close { width: 40px; height: 40px; flex-shrink: 0; border: 1px solid rgb(255 255 255 / 10%); border-radius: 50%; font-size: 25px; line-height: 1; color: #cbd5e1; cursor: pointer; }
+.storage-close:hover { border-color: rgb(103 232 249 / 30%); color: #cffafe; }
+#storage-description { color: #94a3b8; margin: 12px 0 20px; }
+#storage-feedback:empty { display: none; }
+#storage-feedback:not(:empty) { border: 1px solid currentColor; border-radius: 16px; padding: 10px 14px; }
+#storage-form { display: grid; gap: 16px; }
+#storage-form > * { margin-block: 0; }
+.storage-card { min-width: 0; padding: 20px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 24px; background: rgb(255 255 255 / 3%); }
+.storage-card > .storage-eyebrow { margin-bottom: 14px; }
+.storage-card p { font-size: 12px; line-height: 1.65; color: #94a3b8; }
+.storage-card > p:not(:first-child) { margin-top: 12px; }
+.storage-dialog label { display: block; margin-top: 12px; font-size: 13px; color: #94a3b8; }
+.storage-dialog input[type=password] { width: 100%; margin-top: 8px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 16px; background: #040914; padding: 12px 14px; font-size: 14px; color: #f1f5f9; }
+.storage-dialog input[type=checkbox] { accent-color: #67e8f9; margin-right: 6px; }
+.storage-dialog input[type=file] { font-size: 12px; color: #94a3b8; }
+.storage-dialog input::file-selector-button { border: 1px solid rgb(255 255 255 / 10%); border-radius: 999px; background: transparent; color: #cbd5e1; padding: 8px 12px; margin-right: 8px; cursor: pointer; }
+.storage-dialog input:focus-visible, .storage-button:focus-visible, .storage-close:focus-visible, .storage-password-details summary:focus-visible { outline: 2px solid #67e8f9; outline-offset: 3px; }
+.storage-button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgb(255 255 255 / 10%); border-radius: 999px; padding: 9px 14px; font-size: 13px; line-height: 1.4; font-weight: 500; color: #cbd5e1; background: transparent; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.storage-card > .storage-button { margin: 12px 8px 0 0; }
+.storage-button:hover { border-color: rgb(103 232 249 / 30%); color: #cffafe; background: rgb(103 232 249 / 5%); }
+.storage-button-primary { background: rgb(6 182 212 / 16%); border-color: transparent; color: #cffafe; }
+.storage-button-primary:hover { background: rgb(6 182 212 / 24%); }
+.storage-button-danger { color: #fda4af; border-color: rgb(251 113 133 / 20%); }
+.storage-button-danger:hover { background: rgb(251 113 133 / 8%); border-color: rgb(251 113 133 / 35%); color: #fecdd3; }
+.storage-button:disabled, .storage-close:disabled { opacity: .4; cursor: wait; }
+.storage-dialog [hidden], .storage-menu [hidden] { display: none !important; }
+#storage-wallet-account { font-family: ui-monospace, monospace; font-size: 11px; overflow-wrap: anywhere; }
+#storage-manage { display: grid; gap: 16px; }
+#storage-manage > * { margin: 0; }
+.storage-password-details summary { cursor: pointer; font-size: 13px; font-weight: 500; color: #cbd5e1; }
+.storage-menu { display: flex; flex-wrap: wrap; gap: 8px; }
+.storage-settings-card .storage-menu { margin-top: 16px; }
+#storage-dismiss { justify-self: end; }
+@media (max-width: 480px) {
+  .storage-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 18px; border-radius: 24px; }
+  .storage-card { padding: 16px; border-radius: 20px; }
+}

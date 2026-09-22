@@ -17,10 +17,12 @@ export async function startStorageAccess() {
         recoverMigration: async options => { await ensureWasmInit(); return Storage.recoverMigrationSetup(options); },
         restoreDatabase: async (snapshot, keyProvider) => { await ensureWasmInit(); await Storage.restoreEncrypted(snapshot, { keyProvider }); } });
     const dialog = document.createElement('dialog');
-    dialog.className = 'w-full max-w-lg rounded-2xl border border-slate-600 bg-slate-900 p-6 text-slate-100 shadow-xl backdrop:bg-black/80';
+    dialog.className = 'storage-dialog';
     dialog.setAttribute('aria-labelledby', 'storage-title');
     dialog.innerHTML = `
-      <h2 id="storage-title" class="text-xl font-semibold">Local database</h2>
+      <div class="storage-dialog-heading"><div><p class="storage-eyebrow">Privacy & security</p>
+      <h2 id="storage-title">Local database</h2></div>
+      <button id="storage-close" type="button" aria-label="Close database security" class="storage-close">×</button></div>
       <p id="storage-description" class="my-3 text-sm"></p>
       <p id="storage-feedback" role="alert" aria-live="assertive" tabindex="-1" class="my-3 text-sm"></p>
       <form id="storage-form" class="space-y-3">
@@ -67,7 +69,7 @@ export async function startStorageAccess() {
           <button id="storage-enroll" type="button">Add passkey</button>
           <button id="storage-wallet-enroll" type="button">Add Freighter wallet unlock</button>
           <button id="storage-wallet-remove" type="button">Remove wallet unlock</button>
-          <p>Wallet enrollment asks for two signatures of the same dedicated storage message to verify repeatable unlocking. Keep your password and backup for recovery. Never share the storage-unlock signature.</p>
+          <p id="storage-wallet-help">Approve two signatures of a dedicated storage message to add wallet unlock. Keep your password for recovery, and never share the signature.</p>
           <label class="block">New password
             <input id="storage-new" type="password" autocomplete="new-password" maxlength="1024" class="mt-1 block w-full rounded border border-slate-500 bg-slate-800 p-2">
           </label>
@@ -77,14 +79,31 @@ export async function startStorageAccess() {
           <button id="storage-change" type="button">Change password</button>
           <button id="storage-recover" type="button">Reset password with passkey</button>
         </section>
-        <p class="text-sm text-slate-300">The key backup is password-encrypted and contains no database contents. Keep it with your database backup. Losing both local key storage and this file loses access. After changing your password, download a new backup; older backups still work with their old passwords.</p>
+        <p id="storage-backup-help">A complete backup includes your encrypted data and key. A key-only backup needs the database to remain in this browser. Keep your backup and its password safe. After changing your password, save a new backup; older backups still use their old passwords.</p>
         <button id="storage-dismiss" type="button">Back</button>
       </form>`;
     for (const button of dialog.querySelectorAll('button')) {
-        button.className = 'mr-2 mt-2 rounded-lg border border-slate-500 px-3 py-2 text-sm hover:bg-slate-700 disabled:opacity-40';
+        if (button.id !== 'storage-close') button.className = 'storage-button';
     }
     document.body.append(dialog);
     const el = id => dialog.querySelector(`#storage-${id}`);
+    // Reuse the existing controls and event targets, grouped like settings cards.
+    const card = (title, nodes, before) => {
+        const section = document.createElement('section'); section.className = 'storage-card';
+        const heading = document.createElement('h3'); heading.className = 'storage-eyebrow'; heading.textContent = title;
+        before.before(section); section.append(heading, ...nodes); return section;
+    };
+    const accessCard = card('Database access', [el('password').parentElement, el('confirm-label'),
+        ...['create', 'migrate', 'migration-info', 'unlock', 'migration-recover', 'passkey', 'wallet', 'wallet-account', 'resume'].map(el)], el('password').parentElement);
+    const backupCard = card('Backups', ['complete-backup', 'backup', 'backup-help'].map(el), el('backup'));
+    const methodsCard = card('Unlock methods', ['enroll', 'wallet-enroll', 'wallet-remove', 'wallet-help'].map(el), el('enroll'));
+    const passwordDetails = document.createElement('details'); passwordDetails.className = 'storage-card storage-password-details';
+    const passwordSummary = document.createElement('summary'); passwordSummary.textContent = 'Change password';
+    el('new').parentElement.before(passwordDetails);
+    passwordDetails.append(passwordSummary, el('new').parentElement, el('new-confirm').parentElement, el('change'), el('recover'));
+    for (const id of ['migration-section', 'restore-section', 'complete-restore-section']) el(id).classList.add('storage-card');
+    for (const id of ['unlock', 'wallet', 'create', 'complete-backup', 'complete-restore']) el(id).classList.add('storage-button-primary');
+    for (const id of ['wallet-remove', 'migration-activate', 'migration-abort']) el(id).classList.add('storage-button-danger');
     let unlocked = false;
     let required = true;
     let savedBackup = false;
@@ -103,13 +122,19 @@ export async function startStorageAccess() {
     channel?.addEventListener('message', event => { if (event.data === 'lock') void lock(false); });
     window.addEventListener('pagehide', () => channel?.close(), { once: true });
     const menu = document.createElement('div');
-    menu.className = 'flex flex-wrap gap-2 px-5 py-2';
+    menu.className = 'storage-menu';
     const manage = document.createElement('button');
-    manage.type = 'button'; manage.className = 'rounded border border-slate-500 px-3 py-2 text-sm';
+    manage.type = 'button'; manage.className = 'storage-button';
     const lockButton = manage.cloneNode(); lockButton.textContent = 'Lock database'; lockButton.hidden = true;
     lockButton.addEventListener('click', () => void lock());
     menu.append(manage, lockButton);
-    (document.querySelector('header') ?? document.body).append(menu);
+    const settings = document.querySelector('#settings-drawer > .mt-8');
+    if (settings) {
+        const section = document.createElement('section'); section.className = 'storage-card storage-settings-card';
+        const heading = document.createElement('h3'); heading.className = 'storage-eyebrow'; heading.textContent = 'Local database';
+        const description = document.createElement('p'); description.textContent = 'Manage database access, unlock methods and encrypted backups.';
+        section.append(heading, description, menu); settings.prepend(section);
+    } else (document.querySelector('header') ?? document.body).append(menu);
     function feedback(message, failed = false) {
         el('feedback').textContent = message;
         el('feedback').className = `my-3 text-sm ${failed ? 'text-rose-300' : 'text-cyan-200'}`;
@@ -140,6 +165,15 @@ export async function startStorageAccess() {
         el('wallet-account').textContent = state.wallet ? `Storage wallet: ${state.walletAddress}` : '';
         el('wallet-enroll').hidden = !unlocked || state.wallet;
         el('wallet-remove').hidden = !unlocked || !state.wallet;
+        el('wallet-help').hidden = !!state.wallet || !unlocked;
+        methodsCard.hidden = !unlocked;
+        if (unlocked) methodsCard.querySelector('h3').after(el('wallet-account'));
+        else accessCard.append(el('wallet-account'));
+        passwordSummary.textContent = unlocked ? 'Change password' : 'Password recovery';
+        backupCard.hidden = !state.exists;
+        accessCard.querySelector('h3').textContent = unlocked ? 'Confirm your password' : 'Database access';
+        el('password').parentElement.firstChild.textContent = unlocked ? 'Current password ' : 'Database password ';
+        if (!unlocked) passwordDetails.open = true;
         el('resume').hidden = !state.needsCreation || !state.exists || unlocked;
         el('backup').hidden = !state.exists;
         el('complete-backup').hidden = !unlocked;
@@ -150,6 +184,7 @@ export async function startStorageAccess() {
         el('change').hidden = !unlocked;
         el('recover').hidden = !state.passkey;
         el('dismiss').hidden = required && !unlocked;
+        el('close').hidden = el('dismiss').hidden;
         return state;
     }
     let working = false;
@@ -181,6 +216,7 @@ export async function startStorageAccess() {
         await (passkey === 'wallet' ? access.unlockWallet(new FreighterSigner())
             : passkey ? access.unlockPasskey() : access.unlockPassword(password()));
         unlocked = true;
+        passwordDetails.open = false;
         dialog.close();
         resolveReady();
     }
@@ -269,6 +305,7 @@ export async function startStorageAccess() {
         if (unlocked) dialog.close();
         else if (!required) { const url = new URL(location.href); url.searchParams.delete('storage'); location.replace(url); }
     };
+    el('close').onclick = () => el('dismiss').click();
     dialog.addEventListener('cancel', event => { if (!unlocked || working) event.preventDefault(); });
     manage.onclick = () => {
         if (unlocked) { feedback(''); dialog.showModal(); }
