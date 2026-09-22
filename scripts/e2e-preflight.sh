@@ -149,7 +149,7 @@ snapshot_has_onboarding() {
   local f
   f="$(snapshot_file)"
   [ -s "$f" ] || return 1
-  grep -qi 'Local Extension Settings/' < <(tar -tzf "$f" 2>/dev/null)
+  tar -tzf "$f" 2>/dev/null | grep -x '\.chrome-profile/\.spp-encrypted-e2e-v1' >/dev/null
 }
 
 need_headed_run() {
@@ -388,7 +388,7 @@ check_tool_spp() {
   if [ -n "${E2E_SPP_PATH:-}" ]; then
     if [ -x "$E2E_SPP_PATH" ]; then _STATUS="OK"; _DETAIL="$E2E_SPP_PATH (via E2E_SPP_PATH)"; else _STATUS="MISSING"; _DETAIL="E2E_SPP_PATH=$E2E_SPP_PATH is not executable"; fi
   elif [ -x "$REPO_ROOT/target/release/spp" ]; then _STATUS="OK"; _DETAIL="$REPO_ROOT/target/release/spp"
-  else _STATUS="MISSING"; _DETAIL="no target/release/spp build; run: python3 scripts/sqlite3mc.py -- cargo build --release -p stellar-private-payments-cli"; fi; }
+  else _STATUS="MISSING"; _DETAIL="no target/release/spp build; run: cargo build --release -p stellar-private-payments-cli"; fi; }
 
 check_tool_chromium() {
   local path="" ; if [ -n "${E2E_CHROMIUM_PATH:-}" ]; then path="$E2E_CHROMIUM_PATH"; else path="$(command -v chromium 2>/dev/null || command -v google-chrome 2>/dev/null || true)"; fi
@@ -573,8 +573,8 @@ check_freighter_snapshot_integrity() {
   else _STATUS="MISSING"; _DETAIL="archive has no 'Local Extension Settings' directory — prepare-profile.sh cannot locate the profile subdir"; fi; }
 
 check_freighter_onboarding() {
-  if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="onboarding is baked into the existing profile snapshot"
-  else _STATUS="MISSING"; _DETAIL="onboarding wizard completion is not baked into a valid snapshot yet"; fi; }
+  if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="encrypted onboarding is baked into the existing profile snapshot"
+  else _STATUS="MISSING"; _DETAIL="encrypted onboarding is not baked into a valid snapshot yet"; fi; }
 
 check_freighter_snapshot_freshness() {
   local env_file snapshot_file env_mtime snap_mtime
@@ -692,7 +692,7 @@ group_tools() {
   run_check tool.tar freighter check_tool_tar "" "Install tar via your OS package manager (present by default on virtually every Linux/macOS system)."
   run_check tool.unzip freighter check_tool_unzip "" "Install unzip via your OS package manager."
   run_check tool.stellar both check_tool_stellar "" "Install/upgrade the Stellar CLI to 27+ (see https://developers.stellar.org/docs/tools/developer-tools/cli)."
-  run_check tool.spp both check_tool_spp "" "python3 scripts/sqlite3mc.py -- cargo build --release -p stellar-private-payments-cli"
+  run_check tool.spp both check_tool_spp "" "cargo build --release -p stellar-private-payments-cli"
   run_check tool.chromium freighter check_tool_chromium "" "Install Chromium (see e2e-freighter/README.md's per-distro sections) or set E2E_CHROMIUM_PATH to your install."
   run_check tool.chromedriver sdk check_tool_chromedriver "" "Install chromedriver matching your Chrome/Chromium version, or set CHROMEDRIVER to its path."
   run_check tool.trunk freighter check_tool_trunk "" "cargo install trunk (or pin trunk@0.21.14 as CI does) — only needed for local-app test runs (APP_URL=http://localhost:...)."

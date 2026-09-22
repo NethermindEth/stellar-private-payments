@@ -76,4 +76,4 @@ jobs:
           cargo +nightly miri setup
 
       - name: Run Miri
-        run: MIRIFLAGS="${{ matrix.miri_flags }}" python3 scripts/sqlite3mc.py -- cargo +nightly miri test ${{ matrix.cargo_args }}
+        run: MIRIFLAGS="${{ matrix.miri_flags }}" cargo +nightly miri test ${{ matrix.cargo_args }}

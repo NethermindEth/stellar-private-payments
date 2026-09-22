@@ -141,7 +141,8 @@ The three commands under the hood, if you'd rather run them yourself:
 deployments/scripts/e2e-accounts-setup.sh
 
 # 2. Install deps, build the Freighter profile (pinned extension, test
-#    account, onboarding completed), snapshot it, verify. Idempotent;
+#    account, onboarding completed, encrypted database with Freighter unlock),
+#    snapshot it, verify. Idempotent;
 #    --force rebuilds. The onboarding step needs a desktop session.
 bash e2e-freighter/scripts/setup.sh
 
@@ -279,8 +280,8 @@ transaction.
 
 ## The tests
 
-Each submits real transactions on testnet — run them deliberately, not in
-a tight loop.
+Several tests submit real transactions on testnet — run them deliberately,
+not in a tight loop.
 
 | File | Proves |
 |---|---|
@@ -295,6 +296,15 @@ a tight loop.
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
 | `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, and the pool deposit cap, then complete a successful recovery deposit. |
+| `tests/12-encrypted-storage.mjs` | Verify the encrypted profile, download a key backup, reject a wrong password, unlock with real Freighter, and read the same SQLite setting afterward. |
+
+The provisioned profile is encrypted before it is snapshotted. Every Freighter
+test therefore opens the SQLite3MC database through a real Freighter signature;
+the shared runner handles that unlock before connecting the app. Setup also
+tests the plaintext-to-encrypted migration once. Old plaintext snapshots must
+be rebuilt with `bash e2e-freighter/scripts/setup.sh --force`. The test-only
+database password is derived from the generated `E2E_FREIGHTER_PASSWORD` with
+a separate domain label; the application still generates a random database key.
 
 ## CI
 
@@ -311,14 +321,15 @@ wasm32-unknown-unknown -p stellar-private-payments-sdk-web --
 --include-ignored`), compiled from the checked-out commit and run in
 headless Chrome against testnet. These exercise the pre-signing SDK path
 (flows signed directly with the test-account secrets — no Freighter, no
-deployed app), so they need no nullifier-detection support in the deployed
+deployed app) against an encrypted OPFS database with a fresh test key, so
+they need no nullifier-detection support in the deployed
 app. Locally the same suite runs via `sdk/web/scripts/e2e-browser-test.sh`.
 
 **`e2e-freighter.yml`** — Freighter suite (smoke on PR, full on demand)
 
 On pull requests to main it runs the smoke subset (01-connect,
-03-rejection, 05-deposit-transfer) as a fast gate; `workflow_dispatch`
-runs the whole suite (01-11). Both build and serve the app **from the
+03-rejection, 05-deposit-transfer, 12-encrypted-storage) as a fast gate; `workflow_dispatch`
+runs the whole suite (01-12). Both build and serve the app **from the
 checked-out commit** on localhost:8000 via `serve-and-run.sh` — the same
 path `make freighter-e2e` uses locally — so a PR is tested against its own
 code, not whatever is deployed. Trigger the full suite with:

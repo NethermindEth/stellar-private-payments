@@ -48,16 +48,6 @@ jobs:
                | grep -q '^+version = '; then
             echo "bump=true" >> "$GITHUB_OUTPUT"
           fi
-      - name: Configure required SQLite3MC for API comparison
-        if: steps.sdk.outputs.bump == 'true'
-        run: |
-          python3 scripts/sqlite3mc.py -- python3 -c '
-          import os
-          names = ["SPP_SQLITE3MC_BUILD", "LIBSQLITE3_SYS_USE_PKG_CONFIG", "SQLITE3_STATIC", "SQLITE3_LIB_DIR", "SQLITE3_INCLUDE_DIR", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_PATH", "PKG_CONFIG_ALLOW_CROSS"]
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              for name in names:
-                  f.write(f"{name}={os.environ[name]}\n")
-          '
       - name: Verify SDK version bump matches API changes
         if: steps.sdk.outputs.bump == 'true'
         uses: obi1kenobi/cargo-semver-checks-action@5b298c9520f7096a4683c0bd981a7ac5a7e249ae # v2
@@ -112,7 +102,7 @@ jobs:
         if: steps.registry.outputs.publish == 'true'
         id: auth
       - if: steps.registry.outputs.publish == 'true'
-        run: python3 scripts/sqlite3mc.py -- cargo publish -p stellar-private-payments --locked
+        run: cargo publish -p stellar-private-payments --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
@@ -158,7 +148,7 @@ jobs:
       - if: steps.registry.outputs.publish == 'true'
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
-        run: npm run check:artifacts && npm run check:bindgen && npm run check:types && python3 scripts/check-sqlite3mc-package.py
+        run: npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package
       - if: steps.registry.outputs.publish == 'true'
         run: npm publish --ignore-scripts --provenance
 
@@ -312,7 +302,7 @@ jobs:
           cp deployments/testnet/circuit_keys/*.json testdata/
 
       - name: Build with required SQLite3MC
-        run: python3 scripts/sqlite3mc.py --target ${{ matrix.target }} -- cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+        run: cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
 
       - name: Package
         shell: bash

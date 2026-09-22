@@ -39,7 +39,7 @@ Run the pre-signing SDK tests:
   export E2E_STATIC_ORIGIN=http://127.0.0.1:8099
   set -a; . deployments/testnet/.e2e-accounts.env; set +a
   bash sdk/web/scripts/e2e-browser-test.sh \
-    python3 scripts/sqlite3mc.py --target wasm32-unknown-unknown -- cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+    cargo --config "$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir target)" test --target wasm32-unknown-unknown -p stellar-private-payments-web \
     -- --include-ignored
 
 Run the real-browser Freighter tests:

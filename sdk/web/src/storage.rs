@@ -96,7 +96,8 @@ impl Storage {
         }
     }
 
-    /// Restore only an absent database or this exact authenticated interrupted restore.
+    /// Restore only an absent database or this exact authenticated interrupted
+    /// restore.
     #[cfg(feature = "sqlite3mc")]
     #[wasm_bindgen(js_name = restoreEncrypted)]
     pub async fn restore_encrypted(

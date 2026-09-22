@@ -1,4 +1,5 @@
-//! Only encrypted snapshots enter this pool. Existing databases are never replaced.
+//! Only encrypted snapshots enter this pool. Existing databases are never
+//! replaced.
 use anyhow::{Result, ensure};
 use sqlite_wasm_vfs::sahpool::{OpfsSAHPoolCfg, OpfsSAHPoolUtil, install};
 use std::path::Path;
@@ -19,7 +20,8 @@ fn marker_names(pool: &OpfsSAHPoolUtil) -> Vec<String> {
         .collect()
 }
 
-/// A pending restore cannot become an ordinary database merely because page 1 survived.
+/// A pending restore cannot become an ordinary database merely because page 1
+/// survived.
 pub(super) fn check_open(pool: &OpfsSAHPoolUtil) -> Result<()> {
     let names = marker_names(pool);
     ensure!(
@@ -52,7 +54,8 @@ pub(super) fn validate_export(
     snapshot: &[u8],
 ) -> Result<()> {
     // SAH pools intentionally prohibit a second handle for the same file.
-    // Validate an encrypted scratch copy without closing the application's connection.
+    // Validate an encrypted scratch copy without closing the application's
+    // connection.
     if pool.exists(STAGE)? {
         pool.delete_db(STAGE)?;
     }
@@ -85,7 +88,8 @@ pub(super) async fn restore(key: &DatabaseKey, snapshot: &[u8]) -> Result<()> {
 
 #[allow(unsafe_code)]
 fn restore_owned(pool: &OpfsSAHPoolUtil, key: &DatabaseKey, snapshot: &[u8]) -> Result<()> {
-    // SAFETY: pool registered this VFS and all local connections close before destruction.
+    // SAFETY: pool registered this VFS and all local connections close before
+    // destruction.
     ensure!(
         unsafe { sqlite_wasm_rs::sqlite3mc_vfs_create(c"opfs-sahpool".as_ptr(), 1) }
             == sqlite_wasm_rs::SQLITE_OK,
@@ -124,7 +128,8 @@ fn restore_owned(pool: &OpfsSAHPoolUtil, key: &DatabaseKey, snapshot: &[u8]) -> 
     let validation = database_key::validate_backup(Path::new(STAGE), key);
     pool.delete_db(STAGE)?;
     validation?;
-    // The authenticated filename and its mapping are flushed before any canonical write.
+    // The authenticated filename and its mapping are flushed before any
+    // canonical write.
     if !owns_pending {
         pool.import_db_unchecked(&pending, b"restore-v1")?;
     }

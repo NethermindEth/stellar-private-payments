@@ -16,6 +16,7 @@ impl Fixture {
         fs::create_dir(&dir)?;
         Ok(Self(dir))
     }
+
     fn db(&self) -> PathBuf {
         self.0.join("state.db")
     }
@@ -152,7 +153,8 @@ fn wrong_or_missing_key_preserves_clean_and_hot_database() -> Result<()> {
                     break;
                 }
             }
-            // Kill only the child spawned above to leave its synthetic hot journal.
+            // Kill only the child spawned above to leave its synthetic hot
+            // journal.
             let _ = child.kill();
             child.wait()?;
             assert!(ready, "crash writer failed before opening its transaction");

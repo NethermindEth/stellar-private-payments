@@ -159,7 +159,7 @@ jobs:
         id: select
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "tests=e2e-freighter/tests/01-connect.mjs e2e-freighter/tests/03-rejection.mjs e2e-freighter/tests/05-deposit-transfer.mjs" >> "$GITHUB_OUTPUT"
+            echo "tests=e2e-freighter/tests/01-connect.mjs e2e-freighter/tests/03-rejection.mjs e2e-freighter/tests/05-deposit-transfer.mjs e2e-freighter/tests/12-encrypted-storage.mjs" >> "$GITHUB_OUTPUT"
           else
             echo "tests=" >> "$GITHUB_OUTPUT"
           fi

@@ -61,7 +61,7 @@ run() {
 }
 
 step "1/4  rebuilding the spp CLI (it embeds deployments.json at compile time)"
-run python3 scripts/sqlite3mc.py -- cargo build --release -p stellar-private-payments-cli
+run cargo build --release -p stellar-private-payments-cli
 
 step "2/4  re-registering the test accounts against the current deployment"
 run bash deployments/scripts/e2e-accounts-setup.sh --reregister

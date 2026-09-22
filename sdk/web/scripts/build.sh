@@ -8,13 +8,11 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROFILE"
-if [[ -z "${SPP_SQLITE3MC_BUILD:-}" ]]; then
-  exec python3 "$ROOT/scripts/sqlite3mc.py" --target "$TARGET" -- bash "$WEB/scripts/build.sh" "$@"
-fi
-[[ "$SPP_SQLITE3MC_BUILD" == "2.5.1:$TARGET" && -f "${SPP_SQLITE3MC_CONFIG:-}" ]] || {
-  echo "error: browser builds require the pinned SQLite3MC engine; invalid build configuration" >&2; exit 1;
+SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir "$CARGO_TARGET_DIR")"
+[[ -f "$SQLITE3MC_CONFIG" ]] || {
+  echo "error: SQLite3MC build did not produce Cargo link configuration" >&2; exit 1;
 }
-MC_ARGS=(--config "$SPP_SQLITE3MC_CONFIG" --features sqlite3mc)
+MC_ARGS=(--config "$SQLITE3MC_CONFIG" --features sqlite3mc)
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
 case "$PROFILE" in
@@ -126,6 +124,7 @@ rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
 mkdir -p "$WEB/dist/licenses"
 cp "$ROOT/vendor/sqlite3mc-NOTICE.txt" "$WEB/dist/licenses/SQLite3MC.txt"
+cp "$ROOT/vendor/sqlite-wasm-vfs/LICENSE" "$WEB/dist/licenses/sqlite-wasm-vfs-LICENSE.txt"
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"

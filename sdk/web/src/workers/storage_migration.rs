@@ -161,7 +161,8 @@ impl BrowserMigration {
         if !initializing {
             ensure!(target.util.exists(CONTROL)?, "migration control is missing");
         }
-        // Validate before publishing the source-bound marker or changing control files.
+        // Validate before publishing the source-bound marker or changing
+        // control files.
         let initial = if initializing {
             ensure!(
                 target.util.list().iter().all(|name| name == CONTROL
@@ -245,7 +246,8 @@ impl BrowserMigration {
             );
             setup.retire(&marker).await?;
         }
-        // No candidate-producing operation is exposed until retirement completes.
+        // No candidate-producing operation is exposed until retirement
+        // completes.
         Ok(migration)
     }
 

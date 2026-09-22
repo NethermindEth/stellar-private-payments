@@ -170,7 +170,8 @@ pub enum MigrationAction {
 }
 
 /// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
-/// zeroized on drop. Browser message serialization can still create other copies.
+/// zeroized on drop. Browser message serialization can still create other
+/// copies.
 #[cfg(feature = "sqlite3mc")]
 #[derive(Serialize, Deserialize)]
 pub struct DatabaseKeyTransport(pub Vec<u8>);

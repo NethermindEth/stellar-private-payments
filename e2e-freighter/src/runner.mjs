@@ -31,6 +31,7 @@ import {
   waitForAnyFreighterApproval,
   waitForFreighterApproval,
 } from './wallet.mjs';
+import { unlockStorage } from './storage.mjs';
 
 export {
   approveOrWatch,
@@ -103,13 +104,14 @@ export async function launch({ userDataDir, headless = true, video = false } = {
 //
 // The app displays a truncated address. Connection is asserted from the
 // wallet button's visibility; the returned address is for logging only.
-export async function connectApp(page, { appUrl = requireAppUrl(), context } = {}) {
+export async function connectApp(page, { appUrl = requireAppUrl(), context, allowPlaintext = false } = {}) {
   if (!context) throw new Error('connectApp: context is required (needed to watch for the connect approval)');
   await page.goto(appUrl);
   await page.waitForLoadState('domcontentloaded');
+  await unlockStorage(page, context, approveOrWatch, { allowPlaintext });
   await waitForCondition({
     operation: 'app:load',
-    timeoutMs: 10_000,
+    timeoutMs: 30_000,
     intervalMs: 100,
     observe: async () => ({
       readyState: await page.evaluate(() => document.readyState),

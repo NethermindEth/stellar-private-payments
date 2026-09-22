@@ -31,6 +31,6 @@ jobs:
       - name: Build circuit artifacts
         run: make circuits TESTS=1
       - name: Build
-        run: python3 scripts/sqlite3mc.py -- cargo test --release --workspace --no-run
+        run: cargo test --release --workspace --no-run
       - name: Run tests
-        run: python3 scripts/sqlite3mc.py -- cargo test --release --workspace -- --ignored
+        run: cargo test --release --workspace -- --ignored

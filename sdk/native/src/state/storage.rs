@@ -104,7 +104,8 @@ impl Storage {
         #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
         let path = absolute.as_path();
         // Reject a missing key before a recovery-capable handle can write a hot
-        // encrypted journal back into the database. OPFS does this in its owner.
+        // encrypted journal back into the database. OPFS does this in its
+        // owner.
         #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
         if path.exists() && std::fs::metadata(path)?.len() > 0 {
             super::database_key::validate_read_only(path, None)?;

@@ -149,25 +149,22 @@ thread_local! {
 
 /// Open `Storage` against a blob-wrapped storage worker.
 ///
-/// `Storage::open` must be called once per page session because OPFS holds the
-/// SQLite file with an exclusive sync access handle. Open lazily and hand out
-/// `fork()` handles to the same worker.
+/// `Storage::open_encrypted` must be called once per page session because OPFS
+/// holds the SQLite file with an exclusive sync access handle. Each browser
+/// run gets a fresh database and test key; fork handles share its worker.
 async fn open_test_storage() -> Storage {
     if let Some(handle) = SHARED_STORAGE.with(|cell| cell.borrow().as_ref().map(Storage::fork)) {
         return handle;
     }
 
     let worker_url = blob_worker_url("storage-worker.js").await;
-    let options = Object::new();
-    Reflect::set(
-        &options,
-        &JsValue::from_str("workerUrl"),
-        &JsValue::from_str(&worker_url),
+    let key = js_sys::Uint8Array::new(
+        &js_sys::eval("crypto.getRandomValues(new Uint8Array(32))").unwrap(),
     )
-    .unwrap();
-    let storage = Storage::open(options.into())
+    .to_vec();
+    let storage = Storage::open_encrypted(worker_url, key, true)
         .await
-        .expect("storage worker must start and answer its ping");
+        .expect("encrypted storage worker must open and answer its ping");
 
     // Borrow only after the await, never across it.
     let handle = storage.fork();

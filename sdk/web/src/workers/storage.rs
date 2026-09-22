@@ -374,7 +374,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     stellar_private_payments::state::database_key::DatabaseKey::new([0; 32]);
                 owned.copy_from_slice(&key.0);
                 drop(key);
-                // No await: SQLite writes and this snapshot execute serially in this worker.
+                // No await: SQLite writes and this snapshot execute serially in
+                // this worker.
                 let bytes = SAH_POOL.with(|p| -> Result<Vec<u8>> {
                     let borrow = p.borrow();
                     let pool = borrow.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
@@ -479,7 +480,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     Ok(state) => StorageWorkerResponse::MigrationState(state),
                     Err(error) => {
                         // Failed OPFS writes can leave cached filename mappings
-                        // ahead of durable state. Reacquire pools before retrying.
+                        // ahead of durable state. Reacquire pools before
+                        // retrying.
                         close_storage();
                         return Err(error);
                     }
@@ -896,7 +898,8 @@ impl StorageBridge {
     }
 
     /// Copy duration depends on database size. Migration commands have no
-    /// request timer; callers can terminate the worker and resume durable state.
+    /// request timer; callers can terminate the worker and resume durable
+    /// state.
     #[cfg(feature = "sqlite3mc")]
     pub(crate) async fn call_without_timeout(
         &self,

@@ -44,9 +44,11 @@ impl Fixture {
         )?;
         Ok(fixture)
     }
+
     fn source(&self) -> PathBuf {
         self.0.join("source.db")
     }
+
     fn migration(&self) -> PathBuf {
         self.0.join("migration")
     }
@@ -465,7 +467,8 @@ fn interrupted_initialization_and_recovery_preserve_source_and_key_policy() -> R
                 NativeMigration::open(f.migration(), owned(&key))?
             } else {
                 if stage != "setup-directory-created" {
-                    // Recovery itself may die after discarding only incomplete control files.
+                    // Recovery itself may die after discarding only incomplete
+                    // control files.
                     kill_setup(&f, &key, "setup-control-cleared", true)?;
                     let before_retry = bytes(&f.0)?;
                     assert!(

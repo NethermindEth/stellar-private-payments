@@ -6,8 +6,9 @@
 #
 #   E2E_SKIP_SETUP=1   Skip entirely and let the preflight report what is missing
 #
-# Gating is by cheap filesystem checks, NOT by calling the setup scripts and
-# letting their idempotency sort it out. Both scripts are idempotent, but
+# Gating is by filesystem checks (including an archive marker for encrypted
+# profiles), NOT by calling the setup scripts and letting their idempotency
+# sort it out. Both scripts are idempotent, but
 # their no-op paths are expensive: e2e-accounts-setup.sh verifies four
 # accounts over RPC, and e2e-freighter/scripts/setup.sh validates the profile
 # snapshot by restoring it and launching a browser against it. Paying that on
@@ -19,7 +20,9 @@
 # problems: a snapshot that exists but no longer works, or accounts registered
 # against a superseded deployment, are what scripts/e2e-repair.sh is for. A
 # target that silently reprovisioned on every failure would turn a two-minute
-# headed rebuild into a surprise in the middle of a test run.
+# headed rebuild into a surprise in the middle of a test run. A legacy
+# plaintext snapshot is treated as missing setup, since it cannot exercise
+# the encrypted suite.
 
 set -euo pipefail
 
@@ -51,9 +54,14 @@ fi
 # snapshot the profile), and skips whichever of them is already done, so one
 # invocation is enough no matter which piece is the missing one.
 MISSING=()
+PROFILE_REBUILD=0
 [ -d "$PKG/node_modules" ] || MISSING+=("node_modules")
 [ -d "$PKG/vendor/freighter" ] || MISSING+=("vendored extension")
-[ -s "$SNAPSHOT" ] || MISSING+=("profile snapshot")
+[ -s "$SNAPSHOT" ] || { MISSING+=("profile snapshot"); PROFILE_REBUILD=1; }
+if [ -s "$SNAPSHOT" ] && ! tar -tzf "$SNAPSHOT" 2>/dev/null | grep -x '\.chrome-profile/\.spp-encrypted-e2e-v1' >/dev/null; then
+  MISSING+=("encrypted profile snapshot")
+  PROFILE_REBUILD=1
+fi
 
 if [ ${#MISSING[@]} -eq 0 ]; then
   step "profile: snapshot, extension and node_modules all present"
@@ -61,7 +69,7 @@ else
   step "profile: missing ${MISSING[*]} — running e2e-freighter/scripts/setup.sh"
   # Provisioning drives a real browser window. Say so before it happens,
   # rather than letting provision.sh die on a missing display several steps in.
-  if [ ! -s "$SNAPSHOT" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  if [ "$PROFILE_REBUILD" -eq 1 ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
     die "building the profile snapshot needs a display (it completes the wallet and app onboarding headed). Run under a desktop session, or wrap this in xvfb-run."
   fi
   # setup.sh needs a served app regardless of which piece was missing:

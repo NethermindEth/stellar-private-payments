@@ -32,7 +32,7 @@ jobs:
       - uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
       - name: Build circuit artifacts (required by web)
         run: make circuits
-      - run: python3 scripts/sqlite3mc.py -- cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
@@ -105,11 +105,7 @@ jobs:
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
         run: |
-          if [ -f scripts/sqlite3mc.py ]; then
-            python3 scripts/sqlite3mc.py -- cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
-          else
-            cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
-          fi
+          cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
 
       # 3) Extract base coverage (from artifact or from freshly computed fallback)
       - name: Extract total coverage % (base)

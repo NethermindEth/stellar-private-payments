@@ -26,7 +26,7 @@ jobs:
       - uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
       - name: Build circuit artifacts (required by web)
         run: make circuits
-      - run: python3 scripts/sqlite3mc.py -- cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload branch coverage artifact
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4

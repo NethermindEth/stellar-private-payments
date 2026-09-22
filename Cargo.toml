@@ -11,6 +11,7 @@ members = [
     "tools/ceremony-cli",
     "tools/circuit-compiler",
     "tools/gvkey-gen",
+    "tools/sqlite3mc-build",
 ]
 exclude = ["tools/bootnode"]
 resolver = "3"

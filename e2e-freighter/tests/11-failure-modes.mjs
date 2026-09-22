@@ -3,9 +3,8 @@
 // deposit to ensure no failure left the app in a poisoned state.
 
 import { createLogger } from '../src/logger.mjs';
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
 import { assert } from '../src/assert.mjs';
 import { waitForSyncedLedger } from '../src/indexer.mjs';
 import {
@@ -23,24 +22,21 @@ import { expectNoFreighterApproval } from '../src/wallet.mjs';
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const execFileAsync = promisify(execFile);
-// ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]). This is the persistent
-// contract-data key used by both pool contract variants.
-const MAXIMUM_DEPOSIT_KEY_XDR = 'AAAAEAAAAAEAAAABAAAADwAAABRNYXhpbXVtRGVwb3NpdEFtb3VudA==';
-const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+// App dependencies are installed by make serve; using the same SDK avoids a
+// separate Stellar CLI requirement just to read this public ledger entry.
+const requireApp = createRequire(new URL('../../app/package.json', import.meta.url));
+const { Address, rpc, scValToNative, xdr } = requireApp('@stellar/stellar-sdk');
 
 async function readMaximumDepositAmount(poolContractId, rpcUrl) {
-  const { stdout } = await execFileAsync('stellar', [
-    'contract', 'read',
-    '--id', poolContractId,
-    '--key-xdr', MAXIMUM_DEPOSIT_KEY_XDR,
-    '--rpc-url', rpcUrl,
-    '--network-passphrase', TESTNET_PASSPHRASE,
-    '--output', 'json',
-  ]);
-  const match = stdout.match(/""u256"":\s*""(\d+)""/);
-  if (!match) throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
-  return BigInt(match[1]);
+  const key = xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
+    contract: new Address(poolContractId).toScAddress(),
+    key: xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('MaximumDepositAmount')]),
+    durability: xdr.ContractDataDurability.persistent,
+  }));
+  const response = await new rpc.Server(rpcUrl).getLedgerEntries(key);
+  const value = response.entries[0]?.val?.value?.val;
+  if (value?.type !== 'scvU256') throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
+  return scValToNative(value);
 }
 
 function stroopsToDecimal(stroops) {
@@ -181,17 +177,22 @@ export async function run(helpers) {
   const aboveCapOutcome = await Promise.race([
     waitForToast(page, {
       origin: 'deposit',
-      predicate: (toast) => /transaction simulation failed/i.test(toast.message),
-      timeoutMs: 20_000,
+      timeoutMs: 60_000,
     }).then((toast) => ({ toast })),
-    waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 20_000 })
+    waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 60_000 })
       .then((approval) => ({ approval })),
-  ]);
+  ]).catch(async (error) => {
+    const button = page.locator('#btn-deposit');
+    const status = await button.getAttribute('data-status').catch(() => 'unknown');
+    const label = await button.innerText().catch(() => 'unavailable');
+    throw new Error(`above-max deposit did not finish (status=${status}, button=${label}): ${error.message}`);
+  });
   assert(
     aboveCapOutcome.toast,
     `above-max deposit unexpectedly reached Freighter approval (${aboveCapOutcome.approval?.kind || 'unknown'})`,
   );
   const aboveCap = aboveCapOutcome.toast;
+  assert(/^deposit failed/i.test(aboveCap.message), `above-max deposit had unexpected result: ${aboveCap.message}`);
   await assertNoApproval(context, 'above-max deposit');
   await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
   log.info(`(4) above max-deposit (${aboveMaximumDeposit} XLM):`, aboveCap.message);

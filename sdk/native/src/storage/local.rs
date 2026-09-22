@@ -47,7 +47,8 @@ impl LocalStorage {
     }
 
     /// Open encrypted storage after acquiring its key. Provider failure leaves
-    /// the database untouched; forks retain a zeroizing shared key until closed.
+    /// the database untouched; forks retain a zeroizing shared key until
+    /// closed.
     #[cfg(feature = "sqlite3mc")]
     pub async fn open_with_key_provider(
         storage_path: &str,

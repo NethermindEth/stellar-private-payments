@@ -1,6 +1,7 @@
-//! Opt-in encrypted storage. Keys are random 256-bit secrets supplied by the caller.
-//! Opening/creating a database must be serialized by its owner; key wrapping and
-//! wallet signing belong to the key provider, never to the SQLite layer.
+//! Opt-in encrypted storage. Keys are random 256-bit secrets supplied by the
+//! caller. Opening/creating a database must be serialized by its owner; key
+//! wrapping and wallet signing belong to the key provider, never to the SQLite
+//! layer.
 use anyhow::{Result, bail, ensure};
 use rusqlite::{Connection, OpenFlags};
 use std::{
@@ -36,6 +37,7 @@ impl std::fmt::Debug for DatabaseKey {
 }
 impl std::ops::Deref for DatabaseKey {
     type Target = [u8; 32];
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -81,8 +83,9 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-// The caller owns the OPFS pool and checks logical filename absence for CreateNew.
-// Native creation reserves a new path atomically, refusing existing files.
+// The caller owns the OPFS pool and checks logical filename absence for
+// CreateNew. Native creation reserves a new path atomically, refusing existing
+// files.
 /// Open a keyed connection before running application SQL. On WASM, the caller
 /// must own the OPFS pool and check file existence against `purpose` first.
 /// Native paths are reserved atomically for creation. Opens require owner
@@ -115,7 +118,8 @@ pub fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Conn
     };
     let conn = Connection::open_with_flags(path, flags)?;
     configure(&conn, key)?;
-    // This is the first schema access: a successful key API call alone proves nothing.
+    // This is the first schema access: a successful key API call alone proves
+    // nothing.
     let _: i64 = conn.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get(0))?;
     let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
     if matches!(purpose, OpenPurpose::OpenExisting) && pages == 0 {
@@ -131,8 +135,9 @@ pub fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Conn
 #[allow(unsafe_code)]
 pub(crate) fn configure(conn: &Connection, key: &DatabaseKey) -> Result<()> {
     // SAFETY: conn owns the live SQLite handle throughout these synchronous
-    // calls. C strings are NUL-terminated; sqlite3_key copies the 36-byte buffer
-    // before it is zeroized, and no raw pointer escapes this function.
+    // calls. C strings are NUL-terminated; sqlite3_key copies the 36-byte
+    // buffer before it is zeroized, and no raw pointer escapes this
+    // function.
     unsafe {
         let db = conn.handle();
         let cipher = sqlite3mc_cipher_index(c"chacha20".as_ptr());
@@ -171,9 +176,10 @@ pub fn clear_transport(bytes: &mut [u8]) {
 }
 
 // Authenticate the encrypted first page without allowing hot-journal recovery.
-// The immutable handle is closed before the normal recovery-capable handle opens.
-// This is a short preflight under the application's single-owner database policy;
-// it must never be used as a long-lived snapshot while another writer is active.
+// The immutable handle is closed before the normal recovery-capable handle
+// opens. This is a short preflight under the application's single-owner
+// database policy; it must never be used as a long-lived snapshot while another
+// writer is active.
 pub(crate) fn validation_connection(path: &Path) -> Result<Connection> {
     #[cfg(not(target_arch = "wasm32"))]
     let absolute = std::path::absolute(path)?;
@@ -213,8 +219,9 @@ pub(crate) fn validate_read_only(path: &Path, key: Option<&DatabaseKey>) -> Resu
     Ok(())
 }
 
-/// Authenticate and fully check a closed/transaction-boundary encrypted snapshot.
-/// Immutable access never performs journal recovery or changes the input.
+/// Authenticate and fully check a closed/transaction-boundary encrypted
+/// snapshot. Immutable access never performs journal recovery or changes the
+/// input.
 pub fn validate_backup(path: &Path, key: &DatabaseKey) -> Result<()> {
     let conn = validation_connection(path)?;
     configure(&conn, key)?;

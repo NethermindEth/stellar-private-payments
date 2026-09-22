@@ -12,7 +12,7 @@ build = "build.rs"
 name = "stellar_private_payments"
 
 [features]
-# Required engine/key support; scripts/sqlite3mc.py selects the pinned library.
+# Required engine/key support; build.rs compiles the pinned library.
 default = ["sqlite3mc"]
 sqlite3mc = ["dep:hmac", "dep:sha2_010"]
 # multi-threaded proving
@@ -72,7 +72,7 @@ futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
@@ -84,8 +84,10 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
+cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
@@ -95,7 +97,7 @@ pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

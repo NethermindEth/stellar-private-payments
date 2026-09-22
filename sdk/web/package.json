@@ -43,7 +43,8 @@
     "check:artifacts": "node scripts/check-wasm-types.js",
     "check:bindgen": "node scripts/check-bindgen-types.js",
     "check:types": "tsc -p tsconfig.json",
-    "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types && python3 scripts/check-sqlite3mc-package.py"
+    "check:package": "node scripts/check-sqlite3mc-package.js",
+    "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package"
   },
   "peerDependencies": {
     "@stellar/freighter-api": "^6.0.1"

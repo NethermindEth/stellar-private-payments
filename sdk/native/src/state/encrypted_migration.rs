@@ -1,7 +1,8 @@
 //! Explicit migration building blocks; these never run during ordinary opens.
 //!
 //! The native coordinator is available on Linux. The logical copy primitive is
-//! shared with WASM, where OPFS ownership/activation must be coordinated separately.
+//! shared with WASM, where OPFS ownership/activation must be coordinated
+//! separately.
 
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, params_from_iter, types::ValueRef};
@@ -91,8 +92,9 @@ fn check_integrity(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// A digest of schema, exact typed values (including rowids), and version headers.
-/// Keep it private to the encrypted control database; it is not a public identifier.
+/// A digest of schema, exact typed values (including rowids), and version
+/// headers. Keep it private to the encrypted control database; it is not a
+/// public identifier.
 pub fn fingerprint(conn: &Connection) -> Result<String> {
     check_integrity(conn)?;
     let mut hash = Sha256::new();
@@ -145,10 +147,11 @@ pub fn fingerprint(conn: &Connection) -> Result<String> {
 }
 
 /// Copy into an empty connection which the caller has already keyed with
-/// SQLite3MC. Both connections must be exclusively owned and outside transactions.
-/// This copies SQL/data, not encrypted pages: schema and row contents are checked
-/// before applying the SDK's ordinary migrations to the destination only.
-/// No plaintext file, backup, dump or SQL log is produced. The source is read-only.
+/// SQLite3MC. Both connections must be exclusively owned and outside
+/// transactions. This copies SQL/data, not encrypted pages: schema and row
+/// contents are checked before applying the SDK's ordinary migrations to the
+/// destination only. No plaintext file, backup, dump or SQL log is produced.
+/// The source is read-only.
 pub fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> Result<()> {
     ensure!(
         schema(destination)?.is_empty(),

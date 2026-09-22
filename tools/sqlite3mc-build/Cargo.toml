@@ -1,0 +1,16 @@
+[package]
+name = "sqlite3mc-build"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+hex = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

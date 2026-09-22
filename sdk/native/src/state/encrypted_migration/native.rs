@@ -16,13 +16,17 @@ const CANDIDATE: &str = "encrypted.sqlite";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MigrationStatus {
-    /// Source is authoritative. An interrupted candidate can be rebuilt by prepare.
+    /// Source is authoritative. An interrupted candidate can be rebuilt by
+    /// prepare.
     Copying,
-    /// Candidate validated; source remains authoritative until explicit activation.
+    /// Candidate validated; source remains authoritative until explicit
+    /// activation.
     Prepared,
-    /// Encrypted database is authoritative, even if the plaintext source remains.
+    /// Encrypted database is authoritative, even if the plaintext source
+    /// remains.
     Active,
-    /// Encrypted database is authoritative and the original source has been unlinked.
+    /// Encrypted database is authoritative and the original source has been
+    /// unlinked.
     Complete,
     /// Migration was cancelled before activation; source remains authoritative.
     Aborted,
@@ -40,22 +44,24 @@ struct Record {
     candidate_hash: Option<String>,
 }
 
-/// An explicit, owner-serialized migration. Stop all source readers/writers before
-/// begin, keep them stopped through activation, and route subsequent opens through
-/// selected_path. The directory lock serializes coordinators, not arbitrary SQLite
-/// clients. Never open the stale plaintext path after activation.
+/// An explicit, owner-serialized migration. Stop all source readers/writers
+/// before begin, keep them stopped through activation, and route subsequent
+/// opens through selected_path. The directory lock serializes coordinators, not
+/// arbitrary SQLite clients. Never open the stale plaintext path after
+/// activation.
 ///
-/// Use a NEW private directory. A small encrypted control database records state;
-/// the candidate is always encrypted. Retain a recoverable wrapped key before
-/// begin. Open after a crash, then inspect status: prepare can retry Copying,
-/// activate can retry Prepared, and finish can retry Active. Invalid state fails
-/// closed. Opening can retire a setup marker after authenticating durable state;
-/// it never removes a database or converts application data.
+/// Use a NEW private directory. A small encrypted control database records
+/// state; the candidate is always encrypted. Retain a recoverable wrapped key
+/// before begin. Open after a crash, then inspect status: prepare can retry
+/// Copying, activate can retry Prepared, and finish can retry Active. Invalid
+/// state fails closed. Opening can retire a setup marker after authenticating
+/// durable state; it never removes a database or converts application data.
 ///
-/// Aborting is supported before activation. After activation, keep the encrypted
-/// database: returning to the old source could silently lose committed writes.
-/// finish unlinks the source; it cannot securely erase filesystem snapshots, SSD
-/// blocks or external backups. Those are outside the database migration boundary.
+/// Aborting is supported before activation. After activation, keep the
+/// encrypted database: returning to the old source could silently lose
+/// committed writes. finish unlinks the source; it cannot securely erase
+/// filesystem snapshots, SSD blocks or external backups. Those are outside the
+/// database migration boundary.
 pub struct NativeMigration {
     directory: PathBuf,
     control: Connection,
@@ -68,17 +74,18 @@ struct DirectoryLock(File);
 impl Drop for DirectoryLock {
     fn drop(&mut self) {
         // Explicit unlock also releases an inherited open-file-description lock
-        // during another thread's fork/exec window; closing our descriptor alone
-        // can keep the lock alive until the child closes its duplicate.
+        // during another thread's fork/exec window; closing our descriptor
+        // alone can keep the lock alive until the child closes its
+        // duplicate.
         let _ = self.0.unlock();
     }
 }
 
 impl NativeMigration {
-    /// Start a migration record without copying or changing the source database.
-    /// The supplied directory must not exist. After an interrupted setup, use
-    /// recover_initialization with the same source and key; ordinary open still
-    /// requires a valid control record.
+    /// Start a migration record without copying or changing the source
+    /// database. The supplied directory must not exist. After an
+    /// interrupted setup, use recover_initialization with the same source
+    /// and key; ordinary open still requires a valid control record.
     pub fn begin(
         source: impl AsRef<Path>,
         directory: impl AsRef<Path>,
@@ -102,8 +109,9 @@ impl NativeMigration {
 
     /// Explicitly retry an interrupted begin. Requires the original unchanged
     /// source and key, the authenticated setup marker, and no candidate files.
-    /// An entirely empty directory predates key binding and can also be initialized.
-    /// Refuses legacy unmarked control files and every established migration.
+    /// An entirely empty directory predates key binding and can also be
+    /// initialized. Refuses legacy unmarked control files and every
+    /// established migration.
     pub fn recover_initialization(
         source: impl AsRef<Path>,
         directory: impl AsRef<Path>,
@@ -160,7 +168,8 @@ impl NativeMigration {
                 Err(e) => return Err(e.into()),
             }
         }
-        // Validate the entire set before the first removal (including symlinks).
+        // Validate the entire set before the first removal (including
+        // symlinks).
         for path in owned_files {
             fs::remove_file(path)?;
         }
@@ -200,7 +209,8 @@ impl NativeMigration {
         })
     }
 
-    /// Reopen existing state. Wrong keys fail before journal recovery or writes.
+    /// Reopen existing state. Wrong keys fail before journal recovery or
+    /// writes.
     pub fn open(directory: impl AsRef<Path>, key: DatabaseKey) -> Result<Self> {
         ensure!(
             !fs::symlink_metadata(directory.as_ref())?
@@ -230,7 +240,8 @@ impl NativeMigration {
     }
 
     /// Return only the authoritative path. There is no fallback to plaintext if
-    /// the active encrypted database is absent, corrupt or fails authentication.
+    /// the active encrypted database is absent, corrupt or fails
+    /// authentication.
     pub fn selected_path(&self) -> Result<PathBuf> {
         let record = self.record()?;
         if matches!(
@@ -247,8 +258,9 @@ impl NativeMigration {
         }
     }
 
-    /// Copy/retry from the original snapshot, validate, apply the SDK migrations,
-    /// close/reopen and validate again, then durably publish Prepared.
+    /// Copy/retry from the original snapshot, validate, apply the SDK
+    /// migrations, close/reopen and validate again, then durably publish
+    /// Prepared.
     pub fn prepare(&mut self) -> Result<()> {
         let mut record = self.record()?;
         ensure!(
@@ -284,7 +296,8 @@ impl NativeMigration {
     }
 
     /// Atomically select the validated encrypted candidate. Callers must switch
-    /// their storage path using selected_path; ordinary SDK opens are unchanged.
+    /// their storage path using selected_path; ordinary SDK opens are
+    /// unchanged.
     pub fn activate(&mut self) -> Result<()> {
         let mut record = self.record()?;
         ensure!(
@@ -328,9 +341,10 @@ impl NativeMigration {
         self.remove_candidate()
     }
 
-    /// Explicitly remove the unchanged original only AFTER encrypted activation.
-    /// Refuses source replacement/modification or outstanding journals. Retrying
-    /// after a crash between unlink and the final state commit is safe.
+    /// Explicitly remove the unchanged original only AFTER encrypted
+    /// activation. Refuses source replacement/modification or outstanding
+    /// journals. Retrying after a crash between unlink and the final state
+    /// commit is safe.
     pub fn finish(&mut self) -> Result<()> {
         let mut record = self.record()?;
         ensure!(
@@ -399,7 +413,8 @@ impl NativeMigration {
 
     fn remove_candidate(&self) -> Result<()> {
         // Only fixed files inside the new private migration directory are owned
-        // by this operation. Never recursively remove directories or source files.
+        // by this operation. Never recursively remove directories or source
+        // files.
         for path in std::iter::once(self.candidate()).chain(sidecars(&self.candidate())) {
             match fs::symlink_metadata(&path) {
                 Ok(_) => {
