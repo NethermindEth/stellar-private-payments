@@ -105,6 +105,7 @@ fn main() {
     let sqlite_wasm = sqlite_wasm_source(&root);
     let out = cache.join(TARGET);
     fs::create_dir_all(&out).expect("create SQLite3MC output directory");
+    let out = fs::canonicalize(out).expect("resolve SQLite3MC output directory");
 
     let cc = tool("CC", &["clang", "clang-18"]);
     let ar = tool("AR", &["llvm-ar", "llvm-ar-18", "ar"]);
@@ -156,8 +157,10 @@ fn main() {
     fs::write(
         out.join("cargo.toml"),
         format!(
-            "[target.wasm32-unknown-unknown.wsqlite3]\nrustc-link-search = [{}]\nrustc-link-lib = [\"static=wsqlite3\"]\n",
-            serde_json::to_string(&out).expect("serialize link path")
+            "[target.wasm32-unknown-unknown]\nrustflags = [{}]\n\n[target.wasm32-unknown-unknown.wsqlite3]\nrustc-link-search = [{}]\nrustc-link-lib = [\"static=wsqlite3\"]\n",
+            serde_json::to_string(&format!("-Lnative={}", out.display()))
+                .expect("serialize native search path"),
+            serde_json::to_string(&out).expect("serialize link path"),
         ),
     ).expect("write Cargo link configuration");
     println!("{}", out.join("cargo.toml").display());
