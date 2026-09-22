@@ -110,8 +110,9 @@ jobs:
           # Keep the fast browser unit tests together. Each ignored E2E test
           # gets a fresh browser/OPFS database because sync cursors are global
           # to the database, while note derivation is account-specific.
+          SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir target)"
           bash sdk/web/scripts/e2e-browser-test.sh \
-            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+            cargo --config "$SQLITE3MC_CONFIG" test --target wasm32-unknown-unknown -p stellar-private-payments-web \
             -- --skip client::e2e_tests::
 
           for test_name in \
@@ -124,6 +125,6 @@ jobs:
             e2e_session_account_setup_and_sync
           do
             bash sdk/web/scripts/e2e-browser-test.sh \
-              cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web \
+              cargo --config "$SQLITE3MC_CONFIG" test --target wasm32-unknown-unknown -p stellar-private-payments-web \
               "$test_name" -- --include-ignored
           done
