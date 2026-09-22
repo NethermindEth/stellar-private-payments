@@ -31,7 +31,7 @@ const web = resolve(scripts, "..");
 const repository = resolve(web, "..", "..");
 const artifacts = resolve(args.artifacts);
 const profile = join(artifacts, "profile");
-await mkdir(artifacts, { recursive: false });
+await mkdir(artifacts, { recursive: true });
 await mkdir(profile);
 
 const contentTypes = new Map([[".html", "text/html"], [".js", "text/javascript"], [".mjs", "text/javascript"], [".wasm", "application/wasm"], [".css", "text/css"], [".json", "application/json"]]);

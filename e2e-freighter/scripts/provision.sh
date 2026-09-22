@@ -87,6 +87,9 @@ case "$MODE" in
     # Provision the profile
     step "provisioning the Freighter profile"
     node "$SCRIPT_DIR/provision.mjs"
+    # Preflight recognizes a snapshot only after encryption, account D import,
+    # and profile verification have all completed successfully.
+    touch "$PROFILE_DIR/.spp-encrypted-e2e-v1"
 
     # Snapshot the profile.
     #
