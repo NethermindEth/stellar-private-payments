@@ -9,7 +9,7 @@ import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.
 import { getConnectedAddress } from './wallet.js';
 import { rememberedNoteOwner } from './account-session.js';
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function initializeApp() {
     Templates.init();
     Shell.init();
     Wallet.init();
@@ -22,10 +22,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateLastVisit();
     registerServiceWorker();
 
+    // The HTML is visible before the storage bootstrap imports this module.
+    // Signal that the wallet button and other UI handlers are installed.
+    document.body.dataset.appInitialized = 'true';
+
     // Reconnect on load only to an owner the user connected before. Without
     // one, connecting would take Freighter's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
     if (rememberedNoteOwner() && await getConnectedAddress()) {
         Wallet.connect({ auto: true }).catch(() => {});
     }
-});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
+else void initializeApp();

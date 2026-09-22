@@ -12,6 +12,9 @@ build = "build.rs"
 name = "stellar_private_payments"
 
 [features]
+# Required engine/key support; build.rs compiles the pinned library.
+default = ["sqlite3mc"]
+sqlite3mc = ["dep:hmac", "dep:sha2_010"]
 # multi-threaded proving
 parallel = [
     "dep:rayon",
@@ -30,6 +33,9 @@ ed25519-dalek = { version = "2.2", default-features = false, features = ["digest
 futures = { workspace = true, features = ["executor"] }
 getrandom = { workspace = true }
 hex = { workspace = true }
+hmac = { version = "0.12.1", default-features = false, optional = true }
+# Match hmac's digest version; both versions already occur in Cargo.lock.
+sha2_010 = { package = "sha2", version = "0.10", default-features = false, optional = true }
 http = "1.4.2"
 rusqlite_migration = { version = "2.6.0", default-features = false }
 serde = { workspace = true }
@@ -66,7 +72,7 @@ futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
@@ -78,8 +84,10 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
+cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
+zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
@@ -89,7 +97,7 @@ pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

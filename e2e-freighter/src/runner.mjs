@@ -26,11 +26,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   approveOrWatch,
+  findFreighterApproval,
   rejectInFreighter,
   unlockFreighter,
   waitForAnyFreighterApproval,
   waitForFreighterApproval,
 } from './wallet.mjs';
+import { unlockStorage } from './storage.mjs';
 
 export {
   approveOrWatch,
@@ -103,24 +105,39 @@ export async function launch({ userDataDir, headless = true, video = false } = {
 //
 // The app displays a truncated address. Connection is asserted from the
 // wallet button's visibility; the returned address is for logging only.
-export async function connectApp(page, { appUrl = requireAppUrl(), context } = {}) {
+export async function connectApp(page, { appUrl = requireAppUrl(), context, allowPlaintext = false } = {}) {
   if (!context) throw new Error('connectApp: context is required (needed to watch for the connect approval)');
   await page.goto(appUrl);
   await page.waitForLoadState('domcontentloaded');
+  await unlockStorage(page, context, approveOrWatch, { allowPlaintext });
   await waitForCondition({
     operation: 'app:load',
-    timeoutMs: 10_000,
+    timeoutMs: 30_000,
     intervalMs: 100,
     observe: async () => ({
       readyState: await page.evaluate(() => document.readyState),
       dashboardVisible: await page.getByTestId('view-dashboard').isVisible().catch(() => false),
+      appInitialized: await page.locator('body').getAttribute('data-app-initialized'),
     }),
-    isReady: ({ readyState, dashboardVisible }) => readyState === 'complete' && dashboardVisible,
+    isReady: ({ readyState, dashboardVisible, appInitialized }) =>
+      readyState === 'complete' && dashboardVisible && appInitialized === 'true',
   });
 
   // The button remains in the DOM while connected; visibility distinguishes
   // the disconnected state. Use its stable identity rather than button text.
   const connectBtn = page.locator('#wallet-btn');
+  // Toasts disappear after a few seconds. Retain the last connection error so
+  // an intermittent extension failure is visible in the CI log.
+  await page.evaluate(() => {
+    const container = document.querySelector('#toast-container');
+    if (!container) return;
+    window.__e2eConnectionToast = '';
+    new MutationObserver(() => {
+      const messages = [...container.querySelectorAll('[data-testid="toast-message"]')]
+        .map(node => node.textContent?.trim()).filter(Boolean);
+      if (messages.length) window.__e2eConnectionToast = messages.at(-1);
+    }).observe(container, { childList: true, subtree: true, characterData: true });
+  });
   let clickedConnect = false;
   if (await connectBtn.isVisible().catch(() => false)) {
     try {
@@ -133,11 +150,36 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
   if (clickedConnect) {
-    // The approval target is optional.
-    try {
-      await approveOrWatch(context, 'connect', { timeoutMs: 8_000 });
-    } catch {
-      // no popup within the short window — assume it auto-approved.
+    // Approval may arrive after the former eight-second popup window. Watch
+    // both the app and Freighter until one has actually advanced. If the app
+    // returns to disconnected without an approval, retry once: a freshly
+    // installed extension may not have injected its provider on the first try.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const started = Date.now();
+      const { value } = await waitForCondition({
+        operation: 'app:connect-approval-or-state',
+        timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
+        intervalMs: 200,
+        observe: async () => ({
+          ...await readAppLifecycle(page),
+          approval: await findFreighterApproval(context, ['connect']),
+          toast: await page.evaluate(() => window.__e2eConnectionToast || ''),
+          elapsedMs: Date.now() - started,
+        }),
+        isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible, approval, elapsedMs }) =>
+          Boolean(approval) || walletState === 'ready' || onboardingVisible || bootnodeConsentVisible ||
+          (walletState === 'disconnected' && elapsedMs >= 8_000),
+      });
+      if (value.approval) {
+        await approveOrWatch(context, 'connect', { timeoutMs: 10_000 });
+        break;
+      }
+      if (value.walletState !== 'disconnected') break;
+      if (attempt === 1) {
+        throw new Error(`connectApp: app remained disconnected after retry; last toast: ${value.toast || '(none)'}`);
+      }
+      log.warn(`connectApp: no approval and app disconnected; retrying once (toast: ${value.toast || '(none)'})`);
+      await connectBtn.click({ timeout: 5_000 });
     }
   }
 

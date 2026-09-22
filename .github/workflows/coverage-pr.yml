@@ -104,7 +104,8 @@ jobs:
 
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        run: cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
 
       # 3) Extract base coverage (from artifact or from freshly computed fallback)
       - name: Extract total coverage % (base)

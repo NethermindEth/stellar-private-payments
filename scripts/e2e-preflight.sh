@@ -149,7 +149,7 @@ snapshot_has_onboarding() {
   local f
   f="$(snapshot_file)"
   [ -s "$f" ] || return 1
-  grep -qi 'Local Extension Settings/' < <(tar -tzf "$f" 2>/dev/null)
+  tar -tzf "$f" 2>/dev/null | grep -x '\.chrome-profile/\.spp-encrypted-e2e-v1' >/dev/null
 }
 
 need_headed_run() {
@@ -573,8 +573,8 @@ check_freighter_snapshot_integrity() {
   else _STATUS="MISSING"; _DETAIL="archive has no 'Local Extension Settings' directory — prepare-profile.sh cannot locate the profile subdir"; fi; }
 
 check_freighter_onboarding() {
-  if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="onboarding is baked into the existing profile snapshot"
-  else _STATUS="MISSING"; _DETAIL="onboarding wizard completion is not baked into a valid snapshot yet"; fi; }
+  if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="encrypted onboarding is baked into the existing profile snapshot"
+  else _STATUS="MISSING"; _DETAIL="encrypted onboarding is not baked into a valid snapshot yet"; fi; }
 
 check_freighter_snapshot_freshness() {
   local env_file snapshot_file env_mtime snap_mtime

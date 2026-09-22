@@ -25,6 +25,7 @@ import {
   approveOrWatch,
 } from '../src/runner.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { encryptProvisionedProfile } from '../src/storage.mjs';
 import { requireAppUrl } from '../src/env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -261,7 +262,7 @@ async function importSigningAccount(context) {
 async function connectSigningAccount(context) {
   step('connecting account D to the app');
   const page = await appPage(context);
-  await connectApp(page, { appUrl: requireAppUrl(), context });
+  await connectApp(page, { appUrl: requireAppUrl(), context, allowPlaintext: true });
   if (await page.locator('#onboarding-close-btn').isVisible().catch(() => false)) {
     await page.locator('#onboarding-close-btn').click();
   }
@@ -278,7 +279,7 @@ async function completeWizard(context) {
   step('completing the app onboarding wizard (headed)');
   const page = await appPage(context);
   const appUrl = requireAppUrl();
-  await connectApp(page, { appUrl, context });
+  await connectApp(page, { appUrl, context, allowPlaintext: true });
 
   // driveWizard calls both of these; passing null made it die with
   // "waitForFreighterApproval is not a function" the moment the wizard
@@ -296,6 +297,9 @@ async function completeWizard(context) {
   if (stillVisible) throw new Error('provision: onboarding modal still visible after driving all steps');
 
   step('onboarding wizard completed');
+  step('migrating the e2e app database to encrypted storage and enrolling Freighter unlock');
+  await encryptProvisionedProfile(page, context, approveOrWatch);
+  step('encrypted storage provisioned');
 }
 
 // ── Step 4: Verify the profile ──
@@ -308,6 +312,8 @@ async function verifyProfile(context) {
   // even when Freighter would auto-approve the origin. Asserting the button
   // is absent without clicking it can never pass.
   await connectApp(page, { appUrl: requireAppUrl(), context });
+  const selection = await page.evaluate(() => localStorage.getItem('spp.storage-access.v1'));
+  if (selection !== 'encrypted') throw new Error(`verify: expected encrypted storage, got ${selection ?? 'plaintext'}`);
 
   // Test 12 signs with account D for account C's notes: Freighter must hold D,
   // and the app must own notes as C. Later runs connect as the owner the app

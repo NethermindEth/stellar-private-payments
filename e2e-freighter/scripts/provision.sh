@@ -63,10 +63,12 @@ case "$MODE" in
     need tar
 
     if [ "$FORCE" -eq 0 ] && [ -s "$SNAPSHOT_FILE" ]; then
-      step "snapshot exists; verifying instead of rebuilding (use --force to rebuild)"
-      node "$SCRIPT_DIR/provision.mjs" --verify
-      step "snapshot verified — nothing to do"
-      exit 0
+      step "snapshot exists; checking its encrypted profile (use --force to rebuild)"
+      if node "$SCRIPT_DIR/provision.mjs" --verify; then
+        step "snapshot verified — nothing to do"
+        exit 0
+      fi
+      step "existing snapshot is not an encrypted, usable profile; rebuilding it"
     fi
 
     # The wizard completion drives a headed browser
@@ -85,6 +87,9 @@ case "$MODE" in
     # Provision the profile
     step "provisioning the Freighter profile"
     node "$SCRIPT_DIR/provision.mjs"
+    # Preflight recognizes a snapshot only after encryption, account D import,
+    # and profile verification have all completed successfully.
+    touch "$PROFILE_DIR/.spp-encrypted-e2e-v1"
 
     # Snapshot the profile.
     #

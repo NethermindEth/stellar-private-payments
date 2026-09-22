@@ -102,14 +102,15 @@ freighter-setup:
 freighter-e2e: freighter-setup
 	bash e2e-freighter/scripts/serve-and-run.sh
 
-# Smoke subset: connect, signature rejection, and a deposit+transfer round
-# trip — the same three the CI smoke job runs.
+# Smoke subset: connect, signature rejection, deposit+transfer, and encrypted
+# storage — the same four the CI smoke job runs.
 .PHONY: freighter-smoke
 freighter-smoke: freighter-setup
 	bash e2e-freighter/scripts/serve-and-run.sh \
 		e2e-freighter/tests/01-connect.mjs \
 		e2e-freighter/tests/03-rejection.mjs \
-		e2e-freighter/tests/05-deposit-transfer.mjs
+		e2e-freighter/tests/05-deposit-transfer.mjs \
+		e2e-freighter/tests/12-encrypted-storage.mjs
 
 # Salvage an e2e setup broken by a redeploy: stale contracts in the CLI's
 # compiled-in config, accounts registered in a registry nothing points at,

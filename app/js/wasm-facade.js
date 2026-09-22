@@ -22,6 +22,7 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import { createStorageStartup } from './storage-startup.js';
 
 export { DisclosureRequest };
 
@@ -35,18 +36,38 @@ let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
-let wasmReady = false;
+let wasmInitialization = null;
 let currentRpcUrl = null;
 let currentBootnodeUrl = null;
 let boundUserAddress = null;
 let boundSignerAddress = null;
 let deploymentConfigPromise = null;
+let storageLocked = false;
+const storageStartup = createStorageStartup(Storage, ensureWasmInit);
 
-export async function ensureWasmInit() {
-    if (!wasmReady) {
-        await init();
-        wasmReady = true;
+export function ensureWasmInit() {
+    if (!wasmInitialization) {
+        wasmInitialization = Promise.resolve().then(() => init()).catch(error => {
+            wasmInitialization = null;
+            throw error;
+        });
     }
+    return wasmInitialization;
+}
+
+/**
+ * Configure persistence before any ensureStorage/bootnode/runtime call.
+ * Default is plaintext. `encrypted` opens an existing encrypted database;
+ * `migrated` first requires an authenticated active/cleaning/complete migration.
+ * Supply a recoverable random 256-bit key through keyProvider, never a wallet
+ * signature or SEP-53 privacy key. Provisioning and migration are separate SDK
+ * operations. Repeat this configuration on every page load, including admin.
+ * Once opening starts, failures can retry the same provider but cannot change
+ * mode on this page. No automatic migration or plaintext fallback occurs.
+ * @param {import('./storage-startup.js').StorageStartupOptions} options
+ */
+export function configureStorageStartup(options) {
+    storageStartup.configure(options);
 }
 
 /** Load the app deployment config served at `/deployments.json`. */
@@ -172,13 +193,36 @@ export function disposeClient() {
  * @returns {Promise<import('./app-storage.js').AppStorage>}
  */
 export async function ensureStorage() {
-    await ensureWasmInit();
+    if (storageLocked) throw new Error('Storage is locked. Reload to unlock.');
+    const opened = await storageStartup.open();
+    if (storageLocked) {
+        await opened.close();
+        throw new Error('Storage is locked. Reload to unlock.');
+    }
     if (!storageHandle) {
-        storageHandle = await Storage.open();
+        storageHandle = opened;
         bindAppStorage(storageHandle);
         installStoragePauseOnUnload();
     }
     return appStorageInstance;
+}
+
+/** Stop storage users before discarding provider bytes and reloading the page. */
+export async function closeStorageForLock() {
+    storageLocked = true;
+    disposeClient();
+    appStorageInstance = null;
+    if (storageHandle) {
+        const handle = storageHandle;
+        storageHandle = null;
+        try { await handle.close(); } finally { handle.free(); }
+    }
+}
+
+/** Snapshot the currently selected encrypted database without exposing plaintext bytes. */
+export async function exportEncryptedDatabase(keyProvider) {
+    await ensureStorage();
+    return Storage.exportEncrypted(storageHandle, { keyProvider });
 }
 
 let pauseOnUnloadInstalled = false;

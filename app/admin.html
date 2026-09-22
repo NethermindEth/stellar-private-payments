@@ -17,7 +17,8 @@
     {
         "imports": {
             "stellar-private-payments": "./js/stellar-private-payments/js/index.js",
-            "stellar-private-payments/freighter": "./js/stellar-private-payments/js/freighter.js"
+            "stellar-private-payments/freighter": "./js/stellar-private-payments/js/freighter.js",
+            "stellar-private-payments/key-vault": "./js/stellar-private-payments/js/key-vault.js"
         }
     }
     </script>
@@ -27,7 +28,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 
-<body class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
+<body data-application="admin" class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950">
         Skip to main content
     </a>
@@ -314,6 +315,6 @@
         </div>
     </template>
 
-    <script type="module" src="js/admin.js"></script>
+    <script type="module" src="js/storage-bootstrap.js"></script>
 </body>
 </html>

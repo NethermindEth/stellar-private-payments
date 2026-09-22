@@ -21,6 +21,9 @@ pub use client::{
 };
 pub use storage::Storage;
 
+#[cfg(not(feature = "sqlite3mc"))]
+compile_error!("SQLite3MC is required; do not disable the sqlite3mc feature");
+
 use wasm_bindgen::prelude::*;
 
 pub(crate) fn wasm_start() {

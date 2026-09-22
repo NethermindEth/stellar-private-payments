@@ -33,4 +33,9 @@ jobs:
       - name: Build
         run: cargo test --release --workspace --no-run
       - name: Run tests
-        run: cargo test --release --workspace -- --ignored
+        # These ignored tests are subprocess entry points. Their parent tests
+        # supply the required environment and kill them at crash checkpoints.
+        run: |
+          cargo test --release --workspace -- --ignored \
+            --skip state::database_key::tests::crash_writer \
+            --skip state::encrypted_migration::tests::crash_child

@@ -19,7 +19,7 @@ pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[
+pub(super) const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema.sql")),
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
 ];
@@ -70,12 +70,47 @@ pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 impl Storage {
+    /// Open encrypted storage with an explicit key and create/open policy.
+    #[cfg(feature = "sqlite3mc")]
+    pub fn connect_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+        purpose: super::database_key::OpenPurpose,
+    ) -> Result<Self> {
+        Self::connect_with_connection(super::database_key::open(path.as_ref(), key, purpose)?)
+    }
+
+    /// Open an existing plaintext database without permitting encrypted journal
+    /// recovery before the missing-key check. Used by the OPFS owner.
+    #[cfg(feature = "sqlite3mc")]
+    pub fn connect_existing_plaintext(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        super::database_key::validate_read_only(path, None)?;
+        Self::connect_with_connection(Connection::open(path)?)
+    }
+
     pub fn connect() -> Result<Self> {
         Self::connect_file(DB_NAME)
     }
 
     pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
-        Self::connect_with_connection(Connection::open(path.as_ref())?)
+        let path = path.as_ref();
+        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        let path = absolute.as_path();
+        // Reject a missing key before a recovery-capable handle can write a hot
+        // encrypted journal back into the database. OPFS does this in its
+        // owner.
+        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        if path.exists() && std::fs::metadata(path)?.len() > 0 {
+            super::database_key::validate_read_only(path, None)?;
+        }
+        Self::connect_with_connection(Connection::open(path)?)
     }
 
     pub fn connect_in_memory() -> Result<Self> {
@@ -83,9 +118,14 @@ impl Storage {
     }
 
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
-        MIGRATIONS.to_latest(&mut conn)?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Self::migrate_connection(&mut conn)?;
         Ok(Self { conn })
+    }
+
+    pub(super) fn migrate_connection(conn: &mut Connection) -> Result<()> {
+        MIGRATIONS.to_latest(conn)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(())
     }
 
     pub fn save_events_batch(&mut self, data: &crate::types::ContractsEventData) -> Result<()> {

@@ -2,6 +2,28 @@
 
 Native Rust client for privacy pool deposits, transfers, withdrawals, and local wallet state.
 
+## Building
+
+All SDK and CLI builds require the pinned SQLite3 Multiple Ciphers backend.
+From the repository root, use:
+
+```sh
+cargo build -p stellar-private-payments-cli --release
+cargo test -p stellar-private-payments --lib
+cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-linux-musl
+```
+
+Cargo needs `curl`, a C compiler and `ar` (plus `musl-gcc` for musl). The build
+script verifies and caches SQLite3MC 2.5.1 sources. Disabling default features
+cannot bypass the encryption backend requirement. Browser builds configure the
+same pinned backend automatically through `sdk/web/scripts/build.sh`.
+
+SQLite3MC is MIT-licensed; its required attribution is shipped in
+`SQLite3MC-LICENSE.txt`.
+
+Including the backend does not encrypt a database automatically. Plaintext creation
+and explicit encrypted creation/migration remain separate API choices.
+
 ## Architecture
 
 ```

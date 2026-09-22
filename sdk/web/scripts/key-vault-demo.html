@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Database key unlock test</title><link rel="stylesheet" href="/key-vault-demo.css"></head>
+<body><main>
+<p class="eyebrow">STELLAR PRIVATE PAYMENTS · LOCAL TEST</p>
+<h1>One database key.<br>Two ways to unlock.</h1>
+<p class="intro">Test password protection and Proton Pass with a separate local test vault. This page does not open your wallet or application database.</p>
+<p id="state" class="state">Checking test vault…</p>
+<p role="alert" aria-live="assertive" tabindex="-1" id="result" class="feedback">Ready. Use a test password rather than your Proton account password.</p>
+<p class="note">Each button runs one unlock check, then locks the key again. Reloading does not automatically request a password or passkey.</p>
+<section><h2>1. Password</h2>
+<form id="create-form">
+<label for="new-password">New test password <small>At least 15 characters</small></label>
+<input id="new-password" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required>
+<label for="confirm-password">Confirm test password</label>
+<input id="confirm-password" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required>
+<button id="create" type="submit">Create test vault</button>
+</form>
+<form id="unlock-form" hidden>
+<label for="password">Current test password</label>
+<input id="password" type="password" autocomplete="current-password" maxlength="1024" required>
+<div class="actions"><button type="submit">Test password unlock</button></div>
+</form>
+</section>
+<section><h2>2. Passkey</h2>
+<p id="passkey-state">Create the password vault first.</p>
+<p>When prompted, choose <strong>Proton Pass</strong>. Enrollment may ask twice: first to save the passkey, then to verify it supports encryption.</p>
+<form id="enroll-form" hidden>
+<label for="enrollment-password">Test password (to add a passkey)</label>
+<input id="enrollment-password" type="password" autocomplete="current-password" maxlength="1024" required>
+<button id="add-passkey" type="submit">Add passkey with Proton Pass</button>
+</form>
+<div class="actions"><button id="passkey" type="button" disabled>Test passkey unlock</button><button id="reload" type="button">Reload and test again</button></div>
+<p class="note">Passkey sign-in support alone is not enough. If PRF encryption is unavailable, password unlock stays available. An unsuccessful enrollment may leave an unused test passkey in Proton Pass.</p>
+</section>
+<section id="change-section" hidden><h2>3. Change or recover the password</h2>
+<form id="change-form">
+<label for="replacement">New test password</label><input id="replacement" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required>
+<label for="replacement-confirm">Confirm new test password</label><input id="replacement-confirm" type="password" autocomplete="new-password" minlength="15" maxlength="1024" required>
+<div class="actions"><button type="submit">Change using current password</button><button id="recover" type="button">Reset using passkey</button></div>
+</form></section>
+<section><h2>Test history</h2><ol id="results"></ol></section>
+<footer>Only encrypted key records and an encrypted test message are saved locally. Result codes are sent to this localhost test server; passwords, keys and credential IDs are never sent. The password is separate from your Proton account password.</footer>
+</main><script type="module" src="/key-vault-demo.js"></script></body></html>

@@ -13,6 +13,8 @@ step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
+E2E_ENV_FILE="$REPO_ROOT/deployments/testnet/.e2e-accounts.env"
 
 case "${1:-}" in
   --force|"") ;;
@@ -25,17 +27,34 @@ First-time setup for the e2e-freighter suite, in one command:
   1. npm ci (skipped when node_modules exists)
   2. fetch the pinned Freighter extension (if not cached)
   3. provision the Freighter profile (extension, accounts C and D, sidebar mode)
-  4. complete the app's onboarding wizard once, HEADED
+  4. complete onboarding, migrate storage to SQLite3MC, and enroll Freighter unlock, HEADED
   5. snapshot the result
   6. verify a restored copy works
 
 Idempotent: with a good existing snapshot it verifies and exits.
+
+Prerequisite: run deployments/scripts/e2e-accounts-setup.sh first. It writes
+the generated E2E_FREIGHTER_PASSWORD to the git-ignored account env file;
+you do not need to export or choose a password manually.
 
   --force        Rebuild the profile and snapshot even if one verifies fine.
 USAGE
     exit 0 ;;
   *) die "unknown argument '$1'" ;;
 esac
+
+if [ -z "${E2E_FREIGHTER_PASSWORD:-}" ] &&
+   { [ ! -f "$E2E_ENV_FILE" ] || ! grep -q '^E2E_FREIGHTER_PASSWORD=.' "$E2E_ENV_FILE"; }; then
+  die "test-account env file has no E2E_FREIGHTER_PASSWORD. Run 'bash deployments/scripts/e2e-accounts-setup.sh' from the repo root first; it generates and saves the test password automatically."
+fi
+
+# A direct setup invocation needs the checked-out app running for onboarding.
+# The wrapper starts it, or reuses an existing local server, and passes APP_URL
+# to this script. CI already enters through that wrapper and skips this branch.
+if [ -z "${APP_URL:-}" ]; then
+  step "starting the checked-out app for Freighter profile setup"
+  exec bash "$SCRIPT_DIR/serve-and-run.sh" -- bash "$SCRIPT_DIR/setup.sh" "$@"
+fi
 
 # Provisioning imports Playwright through src/runner.mjs, so dependencies must
 # be installed before running it.

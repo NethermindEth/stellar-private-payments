@@ -11,6 +11,7 @@ members = [
     "tools/ceremony-cli",
     "tools/circuit-compiler",
     "tools/gvkey-gen",
+    "tools/sqlite3mc-build",
 ]
 exclude = ["tools/bootnode"]
 resolver = "3"
@@ -77,7 +78,7 @@ serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-sqlite-wasm-rs = { version = "0.5.5", default-features = false }
+sqlite-wasm-rs = { version = "0.5.5", default-features = false, features = ["sqlite3mc"] }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 stellar-private-payments = { path = "sdk/native", version = "0.1.0" }
 taceo-poseidon2 = { version = "0.3", default-features = false, features = ["bn254", "t2", "t3", "t4"] }
@@ -95,6 +96,7 @@ web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Respon
 web-time = "1"
 wiremock = "0.6"
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 missing_docs = "allow"
@@ -133,3 +135,5 @@ opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
+# SAH lock reporting and single-handle ownership needed for hot-journal recovery.
+sqlite-wasm-vfs = { path = "vendor/sqlite-wasm-vfs" }
