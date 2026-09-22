@@ -10,7 +10,7 @@ publish = false
 hex = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { workspace = true }
 
 [lints]
 workspace = true

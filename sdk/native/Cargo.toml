@@ -87,7 +87,7 @@ rusqlite = { workspace = true }
 cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }

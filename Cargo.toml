@@ -96,6 +96,7 @@ web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Respon
 web-time = "1"
 wiremock = "0.6"
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 missing_docs = "allow"
