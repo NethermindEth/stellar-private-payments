@@ -66,34 +66,6 @@ jobs:
         run: |
           make circuits
 
-      # Both test accounts are generated fresh per run (account A is
-      # friendbot-funded as the faucet and distributes XLM to B), so no
-      # persistent secrets or key imports are needed.
-      - name: Provision test accounts
-        env:
-          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
-        run: |
-          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral --accounts a,b,c,d
-          set -a
-          . deployments/testnet/.e2e-accounts.env
-          set +a
-          # Mask freshly-generated secrets so they never leak in logs.
-          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_D_SECRET"
-          {
-            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
-            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
-            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
-            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
-            echo "E2E_ACCOUNT_C_ADDRESS=$E2E_ACCOUNT_C_ADDRESS"
-            echo "E2E_ACCOUNT_C_SECRET=$E2E_ACCOUNT_C_SECRET"
-            echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
-            echo "E2E_ACCOUNT_D_SECRET=$E2E_ACCOUNT_D_SECRET"
-            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
-          } >> "$GITHUB_ENV"
-
       - name: Build sdk/web dist
         run: |
           npm ci --prefix sdk/web
@@ -102,7 +74,6 @@ jobs:
       - name: Run browser e2e tests
         env:
           E2E_STATIC_ORIGIN: http://127.0.0.1:8099
-          E2E_BOOTNODE_URL: https://bootnode.dev-nethermind.xyz
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }

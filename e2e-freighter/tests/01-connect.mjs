@@ -33,11 +33,18 @@ export async function run({ page }) {
   const addressVisible = /^G[A-Z2-7]{7}\.{3}[A-Z2-7]{6}$/.test(walletTextContent);
   assert(addressVisible, `no truncated account address (e.g. "GCDVNXYD...6SE75S") is visible; got "${walletTextContent}"`);
 
+  // Freighter reports the network's passphrase-matched canonical name here
+  // (`network`), not the custom label given when adding it ("Local
+  // Quickstart") — our standalone passphrase matches Freighter's own
+  // STANDALONE preset, so that's what it reports regardless of the label.
   const networkName = await page
     .locator('#network-name')
     .textContent()
     .catch(() => '');
-  assert((networkName || '').trim() === 'TESTNET', 'network indicator does not show "TESTNET"');
+  assert(
+    (networkName || '').trim() === 'STANDALONE',
+    'network indicator does not show "STANDALONE"',
+  );
 
-  log.info('OK: connected, address shown, network is TESTNET');
+  log.info('OK: connected, address shown, network is STANDALONE');
 }

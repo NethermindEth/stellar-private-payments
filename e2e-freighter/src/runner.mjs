@@ -11,7 +11,7 @@
 // classes — only visible button text (Confirm / Cancel / Connect / Sign).
 
 import { createLogger } from './logger.mjs';
-import { requireAppUrl } from './env.mjs';
+import { CHROMIUM_PATH, requireAppUrl } from './env.mjs';
 import { waitForCondition } from './waits.mjs';
 import {
   APP_RUNTIME_READY_TIMEOUT_MS,
@@ -21,25 +21,34 @@ import {
   waitForWalletRuntimeReady,
 } from './appState.mjs';
 import { chromium } from 'playwright';
-import { clearSingletonLocks } from './chrome-locks.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   approveOrWatch,
+  importAccount,
   rejectInFreighter,
   unlockFreighter,
   waitForAnyFreighterApproval,
   waitForFreighterApproval,
 } from './wallet.mjs';
+import { closeIsolatedRegistration, createAccount, fund, seedDriverOnboarding } from './testAccount.mjs';
 
 export {
   approveOrWatch,
+  importAccount,
   rejectInFreighter,
-  switchFreighterAccount,
   unlockFreighter,
   waitForAnyFreighterApproval,
   waitForFreighterApproval,
 } from './wallet.mjs';
+export {
+  closeIsolatedRegistration,
+  createAccount,
+  createRegisteredAccount,
+  fund,
+  register,
+  seedDriverOnboarding,
+} from './testAccount.mjs';
 
 export {
   APP_RUNTIME_READY_TIMEOUT_MS,
@@ -52,17 +61,10 @@ export {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
 const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
-const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
 const log = createLogger('runner');
 
 export async function launch({ userDataDir, headless = true, video = false } = {}) {
   if (!userDataDir) throw new Error('launch: userDataDir is required');
-  // Throws rather than starting a second browser on a profile that something
-  // else still holds.
-  const clearedLocks = clearSingletonLocks(userDataDir);
-  if (clearedLocks.length > 0) {
-    log.warn(`launch: cleared Chrome locks with no live owner (${clearedLocks.join(', ')})`);
-  }
   const contextOptions = {
     headless,
     executablePath: CHROMIUM_PATH,
@@ -196,7 +198,6 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
 // ---------------------------------------------------------------------------
 async function main() {
   const args = process.argv.slice(2);
-  const smoke = args.includes('--smoke');
 
   const userDataDir = process.env.E2E_CHROME_USER_DATA_DIR;
   if (!userDataDir) throw new Error('runner: E2E_CHROME_USER_DATA_DIR not set (run via scripts/run-e2e.sh)');
@@ -204,26 +205,42 @@ async function main() {
   const headless = process.env.HEADFUL !== '1';
   const video = !!process.env.CI;
 
+  const testFile = args.find((a) => !a.startsWith('--'));
+  if (!testFile) throw new Error('runner: no test file given');
+  const testModule = await import(path.resolve(testFile));
+  // A test can set `rawOnboarding = true` to get an account that is funded
+  // and imported but NOT pre-seeded, so the app's real onboarding wizard
+  // opens on connect — for the one test that exercises that wizard directly
+  // (every other test pre-seeds past it; see seedDriverOnboarding).
+  const rawOnboarding = testModule.rawOnboarding === true;
+
   const context = await launch({ userDataDir, headless, video });
   try {
     await unlockFreighter(context);
+
+    // Every run gets its own fresh driver account: create, fund, (usually)
+    // seed the app-level onboarding state it gates on, import into
+    // Freighter, then connect. No account is ever baked into the profile
+    // snapshot.
+    const driver = createAccount();
+    await fund(driver);
+    if (!rawOnboarding) {
+      const seedPage = await context.newPage();
+      await seedPage.goto(requireAppUrl());
+      await seedDriverOnboarding(seedPage, driver);
+      await seedPage.close();
+    }
+    await importAccount(context, driver.secret());
 
     const page = context.pages().find((p) => p.url().startsWith('https://')) || (await context.newPage());
     const address = await connectApp(page, { context });
     log.info('connected:', address);
 
-    if (smoke) {
-      log.info('smoke: reached connected state, done');
-      return;
-    }
-
-    const testFile = args.find((a) => !a.startsWith('--'));
-    if (!testFile) throw new Error('runner: no test file given and --smoke not set');
     log.info('test:', testFile);
-    const testModule = await import(path.resolve(testFile));
     await testModule.run({
       context,
       page,
+      driver,
       connectApp,
       waitForFreighterApproval,
       waitForAnyFreighterApproval,
@@ -231,6 +248,7 @@ async function main() {
       rejectInFreighter,
     });
   } finally {
+    await closeIsolatedRegistration();
     await context.close();
   }
 }

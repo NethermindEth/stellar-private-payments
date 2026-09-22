@@ -15,6 +15,7 @@ import { deposit } from '../src/moveFunds.mjs';
 import { gotoDisclosure, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL } from '../src/testAccount.mjs';
 
 const log = createLogger('09-disclose-negative');
 
@@ -40,7 +41,7 @@ async function verifyWithExpectedChecks(page, receipt, expectedChecks) {
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '09-disclose-negative';
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const rpcUrl = RPC_URL;
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);

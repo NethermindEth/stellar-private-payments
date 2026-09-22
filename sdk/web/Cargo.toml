@@ -43,8 +43,12 @@ web-sys = { workspace = true }
 sqlite-wasm-rs = { workspace = true }
 sqlite-wasm-vfs = { workspace = true }
 
-
 [dev-dependencies]
+# e2e_tests.rs generates ephemeral test keypairs directly (no CLI, no
+# provisioned accounts) — same crates/versions sdk/native's LocalSigner uses.
+ed25519-dalek = { workspace = true }
+rand = { version = "0.8", default-features = false }
+stellar-strkey = { workspace = true }
 wasm-bindgen-test = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

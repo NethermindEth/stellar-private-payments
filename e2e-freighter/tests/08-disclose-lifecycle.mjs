@@ -16,6 +16,7 @@ import { deposit, withdraw } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoDisclosure, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL } from '../src/testAccount.mjs';
 
 const log = createLogger('08-disclose-lifecycle');
 const BASE_CHECKS = { proof: 'pass', context: 'pass', root: 'pass' };
@@ -32,7 +33,7 @@ function receiptStates(receipt, verification) {
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '08-disclose-lifecycle';
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const rpcUrl = RPC_URL;
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);

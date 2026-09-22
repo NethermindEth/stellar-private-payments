@@ -24,10 +24,9 @@ First-time setup for the e2e-freighter suite, in one command:
 
   1. npm ci (skipped when node_modules exists)
   2. fetch the pinned Freighter extension (if not cached)
-  3. provision the Freighter profile (extension, accounts C and D, sidebar mode)
-  4. complete the app's onboarding wizard once, HEADED
+  3. provision the Freighter profile (extension, localnet, sidebar mode)
+  4. verify with a seeded ephemeral account (no wizard, deposit form reachable)
   5. snapshot the result
-  6. verify a restored copy works
 
 Idempotent: with a good existing snapshot it verifies and exits.
 
@@ -56,9 +55,9 @@ fi
 step "ensuring the pinned Freighter extension is vendored"
 bash "$SCRIPT_DIR/fetch-extension.sh"
 
-case "${1:-}" in
-  --force) exec bash "$SCRIPT_DIR/provision.sh" --force ;;
-  *)
-    step "running the consolidated provision pipeline"
-    exec bash "$SCRIPT_DIR/provision.sh" ;;
-esac
+if [ "${1:-}" = "--force" ]; then
+  exec bash "$SCRIPT_DIR/provision.sh" --force
+else
+  step "running the consolidated provision pipeline"
+  exec bash "$SCRIPT_DIR/provision.sh"
+fi

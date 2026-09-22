@@ -93,7 +93,10 @@ step "patching background script to open approvals in a tab instead of a popup"
 # window/tab makes it a first-class Playwright page target.
 BG="$TMP/unpacked/background.min.js"
 if [ -f "$BG" ]; then
-  sed -i 's/He={type:"popup",width:360,height:632}/He={type:"normal"}/g' "$BG"
+  # BSD sed (macOS) requires an argument to -i (even if empty); GNU sed treats
+  # a bare -i the same either way, so this form works on both.
+  sed -i.bak 's/He={type:"popup",width:360,height:632}/He={type:"normal"}/g' "$BG"
+  rm -f "$BG.bak"
   if grep -q 'He={type:"normal"}' "$BG"; then
     echo "    background.min.js patched to open approvals as normal windows"
   else

@@ -57,6 +57,23 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Verifies $SNAPSHOT_FILE by restoring it into a scratch temp dir and running
+# provision.mjs --verify there — never against $PROFILE_DIR itself.
+# Verifying in place would import a wallet into the exact directory the next
+# snapshot is tar'd from, silently contaminating every future restore with a
+# second account (see the "another tab" / "Account 1 not found" e2e flakes
+# this caused).
+verify_snapshot() {
+  need tar
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  tar -xzf "$SNAPSHOT_FILE" -C "$tmp_dir"
+  local status=0
+  E2E_CHROME_USER_DATA_DIR="$tmp_dir/.chrome-profile" node "$SCRIPT_DIR/provision.mjs" --verify || status=$?
+  rm -rf "$tmp_dir"
+  return "$status"
+}
+
 case "$MODE" in
   snapshot)
     need node
@@ -64,9 +81,11 @@ case "$MODE" in
 
     if [ "$FORCE" -eq 0 ] && [ -s "$SNAPSHOT_FILE" ]; then
       step "snapshot exists; verifying instead of rebuilding (use --force to rebuild)"
-      node "$SCRIPT_DIR/provision.mjs" --verify
-      step "snapshot verified — nothing to do"
-      exit 0
+      if verify_snapshot; then
+        step "snapshot verified — nothing to do"
+        exit 0
+      fi
+      step "existing snapshot failed verification — rebuilding"
     fi
 
     # The wizard completion drives a headed browser
@@ -127,7 +146,12 @@ case "$MODE" in
       --exclude='SingletonCookie' \
       -C "$PKG_ROOT" .chrome-profile
 
-    step "snapshot created: $SNAPSHOT_FILE"
+    step "snapshot created: $SNAPSHOT_FILE — verifying a restored copy"
+    if ! verify_snapshot; then
+      rm -f "$SNAPSHOT_FILE"
+      die "the freshly built snapshot failed verification — see the provision.mjs output above"
+    fi
+    step "snapshot verified"
     ;;
 
   restore)
@@ -137,12 +161,16 @@ case "$MODE" in
     fi
     TMP_DIR="$(mktemp -d)"
     tar -xzf "$SNAPSHOT_FILE" -C "$TMP_DIR"
-    # Print the profile subdirectory path on stdout for the caller
-    echo "$TMP_DIR/.chrome-profile/Default"
+    # Print the profile directory (the --user-data-dir value) on stdout for
+    # the caller.
+    echo "$TMP_DIR/.chrome-profile"
     ;;
 
   verify)
-    node "$SCRIPT_DIR/provision.mjs" --verify
+    if [ ! -s "$SNAPSHOT_FILE" ]; then
+      die "snapshot not found: $SNAPSHOT_FILE (run provision.sh first)"
+    fi
+    verify_snapshot || die "snapshot verification failed — see the provision.mjs output above"
     step "snapshot verified"
     ;;
 esac

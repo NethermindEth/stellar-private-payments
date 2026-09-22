@@ -6,6 +6,7 @@ import { createLogger } from '../src/logger.mjs';
 import { deposit } from '../src/moveFunds.mjs';
 import { gotoMoveFunds } from '../src/navigation.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL } from '../src/testAccount.mjs';
 
 const log = createLogger('02-deposit');
 
@@ -20,7 +21,7 @@ export async function run(helpers) {
   const result = await deposit(helpers, {
     logTag,
     amount: '0.01',
-    rpcUrl: process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org',
+    rpcUrl: RPC_URL,
   });
 
   log.info('OK: deposit', result.transactionHash.slice(0, 8), 'confirmed SUCCESS on-chain');

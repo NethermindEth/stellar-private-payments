@@ -6,20 +6,17 @@
 #
 #   E2E_SKIP_SETUP=1   Skip entirely and let the preflight report what is missing
 #
-# Gating is by cheap filesystem checks, NOT by calling the setup scripts and
-# letting their idempotency sort it out. Both scripts are idempotent, but
-# their no-op paths are expensive: e2e-accounts-setup.sh verifies four
-# accounts over RPC, and e2e-freighter/scripts/setup.sh validates the profile
-# snapshot by restoring it and launching a browser against it. Paying that on
-# every `make freighter-smoke` would be several seconds to a minute of
-# nothing. A stat is free, so the expensive path runs only when a piece is
-# genuinely absent.
+# No account provisioning here: e2e-freighter creates its own ephemeral
+# account per test run, so the only prerequisite is the account-agnostic
+# Freighter profile snapshot, plus node_modules and the vendored extension.
 #
-# This deliberately does not attempt REPAIR. Missing and broken are different
-# problems: a snapshot that exists but no longer works, or accounts registered
-# against a superseded deployment, are what scripts/e2e-repair.sh is for. A
-# target that silently reprovisioned on every failure would turn a two-minute
-# headed rebuild into a surprise in the middle of a test run.
+# Gating is a cheap filesystem check, not setup.sh's own idempotency — its
+# no-op path still restores the snapshot and launches a browser, several
+# seconds not worth paying on every `make freighter-smoke`.
+#
+# Deliberately no REPAIR here: a snapshot that exists but no longer works
+# needs `bash e2e-freighter/scripts/setup.sh --force`, not silent
+# reprovisioning on every failure mid test run.
 
 set -euo pipefail
 
@@ -34,22 +31,9 @@ if [ -n "${E2E_SKIP_SETUP:-}" ]; then
   exit 0
 fi
 
-ENV_FILE="deployments/testnet/.e2e-accounts.env"
 PKG="e2e-freighter"
 SNAPSHOT="$PKG/profile-snapshot.tar.gz"
 
-# --- accounts -------------------------------------------------------------
-if [ -s "$ENV_FILE" ]; then
-  step "accounts: $ENV_FILE present"
-else
-  step "accounts: $ENV_FILE missing — provisioning four testnet accounts"
-  bash deployments/scripts/e2e-accounts-setup.sh
-fi
-
-# --- profile, extension, node_modules -------------------------------------
-# setup.sh covers all three (npm ci, fetch the pinned extension, provision and
-# snapshot the profile), and skips whichever of them is already done, so one
-# invocation is enough no matter which piece is the missing one.
 MISSING=()
 [ -d "$PKG/node_modules" ] || MISSING+=("node_modules")
 [ -d "$PKG/vendor/freighter" ] || MISSING+=("vendored extension")
@@ -62,14 +46,11 @@ else
   # Provisioning drives a real browser window. Say so before it happens,
   # rather than letting provision.sh die on a missing display several steps in.
   if [ ! -s "$SNAPSHOT" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
-    die "building the profile snapshot needs a display (it completes the wallet and app onboarding headed). Run under a desktop session, or wrap this in xvfb-run."
+    die "building the profile snapshot needs a display (it completes Freighter's own onboarding headed). Run under a desktop session, or wrap this in xvfb-run."
   fi
-  # setup.sh needs a served app regardless of which piece was missing:
-  # provision.mjs completes the APP's onboarding wizard (navigates to
-  # APP_URL), and even the snapshot-already-exists verify path calls
-  # connectApp(), which needs one too. Routed through serve-and-run.sh
-  # rather than duplicated here, so the same start/stop/reuse-if-already-
-  # running logic applies as it does for an actual test run.
+  # setup.sh needs a served app (even its verify-only path connects to it),
+  # so route through serve-and-run.sh for the same start/stop/reuse logic
+  # and local-network startup a real test run gets.
   bash "$PKG/scripts/serve-and-run.sh" -- bash "$PKG/scripts/setup.sh"
 fi
 

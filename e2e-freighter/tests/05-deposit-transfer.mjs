@@ -9,15 +9,20 @@ import { deposit, transfer } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 
 const log = createLogger('05-deposit-transfer');
 
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '05-deposit-transfer';
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
-  const recipient = process.env.E2E_ACCOUNT_D_ADDRESS;
-  assert(recipient, 'E2E_ACCOUNT_D_ADDRESS is not set -- source deployments/testnet/.e2e-accounts.env first');
+  const rpcUrl = RPC_URL;
+
+  // A passive recipient: created, funded, and registered directly through
+  // the app's SDK bundle — it never needs Freighter, since it's only ever
+  // looked up by address, never connected.
+  const recipientAccount = await createRegisteredAccount();
+  const recipient = recipientAccount.publicKey();
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);

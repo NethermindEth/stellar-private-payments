@@ -4,7 +4,7 @@
 import { createLogger } from './logger.mjs';
 import { WaitTimeoutError, waitForCondition } from './waits.mjs';
 
-export const FREIGHTER_EXTENSION_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
+const FREIGHTER_EXTENSION_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
 
 const log = createLogger('wallet');
 const APPROVAL_ROUTES = {
@@ -20,7 +20,7 @@ const APPROVE_BUTTON_TEXT = {
   signAuthEntry: 'Confirm',
 };
 
-export function isFreighterApprovalUrl(url, kind) {
+function isFreighterApprovalUrl(url, kind) {
   if (!url.startsWith(`chrome-extension://${FREIGHTER_EXTENSION_ID}/`)) return false;
   const route = APPROVAL_ROUTES[kind];
   if (!route) throw new Error(`isFreighterApprovalUrl: unknown approval kind '${kind}'`);
@@ -64,22 +64,86 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   }).catch((error) => {
     throw new Error(
       `unlockFreighter: still on the unlock screen after entering E2E_FREIGHTER_PASSWORD; ` +
-      `the snapshot and .e2e-accounts.env must come from the same provisioning run. ${error.message}`,
+      `the profile snapshot may be stale or corrupted — rebuild it with ` +
+      `'bash e2e-freighter/scripts/setup.sh --force'. ${error.message}`,
     );
   });
   return page;
 }
 
-export async function switchFreighterAccount(context, accountName) {
-  const page = await extensionHomePage(context);
-  const accountButton = page.locator('[data-testid="account-view-account-name"]');
-  await accountButton.waitFor({ state: 'visible', timeout: 10_000 });
-  await accountButton.click({ force: true });
+const ACCOUNT_NAME_HEADER = '[data-testid="account-view-account-name"]';
 
-  const row = page.locator('.detail-name', { hasText: accountName }).first();
-  await row.waitFor({ state: 'visible', timeout: 10_000 });
-  await row.click({ force: true });
+async function submitSecretKeyImport(page, secret, password) {
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="add-wallet"]');
+  await page.waitForTimeout(500);
+  await page.getByText('Import Stellar Secret Key', { exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.fill('#privateKey-input', secret);
+  await page.fill('#password-input', password);
+  await page.check('#authorization-input', { force: true });
+  await page.getByText('Import', { exact: true }).click();
+  await page.waitForTimeout(1000);
+}
+
+// Imports `secret` as a new wallet. Assumes the profile has exactly one
+// wallet so far (the throwaway from provisioning) — true for every restored
+// snapshot, since accounts are never baked into it.
+export async function importAccount(context, secret, password = process.env.E2E_FREIGHTER_PASSWORD) {
+  const page = await extensionHomePage(context);
+  await page.getByText('Account 1', { exact: true }).click();
+  await submitSecretKeyImport(page, secret, password);
   return page;
+}
+
+// Imports `secret` as an additional wallet on top of one already imported.
+// Unlike importAccount, the header no longer reads "Account 1" once another
+// account is active, so this opens the switcher via its testid instead of
+// hardcoded text.
+export async function importAdditionalAccount(context, secret, password = process.env.E2E_FREIGHTER_PASSWORD) {
+  const page = await extensionHomePage(context);
+  await page.click(ACCOUNT_NAME_HEADER, { force: true });
+  await submitSecretKeyImport(page, secret, password);
+  return page;
+}
+
+const shortAddress = (address) => `${address.slice(0, 4)}…${address.slice(-4)}`;
+
+// The row for `address` in Freighter's account list, which it opens, or null.
+// Freighter keeps account keys encrypted, so this list, which names each
+// account by its shortened address, is where a held account shows.
+async function freighterAccountRow(context, address) {
+  const page = await extensionHomePage(context);
+  await page.click(ACCOUNT_NAME_HEADER, { force: true });
+  const rows = page.locator('.detail-name');
+  await rows.first().waitFor({ state: 'visible', timeout: 10_000 });
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    // The name and the shortened address are siblings under the row.
+    if ((await rows.nth(i).locator('xpath=../..').innerText()).includes(shortAddress(address))) {
+      return rows.nth(i);
+    }
+  }
+  return null;
+}
+
+// Makes `address` Freighter's active account, and proves it took.
+export async function selectFreighterAccount(context, address) {
+  const short = shortAddress(address);
+  const page = await extensionHomePage(context);
+  const row = await freighterAccountRow(context, address);
+  if (!row) throw new Error(`no Freighter account row shows ${short}`);
+  await row.click({ force: true });
+
+  const deadline = Date.now() + 10_000;
+  let active = null;
+  while (Date.now() < deadline) {
+    ({ lastUsedAccount: active } = await page.evaluate(
+      () => new Promise((resolve) => chrome.storage.local.get('lastUsedAccount', resolve)),
+    ));
+    if (active === address) return;
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`could not make ${short} the active Freighter account; active is ${active || '(none)'}`);
 }
 
 async function pageShowsApprovalButton(page, buttonText) {
@@ -87,7 +151,7 @@ async function pageShowsApprovalButton(page, buttonText) {
   return page.getByRole('button', { name: buttonText, exact: true }).isVisible().catch(() => false);
 }
 
-export async function findFreighterApproval(context, kinds) {
+async function findFreighterApproval(context, kinds) {
   for (const page of context.pages()) {
     const url = page.url();
     for (const kind of kinds) {
@@ -168,7 +232,7 @@ async function waitForApprovalResolution(page, kind, { timeoutMs = 5_000 } = {})
   });
 }
 
-export function waitForPageClose(page, {
+function waitForPageClose(page, {
   timeoutMs = 30_000,
   setTimer = setTimeout,
   clearTimer = clearTimeout,

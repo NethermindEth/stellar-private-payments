@@ -2,6 +2,7 @@
 // specific pre-signing failure and then finishes with a real successful
 // deposit to ensure no failure left the app in a poisoned state.
 
+import { StrKey } from '@stellar/stellar-sdk';
 import { createLogger } from '../src/logger.mjs';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -19,7 +20,7 @@ import { gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { expectNoFreighterApproval } from '../src/wallet.mjs';
-import { encodeAccountAddress } from '../src/strkey.mjs';
+import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
@@ -28,7 +29,7 @@ const execFileAsync = promisify(execFile);
 // MaximumDepositAmount in the instance entry's storage map, under the key
 // ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]).
 const CONTRACT_INSTANCE_KEY_XDR = 'AAAAFA==';
-const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+const LOCAL_PASSPHRASE = 'Standalone Network ; February 2017';
 
 async function readMaximumDepositAmount(poolContractId, rpcUrl) {
   const { stdout } = await execFileAsync('stellar', [
@@ -36,7 +37,7 @@ async function readMaximumDepositAmount(poolContractId, rpcUrl) {
     '--id', poolContractId,
     '--key-xdr', CONTRACT_INSTANCE_KEY_XDR,
     '--rpc-url', rpcUrl,
-    '--network-passphrase', TESTNET_PASSPHRASE,
+    '--network-passphrase', LOCAL_PASSPHRASE,
     '--output', 'json',
   ]);
   // One CSV row: the key, the entry as JSON with every quote doubled, and two
@@ -58,7 +59,7 @@ function stroopsToDecimal(stroops) {
 }
 
 function randomUnregisteredAddress() {
-  return encodeAccountAddress(randomBytes(32));
+  return StrKey.encodeEd25519PublicKey(randomBytes(32));
 }
 
 async function confirmOperation(page, title) {
@@ -75,9 +76,10 @@ async function assertNoApproval(context, label) {
 export async function run(helpers) {
   const { page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '11-failure-modes';
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
-  const recipient = process.env.E2E_ACCOUNT_D_ADDRESS;
-  assert(recipient, 'E2E_ACCOUNT_D_ADDRESS is not set -- source deployments/testnet/.e2e-accounts.env first');
+  const rpcUrl = RPC_URL;
+
+  const recipientAccount = await createRegisteredAccount();
+  const recipient = recipientAccount.publicKey();
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
@@ -150,8 +152,9 @@ export async function run(helpers) {
   // (4) Read the deployed pool's live cap and exceed it by one stroop.
   // Deployment parameters can change independently of this test branch; a
   // hard-coded amount can silently become valid and open a wallet approval.
-  const poolContractId = process.env.E2E_POOL_CONTRACT;
-  assert(poolContractId, 'E2E_POOL_CONTRACT is not set');
+  const poolContractId = await page.evaluate(() =>
+    fetch('./deployments.json').then((r) => r.json()).then((c) => c.pools[0].poolContractId),
+  );
   const maximumDeposit = await readMaximumDepositAmount(poolContractId, rpcUrl);
   const aboveMaximumDeposit = stroopsToDecimal(maximumDeposit + 1n);
   await gotoMoveFlow(page, 'deposit');
