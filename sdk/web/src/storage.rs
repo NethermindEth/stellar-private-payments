@@ -55,6 +55,16 @@ impl Storage {
             ),
         };
 
+        #[cfg(feature = "sqlite3mc")]
+        storage
+            .bridge
+            .call(
+                StorageWorkerRequest::OpenPlaintext,
+                STORAGE_OPEN_PING_TIMEOUT_MS,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
         storage
             .bridge
             .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
@@ -67,6 +77,54 @@ impl Storage {
 
 #[wasm_bindgen]
 impl Storage {
+    /// Open the separate encrypted OPFS database. The caller supplies a random
+    /// 32-byte key; existing plaintext storage is neither opened nor converted.
+    #[cfg(feature = "sqlite3mc")]
+    #[wasm_bindgen(js_name = openEncrypted)]
+    pub async fn open_encrypted(
+        worker_url: String,
+        key: Vec<u8>,
+        create_new: bool,
+    ) -> Result<Storage, JsError> {
+        let key = crate::protocol::DatabaseKeyTransport(key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
+        crate::wasm_start();
+        let storage = Self {
+            bridge: StorageBridge::new(
+                StorageWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&worker_url),
+            ),
+        };
+        storage
+            .bridge
+            .call(
+                StorageWorkerRequest::OpenEncrypted { key, create_new },
+                STORAGE_OPEN_PING_TIMEOUT_MS,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        storage
+            .bridge
+            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(storage)
+    }
+
+    /// Close the database and release OPFS handles for this storage and all its
+    /// forks. Create a new Storage to reopen; this handle cannot be reused.
+    pub async fn close(&self) -> Result<(), JsError> {
+        self.bridge
+            .call(StorageWorkerRequest::Pause, STORAGE_OPEN_PING_TIMEOUT_MS)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(())
+    }
+
     /// Spawn the storage worker and verify it is ready.
     ///
     /// Call once per page session. Use [`Storage::fork`] for additional handles

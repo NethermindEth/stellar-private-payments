@@ -226,6 +226,8 @@ npm run check:types
 
 ## Build & publish (maintainers)
 
+Every browser build includes the pinned SQLite3 Multiple Ciphers backend; `npm run build` and `make serve` configure it automatically through a Rust build tool. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Creating an encrypted database remains an explicit runtime choice.
+
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
 ```bash

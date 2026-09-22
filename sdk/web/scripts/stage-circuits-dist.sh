@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
-CIRCUITS_OUT="$ROOT/target/circuits-artifacts"
+CIRCUITS_OUT="${CIRCUIT_ARTIFACTS_DIR:-$ROOT/target/circuits-artifacts}"
 KEYS_DIR="$ROOT/deployments/testnet/circuit_keys"
 DIST="$WEB/dist"
 

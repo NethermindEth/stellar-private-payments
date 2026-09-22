@@ -39,9 +39,31 @@ const WORKER_NAME: &str = "WORKER-STORAGE";
 
 #[derive(Clone, Debug)]
 enum InitState {
+    #[cfg(feature = "sqlite3mc")]
+    Locked,
     Pending,
     Ready,
     Failed(String),
+}
+
+#[cfg(feature = "sqlite3mc")]
+enum OpenRequest {
+    Plaintext,
+    Encrypted {
+        key: stellar_private_payments::state::database_key::DatabaseKey,
+        purpose: stellar_private_payments::state::database_key::OpenPurpose,
+    },
+}
+
+const fn initial_state() -> InitState {
+    #[cfg(feature = "sqlite3mc")]
+    {
+        InitState::Locked
+    }
+    #[cfg(not(feature = "sqlite3mc"))]
+    {
+        InitState::Pending
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -61,7 +83,7 @@ fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
 thread_local! {
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
-    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    static INIT_STATE: RefCell<InitState> = const { RefCell::new(initial_state()) };
     #[cfg(target_arch = "wasm32")]
     static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
 }
@@ -103,6 +125,7 @@ pub fn worker_main() {
         tracing::debug!("[{WORKER_NAME}] starting...");
     }
     StorageWorker::registrar().register();
+    #[cfg(not(feature = "sqlite3mc"))]
     spawn_local(
         async move {
             if let Err(e) = init().await {
@@ -122,25 +145,32 @@ const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
 #[cfg(target_arch = "wasm32")]
 const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 
-async fn init() -> Result<(), JsError> {
+async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
     #[cfg(target_arch = "wasm32")]
     {
+        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default();
+        #[cfg(feature = "sqlite3mc")]
+        let cfg = if matches!(opening, OpenRequest::Encrypted { .. }) {
+            sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
+                directory: ".opfs-sahpool-encrypted".into(),
+                ..cfg
+            }
+        } else {
+            cfg
+        };
         let mut attempt = 0;
         loop {
-            match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(
-                &sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default(),
-                true,
-            )
-            .await
+            match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(&cfg, true)
+                .await
             {
                 Ok(util) => {
                     SAH_POOL.with(|s| *s.borrow_mut() = Some(util));
                     break;
                 }
                 Err(e) if is_opfs_locked_error(&e) && attempt < OPFS_LOCK_RETRY_ATTEMPTS => {
-                    attempt += 1;
+                    attempt = attempt.saturating_add(1);
                     tracing::debug!(
                         attempt,
                         "[{WORKER_NAME}] OPFS SAH pool still locked by a previous worker, retrying"
@@ -164,7 +194,52 @@ async fn init() -> Result<(), JsError> {
         }
     }
 
-    let storage = match SqliteStorage::connect() {
+    // SAH installation replaces the default VFS. Attach MC's codec wrapper only
+    // after it exists, including plaintext mode on an MC-enabled worker.
+    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    #[allow(unsafe_code)]
+    {
+        // SAFETY: the named VFS has just been registered in this worker. SQLite
+        // owns the wrapper until all connections close and pause destroys it.
+        let rc = unsafe { sqlite_wasm_rs::sqlite3mc_vfs_create(c"opfs-sahpool".as_ptr(), 1) };
+        if rc != sqlite_wasm_rs::SQLITE_OK {
+            return Err(JsError::new("Failed to register encrypted OPFS storage"));
+        }
+    }
+
+    #[cfg(not(feature = "sqlite3mc"))]
+    let opened = SqliteStorage::connect();
+    #[cfg(feature = "sqlite3mc")]
+    let opened = (|| -> anyhow::Result<SqliteStorage> {
+        match opening {
+            OpenRequest::Plaintext => {
+                #[cfg(target_arch = "wasm32")]
+                if SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                    Ok(p.borrow()
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("OPFS unavailable"))?
+                        .exists("spp.db")?)
+                })? {
+                    return SqliteStorage::connect_existing_plaintext("spp.db");
+                }
+                SqliteStorage::connect()
+            }
+            OpenRequest::Encrypted { key, purpose } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                        Ok(p.borrow()
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("OPFS unavailable"))?
+                            .exists("spp.encrypted.db")?)
+                    })?;
+                    anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
+                }
+                SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
+            }
+        }
+    })();
+    let storage = match opened {
         Ok(storage) => storage,
         Err(e) => {
             let msg = format!("Failed to open local database: {e}");
@@ -193,6 +268,40 @@ async fn init() -> Result<(), JsError> {
     Ok(())
 }
 
+fn close_storage() {
+    INIT_STATE
+        .with(|s| *s.borrow_mut() = InitState::Failed("storage closed; open a new worker".into()));
+    PROCESSOR_TX.with(|s| s.borrow_mut().take());
+    STORAGE.with(|s| s.borrow_mut().take());
+    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    #[allow(unsafe_code)]
+    unsafe {
+        // SAFETY: this worker's sole SQLite connection has been dropped above.
+        sqlite_wasm_rs::sqlite3mc_vfs_destroy(c"multipleciphers-opfs-sahpool".as_ptr());
+    }
+    #[cfg(target_arch = "wasm32")]
+    SAH_POOL.with(|s| {
+        if let Some(pool) = s.borrow().as_ref()
+            && let Err(e) = pool.pause_vfs()
+        {
+            tracing::debug!("[{WORKER_NAME}] pause_vfs failed: {e:#}");
+        }
+    });
+}
+
+#[cfg(feature = "sqlite3mc")]
+async fn open_requested(request: OpenRequest) -> Result<StorageWorkerResponse> {
+    anyhow::ensure!(
+        INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
+        "worker is already opening, open or closed"
+    );
+    if init(request).await.is_err() {
+        close_storage();
+        anyhow::bail!("database could not be opened; check its key and create/open policy");
+    }
+    Ok(StorageWorkerResponse::Saved)
+}
+
 #[oneshot]
 pub(crate) async fn StorageWorker(
     req: CorrelatedRequest<StorageWorkerRequest>,
@@ -216,22 +325,32 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::OpenPlaintext => return open_requested(OpenRequest::Plaintext).await,
+        #[cfg(feature = "sqlite3mc")]
+        StorageWorkerRequest::OpenEncrypted { key, create_new } => {
+            use stellar_private_payments::state::database_key::{DatabaseKey, OpenPurpose};
+            anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
+            let mut owned = DatabaseKey::new([0; 32]);
+            owned.copy_from_slice(&key.0);
+            drop(key);
+            return open_requested(OpenRequest::Encrypted {
+                key: owned,
+                purpose: if create_new {
+                    OpenPurpose::CreateNew
+                } else {
+                    OpenPurpose::OpenExisting
+                },
+            })
+            .await;
+        }
         StorageWorkerRequest::Pause => {
             tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
             // `pause_vfs` refuses to release handles while SQLite still has
             // files open on this VFS, so the live connection must be closed
             // first — this worker is about to be torn down by the browser
             // anyway, and any in-flight request will simply fail from here on.
-            let dropped_storage = STORAGE.with(|s| s.borrow_mut().take());
-            drop(dropped_storage);
-            #[cfg(target_arch = "wasm32")]
-            SAH_POOL.with(|s| {
-                if let Some(pool) = s.borrow().as_ref()
-                    && let Err(e) = pool.pause_vfs()
-                {
-                    tracing::debug!("[{WORKER_NAME}] pause_vfs failed: {e:#}");
-                }
-            });
+            close_storage();
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Ping => {
@@ -249,6 +368,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                         return Ok(StorageWorkerResponse::Error(msg));
                     }
                     InitState::Pending => {}
+                    #[cfg(feature = "sqlite3mc")]
+                    InitState::Locked => return Err(anyhow!("storage has not been opened")),
                 }
 
                 TimeoutFuture::new(50).await;
