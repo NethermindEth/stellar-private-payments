@@ -18,7 +18,8 @@ pub use client::{
     Account, Client, GvkAudit, PrivatePool, derive_asp_user_leaf,
     verify_selective_disclosure_standalone,
 };
-pub use signer::WalletSigner;
+pub use models::PoolExecuteResult;
+pub use signer::{SignerHandle, WalletSigner};
 #[cfg(target_arch = "wasm32")]
 pub use workers::{prover::ProverBridge, storage::StorageBridge};
 

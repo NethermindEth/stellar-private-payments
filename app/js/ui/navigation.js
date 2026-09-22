@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, loadDeploymentConfig } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -9,6 +9,17 @@ import { confirmAction } from './confirm.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { rememberedSigners } from '../signing-account.js';
 import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
+
+// Public, well-known Stellar network passphrases, keyed by the network name
+// deployments.json's `network` field uses. Lets the connected wallet be
+// checked against the network this app was actually deployed against,
+// rather than string-matching the RPC URL for "testnet".
+const NETWORK_PASSPHRASES = {
+    testnet: 'Test SDF Network ; September 2015',
+    futurenet: 'Test SDF Future Network ; October 2022',
+    mainnet: 'Public Global Stellar Network ; September 2015',
+    local: 'Standalone Network ; February 2017',
+};
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -451,8 +462,11 @@ export const Wallet = {
                 const address = owner ?? rememberedNoteOwner() ?? activeAddress;
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
                 const rpcUrl = sorobanRpcUrl || '';
-                if (!rpcUrl.toLowerCase().includes('testnet')) {
-                    throw new Error('This app supports Stellar testnet only.');
+
+                const deploymentConfig = await loadDeploymentConfig();
+                const expectedPassphrase = NETWORK_PASSPHRASES[deploymentConfig.network];
+                if (!expectedPassphrase || networkPassphrase !== expectedPassphrase) {
+                    throw new Error(`This app is deployed on ${deploymentConfig.network}; switch your wallet's network to match.`);
                 }
 
                 App.state.wallet.connected = true;

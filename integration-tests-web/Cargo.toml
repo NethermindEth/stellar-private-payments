@@ -1,0 +1,41 @@
+[package]
+name = "integration-tests-web"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/NethermindEth/stellar-private-transactions"
+license = "Apache-2.0"
+publish = false
+description = "Browser end-to-end tests for the web client, against a local Stellar network"
+
+[dependencies]
+# workspace
+stellar-private-payments = { path = "../sdk/native", version = "0.1.0" }
+stellar-private-payments-web = { path = "../sdk/web", version = "0.1.0" }
+
+# external
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
+futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
+js-sys = "0.3"
+rand = { version = "0.8", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde-wasm-bindgen = { version = "0.6", default-features = false }
+stellar-strkey = "0.0.18"
+wasm-bindgen = { version = "=0.2.126", default-features = false, features = ["serde-serialize"] }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
+
+[lints.rust]
+missing_docs = "allow"
+unsafe_code = "deny"
+
+[lints.clippy]
+arithmetic_side_effects = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+needless_return = "deny"
+panicking_overflow_checks = "deny"
+unwrap_used = "deny"
