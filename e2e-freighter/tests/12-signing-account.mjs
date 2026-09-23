@@ -86,9 +86,12 @@ export async function run(helpers) {
   await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose a withdrawal recipient/.test(toast.message) });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'blank recipient opened confirmation');
   await page.locator('#withdraw-recipient-select').selectOption(owner);
-  await select.selectOption('');
+  // The empty prompt option is intentionally disabled in the production UI.
+  // Leaving the "Enter another address" choice unfinished is the reachable
+  // missing-signer path.
+  await select.selectOption('__other__');
   await page.locator('#btn-withdraw').click();
-  await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose an account to sign and pay with/.test(toast.message) });
+  await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Enter the account to sign and pay with/.test(toast.message) });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'blank signer opened confirmation');
   await select.selectOption(owner);
   // Saved accounts can receive funds without pasting an address.
