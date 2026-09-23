@@ -1,7 +1,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::{NoteAmount, PolicyFlags};
 
-use super::support::setup;
+use super::support::{deploy, session};
 use crate::{
     network::LocalNetwork,
     pool::{PoolAsset, PoolOptions},
@@ -11,11 +11,14 @@ const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
 #[tokio::test]
 async fn blocklist_block() -> Result<()> {
-    let session = setup(&[PoolOptions {
-        policy_flags: PolicyFlags::BLOCKLIST,
-        asset: PoolAsset::Native,
-        ..PoolOptions::NONE
-    }])
+    let session = session(
+        deploy(&[PoolOptions {
+            policy_flags: PolicyFlags::BLOCKLIST,
+            asset: PoolAsset::Native,
+            ..PoolOptions::NONE
+        }])
+        .await?,
+    )
     .await?;
     let pool = session.pool()?;
 
@@ -51,11 +54,14 @@ async fn blocklist_block() -> Result<()> {
 
 #[tokio::test]
 async fn blocklist_unblock() -> Result<()> {
-    let session = setup(&[PoolOptions {
-        policy_flags: PolicyFlags::BLOCKLIST,
-        asset: PoolAsset::Native,
-        ..PoolOptions::NONE
-    }])
+    let session = session(
+        deploy(&[PoolOptions {
+            policy_flags: PolicyFlags::BLOCKLIST,
+            asset: PoolAsset::Native,
+            ..PoolOptions::NONE
+        }])
+        .await?,
+    )
     .await?;
     let pool = session.pool()?;
 
@@ -99,11 +105,14 @@ async fn blocklist_unblock() -> Result<()> {
 
 #[tokio::test]
 async fn allowlist() -> Result<()> {
-    let session = setup(&[PoolOptions {
-        policy_flags: PolicyFlags::ALLOWLIST,
-        asset: PoolAsset::Native,
-        ..PoolOptions::NONE
-    }])
+    let session = session(
+        deploy(&[PoolOptions {
+            policy_flags: PolicyFlags::ALLOWLIST,
+            asset: PoolAsset::Native,
+            ..PoolOptions::NONE
+        }])
+        .await?,
+    )
     .await?;
     let pool = session.pool()?;
 
@@ -137,7 +146,7 @@ async fn allowlist() -> Result<()> {
 
 #[tokio::test]
 async fn none() -> Result<()> {
-    let session = setup(&[PoolOptions::NONE]).await?;
+    let session = session(deploy(&[PoolOptions::NONE]).await?).await?;
     let pool = session.pool()?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -150,14 +159,17 @@ async fn none() -> Result<()> {
 
 #[tokio::test]
 async fn none_unblockable() -> Result<()> {
-    let session = setup(&[
-        PoolOptions::NONE,
-        PoolOptions {
-            policy_flags: PolicyFlags::BLOCKLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-    ])
+    let session = session(
+        deploy(&[
+            PoolOptions::NONE,
+            PoolOptions {
+                policy_flags: PolicyFlags::BLOCKLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+        ])
+        .await?,
+    )
     .await?;
     let pool = session.pool_at(0)?;
     let network = LocalNetwork::shared().await?;
@@ -182,18 +194,21 @@ async fn none_unblockable() -> Result<()> {
 
 #[tokio::test]
 async fn allowlist_unblockable() -> Result<()> {
-    let session = setup(&[
-        PoolOptions {
-            policy_flags: PolicyFlags::ALLOWLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-        PoolOptions {
-            policy_flags: PolicyFlags::BLOCKLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-    ])
+    let session = session(
+        deploy(&[
+            PoolOptions {
+                policy_flags: PolicyFlags::ALLOWLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+            PoolOptions {
+                policy_flags: PolicyFlags::BLOCKLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+        ])
+        .await?,
+    )
     .await?;
     let pool = session.pool_at(0)?;
     let network = LocalNetwork::shared().await?;
@@ -224,14 +239,17 @@ async fn allowlist_unblockable() -> Result<()> {
 
 #[tokio::test]
 async fn none_allowed() -> Result<()> {
-    let session = setup(&[
-        PoolOptions::NONE,
-        PoolOptions {
-            policy_flags: PolicyFlags::ALLOWLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-    ])
+    let session = session(
+        deploy(&[
+            PoolOptions::NONE,
+            PoolOptions {
+                policy_flags: PolicyFlags::ALLOWLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+        ])
+        .await?,
+    )
     .await?;
     let pool = session.pool_at(0)?;
 
@@ -245,18 +263,21 @@ async fn none_allowed() -> Result<()> {
 
 #[tokio::test]
 async fn blocklist_allowed() -> Result<()> {
-    let session = setup(&[
-        PoolOptions {
-            policy_flags: PolicyFlags::BLOCKLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-        PoolOptions {
-            policy_flags: PolicyFlags::ALLOWLIST,
-            asset: PoolAsset::Native,
-            ..PoolOptions::NONE
-        },
-    ])
+    let session = session(
+        deploy(&[
+            PoolOptions {
+                policy_flags: PolicyFlags::BLOCKLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+            PoolOptions {
+                policy_flags: PolicyFlags::ALLOWLIST,
+                asset: PoolAsset::Native,
+                ..PoolOptions::NONE
+            },
+        ])
+        .await?,
+    )
     .await?;
     let pool = session.pool_at(0)?;
 
@@ -275,8 +296,9 @@ async fn blocklist_per_user() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    let alice = setup(std::slice::from_ref(&options)).await?;
-    let bob = setup(&[options]).await?;
+    let config = deploy(std::slice::from_ref(&options)).await?;
+    let alice = session(config.clone()).await?;
+    let bob = session(config).await?;
     let network = LocalNetwork::shared().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -324,8 +346,9 @@ async fn allowlist_per_user() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    let alice = setup(std::slice::from_ref(&options)).await?;
-    let bob = setup(&[options]).await?;
+    let config = deploy(std::slice::from_ref(&options)).await?;
+    let alice = session(config.clone()).await?;
+    let bob = session(config).await?;
     let network = LocalNetwork::shared().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -363,11 +386,14 @@ async fn allowlist_per_user() -> Result<()> {
 
 #[tokio::test]
 async fn both() -> Result<()> {
-    let session = setup(&[PoolOptions {
-        policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-        asset: PoolAsset::Native,
-        ..PoolOptions::NONE
-    }])
+    let session = session(
+        deploy(&[PoolOptions {
+            policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+            asset: PoolAsset::Native,
+            ..PoolOptions::NONE
+        }])
+        .await?,
+    )
     .await?;
     let pool = session.pool()?;
     let network = LocalNetwork::shared().await?;

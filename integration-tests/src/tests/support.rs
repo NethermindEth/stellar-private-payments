@@ -41,17 +41,22 @@ impl TestSession {
     }
 }
 
-pub async fn setup_default() -> Result<TestSession> {
-    setup(&[PoolOptions::NONE]).await
+pub async fn deploy_default() -> Result<ContractConfig> {
+    deploy(&[PoolOptions::NONE]).await
 }
 
 /// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
 /// they share ASP membership/non-membership contracts).
-pub async fn setup(pools: &[PoolOptions]) -> Result<TestSession> {
+pub async fn deploy(pools: &[PoolOptions]) -> Result<ContractConfig> {
     let network = LocalNetwork::shared().await?;
-    let config = network
+    network
         .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools)
-        .await?;
+        .await
+}
+
+/// Open a new wallet session against an existing deployment.
+pub async fn session(config: ContractConfig) -> Result<TestSession> {
+    let network = LocalNetwork::shared().await?;
     let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
     build_session(network, config, pool_entries).await
 }

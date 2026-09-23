@@ -230,7 +230,7 @@ default_vk_file() {
 verifier_wasm_name_for_key() {
   local key="$1"
   if [[ -z "$key" ]]; then
-    printf 'circom_groth16_verifier.wasm'
+    printf 'circom_groth16_verifier_none.wasm'
   else
     printf 'circom_groth16_verifier_%s.wasm' "$key"
   fi
