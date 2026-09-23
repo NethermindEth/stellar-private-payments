@@ -161,7 +161,7 @@ export async function run(helpers) {
   const aboveCapOutcome = await Promise.race([
     waitForToast(page, {
       origin: 'deposit',
-      predicate: (toast) => /transaction simulation failed/i.test(toast.message),
+      predicate: (toast) => /simulate transaction/i.test(toast.message),
       timeoutMs: 20_000,
     }).then((toast) => ({ toast })),
     waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 20_000 })
