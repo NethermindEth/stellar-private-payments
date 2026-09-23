@@ -27,6 +27,32 @@ async fn withdraw_basic() -> Result<()> {
 }
 
 #[tokio::test]
+async fn withdraw_multi_tx() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+
+    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
+    let estimate = pool.estimate(total).await?;
+    assert_eq!(
+        estimate.tx_count, 2,
+        "combining 3 notes with a 2-input circuit should take 2 transactions"
+    );
+
+    let results = pool.withdraw(total, session.wallet.address()).await?;
+    assert_eq!(results.len(), 2);
+
+    let balance = pool.balance().await?;
+    assert_eq!(balance, NoteAmount::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn withdraw_insufficient_balance() -> Result<()> {
     let session = session(deploy_default().await?).await?;
     let pool = session.pool()?;

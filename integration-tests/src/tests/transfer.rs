@@ -73,6 +73,38 @@ async fn transfer_via_keys() -> Result<()> {
 }
 
 #[tokio::test]
+async fn transfer_multi_tx() -> Result<()> {
+    let config = deploy_default().await?;
+    let sender = session(config.clone()).await?;
+    let recipient = session(config).await?;
+    recipient.account.register_public_keys(None, None).await?;
+    let pool = sender.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+
+    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
+    let estimate = pool.estimate(total).await?;
+    assert_eq!(
+        estimate.tx_count, 2,
+        "combining 3 notes with a 2-input circuit should take 2 transactions"
+    );
+
+    let results = pool.transfer(recipient.wallet.address(), total).await?;
+    assert_eq!(results.len(), 2);
+
+    let sender_balance = pool.balance().await?;
+    assert_eq!(sender_balance, NoteAmount::ZERO);
+
+    let recipient_balance = recipient.pool()?.balance().await?;
+    assert_eq!(recipient_balance, total);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn transfer_insufficient_balance() -> Result<()> {
     let config = deploy_default().await?;
     let sender = session(config.clone()).await?;

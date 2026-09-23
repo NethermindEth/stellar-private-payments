@@ -8,7 +8,10 @@ use stellar_private_payments::{
     types::{
         ContractConfig, KeyDerivationSignature, NoteOwnerAddress, PoolConfigEntry, SignerAddress,
     },
-    zk::encryption::{self, KEY_DERIVATION_MESSAGE},
+    zk::{
+        disclosure::find_circuit,
+        encryption::{self, KEY_DERIVATION_MESSAGE},
+    },
 };
 
 use crate::{
@@ -104,8 +107,19 @@ async fn build_session(
             circuit_artifacts.push((stem, artifacts));
         }
     }
+    let disclosure_artifacts = store
+        .disclosure_artifacts()
+        .context("load disclosure circuit artifacts")?
+        .into_iter()
+        .map(|(name, artifacts)| {
+            find_circuit(name)
+                .map(|circuit| (circuit, artifacts))
+                .with_context(|| format!("unregistered disclosure circuit: {name}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let prover = Handle::from_box(Box::new(
-        LocalProver::from_artifacts(&circuit_artifacts).context("init local prover")?,
+        LocalProver::from_all_artifacts(&circuit_artifacts, &disclosure_artifacts)
+            .context("init local prover")?,
     ) as Box<dyn Prover>);
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
