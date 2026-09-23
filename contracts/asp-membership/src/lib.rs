@@ -207,7 +207,6 @@ impl ASPMembership {
         let mut filled: Vec<U256> = store
             .get(&DataKey::FilledSubtrees)
             .ok_or(Error::NotInitialized)?;
-        let mut filled_changed = false;
 
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
@@ -219,16 +218,16 @@ impl ASPMembership {
             } else {
                 // Leaf is left child, store it and pair with zero hash
                 filled.set(lvl, current_hash.clone());
-                filled_changed = true;
                 let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
         }
 
-        if filled_changed {
-            store.set(&DataKey::FilledSubtrees, &filled);
-        }
+        // The last leaf of a full tree is a right child at every level and
+        // leaves `filled` untouched. Skipping the write there would save one
+        // write once in the tree's life, which is not worth the branch.
+        store.set(&DataKey::FilledSubtrees, &filled);
 
         // Update the root with the computed hash
         instance.set(&DataKey::Root, &current_hash);

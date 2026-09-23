@@ -84,39 +84,6 @@ fn test_constructor_sets_admin_and_levels() {
     assert_eq!(stored_levels, levels);
 }
 
-/// An insertion whose whole path consists of right children reads the packed
-/// vector without changing it, so the write back is skipped.
-#[test]
-fn insert_leaf_on_the_last_leaf_leaves_the_filled_subtrees_unwritten() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPMembership, (admin, 1u32));
-    let client = ASPMembershipClient::new(&env, &contract_id);
-    env.mock_all_auths();
-    let filled = || -> Vec<U256> {
-        env.as_contract(&contract_id, || {
-            env.storage()
-                .persistent()
-                .get(&DataKey::FilledSubtrees)
-                .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
-        })
-    };
-
-    client.insert_leaf(&U256::from_u32(&env, 1));
-    let writes_with_a_left_child = env.cost_estimate().resources().write_entries;
-    let before = filled();
-    let root_before = client.get_root();
-
-    client.insert_leaf(&U256::from_u32(&env, 2));
-
-    assert_eq!(
-        env.cost_estimate().resources().write_entries,
-        writes_with_a_left_child.saturating_sub(1)
-    );
-    assert_eq!(filled(), before);
-    assert_ne!(client.get_root(), root_before);
-}
-
 #[test]
 fn test_get_root() {
     let env = test_env();
