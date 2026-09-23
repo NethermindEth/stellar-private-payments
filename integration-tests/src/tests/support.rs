@@ -48,9 +48,18 @@ pub async fn deploy_default() -> Result<ContractConfig> {
 /// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
 /// they share ASP membership/non-membership contracts).
 pub async fn deploy(pools: &[PoolOptions]) -> Result<ContractConfig> {
+    deploy_with_max_deposit(MAX_DEPOSIT_STROOPS, pools).await
+}
+
+/// Like [`deploy`], but with an explicit `max_deposit` cap instead of the
+/// suite-wide default.
+pub async fn deploy_with_max_deposit(
+    max_deposit: u128,
+    pools: &[PoolOptions],
+) -> Result<ContractConfig> {
     let network = LocalNetwork::shared().await?;
     network
-        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools)
+        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools)
         .await
 }
 
