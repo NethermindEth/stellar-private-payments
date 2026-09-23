@@ -337,4 +337,92 @@ mod tests {
         }
         assert!(loaded > 0, "no *.graph.bin under {dir}");
     }
+
+    /// Every input signal of `selectiveDisclosure_1`, sized from the graph
+    /// itself so the fixture stays correct if the circuit's tree depth moves.
+    const DISCLOSURE_SIGNALS: [&str; 9] = [
+        "roots",
+        "noteCommitments",
+        "extContextHash",
+        "expectedNullifier",
+        "inAmount",
+        "inPrivateKey",
+        "inBlinding",
+        "inPathIndices",
+        "inPathElements",
+    ];
+
+    fn disclosure_calculator() -> WitnessCalculator {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deployments/testnet/circuit_keys/selectiveDisclosure_1.graph.bin"
+        );
+        let bytes = std::fs::read(path).expect("committed selectiveDisclosure_1.graph.bin");
+        WitnessCalculator::from_graph(&bytes).expect("init graph")
+    }
+
+    /// Build a complete, correctly sized input set, optionally dropping one
+    /// signal or truncating one by a single element.
+    fn disclosure_inputs(
+        calc: &WitnessCalculator,
+        drop: Option<&str>,
+        short: Option<&str>,
+    ) -> String {
+        let mut obj = serde_json::Map::new();
+        for name in DISCLOSURE_SIGNALS {
+            if drop == Some(name) {
+                continue;
+            }
+            let mut size = *calc
+                .input_sizes
+                .get(&fnv1a(name))
+                .unwrap_or_else(|| panic!("{name} is declared by the graph"));
+            if short == Some(name) {
+                size = size.saturating_sub(1);
+            }
+            let values: Vec<serde_json::Value> = (0..size)
+                .map(|i| serde_json::Value::String(format!("0x{:02x}", i.saturating_add(1))))
+                .collect();
+            obj.insert(String::from(name), serde_json::Value::Array(values));
+        }
+        serde_json::Value::Object(obj).to_string()
+    }
+
+    #[test]
+    fn compute_witness_rejects_missing_signal() {
+        let calc = disclosure_calculator();
+        let err = calc
+            .compute_witness(&disclosure_inputs(&calc, Some("inBlinding"), None))
+            .expect_err("a missing signal must fail instead of being zero-padded");
+        assert!(
+            err.to_string().contains("missing circuit input signal"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn compute_witness_rejects_short_signal() {
+        let calc = disclosure_calculator();
+        let err = calc
+            .compute_witness(&disclosure_inputs(&calc, None, Some("inPathElements")))
+            .expect_err("a short signal must fail instead of being zero-padded");
+        assert!(
+            err.to_string()
+                .contains("circuit input signal(s) of the wrong size"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("inPathElements"),
+            "error should name the short signal: {err:#}"
+        );
+    }
+
+    #[test]
+    fn compute_witness_accepts_complete_inputs() {
+        let calc = disclosure_calculator();
+        let bytes = calc
+            .compute_witness(&disclosure_inputs(&calc, None, None))
+            .expect("a complete, correctly sized input set still builds a witness");
+        assert_eq!(bytes.len(), calc.witness_size() * 32);
+    }
 }
