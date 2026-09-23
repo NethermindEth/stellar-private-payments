@@ -10,19 +10,15 @@ use ark_bn254::Fr as BbfFr;
 use ark_ff::{BigInteger as _, Field as _, PrimeField as _};
 use circom_witness_rs::{BlackBoxFunction, Graph, M, calculate_witness, init_graph};
 use ruint::aliases::U256;
-use std::{
-    collections::{HashMap, HashSet},
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use std::{collections::HashMap, string::String, sync::Arc, vec::Vec};
 
 /// Witness calculator backed by a `circom-witness-rs` operation graph.
 pub struct WitnessCalculator {
     graph: Graph,
     bbfs: HashMap<String, BlackBoxFunction>,
-    /// fnv1a hashes of the graph's known input signal names.
-    input_hashes: HashSet<u64>,
+    /// fnv1a hash of each known input signal name to the number of field
+    /// elements the graph reserves for it.
+    input_sizes: HashMap<u64, usize>,
 }
 
 impl WitnessCalculator {
@@ -30,11 +26,22 @@ impl WitnessCalculator {
     pub fn from_graph(graph_bytes: &[u8]) -> Result<WitnessCalculator> {
         let graph = init_graph(graph_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to load witness graph: {e}"))?;
-        let input_hashes = graph.input_mapping.iter().map(|info| info.hash).collect();
+        // `input_mapping` is a hash table with empty slots (all-zero entries);
+        // only the occupied ones name a real signal.
+        let input_sizes = graph
+            .input_mapping
+            .iter()
+            .filter(|info| info.signalsize != 0)
+            .map(|info| {
+                let size = usize::try_from(info.signalsize)
+                    .map_err(|e| anyhow::anyhow!("input signal size does not fit in usize: {e}"))?;
+                Ok((info.hash, size))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
         Ok(WitnessCalculator {
             graph,
             bbfs: circomlib_black_box_functions(),
-            input_hashes,
+            input_sizes,
         })
     }
 
@@ -42,12 +49,15 @@ impl WitnessCalculator {
     /// (32 bytes per field element) compatible with the prover module.
     ///
     /// Rejects any input signal name the graph does not declare
-    /// (circom-witness-rs would otherwise panic on unknowns).
+    /// (circom-witness-rs would otherwise panic on unknowns), any signal
+    /// whose value count differs from the declared size, and any declared
+    /// signal that is absent. The last two would otherwise be zero-padded
+    /// into the witness and only surface as a proof failure later.
     pub fn compute_witness(&self, inputs_json: &str) -> Result<Vec<u8>> {
         let inputs = parse_inputs(inputs_json)?;
         let mut unknown: Vec<&str> = inputs
             .keys()
-            .filter(|key| !self.input_hashes.contains(&fnv1a(key)))
+            .filter(|key| !self.input_sizes.contains_key(&fnv1a(key)))
             .map(String::as_str)
             .collect();
         unknown.sort_unstable();
@@ -56,6 +66,29 @@ impl WitnessCalculator {
             "unknown circuit input signal(s): {}",
             unknown.join(", ")
         );
+
+        let mut mismatched: Vec<String> = inputs
+            .iter()
+            .filter_map(|(key, values)| {
+                let expected = *self.input_sizes.get(&fnv1a(key))?;
+                (values.len() != expected)
+                    .then(|| format!("{key} (expected {expected}, got {})", values.len()))
+            })
+            .collect();
+        mismatched.sort_unstable();
+        ensure!(
+            mismatched.is_empty(),
+            "circuit input signal(s) of the wrong size: {}",
+            mismatched.join(", ")
+        );
+
+        let declared = self.input_sizes.len();
+        ensure!(
+            inputs.len() == declared,
+            "missing circuit input signal(s): the graph declares {declared}, got {}",
+            inputs.len()
+        );
+
         let witness = calculate_witness(inputs, &self.graph, Some(&self.bbfs))
             .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
         Ok(witness_to_bytes(&witness))
