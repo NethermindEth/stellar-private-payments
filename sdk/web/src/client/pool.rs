@@ -15,28 +15,24 @@ use crate::{
         DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport, PoolEstimate,
         PoolExecuteResult, UserNoteSummary, transact_from_js, user_note_summaries,
     },
-    workers::storage::StorageBridge,
 };
 
 /// Per-pool session for deposits, transfers, and withdrawals.
 #[wasm_bindgen]
 pub struct PrivatePool {
-    inner: Rc<NativePrivatePool<StorageBridge>>,
+    inner: Rc<NativePrivatePool>,
     user_address: String,
 }
 
 impl PrivatePool {
-    pub(crate) fn from_parts(
-        inner: Rc<NativePrivatePool<StorageBridge>>,
-        user_address: String,
-    ) -> Self {
+    pub(crate) fn from_parts(inner: Rc<NativePrivatePool>, user_address: String) -> Self {
         Self {
             inner,
             user_address,
         }
     }
 
-    pub(crate) fn inner(&self) -> &NativePrivatePool<StorageBridge> {
+    pub(crate) fn inner(&self) -> &NativePrivatePool {
         &self.inner
     }
 }

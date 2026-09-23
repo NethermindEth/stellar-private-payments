@@ -6,12 +6,13 @@
 //!
 //! ```no_run
 //! use stellar_private_payments::{
-//!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+//!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Storage,
 //!     types::{CircuitStem, ContractConfig, NoteOwnerAddress, PolicyFlags, SignerAddress},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
-//! let storage = LocalStorage::open("wallet.sqlite")?;
+//! let storage = Handle::from_box(Box::new(LocalStorage::open("wallet.sqlite")?) as Box<dyn
+//! Storage>);
 //!
 //! let store = CircuitStore::open("./circuits");
 //! store.ensure_blocking()?;

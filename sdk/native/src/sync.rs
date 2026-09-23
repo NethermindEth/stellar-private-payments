@@ -92,10 +92,10 @@ impl SyncHandle {
     }
 
     /// Inline catch-up, or kick the background indexer, depending on mode.
-    pub(crate) async fn ensure_synced<S: Storage>(
+    pub(crate) async fn ensure_synced(
         &self,
         rpc: &RpcClient,
-        storage: &S,
+        storage: &dyn Storage,
         contract_config: &ContractConfig,
     ) -> Result<(), Error> {
         match self.mode() {
@@ -191,19 +191,19 @@ impl BackgroundSyncStop {
 /// [`crate::Client::background_sync`]; call [`Self::run`] on your runtime (does
 /// not spawn).
 #[must_use = "call/spawn BackgroundSync::run to keep the client up-to-date"]
-pub struct BackgroundSync<S: Storage> {
+pub struct BackgroundSync {
     rpc: RpcClient,
-    storage: S,
+    storage: Handle<dyn Storage>,
     contract_config: ContractConfig,
     bootnode_url: Option<String>,
     kick: Handle<SyncKick>,
     stop: Handle<AtomicBool>,
 }
 
-impl<S: Storage> BackgroundSync<S> {
+impl BackgroundSync {
     pub(crate) fn new(
         rpc: RpcClient,
-        storage: S,
+        storage: Handle<dyn Storage>,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
         kick: Handle<SyncKick>,
@@ -291,7 +291,9 @@ impl<S: Storage> BackgroundSync<S> {
                 tracing::info!("background sync stopped");
                 return Ok(());
             }
-            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
+            if let Err(e) =
+                catch_up_loop(&indexer, self.storage.as_ref(), Some(self.stop.as_ref())).await
+            {
                 tracing::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
@@ -302,7 +304,7 @@ impl<S: Storage> BackgroundSync<S> {
     /// cursors for main RPC resume.
     async fn bootnode_catch_up(&self) -> Result<(), Error> {
         bootnode_catch_up(
-            &self.storage,
+            self.storage.as_ref(),
             &self.contract_config,
             self.bootnode_url.as_deref(),
             Some(self.stop.as_ref()),
@@ -322,8 +324,8 @@ fn is_rpc_sync_gap(err: &IndexerError) -> bool {
     matches!(err, IndexerError::Rpc(RpcError::RpcSyncGap(_)))
 }
 
-async fn apply_bootnode_handoff<S: Storage>(
-    storage: &S,
+async fn apply_bootnode_handoff(
+    storage: &dyn Storage,
     contract_config: &ContractConfig,
     from_ledger: u32,
 ) -> Result<(), Error> {
@@ -353,8 +355,8 @@ async fn apply_bootnode_handoff<S: Storage>(
     Ok(())
 }
 
-async fn apply_bootnode_handoff_from_err<S: Storage>(
-    storage: &S,
+async fn apply_bootnode_handoff_from_err(
+    storage: &dyn Storage,
     contract_config: &ContractConfig,
     err: &RpcError,
 ) -> Result<(), Error> {
@@ -370,9 +372,9 @@ async fn apply_bootnode_handoff_from_err<S: Storage>(
 ///
 /// Returns `true` on an RPC retention gap, `false` when the RPC can serve
 /// history. Other indexer init errors are returned as [`Err`].
-pub async fn bootnode_required<S: Storage>(
+pub async fn bootnode_required(
     rpc: &RpcClient,
-    storage: &S,
+    storage: &dyn Storage,
     contract_config: &ContractConfig,
 ) -> Result<bool, Error> {
     match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
@@ -386,14 +388,13 @@ pub async fn bootnode_required<S: Storage>(
 ///
 /// When `stop` is set, returns `Ok(())` without draining further. Applies
 /// pending state after each successful round.
-async fn catch_up_loop<I, S>(
+async fn catch_up_loop<I>(
     indexer: &Indexer<I>,
-    storage: &S,
+    storage: &dyn Storage,
     stop: Option<&AtomicBool>,
 ) -> Result<(), Error>
 where
     I: ContractDataStorage,
-    S: Storage,
 {
     loop {
         if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
@@ -409,8 +410,8 @@ where
 
 /// Sync historical range via bootnode until retention handoff, then clear
 /// cursors for main RPC resume.
-async fn bootnode_catch_up<S: Storage>(
-    storage: &S,
+async fn bootnode_catch_up(
+    storage: &dyn Storage,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
     stop: Option<&AtomicBool>,
@@ -476,9 +477,9 @@ async fn bootnode_catch_up<S: Storage>(
 ///
 /// On a main RPC retention gap, syncs via `bootnode_url` until handoff, then
 /// resumes on the main RPC.
-pub(crate) async fn catch_up<S: Storage>(
+pub(crate) async fn catch_up(
     rpc: &RpcClient,
-    storage: &S,
+    storage: &dyn Storage,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<(), Error> {

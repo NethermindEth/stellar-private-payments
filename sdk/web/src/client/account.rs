@@ -6,23 +6,20 @@ use stellar_private_payments::Account as NativeAccount;
 
 use wasm_bindgen::prelude::*;
 
-use crate::{
-    models::{
-        PoolOptions, PortfolioBalance, UserNoteSummary, UserPublicKeys, portfolio_balances,
-        user_note_summaries,
-    },
-    workers::storage::StorageBridge,
+use crate::models::{
+    PoolOptions, PortfolioBalance, UserNoteSummary, UserPublicKeys, portfolio_balances,
+    user_note_summaries,
 };
 
 use super::{pool::PrivatePool, pool_err};
 
 #[wasm_bindgen]
 pub struct Account {
-    inner: Rc<NativeAccount<StorageBridge>>,
+    inner: Rc<NativeAccount>,
 }
 
 impl Account {
-    pub(crate) fn new(inner: Rc<NativeAccount<StorageBridge>>) -> Self {
+    pub(crate) fn new(inner: Rc<NativeAccount>) -> Self {
         Self { inner }
     }
 }
