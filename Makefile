@@ -54,6 +54,11 @@ circuits-lock: circuits
 circuits-verify: circuits
 	sh $(CURDIR)/deployments/scripts/circuit-artifacts.sh verify
 
+# Runs the integration-tests
+.PHONY: integration-tests
+integration-tests:
+	bash $(CURDIR)/integration-tests/run.sh
+
 # Both targets record the built profile in sdk/web/.trunk-wasm-profile so a
 # subsequent `trunk serve`/`trunk build` (which `serve`/`build` invoke) sees a
 # matching marker and skips its own redundant rebuild.

@@ -85,3 +85,5 @@ spp-*-wallet/
 # Contains testnet secret keys — must never be committed.
 deployments/*/.e2e-accounts.env
 deployments/scripts/.e2e-wallet-*/
+
+deployments/local/
