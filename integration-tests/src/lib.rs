@@ -2,6 +2,7 @@
 
 pub mod keypair;
 pub mod network;
+pub mod pool;
 
 #[cfg(test)]
 mod tests;

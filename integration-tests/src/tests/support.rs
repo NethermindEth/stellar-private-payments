@@ -1,60 +1,66 @@
-//! Shared setup for tests: one pool, deployed once on the shared network,
-//! that every test opens its own wallet session against.
+//! Shared setup for tests: each test deploys the one pool it needs on the
+//! shared network, then opens its own wallet session against it.
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
     Prover, Signer,
-    types::{ContractConfig, KeyDerivationSignature, NoteOwnerAddress, SignerAddress},
+    types::{
+        ContractConfig, KeyDerivationSignature, NoteOwnerAddress, PoolConfigEntry, SignerAddress,
+    },
     zk::encryption::{self, KEY_DERIVATION_MESSAGE},
 };
-use tokio::sync::OnceCell;
 
 use crate::{
     keypair::TestKeypair,
     network::{self, LocalNetwork, NETWORK_PASSPHRASE},
+    pool::PoolOptions,
 };
 
 const MAX_DEPOSIT_STROOPS: u128 = 1_000_000_000_000;
 const ASP_LEVELS: u32 = 10;
 const POOL_LEVELS: u32 = 20;
-const POLICY_FLAGS: &str = "none";
-
-static DEPLOYMENT: OnceCell<ContractConfig> = OnceCell::const_new();
-
-/// Deploy the suite's one pool, once, on the shared network.
-async fn deployment() -> Result<&'static ContractConfig> {
-    DEPLOYMENT
-        .get_or_try_init(|| async {
-            let network = LocalNetwork::shared().await?;
-            network
-                .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, POLICY_FLAGS)
-                .await
-        })
-        .await
-}
 
 pub struct TestSession {
     pub account: Account<LocalStorage>,
     pub wallet: TestKeypair,
-    pool_contract_id: String,
+    pool_contract_ids: Vec<String>,
 }
 
 impl TestSession {
     pub fn pool(&self) -> Result<PrivatePool<LocalStorage>> {
-        Ok(self.account.pool(&self.pool_contract_id)?)
+        self.pool_at(0)
+    }
+
+    pub fn pool_at(&self, index: usize) -> Result<PrivatePool<LocalStorage>> {
+        let pool_contract_id = self
+            .pool_contract_ids
+            .get(index)
+            .with_context(|| format!("no deployed pool at index {index}"))?;
+        Ok(self.account.pool(pool_contract_id)?)
     }
 }
 
-pub async fn setup() -> Result<TestSession> {
-    let network = LocalNetwork::shared().await?;
-    let config = deployment().await?.clone();
-    let pool_entry = config
-        .enabled_pools()
-        .next()
-        .context("deployment has no enabled pools")?
-        .clone();
+pub async fn setup_default() -> Result<TestSession> {
+    setup(&[PoolOptions::NONE]).await
+}
 
+/// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
+/// they share ASP membership/non-membership contracts).
+pub async fn setup(pools: &[PoolOptions]) -> Result<TestSession> {
+    let network = LocalNetwork::shared().await?;
+    let config = network
+        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools)
+        .await?;
+    let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
+    build_session(network, config, pool_entries).await
+}
+
+async fn build_session(
+    network: &LocalNetwork,
+    config: ContractConfig,
+    pool_entries: Vec<PoolConfigEntry>,
+) -> Result<TestSession> {
     let wallet = TestKeypair::generate();
     network.fund(&wallet.address()).await?;
 
@@ -72,12 +78,20 @@ pub async fn setup() -> Result<TestSession> {
         .ensure()
         .await
         .context("ensure circuit artifacts (run `make circuits` first)")?;
-    let artifacts = store
-        .artifacts(&pool_entry.circuit_stem().to_string())
-        .context("load circuit artifacts for the deployed pool")?;
+
+    let mut circuit_artifacts = Vec::new();
+    let mut seen_stems = std::collections::HashSet::new();
+    for pool_entry in &pool_entries {
+        let stem = pool_entry.circuit_stem();
+        if seen_stems.insert(stem.to_string()) {
+            let artifacts = store
+                .artifacts(&stem.to_string())
+                .context("load circuit artifacts for a deployed pool")?;
+            circuit_artifacts.push((stem, artifacts));
+        }
+    }
     let prover = Handle::from_box(Box::new(
-        LocalProver::from_artifacts(&[(pool_entry.circuit_stem(), artifacts)])
-            .context("init local prover")?,
+        LocalProver::from_artifacts(&circuit_artifacts).context("init local prover")?,
     ) as Box<dyn Prover>);
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
@@ -96,7 +110,10 @@ pub async fn setup() -> Result<TestSession> {
     Ok(TestSession {
         account,
         wallet,
-        pool_contract_id: pool_entry.pool_contract_id,
+        pool_contract_ids: pool_entries
+            .into_iter()
+            .map(|e| e.pool_contract_id)
+            .collect(),
     })
 }
 
