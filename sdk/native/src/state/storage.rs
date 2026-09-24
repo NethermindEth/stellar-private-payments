@@ -80,6 +80,16 @@ impl Storage {
         Self::connect_with_connection(super::database_key::open(path.as_ref(), key, purpose)?)
     }
 
+    /// Open another handle to encrypted storage that an open handle already
+    /// unlocked with `key`. Used for forks.
+    #[cfg(feature = "sqlite3mc")]
+    pub fn reopen_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+    ) -> Result<Self> {
+        Self::connect_with_connection(super::database_key::reopen(path.as_ref(), key)?)
+    }
+
     /// Open an existing plaintext database without permitting encrypted journal
     /// recovery before the missing-key check. Used by the OPFS owner.
     #[cfg(feature = "sqlite3mc")]

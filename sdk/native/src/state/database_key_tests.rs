@@ -261,6 +261,38 @@ fn provider_failure_and_threaded_forks() -> Result<()> {
 }
 
 #[test]
+fn forks_open_while_another_fork_commits() -> Result<()> {
+    let f = Fixture::new()?;
+    let path = f.db();
+    let path = path.to_str().expect("UTF-8 temp directory");
+    let key = DatabaseKey::generate()?;
+    let storage = futures::executor::block_on(LocalStorage::open_with_key_provider(
+        path,
+        "test",
+        OpenPurpose::CreateNew,
+        &Provider(&key),
+    ))?;
+    let writer = storage.fork()?;
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writing = done.clone();
+    let handle = std::thread::spawn(move || -> Result<()> {
+        let mut i = 0u32;
+        while !writing.load(std::sync::atomic::Ordering::Relaxed) {
+            writer
+                .storage_mut()
+                .set_setting_json(&format!("large-{}", i % 8), &MARKER.repeat(400))?;
+            i = i.wrapping_add(1);
+        }
+        Ok(())
+    });
+    let forked = (0..300).try_for_each(|_| storage.fork().map(drop));
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    handle.join().expect("writer thread")?;
+    forked?;
+    Ok(())
+}
+
+#[test]
 fn corrupt_ciphertext_is_rejected_without_changes() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;

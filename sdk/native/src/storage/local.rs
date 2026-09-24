@@ -112,12 +112,8 @@ impl Storage for LocalStorage {
     fn fork(&self) -> Result<Self, Error> {
         #[cfg(feature = "sqlite3mc")]
         if let Some(key) = &self.database_key {
-            let db = SqliteStorage::connect_encrypted(
-                &self.path,
-                key,
-                crate::state::database_key::OpenPurpose::OpenExisting,
-            )
-            .context("fork encrypted storage")?;
+            let db = SqliteStorage::reopen_encrypted(&self.path, key)
+                .context("fork encrypted storage")?;
             return Ok(Self {
                 path: self.path.clone(),
                 db: RefCell::new(db),

@@ -102,6 +102,21 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
             .mode(0o600)
             .open(path)?;
     }
+    connect(path, key, purpose)
+}
+
+// Another connection to a database an open connection has already unlocked
+// with this key. It skips the read-only preflight, which must not run while
+// that connection may be writing.
+pub(crate) fn reopen(path: &Path, key: &DatabaseKey) -> Result<Connection> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let absolute = std::path::absolute(path)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let path = absolute.as_path();
+    connect(path, key, OpenPurpose::OpenExisting)
+}
+
+fn connect(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     #[cfg(target_arch = "wasm32")]
     let flags = if matches!(purpose, OpenPurpose::CreateNew) {
