@@ -243,7 +243,7 @@ impl DisclosurePublicInputs {
 ///
 /// # Security semantics
 /// A receipt's cryptographic and contextual validity is confirmed when
-/// `proof_verified && context_verified && known_root_status` are all `true`.
+/// `proof_verified && context_verified && pool_match && known_root_status` are all `true`.
 /// The `nullifiers_unspent` flag is separate: a valid receipt may disclose
 /// previously spent notes (e.g., to prove a past payment). The fields are
 /// kept separate so callers can enforce their specific business logic (e.g.,
@@ -255,6 +255,8 @@ pub struct DisclosureVerificationReport {
     pub proof_verified: bool,
     /// Whether the receipt context recomputed to the public `ext_context_hash`.
     pub context_verified: bool,
+    /// Whether the receipt pool matches the verifier's expected pool.
+    pub pool_match: bool,
     /// Status of the known-root freshness check.
     pub known_root_status: bool,
     /// Status of the spent-nullifier check. `true` means none of the disclosed
@@ -267,10 +269,10 @@ pub struct DisclosureVerificationReport {
 }
 
 impl DisclosureVerificationReport {
-    /// Returns `true` when the proof, context, and root freshness checks all
-    /// pass. This confirms the mathematical validity of the disclosure.
+    /// Returns `true` when the proof, context, pool match, and root freshness checks all
+    /// pass. This confirms the mathematical and pool-scoped validity of the disclosure.
     pub fn is_cryptographically_valid(&self) -> bool {
-        self.proof_verified && self.context_verified && self.known_root_status
+        self.pool_match && self.proof_verified && self.context_verified && self.known_root_status
     }
 
     /// Returns `true` only when the disclosure is cryptographically valid

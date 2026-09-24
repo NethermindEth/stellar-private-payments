@@ -150,18 +150,19 @@ pub async fn verify_disclosure_receipt(
     prover: &dyn Prover,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
+    expected_pool_contract_id: &str,
 ) -> Result<DisclosureVerificationReport, Error> {
+    let pool_match = receipt.context.pool_address == expected_pool_contract_id;
     let proof_verified = prover
         .verify_disclosure_proof(receipt, expected_vk_hash)
         .await?;
     let context_verified = crate::zk::disclosure::verify_receipt_context(receipt)
         .context("context verification failed")?;
 
-    let pool_contract_id = receipt.context.pool_address.clone();
     let mut known_root_status = true;
     for root in &receipt.public_inputs.roots {
         let is_known = fetcher
-            .is_pool_known_root(&pool_contract_id, *root)
+            .is_pool_known_root(expected_pool_contract_id, *root)
             .await
             .context("root freshness check failed")?;
         if !is_known {
@@ -174,7 +175,7 @@ pub async fn verify_disclosure_receipt(
     let mut spent_nullifier_indices = Vec::new();
     for (index, nullifier) in receipt.public_inputs.nullifiers.iter().enumerate() {
         let spent = fetcher
-            .is_nullifier_spent(&pool_contract_id, *nullifier)
+            .is_nullifier_spent(expected_pool_contract_id, *nullifier)
             .await
             .context("nullifier spent check failed")?;
         if spent {
@@ -187,6 +188,7 @@ pub async fn verify_disclosure_receipt(
     Ok(DisclosureVerificationReport {
         proof_verified,
         context_verified,
+        pool_match,
         known_root_status,
         nullifiers_unspent,
         spent_nullifier_indices,

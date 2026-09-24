@@ -187,6 +187,7 @@ pub struct VerifyDisclosureOptions {
     prover_worker_url: Option<String>,
     contract_config: super::config::ContractConfig,
     circuits_base_url: String,
+    expected_pool_contract_id: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -203,6 +204,8 @@ impl VerifyDisclosureOptions {
         struct Raw {
             prover_worker_url: Option<String>,
             circuits_base_url: String,
+            expected_pool_contract_id: Option<String>,
+            pool_contract_id: Option<String>,
         }
         let contract_config = js_sys::Reflect::get(&value, &JsValue::from_str("contractConfig"))
             .map_err(|_| {
@@ -215,6 +218,7 @@ impl VerifyDisclosureOptions {
             prover_worker_url: raw.prover_worker_url,
             contract_config: contract_config_from_js(contract_config)?,
             circuits_base_url: raw.circuits_base_url,
+            expected_pool_contract_id: raw.expected_pool_contract_id.or(raw.pool_contract_id),
         })
     }
 
@@ -228,5 +232,9 @@ impl VerifyDisclosureOptions {
 
     pub(crate) fn circuits_base_url(&self) -> &str {
         &self.circuits_base_url
+    }
+
+    pub(crate) fn expected_pool_contract_id(&self) -> Option<&str> {
+        self.expected_pool_contract_id.as_deref()
     }
 }

@@ -285,14 +285,36 @@ impl Client {
         &self,
         receipt_json: String,
         expected_vk_hash: String,
+        expected_pool_contract_id: Option<String>,
     ) -> Result<DisclosureVerificationReport, JsError> {
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
+        let expected_pool = match expected_pool_contract_id {
+            Some(pool) => pool,
+            None => {
+                let enabled: Vec<_> = self.contract_config.enabled_pools().collect();
+                match enabled.as_slice() {
+                    [single] => single.pool_contract_id.clone(),
+                    _ => {
+                        return Err(JsError::new(
+                            "expected_pool_contract_id must be specified when multiple or no enabled pools are configured",
+                        ));
+                    }
+                }
+            }
+        };
+
         let fetcher = self.state_fetcher()?;
-        let report = verify_disclosure_receipt(&fetcher, &self.prover, &receipt, &expected_vk_hash)
-            .await
-            .map_err(pool_err)?;
+        let report = verify_disclosure_receipt(
+            &fetcher,
+            &self.prover,
+            &receipt,
+            &expected_vk_hash,
+            &expected_pool,
+        )
+        .await
+        .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     }
 }
@@ -337,6 +359,20 @@ pub async fn verify_selective_disclosure_standalone(
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
         let opts = VerifyDisclosureOptions::from_value(options)?;
         let contract_config = opts.contract_config().native().clone();
+        let expected_pool = match opts.expected_pool_contract_id() {
+            Some(pool) => pool.to_string(),
+            None => {
+                let enabled: Vec<_> = contract_config.enabled_pools().collect();
+                match enabled.as_slice() {
+                    [single] => single.pool_contract_id.clone(),
+                    _ => {
+                        return Err(JsError::new(
+                            "expectedPoolContractId is required in options when multiple or no enabled pools are configured",
+                        ));
+                    }
+                }
+            }
+        };
         let circuits_base_url = require_circuits_base_url(opts.circuits_base_url().to_string())?;
         let prover_worker_url = opts
             .prover_worker_url()
@@ -362,9 +398,15 @@ pub async fn verify_selective_disclosure_standalone(
             .await
             .map_err(|e| JsError::new(&format!("prover worker unreachable: {e:?}")))?;
 
-        let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
-            .await
-            .map_err(pool_err)?;
+        let report = verify_disclosure_receipt(
+            &fetcher,
+            &prover,
+            &receipt,
+            &expected_vk_hash,
+            &expected_pool,
+        )
+        .await
+        .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     })
     .await

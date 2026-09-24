@@ -222,6 +222,9 @@ enum DisclosureCommands {
     Verify {
         /// Receipt JSON path
         receipt: PathBuf,
+        /// Expected pool contract id (C…); defaults to the deployment pool if single, or specify --pool
+        #[arg(long)]
+        pool: Option<String>,
         /// Override the canonical verifying-key hash pinned by the CLI
         #[arg(long)]
         expected_vk_hash: Option<String>,
@@ -369,11 +372,13 @@ fn main() -> Result<()> {
             ),
             DisclosureCommands::Verify {
                 receipt,
+                pool,
                 expected_vk_hash,
                 require_unspent,
             } => cmd::disclosure::verify(
                 &config,
                 &receipt,
+                pool.as_deref(),
                 expected_vk_hash.as_deref(),
                 require_unspent,
                 json,

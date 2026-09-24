@@ -119,6 +119,7 @@ export interface VerifyDisclosureOptions {
   contractConfig: ContractConfig | ContractConfigInput;
   circuitsBaseUrl: string;
   proverWorkerUrl?: string;
+  expectedPoolContractId?: string;
 }
 
 /** Options for {@link bootnodeRequired}. */
@@ -155,6 +156,7 @@ export interface Client {
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,
+    expectedPoolContractId?: string,
   ): Promise<DisclosureVerificationReport>;
 }
 

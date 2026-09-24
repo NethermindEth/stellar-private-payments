@@ -75,6 +75,7 @@ pub fn generate(
 pub fn verify(
     config: &CliConfig,
     receipt_path: &Path,
+    expected_pool: Option<&str>,
     expected_vk_hash: Option<&str>,
     require_unspent: bool,
     json: bool,
@@ -86,6 +87,23 @@ pub fn verify(
         .ok_or_else(|| anyhow::anyhow!("unknown disclosure circuit: {}", receipt.circuit.name))?;
     let expected_vk_hash = expected_vk_hash.unwrap_or(circuit.canonical_vk_hash);
 
+    let expected_pool_contract_id = match expected_pool {
+        Some(pool) => {
+            validate_pool(pool, &config.deployment)?;
+            pool.to_string()
+        }
+        None => {
+            let enabled: Vec<_> = config.deployment.enabled_pools().collect();
+            match enabled.as_slice() {
+                [single] => single.pool_contract_id.clone(),
+                [] => bail!("no enabled pools configured in deployment"),
+                _ => bail!(
+                    "multiple enabled pools configured in deployment; specify the expected pool with --pool"
+                ),
+            }
+        }
+    };
+
     let network = config.resolve_network()?;
     let prover = disclosure_prover(config)?;
     let report = stellar_private_payments::blocking::verify_disclosure_receipt(
@@ -94,12 +112,13 @@ pub fn verify(
         &prover,
         &receipt,
         expected_vk_hash,
+        &expected_pool_contract_id,
     )
     .map_err(|e| anyhow::anyhow!("verify disclosure receipt: {e}"))?;
     print_verification(&report, json)?;
 
     if !report.is_cryptographically_valid() {
-        bail!("disclosure receipt failed cryptographic, context, or root verification");
+        bail!("disclosure receipt failed cryptographic, context, pool, or root verification");
     }
     if require_unspent && !report.nullifiers_unspent {
         bail!("one or more disclosed notes have already been spent");
@@ -154,6 +173,7 @@ fn print_verification(report: &DisclosureVerificationReport, json: bool) -> Resu
     output::print_section("Disclosure verification");
     output::print_kv("proof_verified", report.proof_verified);
     output::print_kv("context_verified", report.context_verified);
+    output::print_kv("pool_match", report.pool_match);
     output::print_kv("known_root_status", report.known_root_status);
     output::print_kv("nullifiers_unspent", report.nullifiers_unspent);
     if !report.spent_nullifier_indices.is_empty() {

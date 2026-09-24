@@ -622,13 +622,15 @@ where
 /// # Returns
 /// Returns a report that keeps proof-validity and root-freshness status
 /// separate.
+/// Validate receipt proof, context, pool binding, and known roots against explicit callbacks.
 ///
 /// # Errors
 /// Returns an error if receipt metadata is invalid or if callbacks fail.
-#[tracing::instrument(name = "verify_receipt_report", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?Sensitive(expected_vk_hash)))]
-pub fn verify_receipt_report_with<P, R>(
+#[tracing::instrument(name = "verify_receipt_report_for_pool", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?Sensitive(expected_vk_hash), expected_pool = %expected_pool_contract_id))]
+pub fn verify_receipt_report_for_pool_with<P, R>(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
+    expected_pool_contract_id: &str,
     mut verify_proof: P,
     context_verified: bool,
     mut is_known_root: R,
@@ -639,19 +641,26 @@ where
 {
     validate_registered_receipt(receipt, expected_vk_hash)?;
 
+    let pool_match = receipt.context.pool_address == expected_pool_contract_id;
     let proof_verified = verify_proof(receipt, expected_vk_hash)?;
-    tracing::debug!(proof_verified, "receipt proof check outcome");
+    tracing::debug!(
+        proof_verified,
+        pool_match,
+        "receipt proof and pool check outcome"
+    );
     let known_root_status =
         verify_receipt_known_roots_with(receipt, expected_vk_hash, &mut is_known_root)?;
     tracing::debug!(
         context_verified,
+        pool_match,
         known_root_status,
-        "receipt context and root checks outcome"
+        "receipt context, pool, and root checks outcome"
     );
 
     Ok(DisclosureVerificationReport {
         proof_verified,
         context_verified,
+        pool_match,
         known_root_status,
         // The generic disclosure crate does not perform on-chain spent-nullifier
         // checks. Callers that need spent-status validation (e.g. the pool
@@ -660,6 +669,36 @@ where
         nullifiers_unspent: true,
         spent_nullifier_indices: Vec::new(),
     })
+}
+
+/// Validate receipt proof, context, and known roots against explicit callbacks,
+/// using the receipt's own pool address as the expected pool.
+///
+/// Prefer [`verify_receipt_report_for_pool_with`] when an expected pool is known
+/// out-of-band to prevent verifying across mismatched pools.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid or if callbacks fail.
+#[tracing::instrument(name = "verify_receipt_report", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?Sensitive(expected_vk_hash)))]
+pub fn verify_receipt_report_with<P, R>(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+    verify_proof: P,
+    context_verified: bool,
+    is_known_root: R,
+) -> Result<DisclosureVerificationReport>
+where
+    P: FnMut(&DisclosureReceipt, &str) -> Result<bool>,
+    R: FnMut(Field) -> Result<bool>,
+{
+    verify_receipt_report_for_pool_with(
+        receipt,
+        expected_vk_hash,
+        &receipt.context.pool_address,
+        verify_proof,
+        context_verified,
+        is_known_root,
+    )
 }
 
 #[cfg(test)]
@@ -1228,5 +1267,117 @@ mod tests {
                 "vk_hash mismatch for proving key {pk_file}"
             );
         }
+    }
+
+    #[test]
+    fn verify_disclosure_receipt_pool_mismatch_issue_567() -> Result<()> {
+        let pool_a_address =
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
+        let pool_b_address = "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string();
+
+        assert_ne!(
+            pool_a_address, pool_b_address,
+            "Pool A and Pool B must have different contract IDs"
+        );
+
+        // Generation for Pool A
+        let mut pool_a_receipt = valid_receipt();
+        pool_a_receipt.context.pool_address = pool_a_address.clone();
+        pool_a_receipt.public_inputs.ext_context_hash =
+            derive_ext_context_hash(&pool_a_receipt.context)?;
+
+        // Generation for Pool B
+        let mut pool_b_receipt = valid_receipt();
+        pool_b_receipt.context.pool_address = pool_b_address.clone();
+        pool_b_receipt.public_inputs.ext_context_hash =
+            derive_ext_context_hash(&pool_b_receipt.context)?;
+
+        assert_eq!(pool_b_receipt.context.pool_address, pool_b_address);
+        assert_eq!(pool_a_receipt.context.pool_address, pool_a_address);
+
+        // CONTROL 1: Pool B receipt verified using Pool B verifier
+        let report_b_on_b = verify_receipt_report_for_pool_with(
+            &pool_b_receipt,
+            VK_HASH,
+            &pool_b_address,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            verify_receipt_context(&pool_b_receipt)?,
+            |_root| Ok(true),
+        )?;
+        assert!(report_b_on_b.proof_verified);
+        assert!(report_b_on_b.context_verified);
+        assert!(report_b_on_b.pool_match);
+        assert!(report_b_on_b.known_root_status);
+        assert!(
+            report_b_on_b.is_cryptographically_valid(),
+            "CONTROL 1: Pool B receipt verified by Pool B verifier should be valid"
+        );
+
+        // CONTROL 3: Pool A receipt verified using Pool A verifier
+        let report_a_on_a = verify_receipt_report_for_pool_with(
+            &pool_a_receipt,
+            VK_HASH,
+            &pool_a_address,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            verify_receipt_context(&pool_a_receipt)?,
+            |_root| Ok(true),
+        )?;
+        assert!(report_a_on_a.proof_verified);
+        assert!(report_a_on_a.context_verified);
+        assert!(report_a_on_a.pool_match);
+        assert!(report_a_on_a.known_root_status);
+        assert!(
+            report_a_on_a.is_cryptographically_valid(),
+            "CONTROL 3: Pool A receipt verified by Pool A verifier should be valid"
+        );
+
+        // CONTROL 2 / FIX FOR ISSUE #567:
+        // Pool B receipt verified by a verifier scoped to Pool A.
+        let report_b_on_a = verify_receipt_report_for_pool_with(
+            &pool_b_receipt,
+            VK_HASH,
+            &pool_a_address,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            verify_receipt_context(&pool_b_receipt)?,
+            |_root| Ok(true),
+        )?;
+
+        // Verify the security property:
+        assert!(
+            report_b_on_a.proof_verified,
+            "proof itself remains mathematically valid"
+        );
+        assert!(
+            report_b_on_a.context_verified,
+            "context itself recomputes to ext_context_hash"
+        );
+        assert_eq!(
+            pool_b_receipt.context.pool_address, pool_b_address,
+            "receipt belongs to Pool B"
+        );
+        let expected_verifier_pool = &pool_a_address;
+        assert_ne!(
+            &pool_b_receipt.context.pool_address, expected_verifier_pool,
+            "verifier expected Pool A"
+        );
+        assert!(
+            !report_b_on_a.pool_match,
+            "pool_match must be false when receipt pool != expected pool"
+        );
+        assert!(
+            !report_b_on_a.is_cryptographically_valid(),
+            "Pool B receipt verified against expected Pool A must NOT be cryptographically valid"
+        );
+
+        Ok(())
     }
 }

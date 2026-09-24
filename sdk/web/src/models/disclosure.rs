@@ -223,6 +223,16 @@ impl DisclosureVerificationReport {
         self.inner.nullifiers_unspent
     }
 
+    #[wasm_bindgen(getter, js_name = poolMatch)]
+    pub fn pool_match(&self) -> bool {
+        self.inner.pool_match
+    }
+
+    #[wasm_bindgen(getter, js_name = isCryptographicallyValid)]
+    pub fn is_cryptographically_valid(&self) -> bool {
+        self.inner.is_cryptographically_valid()
+    }
+
     #[wasm_bindgen(getter, js_name = spentNullifierIndices)]
     pub fn spent_nullifier_indices(&self) -> js_sys::Array {
         self.inner

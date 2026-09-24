@@ -245,6 +245,7 @@ impl<S: Storage> PrivatePool<S> {
             self.prover.as_ref(),
             receipt,
             expected_vk_hash,
+            &self.config.pool_contract_id,
         )
         .await
     }

@@ -115,8 +115,8 @@ function wrapClient(wasmClient) {
     recipientLookup: (address) => wasmClient.recipientLookup(address),
     aspState: () => wasmClient.aspState(),
     allContractsData: () => wasmClient.allContractsData(),
-    verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>
-      wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash),
+    verifySelectiveDisclosure: (receiptJson, expectedVkHash, expectedPoolContractId) =>
+      wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, expectedPoolContractId),
   };
 }
 
