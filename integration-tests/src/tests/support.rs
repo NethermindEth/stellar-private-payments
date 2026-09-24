@@ -5,8 +5,7 @@ use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
     Prover, Signer,
-    types::{ContractConfig, KeyDerivationSignature, NoteOwnerAddress, SignerAddress},
-    zk::encryption::{self, KEY_DERIVATION_MESSAGE},
+    types::{ContractConfig, NoteOwnerAddress, SignerAddress},
 };
 use tokio::sync::OnceCell;
 
@@ -73,7 +72,6 @@ pub async fn setup() -> Result<TestSession> {
     ));
     let _ = std::fs::remove_file(&storage_path);
     let storage = LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?;
-    save_privacy_keys(&storage, &wallet, &config.network)?;
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store
@@ -96,24 +94,14 @@ pub async fn setup() -> Result<TestSession> {
         SignerAddress::new(wallet.address()),
     )?) as Box<dyn Signer>);
     let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
+    account
+        .derive_privacy_keys()
+        .await
+        .context("derive privacy keys")?;
 
     Ok(TestSession {
         account,
         wallet,
         pool_contract_id: pool_entry.pool_contract_id,
     })
-}
-
-fn save_privacy_keys(storage: &LocalStorage, wallet: &TestKeypair, network: &str) -> Result<()> {
-    let signature = KeyDerivationSignature(wallet.sign(KEY_DERIVATION_MESSAGE.as_bytes()).to_vec());
-    let (note_keypair, encryption_keypair) =
-        encryption::derive_encryption_and_note_keypairs(signature.clone())?;
-    let membership_blinding = encryption::derive_membership_blinding(&signature, network)?;
-    storage.storage_mut().save_encryption_and_note_keypairs(
-        &wallet.address(),
-        &note_keypair,
-        &encryption_keypair,
-        &membership_blinding,
-    )?;
-    Ok(())
 }

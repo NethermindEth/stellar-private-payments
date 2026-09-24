@@ -2,10 +2,7 @@
 //! be running (see `make integration-tests`), deployed to via the repo's
 //! own `deploy.sh`.
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -73,11 +70,16 @@ impl LocalNetwork {
     /// `getHealth` already reports healthy.
     pub async fn fund(&self, address: &str) -> Result<()> {
         const MAX_ATTEMPTS: u32 = 10;
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .context("build friendbot client")?;
         let url = format!("http://localhost:{RPC_PORT}/friendbot?addr={address}");
         let mut last_error = String::new();
         for _ in 0..MAX_ATTEMPTS {
-            match reqwest::get(&url).await {
+            match client.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => return Ok(()),
                 Ok(resp) => {
                     let status = resp.status();
@@ -103,7 +105,6 @@ impl LocalNetwork {
         policy_flags: &str,
     ) -> Result<ContractConfig> {
         let root = repo_root();
-        ensure_local_vk_file(&root)?;
         deploy_native_asset(deployer_secret).await?;
 
         let key = format!("{max_deposit}-{asp_levels}-{pool_levels}-{policy_flags}");
@@ -207,19 +208,4 @@ pub(crate) fn repo_root() -> PathBuf {
         .parent()
         .expect("integration-tests has a parent directory")
         .to_path_buf()
-}
-
-fn ensure_local_vk_file(root: &Path) -> Result<()> {
-    let local_dir = root.join("deployments/local");
-    let link = local_dir.join("circuit_keys");
-    if link.is_symlink() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(&local_dir).context("create deployments/local")?;
-    if link.exists() {
-        std::fs::remove_dir_all(&link).context("remove stale deployments/local/circuit_keys")?;
-    }
-    std::os::unix::fs::symlink(root.join("deployments/testnet/circuit_keys"), &link)
-        .context("symlink deployments/local/circuit_keys to deployments/testnet/circuit_keys")?;
-    Ok(())
 }
