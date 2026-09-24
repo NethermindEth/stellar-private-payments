@@ -1,17 +1,14 @@
 use std::{
     env, fs,
-    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "2.5.1";
-const SQLITE_VERSION: &str = "3.53.4";
-const ARCHIVE_SHA256: &str = "4125f8ff275ea953dabb3289331b20a0e76d4fc060f57148f4a5df3bf3b0d5e0";
-const SOURCE_SHA256: &str = "59e30889a7b0106152e6d4fc3c18ac1592f252cb4defbb0a7e618fdecf1a221c";
-const HEADER_SHA256: &str = "034c22a23268735059850aa22ea79333865c093c90c32287cc03cc606dcbc177";
+#[path = "../../../sdk/native/sqlite3mc_source.rs"]
+mod sqlite3mc_source;
+
 const TARGET: &str = "wasm32-unknown-unknown";
 
 const MUSL_SOURCES: &[&str] = &[
@@ -100,8 +97,8 @@ fn main() {
         .and_then(Path::parent)
         .expect("repository root")
         .to_path_buf();
-    let cache = target_dir.join("sqlite3mc").join(VERSION);
-    let source = sources(&cache);
+    let cache = target_dir.join("sqlite3mc");
+    let source = sqlite3mc_source::sources(&cache);
     let sqlite_wasm = sqlite_wasm_source(&root);
     let out = cache.join(TARGET);
     fs::create_dir_all(&out).expect("create SQLite3MC output directory");
@@ -111,7 +108,7 @@ fn main() {
     let ar = tool("AR", &["llvm-ar", "llvm-ar-18", "ar"]);
     let shim = sqlite_wasm.join("shim");
     let mut files = vec![
-        source.join("sqlite3mc_amalgamation.c"),
+        source.join(sqlite3mc_source::SOURCE_FILES[0]),
         shim.join("printf/printf.c"),
     ];
     files.extend(MUSL_SOURCES.iter().map(|path| shim.join("musl").join(path)));
@@ -164,62 +161,6 @@ fn main() {
         ),
     ).expect("write Cargo link configuration");
     println!("{}", out.join("cargo.toml").display());
-}
-
-fn sources(cache: &Path) -> PathBuf {
-    if let Some(path) = env::var_os("SQLITE3MC_AMALGAMATION_DIR") {
-        let path = PathBuf::from(path);
-        verify(&path.join("sqlite3mc_amalgamation.c"), SOURCE_SHA256);
-        verify(&path.join("sqlite3mc_amalgamation.h"), HEADER_SHA256);
-        return path;
-    }
-    let source = cache.join("sources");
-    if !source.join("sqlite3mc_amalgamation.c").is_file() {
-        fs::create_dir_all(&source).expect("create SQLite3MC source cache");
-        let name = format!("sqlite3mc-{VERSION}-sqlite-{SQLITE_VERSION}-amalgamation.zip");
-        let archive = cache.join(&name);
-        let url = format!(
-            "https://github.com/utelle/SQLite3MultipleCiphers/releases/download/v{VERSION}/{name}"
-        );
-        if !archive.is_file() {
-            assert!(
-                env::var("CARGO_NET_OFFLINE").as_deref() != Ok("true"),
-                "offline build needs SQLITE3MC_AMALGAMATION_DIR or cached SQLite3MC sources"
-            );
-            let partial = cache.join(format!("{name}.partial"));
-            let mut command = Command::new("curl");
-            command.args(["-fsSL", "-o"]).arg(&partial).arg(url);
-            run(&mut command, "download SQLite3MC");
-            verify(&partial, ARCHIVE_SHA256);
-            fs::rename(partial, &archive).expect("publish verified SQLite3MC archive");
-        }
-        verify(&archive, ARCHIVE_SHA256);
-        extract(&archive, &source);
-    }
-    verify(&source.join("sqlite3mc_amalgamation.c"), SOURCE_SHA256);
-    verify(&source.join("sqlite3mc_amalgamation.h"), HEADER_SHA256);
-    source
-}
-
-fn extract(archive: &Path, destination: &Path) {
-    let file = fs::File::open(archive).expect("open SQLite3MC archive");
-    let mut zip = zip::ZipArchive::new(file).expect("read SQLite3MC archive");
-    for expected in ["sqlite3mc_amalgamation.c", "sqlite3mc_amalgamation.h"] {
-        let index = (0..zip.len())
-            .find(|index| {
-                zip.by_index(*index)
-                    .ok()
-                    .and_then(|entry| entry.enclosed_name())
-                    .is_some_and(|path| path.file_name().is_some_and(|name| name == expected))
-            })
-            .unwrap_or_else(|| panic!("{expected} missing from SQLite3MC archive"));
-        let mut entry = zip.by_index(index).expect("read SQLite3MC archive entry");
-        let mut bytes = Vec::new();
-        entry
-            .read_to_end(&mut bytes)
-            .expect("extract SQLite3MC source");
-        fs::write(destination.join(expected), bytes).expect("write SQLite3MC source");
-    }
 }
 
 fn sqlite_wasm_source(root: &Path) -> PathBuf {
@@ -279,16 +220,6 @@ fn signature(files: &[PathBuf], cc: &str, ar: &str) -> String {
         );
     }
     format!("{}\n", hex::encode(hash.finalize()))
-}
-
-fn verify(path: &Path, expected: &str) {
-    let bytes = fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    assert_eq!(
-        hex::encode(Sha256::digest(bytes)),
-        expected,
-        "SHA-256 mismatch: {}",
-        path.display()
-    );
 }
 
 fn run(command: &mut Command, action: &str) {
