@@ -41,15 +41,27 @@ esac
 # A server left running across branch switches can serve an older dist/ while
 # APP_URL still points to it. Reject that before provision.sh clears a working
 # Freighter profile and drives the wrong storage/onboarding flow.
+# Asset names do not change between builds (Trunk.toml sets filehash = false),
+# so compare contents: the app code, SDK and storage worker must match this
+# checkout's build byte for byte.
 [ -n "${APP_URL:-}" ] || die "APP_URL is not set; build and serve this checkout first."
-expected_entry="$(sed -n 's/.*<script type="module" src="\([^"]*\)".*/\1/p' "$REPO_ROOT/app/index.html" | tail -n 1)"
-if ! served_html="$(curl -fsSL "$APP_URL")"; then
-  die "APP_URL=$APP_URL is not serving the app; build and serve this checkout first."
-fi
-served_entry="$(sed -n 's/.*<script type="module" src="\([^"]*\)".*/\1/p' <<< "$served_html" | tail -n 1)"
-if [ -z "$expected_entry" ] || [ "$served_entry" != "$expected_entry" ]; then
-  die "APP_URL=$APP_URL serves ${served_entry:-no app entry}, but this checkout expects $expected_entry. Rebuild and serve this branch before provisioning."
-fi
+curl -fsS -o /dev/null "$APP_URL" \
+  || die "APP_URL=$APP_URL is not serving the app; build and serve this checkout first."
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1
+}
+DIST="$REPO_ROOT/${DIST_DIR:-dist}"
+for asset in \
+  js/ui.js \
+  js/stellar-private-payments/dist/stellar_private_payments_web_bg.wasm \
+  js/stellar-private-payments/dist/workers/storage-worker-module_bg.wasm
+do
+  [ -f "$DIST/$asset" ] || die "$DIST/$asset is missing; build and serve this checkout first."
+  served="$(curl -fsS "${APP_URL%/}/$asset" | sha256)" \
+    || die "APP_URL=$APP_URL does not serve $asset; build and serve this checkout first."
+  [ "$served" = "$(sha256 < "$DIST/$asset")" ] \
+    || die "APP_URL=$APP_URL serves a different $asset than $DIST. Rebuild and serve this branch before provisioning."
+done
 
 # Provisioning imports Playwright through src/runner.mjs, so dependencies must
 # be installed before running it.
