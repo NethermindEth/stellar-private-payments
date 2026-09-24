@@ -296,8 +296,16 @@ async fn open_requested(request: OpenRequest) -> Result<StorageWorkerResponse> {
         "worker is already opening, open or closed"
     );
     if init(request).await.is_err() {
+        // Keep init's reason: the app recognizes "another tab" by its text,
+        // and close_storage overwrites the recorded state.
+        let reason = INIT_STATE.with(|s| match &*s.borrow() {
+            InitState::Failed(msg) => Some(msg.clone()),
+            _ => None,
+        });
         close_storage();
-        anyhow::bail!("database could not be opened; check its key and create/open policy");
+        anyhow::bail!(reason.unwrap_or_else(|| {
+            "database could not be opened; check its key and create/open policy".into()
+        }));
     }
     Ok(StorageWorkerResponse::Saved)
 }

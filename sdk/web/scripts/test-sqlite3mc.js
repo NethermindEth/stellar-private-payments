@@ -129,6 +129,19 @@ try {
   await ctx.close();
   ctx.checks.push("plaintext create, close and worker restart");
 
+  // The app shows its "another tab" modal only for this exact message.
+  const firstTab = await ctx.request("GET", `/session/${ctx.sid}/window`);
+  await ctx.load();
+  await ctx.js("window.storage=await sdk.Storage.open();return true;");
+  const secondTab = await ctx.request("POST", `/session/${ctx.sid}/window/new`, { type: "tab" });
+  await ctx.request("POST", `/session/${ctx.sid}/window`, { handle: secondTab.handle });
+  await ctx.load();
+  await expectFailure(() => ctx.js("window.storage=await sdk.Storage.open();return true;"), "Another tab or window is using this app's local database");
+  await ctx.request("DELETE", `/session/${ctx.sid}/window`);
+  await ctx.request("POST", `/session/${ctx.sid}/window`, { handle: firstTab });
+  await ctx.close();
+  ctx.checks.push("second tab reports the database lock");
+
   {
     await ctx.encrypted(true);
     await ctx.js("await storage.call({SetSetting:{key:'integration-protected',value_json:JSON.stringify(arguments[0])}});window.fork=storage.fork();return true;", [ctx.marker]);
