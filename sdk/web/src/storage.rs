@@ -55,7 +55,6 @@ impl Storage {
             ),
         };
 
-        #[cfg(feature = "sqlite3mc")]
         storage
             .bridge
             .call(
@@ -79,7 +78,6 @@ impl Storage {
 impl Storage {
     /// Open the separate encrypted OPFS database. The caller supplies a random
     /// 32-byte key; existing plaintext storage is neither opened nor converted.
-    #[cfg(feature = "sqlite3mc")]
     #[wasm_bindgen(js_name = openEncrypted)]
     pub async fn open_encrypted(
         worker_url: String,

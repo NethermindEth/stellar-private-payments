@@ -12,9 +12,6 @@ build = "build.rs"
 name = "stellar_private_payments"
 
 [features]
-# Required engine/key support; build.rs compiles the pinned library.
-default = ["sqlite3mc"]
-sqlite3mc = []
 # multi-threaded proving
 parallel = [
     "dep:rayon",

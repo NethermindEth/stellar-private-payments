@@ -3,7 +3,6 @@ pub(crate) mod events_parsers;
 mod processor;
 mod storage;
 
-#[cfg(feature = "sqlite3mc")]
 pub mod database_key;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;

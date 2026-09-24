@@ -30,7 +30,6 @@ use crate::{
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
     path: PathBuf,
-    #[cfg(feature = "sqlite3mc")]
     database_key: Option<std::sync::Arc<crate::state::database_key::DatabaseKey>>,
     db: RefCell<SqliteStorage>,
 }
@@ -41,7 +40,6 @@ impl LocalStorage {
         let db = SqliteStorage::connect_file(&path).context("open storage")?;
         Ok(Self {
             path,
-            #[cfg(feature = "sqlite3mc")]
             database_key: None,
             db: RefCell::new(db),
         })
@@ -49,7 +47,6 @@ impl LocalStorage {
 
     /// Open encrypted storage after acquiring its key. Provider failure leaves
     /// the database untouched; forks retain a zeroizing shared key until closed.
-    #[cfg(feature = "sqlite3mc")]
     pub async fn open_with_key_provider(
         storage_path: &str,
         database_id: &str,
@@ -110,7 +107,6 @@ impl ContractDataStorage for LocalStorage {
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<Self, Error> {
-        #[cfg(feature = "sqlite3mc")]
         if let Some(key) = &self.database_key {
             let db = SqliteStorage::reopen_encrypted(&self.path, key)
                 .context("fork encrypted storage")?;
@@ -123,7 +119,6 @@ impl Storage for LocalStorage {
         let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
         Ok(Self {
             path: self.path.clone(),
-            #[cfg(feature = "sqlite3mc")]
             database_key: None,
             db: RefCell::new(db),
         })

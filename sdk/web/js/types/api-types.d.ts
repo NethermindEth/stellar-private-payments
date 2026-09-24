@@ -97,7 +97,7 @@ export interface Storage {
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
 
-/** Encrypted opening requires an opt-in sqlite3mc build and uses separate OPFS storage. */
+/** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
   open(options?: StorageOpenOptions | null): Promise<Storage>;
   openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;

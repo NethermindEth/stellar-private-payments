@@ -34,12 +34,8 @@ async function openStorage(options = {}) {
   });
 }
 
-/** Open opt-in encrypted storage using a caller-owned key provider. */
+/** Open encrypted storage using a caller-owned key provider. */
 async function openEncryptedStorage(options) {
-  const open = Reflect.get(WasmStorage, 'openEncrypted');
-  if (typeof open !== 'function') {
-    throw new Error('Encrypted storage requires a build with the sqlite3mc feature');
-  }
   const provider = requireField(options?.keyProvider, 'keyProvider');
   if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
   const createNew = options.createNew === true;
@@ -50,7 +46,7 @@ async function openEncryptedStorage(options) {
   // Leave the provider's own buffer intact; clear the copy owned by this call.
   const transport = new Uint8Array(supplied);
   try {
-    return await open.call(WasmStorage, options.workerUrl ?? storageWorkerUrl, transport, createNew);
+    return await WasmStorage.openEncrypted(options.workerUrl ?? storageWorkerUrl, transport, createNew);
   } finally {
     transport.fill(0);
   }
