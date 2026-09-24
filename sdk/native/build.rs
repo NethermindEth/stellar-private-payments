@@ -6,10 +6,6 @@ use sha2::{Digest, Sha256};
 mod sqlite3mc_source;
 
 fn main() {
-    assert!(
-        env::var_os("CARGO_FEATURE_SQLITE3MC").is_some(),
-        "SQLite3MC is required; do not disable the sqlite3mc feature"
-    );
     println!("cargo:rerun-if-env-changed=SQLITE3MC_AMALGAMATION_DIR");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
     if env::var_os("DOCS_RS").is_none()

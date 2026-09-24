@@ -39,31 +39,18 @@ const WORKER_NAME: &str = "WORKER-STORAGE";
 
 #[derive(Clone, Debug)]
 enum InitState {
-    #[cfg(feature = "sqlite3mc")]
     Locked,
     Pending,
     Ready,
     Failed(String),
 }
 
-#[cfg(feature = "sqlite3mc")]
 enum OpenRequest {
     Plaintext,
     Encrypted {
         key: stellar_private_payments::state::database_key::DatabaseKey,
         purpose: stellar_private_payments::state::database_key::OpenPurpose,
     },
-}
-
-const fn initial_state() -> InitState {
-    #[cfg(feature = "sqlite3mc")]
-    {
-        InitState::Locked
-    }
-    #[cfg(not(feature = "sqlite3mc"))]
-    {
-        InitState::Pending
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -83,7 +70,7 @@ fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
 thread_local! {
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
-    static INIT_STATE: RefCell<InitState> = const { RefCell::new(initial_state()) };
+    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Locked) };
     #[cfg(target_arch = "wasm32")]
     static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
 }
@@ -125,15 +112,6 @@ pub fn worker_main() {
         tracing::debug!("[{WORKER_NAME}] starting...");
     }
     StorageWorker::registrar().register();
-    #[cfg(not(feature = "sqlite3mc"))]
-    spawn_local(
-        async move {
-            if let Err(e) = init().await {
-                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
-            }
-        }
-        .instrument(worker_span),
-    );
 }
 
 // A prior page's worker still releases its OPFS sync access handles
@@ -145,13 +123,12 @@ const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
 #[cfg(target_arch = "wasm32")]
 const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 
-async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), JsError> {
+async fn init(opening: OpenRequest) -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
     #[cfg(target_arch = "wasm32")]
     {
         let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default();
-        #[cfg(feature = "sqlite3mc")]
         let cfg = if matches!(opening, OpenRequest::Encrypted { .. }) {
             sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
                 directory: ".opfs-sahpool-encrypted".into(),
@@ -196,7 +173,7 @@ async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), 
 
     // SAH installation replaces the default VFS. Attach MC's codec wrapper only
     // after it exists, including plaintext mode on an MC-enabled worker.
-    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    #[cfg(target_arch = "wasm32")]
     #[allow(unsafe_code)]
     {
         // SAFETY: the named VFS has just been registered in this worker. SQLite
@@ -207,9 +184,6 @@ async fn init(#[cfg(feature = "sqlite3mc")] opening: OpenRequest) -> Result<(), 
         }
     }
 
-    #[cfg(not(feature = "sqlite3mc"))]
-    let opened = SqliteStorage::connect();
-    #[cfg(feature = "sqlite3mc")]
     let opened = (|| -> anyhow::Result<SqliteStorage> {
         match opening {
             OpenRequest::Plaintext => {
@@ -273,7 +247,7 @@ fn close_storage() {
         .with(|s| *s.borrow_mut() = InitState::Failed("storage closed; open a new worker".into()));
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
-    #[cfg(all(target_arch = "wasm32", feature = "sqlite3mc"))]
+    #[cfg(target_arch = "wasm32")]
     #[allow(unsafe_code)]
     unsafe {
         // SAFETY: this worker's sole SQLite connection has been dropped above.
@@ -289,7 +263,6 @@ fn close_storage() {
     });
 }
 
-#[cfg(feature = "sqlite3mc")]
 async fn open_requested(request: OpenRequest) -> Result<StorageWorkerResponse> {
     anyhow::ensure!(
         INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
@@ -333,9 +306,7 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
-        #[cfg(feature = "sqlite3mc")]
         StorageWorkerRequest::OpenPlaintext => return open_requested(OpenRequest::Plaintext).await,
-        #[cfg(feature = "sqlite3mc")]
         StorageWorkerRequest::OpenEncrypted { key, create_new } => {
             use stellar_private_payments::state::database_key::{DatabaseKey, OpenPurpose};
             anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
@@ -376,7 +347,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                         return Ok(StorageWorkerResponse::Error(msg));
                     }
                     InitState::Pending => {}
-                    #[cfg(feature = "sqlite3mc")]
                     InitState::Locked => return Err(anyhow!("storage has not been opened")),
                 }
 

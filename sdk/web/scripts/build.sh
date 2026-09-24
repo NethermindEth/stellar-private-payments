@@ -12,7 +12,7 @@ SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-di
 [[ -f "$SQLITE3MC_CONFIG" ]] || {
   echo "error: SQLite3MC build did not produce Cargo link configuration" >&2; exit 1;
 }
-MC_ARGS=(--config "$SQLITE3MC_CONFIG" --features sqlite3mc)
+MC_ARGS=(--config "$SQLITE3MC_CONFIG")
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
 case "$PROFILE" in

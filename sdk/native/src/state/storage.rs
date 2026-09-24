@@ -71,7 +71,6 @@ pub(crate) type DeriveNoteFn<'a> =
 
 impl Storage {
     /// Open encrypted storage with an explicit key and create/open policy.
-    #[cfg(feature = "sqlite3mc")]
     pub fn connect_encrypted(
         path: impl AsRef<Path>,
         key: &super::database_key::DatabaseKey,
@@ -82,7 +81,6 @@ impl Storage {
 
     /// Open another handle to encrypted storage that an open handle already
     /// unlocked with `key`. Used for forks.
-    #[cfg(feature = "sqlite3mc")]
     pub fn reopen_encrypted(
         path: impl AsRef<Path>,
         key: &super::database_key::DatabaseKey,
@@ -92,7 +90,6 @@ impl Storage {
 
     /// Open an existing plaintext database without permitting encrypted journal
     /// recovery before the missing-key check. Used by the OPFS owner.
-    #[cfg(feature = "sqlite3mc")]
     pub fn connect_existing_plaintext(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         #[cfg(not(target_arch = "wasm32"))]
@@ -109,13 +106,13 @@ impl Storage {
 
     pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        #[cfg(not(target_arch = "wasm32"))]
         let absolute = std::path::absolute(path)?;
-        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        #[cfg(not(target_arch = "wasm32"))]
         let path = absolute.as_path();
         // Reject a missing key before a recovery-capable handle can write a hot
         // encrypted journal back into the database. OPFS does this in its owner.
-        #[cfg(all(not(target_arch = "wasm32"), feature = "sqlite3mc"))]
+        #[cfg(not(target_arch = "wasm32"))]
         if path.exists() && std::fs::metadata(path)?.len() > 0 {
             super::database_key::validate_read_only(path, None)?;
         }

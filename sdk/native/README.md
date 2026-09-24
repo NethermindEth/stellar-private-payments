@@ -14,8 +14,7 @@ cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-li
 ```
 
 Cargo needs `curl`, a C compiler and `ar` (plus `musl-gcc` for musl). The build
-script verifies and caches SQLite3MC 2.5.1 sources. Disabling default features
-cannot bypass the encryption backend requirement. Browser builds configure the
+script verifies and caches SQLite3MC 2.5.1 sources. Browser builds configure the
 same pinned backend automatically through `sdk/web/scripts/build.sh`.
 
 SQLite3MC is MIT-licensed; its required attribution is shipped in
