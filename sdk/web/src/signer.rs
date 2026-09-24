@@ -10,13 +10,14 @@ use stellar_private_payments::{
     },
     types::{KeyDerivationSignature, Sensitive, SignedTransaction, SignerAddress},
 };
-use wasm_bindgen::{JsCast, JsError, JsValue};
+use wasm_bindgen::{JsCast, prelude::*};
 use wasm_bindgen_futures::JsFuture;
 
 const SIGN_METHODS: &[&str] = &["signMessage", "signTransaction", "signAuthEntry"];
 
 /// Wallet adapter invoked from WASM (`FreighterSigner` or any object with the
 /// three sign methods).
+#[wasm_bindgen]
 #[derive(Clone)]
 pub struct WalletSigner {
     signer: JsValue,
@@ -27,12 +28,14 @@ pub struct WalletSigner {
     signer_address: SignerAddress,
 }
 
+#[wasm_bindgen]
 impl WalletSigner {
+    #[wasm_bindgen(constructor)]
     pub fn new(
         signer: JsValue,
         network_passphrase: String,
-        signer_address: SignerAddress,
-    ) -> Result<Self, JsError> {
+        signer_address: String,
+    ) -> Result<WalletSigner, JsError> {
         if signer.is_null() || signer.is_undefined() {
             return Err(JsError::new("signer is required"));
         }
@@ -46,10 +49,29 @@ impl WalletSigner {
         Ok(Self {
             signer,
             network_passphrase,
-            signer_address,
+            signer_address: SignerAddress::new(signer_address),
         })
     }
 
+    #[wasm_bindgen(js_name = toHandle)]
+    pub fn to_handle(&self) -> SignerHandle {
+        SignerHandle(stellar_private_payments::Handle::from_box(
+            Box::new(self.clone()) as Box<dyn Signer>,
+        ))
+    }
+}
+
+/// Handle [`crate::client::Client::account`] takes.
+#[wasm_bindgen]
+pub struct SignerHandle(stellar_private_payments::Handle<dyn Signer>);
+
+impl SignerHandle {
+    pub(crate) fn inner(&self) -> stellar_private_payments::Handle<dyn Signer> {
+        self.0.clone()
+    }
+}
+
+impl WalletSigner {
     pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
         self.call("signMessage", &[message.into()]).await
     }
@@ -357,7 +379,7 @@ mod spike_tests {
     }
 
     fn new_signer(signer: JsValue) -> Result<WalletSigner, JsError> {
-        WalletSigner::new(signer, PASSPHRASE.to_string(), SignerAddress::new(ADDRESS))
+        WalletSigner::new(signer, PASSPHRASE.to_string(), ADDRESS.to_string())
     }
 
     fn error_message(error: JsError) -> String {
@@ -529,11 +551,7 @@ mod signer_address_tests {
             let resolving: JsValue = Function::new_no_args(&body).into();
             Reflect::set(&wallet, &JsValue::from_str(method), &resolving).unwrap();
         }
-        WalletSigner::new(
-            wallet.into(),
-            PASSPHRASE.to_string(),
-            SignerAddress::new(REQUESTED),
-        )
+        WalletSigner::new(wallet.into(), PASSPHRASE.to_string(), REQUESTED.to_string())
     }
 
     fn error_message(error: JsError) -> String {

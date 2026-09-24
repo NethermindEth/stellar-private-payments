@@ -11,28 +11,24 @@ mod pool;
 use std::{rc::Rc, str::FromStr};
 
 use stellar_private_payments::{
-    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle, Signer,
+    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error,
     chain::{RpcClient, StateFetcher},
     crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
-    types::{
-        ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress, NotePublicKey, SignerAddress,
-    },
+    types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress, NotePublicKey},
 };
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
 
 use crate::{
     correlation::{new_correlation_id, with_correlation_id},
     deployment::{parse_contract_config, require_circuits_base_url},
     models::{
-        AccountOptions, ContractConfig as JsContractConfig, ContractsStateData,
-        DisclosureVerificationReport, OperationalFeedItem, RecipientLookup,
-        VerifyDisclosureOptions, operational_feed_items,
+        ContractConfig as JsContractConfig, ContractsStateData, DisclosureVerificationReport,
+        OperationalFeedItem, RecipientLookup, VerifyDisclosureOptions, operational_feed_items,
     },
-    signer::WalletSigner,
-    storage::Storage,
-    workers::prover::{ProverBridge, ProverWorker},
+    signer::SignerHandle,
+    storage::StorageHandle,
+    workers::prover::{ProverBridge, ProverHandle, ProverWorker},
 };
 use gloo_worker::Spawnable;
 
@@ -63,32 +59,23 @@ pub(crate) fn pool_err(error: Error) -> JsError {
 #[wasm_bindgen]
 pub struct Client {
     inner: NativeClient,
-    prover: ProverBridge,
     contract_config: ContractConfig,
     background_sync_stop: Option<BackgroundSyncStop>,
 }
 
 #[wasm_bindgen]
 impl Client {
-    /// Build the client and spawn the prover worker
+    /// Build the client from an already spawned, configured and pinged
+    /// prover, and a storage handle.
     #[wasm_bindgen(js_name = new)]
     pub async fn new(
         rpc_url: String,
-        storage: &Storage,
-        prover_worker_url: String,
+        storage: &StorageHandle,
+        prover: &ProverHandle,
         contract_config: JsValue,
-        circuits_base_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
-        Self::new_inner(
-            rpc_url,
-            storage,
-            prover_worker_url,
-            contract_config,
-            circuits_base_url,
-            bootnode_url,
-        )
-        .await
+        Self::new_inner(rpc_url, storage, prover, contract_config, bootnode_url).await
     }
 
     #[tracing::instrument(
@@ -98,66 +85,26 @@ impl Client {
     )]
     async fn new_inner(
         rpc_url: String,
-        storage: &Storage,
-        prover_worker_url: String,
+        storage: &StorageHandle,
+        prover: &ProverHandle,
         contract_config: JsValue,
-        circuits_base_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
         crate::wasm_start();
 
-        if prover_worker_url.trim().is_empty() {
-            return Err(JsError::new(
-                "proverWorkerUrl is required (absolute URL to prover-worker.js)",
-            ));
-        }
-
-        let storage = storage.fork();
-        let storage_bridge = storage.bridge();
-        storage_bridge
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
         let contract_config = parse_contract_config(contract_config)?;
-        let circuits_base_url = require_circuits_base_url(circuits_base_url)?;
-        let prover = ProverBridge::new(
-            ProverWorker::spawner()
-                .with_loader(true)
-                .as_module(true)
-                .spawn(&prover_worker_url),
-        );
-        prover
-            .configure_circuits_base(circuits_base_url)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let prover_handle: Handle<dyn stellar_private_payments::Prover> =
-            Handle::from_box(Box::new(prover.clone()) as Box<dyn stellar_private_payments::Prover>);
-
-        let storage_handle: Handle<dyn stellar_private_payments::Storage> = Handle::from_box(
-            Box::new(storage_bridge) as Box<dyn stellar_private_payments::Storage>,
-        );
 
         let inner = NativeClient::init(
             rpc_url,
-            storage_handle,
-            prover_handle,
+            storage.inner(),
+            prover.inner(),
             contract_config.clone(),
             bootnode_url,
         )
         .map_err(pool_err)?;
 
-        prover
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&format!("prover worker unreachable: {e:?}")))?;
-
-        // Let telemetry config pushes and log dumps reach the worker isolates.
-        crate::telemetry::register_worker_sinks(Some(storage.bridge()), Some(prover.clone()));
-
         Ok(Self {
             inner,
-            prover,
             contract_config,
             background_sync_stop: None,
         })
@@ -206,28 +153,18 @@ impl Client {
 
     /// Bind a wallet signer and return an [`Account`] session.
     ///
-    /// `signerAddress` may name an account other than the note owner; that
-    /// session signs and pays while the owner holds the notes. Call
-    /// [`Account::derive_privacy_keys`] to derive and store the owner's privacy
-    /// keys.
-    pub async fn account(&self, options: JsValue, signer: JsValue) -> Result<Account, JsError> {
+    /// `signer` may sign for an account other than the note owner
+    /// (`user_address`); that session signs and pays while the owner holds
+    /// the notes — build it with the desired `signerAddress` beforehand.
+    /// Call [`Account::derive_privacy_keys`] to derive and store the owner's
+    /// privacy keys.
+    pub async fn account(
+        &self,
+        user_address: String,
+        signer: &SignerHandle,
+    ) -> Result<Account, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            let opts = AccountOptions::from_value(options)?;
-            let user_address =
-                resolve_user_address(&signer, opts.user_address().map(str::to_string)).await?;
-            // Defaults to the note owner. The wallet signs with this account.
-            let signer_address = SignerAddress::new(
-                opts.signer_address()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| user_address.clone()),
-            );
-            let wallet_signer = WalletSigner::new(
-                signer,
-                opts.network_passphrase().to_string(),
-                signer_address,
-            )?;
-
-            let native_account = self.open_native_account(wallet_signer, user_address)?;
+            let native_account = self.open_native_account(signer, user_address)?;
             Ok(Account::new(Rc::new(native_account)))
         })
         .await
@@ -291,9 +228,14 @@ impl Client {
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
         let fetcher = self.state_fetcher()?;
-        let report = verify_disclosure_receipt(&fetcher, &self.prover, &receipt, &expected_vk_hash)
-            .await
-            .map_err(pool_err)?;
+        let report = verify_disclosure_receipt(
+            &fetcher,
+            self.inner.prover().as_ref(),
+            &receipt,
+            &expected_vk_hash,
+        )
+        .await
+        .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     }
 }
@@ -380,54 +322,11 @@ impl Client {
 
     fn open_native_account(
         &self,
-        wallet_signer: WalletSigner,
+        signer: &SignerHandle,
         user_address: String,
     ) -> Result<NativeAccount, JsError> {
-        let signer: Handle<dyn Signer> =
-            Handle::from_box(Box::new(wallet_signer) as Box<dyn Signer>);
         self.inner
-            .account(NoteOwnerAddress::new(user_address), signer)
+            .account(NoteOwnerAddress::new(user_address), signer.inner())
             .map_err(pool_err)
     }
-}
-
-async fn resolve_user_address(
-    signer: &JsValue,
-    options_address: Option<String>,
-) -> Result<String, JsError> {
-    if let Some(addr) = options_address {
-        return Ok(addr);
-    }
-
-    let get_pk = js_sys::Reflect::get(signer, &JsValue::from_str("getPublicKey"))
-        .map_err(|_| JsError::new("userAddress required or signer.getPublicKey"))?;
-    if !get_pk.is_function() {
-        return Err(JsError::new(
-            "userAddress required or signer must implement getPublicKey",
-        ));
-    }
-
-    let func = get_pk.dyn_ref::<js_sys::Function>().ok_or_else(|| {
-        JsError::new("userAddress required or signer must implement getPublicKey")
-    })?;
-
-    let value = func
-        .call0(signer)
-        .map_err(|_| JsError::new("getPublicKey failed"))?;
-
-    let resolved = if value.is_instance_of::<js_sys::Promise>() {
-        JsFuture::from(
-            value
-                .dyn_into::<js_sys::Promise>()
-                .map_err(|_| JsError::new("getPublicKey failed"))?,
-        )
-        .await
-        .map_err(|_| JsError::new("getPublicKey failed"))?
-    } else {
-        value
-    };
-
-    resolved
-        .as_string()
-        .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
 }

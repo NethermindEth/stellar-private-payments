@@ -19,6 +19,7 @@ pub use client::{
     Account, Client, GvkAudit, PrivatePool, derive_asp_user_leaf,
     verify_selective_disclosure_standalone,
 };
+pub use signer::WalletSigner;
 pub use storage::Storage;
 
 use wasm_bindgen::prelude::*;
@@ -119,6 +120,20 @@ pub fn debug_logs_enabled() -> bool {
 #[wasm_bindgen]
 pub async fn dump_recent_logs() -> String {
     crate::telemetry::dump_all_logs().await
+}
+
+/// Register a storage and/or prover bridge as a telemetry sink. Consumes the
+/// bridges — call `.toHandle()` first if you still need them afterward.
+///
+/// Returns a handle that owns the registration: call `.free()` on it (or let
+/// it be garbage-collected) once the corresponding client is done, so the
+/// sink is unregistered instead of lingering forever.
+#[wasm_bindgen(js_name = registerTelemetrySinks)]
+pub fn register_telemetry_sinks(
+    storage: Option<storage::Storage>,
+    prover: Option<workers::prover::ProverBridge>,
+) -> crate::telemetry::SinkRegistration {
+    crate::telemetry::register_worker_sinks(storage.map(|storage| storage.bridge()), prover)
 }
 
 #[cfg(test)]
