@@ -2970,11 +2970,8 @@ mod tests {
 
         let local = LocalStorage::open(path.to_str().expect("temp path utf-8"))
             .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let mut audit = crate::gvk::GvkAudit::new(
-            crate::Handle::from_box(Box::new(local) as Box<dyn crate::storage::Storage>),
-            "CPOOL",
-            d_priv,
-        );
+        let mut audit =
+            crate::gvk::GvkAudit::new(crate::StorageHandle::from(local), "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.outputs[0].commitment, commitment);

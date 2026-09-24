@@ -195,7 +195,8 @@ impl ProverEngine {
 ///
 /// Native sync clients use [`LocalProver`]; browser apps may supply a
 /// worker-backed implementation over channels.
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait Prover {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error>;
 
@@ -209,4 +210,22 @@ pub trait Prover {
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<bool, Error>;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub type ProverHandle = crate::Handle<dyn Prover>;
+#[cfg(not(target_arch = "wasm32"))]
+pub type ProverHandle = crate::Handle<dyn Prover + Send + Sync>;
+
+#[cfg(target_arch = "wasm32")]
+impl<T: Prover + 'static> From<T> for ProverHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Prover>)
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Prover + Send + Sync + 'static> From<T> for ProverHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Prover + Send + Sync>)
+    }
 }

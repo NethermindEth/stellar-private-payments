@@ -32,8 +32,10 @@ use super::Client;
 use crate::{
     models::PoolExecuteResult,
     signer::{SignerHandle, WalletSigner},
-    storage::Storage,
-    workers::prover::{ProverBridge, ProverWorker},
+    workers::{
+        prover::{ProverBridge, ProverWorker},
+        storage::StorageBridge,
+    },
 };
 
 const TEST_DEPLOYMENT_JSON: &str = include_str!("../../../../deployments/testnet/deployments.json");
@@ -150,7 +152,7 @@ async fn blob_worker_url(file: &str) -> String {
 
 // The one `Storage` for this page. See `open_test_storage`.
 thread_local! {
-    static SHARED_STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
+    static SHARED_STORAGE: RefCell<Option<StorageBridge>> = const { RefCell::new(None) };
 }
 
 /// Open `Storage` against a blob-wrapped storage worker.
@@ -158,8 +160,10 @@ thread_local! {
 /// `Storage::open` must be called once per page session because OPFS holds the
 /// SQLite file with an exclusive sync access handle. Open lazily and hand out
 /// `fork()` handles to the same worker.
-async fn open_test_storage() -> Storage {
-    if let Some(handle) = SHARED_STORAGE.with(|cell| cell.borrow().as_ref().map(Storage::fork)) {
+async fn open_test_storage() -> StorageBridge {
+    if let Some(handle) =
+        SHARED_STORAGE.with(|cell| cell.borrow().as_ref().map(StorageBridge::fork_js))
+    {
         return handle;
     }
 
@@ -171,18 +175,18 @@ async fn open_test_storage() -> Storage {
         &JsValue::from_str(&worker_url),
     )
     .unwrap();
-    let storage = Storage::open(options.into())
+    let storage = StorageBridge::open(options.into())
         .await
         .expect("storage worker must start and answer its ping");
 
     // Borrow only after the await, never across it.
-    let handle = storage.fork();
+    let handle = storage.fork_js();
     SHARED_STORAGE.with(|cell| *cell.borrow_mut() = Some(storage));
     handle
 }
 
 /// Build a `Client` with a blob-wrapped prover worker.
-async fn build_test_client(storage: &Storage) -> Client {
+async fn build_test_client(storage: &StorageBridge) -> Client {
     let prover_url = blob_worker_url("prover-worker.js").await;
     let prover = ProverBridge::new(
         ProverWorker::spawner()
@@ -472,7 +476,7 @@ fn response_status(response: &PoolExecuteResult) -> String {
 
 /// Number of confirmed transaction hashes in a pool execute response.
 fn response_hash_count(response: &PoolExecuteResult) -> u32 {
-    response.hashes().len() as u32
+    u32::try_from(response.hashes().len()).expect("response hashes len")
 }
 
 /// SEP-0043 error code from a pool execute response, when present.

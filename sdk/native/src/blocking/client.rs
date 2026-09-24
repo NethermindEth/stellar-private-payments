@@ -3,7 +3,7 @@
 use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    BackgroundSync, Error, Handle, Prover, Signer, Storage, chain::StateFetcher,
+    BackgroundSync, Error, ProverHandle, SignerHandle, StorageHandle, chain::StateFetcher,
     client::Client as AsyncClient, storage::LocalStorage,
 };
 
@@ -19,11 +19,11 @@ impl Client {
     pub fn init(
         rpc_url: impl AsRef<str>,
         storage: LocalStorage,
-        prover: Handle<dyn Prover>,
+        prover: ProverHandle,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
-        let storage = Handle::from_box(Box::new(storage) as Box<dyn Storage>);
+        let storage = StorageHandle::from(storage);
         Ok(Self {
             inner: AsyncClient::init(rpc_url, storage, prover, contract_config, bootnode_url)?,
         })
@@ -36,17 +36,17 @@ impl Client {
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
-        let storage = Handle::from_box(Box::new(storage) as Box<dyn Storage>);
+        let storage = StorageHandle::from(storage);
         Ok(Self {
             inner: AsyncClient::init_readonly(rpc_url, storage, contract_config, bootnode_url)?,
         })
     }
 
-    pub fn storage(&self) -> &Handle<dyn Storage> {
+    pub fn storage(&self) -> &StorageHandle {
         self.inner.storage()
     }
 
-    pub fn prover(&self) -> &Handle<dyn Prover> {
+    pub fn prover(&self) -> &ProverHandle {
         self.inner.prover()
     }
 
@@ -77,7 +77,7 @@ impl Client {
     pub fn account(
         &self,
         user_address: NoteOwnerAddress,
-        signer: Handle<dyn Signer>,
+        signer: SignerHandle,
     ) -> Result<Account, Error> {
         Ok(Account::from_inner(
             self.inner.account(user_address, signer)?,

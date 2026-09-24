@@ -8,7 +8,7 @@ use crate::types::{
 use crate::chain::{Limits, ReadXdr, RpcError, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, Prover, Signer, Storage,
+    Error, PrivatePool, ProverHandle, SignerHandle, StorageHandle,
     chain::RpcClient,
     sync::{SyncHandle, catch_up, confirm_tx},
     types::{PrivatePoolConfig, TransactionResult},
@@ -19,11 +19,11 @@ use crate::{
 /// Construct via [`crate::Client::account`].
 pub struct Account {
     rpc: RpcClient,
-    storage: Handle<dyn Storage>,
-    prover: Handle<dyn Prover>,
+    storage: StorageHandle,
+    prover: ProverHandle,
     user_address: NoteOwnerAddress,
     signer_address: SignerAddress,
-    signer: Handle<dyn Signer>,
+    signer: SignerHandle,
     sync: SyncHandle,
     contract_config: ContractConfig,
 }
@@ -31,10 +31,10 @@ pub struct Account {
 impl Account {
     pub(crate) fn new(
         rpc: RpcClient,
-        storage: Handle<dyn Storage>,
-        prover: Handle<dyn Prover>,
+        storage: StorageHandle,
+        prover: ProverHandle,
         user_address: NoteOwnerAddress,
-        signer: Handle<dyn Signer>,
+        signer: SignerHandle,
         sync: SyncHandle,
         contract_config: ContractConfig,
     ) -> Self {
@@ -62,11 +62,11 @@ impl Account {
         &self.signer_address
     }
 
-    pub fn signer(&self) -> &Handle<dyn Signer> {
+    pub fn signer(&self) -> &SignerHandle {
         &self.signer
     }
 
-    pub fn storage(&self) -> &Handle<dyn Storage> {
+    pub fn storage(&self) -> &StorageHandle {
         &self.storage
     }
 
@@ -74,7 +74,7 @@ impl Account {
     pub async fn sync(&self) -> Result<(), Error> {
         catch_up(
             &self.rpc,
-            self.storage.as_ref(),
+            &self.storage,
             &self.contract_config,
             self.sync.bootnode_url(),
         )
@@ -280,7 +280,7 @@ impl Account {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(&self.rpc, self.storage.as_ref(), &self.contract_config)
+            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
             .await
     }
 }
@@ -399,9 +399,9 @@ mod derive_privacy_keys_tests {
         let _ = std::fs::remove_file(&db);
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
-            Handle::from_box(Box::new(
+            StorageHandle::from(
                 LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
-            ) as Box<dyn Storage>),
+            ),
             ContractConfig {
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),
@@ -417,18 +417,19 @@ mod derive_privacy_keys_tests {
         .expect("init client")
     }
 
-    fn test_signer(address: &str) -> Handle<dyn crate::Signer> {
-        Handle::from_box(Box::new(
+    fn test_signer(address: &str) -> SignerHandle {
+        SignerHandle::from(
             LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
                 .expect("build signer"),
-        ) as Box<dyn crate::Signer>)
+        )
     }
 
     /// A signer whose `sign_message` panics: proves a code path never asks it
     /// to sign.
-    struct PanicOnMessageSigner(Handle<dyn crate::Signer>);
+    struct PanicOnMessageSigner(SignerHandle);
 
-    #[async_trait::async_trait(?Send)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl crate::Signer for PanicOnMessageSigner {
         fn signer_address(&self) -> SignerAddress {
             self.0.signer_address()
@@ -474,9 +475,7 @@ mod derive_privacy_keys_tests {
         let account = client
             .account(
                 NoteOwnerAddress::new(OWNER),
-                Handle::from_box(
-                    Box::new(PanicOnMessageSigner(test_signer(OWNER))) as Box<dyn crate::Signer>
-                ),
+                SignerHandle::from(PanicOnMessageSigner(test_signer(OWNER))),
             )
             .expect("open account");
 

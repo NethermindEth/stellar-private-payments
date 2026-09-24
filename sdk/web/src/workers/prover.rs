@@ -1,6 +1,7 @@
 use crate::{
     circuits::{fetch_circuit_artifact, get_or_derive_uncompressed},
-    protocol::{CorrelatedRequest, ProverWorkerRequest, ProverWorkerResponse},
+    telemetry::WorkerTelemetryConfig,
+    workers::{CorrelatedRequest, ProverHandle},
 };
 use anyhow::{Context as _, Result, anyhow};
 use futures::{FutureExt, try_join};
@@ -9,6 +10,7 @@ use gloo_worker::{
     Registrable, Spawnable,
     oneshot::{OneshotBridge, oneshot},
 };
+use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments::{
     CircuitLockfile, Error, Prover, circuit_lock, disclosure,
@@ -33,6 +35,30 @@ use tracing::Instrument;
 use wasm_bindgen::prelude::*;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum ProverWorkerRequest {
+    Ping,
+    Transact(TransactParams),
+    Disclosure(disclosure::DisclosureProveParams),
+    VerifyDisclosureProof(DisclosureReceipt, String),
+    ConfigureCircuitsBase(String),
+    ConfigureTelemetry(WorkerTelemetryConfig),
+    DumpLogs,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum ProverWorkerResponse {
+    Pong,
+    Saved,
+    Error(String),
+    TransactPrepared(PreparedProverTx),
+    Disclosure(DisclosureReceipt),
+    DisclosureProofVerified(bool),
+    Logs(String),
+}
 
 fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
@@ -485,7 +511,7 @@ impl ProverBridge {
 
     #[wasm_bindgen(js_name = toHandle)]
     pub fn to_handle(&self) -> ProverHandle {
-        ProverHandle::from_bridge(self)
+        ProverHandle::new(self.clone().into())
     }
 
     /// New handle to the same prover worker.
@@ -496,28 +522,6 @@ impl ProverBridge {
     #[wasm_bindgen(js_name = ping)]
     pub async fn ping_js(&self) -> Result<(), JsError> {
         self.ping().await.map_err(|e| JsError::new(&e.to_string()))
-    }
-}
-
-/// Handle [`crate::client::Client::new`] takes.
-#[wasm_bindgen]
-pub struct ProverHandle(stellar_private_payments::Handle<dyn stellar_private_payments::Prover>);
-
-impl ProverHandle {
-    pub(crate) fn inner(
-        &self,
-    ) -> stellar_private_payments::Handle<dyn stellar_private_payments::Prover> {
-        self.0.clone()
-    }
-}
-
-#[wasm_bindgen]
-impl ProverHandle {
-    #[wasm_bindgen(js_name = fromBridge)]
-    pub fn from_bridge(bridge: &ProverBridge) -> ProverHandle {
-        ProverHandle(stellar_private_payments::Handle::from_box(
-            Box::new(bridge.clone()) as Box<dyn stellar_private_payments::Prover>,
-        ))
     }
 }
 
