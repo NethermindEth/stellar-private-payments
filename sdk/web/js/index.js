@@ -2,6 +2,8 @@ import init, {
   Client as WasmClient,
   DisclosureRequest,
   Storage as WasmStorage,
+  ProverBridge,
+  WalletSigner as WasmWalletSigner,
   bootnodeRequired as wasmBootnodeRequired,
   deriveAspUserLeaf as wasmDeriveAspUserLeaf,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
@@ -9,6 +11,7 @@ import init, {
   set_log_level,
   dump_recent_logs,
   debugLogsEnabled,
+  registerTelemetrySinks,
 } from '../dist/stellar_private_payments_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
@@ -16,6 +19,13 @@ const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.
 
 /** @type {'stellar-private-payments:tx-progress'} */
 export const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
+
+/**
+ * Frees a client's telemetry sinks once the client itself is garbage
+ * collected, so forgetting to call `dispose()` leaks a GC cycle at worst
+ * instead of leaking forever.
+ */
+const telemetryFinalizer = new FinalizationRegistry((telemetrySinks) => telemetrySinks.free());
 
 function requireField(value, name) {
   if (value === undefined || value === null) {
@@ -59,30 +69,20 @@ function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
   return wasmDeriveAspUserLeaf(notePublicKey, membershipBlinding);
 }
 
-function wrapAccount(wasmAccount) {
-  return {
-    get userAddress() {
-      return wasmAccount.userAddress;
-    },
-    get signerAddress() {
-      return wasmAccount.signerAddress;
-    },
-    portfolio: () => wasmAccount.portfolio(),
-    privacyKeys: () => wasmAccount.privacyKeys(),
-    derivePrivacyKeys: () => wasmAccount.derivePrivacyKeys(),
-    aspSecret: () => wasmAccount.aspSecret(),
-    userNotes: (limit) => wasmAccount.userNotes(limit),
-    isRegistered: () => wasmAccount.isRegistered(),
-    deriveAspUserLeaf: () => wasmAccount.deriveAspUserLeaf(),
-    registerPublicKeys: () => wasmAccount.registerPublicKeys(),
-    pool: (options) => wasmAccount.pool(options),
-  };
-}
-
-function wrapClient(wasmClient) {
+function wrapClient(wasmClient, telemetrySinks) {
   return {
     backgroundSync: () => wasmClient.backgroundSync(),
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
+    /**
+     * Free this client's telemetry sinks now, instead of waiting for GC to
+     * do it. Optional — {@link newClient} already registers the client for
+     * automatic cleanup.
+     */
+    dispose: () => {
+      telemetryFinalizer.unregister(wasmClient);
+      telemetrySinks.free();
+      wasmClient.free();
+    },
     sync: () => wasmClient.sync(),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
     contractConfig: () => wasmClient.contractConfig(),
@@ -101,16 +101,15 @@ function wrapClient(wasmClient) {
         );
       }
       const signerAddress = options.signerAddress ?? userAddress;
-
-      const wasmAccount = await wasmClient.account(
-        {
-          ...options,
-          userAddress,
-          signerAddress,
-        },
-        signer,
-      );
-      return wrapAccount(wasmAccount);
+      const networkPassphrase = requireField(options.networkPassphrase, 'networkPassphrase');
+      const walletSigner = new WasmWalletSigner(signer, networkPassphrase, signerAddress);
+      const signerHandle = walletSigner.toHandle();
+      try {
+        return await wasmClient.account(userAddress, signerHandle);
+      } finally {
+        signerHandle.free();
+        walletSigner.free();
+      }
     },
     recipientLookup: (address) => wasmClient.recipientLookup(address),
     aspState: () => wasmClient.aspState(),
@@ -126,7 +125,6 @@ function wrapClient(wasmClient) {
  */
 async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
-  const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
 
   const storage =
     options.storage ??
@@ -134,16 +132,35 @@ async function newClient(options) {
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
     }));
 
-  return wrapClient(
-    await WasmClient.new(
+  let prover = options.prover;
+  if (!prover) {
+    const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
+    const resolvedProverWorkerUrl = options.proverWorkerUrl ?? proverWorkerUrl;
+    if (!resolvedProverWorkerUrl.trim()) {
+      throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
+    }
+    prover = ProverBridge.spawn(resolvedProverWorkerUrl);
+    await prover.configureCircuitsBase(circuitsBaseUrl);
+    await prover.ping();
+  }
+  const proverHandle = prover.toHandle();
+  const storageHandle = await storage.toHandle();
+  const telemetrySinks = registerTelemetrySinks(storage.fork(), prover.fork());
+
+  try {
+    const wasmClient = await WasmClient.new(
       options.rpcUrl,
-      storage,
-      options.proverWorkerUrl ?? proverWorkerUrl,
+      storageHandle,
+      proverHandle,
       contractConfig,
-      circuitsBaseUrl,
       options.bootnodeUrl ?? undefined,
-    ),
-  );
+    );
+    telemetryFinalizer.register(wasmClient, telemetrySinks);
+    return wrapClient(wasmClient, telemetrySinks);
+  } finally {
+    storageHandle.free();
+    proverHandle.free();
+  }
 }
 
 /**
@@ -162,7 +179,7 @@ export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
 };
-export { DisclosureRequest, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { DisclosureRequest, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

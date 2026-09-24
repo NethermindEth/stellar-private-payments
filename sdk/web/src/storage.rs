@@ -23,6 +23,18 @@ struct OpenOptions {
     worker_url: Option<String>,
 }
 
+/// Handle [`crate::client::Client::new`] takes.
+#[wasm_bindgen]
+pub struct StorageHandle(stellar_private_payments::Handle<dyn stellar_private_payments::Storage>);
+
+impl StorageHandle {
+    pub(crate) fn inner(
+        &self,
+    ) -> stellar_private_payments::Handle<dyn stellar_private_payments::Storage> {
+        self.0.clone()
+    }
+}
+
 /// Worker-backed local persistence. Open once per page, [`fork`] for extra
 /// handles.
 #[wasm_bindgen]
@@ -91,6 +103,19 @@ impl Storage {
         Storage {
             bridge: self.bridge.clone(),
         }
+    }
+
+    /// Forks and pings before converting to a [`StorageHandle`].
+    #[wasm_bindgen(js_name = toHandle)]
+    pub async fn to_handle(&self) -> Result<StorageHandle, JsError> {
+        let bridge = self.fork().bridge;
+        bridge
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(StorageHandle(stellar_private_payments::Handle::from_box(
+            Box::new(bridge) as Box<dyn stellar_private_payments::Storage>,
+        )))
     }
 
     /// Raw storage-worker RPC. Request/response shapes match the worker

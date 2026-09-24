@@ -5,15 +5,13 @@
  * `./index.d.ts`). This module adds facade options and wrapped entry points.
  */
 import type {
+  Account as WasmAccount,
   ContractConfig,
   ContractsStateData,
   DisclosureVerificationReport,
   OperationalFeedItem,
-  PortfolioBalance,
-  PrivatePool,
+  ProverBridge,
   RecipientLookup,
-  UserNoteSummary,
-  UserPublicKeys,
 } from './crates/stellar_private_payments_web.js';
 import type { WalletSigner } from './signer.js';
 
@@ -91,9 +89,11 @@ export interface ClientNewOptions {
   rpcUrl: string;
   /** Bindgen class or plain `deployments.json` object (round-trip safe). */
   contractConfig: ContractConfig | ContractConfigInput;
-  circuitsBaseUrl: string;
+  /** Required unless `prover` is supplied (an already-configured prover skips this). */
+  circuitsBaseUrl?: string;
   storage?: Storage;
   storageWorkerUrl?: string;
+  prover?: ProverBridge;
   proverWorkerUrl?: string;
   bootnodeUrl?: string;
 }
@@ -126,20 +126,8 @@ export interface BootnodeRequiredOptions {
   contractConfig: ContractConfig | ContractConfigInput;
 }
 
-/** Wallet session returned by {@link Client.account}. */
-export interface Account {
-  readonly userAddress: string;
-  readonly signerAddress: string;
-  portfolio(): Promise<PortfolioBalance[]>;
-  privacyKeys(): Promise<UserPublicKeys>;
-  derivePrivacyKeys(): Promise<UserPublicKeys>;
-  aspSecret(): Promise<string>;
-  userNotes(limit: number): Promise<UserNoteSummary[]>;
-  isRegistered(): Promise<boolean>;
-  deriveAspUserLeaf(): Promise<string>;
-  registerPublicKeys(): Promise<string>;
-  pool(options: PoolOptions): Promise<PrivatePool>;
-}
+/** Wallet session returned by {@link Client.account}. Call `.free()` when done with it. */
+export type Account = WasmAccount;
 
 /** Deployment runtime returned by {@link Client.new}. */
 export interface Client {

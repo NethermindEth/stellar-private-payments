@@ -4,7 +4,7 @@
 //! thread (`wasm_start`) and by each web worker.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     sync::{
         Arc, Mutex, Once,
         atomic::{AtomicU64, Ordering},
@@ -344,26 +344,60 @@ enum WorkerSink {
 }
 
 thread_local! {
-    static WORKER_SINKS: RefCell<Vec<WorkerSink>> = const { RefCell::new(Vec::new()) };
+    static WORKER_SINKS: RefCell<Vec<(u64, WorkerSink)>> = const { RefCell::new(Vec::new()) };
+    static NEXT_SINK_ID: Cell<u64> = const { Cell::new(0) };
+}
+
+fn next_sink_id() -> u64 {
+    NEXT_SINK_ID.with(|id| {
+        let next = id.get();
+        id.set(next.saturating_add(1));
+        next
+    })
 }
 
 /// Register worker bridges so telemetry configuration and log dumps reach
-/// their isolates. Replaces any previously registered sink of the same kind
-/// (a new Client means new worker instances) and pushes the current
-/// configuration to the freshly registered workers.
-pub(crate) fn register_worker_sinks(storage: Option<StorageBridge>, prover: Option<ProverBridge>) {
+/// their isolates. Multiple clients (and shared bridges forked across them)
+/// can be registered concurrently; a sink is also dropped early if its
+/// worker stops responding. The returned [`SinkRegistration`] owns the
+/// sinks just registered and unregisters them on drop, so a sink never
+/// outlives the client it was forked for.
+pub(crate) fn register_worker_sinks(
+    storage: Option<StorageBridge>,
+    prover: Option<ProverBridge>,
+) -> SinkRegistration {
+    let mut ids = Vec::with_capacity(2);
     WORKER_SINKS.with(|sinks| {
         let mut sinks = sinks.borrow_mut();
         if let Some(storage) = storage {
-            sinks.retain(|sink| !matches!(sink, WorkerSink::Storage(_)));
-            sinks.push(WorkerSink::Storage(storage));
+            let id = next_sink_id();
+            sinks.push((id, WorkerSink::Storage(storage)));
+            ids.push(id);
         }
         if let Some(prover) = prover {
-            sinks.retain(|sink| !matches!(sink, WorkerSink::Prover(_)));
-            sinks.push(WorkerSink::Prover(prover));
+            let id = next_sink_id();
+            sinks.push((id, WorkerSink::Prover(prover)));
+            ids.push(id);
         }
     });
     broadcast_config(current_worker_config());
+    SinkRegistration(ids)
+}
+
+fn drop_sink(id: u64) {
+    WORKER_SINKS.with(|sinks| sinks.borrow_mut().retain(|(sink_id, _)| *sink_id != id));
+}
+
+/// Owns a set of registered worker sinks; unregisters them on drop.
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub struct SinkRegistration(Vec<u64>);
+
+impl Drop for SinkRegistration {
+    fn drop(&mut self) {
+        for id in self.0.drain(..) {
+            drop_sink(id);
+        }
+    }
 }
 
 /// The configuration pushed to worker isolates: level and reveal only.
@@ -382,8 +416,8 @@ pub(crate) fn current_worker_config() -> WorkerTelemetryConfig {
 /// Push telemetry configuration to all registered worker isolates.
 /// Fire-and-forget: diagnostics must never block or break the caller.
 pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
-    let sinks: Vec<WorkerSink> = WORKER_SINKS.with(|s| s.borrow().clone());
-    for sink in sinks {
+    let sinks: Vec<(u64, WorkerSink)> = WORKER_SINKS.with(|s| s.borrow().clone());
+    for (id, sink) in sinks {
         let config = config.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let result = match sink {
@@ -404,6 +438,7 @@ pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
             };
             if let Err(e) = result {
                 tracing::debug!("telemetry config push to worker failed: {e:#}");
+                drop_sink(id);
             }
         });
     }
@@ -415,8 +450,8 @@ pub async fn dump_all_logs() -> String {
     let mut out = String::from("== main ==\n");
     out.push_str(&dump_recent_logs());
 
-    let sinks: Vec<WorkerSink> = WORKER_SINKS.with(|s| s.borrow().clone());
-    for sink in sinks {
+    let sinks: Vec<(u64, WorkerSink)> = WORKER_SINKS.with(|s| s.borrow().clone());
+    for (id, sink) in sinks {
         let (label, result) = match sink {
             WorkerSink::Storage(bridge) => (
                 "storage-worker",
@@ -439,10 +474,13 @@ pub async fn dump_all_logs() -> String {
                     }),
             ),
         };
-        out.push_str(&format!("\n== {label} ==\n"));
+        out.push_str(&format!("\n== {label} ({id}) ==\n"));
         match result {
             Ok(logs) => out.push_str(&logs),
-            Err(e) => out.push_str(&format!("<unavailable: {e:#}>\n")),
+            Err(e) => {
+                out.push_str(&format!("<unavailable: {e:#}>\n"));
+                drop_sink(id);
+            }
         }
     }
     out
