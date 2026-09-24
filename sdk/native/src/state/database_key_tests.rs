@@ -182,7 +182,12 @@ fn wrong_or_missing_key_preserves_clean_and_hot_database() -> Result<()> {
 #[test]
 #[ignore = "child process helper for a deliberate interrupted transaction"]
 fn crash_writer() -> Result<()> {
-    let path = PathBuf::from(std::env::var("SPP_TEST_CRASH_DB")?);
+    // `cargo test -- --ignored` also runs this helper directly; only the
+    // parent test sets the database path.
+    let Some(path) = std::env::var_os("SPP_TEST_CRASH_DB") else {
+        return Ok(());
+    };
+    let path = PathBuf::from(path);
     let mut key = DatabaseKey::new([0; 32]);
     std::io::stdin().read_exact(&mut key[..])?;
     let conn = open(&path, &key, OpenPurpose::OpenExisting)?;
