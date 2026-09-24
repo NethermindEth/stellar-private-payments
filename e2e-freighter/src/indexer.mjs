@@ -33,7 +33,9 @@ export function syncedLedgerFromConsole(message) {
  */
 export function waitForIndexerProgress(page, {
   after = -1,
-  timeoutMs = 15_000,
+  // The signal only fires when two event pages land in the same ledger, so
+  // gaps of 15–20 s are normal while a transaction is proving and submitting.
+  timeoutMs = 120_000,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 } = {}) {
