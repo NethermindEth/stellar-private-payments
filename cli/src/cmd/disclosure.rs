@@ -5,6 +5,7 @@ use std::{path::Path, str::FromStr};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use stellar_private_payments::{
+    ProverHandle,
     disclosure::{DisclosureRequest, find_circuit},
     types::{DisclosureReceipt, DisclosureVerificationReport, Field, correlation_id_or_new},
 };
@@ -87,7 +88,7 @@ pub fn verify(
     let expected_vk_hash = expected_vk_hash.unwrap_or(circuit.canonical_vk_hash);
 
     let network = config.resolve_network()?;
-    let prover = disclosure_prover(config)?;
+    let prover = ProverHandle::from(disclosure_prover(config)?);
     let report = stellar_private_payments::blocking::verify_disclosure_receipt(
         &network.rpc_url,
         config.deployment.clone(),

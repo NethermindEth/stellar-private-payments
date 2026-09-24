@@ -3,15 +3,21 @@
 
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use stellar_private_payments::{
-    Error, PreparedTransaction, Signer,
     chain::{
-        Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
-        auth_sign_steps, unsigned_tx_for_signing,
+        Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, auth_sign_steps,
+        unsigned_tx_for_signing,
     },
-    types::{KeyDerivationSignature, Sensitive, SignedTransaction, SignerAddress},
+    types::{Sensitive, SignerAddress},
 };
 use wasm_bindgen::{JsCast, prelude::*};
 use wasm_bindgen_futures::JsFuture;
+
+#[cfg(target_arch = "wasm32")]
+use stellar_private_payments::{
+    Error, PreparedTransaction, Signer,
+    chain::WriteXdr,
+    types::{KeyDerivationSignature, SignedTransaction},
+};
 
 const SIGN_METHODS: &[&str] = &["signMessage", "signTransaction", "signAuthEntry"];
 
@@ -54,29 +60,28 @@ impl WalletSigner {
     }
 
     #[wasm_bindgen(js_name = toHandle)]
+    #[cfg(target_arch = "wasm32")]
     pub fn to_handle(&self) -> SignerHandle {
-        SignerHandle(stellar_private_payments::Handle::from_box(
-            Box::new(self.clone()) as Box<dyn Signer>,
-        ))
+        SignerHandle(self.clone().into())
     }
 }
 
 /// Handle [`crate::client::Client::account`] takes.
 #[wasm_bindgen]
-pub struct SignerHandle(stellar_private_payments::Handle<dyn Signer>);
+pub struct SignerHandle(stellar_private_payments::SignerHandle);
 
 impl SignerHandle {
-    pub(crate) fn inner(&self) -> stellar_private_payments::Handle<dyn Signer> {
+    pub(crate) fn inner(&self) -> stellar_private_payments::SignerHandle {
         self.0.clone()
     }
 }
 
 impl WalletSigner {
-    pub(crate) async fn sign_wallet_message(&self, message: &str) -> Result<String, JsError> {
+    pub async fn sign_message(&self, message: &str) -> Result<String, JsError> {
         self.call("signMessage", &[message.into()]).await
     }
 
-    pub(crate) async fn sign_prepared_transaction(
+    pub async fn sign_prepared_transaction(
         &self,
         prepared: &PreparedSorobanTx,
     ) -> Result<TransactionEnvelope, JsError> {
@@ -205,12 +210,14 @@ fn wallet_js_error(method: &str, stage: &str, rejection: JsValue) -> JsError {
 }
 
 /// SEP-0043 user-rejection error code.
+#[cfg(target_arch = "wasm32")]
 const SEP43_USER_REJECTED_CODE: f64 = -4.0;
 
 /// Convert a JS signer error into an SDK [`Error`]. A SEP-0043 user rejection
 /// (`code: -4`, copied onto the error by [`wallet_js_error`]) becomes
 /// [`Error::UserRejected`] so it survives the wasm/JS boundary without relying
 /// on message wording; everything else keeps the previous debug formatting.
+#[cfg(target_arch = "wasm32")]
 fn wallet_sign_error(error: JsError) -> Error {
     let value = JsValue::from(error.clone());
     let code = Reflect::get(&value, &JsValue::from_str("code"))
@@ -262,6 +269,7 @@ fn normalize_sign_result(
     Ok((signature, reported))
 }
 
+#[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
     /// The account this signer asks the wallet to sign with.
@@ -294,7 +302,7 @@ impl Signer for WalletSigner {
 
     async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
         let sig = self
-            .sign_wallet_message(message)
+            .sign_message(message)
             .await
             .map_err(wallet_sign_error)?;
         let bytes = wallet_message_signature_to_bytes(&sig).map_err(wallet_sign_error)?;
@@ -306,6 +314,7 @@ impl Signer for WalletSigner {
 ///
 /// Freighter returns base64-encoded signature bytes. Hex is accepted as a
 /// fallback for custom signers.
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn wallet_message_signature_to_bytes(signature: &str) -> Result<Vec<u8>, JsError> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -317,6 +326,7 @@ pub(crate) fn wallet_message_signature_to_bytes(signature: &str) -> Result<Vec<u
     hex_signature_to_bytes(trimmed)
 }
 /// Parse a hex signature string (with or without `0x`) into bytes.
+#[cfg(any(test, target_arch = "wasm32"))]
 fn hex_signature_to_bytes(hex: &str) -> Result<Vec<u8>, JsError> {
     let clean = hex.strip_prefix("0x").unwrap_or(hex);
     if !clean.len().is_multiple_of(2) {
@@ -567,7 +577,7 @@ mod signer_address_tests {
             "{{ signedMessage: '{SIGNATURE}', signerAddress: '{REQUESTED}' }}"
         ))
         .unwrap();
-        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
+        assert_eq!(wallet.sign_message("m").await.unwrap(), SIGNATURE);
     }
 
     /// Freighter reports success while having signed with whatever account was
@@ -579,7 +589,7 @@ mod signer_address_tests {
         ))
         .unwrap();
         let error = wallet
-            .sign_wallet_message("m")
+            .sign_message("m")
             .await
             .expect_err("a substituted signing account must be refused");
         assert!(
@@ -596,7 +606,7 @@ mod signer_address_tests {
             "{{ signedMessage: '{SIGNATURE}', signerAddress: '{SUBSTITUTED}' }}"
         ))
         .unwrap();
-        let message = error_message(wallet.sign_wallet_message("m").await.unwrap_err());
+        let message = error_message(wallet.sign_message("m").await.unwrap_err());
         assert!(!message.contains(SUBSTITUTED), "leaked: {message}");
         assert!(!message.contains(REQUESTED), "leaked: {message}");
     }
@@ -610,7 +620,7 @@ mod signer_address_tests {
         ))
         .unwrap();
         let message =
-            error_message(wallet.sign_wallet_message("m").await.unwrap_err()).to_ascii_lowercase();
+            error_message(wallet.sign_message("m").await.unwrap_err()).to_ascii_lowercase();
         for word in ["rejected", "denied", "cancelled"] {
             assert!(!message.contains(word), "'{word}' in: {message}");
         }
@@ -621,6 +631,6 @@ mod signer_address_tests {
     #[wasm_bindgen_test]
     async fn a_reply_without_an_address_is_accepted() {
         let wallet = wallet_returning(&format!("'{SIGNATURE}'")).unwrap();
-        assert_eq!(wallet.sign_wallet_message("m").await.unwrap(), SIGNATURE);
+        assert_eq!(wallet.sign_message("m").await.unwrap(), SIGNATURE);
     }
 }

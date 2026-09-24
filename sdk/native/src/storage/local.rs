@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Mutex, MutexGuard},
+};
 
 use anyhow::Context;
 
@@ -30,7 +34,7 @@ use crate::{
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
     path: PathBuf,
-    db: RefCell<SqliteStorage>,
+    db: Mutex<SqliteStorage>,
 }
 
 impl LocalStorage {
@@ -39,16 +43,16 @@ impl LocalStorage {
         let db = SqliteStorage::connect_file(&path).context("open storage")?;
         Ok(Self {
             path,
-            db: RefCell::new(db),
+            db: Mutex::new(db),
         })
     }
 
-    pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
-        self.db.borrow()
+    pub fn storage(&self) -> MutexGuard<'_, SqliteStorage> {
+        self.db.lock().expect("storage lock poisoned")
     }
 
-    pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
-        self.db.borrow_mut()
+    pub fn storage_mut(&self) -> MutexGuard<'_, SqliteStorage> {
+        self.db.lock().expect("storage lock poisoned")
     }
 
     pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>, Error> {
@@ -64,7 +68,8 @@ impl LocalStorage {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl ContractDataStorage for LocalStorage {
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
         self.storage().get_sync_metadata()
@@ -84,15 +89,16 @@ impl ContractDataStorage for LocalStorage {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> {
+    fn fork(&self) -> Result<crate::storage::StorageHandle, Error> {
         let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
         let forked = Self {
             path: self.path.clone(),
-            db: RefCell::new(db),
+            db: Mutex::new(db),
         };
-        Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
+        Ok(crate::storage::StorageHandle::from(forked))
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {

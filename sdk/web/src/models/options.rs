@@ -139,9 +139,7 @@ impl PoolOptions {
 
 #[wasm_bindgen]
 pub struct VerifyDisclosureOptions {
-    prover_worker_url: Option<String>,
     contract_config: super::config::ContractConfig,
-    circuits_base_url: String,
 }
 
 #[wasm_bindgen]
@@ -150,38 +148,19 @@ impl VerifyDisclosureOptions {
     pub fn from_value(value: JsValue) -> Result<VerifyDisclosureOptions, JsError> {
         if value.is_null() || value.is_undefined() {
             return Err(JsError::new(
-                "verifySelectiveDisclosure options with contractConfig and circuitsBaseUrl are required",
+                "verifySelectiveDisclosure options with contractConfig are required",
             ));
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Raw {
-            prover_worker_url: Option<String>,
-            circuits_base_url: String,
         }
         let contract_config = js_sys::Reflect::get(&value, &JsValue::from_str("contractConfig"))
             .map_err(|_| {
                 JsError::new("verifySelectiveDisclosure options: contractConfig is required")
             })?;
-        let raw: Raw = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            JsError::new(&format!("invalid verifySelectiveDisclosure options: {e}"))
-        })?;
         Ok(Self {
-            prover_worker_url: raw.prover_worker_url,
             contract_config: contract_config_from_js(contract_config)?,
-            circuits_base_url: raw.circuits_base_url,
         })
-    }
-
-    pub(crate) fn prover_worker_url(&self) -> Option<&str> {
-        self.prover_worker_url.as_deref()
     }
 
     pub(crate) fn contract_config(&self) -> &super::config::ContractConfig {
         &self.contract_config
-    }
-
-    pub(crate) fn circuits_base_url(&self) -> &str {
-        &self.circuits_base_url
     }
 }

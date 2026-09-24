@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use stellar_private_payments::{
-    Handle, LocalProver, LocalSigner, LocalStorage, Signer,
+    LocalProver, LocalSigner, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account, Client, PrivatePool},
     types::{
         CircuitStem, ContractConfig, EncryptionPublicKey, Field, GvkMode, NoteAmount,
@@ -81,8 +81,7 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
         PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
         GvkMode::Off,
     );
-    let prover = Handle::from_box(Box::new(LocalProver::from_artifacts(&[(stem, artifacts)])?)
-        as Box<dyn stellar_private_payments::Prover>);
+    let prover = ProverHandle::from(LocalProver::from_artifacts(&[(stem, artifacts)])?);
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
     let mut client = Client::init(
         "https://soroban-testnet.stellar.org",
@@ -112,12 +111,12 @@ pub fn test_recipient() -> TransferRecipient {
     )
 }
 
-fn test_signer() -> Result<Handle<dyn Signer>> {
-    Ok(Handle::from_box(Box::new(LocalSigner::new(
+fn test_signer() -> Result<SignerHandle> {
+    Ok(SignerHandle::from(LocalSigner::new(
         TEST_SIGNER_SECRET,
         "Test SDF Network ; September 2015",
         SignerAddress::new(USER_ADDRESS),
-    )?) as Box<dyn Signer>))
+    )?))
 }
 
 fn test_prover_artifacts() -> Result<stellar_private_payments::types::ProverArtifacts> {

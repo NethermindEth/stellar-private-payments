@@ -3,7 +3,7 @@ use anyhow::Context;
 use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    Account, Error, Handle, Prover, Signer, Storage, SyncMode,
+    Account, Error, ProverHandle, SignerHandle, StorageHandle, SyncMode,
     chain::{RpcClient, StateFetcher},
     correlation::correlation_id_or_new,
     prover::NoopProver,
@@ -17,8 +17,8 @@ use crate::{
 /// [`Self::background_sync`] to switch to background indexing.
 pub struct Client {
     rpc: RpcClient,
-    storage: Handle<dyn Storage>,
-    prover: Handle<dyn Prover>,
+    storage: StorageHandle,
+    prover: ProverHandle,
     sync: SyncHandle,
     contract_config: ContractConfig,
 }
@@ -31,8 +31,8 @@ impl Client {
     )]
     pub fn init(
         rpc_url: impl AsRef<str>,
-        storage: Handle<dyn Storage>,
-        prover: Handle<dyn Prover>,
+        storage: StorageHandle,
+        prover: ProverHandle,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
@@ -49,24 +49,24 @@ impl Client {
     /// Read-only client with a no-op prover (balance, notes, sync, portfolio).
     pub fn init_readonly(
         rpc_url: impl AsRef<str>,
-        storage: Handle<dyn Storage>,
+        storage: StorageHandle,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
         Self::init(
             rpc_url,
             storage,
-            Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>),
+            ProverHandle::from(NoopProver),
             contract_config,
             bootnode_url,
         )
     }
 
-    pub fn storage(&self) -> &Handle<dyn Storage> {
+    pub fn storage(&self) -> &StorageHandle {
         &self.storage
     }
 
-    pub fn prover(&self) -> &Handle<dyn Prover> {
+    pub fn prover(&self) -> &ProverHandle {
         &self.prover
     }
 
@@ -86,7 +86,7 @@ impl Client {
     pub async fn sync(&self) -> Result<(), Error> {
         catch_up(
             &self.rpc,
-            self.storage.as_ref(),
+            &self.storage,
             &self.contract_config,
             self.sync.bootnode_url(),
         )
@@ -153,7 +153,7 @@ impl Client {
     pub fn account(
         &self,
         user_address: NoteOwnerAddress,
-        signer: Handle<dyn Signer>,
+        signer: SignerHandle,
     ) -> Result<Account, Error> {
         Ok(Account::new(
             self.rpc.clone(),
@@ -175,7 +175,7 @@ impl Client {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(&self.rpc, self.storage.as_ref(), &self.contract_config)
+            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
             .await
     }
 }
@@ -201,9 +201,9 @@ mod divergent_session_tests {
         let _ = std::fs::remove_file(&db);
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
-            Handle::from_box(Box::new(
+            StorageHandle::from(
                 LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
-            ) as Box<dyn Storage>),
+            ),
             ContractConfig {
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),
@@ -219,11 +219,11 @@ mod divergent_session_tests {
         .expect("init client")
     }
 
-    fn test_signer(address: &str) -> Handle<dyn Signer> {
-        Handle::from_box(Box::new(
+    fn test_signer(address: &str) -> SignerHandle {
+        SignerHandle::from(
             LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(address))
                 .expect("build signer"),
-        ) as Box<dyn Signer>)
+        )
     }
 
     // A delegated session signs and pays as one account and owns notes as
