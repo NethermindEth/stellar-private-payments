@@ -135,6 +135,14 @@ debug-assertions = true
 [profile.dev.build-override]
 opt-level = 3
 
+# Argon2 is deliberately slow; unoptimized, every unlock in a debug build or
+# test takes seconds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
 # SAH lock reporting and single-handle ownership needed for hot-journal recovery.

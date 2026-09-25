@@ -4,6 +4,7 @@ mod processor;
 mod storage;
 
 pub mod database_key;
+pub mod encrypted_migration;
 pub mod password_vault;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;

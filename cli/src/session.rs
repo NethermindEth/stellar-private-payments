@@ -35,8 +35,8 @@ impl ClientSession {
         readonly: bool,
     ) -> Result<Self> {
         let storage_path = config.db_path().to_string_lossy().into_owned();
-        let storage =
-            LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+        let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
+            .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
         let bootnode_setting = storage
             .storage()
             .get_bootnode_setting()
@@ -123,8 +123,8 @@ impl ClientSession {
 /// A disclosure only client.
 pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
     let storage_path = config.db_path().to_string_lossy().into_owned();
-    let storage =
-        LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+    let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
+        .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
     let prover = Handle::from_box(Box::new(disclosure_prover(config)?) as Box<dyn Prover>);
     let bootnode_setting = storage
         .storage()

@@ -52,6 +52,10 @@ command -v python3 >/dev/null 2>&1 || die "missing 'python3'"
 
 DB="$DATA_DIR/spp.db"
 [ -f "$DB" ] || die "no wallet DB at $DB"
+# spp encrypts its database, which the sqlite3 shell cannot read. The wallet
+# holds nothing the chain and the account keys cannot rebuild.
+python3 -c 'import sys; sys.exit(open(sys.argv[1], "rb").read(16) != b"SQLite format 3\0")' "$DB" \
+  || die "$DB is encrypted, so sqlite3 cannot prune it. To start over, remove $DB and $DB.key; deployments/scripts/e2e-accounts-setup.sh onboards the accounts again."
 
 cd "$REPO_ROOT"
 

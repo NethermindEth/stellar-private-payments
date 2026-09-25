@@ -64,6 +64,46 @@ impl LocalStorage {
         })
     }
 
+    /// Open an encrypted database with its password, reading the password
+    /// record next to it (see [`crate::state::password_vault::record_path`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_with_password(storage_path: &str, password: &str) -> Result<Self, Error> {
+        use crate::state::{
+            database_key::OpenPurpose,
+            password_vault::{PasswordRecord, record_path},
+        };
+        let path = PathBuf::from(storage_path);
+        let record = record_path(&path);
+        let json = std::fs::read_to_string(&record)
+            .with_context(|| format!("read password record {}", record.display()))?;
+        let key = PasswordRecord::from_json(&json)
+            .and_then(|record| record.open(password))
+            .context("unlock encrypted storage")?;
+        let db = SqliteStorage::connect_encrypted(&path, &key, OpenPurpose::OpenExisting)?;
+        Ok(Self {
+            path,
+            db: RefCell::new(db),
+            database_key: Some(std::sync::Arc::new(key)),
+        })
+    }
+
+    /// Open encrypted storage with a key that has already unlocked it, for
+    /// callers that unlock once and open storage several times.
+    pub fn open_with_key(
+        storage_path: &str,
+        key: &crate::state::database_key::DatabaseKey,
+    ) -> Result<Self, Error> {
+        let path = PathBuf::from(storage_path);
+        let db = SqliteStorage::reopen_encrypted(&path, key).context("open encrypted storage")?;
+        Ok(Self {
+            path,
+            db: RefCell::new(db),
+            database_key: Some(std::sync::Arc::new(
+                crate::state::database_key::DatabaseKey::new(**key),
+            )),
+        })
+    }
+
     pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
         self.db.borrow()
     }

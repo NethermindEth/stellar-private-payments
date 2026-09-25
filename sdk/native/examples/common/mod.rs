@@ -12,6 +12,7 @@
 //! | `SPP_NETWORK_PASSPHRASE` | derived from `network` in deployments.json | account/pool/transact examples |
 //! | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
+//! | `SPP_PASSWORD_FILE` | — | wallets the `spp` CLI encrypted |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
@@ -35,6 +36,7 @@ use stellar_private_payments::{
     CircuitStore, Error, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
+    state::password_vault,
     types::{
         AssetDescriptor, ContractConfig, GvkAuthoritySetting, GvkMode, NoteAmount,
         NoteOwnerAddress, PoolConfigEntry, ProverArtifacts, SignerAddress,
@@ -137,9 +139,22 @@ pub fn load_contract_config() -> Result<ContractConfig, String> {
     serde_json::from_str(&contents).map_err(|e| format!("parse deployment config from {path}: {e}"))
 }
 
-/// Open the SQLite wallet from `SPP_WALLET_PATH` or the default file.
+/// Open the SQLite wallet from `SPP_WALLET_PATH` or the default file. A wallet
+/// the `spp` CLI encrypted has a `<wallet>.key` password record next to it and
+/// needs its password in the file named by `SPP_PASSWORD_FILE`.
 pub fn open_storage() -> Result<LocalStorage, String> {
     let path = env_or("SPP_WALLET_PATH", default_wallet_path());
+    if password_vault::record_path(std::path::Path::new(&path)).exists() {
+        let file = std::env::var("SPP_PASSWORD_FILE").map_err(|_| {
+            format!(
+                "wallet at {path} is encrypted; set SPP_PASSWORD_FILE to a file with its password"
+            )
+        })?;
+        let password = password_vault::read_password_file(std::path::Path::new(&file))
+            .map_err(|e| format!("{e:#}"))?;
+        return LocalStorage::open_with_password(&path, &password)
+            .map_err(|e| format!("open wallet at {path}: {e}"));
+    }
     LocalStorage::open(&path).map_err(|e| format!("open wallet at {path}: {e}"))
 }
 
