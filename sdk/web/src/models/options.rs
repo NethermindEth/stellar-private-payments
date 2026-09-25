@@ -138,51 +138,6 @@ impl PoolOptions {
 }
 
 #[wasm_bindgen]
-pub struct AccountOptions {
-    network_passphrase: String,
-    user_address: Option<String>,
-    signer_address: Option<String>,
-}
-
-#[wasm_bindgen]
-impl AccountOptions {
-    #[wasm_bindgen(js_name = fromValue)]
-    pub fn from_value(value: JsValue) -> Result<AccountOptions, JsError> {
-        if value.is_null() || value.is_undefined() {
-            return Err(JsError::new(
-                "account options with networkPassphrase are required",
-            ));
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Raw {
-            network_passphrase: String,
-            user_address: Option<String>,
-            signer_address: Option<String>,
-        }
-        let raw: Raw = serde_wasm_bindgen::from_value(value)
-            .map_err(|e| JsError::new(&format!("invalid account options: {e}")))?;
-        Ok(Self {
-            network_passphrase: raw.network_passphrase,
-            user_address: raw.user_address,
-            signer_address: raw.signer_address,
-        })
-    }
-
-    pub(crate) fn network_passphrase(&self) -> &str {
-        &self.network_passphrase
-    }
-
-    pub(crate) fn user_address(&self) -> Option<&str> {
-        self.user_address.as_deref()
-    }
-
-    pub(crate) fn signer_address(&self) -> Option<&str> {
-        self.signer_address.as_deref()
-    }
-}
-
-#[wasm_bindgen]
 pub struct VerifyDisclosureOptions {
     prover_worker_url: Option<String>,
     contract_config: super::config::ContractConfig,
