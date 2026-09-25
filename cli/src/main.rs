@@ -196,6 +196,11 @@ enum Commands {
     },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
+    /// Manage the password of the local encrypted database
+    Password {
+        #[command(subcommand)]
+        command: PasswordCommands,
+    },
     /// Show the license / distribution notice
     License,
 }
@@ -234,6 +239,17 @@ enum DisclosureCommands {
         /// Return failure when any disclosed note has already been spent
         #[arg(long)]
         require_unspent: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PasswordCommands {
+    /// Change the password: asks for the current one, then the new one twice
+    Change {
+        /// File holding the new password, for scripts (default: ask on the
+        /// terminal); --password-file supplies the current one
+        #[arg(long)]
+        new_password_file: Option<PathBuf>,
     },
 }
 
@@ -387,6 +403,11 @@ fn main() -> Result<()> {
             ),
         },
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
+        Commands::Password { command } => match command {
+            PasswordCommands::Change { new_password_file } => {
+                cmd::password::change(&config, new_password_file.as_deref(), json)
+            }
+        },
         Commands::License => cmd::license::run(&config, json),
     }
 }
