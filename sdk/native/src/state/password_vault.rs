@@ -190,6 +190,23 @@ fn decode(value: &str, len: usize) -> Result<Vec<u8>, VaultError> {
         .ok_or(VaultError::InvalidRecord)
 }
 
+/// Read a password from a file, dropping one trailing newline (`\n` or
+/// `\r\n`) so files written by `echo` or an editor work.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_password_file(path: &std::path::Path) -> Result<Zeroizing<String>> {
+    let mut password = Zeroizing::new(
+        std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read password file {}: {e}", path.display()))?,
+    );
+    if password.ends_with('\n') {
+        password.pop();
+        if password.ends_with('\r') {
+            password.pop();
+        }
+    }
+    Ok(password)
+}
+
 /// Where the password record of a native database lives: next to it, with
 /// `.key` appended to the file name.
 #[cfg(not(target_arch = "wasm32"))]

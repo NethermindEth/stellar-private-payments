@@ -1,10 +1,13 @@
 mod toml;
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::{Context, Result, bail};
 use stellar_private_payments::{
-    state::SqliteStorage,
+    state::{SqliteStorage, database_key::DatabaseKey},
     types::{ContractConfig, Sensitive},
 };
 
@@ -41,6 +44,7 @@ pub struct CliConfigOverrides {
     pub sign_as: Option<String>,
     pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
+    pub password_file: Option<PathBuf>,
 }
 
 /// Resolved (offline) CLI configuration.
@@ -68,6 +72,11 @@ pub struct CliConfig {
     /// and signs every envelope. `None` means the owner pays for itself.
     pub sign_as: Option<String>,
     pub circuits_dir: Option<PathBuf>,
+    /// File with the local database password; without it, `spp` asks on the
+    /// terminal.
+    pub password_file: Option<PathBuf>,
+    /// The database key once unlocked, so one command asks only once.
+    database_key: Arc<OnceLock<DatabaseKey>>,
 }
 
 impl CliConfig {
@@ -85,6 +94,7 @@ impl CliConfig {
             sign_as,
             stellar_config_dir,
             circuits_dir,
+            password_file,
         } = overrides;
 
         let deployment_path = deployment_path.or(file.defaults.deployment.map(toml::expand_path));
@@ -113,6 +123,8 @@ impl CliConfig {
             account,
             sign_as,
             circuits_dir,
+            password_file,
+            database_key: Arc::default(),
         })
     }
 
@@ -166,12 +178,24 @@ impl CliConfig {
             .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
     }
 
-    /// Open (creating if needed) the local sqlite database (`spp.db`).
-    pub fn open_storage(&self) -> Result<SqliteStorage> {
+    /// The key of the local database, unlocking it on first use (and creating
+    /// or encrypting it if needed).
+    pub fn database_key(&self) -> Result<&DatabaseKey> {
+        if let Some(key) = self.database_key.get() {
+            return Ok(key);
+        }
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
+        let key = crate::unlock::unlock(&self.db_path(), self.password_file.as_deref())?;
+        Ok(self.database_key.get_or_init(|| key))
+    }
+
+    /// Open the local encrypted database (`spp.db`), unlocking it first.
+    pub fn open_storage(&self) -> Result<SqliteStorage> {
+        let key = self.database_key()?;
         let path = self.db_path();
-        SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
+        SqliteStorage::reopen_encrypted(&path, key)
+            .with_context(|| format!("open {}", path.display()))
     }
 }
 

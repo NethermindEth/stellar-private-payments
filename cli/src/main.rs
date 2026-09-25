@@ -9,6 +9,7 @@ mod output;
 mod session;
 mod signer;
 mod stellar_cli;
+mod unlock;
 
 use std::path::PathBuf;
 
@@ -70,6 +71,11 @@ struct Cli {
     /// acts as the pool sender (default: --account)
     #[arg(long, global = true)]
     sign_as: Option<String>,
+
+    /// File holding the local database password, for scripts (default: ask
+    /// on the terminal)
+    #[arg(long, global = true, env = "SPP_PASSWORD_FILE")]
+    password_file: Option<PathBuf>,
 
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
@@ -274,6 +280,7 @@ fn main() -> Result<()> {
             sign_as: cli.sign_as,
             stellar_config_dir: cli.stellar_config_dir,
             circuits_dir: cli.circuits_dir,
+            password_file: cli.password_file,
         },
     )?;
 

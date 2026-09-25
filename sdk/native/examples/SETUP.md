@@ -103,8 +103,9 @@ The examples require the local SQLite wallet to contain derived privacy keys.
 Use the `spp` CLI to onboard each account. From the repository root:
 
 ```bash
-# Onboard Alice's wallet. The default data dir writes the SQLite wallet to
-# ~/.local/share/stellar-private-payments/spp.db.
+# Onboard Alice's wallet. The default data dir writes the encrypted SQLite
+# wallet to ~/.local/share/stellar-private-payments/spp.db. The first run asks
+# you to choose its password.
 cargo run --release -p stellar-private-payments-cli -- onboard \
   --account alice --accept --register
 
@@ -114,6 +115,10 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
   --account bob --accept --register \
   --data-dir ./spp-bob-wallet
 ```
+
+`spp` keeps the wallet encrypted and asks for its password on the terminal.
+Scripts can pass `--password-file <path>` (or set `SPP_PASSWORD_FILE`) instead;
+the examples below read the same file.
 
 What `spp onboard` does:
 
@@ -247,6 +252,7 @@ required by most examples; everything else has a sensible default.
 | `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
+| `SPP_PASSWORD_FILE` | — | wallets created by the `spp` CLI, which are encrypted |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
@@ -274,6 +280,7 @@ in your shell. Use the wallet paths that match the onboarding commands above:
 # Alice's wallet (created by the default spp CLI data dir).
 export STELLAR_SECRET_KEY="S..."
 export SPP_WALLET_PATH="$HOME/.local/share/stellar-private-payments/spp.db"
+export SPP_PASSWORD_FILE="$HOME/.spp-alice-password"  # holds the wallet password
 export SPP_RECIPIENT_ADDRESS="G..."  # Bob's public address
 ```
 
@@ -282,6 +289,7 @@ For the few steps that use Bob's wallet:
 ```bash
 export STELLAR_SECRET_KEY="S..."     # Bob's secret key
 export SPP_WALLET_PATH="./spp-bob-wallet/spp.db"
+export SPP_PASSWORD_FILE="$HOME/.spp-bob-password"
 ```
 
 ## Run the examples
