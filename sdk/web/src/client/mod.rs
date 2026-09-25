@@ -32,10 +32,7 @@ use crate::{
     },
     signer::WalletSigner,
     storage::Storage,
-    workers::{
-        prover::{ProverBridge, ProverWorker},
-        storage::StorageBridge,
-    },
+    workers::prover::{ProverBridge, ProverWorker},
 };
 use gloo_worker::Spawnable;
 
@@ -65,7 +62,7 @@ pub(crate) fn pool_err(error: Error) -> JsError {
 /// handles.
 #[wasm_bindgen]
 pub struct Client {
-    inner: NativeClient<StorageBridge>,
+    inner: NativeClient,
     prover: ProverBridge,
     contract_config: ContractConfig,
     background_sync_stop: Option<BackgroundSyncStop>,
@@ -137,9 +134,13 @@ impl Client {
         let prover_handle: Handle<dyn stellar_private_payments::Prover> =
             Handle::from_box(Box::new(prover.clone()) as Box<dyn stellar_private_payments::Prover>);
 
+        let storage_handle: Handle<dyn stellar_private_payments::Storage> = Handle::from_box(
+            Box::new(storage_bridge) as Box<dyn stellar_private_payments::Storage>,
+        );
+
         let inner = NativeClient::init(
             rpc_url,
-            storage_bridge,
+            storage_handle,
             prover_handle,
             contract_config.clone(),
             bootnode_url,
@@ -381,7 +382,7 @@ impl Client {
         &self,
         wallet_signer: WalletSigner,
         user_address: String,
-    ) -> Result<NativeAccount<StorageBridge>, JsError> {
+    ) -> Result<NativeAccount, JsError> {
         let signer: Handle<dyn Signer> =
             Handle::from_box(Box::new(wallet_signer) as Box<dyn Signer>);
         self.inner

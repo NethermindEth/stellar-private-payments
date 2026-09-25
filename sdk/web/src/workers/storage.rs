@@ -698,10 +698,13 @@ impl ContractDataStorage for StorageBridge {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for StorageBridge {
-    fn fork(&self) -> Result<Self, Error> {
-        Ok(Self {
+    fn fork(&self) -> Result<stellar_private_payments::Handle<dyn Storage>, Error> {
+        let forked = Self {
             bridge: self.bridge.fork(),
-        })
+        };
+        Ok(stellar_private_payments::Handle::from_box(
+            Box::new(forked) as Box<dyn Storage>
+        ))
     }
 
     async fn process_pending_state(&self) -> Result<(), Error> {

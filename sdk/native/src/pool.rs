@@ -42,22 +42,22 @@ const DISCLOSE_MAX_RETRIES: u32 = 50;
 /// Main entry point for a single privacy pool.
 ///
 /// Construct via [`crate::Account::pool`].
-pub struct PrivatePool<S> {
+pub struct PrivatePool {
     rpc: RpcClient,
     config: PrivatePoolConfig,
     core: PoolCore,
     fetcher: StateFetcher,
-    storage: S,
+    storage: Handle<dyn Storage>,
     prover: Handle<dyn Prover>,
     signer: Handle<dyn Signer>,
     sync: SyncHandle,
 }
 
-impl<S> PrivatePool<S> {
+impl PrivatePool {
     pub(crate) fn init(
         rpc: RpcClient,
         config: PrivatePoolConfig,
-        storage: S,
+        storage: Handle<dyn Storage>,
         signer: Handle<dyn Signer>,
         prover: Handle<dyn Prover>,
         sync: SyncHandle,
@@ -82,7 +82,7 @@ impl<S> PrivatePool<S> {
     }
 }
 
-impl<S: Storage> PrivatePool<S> {
+impl PrivatePool {
     // high level methods
 
     pub async fn balance(&self) -> Result<NoteAmount, Error> {
@@ -266,7 +266,7 @@ impl<S: Storage> PrivatePool<S> {
         Ok(())
     }
 
-    pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit<S>, Error> {
+    pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit, Error> {
         let pool = self
             .config
             .contract_config
@@ -361,7 +361,11 @@ impl<S: Storage> PrivatePool<S> {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(&self.rpc, &self.storage, &self.config.contract_config)
+            .ensure_synced(
+                &self.rpc,
+                self.storage.as_ref(),
+                &self.config.contract_config,
+            )
             .await
     }
 

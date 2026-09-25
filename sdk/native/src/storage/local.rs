@@ -86,12 +86,13 @@ impl ContractDataStorage for LocalStorage {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<Self, Error> {
+    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> {
         let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
-        Ok(Self {
+        let forked = Self {
             path: self.path.clone(),
             db: RefCell::new(db),
-        })
+        };
+        Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {

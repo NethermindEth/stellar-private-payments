@@ -27,7 +27,7 @@ mod common;
 use std::collections::HashMap;
 
 use stellar_private_payments::{
-    LocalStorage, Storage,
+    Storage,
     gvk::{GvkAudit, GvkOutputSlot, GvkSpentInput, GvkTxAudit},
     types::{Field, GvkMode},
     zk::gvk::GvkAuditedNote,
@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_audit(
-    storage: LocalStorage,
+    storage: stellar_private_payments::Handle<dyn Storage>,
     pool_contract_id: &str,
     d_priv: stellar_private_payments::types::Field,
     gvk_mode: GvkMode,

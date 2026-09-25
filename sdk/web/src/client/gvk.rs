@@ -5,15 +5,13 @@ use std::cell::RefCell;
 use stellar_private_payments::gvk::GvkAudit as NativeGvkAudit;
 use wasm_bindgen::prelude::*;
 
-use crate::workers::storage::StorageBridge;
-
 /// Cursor over decrypted pool transacts for admin audit.
 ///
 /// Holds the admin view private key for its lifetime; drop the cursor when
 /// finished rather than retaining it longer than needed.
 #[wasm_bindgen]
 pub struct GvkAudit {
-    inner: RefCell<NativeGvkAudit<StorageBridge>>,
+    inner: RefCell<NativeGvkAudit>,
 }
 
 #[wasm_bindgen]
@@ -38,7 +36,7 @@ impl GvkAudit {
 }
 
 impl GvkAudit {
-    pub(crate) fn new(inner: NativeGvkAudit<StorageBridge>) -> Self {
+    pub(crate) fn new(inner: NativeGvkAudit) -> Self {
         Self {
             inner: RefCell::new(inner),
         }

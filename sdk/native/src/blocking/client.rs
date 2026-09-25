@@ -3,7 +3,7 @@
 use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    BackgroundSync, Error, Handle, Prover, Signer, chain::StateFetcher,
+    BackgroundSync, Error, Handle, Prover, Signer, Storage, chain::StateFetcher,
     client::Client as AsyncClient, storage::LocalStorage,
 };
 
@@ -11,7 +11,7 @@ use super::{account::Account, runtime::block_on};
 
 /// Blocking wrapper around [`crate::Client`].
 pub struct Client {
-    inner: AsyncClient<LocalStorage>,
+    inner: AsyncClient,
 }
 
 impl Client {
@@ -23,6 +23,7 @@ impl Client {
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
+        let storage = Handle::from_box(Box::new(storage) as Box<dyn Storage>);
         Ok(Self {
             inner: AsyncClient::init(rpc_url, storage, prover, contract_config, bootnode_url)?,
         })
@@ -35,12 +36,13 @@ impl Client {
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
+        let storage = Handle::from_box(Box::new(storage) as Box<dyn Storage>);
         Ok(Self {
             inner: AsyncClient::init_readonly(rpc_url, storage, contract_config, bootnode_url)?,
         })
     }
 
-    pub fn storage(&self) -> &LocalStorage {
+    pub fn storage(&self) -> &Handle<dyn Storage> {
         self.inner.storage()
     }
 
@@ -58,7 +60,7 @@ impl Client {
 
     /// Switch to background sync mode and return an owned [`BackgroundSync`]
     /// task. Does not spawn — call [`BackgroundSync::run`] on an async runtime.
-    pub fn background_sync(&mut self) -> Result<BackgroundSync<LocalStorage>, Error> {
+    pub fn background_sync(&mut self) -> Result<BackgroundSync, Error> {
         self.inner.background_sync()
     }
 

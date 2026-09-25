@@ -17,9 +17,9 @@ use crate::{
 /// Stellar account session
 ///
 /// Construct via [`crate::Client::account`].
-pub struct Account<S: Storage> {
+pub struct Account {
     rpc: RpcClient,
-    storage: S,
+    storage: Handle<dyn Storage>,
     prover: Handle<dyn Prover>,
     user_address: NoteOwnerAddress,
     signer_address: SignerAddress,
@@ -28,10 +28,10 @@ pub struct Account<S: Storage> {
     contract_config: ContractConfig,
 }
 
-impl<S: Storage> Account<S> {
+impl Account {
     pub(crate) fn new(
         rpc: RpcClient,
-        storage: S,
+        storage: Handle<dyn Storage>,
         prover: Handle<dyn Prover>,
         user_address: NoteOwnerAddress,
         signer: Handle<dyn Signer>,
@@ -66,7 +66,7 @@ impl<S: Storage> Account<S> {
         &self.signer
     }
 
-    pub fn storage(&self) -> &S {
+    pub fn storage(&self) -> &Handle<dyn Storage> {
         &self.storage
     }
 
@@ -74,7 +74,7 @@ impl<S: Storage> Account<S> {
     pub async fn sync(&self) -> Result<(), Error> {
         catch_up(
             &self.rpc,
-            &self.storage,
+            self.storage.as_ref(),
             &self.contract_config,
             self.sync.bootnode_url(),
         )
@@ -260,7 +260,7 @@ impl<S: Storage> Account<S> {
     }
 
     /// Create an owned pool session for `pool_contract_id`.
-    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, Error> {
+    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, Error> {
         let cfg = PrivatePoolConfig {
             contract_config: self.contract_config.clone(),
             pool_contract_id: pool_contract_id.into(),
@@ -280,7 +280,7 @@ impl<S: Storage> Account<S> {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
+            .ensure_synced(&self.rpc, self.storage.as_ref(), &self.contract_config)
             .await
     }
 }
@@ -389,7 +389,7 @@ mod derive_privacy_keys_tests {
     const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
-    fn test_client() -> Client<LocalStorage> {
+    fn test_client() -> Client {
         static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let db = std::env::temp_dir().join(format!(
             "spp-derive-privacy-keys-{}-{}.sqlite",
@@ -399,7 +399,9 @@ mod derive_privacy_keys_tests {
         let _ = std::fs::remove_file(&db);
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
-            LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            Handle::from_box(Box::new(
+                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ) as Box<dyn Storage>),
             ContractConfig {
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),

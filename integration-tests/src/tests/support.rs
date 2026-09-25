@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    Prover, Signer,
+    Prover, Signer, Storage,
     types::{ContractConfig, NoteOwnerAddress, SignerAddress},
 };
 use tokio::sync::OnceCell;
@@ -42,13 +42,13 @@ async fn deployment() -> Result<&'static ContractConfig> {
 }
 
 pub struct TestSession {
-    pub account: Account<LocalStorage>,
+    pub account: Account,
     pub wallet: TestKeypair,
     pool_contract_id: String,
 }
 
 impl TestSession {
-    pub fn pool(&self) -> Result<PrivatePool<LocalStorage>> {
+    pub fn pool(&self) -> Result<PrivatePool> {
         Ok(self.account.pool(&self.pool_contract_id)?)
     }
 }
@@ -71,7 +71,9 @@ pub async fn setup() -> Result<TestSession> {
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?;
+    let storage = Handle::from_box(Box::new(LocalStorage::open(
+        storage_path.to_str().context("storage path is not UTF-8")?,
+    )?) as Box<dyn Storage>);
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store

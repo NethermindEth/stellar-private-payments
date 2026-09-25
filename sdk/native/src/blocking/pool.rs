@@ -10,7 +10,6 @@ use crate::{
     error::Error,
     plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
-    storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
 };
 
@@ -20,11 +19,11 @@ use super::runtime::block_on;
 ///
 /// Construct via [`super::Client::account`] → [`super::Account::pool`].
 pub struct PrivatePool {
-    inner: AsyncPrivatePool<LocalStorage>,
+    inner: AsyncPrivatePool,
 }
 
 impl PrivatePool {
-    pub(crate) fn from_inner(inner: AsyncPrivatePool<LocalStorage>) -> Self {
+    pub(crate) fn from_inner(inner: AsyncPrivatePool) -> Self {
         Self { inner }
     }
 
