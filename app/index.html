@@ -71,6 +71,13 @@
                         <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
                             Connect Freighter
                         </button>
+                        <button id="storage-lock-btn" type="button" data-testid="storage-lock-btn" data-state="locked" title="Unlock local data" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <rect x="5" y="11" width="14" height="10" rx="2"/>
+                                <path id="storage-lock-shackle" d="M8 11V7a4 4 0 0 1 8 0"/>
+                            </svg>
+                            <span id="storage-lock-label">Unlock</span>
+                        </button>
                         <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
                             <span id="wallet-text" class="hidden font-mono text-sm text-slate-100"></span>
                             <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -447,6 +454,29 @@
                 <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Freighter.</p>
                 <ul id="settings-signing-accounts" data-testid="settings-signing-accounts" class="mt-4 space-y-2"></ul>
                 <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-500"></p>
+            </section>
+
+            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5" data-testid="settings-local-data">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Local Data</p>
+                <p class="mt-2 text-sm text-slate-400">Your notes, keys and history are encrypted in this browser with your password.</p>
+                <div class="mt-5 space-y-5">
+                    <div>
+                        <label for="settings-auto-lock" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Lock after inactivity</label>
+                        <select id="settings-auto-lock" data-testid="settings-auto-lock" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                            <option value="5">5 minutes</option>
+                            <option value="15">15 minutes</option>
+                            <option value="30">30 minutes</option>
+                            <option value="60">1 hour</option>
+                            <option value="0">Never</option>
+                        </select>
+                    </div>
+                    <form id="settings-change-password" data-testid="settings-change-password" class="space-y-4 border-t border-white/10 pt-5" novalidate>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Change Password</p>
+                        <div id="settings-password-fields" class="space-y-4"></div>
+                        <p id="settings-password-message" data-testid="settings-password-message" role="status" class="hidden rounded-2xl px-4 py-3 text-sm"></p>
+                        <button id="settings-change-password-btn" data-testid="settings-change-password-btn" type="submit" class="inline-flex w-full items-center justify-center rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 hover:border-cyan-300/20 disabled:cursor-wait disabled:opacity-70">Change password</button>
+                    </form>
+                </div>
             </section>
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">

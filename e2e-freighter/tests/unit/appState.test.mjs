@@ -24,6 +24,9 @@ function fakePage(snapshots) {
       if (selector === '#bootnode-consent-modal') {
         return { async isVisible() { return next().bootnodeConsentVisible || false; } };
       }
+      if (selector === '[data-testid="storage-password-dialog"]') {
+        return { async isVisible() { return next().storagePasswordVisible || false; } };
+      }
       assert.equal(selector, '#onboarding-modal');
       return { async isVisible() { return next().onboardingVisible; } };
     },
@@ -38,7 +41,7 @@ const instantWait = () => {
 test('readAppLifecycle reports both observations, defaulting a missing marker', async () => {
   assert.deepEqual(
     await readAppLifecycle(fakePage([{ walletState: null, onboardingVisible: false }])),
-    { walletState: 'unknown', onboardingVisible: false, bootnodeConsentVisible: false },
+    { walletState: 'unknown', onboardingVisible: false, bootnodeConsentVisible: false, storagePasswordVisible: false },
   );
 });
 
@@ -49,7 +52,7 @@ test('readAppLifecycle reports the pre-onboarding bootnode consent', async () =>
       onboardingVisible: false,
       bootnodeConsentVisible: true,
     }])),
-    { walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: true },
+    { walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: true, storagePasswordVisible: false },
   );
 });
 
@@ -106,8 +109,20 @@ test('a lifecycle that never advances still reports a timeout with its last stat
       assert.equal(error.name, 'WaitTimeoutError');
       assert.deepEqual(error.lastObservedState, {
         walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: false,
+        storagePasswordVisible: false,
       });
       return true;
     },
+  );
+});
+
+test('readAppLifecycle reports the local-data password dialog', async () => {
+  assert.deepEqual(
+    await readAppLifecycle(fakePage([{
+      walletState: 'connecting',
+      onboardingVisible: false,
+      storagePasswordVisible: true,
+    }])),
+    { walletState: 'connecting', onboardingVisible: false, bootnodeConsentVisible: false, storagePasswordVisible: true },
   );
 });

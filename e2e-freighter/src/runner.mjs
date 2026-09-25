@@ -15,8 +15,10 @@ import { requireAppUrl } from './env.mjs';
 import { waitForCondition } from './waits.mjs';
 import {
   APP_RUNTIME_READY_TIMEOUT_MS,
+  answerStoragePassword,
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
+  isStoragePasswordVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
 } from './appState.mjs';
@@ -42,9 +44,12 @@ export {
 } from './wallet.mjs';
 
 export {
+  APP_PASSWORD,
   APP_RUNTIME_READY_TIMEOUT_MS,
+  answerStoragePassword,
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
+  isStoragePasswordVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
 } from './appState.mjs';
@@ -141,17 +146,32 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
 
-  // A missing-history check can require explicit bootnode consent before the
-  // onboarding wizard is shown. Treat both modals as an intentional paused
-  // connect state instead of timing out while `Wallet.connect()` is blocked.
+  // Opening local data asks for its password, and a missing-history check can
+  // require explicit bootnode consent, before the onboarding wizard is shown.
+  // Treat these modals as intentional paused connect states instead of timing
+  // out while `Wallet.connect()` is blocked.
+  const pausedOrReady = ({ walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible }) =>
+    walletState === 'ready' || onboardingVisible || bootnodeConsentVisible || storagePasswordVisible;
   await waitForCondition({
     operation: 'app:connect-or-setup-modal',
     timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
     observe: () => readAppLifecycle(page),
-    isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
-      walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
+    isReady: pausedOrReady,
   });
+
+  if (await isStoragePasswordVisible(page)) {
+    const mode = await answerStoragePassword(page);
+    log.info(`connectApp: answered the local-data password dialog (${mode})`);
+    await waitForCondition({
+      operation: 'app:connect-after-password',
+      timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
+      intervalMs: 100,
+      observe: () => readAppLifecycle(page),
+      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
+        walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
+    });
+  }
 
   if (await isBootnodeConsentVisible(page)) {
     log.info('connectApp: bootnode consent is open — accepting the configured default');

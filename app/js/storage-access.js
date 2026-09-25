@@ -1,0 +1,349 @@
+// Password access to the encrypted local database.
+//
+// The SDK keeps the database encrypted and unlocks it inside its storage
+// worker; this module only asks the user for the password. One dialog covers
+// the states the storage reports before use: "new" (choose a password),
+// "unencrypted" (choose one to encrypt what an earlier version stored) and
+// "locked" (enter it), plus resetting after a forgotten password.
+//
+// Locking, by hand or after inactivity, closes the storage and reloads the
+// page, which then starts locked.
+
+/** Minimum length of a new password, in characters (matches the SDK). */
+export const MIN_PASSWORD_LENGTH = 15;
+
+const AUTO_LOCK_KEY = 'spp.autoLockMinutes';
+const DEFAULT_AUTO_LOCK_MINUTES = 15;
+export const AUTO_LOCK_CHOICES = [5, 15, 30, 60, 0];
+
+const COPY = {
+    new: {
+        title: 'Protect your local data',
+        text: 'This app keeps your notes, keys and history encrypted in this browser. Choose a password to protect them; you enter it once per session.',
+        submit: 'Set password',
+        busy: 'Setting up…',
+    },
+    unencrypted: {
+        title: 'Encrypt your local data',
+        text: 'An earlier version of this app stored your notes, keys and history in this browser unencrypted. Choose a password to encrypt them; you enter it once per session.',
+        submit: 'Encrypt and continue',
+        busy: 'Encrypting…',
+    },
+    locked: {
+        title: 'Unlock your local data',
+        text: 'Enter your password to open your notes, keys and history in this browser.',
+        submit: 'Unlock',
+        busy: 'Unlocking…',
+    },
+};
+
+/**
+ * Ask for the password until `storage` is unlocked. Resolves once it is.
+ * @param {import('stellar-private-payments').Storage} storage
+ */
+export async function unlockStorage(storage) {
+    let status = await storage.status();
+    while (status !== 'unlocked') {
+        status = await showPasswordDialog(storage, status);
+    }
+}
+
+/**
+ * The dialog for one storage status. Resolves with the status after the
+ * user's action: "unlocked", or "new" after a reset.
+ */
+function showPasswordDialog(storage, status) {
+    return new Promise((resolve) => {
+        const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'storage-password-title');
+        overlay.dataset.testid = 'storage-password-dialog';
+        overlay.dataset.mode = status;
+        const card = el('div', 'w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-8 shadow-[0_24px_100px_rgba(0,0,0,0.6)]');
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        const finish = (next) => {
+            overlay.remove();
+            resolve(next);
+        };
+        renderPasswordForm(card, storage, status, finish);
+    });
+}
+
+function renderPasswordForm(card, storage, status, finish) {
+    const copy = COPY[status];
+    if (!copy) throw new Error(`unexpected storage status: ${status}`);
+    const creating = status !== 'locked';
+    card.replaceChildren();
+
+    const title = heading(copy.title);
+    const text = el('p', 'mt-3 text-sm leading-6 text-slate-300', copy.text);
+    const form = el('form', 'mt-6 space-y-4');
+    form.noValidate = true;
+
+    // Lets password managers file the password under a recognisable name.
+    const username = document.createElement('input');
+    username.type = 'text';
+    username.autocomplete = 'username';
+    username.value = 'Stellar Private Payments local data';
+    username.hidden = true;
+    username.tabIndex = -1;
+    form.appendChild(username);
+
+    const password = passwordField({
+        label: 'Password',
+        autocomplete: creating ? 'new-password' : 'current-password',
+        testid: 'storage-password-input',
+    });
+    form.appendChild(password.field);
+    let confirm = null;
+    if (creating) {
+        confirm = passwordField({
+            label: 'Confirm password',
+            autocomplete: 'new-password',
+            testid: 'storage-password-confirm',
+        });
+        form.appendChild(confirm.field);
+        form.appendChild(el('p', 'text-xs leading-5 text-slate-400',
+            `At least ${MIN_PASSWORD_LENGTH} characters. A passphrase of four or more random words works well.`));
+    }
+
+    const error = el('p', 'hidden rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100');
+    error.setAttribute('role', 'alert');
+    error.dataset.testid = 'storage-password-error';
+    form.appendChild(error);
+
+    const submit = el('button', 'inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-70', copy.submit);
+    submit.type = 'submit';
+    submit.dataset.testid = 'storage-password-submit';
+    form.appendChild(submit);
+
+    const showError = (message) => {
+        error.textContent = message;
+        error.classList.remove('hidden');
+    };
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.classList.add('hidden');
+        const value = password.input.value;
+        if (creating) {
+            if ([...value].length < MIN_PASSWORD_LENGTH) {
+                showError(`Use a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
+                password.input.focus();
+                return;
+            }
+            if (confirm.input.value !== value) {
+                showError("Passwords don't match.");
+                confirm.input.focus();
+                return;
+            }
+        } else if (!value) {
+            showError('Enter your password.');
+            password.input.focus();
+            return;
+        }
+        submit.disabled = true;
+        submit.textContent = copy.busy;
+        try {
+            if (creating) {
+                await storage.create(value);
+            } else {
+                await storage.unlock(value);
+            }
+            finish('unlocked');
+        } catch (e) {
+            submit.disabled = false;
+            submit.textContent = copy.submit;
+            if (e?.code === 'wrong-password') {
+                showError('Wrong password. Try again.');
+                password.input.value = '';
+                password.input.focus();
+            } else {
+                showError(e?.message || String(e));
+            }
+        }
+    });
+
+    card.append(eyebrow(), title, text, form);
+    if (!creating) {
+        const forgot = el('button', 'mt-4 w-full text-center text-sm text-slate-400 underline-offset-4 transition hover:text-cyan-100 hover:underline', 'Forgot password?');
+        forgot.type = 'button';
+        forgot.dataset.testid = 'storage-password-forgot';
+        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish));
+        card.appendChild(forgot);
+    }
+    password.input.focus();
+}
+
+function renderResetConfirmation(card, storage, status, finish) {
+    card.replaceChildren();
+    const title = heading('Reset local data?');
+    const text = el('div', 'mt-3 space-y-3 text-sm leading-6 text-slate-300');
+    text.append(
+        el('p', null, 'Without the password, the encrypted data in this browser cannot be opened. Resetting deletes it: your operation history and settings here are lost.'),
+        el('p', null, 'Your funds stay on-chain. After you choose a new password, connect your wallet again: your keys are derived again and your notes sync from the chain.'),
+    );
+    const error = el('p', 'mt-4 hidden rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100');
+    error.setAttribute('role', 'alert');
+
+    const reset = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-rose-400/25 px-5 py-3 text-sm font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10 disabled:cursor-wait disabled:opacity-70', 'Delete local data');
+    reset.type = 'button';
+    reset.dataset.testid = 'storage-reset-confirm';
+    const cancel = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish));
+    reset.addEventListener('click', async () => {
+        reset.disabled = true;
+        reset.textContent = 'Deleting…';
+        try {
+            await storage.reset();
+            finish('new');
+        } catch (e) {
+            reset.disabled = false;
+            reset.textContent = 'Delete local data';
+            error.textContent = e?.message || String(e);
+            error.classList.remove('hidden');
+        }
+    });
+
+    const buttons = el('div', 'mt-6 flex flex-col gap-3 sm:flex-row');
+    buttons.append(cancel, reset);
+    card.append(eyebrow(), title, text, error, buttons);
+    cancel.focus();
+}
+
+/**
+ * A labelled password input with a button that shows or hides the password.
+ * @returns {{ field: HTMLElement, input: HTMLInputElement }}
+ */
+export function passwordField({ label, autocomplete, testid, id }) {
+    const inputId = id || `password-${Math.random().toString(36).slice(2)}`;
+    const field = el('div');
+    const labelEl = el('label', 'text-xs font-medium uppercase tracking-[0.22em] text-slate-500', label);
+    labelEl.htmlFor = inputId;
+    const wrap = el('div', 'relative mt-2');
+    const input = document.createElement('input');
+    input.id = inputId;
+    input.type = 'password';
+    input.autocomplete = autocomplete;
+    input.spellcheck = false;
+    input.className = 'w-full rounded-2xl border border-white/10 bg-ink-950 py-3 pl-4 pr-12 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40';
+    if (testid) input.dataset.testid = testid;
+
+    const toggle = el('button', 'absolute inset-y-0 right-0 inline-flex w-12 items-center justify-center rounded-r-2xl text-slate-400 transition hover:text-cyan-100');
+    toggle.type = 'button';
+    toggle.dataset.testid = testid ? `${testid}-reveal` : 'password-reveal';
+    const eye = icon('M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z', true);
+    const eyeOff = icon('M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22', false);
+    eyeOff.classList.add('hidden');
+    toggle.append(eye, eyeOff);
+    const update = () => {
+        const shown = input.type === 'text';
+        toggle.setAttribute('aria-label', shown ? 'Hide password' : 'Show password');
+        toggle.setAttribute('aria-pressed', String(shown));
+        eye.classList.toggle('hidden', shown);
+        eyeOff.classList.toggle('hidden', !shown);
+    };
+    toggle.addEventListener('click', () => {
+        input.type = input.type === 'password' ? 'text' : 'password';
+        update();
+        input.focus();
+    });
+    update();
+
+    wrap.append(input, toggle);
+    field.append(labelEl, wrap);
+    return { field, input };
+}
+
+/** Minutes of inactivity before the app locks; 0 means never. */
+export function autoLockMinutes() {
+    try {
+        const stored = window.localStorage.getItem(AUTO_LOCK_KEY);
+        if (stored !== null && AUTO_LOCK_CHOICES.includes(Number(stored))) {
+            return Number(stored);
+        }
+    } catch {
+        // Storage can be unavailable; fall back to the default.
+    }
+    return DEFAULT_AUTO_LOCK_MINUTES;
+}
+
+export function setAutoLockMinutes(minutes) {
+    try {
+        window.localStorage.setItem(AUTO_LOCK_KEY, String(minutes));
+    } catch {
+        // Keeps the default for this page when storage is unavailable.
+    }
+}
+
+/**
+ * Lock with `lock` after the configured minutes without user activity.
+ * Browsers slow timers in background tabs, so the deadline is checked on a
+ * short interval and whenever the tab becomes visible again. An operation in
+ * progress (a transaction or a disclosure proof) is never interrupted: the
+ * lock waits until it finishes.
+ * @param {() => void} lock
+ */
+export function startAutoLock(lock) {
+    let lastActivity = Date.now();
+    const touch = () => { lastActivity = Date.now(); };
+    for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+        window.addEventListener(type, touch, { capture: true, passive: true });
+    }
+    const check = () => {
+        const minutes = autoLockMinutes();
+        if (minutes === 0 || Date.now() - lastActivity < minutes * 60_000 || operationInProgress()) {
+            return;
+        }
+        lock();
+    };
+    window.setInterval(check, 15_000);
+    document.addEventListener('visibilitychange', check);
+}
+
+function operationInProgress() {
+    return document.querySelector('[data-status="submitting"], [data-state="generating"]') !== null;
+}
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function eyebrow() {
+    return el('p', 'text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70', 'Local data');
+}
+
+function heading(text) {
+    const title = el('h2', 'mt-3 text-xl font-semibold tracking-tight text-white', text);
+    title.id = 'storage-password-title';
+    return title;
+}
+
+function icon(path, withPupil) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'h-4 w-4');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', path);
+    svg.appendChild(p);
+    if (withPupil) {
+        const circle = document.createElementNS(ns, 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '3');
+        svg.appendChild(circle);
+    }
+    return svg;
+}

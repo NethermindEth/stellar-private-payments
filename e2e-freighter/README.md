@@ -174,6 +174,11 @@ to the repo root), controlled by two env vars:
   for you to click.
 - `HEADFUL=1` — runs Chrome with a visible window instead of headless.
 
+The app encrypts its local data and asks for a password when the wallet
+connects. `connectApp` answers that dialog with `E2E_APP_PASSWORD`
+(default `e2e local data password`): it sets the password on a fresh
+profile, encrypts data an earlier version left unencrypted, or unlocks.
+
 ### Mode 1 — Headless, auto-approve (what CI runs)
 
 No visible window, fully unattended.
