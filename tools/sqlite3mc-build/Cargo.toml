@@ -6,6 +6,11 @@ repository.workspace = true
 license.workspace = true
 publish = false
 
+# zip is used by sdk/native/sqlite3mc_source.rs, included with #[path];
+# cargo-shear does not follow #[path] modules.
+[package.metadata.cargo-shear]
+ignored = ["zip"]
+
 [dependencies]
 hex = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }

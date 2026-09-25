@@ -8,6 +8,11 @@ publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 
+# zip is used by sqlite3mc_source.rs, which build.rs includes with #[path];
+# cargo-shear does not follow #[path] modules.
+[package.metadata.cargo-shear]
+ignored = ["zip"]
+
 [lib]
 name = "stellar_private_payments"
 
