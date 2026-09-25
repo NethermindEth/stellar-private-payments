@@ -184,8 +184,7 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
         }
     }
 
-    let opened = (|| -> anyhow::Result<SqliteStorage> {
-        match opening {
+    let opened = match opening {
             OpenRequest::Plaintext => {
                 #[cfg(target_arch = "wasm32")]
                 if SAH_POOL.with(|p| -> anyhow::Result<bool> {
@@ -211,8 +210,7 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
                 }
                 SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
             }
-        }
-    })();
+        };
     let storage = match opened {
         Ok(storage) => storage,
         Err(e) => {
