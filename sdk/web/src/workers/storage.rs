@@ -184,33 +184,7 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
         }
     }
 
-    let opened = match opening {
-        OpenRequest::Plaintext => {
-            #[cfg(target_arch = "wasm32")]
-            if SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                Ok(p.borrow()
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                    .exists("spp.db")?)
-            })? {
-                return SqliteStorage::connect_existing_plaintext("spp.db");
-            }
-            SqliteStorage::connect()
-        }
-        OpenRequest::Encrypted { key, purpose } => {
-            #[cfg(target_arch = "wasm32")]
-            {
-                let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                    Ok(p.borrow()
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                        .exists("spp.encrypted.db")?)
-                })?;
-                anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
-            }
-            SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
-        }
-    };
+    let opened = open_database(opening);
     let storage = match opened {
         Ok(storage) => storage,
         Err(e) => {
@@ -238,6 +212,37 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
     tracing::debug!("[{WORKER_NAME}] initialized");
 
     Ok(())
+}
+
+/// Open the database `opening` asks for, once the OPFS pool is installed.
+fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
+    match opening {
+        OpenRequest::Plaintext => {
+            #[cfg(target_arch = "wasm32")]
+            if SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                Ok(p.borrow()
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("OPFS unavailable"))?
+                    .exists("spp.db")?)
+            })? {
+                return SqliteStorage::connect_existing_plaintext("spp.db");
+            }
+            SqliteStorage::connect()
+        }
+        OpenRequest::Encrypted { key, purpose } => {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                    Ok(p.borrow()
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("OPFS unavailable"))?
+                        .exists("spp.encrypted.db")?)
+                })?;
+                anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
+            }
+            SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
+        }
+    }
 }
 
 fn close_storage() {
