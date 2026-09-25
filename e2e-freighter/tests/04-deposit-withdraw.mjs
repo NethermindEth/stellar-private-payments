@@ -8,6 +8,7 @@ import { deposit, withdraw } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL } from '../src/testAccount.mjs';
 
 const log = createLogger('04-deposit-withdraw');
 
@@ -20,7 +21,7 @@ export async function run(helpers) {
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '04-deposit-withdraw' });
   await gotoMoveFunds(page);
 
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const rpcUrl = RPC_URL;
   const logTag = '04-deposit-withdraw';
 
   // Start the progress listener before submitting. It stays attached through

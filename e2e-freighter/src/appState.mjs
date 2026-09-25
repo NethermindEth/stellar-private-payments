@@ -7,11 +7,11 @@ import { waitForCondition } from './waits.mjs';
 // Includes runtime and selected-pool initialization.
 export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
-export const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
-export const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
-export const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
+const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
+const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
+const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
 
-export async function readWalletState(page) {
+async function readWalletState(page) {
   return (await page.locator('body').getAttribute(WALLET_STATE_ATTRIBUTE).catch(() => null)) || 'unknown';
 }
 

@@ -13,22 +13,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
 DIST="$WEB/dist"
 
-# Load provisioned account material, if present. Values are read at compile time
-# via option_env!, so they must be exported before cargo runs. Already-exported
-# vars take precedence so CI secrets are never clobbered.
-E2E_ENV_FILE="${E2E_ENV_FILE:-$ROOT/deployments/testnet/.e2e-accounts.env}"
-if [ -f "$E2E_ENV_FILE" ]; then
-  step "loading account env from $E2E_ENV_FILE (already-exported vars win)"
-  while IFS= read -r _line || [ -n "$_line" ]; do
-    case "$_line" in ''|'#'*) continue ;; esac
-    case "$_line" in *=*) ;; *) continue ;; esac
-    _key="${_line%%=*}"
-    case "$_key" in E2E_*) ;; *) continue ;; esac
-    [ -n "${_key:-}" ] && continue
-    export "$_key=${_line#*=}"
-  done < "$E2E_ENV_FILE"
-  unset _line _key
-fi
+# Only a local `stellar/quickstart` network is supported — client::e2e_tests
+# compiles in deployments/local/deployments.json directly and hardcodes its
+# RPC/passphrase/friendbot, so this script's only job re: the network is to
+# start and stop the matching container.
+LOCAL_NETWORK_STARTED=0
 
 E2E_STATIC_ORIGIN="${E2E_STATIC_ORIGIN:-http://127.0.0.1:8099}"
 
@@ -47,7 +36,7 @@ Runs <command> with everything the sdk/web browser e2e tests need:
   2. A CORS-enabled static server is started on $E2E_STATIC_ORIGIN, rooted at
      sdk/web/dist.
   3. The server is polled for readiness before <command> starts.
-  4. E2E_STATIC_ORIGIN and any loaded account material are exported.
+  4. E2E_STATIC_ORIGIN is exported.
   5. CHROMEDRIVER is resolved from PATH when unset.
   6. scripts/e2e-preflight.sh --check --suite sdk has passed.
      E2E_SKIP_PREFLIGHT=1 bypasses it.
@@ -55,10 +44,12 @@ Runs <command> with everything the sdk/web browser e2e tests need:
 An already-running server on that origin is reused and left running. A server
 started by this script is stopped on exit.
 
+Test accounts are ephemeral: client::e2e_tests generates and friendbot-funds
+its own keypairs at run time (see e2e_tests.rs's TestAccount), so there is no
+account material to provision or load here. Only a local `stellar/quickstart`
+network is supported; this script starts and stops it itself.
+
 Environment:
-  E2E_ENV_FILE               Account material to export (default
-                             deployments/testnet/.e2e-accounts.env). Missing
-                             file is not an error.
   E2E_SKIP_PREFLIGHT         Set to 1 to bypass scripts/e2e-preflight.sh
   E2E_STATIC_ORIGIN          Origin to serve assets on (default http://127.0.0.1:8099)
   CHROMEDRIVER               Path to chromedriver (default: from PATH)
@@ -175,6 +166,10 @@ cleanup() {
   fi
   [ -n "$SERVER_LOG" ] && rm -f "$SERVER_LOG"
   [ -n "$SERVER_PY" ] && rm -f "$SERVER_PY"
+  if [ "$LOCAL_NETWORK_STARTED" -eq 1 ]; then
+    LOCAL_NETWORK_STARTED=0
+    bash "$ROOT/deployments/scripts/localnet.sh" stop
+  fi
   return 0
 }
 trap cleanup EXIT
@@ -183,6 +178,10 @@ main() {
   if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
     bash "$ROOT/scripts/e2e-preflight.sh" --check --suite sdk || exit 1
   fi
+
+  bash "$ROOT/deployments/scripts/localnet.sh" start
+  LOCAL_NETWORK_STARTED=1
+  bash "$ROOT/deployments/scripts/deploy-local.sh"
 
   ensure_dist
 
@@ -194,7 +193,7 @@ main() {
 
   export E2E_STATIC_ORIGIN
 
-  # wasm-bindgen's default 20s timeout is too short for proving + testnet.
+  # wasm-bindgen's default 20s timeout is too short for proving + chain confirmation.
   export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-600}"
   step "WASM_BINDGEN_TEST_TIMEOUT=${WASM_BINDGEN_TEST_TIMEOUT}s"
 

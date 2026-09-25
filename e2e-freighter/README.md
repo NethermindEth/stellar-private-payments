@@ -1,8 +1,10 @@
 # e2e-freighter
 
-End-to-end tests that drive the deployed app through a real Freighter
-extension in Chrome/Chromium, submitting real transactions on Stellar
-testnet.
+End-to-end tests that drive the app through a real Freighter extension in
+Chrome/Chromium, submitting real transactions against a local
+`stellar/quickstart` network started fresh for each run
+(`deployments/scripts/localnet.sh`) and deployed to
+(`deployments/scripts/deploy-local.sh`).
 
 ## Requirements
 
@@ -115,37 +117,32 @@ each command with it.)
 
 Prerequisites: the Requirements above, plus the `stellar` CLI (27 or newer —
 `spp` passes `--auto-sign` to `stellar tx sign`, which older releases don't
-know) and `trunk` installed.
+know), `trunk`, and Docker (for localnet).
 
 Fastest path — from the repo root:
 
 ```bash
-bash scripts/e2e-preflight.sh --fix   # provisions accounts + Freighter deps
+bash scripts/e2e-preflight.sh --fix   # provisions Freighter deps
 bash e2e-freighter/scripts/run-all.sh
 ```
 
-`--fix` provisions the four test accounts and the Freighter node_modules +
-vendored extension automatically. It cannot do the one-time headed
-onboarding itself (no browser automation runs from the preflight), so if
-that's still outstanding it prints the exact command to run — headed on a
-desktop session, or the `xvfb-run` form on CI/headless — and exits nonzero
-until you run it.
+`--fix` provisions the Freighter node_modules + vendored extension
+automatically. It cannot do the one-time headed onboarding itself (no browser
+automation runs from the preflight), so if that's still outstanding it prints
+the exact command to run — headed on a desktop session, or the `xvfb-run`
+form on CI/headless — and exits nonzero until you run it.
 
-The three commands under the hood, if you'd rather run them yourself:
+The two commands under the hood, if you'd rather run them yourself:
 
 ```bash
-# 1. Provision the four test accounts (A/B for the SDK suite, C/D for the
-#    Freighter tests): keypairs, friendbot funding, on-chain registration —
-#    plus a generated E2E_FREIGHTER_PASSWORD — all recorded in the
-#    git-ignored env file. Idempotent; --verify re-checks.
-deployments/scripts/e2e-accounts-setup.sh
-
-# 2. Install deps, build the Freighter profile (pinned extension, test
-#    account, onboarding completed), snapshot it, verify. Idempotent;
-#    --force rebuilds. The onboarding step needs a desktop session.
+# 1. Install deps, build the Freighter profile (pinned extension, the
+#    local custom network, onboarding completed), snapshot it, verify.
+#    Idempotent; --force rebuilds. The onboarding step needs a desktop
+#    session. Account-agnostic: no test account is baked into the profile —
+#    each test imports its own fresh ephemeral account at run time.
 bash e2e-freighter/scripts/setup.sh
 
-# 3. Run the suite.
+# 2. Run the suite.
 bash e2e-freighter/scripts/run-all.sh
 ```
 
@@ -161,10 +158,6 @@ bash e2e-freighter/scripts/run-all.sh e2e-freighter/tests/02-deposit.mjs  # subs
 npm run demo                                                              # headed, you approve
 npm run ci                                                                # headless, auto
 ```
-
-Everything self-sources the env file — no manual exporting, any shell.
-To override a variable for a run, export it first; explicit environment
-wins over the file.
 
 Single tests go through `scripts/run-e2e.sh <TEST_FILE>` (paths relative
 to the repo root), controlled by two env vars:
@@ -203,15 +196,6 @@ HEADFUL=1 APPROVE=human bash e2e-freighter/scripts/run-e2e.sh e2e-freighter/test
 
 (The npm presets run the whole suite via `run-all.sh`; for one test, call
 `run-e2e.sh` directly as above.)
-
-### Mode 4 — Smoke check only (no test logic)
-
-Just proves the pipeline reaches a connected state against the app. Useful
-as a fast sanity check.
-
-```bash
-APPROVE=auto bash e2e-freighter/scripts/run-e2e.sh --smoke
-```
 
 ## Operation building blocks and timeout policy
 
@@ -269,33 +253,30 @@ readiness, or proof worker.
 ```bash
 npm --prefix e2e-freighter run test:unit                         # helper tests
 bash e2e-freighter/scripts/serve-and-run.sh e2e-freighter/tests/04-deposit-withdraw.mjs
-APPROVE=auto bash e2e-freighter/scripts/run-e2e.sh --smoke        # connection only
-bash e2e-freighter/scripts/serve-and-run.sh e2e-freighter/tests/demo.mjs
+APPROVE=auto bash e2e-freighter/scripts/run-e2e.sh e2e-freighter/tests/01-connect.mjs   # connection only
 bash e2e-freighter/scripts/serve-and-run.sh                       # full local suite
 ```
 
-`demo.mjs` demonstrates indexer and navigation helpers without submitting a
-transaction.
-
 ## The tests
 
-Each submits real transactions on testnet — run them deliberately, not in
-a tight loop.
+Each submits real transactions against localnet — run them
+deliberately, not in a tight loop.
 
 | File | Proves |
 |---|---|
-| `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, wallet address shown, network is TESTNET. |
+| `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, wallet address shown, network is the local custom network. |
 | `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, Freighter signTransaction approval(s), and `SUCCESS` confirmation through Soroban RPC. |
 | `tests/03-rejection.mjs` | Rejecting a deposit's signing prompt: the app surfaces it as "Deposit cancelled." (not a crash or generic error) and returns to idle. |
 | `tests/04-deposit-withdraw.mjs` | Deposit then withdraw to self back-to-back: two distinct transactions, both confirmed `SUCCESS` on-chain. |
-| `tests/05-deposit-transfer.mjs` | Deposit then transfer to a second, registered account (`E2E_ACCOUNT_D_ADDRESS`): recipient resolves through the public-key registry, two distinct transactions, both confirmed `SUCCESS` on-chain. |
+| `tests/05-deposit-transfer.mjs` | Deposit then transfer to a second, freshly created and registered account: recipient resolves through the public-key registry, two distinct transactions, both confirmed `SUCCESS` on-chain. |
 | `tests/06-disclose-basic.mjs` | Deposit twice, generate a 1-note selective-disclosure receipt for an unspent note, then verify the receipt through the app's verify flow. |
 | `tests/07-disclose-spent.mjs` | Deposit three times, withdraw once, then verify a spent-note receipt and an unspent-note receipt. Supports a locally served app through `APP_URL`. |
 | `tests/08-disclose-lifecycle.mjs` | Verify 1/2/3/4-note and spent-note receipts, withdraw again, then re-verify each receipt against current chain state. Requires a locally served app. |
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. Requires a locally served app. |
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
 | `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, the pool deposit cap, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
-| `tests/12-signing-account.mjs` | Pick account D to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw it back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and both transactions are sent by D on-chain. |
+| `tests/12-signing-account.mjs` | Import a second ephemeral account and pick it to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw it back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and both transactions are sent by the signer on-chain. |
+| `tests/13-onboarding.mjs` | Drives the app's real onboarding wizard end to end for a freshly imported, unseeded account (every other test pre-seeds past it). |
 
 ## CI
 
@@ -310,16 +291,17 @@ subset on PR plus the full suite on manual dispatch.
 The sdk/web wasm-bindgen browser tests (`cargo test --target
 wasm32-unknown-unknown -p stellar-private-payments-sdk-web --
 --include-ignored`), compiled from the checked-out commit and run in
-headless Chrome against testnet. These exercise the pre-signing SDK path
-(flows signed directly with the test-account secrets — no Freighter, no
-deployed app), so they need no nullifier-detection support in the deployed
-app. Locally the same suite runs via `sdk/web/scripts/e2e-browser-test.sh`.
+headless Chrome against a local `stellar/quickstart` network. These exercise
+the pre-signing SDK path (flows signed directly with ephemeral test-account
+secrets generated at run time — no Freighter, no deployed app), so they need
+no nullifier-detection support in the deployed app. Locally the same suite
+runs via `sdk/web/scripts/e2e-browser-test.sh`.
 
 **`e2e-freighter.yml`** — Freighter suite (smoke on PR, full on demand)
 
 On pull requests to main it runs the smoke subset (01-connect,
 03-rejection, 05-deposit-transfer) as a fast gate; `workflow_dispatch`
-runs the whole suite (01-11). Both build and serve the app **from the
+runs the whole suite. Both build and serve the app **from the
 checked-out commit** on localhost:8000 via `serve-and-run.sh` — the same
 path `make freighter-e2e` uses locally — so a PR is tested against its own
 code, not whatever is deployed. Trigger the full suite with:
@@ -328,41 +310,27 @@ code, not whatever is deployed. Trigger the full suite with:
 gh workflow run e2e-freighter.yml --repo <OWNER/REPO>
 ```
 
-Overlapping runs are safe: each run provisions its own ephemeral testnet
-accounts (`--ephemeral`), so two runs cannot spend each other's notes and
-no `concurrency` group is needed. Fork PRs never run this job (untrusted
-code must not drive live testnet provisioning).
+Overlapping runs are safe: each run gets its own local `stellar/quickstart`
+container and deploys fresh contracts to it, and every test account is
+generated and funded ephemerally at run time — there is no shared state for
+two runs to interfere with, so no `concurrency` group is needed. Fork PRs
+never run this job (untrusted code must not drive a real browser/Docker
+session on our runners).
 
 ### CI credentials
 
-No GitHub secrets or environments. Each run generates ephemeral testnet
-accounts and an `E2E_FREIGHTER_PASSWORD` (Freighter wallet unlock;
-uppercase/lowercase/digit). All values are masked with `::add-mask::` and
-exported to `$GITHUB_ENV` by the provisioning step (the pool is whatever
-`deployments.json` currently names).
+No GitHub secrets or environments. Each run generates its own ephemeral
+accounts (`testAccount.mjs`) and a fixed, non-sensitive Freighter wallet
+password (`env.mjs`) — nothing is generated ahead of time to mask.
 
-### Account provisioning in CI
+### Network setup in CI
 
-Both workflows provision ephemeral per-run accounts themselves — nothing
-is assumed from pre-seeded state:
-
-1. **Provision test accounts** — runs `e2e-accounts-setup.sh --ephemeral`
-   (webclient passes `--accounts a,b`): all keypairs are generated fresh
-   on the runner, the first account is friendbot-funded as a faucet and
-   distributes XLM to the rest in a single multi-operation transaction,
-   and every account is onboarded and registered against whatever pool
-   `deployments.json` currently names. Generated keys and the Freighter
-   password are masked with `::add-mask::` and exported via `$GITHUB_ENV`.
-2. **Generate Freighter profile snapshot** — `setup.sh` runs through
-   `serve-and-run.sh --` (the `--` form), which builds+serves the app on
-   :8000, exports `APP_URL`, and stops the server afterwards. The
-   onboarding wizard navigates to `APP_URL`, so running bare `setup.sh`
-   dies with "APP_URL is not set". `xvfb-run` provides the virtual
-   display for setup's headed steps.
-
-In CI, preflight skips env-file and `chain.accounts.*` checks (vars come
-from `$GITHUB_ENV`; registration was verified during provisioning). It
-still runs `env.vars.required` and artifact checks.
+Both workflows start their own localnet: `serve-and-run.sh` invokes
+`deployments/scripts/localnet.sh` to start a `stellar/quickstart` container,
+then `deployments/scripts/deploy-local.sh` to deploy fresh contracts to it,
+before the app or tests run — and stops the container again on exit.
+Nothing is assumed from pre-seeded state. The Freighter profile snapshot is
+account-agnostic — no test account is baked in.
 
 ### Gating
 
@@ -391,8 +359,7 @@ Re-run with `--force` if the vendored extension version changes or the
 profile is corrupted. The extension comes from the upstream
 `stellar/freighter` GitHub release and is pinned in
 `scripts/fetch-extension.sh`. The onboarding step requires headed rendering,
-so run setup on a machine with a desktop session. The env file is self-sourced
-by every step.
+so run setup on a machine with a desktop session.
 
 What setup.sh does under the hood, if you ever need the pieces:
 

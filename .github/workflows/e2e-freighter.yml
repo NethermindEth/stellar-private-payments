@@ -14,16 +14,18 @@ on:
 permissions:
   contents: read
 
-# Each run provisions fresh ephemeral testnet accounts (--ephemeral in
-# e2e-accounts-setup.sh), so overlapping runs cannot interfere with each
-# other. No concurrency group needed; the old one serialised runs because
-# they used shared persistent accounts and could spend each other's notes.
+# Each run gets its own local `stellar/quickstart` container and deploys
+# fresh contracts to it (deployments/scripts/localnet.sh), and every test
+# account is generated and funded ephemerally at run time
+# (e2e-freighter/src/testAccount.mjs). No concurrency group needed; there is
+# no shared state — persistent or otherwise — for overlapping runs to
+# interfere with.
 
 jobs:
   e2e-freighter:
     name: Freighter e2e
-    # Fork PRs must not run this job: untrusted code must not drive live
-    # testnet provisioning. Same guard as e2e-webclient.yml.
+    # Fork PRs must not run this job: untrusted code must not drive a real
+    # browser/Docker session on our runners. Same guard as e2e-webclient.yml.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -55,8 +57,8 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
-      # e2e-accounts-setup.sh needs the stellar CLI to fund/register the four
-      # shared testnet accounts; without it the provisioning step below fails.
+      # deployments/scripts/deploy-local.sh needs the stellar CLI to deploy
+      # fresh contracts to the local quickstart container.
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
         with:
@@ -108,45 +110,14 @@ jobs:
       - name: Build circuit artifacts
         run: make circuits
 
-      # All four testnet accounts are generated fresh per run (account A is
-      # friendbot-funded as the faucet and distributes XLM to B/C/D), so no
-      # persistent secrets or key imports are needed.
-      - name: Provision test accounts
-        run: |
-          bash deployments/scripts/e2e-accounts-setup.sh --ephemeral
-          set -a
-          . deployments/testnet/.e2e-accounts.env
-          set +a
-          # Mask generated keys and password so they never leak in logs.
-          echo "::add-mask::$E2E_ACCOUNT_A_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_B_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_C_SECRET"
-          echo "::add-mask::$E2E_ACCOUNT_D_SECRET"
-          echo "::add-mask::$E2E_FREIGHTER_PASSWORD"
-          {
-            echo "E2E_ACCOUNT_A_ADDRESS=$E2E_ACCOUNT_A_ADDRESS"
-            echo "E2E_ACCOUNT_A_SECRET=$E2E_ACCOUNT_A_SECRET"
-            echo "E2E_ACCOUNT_B_ADDRESS=$E2E_ACCOUNT_B_ADDRESS"
-            echo "E2E_ACCOUNT_B_SECRET=$E2E_ACCOUNT_B_SECRET"
-            echo "E2E_ACCOUNT_C_ADDRESS=$E2E_ACCOUNT_C_ADDRESS"
-            echo "E2E_ACCOUNT_C_SECRET=$E2E_ACCOUNT_C_SECRET"
-            echo "E2E_ACCOUNT_D_ADDRESS=$E2E_ACCOUNT_D_ADDRESS"
-            echo "E2E_ACCOUNT_D_SECRET=$E2E_ACCOUNT_D_SECRET"
-            echo "E2E_POOL_CONTRACT=$E2E_POOL_CONTRACT"
-            echo "E2E_FREIGHTER_PASSWORD=$E2E_FREIGHTER_PASSWORD"
-          } >> "$GITHUB_ENV"
-
-
       # The profile is generated fresh on every run — nothing is stored in
       # releases, caches, or the repo. setup.sh's headed steps (Freighter
       # provisioning, app onboarding wizard) get a virtual display from xvfb.
       # The onboarding wizard navigates to APP_URL, so setup must run through
       # serve-and-run.sh (the -- form) exactly like e2e-ensure-setup.sh does
-      # locally: it builds+serves the app on :8000, exports APP_URL, and stops
-      # the server afterwards. Without it provisioning dies with
-      # "APP_URL is not set".
-      # E2E_ACCOUNT_* and E2E_FREIGHTER_PASSWORD come from the Provision step
-      # above via $GITHUB_ENV (generated fresh per run).
+      # locally: it builds+serves the app on :8000 (and starts the local
+      # network alongside it), exports APP_URL, and stops both afterwards.
+      # Without it provisioning dies with "APP_URL is not set".
       - name: Generate Freighter profile snapshot
         env:
           # Cold `make serve` (circuits + wasm SDK) takes longer than the
@@ -170,9 +141,8 @@ jobs:
       # exercise identical wiring.
       #
       # run-all.sh runs e2e-preflight.sh --check --suite freighter once before
-      # the tests. In CI, env-file and chain.accounts.* checks SKIP (vars come
-      # from $GITHUB_ENV; registration was verified during provisioning).
-      # env.vars.required and artifact checks still run.
+      # the tests (tool/artifact/browser checks; there is no account or env-file
+      # state left to verify).
       - name: Run Freighter tests
         env:
           APPROVE: auto

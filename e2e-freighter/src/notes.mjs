@@ -6,7 +6,7 @@ function asNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-export async function readNotes(page) {
+async function readNotes(page) {
   const table = page.getByTestId('advanced-notes-table');
   const rows = page.getByTestId('advanced-note');
   const [refreshSequence, refreshState, noteCount, notes] = await Promise.all([

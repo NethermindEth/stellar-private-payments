@@ -16,6 +16,7 @@ import { deposit, withdraw } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoDisclosure, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
+import { RPC_URL } from '../src/testAccount.mjs';
 
 const log = createLogger('07-disclose-spent');
 const PASSING_PROOF_CONTEXT_ROOT = { proof: 'pass', context: 'pass', root: 'pass' };
@@ -23,7 +24,7 @@ const PASSING_PROOF_CONTEXT_ROOT = { proof: 'pass', context: 'pass', root: 'pass
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '07-disclose-spent';
-  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const rpcUrl = RPC_URL;
 
   await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);

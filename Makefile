@@ -2,6 +2,7 @@
 # change where serve, build, and clean write/read compiled assets.
 DIST_DIR ?= dist
 PUBLIC_URL ?= /
+PORT ?=
 TESTS ?=
 REGEN_KEYS ?=
 GRAPHS ?=
@@ -21,7 +22,7 @@ serve: install $(if $(LOGS),sdk-web-build-debug,sdk-web-build)
 	# --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
 	# it's useful for generating a different serving path
 	unset NO_COLOR && export PUBLIC_URL=$(PUBLIC_URL) && \
-	trunk serve --dist $(DIST_DIR) --public-url $(PUBLIC_URL)
+	trunk serve --dist $(DIST_DIR) --public-url $(PUBLIC_URL) $(if $(PORT),--port $(PORT),)
 
 # Alias: `make serve-debug` == `make serve LOGS=1`.
 .PHONY: serve-debug
@@ -86,12 +87,13 @@ install:
 # and stop it again when the tests finish — pass or fail, and on Ctrl-C.
 # A server already listening on the port is reused and left running.
 #
-# Anything missing is set up first (testnet accounts, the pinned extension,
-# node_modules, the Freighter profile snapshot). Already-set-up checkouts pay
-# only a few stat calls. First-time setup provisions the profile HEADED and
-# needs a display. E2E_SKIP_SETUP=1 skips the check.
+# Anything missing is set up first (the pinned extension, node_modules, the
+# Freighter profile snapshot). Already-set-up checkouts pay only a few stat
+# calls. First-time setup provisions the profile HEADED and needs a display.
+# E2E_SKIP_SETUP=1 skips the check.
 #
-# These run against live testnet and spend real testnet XLM.
+# These run against a local `stellar/quickstart` network, started and
+# deployed to automatically — no public testnet dependency.
 #
 # An APP_URL already exported in the shell is replaced with the served one:
 # these targets own the server, so a stale export cannot silently point the
@@ -115,18 +117,6 @@ freighter-smoke: freighter-setup
 		e2e-freighter/tests/01-connect.mjs \
 		e2e-freighter/tests/03-rejection.mjs \
 		e2e-freighter/tests/05-deposit-transfer.mjs
-
-# Salvage an e2e setup broken by a redeploy: stale contracts in the CLI's
-# compiled-in config, accounts registered in a registry nothing points at,
-# wallet-DB state for pools that no longer exist. Rebuilds spp, re-registers
-# the EXISTING accounts (keypairs and funding kept), prunes dead generations,
-# then re-runs the preflight to confirm.
-#
-# PROFILE=1 also rebuilds the Freighter profile snapshot (headed, ~2 min).
-# DRY_RUN=1 prints the steps without running them.
-.PHONY: freighter-repair
-freighter-repair:
-	bash scripts/e2e-repair.sh $(if $(PROFILE),--profile) $(if $(DRY_RUN),--dry-run)
 
 .PHONY: clean
 clean:

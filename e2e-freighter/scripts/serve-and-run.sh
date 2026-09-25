@@ -26,11 +26,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
 
-PORT="${E2E_SERVE_PORT:-8000}"
+# 8000 is reserved for localnet (localnet.sh), so the app
+# listens on 8080 instead.
+PORT="${E2E_SERVE_PORT:-8080}"
 LOCAL_URL="http://localhost:$PORT"
 # Cold `make serve` builds the circuits and the wasm SDK before it listens.
 READY_TIMEOUT="${E2E_SERVE_TIMEOUT:-900}"
 SERVE_LOG="${E2E_SERVE_LOG:-$PKG_ROOT/test-results/serve.log}"
+LOCAL_NETWORK_STARTED=0
 
 EXPLICIT_URL=""
 CUSTOM_CMD=0
@@ -76,11 +79,19 @@ stop_server() {
   kill -KILL "-$server_pgid" 2>/dev/null || true
 }
 
+cleanup() {
+  stop_server
+  if [ "$LOCAL_NETWORK_STARTED" -eq 1 ]; then
+    LOCAL_NETWORK_STARTED=0
+    bash "$REPO_ROOT/deployments/scripts/localnet.sh" stop
+  fi
+}
+
 # EXIT covers the normal and failing paths; INT/TERM cover Ctrl-C and a
 # killed make, which would otherwise leave the server running.
-trap stop_server EXIT
-trap 'stop_server; exit 130' INT
-trap 'stop_server; exit 143' TERM
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 if [ -n "$EXPLICIT_URL" ]; then
   step "--url $EXPLICIT_URL — starting no server"
@@ -91,6 +102,11 @@ elif server_responds; then
   step "something is already serving $LOCAL_URL — reusing it, and leaving it running"
   export APP_URL="$LOCAL_URL"
 else
+  bash "$REPO_ROOT/deployments/scripts/localnet.sh" start
+  LOCAL_NETWORK_STARTED=1
+  bash "$REPO_ROOT/deployments/scripts/deploy-local.sh"
+  export SPP_DEPLOY_NETWORK=local
+
   mkdir -p "$(dirname "$SERVE_LOG")"
   step "starting the app server: make serve (log: $SERVE_LOG)"
   # Put make and every child it spawns in a fresh process group, so
@@ -99,9 +115,9 @@ else
   # perl's setpgrp(0,0) makes the process a new group leader, then execs the
   # command in its place. This works on both platforms.
   if command -v setsid >/dev/null 2>&1; then
-    setsid make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+    setsid make -C "$REPO_ROOT" serve "PORT=$PORT" > "$SERVE_LOG" 2>&1 &
   else
-    perl -e 'setpgrp(0,0) or die "setpgrp: $!"; exec @ARGV' make -C "$REPO_ROOT" serve > "$SERVE_LOG" 2>&1 &
+    perl -e 'setpgrp(0,0) or die "setpgrp: $!"; exec @ARGV' make -C "$REPO_ROOT" serve "PORT=$PORT" > "$SERVE_LOG" 2>&1 &
   fi
   SERVE_PID=$!
   # The child keeps this wrapper's process group from fork(2) until it is

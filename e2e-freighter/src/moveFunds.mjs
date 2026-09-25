@@ -162,7 +162,7 @@ export async function waitForSubmittedTransaction(page, {
 // Fill amount, click submit, handle the runtime confirmation dialog, drive
 // every sequential Freighter approval, capture the submitted tx hash from
 // the toast's explorer link, then confirm SUCCESS on-chain.
-export async function submitAndConfirmOperation(
+async function submitAndConfirmOperation(
   { page, context, waitForAnyFreighterApproval, approveOrWatch },
   {
     logTag,

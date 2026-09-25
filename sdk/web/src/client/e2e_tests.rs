@@ -19,23 +19,52 @@
 use std::{cell::RefCell, rc::Rc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use ed25519_dalek::SigningKey;
 use js_sys::{Function, Object, Reflect};
+use rand::rngs::OsRng;
 use stellar_private_payments::{
     chain::{Limits, LocalSigner as ChainLocalSigner, ReadXdr, TransactionEnvelope, WriteXdr},
     zk::encryption::sep53_payload,
 };
+use stellar_strkey::ed25519 as strkey_ed25519;
 use wasm_bindgen::{JsValue, closure::Closure};
 use wasm_bindgen_test::*;
 
 use super::Client;
 use crate::{models::PoolExecuteResult, storage::Storage};
 
-const TEST_DEPLOYMENT_JSON: &str = include_str!("../../../../deployments/testnet/deployments.json");
+// Only local `stellar/quickstart` is supported
+// (deployments/scripts/localnet.sh, started by e2e-browser-test.sh) — accounts
+// are ephemeral, so testnet bought no extra coverage, only friendbot limits and
+// an extra CLI dependency.
+const TEST_DEPLOYMENT_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deployments/local/deployments.json"
+));
+
+fn test_contract_config_native() -> stellar_private_payments::types::ContractConfig {
+    serde_json::from_str(TEST_DEPLOYMENT_JSON).expect("parse test deployment json")
+}
 
 fn test_contract_config() -> JsValue {
-    let config: stellar_private_payments::types::ContractConfig =
-        serde_json::from_str(TEST_DEPLOYMENT_JSON).expect("parse test deployment json");
-    serde_wasm_bindgen::to_value(&config).expect("contract config js value")
+    serde_wasm_bindgen::to_value(&test_contract_config_native()).expect("contract config js value")
+}
+
+/// The deployment's native XLM pool (`policyFlags: ["blocklist"]`, no ASP
+/// membership needed), resolved from `TEST_DEPLOYMENT_JSON` itself.
+fn test_pool_contract() -> String {
+    test_contract_config_native()
+        .pools
+        .into_iter()
+        .find(|pool| {
+            pool.enabled
+                && matches!(
+                    pool.asset,
+                    stellar_private_payments::types::AssetDescriptor::Native
+                )
+        })
+        .expect("no enabled native pool in deployments/local/deployments.json")
+        .pool_contract_id
 }
 
 fn test_circuits_base_url() -> String {
@@ -52,56 +81,116 @@ const STATIC_ORIGIN: &str = match option_env!("E2E_STATIC_ORIGIN") {
     None => "http://127.0.0.1:8099",
 };
 
-/// Testnet RPC endpoint.
-const RPC_URL: &str = match option_env!("E2E_RPC_URL") {
-    Some(url) => url,
-    None => "https://soroban-testnet.stellar.org",
-};
+/// RPC endpoint of the local `stellar/quickstart` network.
+const RPC_URL: &str = "http://localhost:8000/rpc";
 
-/// Optional archive RPC used when the public RPC no longer retains deployment
-/// history. This is test-only configuration; production callers choose their
-/// bootnode explicitly.
-const BOOTNODE_URL: Option<&str> = option_env!("E2E_BOOTNODE_URL");
+/// Friendbot endpoint of the local `stellar/quickstart` network, used to fund
+/// ephemeral test accounts.
+const FRIENDBOT_URL: &str = "http://localhost:8000/friendbot";
 
-/// Native XLM pool. `policyFlags: ["blocklist"]`, so no ASP membership leaf is
-/// required.
-const POOL_CONTRACT: &str = match option_env!("E2E_POOL_CONTRACT") {
-    Some(id) => id,
-    None => "CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV",
-};
-
-const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+/// Passphrase of the local `stellar/quickstart` standalone network.
+const NETWORK_PASSPHRASE: &str = "Standalone Network ; February 2017";
 
 /// Amount seeded per setup deposit, in stroops (0.1 XLM).
 const SEED_DEPOSIT_STROOPS: u128 = 1_000_000;
 
-#[derive(Clone, Copy)]
+/// An ephemeral Stellar keypair, generated fresh for one test and never
+/// persisted — no CLI, no shared env file, no long-lived on-chain identity.
+#[derive(Clone)]
 struct TestAccount {
     label: &'static str,
-    address: Option<&'static str>,
-    secret: Option<&'static str>,
+    address: String,
+    secret: String,
 }
 
-const ACCOUNT_A: TestAccount = TestAccount {
-    label: "A",
-    address: option_env!("E2E_ACCOUNT_A_ADDRESS"),
-    secret: option_env!("E2E_ACCOUNT_A_SECRET"),
-};
-const ACCOUNT_B: TestAccount = TestAccount {
-    label: "B",
-    address: option_env!("E2E_ACCOUNT_B_ADDRESS"),
-    secret: option_env!("E2E_ACCOUNT_B_SECRET"),
-};
-const ACCOUNT_C: TestAccount = TestAccount {
-    label: "C",
-    address: option_env!("E2E_ACCOUNT_C_ADDRESS"),
-    secret: option_env!("E2E_ACCOUNT_C_SECRET"),
-};
-const ACCOUNT_D: TestAccount = TestAccount {
-    label: "D",
-    address: option_env!("E2E_ACCOUNT_D_ADDRESS"),
-    secret: option_env!("E2E_ACCOUNT_D_SECRET"),
-};
+fn generate_account(label: &'static str) -> TestAccount {
+    let mut seed = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut seed);
+    let signing_key = SigningKey::from_bytes(&seed);
+
+    let address = strkey_ed25519::PublicKey(signing_key.verifying_key().to_bytes())
+        .to_string()
+        .to_string();
+    let secret = strkey_ed25519::PrivateKey(seed)
+        .as_unredacted()
+        .to_string()
+        .to_string();
+
+    TestAccount {
+        label,
+        address,
+        secret,
+    }
+}
+
+/// Fund `address` via the network's friendbot. XMLHttpRequest, not fetch,
+/// since this crate's circuits tests replace `window.fetch` with a shim and
+/// never restore it. `eval` only interpolates compile-time/self-generated
+/// values, never untrusted input.
+async fn fund_account(address: &str) {
+    let js = format!(
+        r#"new Promise(function (resolve, reject) {{
+             const xhr = new XMLHttpRequest();
+             xhr.open('GET', '{FRIENDBOT_URL}?addr={address}', true);
+             xhr.onload = function () {{
+               if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+               else reject(new Error('friendbot ' + xhr.status + ': ' + xhr.responseText));
+             }};
+             xhr.onerror = function () {{ reject(new Error('friendbot: network error')); }};
+             xhr.send();
+           }})"#
+    );
+    let promise = js_sys::Promise::from(js_sys::eval(&js).unwrap());
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .unwrap_or_else(|e| panic!("friendbot funding failed for {address}: {e:?}"));
+}
+
+/// Poll Horizon until `address` is visible on-chain. Friendbot's response
+/// only confirms submission — RPC's own ledger ingestion can lag behind it
+/// right after a fresh network starts, so a deposit simulated immediately
+/// after funding can hit an account RPC doesn't know about yet.
+async fn wait_for_account_visible(address: &str) {
+    let js = format!(
+        r#"(async function () {{
+             for (let attempt = 0; attempt < 30; attempt++) {{
+               const ok = await new Promise(function (resolve) {{
+                 const xhr = new XMLHttpRequest();
+                 xhr.open('GET', 'http://localhost:8000/accounts/{address}', true);
+                 xhr.onload = function () {{ resolve(xhr.status === 200); }};
+                 xhr.onerror = function () {{ resolve(false); }};
+                 xhr.send();
+               }});
+               if (ok) return;
+               await new Promise((resolve) => setTimeout(resolve, 500));
+             }}
+             throw new Error('account {address} never became visible on Horizon');
+           }})()"#
+    );
+    let promise = js_sys::Promise::from(js_sys::eval(&js).unwrap());
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+}
+
+/// Generate, fund, and return a fresh ephemeral test account.
+async fn create_funded_account(label: &'static str) -> TestAccount {
+    let account = generate_account(label);
+    fund_account(&account.address).await;
+    wait_for_account_visible(&account.address).await;
+    account
+}
+
+/// Register `account`'s public keys so it can be resolved as a transfer
+/// recipient — a passive on-chain lookup, the same call the app itself
+/// makes. Only needed for accounts used as a transfer target.
+async fn register_account(client: &Client, account: &TestAccount) {
+    let session = open_account_with(client, account, SignerMode::Signing(account.clone())).await;
+    session
+        .register_public_keys()
+        .await
+        .expect("register_public_keys must succeed");
+}
 
 /// Amount moved by the transfer/withdraw flow tests, in stroops.
 const FLOW_AMOUNT_STROOPS: u128 = 500_000;
@@ -184,7 +273,7 @@ async fn build_test_client(storage: &Storage) -> Client {
         prover_url,
         test_contract_config(),
         test_circuits_base_url(),
-        BOOTNODE_URL.map(str::to_owned),
+        None,
     )
     .await
     .expect("client construction must succeed")
@@ -196,53 +285,46 @@ async fn build_test_client(storage: &Storage) -> Client {
 /// `signAuthEntry` both reject with SEP-0043 `code: -4`, which maps to
 /// `Error::UserRejected` and surfaces to JS as `{status:"failed", code:-4}`.
 fn stub_signer() -> JsValue {
-    signer_with_mode(ACCOUNT_A, SignerMode::Sentinel)
+    signer_with_mode(&generate_account("smoke"), SignerMode::Sentinel)
 }
 
 /// Which way a test signer answers signing requests.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum SignerMode {
     /// Reject with the SEP-0043 `code: -4` sentinel.
     Sentinel,
-    /// Produce real Ed25519 signatures for setup transactions, as the account
-    /// the signer was built for.
-    Signing,
+    /// Produce real Ed25519 signatures for setup transactions, as the given
+    /// account.
+    Signing(TestAccount),
 }
 
 /// `signMessage`, shared by both modes: a real SEP-53 signature by `account`.
 ///
 /// Key derivation checks the signature against the account's own key, so a
-/// stand-in blob would be refused. The account's secret is only looked up when
-/// a message is actually signed; a session whose keys already exist never asks.
-fn sign_message_fn(account: TestAccount) -> JsValue {
+/// stand-in blob would be refused.
+fn sign_message_fn(account: &TestAccount) -> JsValue {
+    let signer = test_account_signer(account);
     Closure::wrap(Box::new(move |message: JsValue, _opts: JsValue| {
         let message = message.as_string().expect("signMessage takes a string");
-        let signature = test_account_signer(account).sign(&sep53_payload(&message));
+        let signature = signer.sign(&sep53_payload(&message));
         js_sys::Promise::resolve(&JsValue::from_str(&STANDARD.encode(signature.as_bytes())))
     })
         as Box<dyn FnMut(JsValue, JsValue) -> js_sys::Promise>)
     .into_js_value()
 }
 
-/// The test account's in-process signer, from its compiled-in secret.
-fn test_account_signer(account: TestAccount) -> ChainLocalSigner {
-    let secret = account.secret.unwrap_or_else(|| {
+/// The test account's in-process signer, from its generated secret.
+fn test_account_signer(account: &TestAccount) -> ChainLocalSigner {
+    ChainLocalSigner::from_secret(&account.secret).unwrap_or_else(|_| {
         panic!(
-            "E2E_ACCOUNT_{}_SECRET not compiled in: run via \
-             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-            account.label
-        )
-    });
-    ChainLocalSigner::from_secret(secret).unwrap_or_else(|_| {
-        panic!(
-            "E2E_ACCOUNT_{}_SECRET must be a valid S… key",
+            "generated secret for account '{}' must be valid",
             account.label
         )
     })
 }
 
 /// Build a test signer object with all three methods `WalletSigner` requires.
-fn signer_with_mode(account: TestAccount, mode: SignerMode) -> JsValue {
+fn signer_with_mode(account: &TestAccount, mode: SignerMode) -> JsValue {
     let signer = Object::new();
     Reflect::set(
         &signer,
@@ -274,14 +356,14 @@ fn signer_with_mode(account: TestAccount, mode: SignerMode) -> JsValue {
             )
             .unwrap();
         }
-        SignerMode::Signing => install_real_signing(&signer, account),
+        SignerMode::Signing(ref signing_account) => install_real_signing(&signer, signing_account),
     }
 
     signer.into()
 }
 
 /// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
-fn install_real_signing(signer: &Object, account: TestAccount) {
+fn install_real_signing(signer: &Object, account: &TestAccount) {
     let local = Rc::new(test_account_signer(account));
 
     // signTransaction(txXdrBase64, opts) -> Promise<signedTxXdrBase64>
@@ -291,7 +373,7 @@ fn install_real_signing(signer: &Object, account: TestAccount) {
         let envelope = TransactionEnvelope::from_xdr_base64(&b64, Limits::none())
             .expect("unsigned envelope must be valid xdr");
         let signed = tx_signer
-            .sign_transaction(envelope, TESTNET_PASSPHRASE)
+            .sign_transaction(envelope, NETWORK_PASSPHRASE)
             .expect("signing the envelope must succeed");
         let out = signed
             .to_xdr_base64(Limits::none())
@@ -332,7 +414,7 @@ fn install_real_signing(signer: &Object, account: TestAccount) {
 
 /// Both workers must start and answer, and `Client` must construct.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_smoke_client_construction() {
     let storage = open_test_storage().await;
 
@@ -345,7 +427,7 @@ async fn e2e_smoke_client_construction() {
 }
 
 /// Open an `Account` session using the sentinel signer.
-async fn open_account(client: &Client, account: TestAccount) -> super::Account {
+async fn open_account(client: &Client, account: &TestAccount) -> super::Account {
     open_account_with(client, account, SignerMode::Sentinel).await
 }
 
@@ -353,41 +435,33 @@ async fn open_account(client: &Client, account: TestAccount) -> super::Account {
 /// deriving and persisting its privacy keys.
 async fn open_account_with(
     client: &Client,
-    account: TestAccount,
+    account: &TestAccount,
     mode: SignerMode,
 ) -> super::Account {
-    let account = client
+    let session = client
         .account(account_options(account), signer_with_mode(account, mode))
         .await
         .expect("account session must open");
-    account
+    session
         .derive_privacy_keys()
         .await
         .expect("privacy keys must derive (stub signer answers signMessage)");
-    account
+    session
 }
 
 /// `Client::account` options naming `account` as the note owner.
-fn account_options(account: TestAccount) -> JsValue {
-    let address = account.address.unwrap_or_else(|| {
-        panic!(
-            "E2E_ACCOUNT_{}_ADDRESS not compiled in: run via \
-             `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
-            account.label
-        )
-    });
-
+fn account_options(account: &TestAccount) -> JsValue {
     let options = Object::new();
     Reflect::set(
         &options,
         &JsValue::from_str("networkPassphrase"),
-        &JsValue::from_str(TESTNET_PASSPHRASE),
+        &JsValue::from_str(NETWORK_PASSPHRASE),
     )
     .unwrap();
     Reflect::set(
         &options,
         &JsValue::from_str("userAddress"),
-        &JsValue::from_str(address),
+        &JsValue::from_str(&account.address),
     )
     .unwrap();
     options.into()
@@ -397,29 +471,34 @@ fn account_options(account: TestAccount) -> JsValue {
 /// not derive or leave keys behind under the owner. Opening the session
 /// itself always succeeds now — derivation is a separate, explicit call.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_foreign_derivation_signature_is_refused() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
+    let (owner, impostor) = futures::join!(
+        create_funded_account("foreign-derivation-owner"),
+        create_funded_account("foreign-derivation-impostor"),
+    );
+
     // Twice: had the first refusal stored keys, the second call would find
     // them, skip derivation, and succeed.
     for attempt in ["first", "second"] {
-        let signer = signer_with_mode(ACCOUNT_A, SignerMode::Sentinel);
+        let signer = signer_with_mode(&owner, SignerMode::Sentinel);
         Reflect::set(
             &signer,
             &JsValue::from_str("signMessage"),
-            &sign_message_fn(ACCOUNT_B),
+            &sign_message_fn(&impostor),
         )
         .unwrap();
 
-        let account = client
-            .account(account_options(ACCOUNT_A), signer)
+        let session = client
+            .account(account_options(&owner), signer)
             .await
             .expect("opening the session does not itself derive keys");
 
-        let error = match account.derive_privacy_keys().await {
-            Ok(_) => panic!("{attempt} derivation accepted account B's signature for account A"),
+        let error = match session.derive_privacy_keys().await {
+            Ok(_) => panic!("{attempt} derivation accepted the impostor's signature for the owner"),
             Err(error) => JsValue::from(error),
         };
         let message = Reflect::get(&error, &JsValue::from_str("message"))
@@ -495,8 +574,13 @@ fn captured_stages(capture_id: &str) -> Vec<String> {
 /// Run a deposit to completion so later tests start from real on-chain notes.
 ///
 /// Uses `SignerMode::Signing` because this is setup, not a flow under test.
-async fn seed_deposit(client: &Client, test_account: TestAccount, amount: u128) {
-    let account = open_account_with(client, test_account, SignerMode::Signing).await;
+async fn seed_deposit(client: &Client, test_account: &TestAccount, amount: u128) {
+    let account = open_account_with(
+        client,
+        test_account,
+        SignerMode::Signing(test_account.clone()),
+    )
+    .await;
     let pool = open_pool(&account).await;
 
     let response = pool
@@ -519,18 +603,24 @@ async fn seed_deposit(client: &Client, test_account: TestAccount, amount: u128) 
 
 /// A real signed+submitted deposit must leave spendable notes behind.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_seed_deposit_creates_spendable_notes() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
     client.sync().await.expect("initial sync must succeed");
 
-    let account = open_account_with(&client, ACCOUNT_A, SignerMode::Signing).await;
+    let test_account = create_funded_account("seed-deposit").await;
+    let account = open_account_with(
+        &client,
+        &test_account,
+        SignerMode::Signing(test_account.clone()),
+    )
+    .await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
 
-    seed_deposit(&client, ACCOUNT_A, SEED_DEPOSIT_STROOPS).await;
+    seed_deposit(&client, &test_account, SEED_DEPOSIT_STROOPS).await;
 
     client
         .sync()
@@ -579,13 +669,14 @@ fn assert_halted_at_signing(flow: &str, response: &PoolExecuteResult, stages: &[
 
 /// Deposit must reach prove → simulate and then halt at signing.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_deposit_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("sync must succeed");
 
-    let account = open_account(&client, ACCOUNT_B).await;
+    let test_account = create_funded_account("deposit-halt").await;
+    let account = open_account(&client, &test_account).await;
     let pool = open_pool(&account).await;
 
     let balance_before = pool.balance().await.expect("balance read before");
@@ -613,24 +704,33 @@ async fn e2e_deposit_halts_at_signing() {
 /// Transfer must spend seeded notes through prove → simulate, then halt at
 /// signing.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_transfer_halts_at_signing() {
-    let recipient = ACCOUNT_A
-        .address
-        .expect("E2E_ACCOUNT_A_ADDRESS must be compiled in");
-
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("initial sync must succeed");
 
-    // Give this test's dedicated source account something to spend.
-    seed_deposit(&client, ACCOUNT_C, SEED_DEPOSIT_STROOPS).await;
+    // The recipient (created + registered) and the source (created + seeded)
+    // are independent until the transfer call below, so build them
+    // concurrently.
+    let (recipient_account, source_account) = futures::join!(
+        async {
+            let recipient_account = create_funded_account("transfer-recipient").await;
+            register_account(&client, &recipient_account).await;
+            recipient_account
+        },
+        async {
+            let source_account = create_funded_account("transfer-source").await;
+            seed_deposit(&client, &source_account, SEED_DEPOSIT_STROOPS).await;
+            source_account
+        },
+    );
     client
         .sync()
         .await
         .expect("sync after seeding must succeed");
 
-    let account = open_account(&client, ACCOUNT_C).await;
+    let account = open_account(&client, &source_account).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
     assert!(
@@ -640,7 +740,7 @@ async fn e2e_transfer_halts_at_signing() {
 
     start_progress_capture("transfer");
     let response = pool
-        .transfer(recipient, FLOW_AMOUNT_STROOPS)
+        .transfer(&recipient_account.address, FLOW_AMOUNT_STROOPS)
         .await
         .expect("transfer must resolve at the JS boundary, not throw");
     let stages = captured_stages("transfer");
@@ -660,19 +760,20 @@ async fn e2e_transfer_halts_at_signing() {
 /// Withdraw must spend seeded notes through prove → simulate, then halt at
 /// signing.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_withdraw_halts_at_signing() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
     client.sync().await.expect("initial sync must succeed");
 
-    seed_deposit(&client, ACCOUNT_D, SEED_DEPOSIT_STROOPS).await;
+    let test_account = create_funded_account("withdraw-halt").await;
+    seed_deposit(&client, &test_account, SEED_DEPOSIT_STROOPS).await;
     client
         .sync()
         .await
         .expect("sync after seeding must succeed");
 
-    let account = open_account(&client, ACCOUNT_D).await;
+    let account = open_account(&client, &test_account).await;
     let pool = open_pool(&account).await;
     let balance_before = pool.balance().await.expect("balance read before");
     assert!(
@@ -705,7 +806,7 @@ async fn open_pool(account: &super::Account) -> super::PrivatePool {
     Reflect::set(
         &options,
         &JsValue::from_str("poolContract"),
-        &JsValue::from_str(POOL_CONTRACT),
+        &JsValue::from_str(&test_pool_contract()),
     )
     .unwrap();
     account
@@ -714,18 +815,19 @@ async fn open_pool(account: &super::Account) -> super::PrivatePool {
         .expect("pool session must open")
 }
 
-/// A full session against testnet: key derivation from the owner's SEP-53
+/// A full session against localnet: key derivation from the owner's SEP-53
 /// signature, sync, and a pool state read.
 #[wasm_bindgen_test]
-#[ignore = "needs testnet accounts and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
+#[ignore = "needs localnet and CORS server; run via e2e-browser-test.sh with -- --include-ignored"]
 async fn e2e_session_account_setup_and_sync() {
     let storage = open_test_storage().await;
     let mut client = build_test_client(&storage).await;
 
-    let account = open_account(&client, ACCOUNT_A).await;
+    let test_account = create_funded_account("session-setup").await;
+    let account = open_account(&client, &test_account).await;
     assert_eq!(
         account.user_address(),
-        ACCOUNT_A.address.unwrap(),
+        test_account.address,
         "session must bind to the configured test account"
     );
 

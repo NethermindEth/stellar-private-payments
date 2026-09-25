@@ -1,8 +1,10 @@
 // Chain-level confirmation helper. Transaction success is confirmed through
 // Soroban RPC rather than an eventually consistent UI.
 
+import { StrKey } from '@stellar/stellar-sdk';
 import { createLogger } from './logger.mjs';
-import { encodeAccountAddress } from './strkey.mjs';
+
+const encodeAccountAddress = (bytes) => StrKey.encodeEd25519PublicKey(Buffer.from(bytes));
 
 const log = createLogger('chain');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

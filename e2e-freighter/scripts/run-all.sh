@@ -29,7 +29,7 @@ arguments are taken as the subset to run (paths from the repo root or the
 e2e-freighter directory).
 
 Environment: same as run-e2e.sh (APPROVE, HEADFUL, APP_URL, E2E_LOG_LEVEL,
-the sourced deployments/testnet/.e2e-accounts.env).
+E2E_FREIGHTER_PASSWORD).
 
 Examples:
   scripts/run-all.sh                          # whole suite

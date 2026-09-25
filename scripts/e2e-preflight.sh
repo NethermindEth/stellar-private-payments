@@ -5,9 +5,8 @@
 # every dependency and piece of state the two e2e suites in this repo need:
 # the pre-signing SDK wasm-bindgen browser tests (sdk/web) and the
 # real-Freighter browser tests (e2e-freighter). Safe to run before every
-# test invocation — a bare `--check` never builds, installs, or launches a
-# browser; it only inspects the filesystem, PATH, and (for a small, capped
-# set of checks) the network.
+# test invocation — a bare `--check` never builds, installs, launches a
+# browser, or touches the network.
 #
 # Usage: scripts/e2e-preflight.sh [--check|--fix] [--suite sdk|freighter|all]
 #                                 [-h|--help]
@@ -16,9 +15,6 @@
 #   E2E_SKIP_PREFLIGHT=1     Read by callers (run-all.sh, run-e2e.sh,
 #                             e2e-browser-test.sh) to bypass entirely.
 #   E2E_PREFLIGHT_DONE       Set to 1 by this script on a successful run.
-#   E2E_SKIP_NETWORK_CHECKS=1  Skip env.rpc.reachable and chain.accounts.*
-#                             (replaces the old cache mechanism).
-#   E2E_SPP_PATH             Override path to the spp CLI binary.
 
 set -euo pipefail
 
@@ -59,10 +55,6 @@ Environment:
                          run-e2e.sh, e2e-browser-test.sh) to bypass it
                          entirely; this script itself does not read it.
   E2E_PREFLIGHT_DONE     Set to 1 by this script on a successful run.
-  E2E_SKIP_NETWORK_CHECKS=1  Skip network-cost checks (env.rpc.reachable,
-                             chain.accounts.funded, chain.accounts.registered).
-  E2E_SPP_PATH           Override path to the spp CLI binary (default:
-                         target/release/spp).
 
 Examples:
   scripts/e2e-preflight.sh --check --suite sdk
@@ -100,31 +92,6 @@ case "$SUITE" in
   sdk|freighter|all) ;;
   *) usage_error "--suite must be one of: sdk, freighter, all" ;;
 esac
-
-# ---------------------------------------------------------------------------
-# Env-file helpers
-# ---------------------------------------------------------------------------
-env_file_path() {
-  printf '%s' "${E2E_ENV_FILE:-$REPO_ROOT/deployments/testnet/.e2e-accounts.env}"
-}
-
-env_var_value() {
-  local key="$1" f
-  if [ -n "${!key:-}" ]; then
-    printf '%s' "${!key}"
-    return 0
-  fi
-  f="$(env_file_path)"
-  if [ -f "$f" ]; then
-    ( set -a; . "$f" >/dev/null 2>&1; if [ -n "${!key:-}" ]; then printf '%s' "${!key}"; else exit 1; fi )
-    return $?
-  fi
-  return 1
-}
-
-env_var_present() {
-  env_var_value "$1" >/dev/null
-}
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -233,76 +200,6 @@ resolve_profile_tmpdir_base() {
 }
 
 # ---------------------------------------------------------------------------
-# Env key helpers (shared by env group checks and CI skip logic)
-# ---------------------------------------------------------------------------
-set_required_keys_for_suite() {
-  case "$SUITE" in
-    sdk)
-      REQUIRED_KEYS_FOR_SUITE=(E2E_ACCOUNT_A_ADDRESS E2E_ACCOUNT_A_SECRET E2E_ACCOUNT_B_ADDRESS) ;;
-    freighter)
-      REQUIRED_KEYS_FOR_SUITE=(E2E_FREIGHTER_PASSWORD E2E_ACCOUNT_C_SECRET E2E_ACCOUNT_C_ADDRESS E2E_ACCOUNT_D_SECRET E2E_ACCOUNT_D_ADDRESS) ;;
-    *)
-      REQUIRED_KEYS_FOR_SUITE=(
-        E2E_ACCOUNT_A_ADDRESS E2E_ACCOUNT_A_SECRET E2E_ACCOUNT_B_ADDRESS
-        E2E_FREIGHTER_PASSWORD E2E_ACCOUNT_C_SECRET E2E_ACCOUNT_C_ADDRESS E2E_ACCOUNT_D_SECRET E2E_ACCOUNT_D_ADDRESS
-      ) ;;
-  esac
-}
-
-ci_env_already_satisfied() {
-  is_ci || return 1
-  set_required_keys_for_suite
-  local key
-  for key in "${REQUIRED_KEYS_FOR_SUITE[@]}"; do
-    [ -n "${!key:-}" ] || return 1
-  done
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# Chain verify-once helper (shared by chain.accounts.funded and .registered)
-# ---------------------------------------------------------------------------
-CHAIN_VERIFY_ATTEMPTED=0
-CHAIN_VERIFY_STATUS=""
-CHAIN_VERIFY_DETAIL=""
-CHAIN_HEAL_ATTEMPTED=0
-CHAIN_HEAL_LAST_STATUS=0
-
-run_chain_verify_once() {
-  if [ "$CHAIN_VERIFY_ATTEMPTED" -eq 1 ]; then
-    return 0
-  fi
-  CHAIN_VERIFY_ATTEMPTED=1
-  local err_file err
-  err_file="$(mktemp)"
-  if bash "$REPO_ROOT/deployments/scripts/e2e-accounts-setup.sh" --verify >/dev/null 2>"$err_file"; then
-    CHAIN_VERIFY_STATUS="OK"
-    CHAIN_VERIFY_DETAIL="verified"
-  else
-    err="$(tail -c 400 "$err_file" 2>/dev/null | tr '\n' ' ' \
-      | sed -E 's/S[A-Z2-7]{55}/[REDACTED_SECRET]/g')"
-    CHAIN_VERIFY_STATUS="MISSING"
-    CHAIN_VERIFY_DETAIL="${err:-e2e-accounts-setup.sh --verify failed (see stderr)}"
-  fi
-  rm -f "$err_file"
-  return 0
-}
-
-heal_chain_accounts() {
-  if [ "$CHAIN_HEAL_ATTEMPTED" -eq 1 ]; then
-    return "$CHAIN_HEAL_LAST_STATUS"
-  fi
-  CHAIN_HEAL_ATTEMPTED=1
-  if bash "$REPO_ROOT/deployments/scripts/e2e-accounts-setup.sh"; then
-    CHAIN_HEAL_LAST_STATUS=0
-  else
-    CHAIN_HEAL_LAST_STATUS=1
-  fi
-  CHAIN_VERIFY_ATTEMPTED=0
-  return "$CHAIN_HEAL_LAST_STATUS"
-}
-
-# ---------------------------------------------------------------------------
 # SDK dist heal-once helper
 # ---------------------------------------------------------------------------
 SDK_DIST_HEAL_ATTEMPTED=0
@@ -384,12 +281,6 @@ check_tool_stellar() {
   case "$major" in ''|*[!0-9]*) _STATUS="OK"; _DETAIL="$v (version unknown, could not parse)" ;; *)
     if [ "$major" -ge 27 ]; then _STATUS="OK"; _DETAIL="$v"; else _STATUS="MISSING"; _DETAIL="$v is older than the required 27+ (spp passes --auto-sign to 'stellar tx sign', which older releases do not know)"; fi ;; esac; }
 
-check_tool_spp() {
-  if [ -n "${E2E_SPP_PATH:-}" ]; then
-    if [ -x "$E2E_SPP_PATH" ]; then _STATUS="OK"; _DETAIL="$E2E_SPP_PATH (via E2E_SPP_PATH)"; else _STATUS="MISSING"; _DETAIL="E2E_SPP_PATH=$E2E_SPP_PATH is not executable"; fi
-  elif [ -x "$REPO_ROOT/target/release/spp" ]; then _STATUS="OK"; _DETAIL="$REPO_ROOT/target/release/spp"
-  else _STATUS="MISSING"; _DETAIL="no target/release/spp build; run: cargo build --release -p stellar-private-payments-cli"; fi; }
-
 check_tool_chromium() {
   local path="" ; if [ -n "${E2E_CHROMIUM_PATH:-}" ]; then path="$E2E_CHROMIUM_PATH"; else path="$(command -v chromium 2>/dev/null || command -v google-chrome 2>/dev/null || true)"; fi
   if [ -n "$path" ] && [ -x "$path" ]; then _STATUS="OK"; _DETAIL="$path"; elif [ -n "$path" ]; then _STATUS="MISSING"; _DETAIL="resolved Chromium path '$path' is not executable"
@@ -410,82 +301,6 @@ check_tool_xvfb() {
   if ! need_headed_run; then _STATUS="SKIP"; _DETAIL="not needed for the default headless run"; return; fi
   if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then _STATUS="SKIP"; _DETAIL="a headed run is needed, but a real display is already available"; return; fi
   if command -v xvfb-run >/dev/null 2>&1; then _STATUS="OK"; _DETAIL="$(command -v xvfb-run)"; else _STATUS="MISSING"; _DETAIL="xvfb-run not found on PATH"; fi; }
-
-# --- env ---
-check_env_file_exists() {
-  if ci_env_already_satisfied; then _STATUS="SKIP"; _DETAIL="CI detected and required vars are already exported — no env file expected"; return; fi
-  local f; f="$(env_file_path)"
-  if [ -s "$f" ]; then _STATUS="OK"; _DETAIL="$f"; else _STATUS="MISSING"; _DETAIL="$f not found or empty"; fi; }
-
-heal_env_accounts_setup() {
-  # Delegates to heal_chain_accounts which has its own once-per-run guard.
-  # Both env and chain checks ultimately need the same `bash e2e-accounts-setup.sh`.
-  heal_chain_accounts
-}
-
-check_env_file_mode() {
-  if ci_env_already_satisfied; then _STATUS="SKIP"; _DETAIL="CI detected and required vars are already exported — no env file expected"; return; fi
-  local f mode; f="$(env_file_path)"
-  if [ ! -f "$f" ]; then _STATUS="MISSING"; _DETAIL="$f does not exist"; return; fi
-  mode="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null || true)"
-  if [ "$mode" = "600" ]; then _STATUS="OK"; _DETAIL="mode 600"; else _STATUS="MISSING"; _DETAIL="mode is ${mode:-unknown}, expected 600 (it holds secret keys)"; fi; }
-
-check_env_file_gitignored() {
-  if ci_env_already_satisfied; then _STATUS="SKIP"; _DETAIL="CI detected and required vars are already exported — no env file expected"; return; fi
-  local f; f="$(env_file_path)"
-  if [ ! -f "$f" ]; then _STATUS="MISSING"; _DETAIL="$f does not exist"; return; fi
-  if ( cd "$REPO_ROOT" && git check-ignore -q "$f" ); then _STATUS="OK"; _DETAIL="git-ignored"; else _STATUS="MISSING"; _DETAIL="$f is NOT git-ignored — add it to .gitignore before continuing"; fi; }
-
-check_env_vars_required() {
-  set_required_keys_for_suite; local key missing=()
-  for key in "${REQUIRED_KEYS_FOR_SUITE[@]}"; do env_var_present "$key" || missing+=("$key"); done
-  if [ "${#missing[@]}" -eq 0 ]; then _STATUS="OK"; _DETAIL="all ${#REQUIRED_KEYS_FOR_SUITE[@]} keys required by suite=$SUITE are present and non-empty"
-  else _STATUS="MISSING"; _DETAIL="missing/empty (suite=$SUITE): $(IFS=,; echo "${missing[*]}")"; fi; }
-
-check_env_address_format() {
-  local key addr bad=() present=0
-  for key in E2E_ACCOUNT_A_ADDRESS E2E_ACCOUNT_B_ADDRESS E2E_ACCOUNT_C_ADDRESS E2E_ACCOUNT_D_ADDRESS; do
-    addr="$(env_var_value "$key")" || continue; [ -n "$addr" ] || continue; present=$((present + 1))
-    if [[ ! "$addr" =~ ^G[A-Z2-7]{55}$ ]]; then bad+=("$key"); fi; done
-  if [ "$present" -eq 0 ]; then _STATUS="MISSING"; _DETAIL="no account addresses available to check (see env.vars.required / env.file.exists)"
-  elif [ "${#bad[@]}" -eq 0 ]; then _STATUS="OK"; _DETAIL="$present address(es) checked, all well-formed"
-  else _STATUS="MISSING"; _DETAIL="malformed address for: $(IFS=,; echo "${bad[*]}")"; fi; }
-
-check_env_pool_matches_deployments() {
-  local pool_env native_pools deployments_json; pool_env="$(env_var_value E2E_POOL_CONTRACT)" || pool_env=""
-  if [ -z "$pool_env" ]; then _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT not set (see env.vars.required)"; return; fi
-  deployments_json="$REPO_ROOT/deployments/testnet/deployments.json"
-  if [ ! -f "$deployments_json" ]; then _STATUS="MISSING"; _DETAIL="$deployments_json not found"; return; fi
-  native_pools="$(python3 - "$deployments_json" <<'PYEOF'
-import json, sys
-pools = json.load(open(sys.argv[1]))["pools"]
-native = [p for p in pools if p.get("enabled") and p.get("asset", {}).get("kind") == "native"]
-for p in native:
-    print(p["poolContractId"])
-PYEOF
-)"
-  if [ -z "$native_pools" ]; then _STATUS="MISSING"; _DETAIL="could not resolve an enabled native pool from $deployments_json"; return; fi
-  if grep -qxF "$pool_env" <<<"$native_pools"; then _STATUS="OK"; _DETAIL="matches an enabled native pool in deployments.json ($pool_env)"
-  else _STATUS="MISSING"; _DETAIL="E2E_POOL_CONTRACT ($pool_env) is not among the enabled native pools in deployments.json ($(tr '\n' ',' <<<"$native_pools" | sed 's/,$//')) — a redeploy invalidated the env file"; fi; }
-
-check_env_rpc_reachable() {
-  local url; url="$(env_var_value E2E_RPC_URL)" || url=""; [ -n "$url" ] || url="https://soroban-testnet.stellar.org"
-  if curl -fsS --max-time 5 -X POST "$url" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' >/dev/null 2>&1; then _STATUS="OK"; _DETAIL="getHealth OK ($url)"
-  else _STATUS="MISSING"; _DETAIL="getHealth failed or timed out ($url)"; fi; }
-
-check_env_compiletime_exported() {
-  local vars=(E2E_ACCOUNT_A_ADDRESS E2E_ACCOUNT_A_SECRET E2E_ACCOUNT_B_ADDRESS); local key missing=()
-  for key in "${vars[@]}"; do [ -n "${!key:-}" ] || missing+=("$key"); done
-  if [ "${#missing[@]}" -eq 0 ]; then _STATUS="OK"; _DETAIL="all no-default option_env! variables are already exported in this shell"
-  else _STATUS="MISSING"; _DETAIL="not exported in the current shell, a file on disk is not enough: $(IFS=,; echo "${missing[*]}")"; fi; }
-
-# --- chain ---
-check_chain_accounts_funded() {
-  if is_ci; then _STATUS="SKIP"; _DETAIL="CI detected — trusting the account state verified once before its secrets were copied into CI"; return; fi
-  run_chain_verify_once; _STATUS="$CHAIN_VERIFY_STATUS"; _DETAIL="funding (delegated to a single e2e-accounts-setup.sh --verify pass for A/B/C/D): $CHAIN_VERIFY_DETAIL"; }
-check_chain_accounts_registered() {
-  if is_ci; then _STATUS="SKIP"; _DETAIL="CI detected — trusting the account state verified once before its secrets were copied into CI"; return; fi
-  run_chain_verify_once; _STATUS="$CHAIN_VERIFY_STATUS"; _DETAIL="public-key registry (delegated to a single e2e-accounts-setup.sh --verify pass for A/B/C/D): $CHAIN_VERIFY_DETAIL"; }
 
 # --- artifacts ---
 check_artifact_circuits() {
@@ -576,21 +391,6 @@ check_freighter_onboarding() {
   if snapshot_has_onboarding; then _STATUS="OK"; _DETAIL="onboarding is baked into the existing profile snapshot"
   else _STATUS="MISSING"; _DETAIL="onboarding wizard completion is not baked into a valid snapshot yet"; fi; }
 
-check_freighter_snapshot_freshness() {
-  local env_file snapshot_file env_mtime snap_mtime
-  env_file="$(env_file_path)"
-  snapshot_file="$(snapshot_file)"
-  if [ ! -s "$snapshot_file" ] || [ ! -f "$env_file" ]; then _STATUS="SKIP"; _DETAIL="need both snapshot and env file to compare"; return; fi
-  if ci_env_already_satisfied; then _STATUS="SKIP"; _DETAIL="CI detected — env file is not relevant"; return; fi
-  env_mtime="$(stat -c '%Y' "$env_file" 2>/dev/null || stat -f '%m' "$env_file" 2>/dev/null || echo 0)"
-  snap_mtime="$(stat -c '%Y' "$snapshot_file" 2>/dev/null || stat -f '%m' "$snapshot_file" 2>/dev/null || echo 0)"
-  if [ "$env_mtime" -gt "$snap_mtime" ]; then
-    _STATUS="MISSING"
-    _DETAIL=".e2e-accounts.env (mtime $(date -d @"$env_mtime" '+%F %T' 2>/dev/null || echo "$env_mtime")) is newer than profile-snapshot.tar.gz (mtime $(date -d @"$snap_mtime" '+%F %T' 2>/dev/null || echo "$snap_mtime")) — the snapshot may have a stale password. Rebuild with: bash e2e-freighter/scripts/setup.sh --force"
-  else
-    _STATUS="OK"; _DETAIL="snapshot is at least as recent as the env file"
-  fi; }
-
 # --- browser ---
 check_browser_chromium_resolved() {
   local path resolved=""
@@ -624,13 +424,6 @@ check_browser_app_url() {
   local url="${APP_URL:-}"
   if [ -z "$url" ]; then _STATUS="MISSING"; _DETAIL="APP_URL is not set — set it to the deployed app or local server URL"; return; fi
   case "$url" in http://localhost*|http://127.0.0.1*) _STATUS="OK"; _DETAIL="$url (local — a server must already be running)" ;; *) _STATUS="OK"; _DETAIL="$url" ;; esac; }
-
-# ---------------------------------------------------------------------------
-# Helpers: network-skip check
-# ---------------------------------------------------------------------------
-skip_network() {
-  [ "${E2E_SKIP_NETWORK_CHECKS:-}" = "1" ]
-}
 
 # ---------------------------------------------------------------------------
 # Group runners
@@ -669,14 +462,6 @@ run_check() {
   return 0
 }
 
-run_network_check() {
-  local id="$1"; local suite_filter="$2"; local check_fn="$3"; local heal_fn="${4:-}"; local remediation="${5:-}"
-  if skip_network; then
-    return 0
-  fi
-  run_check "$1" "$2" "$3" "$4" "$5"
-}
-
 group_tools() {
   echo "-- tools --"
   run_check tool.bash both check_tool_bash "" "Install bash via your OS package manager; it is a hard prerequisite of every entry script in this repo."
@@ -692,29 +477,10 @@ group_tools() {
   run_check tool.tar freighter check_tool_tar "" "Install tar via your OS package manager (present by default on virtually every Linux/macOS system)."
   run_check tool.unzip freighter check_tool_unzip "" "Install unzip via your OS package manager."
   run_check tool.stellar both check_tool_stellar "" "Install/upgrade the Stellar CLI to 27+ (see https://developers.stellar.org/docs/tools/developer-tools/cli)."
-  run_check tool.spp both check_tool_spp "" "cargo build --release -p stellar-private-payments-cli"
   run_check tool.chromium freighter check_tool_chromium "" "Install Chromium (see e2e-freighter/README.md's per-distro sections) or set E2E_CHROMIUM_PATH to your install."
   run_check tool.chromedriver sdk check_tool_chromedriver "" "Install chromedriver matching your Chrome/Chromium version, or set CHROMEDRIVER to its path."
   run_check tool.trunk freighter check_tool_trunk "" "cargo install trunk (or pin trunk@0.21.14 as CI does) — only needed for local-app test runs (APP_URL=http://localhost:...)."
   run_check tool.xvfb freighter check_tool_xvfb "" "Install xvfb (e.g. 'apt install xvfb'); preinstalled on ubuntu-latest."
-}
-
-group_env() {
-  echo "-- env --"
-  run_check env.file.exists both check_env_file_exists heal_env_accounts_setup "bash deployments/scripts/e2e-accounts-setup.sh"
-  run_check env.file.mode both check_env_file_mode "" "chmod 600 deployments/testnet/.e2e-accounts.env"
-  run_check env.file.gitignored both check_env_file_gitignored "" "Add the path to .gitignore before continuing — never commit this file."
-  run_check env.vars.required both check_env_vars_required heal_env_accounts_setup "bash deployments/scripts/e2e-accounts-setup.sh"
-  run_check env.address.format both check_env_address_format "" "Regenerate the env file (deployments/scripts/e2e-accounts-setup.sh --force) if an address is malformed."
-  run_check env.pool.matches_deployments sdk check_env_pool_matches_deployments "" "Re-run deployments/scripts/e2e-accounts-setup.sh (it re-resolves the pool from deployments.json on every run)."
-  run_network_check env.rpc.reachable both check_env_rpc_reachable "" "Check connectivity to \$E2E_RPC_URL, or that testnet RPC is not degraded (https://status.stellar.org)."
-  run_check env.compiletime.exported sdk check_env_compiletime_exported "" "set -a; . deployments/testnet/.e2e-accounts.env; set +a   (then run cargo/e2e-browser-test.sh in the same shell)"
-}
-
-group_chain() {
-  echo "-- chain --"
-  run_network_check chain.accounts.funded both check_chain_accounts_funded heal_chain_accounts "bash deployments/scripts/e2e-accounts-setup.sh"
-  run_network_check chain.accounts.registered both check_chain_accounts_registered heal_chain_accounts "bash deployments/scripts/e2e-accounts-setup.sh"
 }
 
 group_artifacts() {
@@ -735,7 +501,6 @@ group_freighter() {
   run_check freighter.snapshot.exists freighter check_freighter_snapshot_exists "" "$(onboarding_remediation_command)"
   run_check freighter.snapshot.integrity freighter check_freighter_snapshot_integrity "" "$(onboarding_remediation_command)"
   run_check freighter.onboarding freighter check_freighter_onboarding "" "$(onboarding_remediation_command)"
-  run_check freighter.snapshot.freshness freighter check_freighter_snapshot_freshness "" "Rebuild with: bash e2e-freighter/scripts/setup.sh --force"
 }
 
 group_browser() {
@@ -751,8 +516,6 @@ group_browser() {
 # ---------------------------------------------------------------------------
 main() {
   group_tools
-  group_env
-  group_chain
   group_artifacts
   group_freighter
   group_browser
