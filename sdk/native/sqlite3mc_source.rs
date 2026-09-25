@@ -27,7 +27,10 @@ pub fn sources(cache: &Path) -> PathBuf {
         PathBuf::from(path)
     } else {
         let directory = cache.join(format!("sqlite3mc-{VERSION}"));
-        if !SOURCE_FILES.iter().all(|name| directory.join(name).is_file()) {
+        if !SOURCE_FILES
+            .iter()
+            .all(|name| directory.join(name).is_file())
+        {
             download_and_extract(cache, &directory);
         }
         directory
