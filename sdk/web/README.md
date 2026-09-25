@@ -1,20 +1,20 @@
-# stellar-private-payments (`sdk/web`)
+# Stellar Private Payments Browser SDK
 
-Browser SDK for Stellar Private Payments.
+Transact Stellar assets privately, from JavaScript/TypeScript. See the project
+[README](../../README.md) for how the protocol works.
 
-> **Work in progress** — not audited and not production-ready.
+> **Work in progress**: not audited and not production-ready.
 
-**`Storage.open`** → **`bootnodeRequired`** → **`Client.new`** → **`backgroundSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
+[![npm](https://img.shields.io/npm/v/stellar-private-payments.svg)](https://www.npmjs.com/package/stellar-private-payments)
 
-## Usage
+```bash
+npm install stellar-private-payments
+```
+
+## Quick start
 
 ```js
-import init, {
-  Storage,
-  Client,
-  bootnodeRequired,
-  verifySelectiveDisclosure,
-} from 'stellar-private-payments';
+import init, { Storage, Client, bootnodeRequired } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
@@ -31,188 +31,71 @@ if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
 }
 
-const client = await Client.new({
-  rpcUrl,
-  storage,
-  contractConfig,
-  circuitsBaseUrl,
-  // bootnodeUrl: '...',
-  // proverWorkerUrl defaults to package dist/workers/prover-worker.js
-});
-
+const client = await Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl });
 await client.backgroundSync();
 
 const account = await client.account({ networkPassphrase }, signer);
 await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
-console.log(await account.privacyKeys());
-console.log(await account.isRegistered());
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
-await client.sync(); // optional explicit catch-up
 await pool.deposit(10_000_000n); // stroops (1 XLM)
-console.log(await pool.balance()); // bigint stroops
+const balance = await pool.balance(); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n); // defaults to connected wallet
+```
 
-const cfg = client.contractConfig();
-const feed = await client.operationalFeed(10);
-const lookup = await client.recipientLookup('G...');
-const chain = await client.allContractsData();
+### Walletless verification
 
-// Walletless verify (no Client / storage)
+Verify a selective-disclosure receipt without a `Storage` / `Client` session:
+
+```js
+import { verifySelectiveDisclosure } from 'stellar-private-payments';
+
 const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
   contractConfig,
   circuitsBaseUrl,
 });
 ```
 
-### `Storage`
+## API reference
 
-| Method | Description                                              |
-|--------|----------------------------------------------------------|
-| `Storage.open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
-| `fork()` | Extra handle to the same worker (app + SDK share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
+Method names mirror the [Rust SDK](../native/README.md). Full signatures live in
+the generated types: [`js/types/api-types.d.ts`](./js/types/api-types.d.ts)
+(`Client`, `Account`, `PrivatePool`, options) and
+[`js/types/index.d.ts`](./js/types/index.d.ts) (package entry).
 
-The package exports a `Storage` namespace with `open` only; `fork` / `call` are on the opened handle.
+## Signer
 
-### Free functions
-
-| Function | Description |
-|----------|-------------|
-| `bootnodeRequired(rpcUrl, storage, { contractConfig })` | `true` if wallet RPC needs a historical-sync bootnode |
-| `deriveAspUserLeaf(notePublicKey, membershipBlinding)` | ASP membership leaf from explicit hex inputs |
-| `verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { contractConfig, circuitsBaseUrl, proverWorkerUrl? })` | Walletless disclosure verification (no Storage / Client) |
-
-### `Client`
-
-| Method | Description |
-|--------|-------------|
-| `new({ rpcUrl, contractConfig, circuitsBaseUrl, storage?, proverWorkerUrl?, bootnodeUrl? })` | Build native client + spawn prover worker (no wallet yet) |
-| `contractConfig()` | Deployment config for this client instance |
-| `backgroundSync()` | Background contract-event sync |
-| `stopBackgroundSync()` | Stop the background indexer (also on Client drop) |
-| `sync()` | Explicit foreground catch-up |
-| `operationalFeed(limit)` | Recent deployment activity |
-| `recipientLookup(address)` | Recipient registry lookup |
-| `account({ networkPassphrase, userAddress?, signerAddress? }, signer)` | Bind wallet and return `Account` |
-| `aspState()` | On-chain ASP membership state |
-| `allContractsData()` | On-chain pool + ASP state |
-| `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Verify a disclosure receipt (uses this client's prover) |
-
-### `verifySelectiveDisclosure` (standalone)
-
-```ts
-verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { contractConfig, circuitsBaseUrl, proverWorkerUrl? })
-```
-
-Walletless verification — no `Storage` / `Client`. Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
-
-### `Account`
-
-| Method | Description |
-|--------|-------------|
-| `userAddress` | Connected Stellar address |
-| `portfolio()` | Balances across all enabled pools |
-| `privacyKeys()` | Note + encryption public keys |
-| `derivePrivacyKeys()` | Derive and store privacy keys from the owner's wallet signature |
-| `aspSecret()` | ASP membership blinding |
-| `userNotes(limit)` | Notes across pools (newest first) |
-| `isRegistered()` | On-chain public key registry entry exists |
-| `deriveAspUserLeaf()` | ASP membership tree leaf from stored keys |
-| `registerPublicKeys()` | On-chain key registry |
-| `pool({ poolContract })` | Open a `PrivatePool` session |
-
-### `PrivatePool`
-
-Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance` use **stroops** as JavaScript `bigint`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up.
-
-| Method | Description |
-|--------|-------------|
-| `balance()` | Spendable balance (stroops) |
-| `notes()` | Notes for this pool |
-| `estimate(amount)` | How many on-chain txs a spend needs |
-| `deposit(amount)` | Deposit stroops |
-| `transfer(recipient, amount)` | Private transfer to a `G...` address |
-| `transferToKeys(notePkHex, encPkHex, amount)` | Private transfer to explicit note + encryption keys |
-| `withdraw(amount, recipient?)` | Withdraw; `recipient` defaults to the connected wallet |
-| `transact(config)` | Low-level pool transact |
-| `disclose(config)` | Selective disclosure (`selectedCommitments` 1..=4); may return `null` if ASP registration is needed |
-| `verifyDisclosure(receipt, expectedVkHash)` | Verify a disclosure receipt in this pool session |
-| `audit(globalViewPrivateKeyHex)` | Open a {@link GvkAudit} cursor (pool-gvk deployments only) |
-
-`GvkAudit.nextTx()` yields decrypted outputs, inputs (traceable pools), and nullifiers per on-chain `transact`, or `null` when exhausted.
-
-`disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
-
-### Signer
-
-Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`.
-Optional Freighter adapter: `import { FreighterSigner } from 'stellar-private-payments/freighter'` (requires peer `@stellar/freighter-api`).
-
-When privacy keys are missing, `account.derivePrivacyKeys()` asks the note
-owner to sign `Privacy Pool Key Derivation [v1]`. Custom `signMessage(message,
-opts)` implementations must return a real SEP-53 Ed25519 signature: sign the
-SHA-256 digest of the UTF-8 bytes of `"Stellar Signed Message:\n" + message`
-with the owner's key. Return the 64 signature bytes as base64, either as a
-string or as `{ signedMessage, signerAddress }`.
-
-The SDK strictly verifies the signature against `userAddress` before deriving
-or storing keys, even when the wallet reports no signer address. A signature
-from another key, over another message, or with an invalid encoding or length
-causes `derivePrivacyKeys()` to fail without saving privacy keys. Arbitrary
-64-byte test stubs no longer work. If verification fails, check that the wallet
-signed with the owner's account; this failure is not a wallet cancellation.
-
-`signerAddress` defaults to the note owner and may name a different signing
-account; `client.account()` opens the session without deriving or verifying
-keys either way. Once keys are stored, `derivePrivacyKeys()` reuses them
-without signing or verifying another derivation message. Existing stored keys
-are not revalidated by this check.
+Bound at `client.account()`. Must implement `signMessage`, `signTransaction`,
+and `signAuthEntry` (see [`js/types/signer.d.ts`](./js/types/signer.d.ts)).
+Optional Freighter adapter: `stellar-private-payments/freighter` (requires
+peer `@stellar/freighter-api`).
 
 ## Logging & Diagnostics
 
-The SDK provides integrated telemetry logging using `tracing` in Rust. You can configure and control logging from JavaScript:
+The SDK emits `tracing` spans and events in Rust, controllable from JS:
 
 ```js
 import { configureTelemetry, dump_recent_logs, set_log_level } from 'stellar-private-payments';
 
-// Initialize or update telemetry settings
 configureTelemetry({
   level: 'debug',             // 'info' | 'debug' | 'trace'
   sink: 'both',               // 'console' | 'ringBuffer' | 'both'
-  ringBufferBytes: 256 * 1024, // 256 KiB buffer
-  revealSensitive: true       // Reveal Tier-1 values (debug profile only)
+  ringBufferBytes: 256 * 1024,
+  revealSensitive: true,      // reveal Tier-1 values (debug profile only)
 });
 
-// Dump recent logs (main thread + storage/prover workers) for diagnostic reports
-const logs = await dump_recent_logs();
-
-// Update log level filter on the fly
+const logs = await dump_recent_logs(); // main thread + storage/prover workers
 set_log_level('info');
 ```
 
 ## TypeScript
 
-Public types live under [`js/types/`](./js/types/):
-
-| Module | Role |
-|--------|------|
-| `crates/stellar_private_payments_web.d.ts` | wasm-bindgen domain types + session classes (staged from `dist/` on build; gitignored, never committed) |
-| `api-types.d.ts` | JS facade (`Client.new`, `Account`, options, telemetry) |
-| `index.d.ts` | Package entry — bindgen types + facade |
-
-Low-level wasm classes are available as `WasmClient`, `WasmAccount`, and `WasmStorage`, or via `stellar-private-payments/wasm`.
-
-```ts
-import init, {
-  Client,
-  Storage,
-  TX_PROGRESS_EVENT,
-  type ContractConfig,
-  type PoolExecuteResult,
-} from 'stellar-private-payments';
-```
+Public types live under [`js/types/`](./js/types/): `api-types.d.ts` (JS
+facade), `index.d.ts` (package entry), and the gitignored, build-staged
+`crates/stellar_private_payments_web.d.ts` (wasm-bindgen domain types). Low-level
+wasm classes are available as `WasmClient`, `WasmAccount`, `WasmStorage`, or
+via `stellar-private-payments/wasm`.
 
 After building WASM:
 
@@ -222,7 +105,16 @@ npm run check:bindgen   # wasm exports ⊆ public .d.ts; staged crates/ === dist
 npm run check:types
 ```
 
-`check:types` and `check:bindgen` both require a full build first: `js/types/crates/stellar_private_payments_web.d.ts` is gitignored and only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
+Both checks need a full build first — `crates/stellar_private_payments_web.d.ts`
+only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
+
+## Workers
+
+Web Workers are used for the provided storage (SQlite OPFS) and prover implementations.
+`Storage.open()` defaults to the bundled storage worker URL via
+`import.meta.url`; override with `workerUrl` on `Storage.open()` or
+`storageWorkerUrl` on `Client.new()`. The prover worker URL defaults the same
+way (`proverWorkerUrl`), loading circuit artifacts from `dist/circuits/`.
 
 ## Build & publish (maintainers)
 
@@ -236,28 +128,28 @@ npm pack
 
 Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
 
-### Binaryen / `wasm-opt`
-
-The build script (`sdk/web/scripts/build.sh`) optimizes every shipped circuit witness module with `wasm-opt -Os`. It pins Binaryen **`version_131`** and downloads the matching release tarball for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, or `arm64-macos` when `wasm-opt` is not already on `PATH`. The download requires `curl`, `tar`, and `sha256sum` (or `shasum` on macOS).
-
-- To skip the automatic download, install Binaryen 131 locally and point `WASM_OPT` at the binary:
-  ```bash
-  export WASM_OPT=/usr/local/bin/wasm-opt
-  npm run build
-  ```
-- The optimization cache lives under `target/tmp/witness-opt-cache/` and is keyed by the actual `wasm-opt` version, the cargo profile, and the enabled feature flags. It is safe to delete at any time.
-
 CI publishes from `main` when `version` in `package.json` is bumped (see `.github/workflows/release.yml`).
 
-## npm install (app developers)
+### Binaryen / `wasm-opt`
+
+The build script (`scripts/build.sh`) optimizes every shipped circuit witness
+module with `wasm-opt -Os`. It pins Binaryen `version_131` and downloads the
+matching release tarball for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`,
+or `arm64-macos` when `wasm-opt` isn't already on `PATH` (needs `curl`, `tar`,
+`sha256sum`/`shasum`).
+
+To skip the download, install Binaryen 131 locally and set `WASM_OPT`:
 
 ```bash
-npm install stellar-private-payments
+export WASM_OPT=/usr/local/bin/wasm-opt
+npm run build
 ```
 
-One package — no separate circuit hosting or Cargo build. Circuit artifacts ship under `dist/circuits/` and load automatically from the prover worker. Your bundler must serve static files from the package `dist/` tree (same as WASM and workers).
+The optimization cache lives under `target/tmp/witness-opt-cache/`, keyed by
+the `wasm-opt` version, cargo profile, and enabled feature flags — safe to
+delete at any time.
 
-### Licensing (compiled circuits)
+## Licensing (compiled circuits)
 
 Compiled `.graph.bin` / `.r1cs` files incorporate [iden3/circomlib](https://github.com/iden3/circomlib) (LGPL-3.0). The npm package includes:
 
@@ -269,7 +161,3 @@ Compiled `.graph.bin` / `.r1cs` files incorporate [iden3/circomlib](https://gith
 | `dist/LICENSE.txt` | Apache-2.0 (this SDK) |
 
 The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scripts/stage-dist-legal.sh`). If you redistribute the compiled circuits, comply with LGPL-3.0 (see NOTICE).
-
-## Workers
-
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.

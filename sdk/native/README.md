@@ -1,24 +1,24 @@
-# Stellar Private Payments — Rust SDK (`stellar-private-payments`)
+# Stellar Private Payments Rust SDK
 
-Native Rust client for privacy pool deposits, transfers, withdrawals, and local wallet state.
+Transact Stellar assets privately. See the project [README](../../README.md) for
+how the protocol works.
 
-## Architecture
+> **Work in progress**: not audited and not production-ready.
 
+[![crates.io](https://img.shields.io/crates/v/stellar-private-payments.svg)](https://crates.io/crates/stellar-private-payments)
+[![docs.rs](https://docs.rs/stellar-private-payments/badge.svg)](https://docs.rs/stellar-private-payments)
+
+Add to your project:
+
+```bash
+cargo add stellar-private-payments
 ```
-Client (deployment: sync, operational_feed, recipient_lookup)
-  └─ account(user_address, signer) → Account (portfolio, user_notes, privacy_keys, derive_privacy_keys, is_registered, register_public_keys, sync, pool)
-       └─ pool(id) → PrivatePool (deposit / transfer / withdraw / balance / notes)
-```
-
-- **Sync**: `Client::sync()` / `Account::sync()` catch local SQLite state up to chain tip via Soroban RPC. Pass an optional bootnode URL to `Client::init` for retention gaps.
-- **`SyncMode::Inline`**: reads auto-sync before returning data (CLI default). Starts here after `init`.
-- **`SyncMode::Background`**: after `Client::background_sync()`, `ensure_synced` kicks the background loop instead of awaiting catch-up (web default).
 
 ## Quick start
 
 ```rust
 use stellar_private_payments::{
-    CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover,
+    CircuitStore, Client, LocalProver, LocalSigner, LocalStorage,
     types::{ContractConfig, NoteOwnerAddress, SignerAddress},
 };
 
@@ -28,28 +28,24 @@ let storage = LocalStorage::open("wallet.sqlite")?;
 let store = CircuitStore::open("./circuits");
 store.ensure_blocking()?;
 let artifacts = store.transact_artifacts()?;
-let prover = Handle::from_box(
-    Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
-);
+let prover = LocalProver::from_artifacts(&artifacts)?;
 
 let client = Client::init(
     "https://soroban-testnet.stellar.org",
-    storage,
-    prover,
+    storage.into(),
+    prover.into(),
     deployment,
     None, // optional bootnode URL
 )?;
 
-let signer = Handle::from_box(
-    Box::new(LocalSigner::new(
-        "S...",
-        "Test SDF Network ; September 2015",
-        SignerAddress::new("G..."),
-    )?)
-        as Box<dyn stellar_private_payments::Signer>,
-);
+let signer = LocalSigner::new(
+    "S...",
+    "Test SDF Network ; September 2015",
+    SignerAddress::new("G..."),
+)?;
 
-let account = client.account(NoteOwnerAddress::new("G..."), signer)?;
+let account = client.account(NoteOwnerAddress::new("G..."), signer.into())?;
+account.derive_privacy_keys().await?; // once per wallet; idempotent after that
 let pool = account.pool("C...")?;
 
 pool.deposit(10_000_000u128.into()).await?;
@@ -64,90 +60,9 @@ For balance, portfolio, notes, and sync without transact proving:
 let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 ```
 
-The native SDK ships an embedded circuit lockfile and downloads the matching
-GitHub release with [`CircuitStore`] (native targets only). Call
-`ensure` / `ensure_blocking`, then pass the returned artifacts to
-[`LocalProver`], or supply a custom [`Prover`]. The CLI and browser SDK load
-artifacts from their own paths.
-
-## Examples
-
-The `examples/` directory demonstrates the blocking SDK API surface. Each example uses the shared `examples/common` bootstrap and exits 0 with instructions when a prerequisite is missing.
-
-All examples run in **release mode**. Transact examples download circuit artifacts
-into `target/circuits-artifacts` on first run (`CircuitStore`); no extra env vars.
-
-| Example | What it shows | Run |
-|---------|---------------|-----|
-| `account_pool` | Account identity, registration, keys, portfolio, and pool state reads | `cargo run --release --example account_pool` |
-| `sync` | Deployment-level sync, background sync, and operational feed | `cargo run --release --example sync` |
-| `estimate` | Transaction-count estimation and plan introspection | `cargo run --release --example estimate` |
-| `deposit` | Full proving + submission of a deposit | `cargo run --release --example deposit` |
-| `transfer` | Private transfer to a recipient | `SPP_RECIPIENT_ADDRESS="G..." cargo run --release --example transfer` |
-| `withdraw` | Withdraw from the pool to a public Stellar address | `cargo run --release --example withdraw` |
-
-See [`examples/SETUP.md`](examples/SETUP.md) for the complete environment setup walkthrough (creating testnet accounts, funding, onboarding, and release-mode run commands). See the header comment in each example for its exact env-var contract. The shared contract is:
-
-| Variable | Default | Required by |
-|----------|---------|-------------|
-| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw` |
-| `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
-| `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
-| `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
-| `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
-| `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples (set to an empty string to disable the fallback) |
-| `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
-| `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw` | `transfer`; also read by `withdraw` |
-| `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY` | — | `transfer`, as an alternative to `SPP_RECIPIENT_ADDRESS` (0x-prefixed 32-byte keys, skipping the registry lookup) |
-| `SPP_REGISTER` | unset | `account_pool` (set to `1` to publish privacy keys on-chain — this writes a transaction) |
-| `SPP_VERBOSE_PLAN` | unset | `deposit` (set to `1` for per-step prove/simulate/sign/submit logs) |
-
-> **`SPP_RECIPIENT_ADDRESS` governs `withdraw` too.** `withdraw` defaults to
-> self-withdrawal, but if this variable is still exported from a `transfer`
-> run it silently becomes the withdrawal destination. Unset it (or set it to
-> the wallet's own address) before running `withdraw`. The example prints
-> `(Using self-withdrawal; ...)` when the destination is the wallet itself —
-> if that line is absent, the funds are going somewhere else.
-
-### Prerequisites
-
-- The examples target the checked-in **testnet** deployment by default.
-- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. They download a hashed release into `target/circuits-artifacts`.
-- Transact examples need a **funded, onboarded** testnet account: onboard the wallet (for example with the `spp` CLI) and ensure the account holds the pool asset.
-- **Allowlist pools require ASP membership.** The default testnet pool (native XLM) carries only the `blocklist` flag and needs no membership setup. The second testnet pool (EURC) adds the `allowlist` flag; before a wallet can `deposit` or `transfer` through it, the pool admin must insert each participant's ASP membership leaf into the `asp_membership` contract. Without it those examples fail even though the account is funded, onboarded, and circuit-ready. See [ASP membership for allowlist pools](examples/SETUP.md#asp-membership-for-allowlist-pools).
-- These prerequisite classes print a skip message and exit 0 rather than failing: a missing `STELLAR_SECRET_KEY`, a wallet without privacy keys, missing circuit artifacts, and an RPC retention gap. Other misconfiguration — an unreadable `SPP_DEPLOYMENT_JSON`, an unopenable `SPP_WALLET_PATH`, or a `SPP_POOL_CONTRACT_ID` that is not in the deployment config — surfaces as a hard error, because those paths propagate rather than exiting early.
-
-### Sync caveat: the checked-in deployment has a ~7-day shelf life
-
-The public Soroban testnet RPC serves a rolling window of 120 960 ledgers —
-about **7 days** at ~5 s per ledger. Every example syncs from the pool's
-`deploymentLedger`, so roughly one week after the contracts were last deployed
-that ledger falls out of the window and a wallet with no prior sync history can
-no longer catch up. Check the remaining margin before you start:
-
-```bash
-jq -r '.pools[0].deploymentLedger' deployments/testnet/deployments.json
-curl -s -X POST https://soroban-testnet.stellar.org \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | jq '.result.oldestLedger'
-```
-
-If `deploymentLedger` is below `oldestLedger`, the deployment has expired.
-
-When that happens the examples exit 0 with an explanation and a remedy list
-rather than a raw JSON-RPC error — but they **cannot** sync, so the graceful
-message is not a workaround. Actually running them then requires a bootnode
-holding the missing range (see [Local bootnode](examples/SETUP.md#local-bootnode))
-or a fresh contract deployment. Setting `SPP_RPC_URL` to a full-history RPC also
-works if you have one.
-
-Already-synced wallets are unaffected: they sync incrementally and never need
-the missing history. This is specifically a first-run problem.
-
 ## Blocking API
 
-For CLI and synchronous hosts, use `stellar_private_payments::blocking`:
+A synchronous (non-async) client is also provided under `stellar_private_payments::blocking`:
 
 ```rust
 use stellar_private_payments::blocking::{Client, Account};
@@ -160,53 +75,44 @@ let portfolio = account.portfolio()?;
 
 Method names mirror the async API; each call runs on an internal Tokio runtime.
 
-## Key types
+## Custom implementations
 
-| Type | Role |
-|------|------|
-| `Client` | Deployment runtime, sync, chain reads |
-| `Account` | Wallet session bound to one Stellar address |
-| `PrivatePool` | Pool-scoped transact operations |
-| `LocalStorage` | SQLite-backed `Storage` implementation |
-| `CircuitStore` | Download and verify circuit artifacts (native only) |
-| `types::PortfolioBalance` | Per-pool balance + note count |
-| `types::RecipientLookup` | Registry lookup for private transfers |
+`LocalStorage`, `LocalProver`, and `LocalSigner` are the built-in
+implementations for storage (SQLite), proving, and signing. Bring your own for
+any of the three by implementing the corresponding trait.
 
-### Privacy keys
+## Examples
 
-| API | Role |
-|-----|------|
-| `zk::encryption::KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Account::derivePrivacyKeys()`, which signs this internally) |
-| `zk::encryption::sep53_payload(message)` | UTF-8 message prefixed with `Stellar Signed Message:\n`; hash with SHA-256 before Ed25519 signing |
-| `zk::encryption::verify_owner_signature(owner_address, message, &signature)` | Strictly verify a 64-byte SEP-53 signature against the note owner's Stellar `G...` public key |
-| `Account::derive_privacy_keys()` | Derive and persist privacy keys from the owner's wallet signature (idempotent, signature-verified) |
-| `Account::privacy_keys()` | Note + encryption public keys for the bound account |
-| `Account::asp_secret()` | ASP membership blinding for the bound account |
-| `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |
-| `crypto::derive_asp_user_leaf(note, blinding)` | Same leaf from explicit inputs (no session) |
+See more ways to use the SDK in the [examples/](examples/) directory.
 
-Private note/encryption keys stay in storage and are not exposed through the SDK.
+## Circuit artifacts
 
-Custom native onboarding code must call `verify_owner_signature` with
-`KEY_DERIVATION_MESSAGE` before deriving and saving keys. The low-level
-`derive_encryption_and_note_keypairs` and `derive_membership_blinding` helpers
-do not take an owner address and do not verify ownership themselves. The CLI's
-`spp onboard` command performs this check before creating missing privacy keys;
-the browser SDK does so in `Account::derivePrivacyKeys()`.
+Transacting in the private pool means producing ZK proofs, which requires the
+circuit artifacts the proofs are built against. The SDK ships an embedded
+circuit lockfile and downloads the matching GitHub release with
+[`CircuitStore`].
 
-Verification requires the owner's own Ed25519 signature over
-`SHA256(sep53_payload(KEY_DERIVATION_MESSAGE))`. Another account's signature
-(including a delegated transaction signer's), a signature over a different
-message, an invalid owner address, or a signature of the wrong length fails.
-Strict verification also refuses small-order owner keys or signature `R`
-points. This check does not change the key derivation algorithm or revalidate
-keys already in storage.
+## Bootnode
+
+Producing transact proofs requires the pool's full event history, but Stellar's
+RPC only serves the last 7 days of events. Any pool older than that needs a
+second source for the missing range.
+
+For the deployment at `deployments/testnet/deployments.json` we run a bootnode
+that serves those older events. For your own pool deployments, consider running
+a [bootnode](../../tools/bootnode) as well.
+
+## Beyond payments
+
+- **Selective disclosure**: prove to a named authority that you own specific
+  notes, without revealing the rest of your activity. See `disclosure::`.
+- **Global View Key audit**: where a pool is deployed with GVK enabled, the
+  key holder can reconstruct that pool's flows from synced state. See `gvk::`.
 
 ## Logging & Diagnostics
 
-The SDK emits `tracing` spans and events but does **not** install a subscriber —
-that is the consumer's responsibility, so the library stays free of a
-`tracing-subscriber` dependency. Install one in your binary/tests, and include
+The SDK emits `tracing` spans and events. Install a subscriber such as
+`tracing-subscriber` in your binary or tests, and include
 [`types::CorrelationIdLayer`] so nested SDK calls inherit an ambient
 `correlation_id`:
 
@@ -227,9 +133,6 @@ fn main() {
 
 See the CLI's `logging` module for a full example (human vs. JSON output) configuring the `TelemetryConfig` sink.
 
-### Intermediate SDK Logs
-Intermediate transaction lifecycle steps (simulating, submitting, confirming) are instrumented at the `info!` level. Every operation uses an inherited or generated `correlation_id` so that the entire blocking call trace (e.g., `pool.deposit()`) can be correlated end-to-end. To view these steps, ensure your tracing subscriber or `TelemetryConfig` filters include at least `info` for `stellar_private_payments`.
+## Browser / WASM SDK
 
-## Browser / WASM
-
-See [`../web/README.md`](../web/README.md). JS method names align with Rust where possible (`operationalFeed`, `recipientLookup`, `privacyKeys`, `isRegistered`).
+See [`../web/README.md`](../web/README.md).
