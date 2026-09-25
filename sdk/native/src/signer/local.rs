@@ -39,7 +39,8 @@ impl LocalSigner {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Signer for LocalSigner {
     fn signer_address(&self) -> SignerAddress {
         self.signer_address.clone()

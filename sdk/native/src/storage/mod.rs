@@ -100,10 +100,11 @@ pub(crate) fn recipient_lookup_from_storage(
 }
 
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait Storage: crate::chain::ContractDataStorage {
     /// Independent handle for a concurrent consumer
-    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error>;
+    fn fork(&self) -> Result<StorageHandle, Error>;
 
     async fn ensure_ready(&self) -> Result<(), Error>;
 
@@ -203,6 +204,24 @@ pub trait Storage: crate::chain::ContractDataStorage {
         pool_contract_id: &str,
         commitments: &[Field],
     ) -> Result<HashSet<Field>, Error>;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub type StorageHandle = crate::Handle<dyn Storage>;
+#[cfg(not(target_arch = "wasm32"))]
+pub type StorageHandle = crate::Handle<dyn Storage + Send + Sync>;
+
+#[cfg(target_arch = "wasm32")]
+impl<T: Storage + 'static> From<T> for StorageHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Storage>)
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Storage + Send + Sync + 'static> From<T> for StorageHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Storage + Send + Sync>)
+    }
 }
 
 #[cfg(test)]

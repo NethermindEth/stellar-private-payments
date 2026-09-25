@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments::{
-    Handle, LocalProver, LocalStorage, Prover, Signer,
+    LocalProver, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{
         EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
@@ -54,10 +54,10 @@ impl ClientSession {
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
             let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
-            let prover = Handle::from_box(Box::new(
+            let prover = ProverHandle::from(
                 LocalProver::from_artifacts(&artifacts)
                     .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
-            ) as Box<dyn Prover>);
+            );
             Client::init(
                 network.rpc_url.clone(),
                 storage,
@@ -125,7 +125,7 @@ pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result
     let storage_path = config.db_path().to_string_lossy().into_owned();
     let storage =
         LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
-    let prover = Handle::from_box(Box::new(disclosure_prover(config)?) as Box<dyn Prover>);
+    let prover = ProverHandle::from(disclosure_prover(config)?);
     let bootnode_setting = storage
         .storage()
         .get_bootnode_setting()
@@ -176,18 +176,14 @@ fn open_account(
 
 /// The signer delegates identity to the Stellar CLI keystore, so it carries the
 /// payer's alias and address.
-fn alias_signer(
-    config: &CliConfig,
-    signer: &Account,
-    network: &StellarNetwork,
-) -> Handle<dyn Signer> {
-    Handle::from_box(Box::new(AliasSigner {
+fn alias_signer(config: &CliConfig, signer: &Account, network: &StellarNetwork) -> SignerHandle {
+    SignerHandle::from(AliasSigner {
         alias: signer.alias.clone(),
         rpc_url: network.rpc_url.clone(),
         network_passphrase: network.passphrase.clone(),
         config_dir: config.stellar_config_dir.clone(),
         signer_address: SignerAddress::new(signer.address.as_str()),
-    }) as Box<dyn Signer>)
+    })
 }
 
 pub fn parse_amount(raw: &str) -> Result<NoteAmount> {

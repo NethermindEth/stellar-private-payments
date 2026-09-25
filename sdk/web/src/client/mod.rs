@@ -21,16 +21,14 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     correlation::{new_correlation_id, with_correlation_id},
-    deployment::{parse_contract_config, require_circuits_base_url},
+    deployment::parse_contract_config,
     models::{
         ContractConfig as JsContractConfig, ContractsStateData, DisclosureVerificationReport,
         OperationalFeedItem, RecipientLookup, VerifyDisclosureOptions, operational_feed_items,
     },
     signer::SignerHandle,
-    storage::StorageHandle,
-    workers::prover::{ProverBridge, ProverHandle, ProverWorker},
+    workers::{ProverHandle, StorageHandle},
 };
-use gloo_worker::Spawnable;
 
 pub use account::Account;
 pub use gvk::GvkAudit;
@@ -228,14 +226,10 @@ impl Client {
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
         let fetcher = self.state_fetcher()?;
-        let report = verify_disclosure_receipt(
-            &fetcher,
-            self.inner.prover().as_ref(),
-            &receipt,
-            &expected_vk_hash,
-        )
-        .await
-        .map_err(pool_err)?;
+        let report =
+            verify_disclosure_receipt(&fetcher, self.inner.prover(), &receipt, &expected_vk_hash)
+                .await
+                .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     }
 }
@@ -264,11 +258,13 @@ pub fn derive_asp_user_leaf(
 }
 
 /// Verify a selective-disclosure receipt with no wallet, no local storage,
-/// and no [`Client`] instance — just an RPC URL. Skips the OPFS/SQLite
-/// storage worker entirely, since verification never reads local state.
+/// and no [`Client`] instance — just an RPC URL and an already-configured
+/// [`ProverHandle`]. Skips the OPFS/SQLite storage worker entirely, since
+/// verification never reads local state.
 #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
 pub async fn verify_selective_disclosure_standalone(
     rpc_url: String,
+    prover: &ProverHandle,
     receipt_json: String,
     expected_vk_hash: String,
     options: JsValue,
@@ -280,34 +276,14 @@ pub async fn verify_selective_disclosure_standalone(
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
         let opts = VerifyDisclosureOptions::from_value(options)?;
         let contract_config = opts.contract_config().native().clone();
-        let circuits_base_url = require_circuits_base_url(opts.circuits_base_url().to_string())?;
-        let prover_worker_url = opts
-            .prover_worker_url()
-            .filter(|url| !url.trim().is_empty())
-            .ok_or_else(|| {
-                JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
-            })?;
         let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
         let fetcher =
             StateFetcher::new(rpc, contract_config).map_err(|e| JsError::new(&e.to_string()))?;
-        let prover = ProverBridge::new(
-            ProverWorker::spawner()
-                .with_loader(true)
-                .as_module(true)
-                .spawn(prover_worker_url),
-        );
-        prover
-            .configure_circuits_base(circuits_base_url)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        prover
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&format!("prover worker unreachable: {e:?}")))?;
 
-        let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
-            .await
-            .map_err(pool_err)?;
+        let report =
+            verify_disclosure_receipt(&fetcher, &prover.inner(), &receipt, &expected_vk_hash)
+                .await
+                .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     })
     .await

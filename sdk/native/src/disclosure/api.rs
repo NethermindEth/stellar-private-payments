@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     chain::StateFetcher,
     error::Error,
-    prover::Prover,
+    prover::ProverHandle,
     transact::{build_validated_pool_tree, load_user_key_material},
     zk::merkle::MerkleProof,
 };
@@ -147,7 +147,7 @@ pub(crate) fn map_build_disclosure_inputs(
 /// freshness, and spent-nullifier status.
 pub async fn verify_disclosure_receipt(
     fetcher: &StateFetcher,
-    prover: &dyn Prover,
+    prover: &ProverHandle,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
 ) -> Result<DisclosureVerificationReport, Error> {

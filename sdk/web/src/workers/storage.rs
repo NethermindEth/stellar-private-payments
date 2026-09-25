@@ -1,7 +1,6 @@
-use crate::protocol::{
-    AdminASPRequest, AspSecret, CorrelatedRequest, DisclaimerStatePayload, DisclosureInputs,
-    DisclosureInputsRequest, PrivacyKeys, PublicEncryptionKeyPair, PublicNoteKeyPair,
-    StorageWorkerRequest, StorageWorkerResponse,
+use crate::{
+    telemetry::WorkerTelemetryConfig,
+    workers::{CorrelatedRequest, StorageHandle},
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -10,32 +9,181 @@ use gloo_worker::{
     Registrable,
     oneshot::{OneshotBridge, oneshot},
 };
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use stellar_private_payments::{
     Error, Storage,
     chain::ContractDataStorage,
-    disclosure::{BuildDisclosureInputs, build_disclosure_inputs},
+    disclosure::{
+        BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, build_disclosure_inputs,
+    },
+    gvk::GvkEvent,
     planner::SpendableNote,
     state::{SqliteStorage, process_local_state_batch},
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
-        ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
-        NoteKeyPair, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
-        RecipientLookup, Sensitive, SyncMetadata, UserNoteSummary,
+        AspMembershipSync, ContractConfig, ContractsEventData, EncryptionKeyPair,
+        EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey, OperationalFeedItem,
+        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive, SyncMetadata,
+        UserNoteSummary, UserOperation,
     },
     zk::{crypto::asp_membership_leaf, flows::TransactParams},
 };
 use tracing::Instrument;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsCast;
-use wasm_bindgen::JsError;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
+
+#[cfg(target_arch = "wasm32")]
+use gloo_worker::Spawnable;
 
 // TODO for now it is a mix of async (because we want an async bridge for the
 // main thread) and sync (blocking) code in the future we should refactor to use
 // wasm threads?
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
+
+type Address = String;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublicNoteKeyPair {
+    public: NotePublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublicEncryptionKeyPair {
+    public: EncryptionPublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PrivacyKeys {
+    note_keypair: PublicNoteKeyPair,
+    encryption_keypair: PublicEncryptionKeyPair,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AspSecret {
+    membership_blinding: Field,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisclaimerStatePayload {
+    disclaimer_text_md: String,
+    disclaimer_hash_hex: String,
+    accepted: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AdminASPRequest {
+    membership_blinding: Field,
+    pubkey: NotePublicKey,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum StorageWorkerRequest {
+    Ping,
+    Pause,
+    SyncState,
+    ProcessPendingState,
+    SaveEvents(ContractsEventData),
+    SaveSyncProgress {
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    },
+    ClearIndexingCursors,
+    ClampLastFullyIndexedLedger(u32),
+    SavePrivateKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
+    DisclaimerState(Address),
+    AcceptDisclaimer(Address, String),
+    GetSetting(String),
+    SetSetting {
+        key: String,
+        value_json: String,
+    },
+    PrivacyKeys(Address),
+    AspSecret(Address),
+    UserNotes(Address, u32),
+    PortfolioBalances {
+        address: Address,
+        enabled_pools: Vec<PortfolioPoolEntry>,
+    },
+    RecordOperation {
+        address: Address,
+        pool_contract_id: String,
+        op_type: String,
+        amount: String,
+        direction: String,
+        counterparty: Option<String>,
+        tx_hash: Option<String>,
+    },
+    ListOperations {
+        address: Address,
+        pool_contract_id: String,
+        limit: u32,
+    },
+    UnspentUserNotes {
+        user_address: Address,
+        pool_contract_id: Address,
+    },
+    PoolUserNotes {
+        user_address: Address,
+        pool_contract_id: Address,
+    },
+    RecipientLookup {
+        address: Address,
+        public_key_registry_contract_id: String,
+    },
+    OperationalFeed {
+        limit: u32,
+        asp_membership_contract_id: String,
+        public_key_registry_contract_id: String,
+    },
+    DisclosureInputs(DisclosureInputsRequest),
+    Transact(TransactRequest),
+    DeriveASPleaf(AdminASPRequest),
+    ConfigureTelemetry(WorkerTelemetryConfig),
+    DumpLogs,
+    ListPoolGvkEvents {
+        pool_contract_id: String,
+        after: Option<(u32, String)>,
+        limit: u32,
+    },
+    PoolHasCommitments {
+        pool_contract_id: String,
+        commitments: Vec<Field>,
+    },
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum StorageWorkerResponse {
+    Pong,
+    SyncState(Vec<SyncMetadata>),
+    Saved,
+    Error(String),
+    DisclaimerState(DisclaimerStatePayload),
+    Setting(Option<String>),
+    PrivacyKeys(Option<PrivacyKeys>),
+    AspSecret(Option<AspSecret>),
+    UserNotes(Vec<UserNoteSummary>),
+    PortfolioBalances(Vec<PortfolioBalance>),
+    Operations(Vec<UserOperation>),
+    RecipientLookup(RecipientLookup),
+    OperationalFeed(Vec<OperationalFeedItem>),
+    AspMembershipSync(AspMembershipSync),
+    DisclosureNotes(Vec<DisclosureInputs>),
+    TransactParams(TransactParams),
+    DeriveASPleaf(Field),
+    Logs(String),
+    PoolGvkEvents(Vec<GvkEvent>),
+    PoolHasCommitments(Vec<Field>),
+}
 
 #[derive(Clone, Debug)]
 enum InitState {
@@ -140,7 +288,7 @@ async fn init() -> Result<(), JsError> {
                     break;
                 }
                 Err(e) if is_opfs_locked_error(&e) && attempt < OPFS_LOCK_RETRY_ATTEMPTS => {
-                    attempt += 1;
+                    attempt = attempt.saturating_add(1);
                     tracing::debug!(
                         attempt,
                         "[{WORKER_NAME}] OPFS SAH pool still locked by a previous worker, retrying"
@@ -597,11 +745,30 @@ async fn process_until_empty() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Storage worker bridge — single entry point for all main-thread ↔ worker I/O.
-pub(crate) struct StorageBridge {
+#[cfg(target_arch = "wasm32")]
+pub(crate) const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js";
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
+/// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
+#[cfg(target_arch = "wasm32")]
+const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenOptions {
+    worker_url: Option<String>,
+}
+
+/// Storage worker bridge — main-thread ↔ worker I/O for local persistence.
+/// Open once per page, [`StorageBridge::fork`] for extra handles.
+#[wasm_bindgen(js_name = Storage)]
+#[cfg(target_arch = "wasm32")]
+pub struct StorageBridge {
     bridge: OneshotBridge<StorageWorker>,
 }
 
+#[cfg(target_arch = "wasm32")]
 impl Clone for StorageBridge {
     fn clone(&self) -> Self {
         Self {
@@ -610,9 +777,86 @@ impl Clone for StorageBridge {
     }
 }
 
+#[wasm_bindgen(js_class = Storage)]
+#[cfg(target_arch = "wasm32")]
+impl StorageBridge {
+    /// Spawn the storage worker and verify it is ready.
+    ///
+    /// Call once per page session. Use [`StorageBridge::fork`] for additional
+    /// handles (e.g. app code alongside [`crate::Client`]).
+    #[wasm_bindgen(js_name = open)]
+    pub async fn open(options: JsValue) -> Result<StorageBridge, JsError> {
+        let opts: OpenOptions = if options.is_null() || options.is_undefined() {
+            OpenOptions { worker_url: None }
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+
+        Self::open_internal(
+            opts.worker_url
+                .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+        )
+        .await
+    }
+
+    /// New handle to the same storage worker (shared `spp.db`).
+    #[wasm_bindgen(js_name = fork)]
+    pub fn fork_js(&self) -> StorageBridge {
+        self.clone()
+    }
+
+    /// Forks and pings before converting to a [`StorageHandle`].
+    #[wasm_bindgen(js_name = toHandle)]
+    pub async fn to_handle(&self) -> Result<StorageHandle, JsError> {
+        let bridge = self.clone();
+        bridge
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(StorageHandle::new(bridge.into()))
+    }
+
+    /// Raw storage-worker RPC. Request/response shapes match the worker
+    /// protocol (externally tagged enums, e.g. `{ "DisclaimerState": "G..."
+    /// }`).
+    #[wasm_bindgen(js_name = call)]
+    pub async fn call_js(
+        &self,
+        request: JsValue,
+        timeout_ms: Option<u32>,
+    ) -> Result<JsValue, JsError> {
+        let req: StorageWorkerRequest = serde_wasm_bindgen::from_value(request)?;
+        let timeout = timeout_ms.unwrap_or(DEFAULT_CALL_TIMEOUT_MS);
+        let resp = self
+            .call(req, timeout)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&resp)?)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 impl StorageBridge {
     pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
         Self { bridge }
+    }
+
+    async fn open_internal(worker_url: String) -> Result<Self, JsError> {
+        crate::wasm_start();
+
+        let storage = Self::new(
+            StorageWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&worker_url),
+        );
+
+        storage
+            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        Ok(storage)
     }
 
     pub(crate) async fn call(
@@ -656,6 +900,7 @@ impl StorageBridge {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
 impl ContractDataStorage for StorageBridge {
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
@@ -696,15 +941,14 @@ impl ContractDataStorage for StorageBridge {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
 impl Storage for StorageBridge {
-    fn fork(&self) -> Result<stellar_private_payments::Handle<dyn Storage>, Error> {
+    fn fork(&self) -> Result<stellar_private_payments::StorageHandle, Error> {
         let forked = Self {
             bridge: self.bridge.fork(),
         };
-        Ok(stellar_private_payments::Handle::from_box(
-            Box::new(forked) as Box<dyn Storage>
-        ))
+        Ok(forked.into())
     }
 
     async fn process_pending_state(&self) -> Result<(), Error> {
@@ -1099,14 +1343,16 @@ impl Storage for StorageBridge {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::*;
 
-    #[test]
-    fn dump_logs_returns_ring_buffer_contents() {
+    #[wasm_bindgen_test]
+    async fn dump_logs_returns_ring_buffer_contents() {
         crate::telemetry::init_telemetry(None);
-        let resp = futures::executor::block_on(router(StorageWorkerRequest::DumpLogs))
+        let resp = router(StorageWorkerRequest::DumpLogs)
+            .await
             .expect("dump logs succeeds");
         let StorageWorkerResponse::Logs(_) = resp else {
             panic!("expected Logs response, got: {resp:?}");

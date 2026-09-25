@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{collections::HashMap, sync::Mutex};
 
 use anyhow::Context;
 
@@ -24,8 +24,8 @@ use crate::{
 /// Transact engines are keyed by [`CircuitStem`]. Disclosure engines are keyed
 /// by their registered circuit name.
 pub struct LocalProver {
-    transact: RefCell<HashMap<CircuitStem, ProverEngine>>,
-    disclosure: RefCell<HashMap<&'static str, ProverEngine>>,
+    transact: Mutex<HashMap<CircuitStem, ProverEngine>>,
+    disclosure: Mutex<HashMap<&'static str, ProverEngine>>,
 }
 
 impl LocalProver {
@@ -91,15 +91,16 @@ impl LocalProver {
         }
 
         Ok(Self {
-            transact: RefCell::new(transact),
-            disclosure: RefCell::new(disclosure),
+            transact: Mutex::new(transact),
+            disclosure: Mutex::new(disclosure),
         })
     }
 
     pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
         let stem = CircuitStem::transact(params.policy_flags, params.gvk_mode);
         self.transact
-            .borrow_mut()
+            .lock()
+            .expect("prover lock poisoned")
             .get_mut(&stem)
             .ok_or_else(|| {
                 Error::Other(anyhow::anyhow!("no transact prover configured for {stem}"))
@@ -110,7 +111,8 @@ impl LocalProver {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Prover for LocalProver {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
         self.prove(params)
@@ -127,7 +129,7 @@ impl Prover for LocalProver {
                 "no disclosure circuit registered for {note_count} note(s)"
             ))
         })?;
-        let mut disclosure = self.disclosure.borrow_mut();
+        let mut disclosure = self.disclosure.lock().expect("prover lock poisoned");
         let engine = disclosure.get_mut(circuit.name).ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "no disclosure prover configured for {}",
@@ -147,7 +149,7 @@ impl Prover for LocalProver {
     ) -> Result<bool, Error> {
         let circuit = validate_registered_receipt(receipt, expected_vk_hash)
             .context("validate disclosure receipt")?;
-        let disclosure = self.disclosure.borrow();
+        let disclosure = self.disclosure.lock().expect("prover lock poisoned");
         let engine = disclosure.get(circuit.name).ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "no disclosure verifier configured for {}",

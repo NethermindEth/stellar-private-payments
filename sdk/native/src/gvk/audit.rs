@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
-use crate::{gvk::GvkEvent, storage::Storage, types::Field, zk::gvk::GvkAuditedNote};
+use crate::{gvk::GvkEvent, types::Field, zk::gvk::GvkAuditedNote};
 
 /// Stellar RPC event ids start with a 19-character TOID (SEP-0035 operation id)
 pub(crate) const TOID_LEN: usize = 19;
@@ -53,7 +53,7 @@ struct TxGroup {
 
 /// Cursor over private transacts for one pool
 pub struct GvkAudit {
-    storage: crate::Handle<dyn Storage>,
+    storage: crate::StorageHandle,
     pool_contract_id: String,
     d_priv: Field,
     after: Option<(u32, String)>,
@@ -64,7 +64,7 @@ pub struct GvkAudit {
 
 impl GvkAudit {
     pub fn new(
-        storage: crate::Handle<dyn Storage>,
+        storage: crate::StorageHandle,
         pool_contract_id: impl Into<String>,
         d_priv: Field,
     ) -> Self {
@@ -401,11 +401,7 @@ mod tests {
             }])
         })?;
 
-        let mut audit = GvkAudit::new(
-            crate::Handle::from_box(Box::new(storage) as Box<dyn Storage>),
-            "CPOOL",
-            d_priv,
-        );
+        let mut audit = GvkAudit::new(crate::StorageHandle::from(storage), "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
         let output = tx.outputs[0].note.as_ref().expect("recovered output note");
@@ -476,11 +472,7 @@ mod tests {
             }])
         })?;
 
-        let mut audit = GvkAudit::new(
-            crate::Handle::from_box(Box::new(storage) as Box<dyn Storage>),
-            "CPOOL",
-            d_priv,
-        );
+        let mut audit = GvkAudit::new(crate::StorageHandle::from(storage), "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("transact tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.inputs.len(), 1);

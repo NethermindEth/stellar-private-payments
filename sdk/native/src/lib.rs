@@ -86,9 +86,9 @@ pub use client::Client;
 pub use error::{Error, PlanExecutionError, RetentionGap};
 pub use handle::Handle;
 pub use pool::PrivatePool;
-pub use prover::{LocalProver, Prover};
-pub use signer::{LocalSigner, Signer};
-pub use storage::{LocalStorage, Storage};
+pub use prover::{LocalProver, Prover, ProverHandle};
+pub use signer::{LocalSigner, Signer, SignerHandle};
+pub use storage::{LocalStorage, Storage, StorageHandle};
 pub use sync::{BackgroundSync, BackgroundSyncStop, SyncMode, bootnode_required};
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).

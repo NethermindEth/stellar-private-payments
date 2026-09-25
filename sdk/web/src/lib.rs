@@ -3,14 +3,13 @@
 //! Connect with [`Client`], then [`Client::account`], then [`Account::pool`].
 
 mod bootnode;
+#[cfg(target_arch = "wasm32")]
 mod circuits;
 mod client;
 mod correlation;
 mod deployment;
 mod models;
-mod protocol;
 mod signer;
-mod storage;
 mod telemetry;
 pub mod workers;
 
@@ -20,7 +19,8 @@ pub use client::{
     verify_selective_disclosure_standalone,
 };
 pub use signer::WalletSigner;
-pub use storage::Storage;
+#[cfg(target_arch = "wasm32")]
+pub use workers::{prover::ProverBridge, storage::StorageBridge};
 
 use wasm_bindgen::prelude::*;
 
@@ -75,7 +75,7 @@ pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
         }
     };
 
-    let worker_config = crate::protocol::WorkerTelemetryConfig {
+    let worker_config = crate::telemetry::WorkerTelemetryConfig {
         level: final_config.level.clone(),
         reveal_sensitive: final_config.reveal_sensitive,
     };
@@ -128,12 +128,13 @@ pub async fn dump_recent_logs() -> String {
 /// Returns a handle that owns the registration: call `.free()` on it (or let
 /// it be garbage-collected) once the corresponding client is done, so the
 /// sink is unregistered instead of lingering forever.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = registerTelemetrySinks)]
 pub fn register_telemetry_sinks(
-    storage: Option<storage::Storage>,
+    storage: Option<workers::storage::StorageBridge>,
     prover: Option<workers::prover::ProverBridge>,
 ) -> crate::telemetry::SinkRegistration {
-    crate::telemetry::register_worker_sinks(storage.map(|storage| storage.bridge()), prover)
+    crate::telemetry::register_worker_sinks(storage, prover)
 }
 
 #[cfg(test)]

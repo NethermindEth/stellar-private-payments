@@ -16,7 +16,8 @@ const READ_ONLY: &str = "read-only pool session cannot prove; open a full sessio
 /// A no-op [`Prover`]; every proving method errors.
 pub(crate) struct NoopProver;
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Prover for NoopProver {
     async fn prove_transact(&self, _params: TransactParams) -> Result<PreparedProverTx, Error> {
         Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
