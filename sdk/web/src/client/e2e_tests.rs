@@ -152,9 +152,9 @@ thread_local! {
 
 /// Open `Storage` against a blob-wrapped storage worker.
 ///
-/// `Storage::connect` must be called once per page session because OPFS holds the
-/// SQLite file with an exclusive sync access handle. Open lazily and hand out
-/// `fork()` handles to the same worker.
+/// `Storage::connect` must be called once per page session because OPFS holds
+/// the SQLite file with an exclusive sync access handle. Open lazily and hand
+/// out `fork()` handles to the same worker.
 async fn open_test_storage() -> Storage {
     if let Some(handle) = SHARED_STORAGE.with(|cell| cell.borrow().as_ref().map(Storage::fork)) {
         return handle;

@@ -5,6 +5,7 @@ import { SigningAccount } from './ui/signing-account.js';
 import { RecipientAccount } from './ui/recipient-account.js';
 import { NotesTable } from './ui/notes-table.js';
 import { Dashboard } from './ui/dashboard.js';
+import { LocalData } from './ui/local-data.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
 import { getConnectedAddress } from './wallet.js';
 import { rememberedNoteOwner } from './account-session.js';
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     RecipientAccount.init();
     NotesTable.init();
     Dashboard.init();
+    LocalData.init();
 
     updateLastVisit();
     registerServiceWorker();

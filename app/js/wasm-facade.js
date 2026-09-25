@@ -22,6 +22,7 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import { startAutoLock, unlockStorage } from './storage-access.js';
 
 export { DisclosureRequest };
 
@@ -31,7 +32,11 @@ const CIRCUITS_BASE_URL = new URL(
   window.location.href,
 ).href;
 
+/** Dispatched on `window` once the local database has been unlocked. */
+export const STORAGE_UNLOCKED_EVENT = 'spp:storage-unlocked';
+
 let storageHandle = null;
+let storageOpening = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
@@ -169,16 +174,55 @@ export function disposeClient() {
 
 /**
  * Open local persistence (and app storage helpers) without building a Client.
+ * The database is encrypted: the first call asks for the password (or for a
+ * new one) and resolves once it is unlocked.
  * @returns {Promise<import('./app-storage.js').AppStorage>}
  */
 export async function ensureStorage() {
     await ensureWasmInit();
-    if (!storageHandle) {
-        storageHandle = await Storage.open();
-        bindAppStorage(storageHandle);
-        installStoragePauseOnUnload();
+    if (!storageOpening) {
+        storageOpening = (async () => {
+            const storage = await Storage.connect();
+            installStoragePauseOnUnload(storage);
+            await unlockStorage(storage);
+            storageHandle = storage;
+            bindAppStorage(storage);
+            startAutoLock(() => { lockStorage().catch(() => window.location.reload()); });
+            window.dispatchEvent(new Event(STORAGE_UNLOCKED_EVENT));
+        })().catch((err) => {
+            storageOpening = null;
+            throw err;
+        });
     }
+    await storageOpening;
     return appStorageInstance;
+}
+
+/**
+ * Lock the local database: close it and reload the page, which then asks for
+ * the password again before anything reads local data.
+ */
+export async function lockStorage() {
+    disposeClient();
+    try {
+        await storageHandle?.close();
+    } finally {
+        window.location.reload();
+    }
+}
+
+/**
+ * Replace the database password. Rejects with `code: "wrong-password"` when
+ * `current` is wrong.
+ */
+export async function changeStoragePassword(current, next) {
+    await ensureStorage();
+    await storageHandle.changePassword(current, next);
+}
+
+/** Whether the local database has been unlocked on this page. */
+export function isStorageUnlocked() {
+    return storageHandle !== null;
 }
 
 let pauseOnUnloadInstalled = false;
@@ -195,14 +239,14 @@ let pauseOnUnloadInstalled = false;
  * worker releases the handles synchronously as soon as it processes the
  * message.
  */
-function installStoragePauseOnUnload() {
+function installStoragePauseOnUnload(storage) {
     if (pauseOnUnloadInstalled) {
         return;
     }
     pauseOnUnloadInstalled = true;
     window.addEventListener('pagehide', () => {
         try {
-            storageHandle?.call('Pause', 1_000)?.catch(() => {});
+            storage.call('Pause', 1_000)?.catch(() => {});
         } catch {
             // Best-effort: nothing to do if the worker is already gone.
         }

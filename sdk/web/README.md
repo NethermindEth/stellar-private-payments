@@ -25,7 +25,13 @@ const signer = new FreighterSigner();
 
 await init();
 
-const storage = await Storage.open();
+const storage = await Storage.connect();
+// The database is encrypted with the user's password.
+if ((await storage.status()) === 'locked') {
+  await storage.unlock(password); // rejects with code 'wrong-password'
+} else if ((await storage.status()) !== 'unlocked') {
+  await storage.create(password); // "new", or "unencrypted" data of an earlier version
+}
 
 if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
@@ -70,11 +76,17 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 
 | Method | Description                                              |
 |--------|----------------------------------------------------------|
-| `Storage.open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
+| `Storage.connect({ workerUrl? })` | Spawn the storage worker once per page; the encrypted database stays closed |
+| `status()` | `"new"`, `"unencrypted"` (earlier version's data), `"locked"` or `"unlocked"` |
+| `create(password)` | Set the first password (at least 15 characters): create the database, or encrypt the earlier unencrypted one |
+| `unlock(password)` | Open the database; a wrong password rejects with `code: "wrong-password"` |
+| `changePassword(current, next)` | Seal the key with a new password; the database is not rewritten |
+| `reset()` | Delete the local database and its password, for a forgotten password |
+| `close()` | Release the database for this handle and its forks |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
 
-The package exports a `Storage` namespace with `open` only; `fork` / `call` are on the opened handle.
+The package exports a `Storage` namespace with `connect` only; the other methods are on the handle. The key is derived from the password (Argon2id) and unsealed inside the storage worker, so the page never holds it. `Client.new` needs an unlocked storage.
 
 ### Free functions
 
@@ -274,4 +286,4 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+`Storage.connect()` defaults to the bundled storage worker URL via `import.meta.url`. Override it with `workerUrl`. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.

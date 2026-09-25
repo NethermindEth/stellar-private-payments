@@ -10,6 +10,12 @@ export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 export const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
 export const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
 export const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
+export const STORAGE_PASSWORD_DIALOG_SELECTOR = '[data-testid="storage-password-dialog"]';
+
+// The app encrypts its local data and asks for this password the first time
+// it opens storage on a page: to create the database, to encrypt an earlier
+// unencrypted one, or to unlock it.
+export const APP_PASSWORD = process.env.E2E_APP_PASSWORD || 'e2e local data password';
 
 export async function readWalletState(page) {
   return (await page.locator('body').getAttribute(WALLET_STATE_ATTRIBUTE).catch(() => null)) || 'unknown';
@@ -31,13 +37,52 @@ export async function isBootnodeConsentVisible(page) {
   return page.locator(BOOTNODE_CONSENT_MODAL_SELECTOR).isVisible().catch(() => false);
 }
 
+export async function isStoragePasswordVisible(page) {
+  return page.locator(STORAGE_PASSWORD_DIALOG_SELECTOR).isVisible().catch(() => false);
+}
+
 export async function readAppLifecycle(page) {
-  const [walletState, onboardingVisible, bootnodeConsentVisible] = await Promise.all([
+  const [walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible] = await Promise.all([
     readWalletState(page),
     isOnboardingWizardVisible(page),
     isBootnodeConsentVisible(page),
+    isStoragePasswordVisible(page),
   ]);
-  return { walletState, onboardingVisible, bootnodeConsentVisible };
+  return { walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible };
+}
+
+/**
+ * Answer the local-data password dialog with {@link APP_PASSWORD}, whichever
+ * of its modes is open, and wait until the app accepts it. Unlocking derives
+ * the key and may first encrypt an earlier database, so this can take a while.
+ */
+export async function answerStoragePassword(page) {
+  const dialog = page.locator(STORAGE_PASSWORD_DIALOG_SELECTOR);
+  const mode = await dialog.getAttribute('data-mode');
+  await page.getByTestId('storage-password-input').fill(APP_PASSWORD);
+  if (mode !== 'locked') {
+    await page.getByTestId('storage-password-confirm').fill(APP_PASSWORD);
+  }
+  await page.getByTestId('storage-password-submit').click();
+  const { value } = await waitForCondition({
+    operation: `storage:password-${mode}`,
+    timeoutMs: 120_000,
+    intervalMs: 200,
+    // One DOM read per poll: locator reads wait for a missing element, and the
+    // dialog is removed once the password is accepted.
+    observe: () => page.evaluate((selector) => {
+      const node = document.querySelector(selector);
+      return {
+        visible: Boolean(node?.checkVisibility()),
+        error: node?.querySelector('[data-testid="storage-password-error"]')?.textContent ?? '',
+      };
+    }, STORAGE_PASSWORD_DIALOG_SELECTOR),
+    isReady: ({ visible, error }) => !visible || Boolean(error?.trim()),
+  });
+  if (value.visible) {
+    throw new Error(`the local-data password was refused (${mode}): ${value.error.trim()}`);
+  }
+  return mode;
 }
 
 /**
