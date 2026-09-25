@@ -3,6 +3,8 @@ pub(crate) mod events_parsers;
 mod processor;
 mod storage;
 
+pub mod database_key;
+
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;
 pub use storage::{
     APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, APP_SETTING_GVK_AUTHORITY,

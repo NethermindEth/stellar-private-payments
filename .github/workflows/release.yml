@@ -148,7 +148,7 @@ jobs:
       - if: steps.registry.outputs.publish == 'true'
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
-        run: npm run check:artifacts && npm run check:bindgen && npm run check:types
+        run: npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package
       - if: steps.registry.outputs.publish == 'true'
         run: npm publish --ignore-scripts --provenance
 
@@ -262,10 +262,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
-          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
-          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
+          # Only qualified SQLite3MC targets; ARM64 and macOS remain deferred.
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -275,12 +274,12 @@ jobs:
         with:
           toolchain: stable
 
-      # Native (macOS) builds compile with rust-toolchain.toml, so
-      # add the target to that toolchain. The musl targets build via `cross`,
-      # which supplies the target inside its container.
       - name: Add target
-        if: ${{ !matrix.cross }}
         run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl compiler
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
         with:
@@ -302,21 +301,8 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
-      - name: Install cross
-        if: matrix.cross
-        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
-        with:
-          tool: cross
-
-      - name: Build
-        shell: bash
-        run: |
-          set -eu
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
-          else
-            cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
-          fi
+      - name: Build with required SQLite3MC
+        run: cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
@@ -325,7 +311,7 @@ jobs:
           mkdir -p out
           BIN="target/${{ matrix.target }}/release/spp"
           test -f "$BIN"
-          tar -C "$(dirname "$BIN")" -czf "out/spp-${{ matrix.target }}.tar.gz" spp
+          tar -czf "out/spp-${{ matrix.target }}.tar.gz" -C "$(dirname "$BIN")" spp -C "$GITHUB_WORKSPACE/vendor" sqlite3mc-NOTICE.txt
           cd out
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"

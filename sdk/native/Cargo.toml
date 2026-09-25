@@ -8,6 +8,11 @@ publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 
+# zip is used by sqlite3mc_source.rs, which build.rs includes with #[path];
+# cargo-shear does not follow #[path] modules.
+[package.metadata.cargo-shear]
+ignored = ["zip"]
+
 [lib]
 name = "stellar_private_payments"
 
@@ -66,7 +71,7 @@ futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
@@ -78,8 +83,10 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
+cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
+zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
@@ -89,7 +96,7 @@ pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

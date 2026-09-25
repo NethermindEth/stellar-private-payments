@@ -1,0 +1,120 @@
+name: SQLite3MC qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl]
+    env:
+      CC_x86_64_unknown_linux_gnu: gcc-13
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      AR_x86_64_unknown_linux_musl: ar
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Install target compiler
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install repository Rust toolchain and target
+        # rustup reads rust-toolchain.toml, avoiding a separate floating override.
+        run: |
+          rustup show active-toolchain
+          rustup target add '${{ matrix.target }}'
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: sqlite3mc-${{ matrix.target }}
+      - name: Build circuit artifacts
+        run: make circuits
+      - name: Test encrypted native SDK
+        run: cargo test --locked --release -p stellar-private-payments --lib --target '${{ matrix.target }}'
+      - name: Build CLI with required backend
+        run: cargo build --locked --release -p stellar-private-payments-cli --bin spp --target '${{ matrix.target }}'
+      - name: Check native lint
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo clippy --locked --release -p stellar-private-payments --lib --tests -- -D warnings
+
+  browser:
+    runs-on: ubuntu-24.04
+    env:
+      CC_wasm32_unknown_unknown: clang-18
+      AR_wasm32_unknown_unknown: llvm-ar-18
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: sqlite3mc-wasm
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+      - name: Install build dependencies
+        run: |
+          # The Rust builder reuses sqlite-wasm-rs headers/shims from the locked registry source.
+          cargo fetch --locked
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+          npm ci --prefix sdk/web
+          make circuits
+      - name: Cache verified binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+      - name: Record browser and compiler versions
+        # The hosted image supplies matching Chrome/ChromeDriver.
+        # Record these rolling test versions; engine sources and Rust remain pinned.
+        run: |
+          google-chrome --version
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          clang-18 --version
+          llvm-ar-18 --version
+      - name: Build and lint encrypted WASM
+        run: |
+          bash sdk/web/scripts/build.sh
+          SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir target)"
+          cargo --config "$SQLITE3MC_CONFIG" clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins -- -D warnings
+          npm run check:artifacts --prefix sdk/web
+          npm run check:bindgen --prefix sdk/web
+          npm run check:types --prefix sdk/web
+      - name: Test encrypted Chromium storage
+        run: |
+          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/chromium-storage
+      - name: Package verified encrypted SDK
+        # No publication. Lifecycle scripts are disabled so packaging cannot
+        # rebuild artifacts after the browser tests.
+        run: node sdk/web/scripts/check-sqlite3mc-package.js --output-directory target/sqlite3mc-package
+      - name: Upload verified encrypted package
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sqlite3mc-web-sdk-${{ github.sha }}
+          path: target/sqlite3mc-package/*
+          if-no-files-found: error
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sqlite3mc-browser-checks-${{ github.sha }}
+          path: |
+            target/sqlite3mc-checks/**/result.json
+            target/sqlite3mc-checks/**/driver.log

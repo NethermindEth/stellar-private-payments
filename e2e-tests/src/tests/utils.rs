@@ -822,7 +822,7 @@ pub fn sync_contract_state(
     }
     assert_eq!(leaves.len() % 2, 0, "Leaves should be even for this test");
     let pool_client = PoolContractClient::new(env, &contracts.pool);
-    for pair in leaves.chunks_exact(2) {
+    for pair in leaves.as_chunks::<2>().0 {
         let leaf_1 = scalar_to_u256(env, pair[0]);
         let leaf_2 = scalar_to_u256(env, pair[1]);
         env.as_contract(&contracts.pool, || {

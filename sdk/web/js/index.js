@@ -34,6 +34,24 @@ async function openStorage(options = {}) {
   });
 }
 
+/** Open encrypted storage using a caller-owned key provider. */
+async function openEncryptedStorage(options) {
+  const provider = requireField(options?.keyProvider, 'keyProvider');
+  if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
+  const createNew = options.createNew === true;
+  const supplied = await provider('spp.encrypted.db', createNew ? 'create' : 'open');
+  if (!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]' || supplied.byteLength !== 32) {
+    throw new TypeError('keyProvider must return a 32-byte Uint8Array');
+  }
+  // Leave the provider's own buffer intact; clear the copy owned by this call.
+  const transport = new Uint8Array(supplied);
+  try {
+    return await WasmStorage.openEncrypted(options.workerUrl ?? storageWorkerUrl, transport, createNew);
+  } finally {
+    transport.fill(0);
+  }
+}
+
 /**
  * Probe whether the wallet RPC needs a historical-sync bootnode.
  * @param {string} rpcUrl
@@ -158,7 +176,7 @@ function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options)
   });
 }
 
-export const Storage = { open: openStorage };
+export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage };
 export const Client = {
   new: newClient,
 };

@@ -70,6 +70,20 @@ export interface StorageOpenOptions {
   workerUrl?: string;
 }
 
+/** Supply a random 256-bit key; preserve a recoverable wrapped copy before
+ * creating the database. Do not return a wallet signature or a SEP-53 key.
+ */
+export type DatabaseKeyProvider = (
+  databaseId: string,
+  purpose: 'create' | 'open',
+) => Uint8Array | Promise<Uint8Array>;
+
+export interface EncryptedStorageOpenOptions extends StorageOpenOptions {
+  keyProvider: DatabaseKeyProvider;
+  /** Refuse an existing database when true; require an existing one otherwise. */
+  createNew?: boolean;
+}
+
 /**
  * Worker-backed local persistence (`spp.db` on OPFS).
  *
@@ -78,12 +92,15 @@ export interface StorageOpenOptions {
  */
 export interface Storage {
   fork(): Storage;
+  /** Releases the database for this handle and all forks. Reopen with Storage.open/openEncrypted. */
+  close(): Promise<void>;
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
 
-/** Package entry: `Storage.open()` only (instance methods live on the handle). */
+/** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
   open(options?: StorageOpenOptions | null): Promise<Storage>;
+  openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
 };
 
 /** Options for {@link Client.new}. */

@@ -70,12 +70,54 @@ pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 impl Storage {
+    /// Open encrypted storage with an explicit key and create/open policy.
+    pub fn connect_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+        purpose: super::database_key::OpenPurpose,
+    ) -> Result<Self> {
+        Self::connect_with_connection(super::database_key::open(path.as_ref(), key, purpose)?)
+    }
+
+    /// Open another handle to encrypted storage that an open handle already
+    /// unlocked with `key`. Used for forks.
+    pub fn reopen_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+    ) -> Result<Self> {
+        Self::connect_with_connection(super::database_key::reopen(path.as_ref(), key)?)
+    }
+
+    /// Open an existing plaintext database without permitting encrypted journal
+    /// recovery before the missing-key check. Used by the OPFS owner.
+    pub fn connect_existing_plaintext(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        super::database_key::validate_read_only(path, None)?;
+        Self::connect_with_connection(Connection::open(path)?)
+    }
+
     pub fn connect() -> Result<Self> {
         Self::connect_file(DB_NAME)
     }
 
     pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
-        Self::connect_with_connection(Connection::open(path.as_ref())?)
+        let path = path.as_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        // Reject a missing key before a recovery-capable handle can write a hot
+        // encrypted journal back into the database. OPFS does this in its
+        // owner.
+        #[cfg(not(target_arch = "wasm32"))]
+        if path.exists() && std::fs::metadata(path)?.len() > 0 {
+            super::database_key::validate_read_only(path, None)?;
+        }
+        Self::connect_with_connection(Connection::open(path)?)
     }
 
     pub fn connect_in_memory() -> Result<Self> {
