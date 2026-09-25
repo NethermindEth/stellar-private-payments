@@ -1,8 +1,9 @@
 # Summary
 
 - [Introduction](./introduction.md)
-  - [Install the CLI](./introduction.md#install-the-cli)
+  - [Install the CLI]()
 - [Contributing](./contributing.md)
+- [Deploy](./deploy.md)
 - [Security](./security.md)
   - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
 
