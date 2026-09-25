@@ -86,7 +86,15 @@ async fn sync_inline_idempotent() -> Result<()> {
 #[tokio::test]
 async fn unknown_pool() -> Result<()> {
     let session = setup().await?;
+
+    // bad format
     let pool_res = session.account.pool("unknown-pool-contract-id");
+    assert!(pool_res.is_err());
+
+    // non-existent pool
+    let pool_res = session
+        .account
+        .pool("CBEDPYMAEPQ6JRXWKWXRM6CFHHJLKA5RHPRRLSD4UZXZRGNMBXOT3LMW");
     assert!(pool_res.is_err());
 
     Ok(())
