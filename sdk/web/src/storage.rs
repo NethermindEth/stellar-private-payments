@@ -4,10 +4,10 @@
 //! Internal transport uses [`crate::workers::storage::StorageBridge`].
 
 use serde::Deserialize;
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, prelude::*};
 
 use crate::{
-    protocol::StorageWorkerRequest,
+    protocol::{Password, StorageWorkerRequest, StorageWorkerResponse},
     workers::storage::{StorageBridge, StorageWorker},
 };
 use gloo_worker::Spawnable;
@@ -15,7 +15,10 @@ use gloo_worker::Spawnable;
 pub(crate) const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js";
 const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
 /// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
-const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
+const STORAGE_OPEN_TIMEOUT_MS: u32 = 15_000;
+/// Deriving the key from a password takes a second or two, and encrypting an
+/// earlier unencrypted database copies all of it.
+const STORAGE_PASSWORD_TIMEOUT_MS: u32 = 120_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,106 +58,140 @@ impl Storage {
         self.bridge.clone()
     }
 
-    pub(crate) async fn open_internal(worker_url: String) -> Result<Self, JsError> {
-        crate::wasm_start();
-
-        let storage = Self {
-            bridge: StorageBridge::new(
-                StorageWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&worker_url),
-            ),
-        };
-
-        storage
-            .bridge
-            .call(
-                StorageWorkerRequest::OpenPlaintext,
-                STORAGE_OPEN_PING_TIMEOUT_MS,
-            )
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        storage
-            .bridge
-            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        Ok(storage)
+    async fn request(
+        &self,
+        request: StorageWorkerRequest,
+        timeout_ms: u32,
+    ) -> Result<StorageWorkerResponse, JsValue> {
+        // Own a bridge for the whole request: JS may drop this handle while
+        // the request is pending, and the worker must outlive the request.
+        let bridge = self.bridge.clone();
+        match bridge.call(request, timeout_ms).await {
+            Ok(StorageWorkerResponse::WrongPassword) => Err(wrong_password()),
+            Ok(response) => Ok(response),
+            Err(e) => Err(js_sys::Error::new(&e.to_string()).into()),
+        }
     }
+}
+
+/// A wrong password as a JS `Error` with `code: "wrong-password"`, so callers
+/// can ask again rather than report a failure.
+fn wrong_password() -> JsValue {
+    let error = js_sys::Error::new("wrong password");
+    // Setting a property on a fresh Error cannot fail.
+    let _ = js_sys::Reflect::set(&error, &"code".into(), &"wrong-password".into());
+    error.into()
 }
 
 #[wasm_bindgen]
 impl Storage {
-    /// Open the separate encrypted OPFS database. The caller supplies a random
-    /// 32-byte key; existing plaintext storage is neither opened nor converted.
-    #[wasm_bindgen(js_name = openEncrypted)]
-    pub async fn open_encrypted(
-        worker_url: String,
-        key: Vec<u8>,
-        create_new: bool,
-    ) -> Result<Storage, JsError> {
-        let key = crate::protocol::DatabaseKeyTransport(key);
-        if key.0.len() != 32 {
-            return Err(JsError::new("database key must contain 32 bytes"));
-        }
-        crate::wasm_start();
-        let storage = Self {
-            bridge: StorageBridge::new(
-                StorageWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&worker_url),
-            ),
-        };
-        storage
-            .bridge
-            .call(
-                StorageWorkerRequest::OpenEncrypted { key, create_new },
-                STORAGE_OPEN_PING_TIMEOUT_MS,
-            )
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        storage
-            .bridge
-            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(storage)
-    }
-
-    /// Close the database and release OPFS handles for this storage and all its
-    /// forks. Create a new Storage to reopen; this handle cannot be reused.
-    pub async fn close(&self) -> Result<(), JsError> {
-        self.bridge
-            .call(StorageWorkerRequest::Pause, STORAGE_OPEN_PING_TIMEOUT_MS)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(())
-    }
-
-    /// Spawn the storage worker and verify it is ready.
+    /// Spawn the storage worker. The database stays closed until [`create`]
+    /// or [`unlock`]; ask [`status`] which one it needs. Connect once per
+    /// page; use [`fork`] for additional handles.
     ///
-    /// Call once per page session. Use [`Storage::fork`] for additional handles
-    /// (e.g. app code alongside [`crate::Client`]).
-    #[wasm_bindgen(js_name = open)]
-    pub async fn open(options: JsValue) -> Result<Storage, JsError> {
+    /// [`create`]: Storage::create
+    /// [`unlock`]: Storage::unlock
+    /// [`status`]: Storage::status
+    /// [`fork`]: Storage::fork
+    pub async fn connect(options: JsValue) -> Result<Storage, JsError> {
         let opts: OpenOptions = if options.is_null() || options.is_undefined() {
             OpenOptions { worker_url: None }
         } else {
             serde_wasm_bindgen::from_value(options)?
         };
-
-        Self::open_internal(
-            opts.worker_url
-                .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
-        )
-        .await
+        crate::wasm_start();
+        let storage = Self {
+            bridge: StorageBridge::new(
+                StorageWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(
+                        &opts
+                            .worker_url
+                            .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+                    ),
+            ),
+        };
+        // Return only once the worker has loaded and taken the OPFS pool. A
+        // handle JS drops while the worker still loads can lose the worker,
+        // and a second tab's lock surfaces here rather than on first use.
+        storage
+            .status()
+            .await
+            .map_err(|e| JsError::new(&js_message(&e)))?;
+        Ok(storage)
     }
 
-    /// New handle to the same storage worker (shared `spp.db`).
+    /// What the database needs: `"new"` or `"unencrypted"` (choose a password
+    /// with [`Storage::create`]), `"locked"` ([`Storage::unlock`]) or
+    /// `"unlocked"`.
+    pub async fn status(&self) -> Result<JsValue, JsValue> {
+        match self
+            .request(StorageWorkerRequest::Status, STORAGE_OPEN_TIMEOUT_MS)
+            .await?
+        {
+            StorageWorkerResponse::Status(status) => Ok(serde_wasm_bindgen::to_value(&status)?),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Set the first password: create the database, or encrypt the
+    /// unencrypted one of an earlier version. The database is open afterwards.
+    pub async fn create(&self, password: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::Create(Password(password)),
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Open the database. A wrong password rejects with
+    /// `code: "wrong-password"` and leaves the storage ready for another try.
+    pub async fn unlock(&self, password: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::Unlock(Password(password)),
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Replace the password. Rejects with `code: "wrong-password"` when
+    /// `current` is wrong; the database itself is not rewritten.
+    #[wasm_bindgen(js_name = changePassword)]
+    pub async fn change_password(&self, current: String, next: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::ChangePassword {
+                current: Password(current),
+                new: Password(next),
+            },
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Delete the local database and its password, for a forgotten password.
+    /// Everything in it is synced again from the chain and the wallet
+    /// afterwards; [`Storage::create`] sets a new password.
+    pub async fn reset(&self) -> Result<(), JsValue> {
+        self.request(StorageWorkerRequest::Reset, STORAGE_OPEN_TIMEOUT_MS)
+            .await?;
+        Ok(())
+    }
+
+    /// Close the database and release OPFS handles for this storage and all its
+    /// forks. Connect a new Storage to reopen; this handle cannot be reused.
+    pub async fn close(&self) -> Result<(), JsError> {
+        self.bridge
+            .call(StorageWorkerRequest::Pause, STORAGE_OPEN_TIMEOUT_MS)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(())
+    }
+
+    /// New handle to the same storage worker and database.
     pub fn fork(&self) -> Storage {
         Storage {
             bridge: self.bridge.clone(),
@@ -192,4 +229,15 @@ impl Storage {
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&resp)?)
     }
+}
+
+fn unexpected(response: &StorageWorkerResponse) -> JsValue {
+    js_sys::Error::new(&format!("unexpected storage response: {response:?}")).into()
+}
+
+fn js_message(error: &JsValue) -> String {
+    error
+        .dyn_ref::<js_sys::Error>()
+        .map(|e| String::from(e.message()))
+        .unwrap_or_else(|| format!("{error:?}"))
 }

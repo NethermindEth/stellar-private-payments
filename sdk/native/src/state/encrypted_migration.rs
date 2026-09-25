@@ -213,6 +213,49 @@ pub fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> 
     check_integrity(destination)
 }
 
+/// Copy the plaintext database at `source`, opened through the SQLite VFS
+/// `source_vfs` (or the default one), into a new encrypted database at
+/// `destination`, which must not exist yet.
+pub fn copy_into_encrypted(
+    source: &std::path::Path,
+    source_vfs: Option<&str>,
+    destination: &std::path::Path,
+    key: &super::database_key::DatabaseKey,
+) -> Result<()> {
+    use rusqlite::OpenFlags;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    // Opening normally rolls back a hot journal a crash may have left.
+    let mut source = match source_vfs {
+        Some(vfs) => Connection::open_with_flags_and_vfs(source, flags, vfs)?,
+        None => Connection::open_with_flags(source, flags)?,
+    };
+    let mut destination = super::database_key::open(
+        destination,
+        key,
+        super::database_key::OpenPurpose::CreateNew,
+    )?;
+    copy_plaintext(&mut source, &mut destination)
+}
+
+/// Whether the encrypted database at `path` has any tables. A copy commits
+/// schema and rows together, so a database without tables, or without any
+/// pages at all, holds an interrupted copy or creation and can be replaced.
+pub fn has_tables(path: &std::path::Path, key: &super::database_key::DatabaseKey) -> Result<bool> {
+    use rusqlite::OpenFlags;
+    #[cfg(not(target_arch = "wasm32"))]
+    let absolute = std::path::absolute(path)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let path = absolute.as_path();
+    // Not database_key::open, which refuses a database without pages.
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    super::database_key::configure(&conn, key)?;
+    let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+    Ok(pages > 0 && !schema(&conn)?.is_empty())
+}
+
 /// Whether the file at `path` is an unencrypted SQLite database. Encrypted
 /// databases do not start with SQLite's plaintext header.
 #[cfg(not(target_arch = "wasm32"))]
@@ -239,7 +282,6 @@ pub fn encrypt_in_place(
     path: &std::path::Path,
     key: &super::database_key::DatabaseKey,
 ) -> Result<()> {
-    use super::database_key::{OpenPurpose, open};
     let path = std::path::absolute(path)?;
     ensure!(
         is_plaintext_file(&path)?,
@@ -257,12 +299,7 @@ pub fn encrypt_in_place(
             result => result?,
         }
     }
-    // Opening normally rolls back a hot journal a crash may have left.
-    let mut source = Connection::open(&path)?;
-    let mut destination = open(&staging, key, OpenPurpose::CreateNew)?;
-    copy_plaintext(&mut source, &mut destination)?;
-    drop(destination);
-    drop(source);
+    copy_into_encrypted(&path, None, &staging, key)?;
     std::fs::File::open(&staging)?.sync_all()?;
     std::fs::rename(&staging, &path)?;
     if let Some(directory) = path.parent() {

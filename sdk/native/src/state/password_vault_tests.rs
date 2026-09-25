@@ -203,3 +203,22 @@ fn provider_rejects_wrong_password_and_existing_database() -> Result<()> {
     assert_eq!(fs::read(record_path(&f.db()))?, record);
     Ok(())
 }
+
+#[test]
+fn record_database_replaces_its_record() -> Result<()> {
+    let f = Fixture::new()?;
+    let path = f.0.join("spp.key.db");
+    assert_eq!(read_record_database(&path)?, None);
+
+    let key = DatabaseKey::generate()?;
+    let first = PasswordRecord::seal(&key, PASSWORD)?;
+    write_record_database(&path, &first)?;
+    assert_eq!(read_record_database(&path)?, Some(first));
+
+    let second = PasswordRecord::seal(&key, OTHER_PASSWORD)?;
+    write_record_database(&path, &second)?;
+    let stored = read_record_database(&path)?.expect("record is stored");
+    assert_eq!(stored, second);
+    assert_eq!(*stored.open(OTHER_PASSWORD)?, *key);
+    Ok(())
+}

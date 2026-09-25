@@ -190,6 +190,43 @@ fn decode(value: &str, len: usize) -> Result<Vec<u8>, VaultError> {
         .ok_or(VaultError::InvalidRecord)
 }
 
+/// Read the password record kept in the plain SQLite file at `path`, if the
+/// file and its record exist. Browser storage keeps the record this way, so
+/// replacing it is a SQLite transaction and cannot leave a half-written file.
+pub fn read_record_database(path: &std::path::Path) -> Result<Option<PasswordRecord>> {
+    let conn = rusqlite::Connection::open(path)?;
+    create_record_table(&conn)?;
+    let json: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
+        "SELECT record FROM password_record WHERE id = 1",
+        [],
+        |row| row.get(0),
+    ))?;
+    json.map(|json| Ok(PasswordRecord::from_json(&json)?))
+        .transpose()
+}
+
+/// Store `record` in the plain SQLite file at `path`, replacing any earlier
+/// one in a single transaction.
+pub fn write_record_database(path: &std::path::Path, record: &PasswordRecord) -> Result<()> {
+    let conn = rusqlite::Connection::open(path)?;
+    create_record_table(&conn)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO password_record (id, record) VALUES (1, ?1)",
+        [record.to_json()?],
+    )?;
+    Ok(())
+}
+
+fn create_record_table(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS password_record (
+             id INTEGER PRIMARY KEY CHECK (id = 1),
+             record TEXT NOT NULL
+         )",
+    )?;
+    Ok(())
+}
+
 /// Read a password from a file, dropping one trailing newline (`\n` or
 /// `\r\n`) so files written by `echo` or an editor work.
 #[cfg(not(target_arch = "wasm32"))]

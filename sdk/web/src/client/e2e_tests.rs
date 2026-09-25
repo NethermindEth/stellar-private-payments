@@ -148,6 +148,9 @@ async fn blob_worker_url(file: &str) -> String {
         .unwrap()
 }
 
+/// Password of the e2e tests' local database.
+const TEST_DATABASE_PASSWORD: &str = "e2e test database password";
+
 // The one `Storage` for this page. See `open_test_storage`.
 thread_local! {
     static SHARED_STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
@@ -155,7 +158,7 @@ thread_local! {
 
 /// Open `Storage` against a blob-wrapped storage worker.
 ///
-/// `Storage::open` must be called once per page session because OPFS holds the
+/// `Storage::connect` must be called once per page session because OPFS holds the
 /// SQLite file with an exclusive sync access handle. Open lazily and hand out
 /// `fork()` handles to the same worker.
 async fn open_test_storage() -> Storage {
@@ -171,9 +174,23 @@ async fn open_test_storage() -> Storage {
         &JsValue::from_str(&worker_url),
     )
     .unwrap();
-    let storage = Storage::open(options.into())
+    let storage = Storage::connect(options.into())
         .await
-        .expect("storage worker must start and answer its ping");
+        .expect("storage worker must start");
+    // Each e2e test runs in a fresh browser profile, so this creates the
+    // database; unlock covers a reused profile.
+    let status = storage.status().await.expect("storage status");
+    if status.as_string().as_deref() == Some("locked") {
+        storage
+            .unlock(TEST_DATABASE_PASSWORD.to_string())
+            .await
+            .expect("unlock the test database");
+    } else {
+        storage
+            .create(TEST_DATABASE_PASSWORD.to_string())
+            .await
+            .expect("create the test database");
+    }
 
     // Borrow only after the await, never across it.
     let handle = storage.fork();

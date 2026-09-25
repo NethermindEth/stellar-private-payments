@@ -129,3 +129,32 @@ fn refuses_databases_that_are_not_plaintext() -> Result<()> {
     assert!(encrypt_in_place(&f.0.join("missing.db"), &key).is_err());
     Ok(())
 }
+
+#[test]
+fn an_interrupted_copy_is_recognised_and_can_be_redone() -> Result<()> {
+    let f = Fixture::new()?;
+    seed_plaintext(&f.db())?;
+    let before = fingerprint(&Connection::open(f.db())?)?;
+    let encrypted = f.0.join("spp.encrypted.db");
+    let key = DatabaseKey::generate()?;
+
+    // An interrupted copy leaves an encrypted database without pages.
+    drop(super::super::database_key::open(
+        &encrypted,
+        &key,
+        OpenPurpose::CreateNew,
+    )?);
+    assert!(!has_tables(&encrypted, &key)?);
+
+    fs::remove_file(&encrypted)?;
+    copy_into_encrypted(&f.db(), None, &encrypted, &key)?;
+    assert!(has_tables(&encrypted, &key)?);
+    assert!(has_tables(&encrypted, &DatabaseKey::generate()?).is_err());
+    let conn = super::super::database_key::open(&encrypted, &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(fingerprint(&conn)?, before);
+    drop(conn);
+
+    // A copy never overwrites an existing database.
+    assert!(copy_into_encrypted(&f.db(), None, &encrypted, &key).is_err());
+    Ok(())
+}

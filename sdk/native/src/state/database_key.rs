@@ -181,11 +181,6 @@ pub(crate) fn configure(conn: &Connection, key: &DatabaseKey) -> Result<()> {
     Ok(())
 }
 
-pub fn clear_transport(bytes: &mut [u8]) {
-    use zeroize::Zeroize;
-    bytes.zeroize();
-}
-
 // Authenticate the encrypted first page without allowing hot-journal recovery.
 // The immutable handle is closed before the normal recovery-capable handle
 // opens. This is a short preflight under the application's single-owner

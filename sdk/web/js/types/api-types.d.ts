@@ -63,42 +63,48 @@ export interface TelemetryConfig {
   revealSensitive?: boolean;
 }
 
-/** Options for {@link Storage.open}. */
-export interface StorageOpenOptions {
+/** Options for {@link Storage.connect}. */
+export interface StorageConnectOptions {
   workerUrl?: string;
 }
 
-/** Supply a random 256-bit key; preserve a recoverable wrapped copy before
- * creating the database. Do not return a wallet signature or a SEP-53 key.
+/**
+ * What the local database needs before use: `"new"` and `"unencrypted"` need
+ * a password from {@link Storage.create}, `"locked"` needs
+ * {@link Storage.unlock}.
  */
-export type DatabaseKeyProvider = (
-  databaseId: string,
-  purpose: 'create' | 'open',
-) => Uint8Array | Promise<Uint8Array>;
-
-export interface EncryptedStorageOpenOptions extends StorageOpenOptions {
-  keyProvider: DatabaseKeyProvider;
-  /** Refuse an existing database when true; require an existing one otherwise. */
-  createNew?: boolean;
-}
+export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'unlocked';
 
 /**
- * Worker-backed local persistence (`spp.db` on OPFS).
+ * Worker-backed local persistence in an encrypted OPFS database.
  *
- * Open once per page via {@link Storage.open}. Call {@link Storage.fork} for
- * additional handles (e.g. app code alongside {@link Client.new}).
+ * Connect once per page via {@link Storage.connect}, then create or unlock
+ * the database with the user's password. The key never leaves the storage
+ * worker. Call {@link Storage.fork} for additional handles (e.g. app code
+ * alongside {@link Client.new}).
+ *
+ * `unlock` and `changePassword` reject with an `Error` whose `code` is
+ * `"wrong-password"` when the password is wrong.
  */
 export interface Storage {
+  status(): Promise<StorageStatus>;
+  /**
+   * Set the first password (at least 15 characters): create the database, or
+   * encrypt an earlier version's unencrypted one. Opens it.
+   */
+  create(password: string): Promise<void>;
+  unlock(password: string): Promise<void>;
+  changePassword(current: string, next: string): Promise<void>;
+  /** Delete the local database and its password, for a forgotten password. */
+  reset(): Promise<void>;
   fork(): Storage;
-  /** Releases the database for this handle and all forks. Reopen with Storage.open/openEncrypted. */
+  /** Releases the database for this handle and all forks. Connect again to reopen. */
   close(): Promise<void>;
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
 
-/** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
-  open(options?: StorageOpenOptions | null): Promise<Storage>;
-  openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
+  connect(options?: StorageConnectOptions | null): Promise<Storage>;
 };
 
 /** Options for {@link Client.new}. */
