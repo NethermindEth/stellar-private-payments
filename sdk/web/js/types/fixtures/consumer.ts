@@ -16,7 +16,13 @@ declare const signer: import('../signer.js').WalletSigner;
 async function typedConsumer(config: ContractConfig) {
   void TX_PROGRESS_EVENT;
 
-  const storage = await Storage.open();
+  const storage = await Storage.connect();
+  const status: import('../index.js').StorageStatus = await storage.status();
+  if (status === 'locked') {
+    await storage.unlock('correct horse battery staple');
+  } else if (status !== 'unlocked') {
+    await storage.create('correct horse battery staple');
+  }
   const client = await Client.new({
     rpcUrl,
     storage,

@@ -25,31 +25,14 @@ function requireField(value, name) {
 }
 
 /**
- * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
- * then pass the instance (or a fork) to {@link Client.new}.
+ * Connect to worker-backed local persistence. Connect once per page, check
+ * `status()`, then `create(password)` or `unlock(password)` before passing the
+ * storage (or a fork) to {@link Client.new}.
  */
-async function openStorage(options = {}) {
-  return WasmStorage.open({
+async function connectStorage(options = {}) {
+  return WasmStorage.connect({
     workerUrl: options.workerUrl ?? storageWorkerUrl,
   });
-}
-
-/** Open encrypted storage using a caller-owned key provider. */
-async function openEncryptedStorage(options) {
-  const provider = requireField(options?.keyProvider, 'keyProvider');
-  if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
-  const createNew = options.createNew === true;
-  const supplied = await provider('spp.encrypted.db', createNew ? 'create' : 'open');
-  if (!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]' || supplied.byteLength !== 32) {
-    throw new TypeError('keyProvider must return a 32-byte Uint8Array');
-  }
-  // Leave the provider's own buffer intact; clear the copy owned by this call.
-  const transport = new Uint8Array(supplied);
-  try {
-    return await WasmStorage.openEncrypted(options.workerUrl ?? storageWorkerUrl, transport, createNew);
-  } finally {
-    transport.fill(0);
-  }
 }
 
 /**
@@ -146,11 +129,8 @@ async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
   const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
 
-  const storage =
-    options.storage ??
-    (await openStorage({
-      workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
-    }));
+  // The database is encrypted: only the app can ask for its password.
+  const storage = requireField(options.storage, 'storage (connect and unlock it first)');
 
   return wrapClient(
     await WasmClient.new(
@@ -176,7 +156,7 @@ function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options)
   });
 }
 
-export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage };
+export const Storage = { connect: connectStorage };
 export const Client = {
   new: newClient,
 };

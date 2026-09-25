@@ -62,11 +62,19 @@ pub struct DisclaimerStatePayload {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
-    OpenPlaintext,
-    OpenEncrypted {
-        key: DatabaseKeyTransport,
-        create_new: bool,
+    /// What the database needs before it can be used; see [`StorageStatus`].
+    Status,
+    /// Set the first password: create the database, or encrypt the one an
+    /// earlier version left unencrypted.
+    Create(Password),
+    Unlock(Password),
+    ChangePassword {
+        current: Password,
+        new: Password,
     },
+    /// Delete the local database and its password record, for a forgotten
+    /// password. Everything in it can be synced again.
+    Reset,
     Ping,
     Pause,
     SyncState,
@@ -140,27 +148,45 @@ pub enum StorageWorkerRequest {
     },
 }
 
-/// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
-/// zeroized on drop. Browser message serialization can still create other
+/// A password in a worker message. Debug never shows it and this Rust copy is
+/// zeroized on drop; browser message serialization can still make other
 /// copies.
 #[derive(Serialize, Deserialize)]
-pub struct DatabaseKeyTransport(pub Vec<u8>);
+#[serde(transparent)]
+pub struct Password(pub String);
 
-impl std::fmt::Debug for DatabaseKeyTransport {
+impl std::fmt::Debug for Password {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("DatabaseKey([REDACTED])")
+        f.write_str("Password([REDACTED])")
     }
 }
 
-impl Drop for DatabaseKeyTransport {
+impl Drop for Password {
     fn drop(&mut self) {
-        stellar_private_payments::state::database_key::clear_transport(&mut self.0);
+        zeroize::Zeroize::zeroize(&mut self.0);
     }
+}
+
+/// What the local database needs before the app can use it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageStatus {
+    /// Nothing stored yet: choose a password to create the database.
+    New,
+    /// An earlier version's unencrypted database: choose a password to
+    /// encrypt it.
+    Unencrypted,
+    /// Set up; enter the password to unlock.
+    Locked,
+    /// Open and ready.
+    Unlocked,
 }
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerResponse {
+    Status(StorageStatus),
+    WrongPassword,
     Pong,
     SyncState(Vec<SyncMetadata>),
     Saved,

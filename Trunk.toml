@@ -7,7 +7,15 @@ release = true
 
 [watch]
 watch = ["app", "circuits", "sdk/web"]
-ignore = ["app/node_modules", "dist", "sdk/web/node_modules"]
+# The pre_build hook writes sdk/web/dist and the profile marker; watching them
+# makes every SDK build trigger the next one.
+ignore = [
+    "app/node_modules",
+    "dist",
+    "sdk/web/node_modules",
+    "sdk/web/dist",
+    "sdk/web/.trunk-wasm-profile",
+]
 
 [serve]
 addresses = ["0.0.0.0"]
@@ -39,7 +47,7 @@ fi
 PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
 LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
 if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ] || \
-   ! grep -q 'static openEncrypted(' sdk/web/dist/stellar_private_payments_web.js || \
+   ! grep -q 'changePassword(' sdk/web/dist/stellar_private_payments_web.js || \
    [ ! -f sdk/web/dist/licenses/SQLite3MC.txt ]; then
     echo "trunk: building stellar-private-payments-web (WASM_PROFILE=$WASM_PROFILE)..."
     npm run build --prefix sdk/web

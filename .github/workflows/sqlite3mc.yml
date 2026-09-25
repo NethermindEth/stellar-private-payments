@@ -100,6 +100,18 @@ jobs:
       - name: Test encrypted Chromium storage
         run: |
           node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/chromium-storage
+      - name: Test migrating an earlier unencrypted database in Chromium
+        run: |
+          # gvkey-gen writes a plaintext wallet through the native SDK, as
+          # earlier versions did, with a GVK authority key that must survive.
+          mkdir -p target/sqlite3mc-checks/legacy
+          cargo run --locked --quiet -p gvkey-gen -- generate \
+            --db target/sqlite3mc-checks/legacy/spp.db \
+            --out-file target/sqlite3mc-checks/legacy/gvk.json
+          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" \
+            --artifacts target/sqlite3mc-checks/chromium-migration \
+            --legacy-db target/sqlite3mc-checks/legacy/spp.db \
+            --legacy-gvk target/sqlite3mc-checks/legacy/gvk.json
       - name: Package verified encrypted SDK
         # No publication. Lifecycle scripts are disabled so packaging cannot
         # rebuild artifacts after the browser tests.

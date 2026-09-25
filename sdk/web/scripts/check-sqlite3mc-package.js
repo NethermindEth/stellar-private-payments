@@ -42,10 +42,10 @@ function verify(read) {
   if (!read('dist/licenses/SQLite3MC.txt').equals(notice)) throw new Error('SQLite3MC notice differs from reviewed notice');
   if (!read('dist/licenses/sqlite-wasm-vfs-LICENSE.txt').equals(vfsNotice)) throw new Error('VFS notice differs from reviewed notice');
   const bindings = read('dist/stellar_private_payments_web.js').toString();
-  for (const method of ['static openEncrypted(']) {
+  for (const method of ['static connect(', 'changePassword(']) {
     if (!bindings.includes(method)) throw new Error(`WASM bindings lack ${method}`);
   }
-  if (!read('js/index.js').toString().includes('openEncrypted')) throw new Error('JavaScript facade lacks encrypted storage access');
+  if (!read('js/index.js').toString().includes('connect: connectStorage')) throw new Error('JavaScript facade lacks encrypted storage access');
   for (const name of ['dist/stellar_private_payments_web_bg.wasm', 'dist/workers/storage-worker-module_bg.wasm']) {
     if (!read(name).subarray(0, 4).equals(Buffer.from([0, 97, 115, 109]))) throw new Error(`invalid WASM artifact: ${name}`);
   }
