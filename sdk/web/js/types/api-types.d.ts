@@ -144,6 +144,7 @@ export interface Client {
     receiptJson: string,
     expectedVkHash: string,
   ): Promise<DisclosureVerificationReport>;
+  dispose(): void;
 }
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
