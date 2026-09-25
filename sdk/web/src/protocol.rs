@@ -141,7 +141,8 @@ pub enum StorageWorkerRequest {
 }
 
 /// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
-/// zeroized on drop. Browser message serialization can still create other copies.
+/// zeroized on drop. Browser message serialization can still create other
+/// copies.
 #[derive(Serialize, Deserialize)]
 pub struct DatabaseKeyTransport(pub Vec<u8>);
 
