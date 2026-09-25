@@ -6,6 +6,7 @@ pub mod keys;
 pub mod license;
 pub mod notes;
 pub mod overview;
+pub mod password;
 pub mod pool;
 pub mod register;
 pub mod version;

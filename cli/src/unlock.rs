@@ -64,42 +64,51 @@ fn open_existing(
     password_file: Option<&Path>,
     prompt: &mut Prompt<'_>,
 ) -> Result<DatabaseKey> {
-    let record_path = password_vault::record_path(database);
-    let json = std::fs::read_to_string(&record_path)
-        .with_context(|| format!("read password record {}", record_path.display()))?;
-    let record = PasswordRecord::from_json(&json)?;
-    let key = match password_file {
-        Some(file) => record
-            .open(&read_password_file(file)?)
-            .map_err(|e| match e {
-                VaultError::WrongPassword => {
-                    anyhow::anyhow!("the password in {} is wrong", file.display())
-                }
-                e => e.into(),
-            })?,
-        None => {
-            let mut attempt = 1;
-            loop {
-                match record.open(&prompt("Password: ")?) {
-                    Ok(key) => break key,
-                    Err(VaultError::WrongPassword) if attempt < ATTEMPTS => {
-                        eprintln!("Sorry, try again.");
-                        attempt = attempt.saturating_add(1);
-                    }
-                    Err(VaultError::WrongPassword) => {
-                        bail!("{ATTEMPTS} incorrect password attempts")
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-        }
-    };
+    let key = open_record(&read_record(database)?, password_file, prompt, "Password: ")?;
     // Opening proves the key belongs to this database, not just the record.
     drop(
         SqliteStorage::connect_encrypted(database, &key, OpenPurpose::OpenExisting)
             .with_context(|| format!("open {}", database.display()))?,
     );
     Ok(key)
+}
+
+fn read_record(database: &Path) -> Result<PasswordRecord> {
+    let record_path = password_vault::record_path(database);
+    let json = std::fs::read_to_string(&record_path)
+        .with_context(|| format!("read password record {}", record_path.display()))?;
+    Ok(PasswordRecord::from_json(&json)?)
+}
+
+/// Open `record` with the password from `password_file`, or ask for it with
+/// `label` up to [`ATTEMPTS`] times.
+fn open_record(
+    record: &PasswordRecord,
+    password_file: Option<&Path>,
+    prompt: &mut Prompt<'_>,
+    label: &str,
+) -> Result<DatabaseKey> {
+    if let Some(file) = password_file {
+        return record
+            .open(&read_password_file(file)?)
+            .map_err(|e| match e {
+                VaultError::WrongPassword => {
+                    anyhow::anyhow!("the password in {} is wrong", file.display())
+                }
+                e => e.into(),
+            });
+    }
+    for attempt in 1..=ATTEMPTS {
+        match record.open(&prompt(label)?) {
+            Ok(key) => return Ok(key),
+            Err(VaultError::WrongPassword) if attempt < ATTEMPTS => {
+                eprintln!("Sorry, try again.");
+            }
+            Err(VaultError::WrongPassword) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    bail!("{ATTEMPTS} incorrect password attempts")
 }
 
 fn create(
@@ -140,6 +149,53 @@ fn encrypt_existing(
     encrypted_migration::encrypt_in_place(database, &key)
         .with_context(|| format!("encrypt {}", database.display()))?;
     Ok(key)
+}
+
+/// Change the password of the encrypted database at `database`.
+///
+/// The current password comes from `password_file` or the terminal, the new
+/// one from `new_password_file` or the terminal, asked twice. The same
+/// database key is sealed again, so the database itself is not rewritten.
+pub fn change_password(
+    database: &Path,
+    password_file: Option<&Path>,
+    new_password_file: Option<&Path>,
+) -> Result<()> {
+    change_password_with(
+        database,
+        password_file,
+        new_password_file,
+        &mut terminal_prompt,
+    )
+}
+
+fn change_password_with(
+    database: &Path,
+    password_file: Option<&Path>,
+    new_password_file: Option<&Path>,
+    prompt: &mut Prompt<'_>,
+) -> Result<()> {
+    anyhow::ensure!(
+        database.exists() && !encrypted_migration::is_plaintext_file(database)?,
+        "no encrypted database at {}; any other spp command creates or encrypts it",
+        database.display()
+    );
+    let key = open_record(
+        &read_record(database)?,
+        password_file,
+        prompt,
+        "Current password: ",
+    )?;
+    // Re-seal only a key that really opens this database.
+    drop(
+        SqliteStorage::connect_encrypted(database, &key, OpenPurpose::OpenExisting)
+            .with_context(|| format!("open {}", database.display()))?,
+    );
+    let password = new_password(new_password_file, prompt, "Choose a new password.")?;
+    password_vault::write_record(
+        &password_vault::record_path(database),
+        &PasswordRecord::seal(&key, &password)?,
+    )
 }
 
 /// Generate the database key and write its password record, before anything
@@ -331,6 +387,76 @@ mod tests {
                 .get_setting_json::<String>("explorer")?
                 .as_deref(),
             Some("https://example.test")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn changing_the_password_keeps_the_data() -> Result<()> {
+        const NEW: &str = "a brand new passphrase for spp";
+        let f = Fixture::new();
+        let file = f.password_file(PASSWORD);
+        let key = unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!())?;
+        SqliteStorage::reopen_encrypted(f.db(), &key)?.set_setting_json("kept", &"yes")?;
+        let before = fs::read(f.db())?;
+
+        let mut asked = Vec::new();
+        change_password_with(
+            &f.db(),
+            None,
+            None,
+            &mut scripted(&["wrong", PASSWORD, NEW, NEW], &mut asked),
+        )?;
+        assert_eq!(
+            asked,
+            [
+                "Current password: ",
+                "Current password: ",
+                "New password: ",
+                "Retype new password: "
+            ]
+        );
+        // Only the record changed; the database file is untouched.
+        assert_eq!(fs::read(f.db())?, before);
+
+        let mut asked = Vec::new();
+        let reopened = unlock_with(&f.db(), None, &mut scripted(&[NEW], &mut asked))?;
+        assert_eq!(
+            SqliteStorage::reopen_encrypted(f.db(), &reopened)?
+                .get_setting_json::<String>("kept")?
+                .as_deref(),
+            Some("yes")
+        );
+        let old = unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!());
+        assert!(old.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn changing_the_password_needs_the_current_one() -> Result<()> {
+        let f = Fixture::new();
+        let file = f.password_file(PASSWORD);
+        unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!())?;
+        let record = fs::read(password_vault::record_path(&f.db()))?;
+
+        let mut asked = Vec::new();
+        let error = change_password_with(
+            &f.db(),
+            None,
+            None,
+            &mut scripted(&["wrong", "wrong", "wrong"], &mut asked),
+        )
+        .err()
+        .map(|e| e.to_string());
+        assert_eq!(error.as_deref(), Some("3 incorrect password attempts"));
+        assert_eq!(fs::read(password_vault::record_path(&f.db()))?, record);
+
+        let missing = f.0.join("missing.db");
+        assert!(
+            change_password_with(&missing, Some(&file), Some(&file), &mut |_: &str| {
+                unreachable!()
+            })
+            .is_err()
         );
         Ok(())
     }
