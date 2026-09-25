@@ -111,6 +111,11 @@ curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh |
 
 CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/native).
 
+## Deploying pools
+
+Deploy a private pool tailored to your own asset, compliance policy, and privacy
+needs. See [DEPLOY.md](DEPLOY.md) for details.
+
 ## Limitations
 
 As a work-in-progress, this implementation has several limitations to be resolved in the nearest future:
