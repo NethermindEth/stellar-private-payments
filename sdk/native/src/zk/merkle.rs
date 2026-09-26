@@ -297,6 +297,73 @@ impl MerklePrefixTreeBuilt {
         Ok(root)
     }
 
+    /// Append `leaves` after the current prefix, re-hashing only the nodes
+    /// they change.
+    ///
+    /// The result is identical to rebuilding the tree from the old prefix
+    /// followed by `leaves`, but costs about `leaves.len() + depth` hashes
+    /// instead of one hash per node of the whole prefix. Fails without
+    /// changing the tree if the new prefix would not fit in `2^depth` leaves.
+    pub fn append(&mut self, leaves: &[Field]) -> Result<()> {
+        if leaves.is_empty() {
+            return Ok(());
+        }
+
+        let start = self.leaf_count();
+        let end = start
+            .checked_add(leaves.len())
+            .ok_or_else(|| anyhow!("leaf count overflow"))?;
+        // `depth <= 32`, so the capacity fits in a u64 even on wasm32.
+        let capacity = u32::try_from(self.depth)
+            .ok()
+            .and_then(|d| 1u64.checked_shl(d))
+            .ok_or_else(|| anyhow!("tree depth too large"))?;
+        let end_u64 = u64::try_from(end).map_err(|_| anyhow!("leaf count overflow"))?;
+        if end_u64 > capacity {
+            return Err(anyhow!(
+                "tree is full: {} leaves + {} new > capacity {}",
+                start,
+                leaves.len(),
+                capacity
+            ));
+        }
+
+        self.levels[0].extend_from_slice(leaves);
+
+        // `[lo, hi)` is the range of nodes at `level` that changed. Their
+        // parents are the only nodes one level up that need re-hashing.
+        let mut lo = start;
+        let mut hi = end;
+        for level in 0..self.depth {
+            let parent_lo = lo / 2;
+            let parent_hi = hi.div_ceil(2);
+            let (below, above) = self
+                .levels
+                .split_at_mut(level.checked_add(1).expect("level overflow"));
+            let (children, parents) = (&below[level], &mut above[0]);
+
+            for p in parent_lo..parent_hi {
+                let left_idx = p.checked_mul(2).expect("index overflow");
+                let right_idx = left_idx.checked_add(1).expect("index overflow");
+                let left = children[left_idx];
+                let right = children
+                    .get(right_idx)
+                    .copied()
+                    .unwrap_or(self.empty[level]);
+                let node = hash_pair(left, right);
+                match parents.get_mut(p) {
+                    Some(slot) => *slot = node,
+                    None => parents.push(node),
+                }
+            }
+
+            lo = parent_lo;
+            hi = parent_hi;
+        }
+
+        Ok(())
+    }
+
     /// Compute a Merkle proof for `index` for the provided prefix.
     ///
     /// `index` must be `< leaf_count()`.
