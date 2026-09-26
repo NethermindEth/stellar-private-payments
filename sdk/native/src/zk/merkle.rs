@@ -224,11 +224,10 @@ impl MerklePrefixTree {
         let mut levels = Vec::with_capacity(levels_cap);
         levels.push(leaves);
 
+        // An empty prefix keeps every level empty rather than padding it with
+        // `empty[level]`, so `leaf_count()` stays 0. `root()` and `proof()`
+        // already fall back to `empty` for missing nodes.
         for level in 0..depth {
-            if levels[level].is_empty() {
-                levels[level].push(empty[level]);
-            }
-
             let level_len = levels[level].len();
             let next_len = level_len.div_ceil(2);
             let mut next = Vec::with_capacity(next_len);
