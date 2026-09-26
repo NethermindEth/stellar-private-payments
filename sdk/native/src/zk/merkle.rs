@@ -498,6 +498,109 @@ mod tests {
         assert_eq!(built.root().expect("root"), unbuilt_root);
     }
 
+    fn leaf(i: u64) -> Field {
+        let mut le = [0u8; 32];
+        le[..8].copy_from_slice(&i.to_le_bytes());
+        Field::try_from_le_bytes(le).expect("field")
+    }
+
+    fn leaves(from: u64, to: u64) -> Vec<Field> {
+        (from..to).map(leaf).collect()
+    }
+
+    /// Root and every proof of `tree` equal a fresh build over `all`.
+    fn assert_matches_rebuild(depth: u32, tree: &MerklePrefixTreeBuilt, all: &[Field]) {
+        let rebuilt = MerklePrefixTree::new(depth, all).expect("new").into_built();
+        let n = all.len();
+
+        assert_eq!(tree.leaf_count(), n, "leaf count at n={n}");
+        assert_eq!(
+            tree.root().expect("root"),
+            rebuilt.root().expect("root"),
+            "root at n={n}"
+        );
+        for idx in 0..u32::try_from(n).expect("n fits in u32") {
+            let got = tree.proof(idx).expect("proof");
+            let want = rebuilt.proof(idx).expect("proof");
+            assert_eq!(got.path_elements, want.path_elements, "path at {idx}/{n}");
+            assert_eq!(got.path_indices, want.path_indices, "indices at {idx}/{n}");
+            assert_eq!(got.root, want.root, "proof root at {idx}/{n}");
+            assert_eq!(got.levels, want.levels, "levels at {idx}/{n}");
+        }
+        assert!(tree.proof(u32::try_from(n).expect("n")).is_err());
+    }
+
+    #[test]
+    fn append_to_empty_tree_matches_rebuild() {
+        let mut tree = MerklePrefixTree::new(8, &[]).expect("new").into_built();
+        tree.append(&leaves(1, 2)).expect("append");
+        assert_matches_rebuild(8, &tree, &leaves(1, 2));
+
+        let mut tree = MerklePrefixTree::new(8, &[]).expect("new").into_built();
+        tree.append(&leaves(1, 4)).expect("append");
+        assert_matches_rebuild(8, &tree, &leaves(1, 4));
+    }
+
+    /// Every split of every prefix of a depth-5 tree, so appends start and
+    /// end on and across each power-of-two boundary up to full capacity.
+    #[test]
+    fn append_every_split_matches_rebuild() {
+        const DEPTH: u32 = 5;
+        let cap = 1u64 << DEPTH;
+        for start in 0..=cap {
+            for end in start..=cap {
+                let mut tree = MerklePrefixTree::new(DEPTH, &leaves(1, start.saturating_add(1)))
+                    .expect("new")
+                    .into_built();
+                tree.append(&leaves(start.saturating_add(1), end.saturating_add(1)))
+                    .expect("append");
+                assert_matches_rebuild(DEPTH, &tree, &leaves(1, end.saturating_add(1)));
+            }
+        }
+    }
+
+    #[test]
+    fn many_single_appends_match_rebuild() {
+        const DEPTH: u32 = 7;
+        let mut tree = MerklePrefixTree::new(DEPTH, &[]).expect("new").into_built();
+        for n in 1..=(1u64 << DEPTH) {
+            tree.append(&[leaf(n)]).expect("append");
+            assert_matches_rebuild(DEPTH, &tree, &leaves(1, n.saturating_add(1)));
+        }
+    }
+
+    #[test]
+    fn append_past_capacity_fails_and_leaves_tree_unchanged() {
+        let mut tree = MerklePrefixTree::new(3, &leaves(1, 7))
+            .expect("new")
+            .into_built();
+
+        assert!(tree.append(&leaves(7, 10)).is_err());
+        assert_matches_rebuild(3, &tree, &leaves(1, 7));
+
+        tree.append(&leaves(7, 9)).expect("fill to capacity");
+        assert_matches_rebuild(3, &tree, &leaves(1, 9));
+
+        assert!(tree.append(&[leaf(9)]).is_err());
+        assert_matches_rebuild(3, &tree, &leaves(1, 9));
+    }
+
+    #[test]
+    fn append_at_min_and_max_depth_matches_rebuild() {
+        let mut tree = MerklePrefixTree::new(1, &[]).expect("new").into_built();
+        tree.append(&[leaf(1)]).expect("append");
+        tree.append(&[leaf(2)]).expect("append");
+        assert_matches_rebuild(1, &tree, &leaves(1, 3));
+        assert!(tree.append(&[leaf(3)]).is_err());
+
+        let mut tree = MerklePrefixTree::new(32, &leaves(1, 4))
+            .expect("new")
+            .into_built();
+        tree.append(&leaves(4, 6)).expect("append");
+        tree.append(&[leaf(6)]).expect("append");
+        assert_matches_rebuild(32, &tree, &leaves(1, 7));
+    }
+
     #[test]
     fn field_to_scalar_roundtrip_zero_and_one() {
         let zero = Field::ZERO;
