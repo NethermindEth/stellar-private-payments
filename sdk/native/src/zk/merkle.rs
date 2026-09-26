@@ -421,6 +421,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_built_tree_has_no_leaves() {
+        let tree = MerklePrefixTree::new(8, &[]).expect("new");
+        let unbuilt_root = tree.root().expect("root");
+        let built = tree.into_built();
+
+        assert_eq!(built.leaf_count(), 0);
+        assert!(built.proof(0).is_err());
+        assert_eq!(built.root().expect("root"), unbuilt_root);
+    }
+
+    #[test]
     fn field_to_scalar_roundtrip_zero_and_one() {
         let zero = Field::ZERO;
         let one = Field::ONE;
