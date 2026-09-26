@@ -143,6 +143,7 @@ pub struct MerklePrefixTree {
 ///
 /// Stores the computed node values for each level, but only for the provided
 /// prefix width (missing nodes are still treated as `empty[level]`).
+#[derive(Clone)]
 pub struct MerklePrefixTreeBuilt {
     depth: usize,
     /// See [`MerklePrefixTree::empty`].
