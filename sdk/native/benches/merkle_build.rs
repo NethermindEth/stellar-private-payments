@@ -8,7 +8,7 @@
 //!
 //! Depths are the ones the SDK actually uses, not round numbers.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use stellar_private_payments::{types::Field, zk::merkle::MerklePrefixTree};
 
 /// Distinct leaves. Values do not affect the shape of the work, only the count
@@ -56,5 +56,38 @@ fn bench_new_only(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_build, bench_new_only);
+/// Adding a transaction's two output commitments to a pool tree of `n` leaves,
+/// by rebuilding from scratch versus appending to an already built tree. The
+/// append side clones the built tree outside the timed section so every
+/// iteration starts from the same `n`.
+fn bench_append_vs_rebuild(c: &mut Criterion) {
+    const DEPTH: u32 = 20;
+    const NEW: usize = 2;
+
+    let mut group = c.benchmark_group("prefix_tree_append_vs_rebuild/pool_d20");
+    for n in [256usize, 1_024, 16_384] {
+        let all = leaves(n.checked_add(NEW).expect("leaf count"));
+        let (old, new) = all.split_at(n);
+        let built = MerklePrefixTree::new(DEPTH, old).expect("new").into_built();
+
+        group.bench_with_input(BenchmarkId::new("rebuild", n), &all, |b, all| {
+            b.iter(|| MerklePrefixTree::new(DEPTH, all).expect("new").into_built())
+        });
+        group.bench_with_input(BenchmarkId::new("append", n), &new, |b, new| {
+            b.iter_batched_ref(
+                || built.clone(),
+                |tree| tree.append(new).expect("append"),
+                BatchSize::LargeInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_build,
+    bench_new_only,
+    bench_append_vs_rebuild
+);
 criterion_main!(benches);
