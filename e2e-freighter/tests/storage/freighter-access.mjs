@@ -163,7 +163,7 @@ try {
         };
         storage.unlock = async function() {
             this.attempts = (this.attempts || 0) + 1;
-            throw Error('Legacy database migration failed; back up local data before resetting.');
+            throw Error('Legacy database migration failed; this app has no local-data export; reset deletes the original too.');
         };
     });
     await start();
@@ -176,6 +176,6 @@ try {
     await page.getByTestId('storage-password-submit').click();
     await page.waitForFunction(() => storage.attempts === 1);
     assert.equal(await page.evaluate(() => storage.created), 1, 'retry must unlock rather than create again');
-    assert.match(await page.getByTestId('storage-password-error').textContent(), /back up local data/);
+    assert.match(await page.getByTestId('storage-password-error').textContent(), /no local-data export/);
     console.log('PASS: method replacement/removal, guarded inactivity locking; password-first setup, skip, enrollment retry, wallet unlock, password fallback, reset');
 } finally { await browser.close(); }

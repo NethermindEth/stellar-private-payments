@@ -1,3 +1,4 @@
+import { closeAndReload } from './storage-lock.js';
 import { withStorageActivity } from './storage-activity.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
@@ -192,7 +193,7 @@ export async function ensureStorage() {
                     // optional enrollment screens that still retain a password.
                     if (!stopAutoLock) stopAutoLock = startAutoLock(() => {
                         disposeClient();
-                        storage.close().finally(() => window.location.reload()).catch(() => {});
+                        void closeAndReload(storage);
                     });
                 } });
                 storageHandle = storage;
@@ -220,11 +221,7 @@ export async function ensureStorage() {
  */
 export async function lockStorage() {
     disposeClient();
-    try {
-        await storageHandle?.close();
-    } finally {
-        window.location.reload();
-    }
+    await closeAndReload(storageHandle);
 }
 
 /**

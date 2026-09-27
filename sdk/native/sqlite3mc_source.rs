@@ -11,7 +11,9 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "2.5.1";
+#[path = "sqlite3mc_version.rs"]
+mod version;
+use version::VERSION;
 const SQLITE_VERSION: &str = "3.53.4";
 const ARCHIVE_SHA256: &str = "4125f8ff275ea953dabb3289331b20a0e76d4fc060f57148f4a5df3bf3b0d5e0";
 const SOURCE_SHA256: &str = "59e30889a7b0106152e6d4fc3c18ac1592f252cb4defbb0a7e618fdecf1a221c";
