@@ -86,6 +86,13 @@ export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'unlocked';
  * `unlock` and `changePassword` reject with an `Error` whose `code` is
  * `"wrong-password"` when the password is wrong.
  */
+export interface WalletUnlockContext {
+  version: 1;
+  address: string;
+  origin: string;
+  salt: string;
+}
+
 export interface Storage {
   status(): Promise<StorageStatus>;
   /**
@@ -94,6 +101,10 @@ export interface Storage {
    */
   create(password: string): Promise<void>;
   unlock(password: string): Promise<void>;
+  walletContext(): Promise<WalletUnlockContext | undefined>;
+  /** Low-level enrollment: secret must be derived from a verified wallet signature. */
+  enrollWallet(password: string, context: WalletUnlockContext, secret: string): Promise<void>;
+  unlockWallet(context: WalletUnlockContext, secret: string): Promise<void>;
   changePassword(current: string, next: string): Promise<void>;
   /** Delete the local database and its password, for a forgotten password. */
   reset(): Promise<void>;

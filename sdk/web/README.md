@@ -287,3 +287,39 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 ## Workers
 
 `Storage.connect()` defaults to the bundled storage worker URL via `import.meta.url`. Override it with `workerUrl`. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+
+### Optional Freighter database unlocking
+
+The app creates or migrates storage with a password first, then offers Freighter
+unlocking. Skipping or declining the wallet request keeps password access. Once
+enrolled, the locked screen offers both methods; manual and inactivity locking
+still close the worker and reload the page. Reset removes both unlock methods.
+
+Freighter signs an origin-, account-, and random-salt-bound local storage message
+using SEP-0053. Enrollment verifies the signature and asks for it twice before
+saving anything, to check reproducibility. HKDF-SHA-256 derives a secret from the
+signature. The storage worker authenticates the password and uses its existing
+Argon2id/secretbox envelope format to seal the same database key with this secret
+in a separate `wallet_record` in `spp.key.db`. The database key never leaves the
+worker. Password changes preserve wallet access. No password, signature, or
+derived secret is persisted; signatures for this message must be treated as
+secrets because they grant local database access.
+
+The low-level `Storage.walletContext`, `Storage.enrollWallet`, and
+`Storage.unlockWallet` methods support the app flow in
+`app/js/storage-freighter.js`. The SDK accepts the derived secret; the app
+verifies the account, origin, signature, and reproducibility before enrollment.
+Passkeys and the research branch's key-vault format are not used.
+
+Focused checks (after installing app and e2e dependencies):
+
+```sh
+node --test app/tests/storage-freighter.test.mjs
+node e2e-freighter/tests/storage/freighter-access.mjs
+cargo test --locked -p stellar-private-payments --lib wallet_vault
+# Build the SDK first. Use a new artifacts directory for each browser run.
+node sdk/web/scripts/test-sqlite3mc.js --artifacts /tmp/storage-check
+```
+
+The UI check uses a simulated signer with real Ed25519 signatures; the SDK
+browser check exercises real WASM and encrypted OPFS across browser restarts.

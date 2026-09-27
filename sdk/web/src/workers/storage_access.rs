@@ -28,6 +28,7 @@ use stellar_private_payments::state::{
         PasswordRecord, VaultError, read_record_database, validate_new_password,
         write_record_database,
     },
+    wallet_vault::{self, WalletContext},
 };
 
 use crate::protocol::StorageStatus;
@@ -64,6 +65,7 @@ pub(super) async fn create(password: &str) -> Result<SqliteStorage> {
     let key = DatabaseKey::generate()?;
     // Whatever is there without a password record cannot be unlocked.
     pools::delete_encrypted(ENCRYPTED_DB)?;
+    wallet_vault::clear(Path::new(KEY_DB))?;
     write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(&key, password)?)?;
     if status == StorageStatus::Unencrypted {
         copy_plaintext(&key).await?;
@@ -82,27 +84,49 @@ pub(super) async fn unlock(password: &str) -> Result<Option<SqliteStorage>> {
         Err(VaultError::WrongPassword) => return Ok(None),
         Err(e) => return Err(e.into()),
     };
+    open_key(&key).await
+}
+
+pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
+    pools::ensure_encrypted().await?;
+    wallet_vault::context(Path::new(KEY_DB))
+}
+
+pub(super) fn enroll_wallet(password: &str, context: WalletContext, secret: &str) -> Result<()> {
+    wallet_vault::enroll(Path::new(KEY_DB), password, context, secret)
+}
+
+pub(super) async fn unlock_wallet(
+    context: &WalletContext,
+    secret: &str,
+) -> Result<Option<SqliteStorage>> {
+    pools::ensure_encrypted().await?;
+    let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
+    open_key(&key).await
+}
+
+async fn open_key(key: &DatabaseKey) -> Result<Option<SqliteStorage>> {
     let plaintext = pools::plaintext_exists(PLAINTEXT_DB).await?;
     let complete =
-        pools::encrypted_exists(ENCRYPTED_DB)? && has_tables(Path::new(ENCRYPTED_DB), &key)?;
+        pools::encrypted_exists(ENCRYPTED_DB)? && has_tables(Path::new(ENCRYPTED_DB), key)?;
     if !complete {
         // Setting the password was interrupted: finish it.
         pools::delete_encrypted(ENCRYPTED_DB)?;
         if !plaintext {
             return Ok(Some(SqliteStorage::connect_encrypted(
                 ENCRYPTED_DB,
-                &key,
+                key,
                 OpenPurpose::CreateNew,
             )?));
         }
-        copy_plaintext(&key).await?;
+        copy_plaintext(key).await?;
     } else if plaintext {
         // The copy committed, but deleting the unencrypted database did not.
         pools::remove_plaintext(PLAINTEXT_DB).await?;
     }
     Ok(Some(SqliteStorage::connect_encrypted(
         ENCRYPTED_DB,
-        &key,
+        key,
         OpenPurpose::OpenExisting,
     )?))
 }
