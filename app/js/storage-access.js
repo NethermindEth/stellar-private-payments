@@ -1,8 +1,11 @@
-// Password access to the encrypted local database.
+import { FreighterSigner } from 'stellar-private-payments/freighter';
+import { enrollFreighter, unlockFreighter } from './storage-freighter.js';
+
+// Password and optional Freighter access to the encrypted local database.
 //
 // The SDK keeps the database encrypted and unlocks it inside its storage
-// worker; this module only asks the user for the password. One dialog covers
-// the states the storage reports before use: "new" (choose a password),
+// worker; this module asks for a password or an enrolled wallet signature.
+// One dialog covers the states the storage reports before use: "new" (choose a password),
 // "unencrypted" (choose one to encrypt what an earlier version stored) and
 // "locked" (enter it), plus resetting after a forgotten password.
 //
@@ -13,7 +16,7 @@
 export const MIN_PASSWORD_LENGTH = 15;
 
 const AUTO_LOCK_KEY = 'spp.autoLockMinutes';
-const DEFAULT_AUTO_LOCK_MINUTES = 15;
+const DEFAULT_AUTO_LOCK_MINUTES = 5;
 export const AUTO_LOCK_CHOICES = [5, 15, 30, 60, 0];
 
 const COPY = {
@@ -44,7 +47,8 @@ const COPY = {
 export async function unlockStorage(storage) {
     let status = await storage.status();
     while (status !== 'unlocked') {
-        status = await showPasswordDialog(storage, status);
+        status = await showPasswordDialog(storage, status, status === 'locked'
+            ? await storage.walletContext().catch(() => null) : null);
     }
 }
 
@@ -52,7 +56,7 @@ export async function unlockStorage(storage) {
  * The dialog for one storage status. Resolves with the status after the
  * user's action: "unlocked", or "new" after a reset.
  */
-function showPasswordDialog(storage, status) {
+function showPasswordDialog(storage, status, walletContext) {
     return new Promise((resolve) => {
         const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
         overlay.setAttribute('role', 'dialog');
@@ -68,11 +72,11 @@ function showPasswordDialog(storage, status) {
             overlay.remove();
             resolve(next);
         };
-        renderPasswordForm(card, storage, status, finish);
+        renderPasswordForm(card, storage, status, finish, walletContext);
     });
 }
 
-function renderPasswordForm(card, storage, status, finish) {
+function renderPasswordForm(card, storage, status, finish, walletContext) {
     const copy = COPY[status];
     if (!copy) throw new Error(`unexpected storage status: ${status}`);
     const creating = status !== 'locked';
@@ -99,6 +103,7 @@ function renderPasswordForm(card, storage, status, finish) {
     });
     form.appendChild(password.field);
     let confirm = null;
+    let autoLock = null;
     if (creating) {
         confirm = passwordField({
             label: 'Confirm password',
@@ -108,6 +113,22 @@ function renderPasswordForm(card, storage, status, finish) {
         form.appendChild(confirm.field);
         form.appendChild(el('p', 'text-xs leading-5 text-slate-400',
             `At least ${MIN_PASSWORD_LENGTH} characters. A passphrase of four or more random words works well.`));
+
+        const field = el('div');
+        const label = el('label', 'text-xs font-medium uppercase tracking-[0.22em] text-slate-500', 'Lock after inactivity');
+        label.htmlFor = 'storage-auto-lock';
+        autoLock = el('select', 'mt-2 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40');
+        autoLock.id = 'storage-auto-lock';
+        autoLock.dataset.testid = 'storage-auto-lock';
+        for (const minutes of AUTO_LOCK_CHOICES) {
+            const option = el('option', null, minutes === 0 ? 'Never' : `${minutes} minutes`);
+            option.value = String(minutes);
+            autoLock.appendChild(option);
+        }
+        autoLock.value = String(DEFAULT_AUTO_LOCK_MINUTES);
+        field.append(label, autoLock, el('p', 'mt-2 text-xs leading-5 text-slate-400',
+            'Automatically lock your local data when you stop using the app. You can change this later in Settings.'));
+        form.appendChild(field);
     }
 
     const error = el('p', 'hidden rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100');
@@ -127,8 +148,9 @@ function renderPasswordForm(card, storage, status, finish) {
 
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (submit.disabled) return;
         error.classList.add('hidden');
-        const value = password.input.value;
+        let value = password.input.value;
         if (creating) {
             if ([...value].length < MIN_PASSWORD_LENGTH) {
                 showError(`Use a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
@@ -145,17 +167,24 @@ function renderPasswordForm(card, storage, status, finish) {
             password.input.focus();
             return;
         }
-        submit.disabled = true;
+        setBusy(true);
         submit.textContent = copy.busy;
         try {
             if (creating) {
                 await storage.create(value);
+                setAutoLockMinutes(Number(autoLock.value));
             } else {
                 await storage.unlock(value);
             }
-            finish('unlocked');
+            password.input.value = '';
+            if (confirm) confirm.input.value = '';
+            if (creating) {
+                renderFreighterOffer(card, storage, value, finish);
+            } else {
+                finish('unlocked');
+            }
         } catch (e) {
-            submit.disabled = false;
+            setBusy(false);
             submit.textContent = copy.submit;
             if (e?.code === 'wrong-password') {
                 showError('Wrong password. Try again.');
@@ -164,26 +193,86 @@ function renderPasswordForm(card, storage, status, finish) {
             } else {
                 showError(e?.message || String(e));
             }
-        }
+        } finally { value = undefined; }
     });
 
+    const setBusy = (busy) => {
+        for (const control of card.querySelectorAll('button, input, select')) control.disabled = busy;
+    };
     card.append(eyebrow(), title, text, form);
+    if (!creating && walletContext) {
+        const wallet = actionButton('Unlock with Freighter', 'storage-freighter-unlock');
+        wallet.addEventListener('click', async () => {
+            if (wallet.disabled) return;
+            setBusy(true);
+            error.classList.add('hidden');
+            wallet.textContent = 'Approve in Freighter…';
+            try {
+                await unlockFreighter(storage, new FreighterSigner());
+                finish('unlocked');
+            } catch (e) {
+                showError(e?.message || 'Freighter could not unlock your data. Use your password.');
+                setBusy(false);
+                wallet.textContent = 'Unlock with Freighter';
+            }
+        });
+        card.appendChild(wallet);
+    }
     if (!creating) {
         const forgot = el('button', 'mt-4 w-full text-center text-sm text-slate-400 underline-offset-4 transition hover:text-cyan-100 hover:underline', 'Forgot password?');
         forgot.type = 'button';
         forgot.dataset.testid = 'storage-password-forgot';
-        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish));
+        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish, walletContext));
         card.appendChild(forgot);
     }
     password.input.focus();
 }
 
-function renderResetConfirmation(card, storage, status, finish) {
+function actionButton(text, testid) {
+    const button = el('button', 'mt-4 w-full rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:cursor-wait disabled:opacity-70', text);
+    button.type = 'button';
+    button.dataset.testid = testid;
+    return button;
+}
+
+function renderFreighterOffer(card, storage, password, finish) {
+    card.replaceChildren();
+    card.parentElement.dataset.mode = 'freighter';
+    const enable = actionButton('Enable Freighter unlocking', 'storage-freighter-enable');
+    const skip = actionButton('Continue with password only', 'storage-freighter-skip');
+    const error = el('p', 'mt-4 hidden text-sm text-rose-100');
+    error.setAttribute('role', 'alert');
+    error.dataset.testid = 'storage-freighter-error';
+    const done = () => { password = undefined; finish('unlocked'); };
+    enable.addEventListener('click', async () => {
+        if (enable.disabled) return;
+        enable.disabled = skip.disabled = true;
+        enable.textContent = 'Approve in Freighter…';
+        error.classList.add('hidden');
+        try {
+            await enrollFreighter(storage, password, new FreighterSigner());
+            done();
+        } catch (e) {
+            error.textContent = e?.message || 'Could not enable Freighter. Your password is already set.';
+            error.classList.remove('hidden');
+            enable.disabled = skip.disabled = false;
+            enable.textContent = 'Try Freighter again';
+        }
+    });
+    skip.addEventListener('click', done);
+    card.append(eyebrow(), heading('Unlock with Freighter too?'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-300', 'Your password is set. You can also use your Freighter account to unlock this browser’s local data. Your password will still work.'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-400', 'Setup asks you to approve the same message twice to check that unlocking works. No transaction or fee is involved. Keep your password in case you lose access to Freighter.'),
+        error, enable, skip);
+    enable.focus();
+}
+
+function renderResetConfirmation(card, storage, status, finish, walletContext) {
     card.replaceChildren();
     const title = heading('Reset local data?');
     const text = el('div', 'mt-3 space-y-3 text-sm leading-6 text-slate-300');
     text.append(
-        el('p', null, 'Without the password, the encrypted data in this browser cannot be opened. Resetting deletes it: your operation history and settings here are lost.'),
+        el('p', null, 'Without the password or an enrolled Freighter account, the encrypted data in this browser cannot be opened. Resetting deletes it: your operation history and settings here are lost.'),
         el('p', null, 'Your funds stay on-chain. After you choose a new password, connect your wallet again: your keys are derived again and your notes sync from the chain.'),
     );
     const error = el('p', 'mt-4 hidden rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100');
@@ -194,15 +283,16 @@ function renderResetConfirmation(card, storage, status, finish) {
     reset.dataset.testid = 'storage-reset-confirm';
     const cancel = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish));
+    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish, walletContext));
     reset.addEventListener('click', async () => {
-        reset.disabled = true;
+        if (reset.disabled) return;
+        reset.disabled = cancel.disabled = true;
         reset.textContent = 'Deleting…';
         try {
             await storage.reset();
             finish('new');
         } catch (e) {
-            reset.disabled = false;
+            reset.disabled = cancel.disabled = false;
             reset.textContent = 'Delete local data';
             error.textContent = e?.message || String(e);
             error.classList.remove('hidden');

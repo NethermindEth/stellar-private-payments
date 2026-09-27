@@ -80,6 +80,10 @@ const origin = `http://127.0.0.1:${serverPort}/test.html`;
 
 const PASSWORD = "correct horse battery staple";
 const NEW_PASSWORD = "a different passphrase for spp";
+// The application signature tests cover deriving this secret. Here exercise
+// the real WASM worker, encrypted OPFS envelopes, and browser restarts.
+const WALLET_CONTEXT = { version: 1, address: `G${'A'.repeat(55)}`, origin: new URL(origin).origin, salt: '01'.repeat(32) };
+const WALLET_SECRET = 'ab'.repeat(32);
 const ctx = {
   args, web, artifacts, firefox, sid: null,
   marker: "PROTECTED_OPFS_INTEGRATION_01b8af6d", checks: [],
@@ -163,6 +167,12 @@ try {
   await ctx.create(PASSWORD);
   assert.equal(await ctx.status(), "unlocked");
   await ctx.setMarker();
+  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
+  assert.notEqual(await ctx.outcome("enrollWallet", "wrong password", WALLET_CONTEXT, WALLET_SECRET), "ok");
+  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
+  assert.equal(await ctx.outcome("enrollWallet", PASSWORD, WALLET_CONTEXT, WALLET_SECRET), "ok");
+  assert.deepEqual(await ctx.js("return await storage.walletContext();"), WALLET_CONTEXT);
+  ctx.checks.push("wallet enrollment authenticates password and persists public signing context");
   if (args["legacy-db"]) {
     const snapshot = await ctx.snapshot();
     assert(!snapshot.some(file => file.path.startsWith(".opfs-sahpool/")), "the unencrypted pool is still there");
@@ -212,8 +222,11 @@ try {
   await ctx.request("DELETE", `/session/${ctx.sid}`); ctx.sid = null;
   await ctx.session(); await ctx.load();
   assert.equal(await ctx.connect(), "locked");
-  await ctx.unlock(NEW_PASSWORD);
+  assert.notEqual(await ctx.outcome("unlockWallet", WALLET_CONTEXT, 'cd'.repeat(32)), "ok");
+  assert.equal(await ctx.status(), "locked");
+  assert.equal(await ctx.outcome("unlockWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");
   assert(await ctx.marked());
+  ctx.checks.push("wallet unlock survives password change and browser-process restart; wrong secret stays locked");
   const final = await ctx.snapshot();
   assert(final.some(file => file.path.startsWith(".opfs-sahpool-encrypted/")));
   assert(!final.some(file => file.protected), "a protected value is readable in OPFS");
@@ -221,6 +234,8 @@ try {
 
   await ctx.js("await storage.reset();return true;");
   assert.equal(await ctx.status(), "new");
+  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
+  assert.notEqual(await ctx.outcome("unlockWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");
   await ctx.create(PASSWORD);
   assert(!(await ctx.marked()), "reset kept the old data");
   await ctx.close();

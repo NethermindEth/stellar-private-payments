@@ -52,7 +52,9 @@ function bindLockButton() {
 function bindAutoLock() {
     const select = document.getElementById('settings-auto-lock');
     if (!select) return;
-    select.value = String(autoLockMinutes());
+    const render = () => { select.value = String(autoLockMinutes()); };
+    render();
+    window.addEventListener(STORAGE_UNLOCKED_EVENT, render);
     select.addEventListener('change', () => setAutoLockMinutes(Number(select.value)));
 }
 

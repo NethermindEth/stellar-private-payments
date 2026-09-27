@@ -68,15 +68,19 @@ export async function answerStoragePassword(page) {
     operation: `storage:password-${mode}`,
     timeoutMs: 120_000,
     intervalMs: 200,
-    // One DOM read per poll: locator reads wait for a missing element, and the
-    // dialog is removed once the password is accepted.
-    observe: () => page.evaluate((selector) => {
-      const node = document.querySelector(selector);
-      return {
-        visible: Boolean(node?.checkVisibility()),
-        error: node?.querySelector('[data-testid="storage-password-error"]')?.textContent ?? '',
-      };
-    }, STORAGE_PASSWORD_DIALOG_SELECTOR),
+    // Existing wallet scenarios use password-only storage. Dismiss the
+    // optional Freighter offer before waiting for the dialog to close.
+    observe: async () => {
+      const skip = page.getByTestId('storage-freighter-skip');
+      if (await skip.isVisible()) await skip.click();
+      return page.evaluate((selector) => {
+        const node = document.querySelector(selector);
+        return {
+          visible: Boolean(node?.checkVisibility()),
+          error: node?.querySelector('[data-testid="storage-password-error"]')?.textContent ?? '',
+        };
+      }, STORAGE_PASSWORD_DIALOG_SELECTOR);
+    },
     isReady: ({ visible, error }) => !visible || Boolean(error?.trim()),
   });
   if (value.visible) {

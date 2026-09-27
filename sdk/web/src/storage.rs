@@ -145,6 +145,55 @@ impl Storage {
         Ok(())
     }
 
+    /// Public signing context for the optional wallet unlock method.
+    #[wasm_bindgen(js_name = walletContext)]
+    pub async fn wallet_context(&self) -> Result<JsValue, JsValue> {
+        match self
+            .request(StorageWorkerRequest::WalletContext, STORAGE_OPEN_TIMEOUT_MS)
+            .await?
+        {
+            StorageWorkerResponse::WalletContext(context) => {
+                Ok(serde_wasm_bindgen::to_value(&context)?)
+            }
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Add a wallet-derived secret after authenticating the existing password.
+    /// The database key stays inside the worker.
+    #[wasm_bindgen(js_name = enrollWallet)]
+    pub async fn enroll_wallet(
+        &self,
+        password: String,
+        context: JsValue,
+        secret: String,
+    ) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::EnrollWallet {
+                password: Password(password),
+                context: serde_wasm_bindgen::from_value(context)?,
+                secret: Password(secret),
+            },
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Unlock using the secret derived from the enrolled wallet signature.
+    #[wasm_bindgen(js_name = unlockWallet)]
+    pub async fn unlock_wallet(&self, context: JsValue, secret: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::UnlockWallet {
+                context: serde_wasm_bindgen::from_value(context)?,
+                secret: Password(secret),
+            },
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Replace the password. Rejects with `code: "wrong-password"` when
     /// `current` is wrong; the database itself is not rewritten.
     #[wasm_bindgen(js_name = changePassword)]
