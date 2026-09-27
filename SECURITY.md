@@ -90,12 +90,17 @@ from malicious same-origin JavaScript, a compromised browser/OS, or memory reads
 
 Unencrypted envelope metadata identifies enabled methods, including wallet
 address, passkey credential ID, origin/RP ID, salts and KDF parameters. Browser
-auto-lock preferences are also stored unencrypted. These are not decryption
+auto-lock preferences and account/signing Stellar addresses in `localStorage`
+are also stored unencrypted. These are not decryption
 secrets but can fingerprint a profile.
 
 Browser locking closes storage and reloads the page. Auto-lock waits for guarded
 foreground work (including key derivation, registration, admin operations and
-unlock-method changes), then starts a fresh inactivity interval. Background sync
+unlock-method changes), then starts a fresh inactivity interval. Guarded work
+can defer an expired idle lock by at most ten additional minutes; a stuck wallet
+prompt or transaction marker cannot keep storage unlocked indefinitely. Deadlines
+use a monotonic clock. Locking also runs on the optional enrollment screens as
+soon as the database opens. Background sync
 is stopped when locking; SQLite's synchronous transactions complete before the
 worker handles close. A forced browser/process termination instead relies on
 rollback-journal recovery. The Chromium regression suite terminates a real worker

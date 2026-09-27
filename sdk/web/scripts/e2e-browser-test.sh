@@ -206,7 +206,14 @@ main() {
   step "CHROMEDRIVER=$CHROMEDRIVER"
 
   step "running: $*"
-  "$@"
+  if [ "$1" = cargo ]; then
+    local sqlite_config
+    sqlite_config="$(cargo run --locked --quiet --manifest-path "$ROOT/Cargo.toml" -p sqlite3mc-build -- --target-dir "${CARGO_TARGET_DIR:-$ROOT/target}")"
+    shift
+    cargo --config "$sqlite_config" "$@"
+  else
+    "$@"
+  fi
 }
 
 main "$@"

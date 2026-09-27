@@ -19,9 +19,11 @@ fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
+// Optimizer statistics are derived, not application data. Exclude them from
+// both copying and fingerprinting; SQLite can regenerate them with ANALYZE.
 fn schema(conn: &Connection) -> Result<Schema> {
     Ok(conn
-        .prepare("SELECT type,name,sql FROM sqlite_schema ORDER BY type,name")?
+        .prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT IN ('sqlite_stat1','sqlite_stat2','sqlite_stat3','sqlite_stat4') ORDER BY type,name")?
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
@@ -30,7 +32,7 @@ fn tables(conn: &Connection) -> Result<Vec<(String, bool)>> {
     let tables: Vec<(String, String, bool)> = conn
         .prepare(
             "SELECT name,type,wr FROM pragma_table_list WHERE schema='main' AND \
-             name<>'sqlite_schema' ORDER BY name",
+             name NOT IN ('sqlite_schema','sqlite_stat1','sqlite_stat2','sqlite_stat3','sqlite_stat4') ORDER BY name",
         )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;

@@ -53,23 +53,25 @@ const COPY = {
  * Ask for the password until `storage` is unlocked. Resolves once it is.
  * @param {import('stellar-private-payments').Storage} storage
  */
-export async function unlockStorage(storage) {
+export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
     let status = await settledStorageStatus(storage);
     while (status !== 'unlocked') {
+        if (status === 'password-recovery-required') onOpened();
         const [walletContext, passkeyContext] = ['locked', 'recovery-required'].includes(status)
             ? await Promise.all([
                 storage.walletContext().catch(() => null),
                 storage.passkeyContext().catch(() => null),
             ]) : [null, null];
-        status = await showPasswordDialog(storage, status, walletContext, passkeyContext);
+        status = await showPasswordDialog(storage, status, walletContext, passkeyContext, onOpened);
     }
+    onOpened();
 }
 
 /**
  * The dialog for one storage status. Resolves with the status after the
  * user's action: "unlocked", or "new" after a reset.
  */
-function showPasswordDialog(storage, status, walletContext, passkeyContext) {
+function showPasswordDialog(storage, status, walletContext, passkeyContext, onOpened) {
     return new Promise((resolve) => {
         const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
         overlay.setAttribute('role', 'dialog');
@@ -85,12 +87,12 @@ function showPasswordDialog(storage, status, walletContext, passkeyContext) {
             overlay.remove();
             resolve(next);
         };
-        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext);
-        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
+        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext, onOpened);
+        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext, null, onOpened);
     });
 }
 
-function renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext) {
+function renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext, initialError = null, onOpened = () => {}) {
     const copy = COPY[status];
     if (!copy) throw new Error(`unexpected storage status: ${status}`);
     const recovering = status === 'password-recovery-required';
@@ -198,6 +200,7 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
             } else {
                 await openStorage(storage, () => storage.unlock(value));
             }
+            onOpened();
             password.input.value = '';
             if (confirm) confirm.input.value = '';
             if (creating && !recovering) {
@@ -213,6 +216,15 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
                 password.input.value = '';
                 password.input.focus();
             } else {
+                const next = await settledStorageStatus(storage).catch(() => status);
+                if (next === 'unlocked') { finish(next); return; }
+                if (next !== status) {
+                    password.input.value = '';
+                    if (confirm) confirm.input.value = '';
+                    if (next === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext, onOpened);
+                    else renderPasswordForm(card, storage, next, finish, walletContext, passkeyContext, e?.message || String(e), onOpened);
+                    return;
+                }
                 showError(e?.message || String(e));
             }
         } finally { value = undefined; }
@@ -262,9 +274,10 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
         const forgot = el('button', 'mt-4 w-full text-center text-sm text-slate-400 underline-offset-4 transition hover:text-cyan-100 hover:underline', 'Forgot password?');
         forgot.type = 'button';
         forgot.dataset.testid = 'storage-password-forgot';
-        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext));
+        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext, onOpened));
         card.appendChild(forgot);
     }
+    if (initialError) showError(initialError);
     password.input.focus();
 }
 
@@ -342,7 +355,7 @@ function renderPasskeyOffer(card, storage, password, finish) {
     enable.focus();
 }
 
-function renderRecovery(card, storage, finish, walletContext, passkeyContext) {
+function renderRecovery(card, storage, finish, walletContext, passkeyContext, onOpened) {
     card.replaceChildren();
     const error = el('p', 'mt-4 text-sm text-rose-100');
     error.setAttribute('role', 'alert');
@@ -365,11 +378,11 @@ function renderRecovery(card, storage, finish, walletContext, passkeyContext) {
         card.appendChild(button);
     }
     const reset = actionButton('Reset local data…', 'storage-recovery-reset');
-    reset.addEventListener('click', () => renderResetConfirmation(card, storage, 'recovery-required', finish, walletContext, passkeyContext));
+    reset.addEventListener('click', () => renderResetConfirmation(card, storage, 'recovery-required', finish, walletContext, passkeyContext, onOpened));
     card.appendChild(reset);
 }
 
-function renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext) {
+function renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext, onOpened) {
     card.replaceChildren();
     const title = heading('Reset local data?');
     const text = el('div', 'mt-3 space-y-3 text-sm leading-6 text-slate-300');
@@ -386,8 +399,8 @@ function renderResetConfirmation(card, storage, status, finish, walletContext, p
     const cancel = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
     cancel.type = 'button';
     cancel.addEventListener('click', () => {
-        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext);
-        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
+        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext, onOpened);
+        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext, null, onOpened);
     });
     reset.addEventListener('click', async () => {
         if (reset.disabled) return;
@@ -479,28 +492,42 @@ export function setAutoLockMinutes(minutes) {
  * Lock with `lock` after the configured minutes without user activity.
  * Browsers slow timers in background tabs, so the deadline is checked on a
  * short interval and whenever the tab becomes visible again. An operation in
- * progress (a transaction or a disclosure proof) is never interrupted: the
- * lock waits until it finishes.
+ * progress gets a bounded grace period; a stuck operation cannot hold storage
+ * open indefinitely.
  * @param {() => void} lock
  */
+// Busy work can defer an expired idle lock for at most ten additional minutes.
+export const MAX_BUSY_LOCK_DELAY_MS = 10 * 60_000;
 export function startAutoLock(lock) {
-    let lastActivity = Date.now();
-    const touch = () => { lastActivity = Date.now(); };
-    for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
-        window.addEventListener(type, touch, { capture: true, passive: true });
-    }
+    let lastActivity = performance.now();
+    let busyDeadline = null;
+    const touch = () => { lastActivity = performance.now(); busyDeadline = null; };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    for (const type of events) window.addEventListener(type, touch, { capture: true, passive: true });
     let locking = false;
     const check = () => {
         if (locking) return;
         const minutes = autoLockMinutes();
-        if (minutes === 0 || Date.now() - Math.max(lastActivity, lastStorageActivity()) < minutes * 60_000 || operationInProgress()) {
-            return;
+        if (minutes === 0) { busyDeadline = null; return; }
+        const now = performance.now();
+        const busy = operationInProgress();
+        if (!busy) busyDeadline = null;
+        const idleAt = (busy ? lastActivity : Math.max(lastActivity, lastStorageActivity())) + minutes * 60_000;
+        if (now < idleAt) return;
+        if (busy) {
+            busyDeadline ??= idleAt + MAX_BUSY_LOCK_DELAY_MS;
+            if (now < busyDeadline) return;
         }
         locking = true;
         lock();
     };
-    window.setInterval(check, 15_000);
+    const timer = window.setInterval(check, 15_000);
     document.addEventListener('visibilitychange', check);
+    return () => {
+        window.clearInterval(timer);
+        for (const type of events) window.removeEventListener(type, touch, true);
+        document.removeEventListener('visibilitychange', check);
+    };
 }
 
 function operationInProgress() {

@@ -245,7 +245,7 @@ async fn copy_plaintext(key: &DatabaseKey) -> Result<()> {
         Some(pools::PLAINTEXT_VFS),
         Path::new(ENCRYPTED_DB),
         key,
-    )?;
+    ).map_err(|error| anyhow!("Legacy database migration failed; the original plaintext data is preserved. Retry unlocking to resume migration. If it keeps failing, back up local data before resetting (reset deletes the original too). Details: {error:#}"))?;
     pools::remove_plaintext(PLAINTEXT_DB).await
 }
 
@@ -285,11 +285,24 @@ mod pools {
     }
 
     pub(super) async fn ensure_encrypted() -> Result<()> {
+        // Validate the linked library before installing or opening any VFS.
+        #[allow(unsafe_code)]
+        // SAFETY: SQLite3MC returns a static NUL-terminated version string.
+        let actual = unsafe { std::ffi::CStr::from_ptr(sqlite_wasm_rs::sqlite3mc_version()) };
+        let manifest = include_str!("../../../native/sqlite3mc_source.rs");
+        let expected = manifest
+            .split("const VERSION: &str = \"")
+            .nth(1)
+            .and_then(|part| part.split('"').next())
+            .ok_or_else(|| anyhow!("missing pinned SQLite3MC version"))?;
+        anyhow::ensure!(
+            actual.to_bytes() == format!("SQLite3 Multiple Ciphers {expected}").as_bytes(),
+            "Unsupported SQLite3MC backend; rebuild with sdk/web/scripts/build.sh"
+        );
         if ENCRYPTED.with(|p| p.borrow().is_some()) {
             return Ok(());
         }
         let util = install_pool(ENCRYPTED_VFS, ENCRYPTED_DIRECTORY, true).await?;
-        ENCRYPTED.with(|p| *p.borrow_mut() = Some(util));
         // SAH installation replaces the default VFS. Attach SQLite3MC's codec
         // wrapper once it exists.
         #[allow(unsafe_code)]
@@ -297,8 +310,10 @@ mod pools {
         // SQLite owns the wrapper until release() destroys it.
         let rc = unsafe { sqlite_wasm_rs::sqlite3mc_vfs_create(c"opfs-sahpool".as_ptr(), 1) };
         if rc != sqlite_wasm_rs::SQLITE_OK {
+            util.pause_vfs()?;
             return Err(anyhow!("Failed to register encrypted OPFS storage"));
         }
+        ENCRYPTED.with(|p| *p.borrow_mut() = Some(util));
         Ok(())
     }
 

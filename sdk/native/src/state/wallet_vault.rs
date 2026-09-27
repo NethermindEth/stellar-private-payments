@@ -64,7 +64,8 @@ pub fn enroll(path: &Path, password: &str, context: WalletContext, secret: &str)
         context.version == 1
             && context.address.len() == 56
             && context.origin.len() <= 2048
-            && context.salt.len() == 64,
+            && context.salt.len() == 64
+            && context.salt.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "invalid wallet context"
     );
     let key = read_record_database(path)?
@@ -135,6 +136,10 @@ mod tests {
         };
         assert!(context(&path)?.is_none());
         assert!(enroll(&path, "wrong password", ctx.clone(), &secret).is_err());
+        assert!(context(&path)?.is_none());
+        let mut malformed = ctx.clone();
+        malformed.salt = "z".repeat(64);
+        assert!(enroll(&path, password, malformed, &secret).is_err());
         assert!(context(&path)?.is_none());
         enroll(&path, password, ctx.clone(), &secret)?;
         assert_eq!(*unlock(&path, &ctx, &secret)?, *key);
