@@ -52,7 +52,6 @@ fn unlock_with(
         Ok(_) => {
             // An empty file is all a create that failed early leaves behind;
             // it holds nothing to protect.
-            std::fs::remove_file(database)?;
             create(database, password_file, prompt)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -119,7 +118,8 @@ fn create(
     password_file: Option<&Path>,
     prompt: &mut Prompt<'_>,
 ) -> Result<DatabaseKey> {
-    let password = new_password(
+    let key = setup_key(
+        database,
         password_file,
         prompt,
         &format!(
@@ -127,7 +127,10 @@ fn create(
             database.display()
         ),
     )?;
-    let key = seal_new_key(database, &password)?;
+    // Authenticate any surviving record before removing an empty setup file.
+    if std::fs::metadata(database).is_ok_and(|metadata| metadata.len() == 0) {
+        std::fs::remove_file(database)?;
+    }
     drop(
         SqliteStorage::connect_encrypted(database, &key, OpenPurpose::CreateNew)
             .with_context(|| format!("create {}", database.display()))?,
@@ -140,7 +143,8 @@ fn encrypt_existing(
     password_file: Option<&Path>,
     prompt: &mut Prompt<'_>,
 ) -> Result<DatabaseKey> {
-    let password = new_password(
+    let key = setup_key(
+        database,
         password_file,
         prompt,
         &format!(
@@ -148,7 +152,6 @@ fn encrypt_existing(
             database.display()
         ),
     )?;
-    let key = seal_new_key(database, &password)?;
     encrypted_migration::encrypt_in_place(database, &key)
         .with_context(|| format!("encrypt {}", database.display()))?;
     Ok(key)
@@ -201,13 +204,37 @@ fn change_password_with(
     )
 }
 
+/// Resume setup using the surviving key record. Never replace a key that may
+/// also protect a moved database or backup. The CLI holds directory ownership.
+fn setup_key(
+    database: &Path,
+    password_file: Option<&Path>,
+    prompt: &mut Prompt<'_>,
+    intro: &str,
+) -> Result<DatabaseKey> {
+    let record_path = password_vault::record_path(database);
+    match std::fs::symlink_metadata(&record_path) {
+        Ok(_) => {
+            eprintln!(
+                "An existing password record was found. Enter its password to resume setup with the same database key."
+            );
+            open_record(&read_record(database)?, password_file, prompt, "Password: ")
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let password = new_password(password_file, prompt, intro)?;
+            seal_new_key(database, &password)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Generate the database key and write its password record, before anything
 /// uses the key, so the database never exists without a way to unlock it.
 fn seal_new_key(database: &Path, password: &str) -> Result<DatabaseKey> {
     let record_path = password_vault::record_path(database);
     match std::fs::symlink_metadata(&record_path) {
         Ok(_) => bail!(
-            "refusing to replace existing password record {}; preserve it with its matching database backup, or move it aside explicitly before creating new storage",
+            "refusing to replace existing password record {}; retry setup to authenticate its password and reuse its key",
             record_path.display()
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -311,30 +338,59 @@ mod tests {
     }
 
     #[test]
-    fn creating_storage_preserves_an_existing_backup_key_record() -> Result<()> {
-        let f = Fixture::new();
-        let key = DatabaseKey::generate()?;
-        let record_path = password_vault::record_path(&f.db());
-        password_vault::write_record(&record_path, &PasswordRecord::seal(&key, PASSWORD)?)?;
-        let before = std::fs::read(&record_path)?;
-        let file = f.password_file(PASSWORD);
-        for plaintext in [false, true] {
-            if plaintext {
-                drop(SqliteStorage::connect_file(f.db())?);
+    fn resumes_setup_with_existing_key_for_missing_empty_and_plaintext_databases() -> Result<()> {
+        for state in ["missing", "empty", "plaintext"] {
+            let f = Fixture::new();
+            let key = DatabaseKey::generate()?;
+            let record_path = password_vault::record_path(&f.db());
+            password_vault::write_record(&record_path, &PasswordRecord::seal(&key, PASSWORD)?)?;
+            let record_before = std::fs::read(&record_path)?;
+            if state == "empty" {
+                std::fs::write(f.db(), [])?;
             }
-            let error = unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!())
-                .expect_err("existing key record must be preserved");
-            assert!(
-                error
-                    .to_string()
-                    .contains("refusing to replace existing password record")
-            );
-            assert_eq!(std::fs::read(&record_path)?, before);
-            assert_eq!(
-                *PasswordRecord::from_json(&String::from_utf8(before.clone())?)?.open(PASSWORD)?,
-                *key
-            );
+            if state == "plaintext" {
+                let mut storage = SqliteStorage::connect_file(f.db())?;
+                storage.set_setting_json("resume-marker", &"preserved")?;
+            }
+            let db_before = std::fs::read(f.db()).ok();
+            let wrong = f.password_file("incorrect password");
+            assert!(unlock_with(&f.db(), Some(&wrong), &mut |_: &str| unreachable!()).is_err());
+            assert_eq!(std::fs::read(&record_path)?, record_before);
+            assert_eq!(std::fs::read(f.db()).ok(), db_before);
+            let mut asked = Vec::new();
+            let resumed = unlock_with(&f.db(), None, &mut scripted(&[PASSWORD], &mut asked))?;
+            assert_eq!(asked, ["Password: "]);
+            assert_eq!(*resumed, *key);
+            assert_eq!(std::fs::read(&record_path)?, record_before);
+            let storage = SqliteStorage::reopen_encrypted(f.db(), &key)?;
+            if state == "plaintext" {
+                assert_eq!(
+                    storage.get_setting_json::<String>("resume-marker")?,
+                    Some("preserved".into())
+                );
+            }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn retries_failed_migration_with_the_record_written_by_first_attempt() -> Result<()> {
+        let f = Fixture::new();
+        drop(SqliteStorage::connect_file(f.db())?);
+        let plaintext = std::fs::read(f.db())?;
+        let staging = f.db().with_extension("db.encrypting");
+        std::fs::create_dir(&staging)?; // Force a failure after the record is sealed.
+        let file = f.password_file(PASSWORD);
+        assert!(unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!()).is_err());
+        let record_path = password_vault::record_path(&f.db());
+        let record_before = std::fs::read(&record_path)?;
+        let key = read_record(&f.db())?.open(PASSWORD)?;
+        assert_eq!(std::fs::read(f.db())?, plaintext);
+        std::fs::remove_dir(staging)?;
+        let resumed = unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!())?;
+        assert_eq!(*resumed, *key);
+        assert_eq!(std::fs::read(record_path)?, record_before);
+        drop(SqliteStorage::reopen_encrypted(f.db(), &key)?);
         Ok(())
     }
 

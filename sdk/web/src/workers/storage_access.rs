@@ -245,7 +245,7 @@ async fn copy_plaintext(key: &DatabaseKey) -> Result<()> {
         Some(pools::PLAINTEXT_VFS),
         Path::new(ENCRYPTED_DB),
         key,
-    ).map_err(|error| anyhow!("Legacy database migration failed; the original plaintext data is preserved. Retry unlocking to resume migration. If it keeps failing, back up local data before resetting (reset deletes the original too). Details: {error:#}"))?;
+    ).map_err(|error| anyhow!("Legacy database migration failed; the original plaintext data is preserved. Retry unlocking to resume migration. If it keeps failing, stop and seek help recovering the existing browser profile. This app has no local-data export; reset deletes the original too. Details: {error:#}"))?;
     pools::remove_plaintext(PLAINTEXT_DB).await
 }
 
@@ -289,12 +289,10 @@ mod pools {
         #[allow(unsafe_code)]
         // SAFETY: SQLite3MC returns a static NUL-terminated version string.
         let actual = unsafe { std::ffi::CStr::from_ptr(sqlite_wasm_rs::sqlite3mc_version()) };
-        let manifest = include_str!("../../../native/sqlite3mc_source.rs");
-        let expected = manifest
-            .split("const VERSION: &str = \"")
-            .nth(1)
-            .and_then(|part| part.split('"').next())
-            .ok_or_else(|| anyhow!("missing pinned SQLite3MC version"))?;
+        mod cipher_version {
+            include!("../../../native/sqlite3mc_version.rs");
+        }
+        let expected = cipher_version::VERSION;
         anyhow::ensure!(
             actual.to_bytes() == format!("SQLite3 Multiple Ciphers {expected}").as_bytes(),
             "Unsupported SQLite3MC backend; rebuild with sdk/web/scripts/build.sh"

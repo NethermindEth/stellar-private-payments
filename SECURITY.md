@@ -94,7 +94,8 @@ auto-lock preferences and account/signing Stellar addresses in `localStorage`
 are also stored unencrypted. These are not decryption
 secrets but can fingerprint a profile.
 
-Browser locking closes storage and reloads the page. Auto-lock waits for guarded
+Browser locking requests storage closure and reloads the page, with a three-second
+fallback reload if the worker does not acknowledge closure. Auto-lock waits for guarded
 foreground work (including key derivation, registration, admin operations and
 unlock-method changes), then starts a fresh inactivity interval. Guarded work
 can defer an expired idle lock by at most ten additional minutes; a stuck wallet

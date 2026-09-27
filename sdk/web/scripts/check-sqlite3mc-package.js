@@ -15,7 +15,7 @@ const required = new Set([
   'dist/licenses/SQLite3MC.txt', 'dist/licenses/sqlite-wasm-vfs-LICENSE.txt',
   'dist/circuits/NOTICE.txt', 'dist/circuits/source-bundle.tar.gz',
 ]);
-const pinnedCipherVersion = readFileSync(join(root, 'sdk/native/sqlite3mc_source.rs'), 'utf8').match(/const VERSION: &str = "([^"]+)";/)?.[1];
+const pinnedCipherVersion = readFileSync(join(root, 'sdk/native/sqlite3mc_version.rs'), 'utf8').match(/const VERSION: &str = "([^"]+)";/)?.[1];
 if (!pinnedCipherVersion) throw new Error('cannot read pinned SQLite3MC version');
 const notice = readFileSync(join(root, 'vendor/sqlite3mc-NOTICE.txt'));
 const vfsNotice = readFileSync(join(root, 'vendor/sqlite-wasm-vfs/LICENSE'));
