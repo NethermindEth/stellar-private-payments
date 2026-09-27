@@ -78,6 +78,16 @@ pub enum StorageWorkerRequest {
         context: stellar_private_payments::state::wallet_vault::WalletContext,
         secret: Password,
     },
+    PasskeyContext,
+    EnrollPasskey {
+        password: Password,
+        context: stellar_private_payments::state::passkey_vault::PasskeyContext,
+        secret: Password,
+    },
+    UnlockPasskey {
+        context: stellar_private_payments::state::passkey_vault::PasskeyContext,
+        secret: Password,
+    },
     ChangePassword {
         current: Password,
         new: Password,
@@ -197,6 +207,7 @@ pub enum StorageStatus {
 pub enum StorageWorkerResponse {
     Status(StorageStatus),
     WalletContext(Option<stellar_private_payments::state::wallet_vault::WalletContext>),
+    PasskeyContext(Option<stellar_private_payments::state::passkey_vault::PasskeyContext>),
     WrongPassword,
     Pong,
     SyncState(Vec<SyncMetadata>),

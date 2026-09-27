@@ -309,7 +309,7 @@ The low-level `Storage.walletContext`, `Storage.enrollWallet`, and
 `Storage.unlockWallet` methods support the app flow in
 `app/js/storage-freighter.js`. The SDK accepts the derived secret; the app
 verifies the account, origin, signature, and reproducibility before enrollment.
-Passkeys and the research branch's key-vault format are not used.
+The research branch's key-vault format is not used.
 
 Focused checks (after installing app and e2e dependencies):
 
@@ -323,3 +323,46 @@ node sdk/web/scripts/test-sqlite3mc.js --artifacts /tmp/storage-check
 
 The UI check uses a simulated signer with real Ed25519 signatures; the SDK
 browser check exercises real WASM and encrypted OPFS across browser restarts.
+
+
+### Optional passkey database unlocking
+
+After the Freighter setup step (enabled or skipped), the app offers passkey
+unlocking. Create a passkey and confirm it once to verify encryption support
+before saving access. The locked screen shows an explicit **Unlock with
+passkey** button when enrolled. Password and Freighter access remain available,
+and manual/inactivity locking uses the same worker shutdown as before.
+
+This requires the [WebAuthn PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension)
+and user verification (for example a device PIN or biometric). Providers without
+PRF support cannot unlock encrypted local storage; setup reports this and lets
+the user retry or skip. A successful creation alone never enrolls access.
+The app validates the assertion's challenge, origin, credential ID, relying
+party hash, and user presence/verification flags. HKDF-SHA-256 derives a secret
+from the PRF output, bound to the site, credential and a random salt. Assertion
+signatures are not encryption material. The browser mediates WebAuthn; this is
+local decryption, not a server authentication protocol.
+
+`Storage.passkeyContext`, `Storage.enrollPasskey`, and `Storage.unlockPasskey`
+provide the worker API. Enrollment authenticates the existing password and
+stores a separate encrypted key envelope in `passkey_record` in `spp.key.db`.
+Only public credential metadata and the sealed database key are stored; PRF
+output and derived secrets are never persisted. The database key stays in the
+worker. Changing the password preserves both optional methods; resetting local
+storage removes both envelopes (it does not delete the provider's passkey).
+
+After building the SDK and installing app and e2e dependencies, run:
+
+```sh
+npm run test:storage --prefix e2e-freighter
+cargo test --locked -p stellar-private-payments --lib passkey_vault
+```
+
+The passkey browser test uses Chromium's CDP virtual authenticator with PRF
+support and the real WebAuthn API, WASM worker, and encrypted OPFS database.
+It covers unsupported PRF, enrollment, reload/unlock, password changes,
+cancellation, missing credentials, password/Freighter fallback, and reset.
+Override the Chromium executable with `CHROMIUM=/path/to/chrome`. Node tests
+inject malformed WebAuthn responses to check origin, challenge, credential,
+user-verification, and PRF validation. These tests run in the SQLite3MC CI job;
+no real passkey or Freighter wallet is needed.
