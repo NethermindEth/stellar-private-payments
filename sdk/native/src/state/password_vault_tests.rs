@@ -222,3 +222,38 @@ fn record_database_replaces_its_record() -> Result<()> {
     assert_eq!(*stored.open(OTHER_PASSWORD)?, *key);
     Ok(())
 }
+
+#[test]
+fn reading_absent_metadata_does_not_create_files_or_tables() -> Result<()> {
+    let f = Fixture::new()?;
+    let path = f.0.join("absent.db");
+    assert!(read_record_database(&path)?.is_none());
+    assert!(!path.exists());
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch("CREATE TABLE unrelated (value TEXT)")?;
+    drop(conn);
+    let before = fs::read(&path)?;
+    assert!(read_record_database(&path)?.is_none());
+    assert_eq!(fs::read(&path)?, before);
+    Ok(())
+}
+
+#[test]
+fn replacing_record_does_not_follow_preplanted_temporary_symlink() -> Result<()> {
+    let f = Fixture::new()?;
+    let path = record_path(&f.db());
+    let victim = f.0.join("victim");
+    fs::write(&victim, b"must survive")?;
+    let mut old_temporary = path.as_os_str().to_owned();
+    old_temporary.push(".tmp");
+    std::os::unix::fs::symlink(&victim, std::path::PathBuf::from(old_temporary))?;
+    let key = DatabaseKey::generate()?;
+    write_record(&path, &PasswordRecord::seal(&key, PASSWORD)?)?;
+    write_record(&path, &PasswordRecord::seal(&key, OTHER_PASSWORD)?)?;
+    assert_eq!(fs::read(&victim)?, b"must survive");
+    assert_eq!(
+        *PasswordRecord::from_json(&fs::read_to_string(path)?)?.open(OTHER_PASSWORD)?,
+        *key
+    );
+    Ok(())
+}

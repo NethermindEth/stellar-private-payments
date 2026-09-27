@@ -57,7 +57,7 @@ fn build_sqlite3mc() {
         .define("SQLITE_ENABLE_FTS3_PARENTHESIS", None)
         .define("SQLITE_ENABLE_FTS5", None)
         .define("SQLITE_ENABLE_JSON1", None)
-        .define("SQLITE_ENABLE_LOAD_EXTENSION", "1")
+        .define("SQLITE_OMIT_LOAD_EXTENSION", None)
         .define("SQLITE_ENABLE_MEMORY_MANAGEMENT", None)
         .define("SQLITE_ENABLE_RTREE", None)
         .define("SQLITE_ENABLE_STAT4", None)

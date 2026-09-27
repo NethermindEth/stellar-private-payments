@@ -101,6 +101,7 @@ fn start(storage: SqliteStorage) {
 
 /// Stop serving the database, keeping the OPFS pools for another open.
 fn detach() {
+    super::storage_access::clear_recovery_key();
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
@@ -161,11 +162,18 @@ pub(crate) async fn StorageWorker(
 
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
+    if let InitState::Failed(message) = INIT_STATE.with(|s| s.borrow().clone()) {
+        return Err(anyhow!(message));
+    }
     let resp = match req {
-        StorageWorkerRequest::Status => {
-            let unlocked = INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready));
-            StorageWorkerResponse::Status(super::storage_access::status(unlocked).await?)
-        }
+        StorageWorkerRequest::Status => match INIT_STATE.with(|s| s.borrow().clone()) {
+            InitState::Pending => {
+                StorageWorkerResponse::Status(crate::protocol::StorageStatus::Opening)
+            }
+            state => StorageWorkerResponse::Status(
+                super::storage_access::status(matches!(state, InitState::Ready)).await?,
+            ),
+        },
         StorageWorkerRequest::Create(password) => {
             return open_with(async {
                 Ok(Some(super::storage_access::create(&password.0).await?))
@@ -211,6 +219,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::UnlockPasskey { context, secret } => {
             return open_with(super::storage_access::unlock_passkey(&context, &secret.0)).await;
         }
+        StorageWorkerRequest::RemoveWallet(password) => {
+            super::storage_access::remove_wallet(&password.0)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::RemovePasskey(password) => {
+            super::storage_access::remove_passkey(&password.0)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::RecoverPassword(password) => {
+            anyhow::ensure!(
+                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
+                "unlock the database first"
+            );
+            super::storage_access::recover_password(&password.0)?;
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::ChangePassword { current, new } => {
             if super::storage_access::change_password(&current.0, &new.0)? {
                 StorageWorkerResponse::Saved
@@ -228,6 +252,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Pause => {
+            anyhow::ensure!(
+                !INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending)),
+                "the database is being opened"
+            );
             tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
             // `pause_vfs` refuses to release handles while SQLite still has
             // files open on this VFS, so the live connection must be closed

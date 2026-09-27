@@ -28,9 +28,9 @@ const ITERATIONS: u32 = 3;
 const PARALLELISM: u32 = 1;
 // Limits on parameters read back from a record, so a damaged record cannot
 // make unlocking allocate or compute without bound.
-const MAX_MEMORY_KIB: u32 = 1024 * 1024;
-const MAX_ITERATIONS: u32 = 16;
-const MAX_PARALLELISM: u32 = 4;
+const MAX_MEMORY_KIB: u32 = MEMORY_KIB;
+const MAX_ITERATIONS: u32 = ITERATIONS;
+const MAX_PARALLELISM: u32 = PARALLELISM;
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const SEALED_KEY_LEN: usize = 32 + 16;
@@ -194,15 +194,41 @@ fn decode(value: &str, len: usize) -> Result<Vec<u8>, VaultError> {
 /// file and its record exist. Browser storage keeps the record this way, so
 /// replacing it is a SQLite transaction and cannot leave a half-written file.
 pub fn read_record_database(path: &std::path::Path) -> Result<Option<PasswordRecord>> {
-    let conn = rusqlite::Connection::open(path)?;
-    create_record_table(&conn)?;
-    let json: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
-        "SELECT record FROM password_record WHERE id = 1",
-        [],
-        |row| row.get(0),
-    ))?;
+    let json = read_optional_record(path, "password_record")?;
     json.map(|json| Ok(PasswordRecord::from_json(&json)?))
         .transpose()
+}
+
+/// Open existing metadata without creating a file or table. Read/write mode
+/// permits SQLite to recover a hot journal, but SQLITE_OPEN_CREATE is omitted.
+pub(crate) fn read_optional_record(path: &std::path::Path, table: &str) -> Result<Option<String>> {
+    use rusqlite::{Connection, Error, ErrorCode, OpenFlags, OptionalExtension};
+    let conn = match Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => conn,
+        Err(Error::SqliteFailure(error, _)) if error.code == ErrorCode::CannotOpen => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    // Only internal constant table names reach this helper.
+    Ok(conn
+        .query_row(
+            &format!("SELECT record FROM {table} WHERE id = 1"),
+            [],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// Store `record` in the plain SQLite file at `path`, replacing any earlier
@@ -311,18 +337,26 @@ impl super::database_key::DatabaseKeyProvider for PasswordKeyProvider {
 pub fn write_record(path: &std::path::Path, record: &PasswordRecord) -> Result<()> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".tmp");
+    let mut suffix = [0u8; 16];
+    getrandom::getrandom(&mut suffix)?;
+    temporary.push(format!(".{}.tmp", hex::encode(suffix)));
     let temporary = std::path::PathBuf::from(temporary);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&temporary)?;
-    file.write_all(record.to_json()?.as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&temporary, path)?;
+    let result = (|| -> Result<()> {
+        file.write_all(record.to_json()?.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result?;
     if let Some(directory) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::File::open(directory)?.sync_all()?;
     }

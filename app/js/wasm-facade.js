@@ -1,3 +1,4 @@
+import { withStorageActivity } from './storage-activity.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
@@ -98,7 +99,7 @@ function wrapSdkClient(sdk) {
             await sdk.backgroundSync();
         },
         async sync() {
-            await sdk.sync();
+            await withStorageActivity(() => sdk.sync());
         },
         stopBackgroundSync() {
             sdk.stopBackgroundSync();
@@ -116,14 +117,14 @@ function wrapSdkClient(sdk) {
                 return boundAccount;
             }
 
-            boundAccount = await sdk.account(
+            boundAccount = await withStorageActivity(() => sdk.account(
                 {
                     networkPassphrase,
                     userAddress,
                     signerAddress: effectiveSigner,
                 },
                 signer,
-            );
+            ));
             boundUserAddress = userAddress;
             boundSignerAddress = effectiveSigner;
             return boundAccount;
@@ -135,11 +136,11 @@ function wrapSdkClient(sdk) {
             return {
                 portfolio: () => boundAccount.portfolio(),
                 privacyKeys: () => boundAccount.privacyKeys(),
-                derivePrivacyKeys: () => boundAccount.derivePrivacyKeys(),
+                derivePrivacyKeys: () => withStorageActivity(() => boundAccount.derivePrivacyKeys()),
                 aspSecret: () => boundAccount.aspSecret(),
                 userNotes: (limit) => boundAccount.userNotes(limit),
                 isRegistered: () => boundAccount.isRegistered(),
-                registerPublicKeys: () => boundAccount.registerPublicKeys(),
+                registerPublicKeys: () => withStorageActivity(() => boundAccount.registerPublicKeys()),
                 deriveAspUserLeaf: () => boundAccount.deriveAspUserLeaf(),
                 pool: (options) => boundAccount.pool(options),
             };
@@ -217,7 +218,13 @@ export async function lockStorage() {
  */
 export async function changeStoragePassword(current, next) {
     await ensureStorage();
-    await storageHandle.changePassword(current, next);
+    await withStorageActivity(() => storageHandle.changePassword(current, next));
+}
+
+/** Settings access to the currently unlocked worker; never opens a dialog. */
+export function unlockedStorage() {
+    if (!storageHandle) throw new Error('Unlock local data first.');
+    return storageHandle;
 }
 
 /** Whether the local database has been unlocked on this page. */

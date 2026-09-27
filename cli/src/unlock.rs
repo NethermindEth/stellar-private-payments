@@ -42,6 +42,9 @@ fn unlock_with(
     prompt: &mut Prompt<'_>,
 ) -> Result<DatabaseKey> {
     if encrypted_migration::is_plaintext_file(database)? {
+        eprintln!(
+            "Encrypting local storage. Deleted plaintext, backups and filesystem snapshots may remain recoverable; encryption does not securely erase them."
+        );
         return encrypt_existing(database, password_file, prompt);
     }
     match std::fs::metadata(database) {

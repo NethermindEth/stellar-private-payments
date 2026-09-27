@@ -1,3 +1,4 @@
+import { withStorageActivity } from './storage-activity.js';
 /**
  * Global View admin tab — pool decrypt cursor with paginated tx rows.
  */
@@ -2130,7 +2131,7 @@ function queueCursorOp(fn) {
   return run;
 }
 
-async function fetchBatch(limit) {
+async function fetchBatchOperation(limit) {
   return queueCursorOp(async () => {
     let fetched = 0;
     while (fetched < limit) {
@@ -2149,7 +2150,7 @@ async function fetchBatch(limit) {
 let drainPromise = null;
 
 /** Exhausts the audit cursor so filters can see the full result set, not just what's paged in so far. */
-async function ensureFullyLoaded() {
+async function ensureFullyLoadedOperation() {
   if (!state.audit || state.exhausted) return;
   if (!drainPromise) {
     drainPromise = (async () => {
@@ -2419,7 +2420,7 @@ function resetAuditState() {
   fullPkGraphCache = null;
 }
 
-async function startAudit({ reset }) {
+async function startAuditOperation({ reset }) {
   const poolContractId = poolSelectEl?.value?.trim();
   const privateKey = privateKeyEl?.value?.trim();
 
@@ -2596,4 +2597,16 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     console.warn('[global-view] init failed:', err);
     setPanelStatus('Global View unavailable until the app runtime is ready.', 'error');
   }
+}
+
+async function startAudit(...args) {
+    return withStorageActivity(() => startAuditOperation(...args));
+}
+
+async function fetchBatch(...args) {
+    return withStorageActivity(() => fetchBatchOperation(...args));
+}
+
+async function ensureFullyLoaded(...args) {
+    return withStorageActivity(() => ensureFullyLoadedOperation(...args));
 }

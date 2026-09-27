@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
+SOURCE_STAMP="$(node "$WEB/scripts/wasm-source-stamp.mjs" --print)"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
@@ -169,5 +170,7 @@ bash "$WEB/scripts/stage-circuits-dist.sh"
 
 echo "==> Staging wasm-bindgen TypeScript declarations..."
 bash "$WEB/scripts/stage-wasm-types.sh"
+
+printf '%s\n' "$SOURCE_STAMP" > "$WEB/dist/source.sha256"
 
 echo "==> Built sdk/web/dist/"

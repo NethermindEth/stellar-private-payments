@@ -328,7 +328,7 @@ browser check exercises real WASM and encrypted OPFS across browser restarts.
 ### Optional passkey database unlocking
 
 After the Freighter setup step (enabled or skipped), the app offers passkey
-unlocking. Create a passkey and confirm it once to verify encryption support
+unlocking. Create a passkey and confirm it twice to verify encryption support
 before saving access. The locked screen shows an explicit **Unlock with
 passkey** button when enrolled. Password and Freighter access remain available,
 and manual/inactivity locking uses the same worker shutdown as before.
@@ -337,7 +337,7 @@ This requires the [WebAuthn PRF extension](https://www.w3.org/TR/webauthn-3/#prf
 and user verification (for example a device PIN or biometric). Providers without
 PRF support cannot unlock encrypted local storage; setup reports this and lets
 the user retry or skip. A successful creation alone never enrolls access.
-The app validates the assertion's challenge, origin, credential ID, relying
+The app verifies reproducible PRF output and validates each assertion's challenge, origin, credential ID, relying
 party hash, and user presence/verification flags. HKDF-SHA-256 derives a secret
 from the PRF output, bound to the site, credential and a random salt. Assertion
 signatures are not encryption material. The browser mediates WebAuthn; this is
@@ -366,3 +366,29 @@ Override the Chromium executable with `CHROMIUM=/path/to/chrome`. Node tests
 inject malformed WebAuthn responses to check origin, challenge, credential,
 user-verification, and PRF validation. These tests run in the SQLite3MC CI job;
 no real passkey or Freighter wallet is needed.
+
+
+### Storage API migration (0.2.0)
+
+This release intentionally changes the pre-1.0 SDK API. Replace `Storage.open`
+with `Storage.connect`, inspect `status()`, and call `create` or `unlock` before
+passing storage to `Client.new`. Status can also be `opening` (wait and re-query)
+or `recovery-required` (encrypted data exists without a readable password
+record; unlock with a surviving optional method, restore a complete backup, or
+explicitly reset). `password-recovery-required` means an optional method opened
+the database without a password record: call `recoverPassword(newPassword)` to
+restore it while preserving data and methods. Existing password records cannot
+be replaced through this route. A closed handle rejects
+further requests. Timed-out opening requests may still finish in the worker;
+check status before retrying. The app does this automatically.
+
+Optional unlock enrollment authenticates the password and atomically replaces
+that method's existing envelope. `removeWallet(password)` and
+`removePasskey(password)` revoke the corresponding envelope on this database
+copy. Settings exposes enable/replace/remove controls. This is not database-key
+rotation and cannot revoke old backups or a copied database key. See
+[the at-rest security model](../../docs/src/security.md).
+
+The app bounds opening-status polling to two minutes and asks for a reload if
+the worker remains pending or unresponsive. Package checks inspect the shipped
+storage worker for the pinned SQLite3MC version string.

@@ -88,6 +88,9 @@ pub enum StorageWorkerRequest {
         context: stellar_private_payments::state::passkey_vault::PasskeyContext,
         secret: Password,
     },
+    RecoverPassword(Password),
+    RemoveWallet(Password),
+    RemovePasskey(Password),
     ChangePassword {
         current: Password,
         new: Password,
@@ -198,6 +201,15 @@ pub enum StorageStatus {
     Unencrypted,
     /// Set up; enter the password to unlock.
     Locked,
+    /// An open operation is still running.
+    Opening,
+    /// Encrypted data exists without its password record. Never recreate
+    /// implicitly.
+    #[serde(rename = "recovery-required")]
+    RecoveryRequired,
+    /// Open via an optional method; restore the missing password record.
+    #[serde(rename = "password-recovery-required")]
+    PasswordRecoveryRequired,
     /// Open and ready.
     Unlocked,
 }

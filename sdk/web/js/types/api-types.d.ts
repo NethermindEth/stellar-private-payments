@@ -73,7 +73,7 @@ export interface StorageConnectOptions {
  * a password from {@link Storage.create}, `"locked"` needs
  * {@link Storage.unlock}.
  */
-export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'unlocked';
+export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'opening' | 'recovery-required' | 'password-recovery-required' | 'unlocked';
 
 /**
  * Worker-backed local persistence in an encrypted OPFS database.
@@ -117,6 +117,10 @@ export interface Storage {
   /** Low-level enrollment: secret must be derived from a user-verified WebAuthn PRF assertion. */
   enrollPasskey(password: string, context: PasskeyUnlockContext, secret: string): Promise<void>;
   unlockPasskey(context: PasskeyUnlockContext, secret: string): Promise<void>;
+  removeWallet(password: string): Promise<void>;
+  removePasskey(password: string): Promise<void>;
+  /** Restore an absent record only after optional-method recovery unlock. */
+  recoverPassword(password: string): Promise<void>;
   changePassword(current: string, next: string): Promise<void>;
   /** Delete the local database and its password, for a forgotten password. */
   reset(): Promise<void>;

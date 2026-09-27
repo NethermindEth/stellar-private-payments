@@ -27,6 +27,9 @@ pub fn change(config: &CliConfig, new_password_file: Option<&Path>, json: bool) 
             true,
         );
     }
-    println!("Password changed for {}.", database.display());
+    println!(
+        "Password changed for {}. The database key is unchanged; old keys and backups are not revoked.",
+        database.display()
+    );
     Ok(())
 }

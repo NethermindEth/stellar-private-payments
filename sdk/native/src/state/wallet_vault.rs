@@ -4,12 +4,12 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow, ensure};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use super::{
     database_key::DatabaseKey,
-    password_vault::{PasswordRecord, read_record_database},
+    password_vault::{PasswordRecord, read_optional_record, read_record_database},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,11 +39,7 @@ fn connection(path: &Path) -> Result<Connection> {
 }
 
 fn read(path: &Path) -> Result<Option<WalletRecord>> {
-    let json: Option<String> = connection(path)?
-        .query_row("SELECT record FROM wallet_record WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .optional()?;
+    let json = read_optional_record(path, "wallet_record")?;
     json.map(|json| Ok(serde_json::from_str(&json)?))
         .transpose()
 }
@@ -79,7 +75,7 @@ pub fn enroll(path: &Path, password: &str, context: WalletContext, secret: &str)
         sealed: PasswordRecord::seal(&key, secret)?,
     };
     connection(path)?.execute(
-        "INSERT INTO wallet_record (id, record) VALUES (1, ?1)",
+        "INSERT INTO wallet_record (id, record) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET record = excluded.record",
         [serde_json::to_string(&record)?],
     )?;
     Ok(())
@@ -93,6 +89,14 @@ pub fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<Data
         "wallet enrollment changed; try again"
     );
     Ok(record.sealed.open(secret)?)
+}
+
+/// Authenticate before revoking this method on the current database copy.
+pub fn remove(path: &Path, password: &str) -> Result<()> {
+    let _key = read_record_database(path)?
+        .ok_or_else(|| anyhow!("password record is missing"))?
+        .open(password)?;
+    clear(path)
 }
 
 pub fn clear(path: &Path) -> Result<()> {
@@ -139,7 +143,7 @@ mod tests {
         let mut altered = ctx.clone();
         altered.salt = "02".repeat(32);
         assert!(unlock(&path, &altered, &secret).is_err());
-        assert!(enroll(&path, password, altered, &secret).is_err());
+        assert!(enroll(&path, "wrong password", altered.clone(), &secret).is_err());
         assert_eq!(context(&path)?, Some(ctx.clone()));
         write_record_database(
             &path,
@@ -164,7 +168,19 @@ mod tests {
                     .any(|w| w == sensitive.as_bytes())
             );
         }
-        clear(&path)?;
+        assert!(remove(&path, "wrong password").is_err());
+        assert_eq!(*unlock(&path, &ctx, &secret)?, *key);
+        let replacement_secret = "98".repeat(32);
+        enroll(
+            &path,
+            "replacement password phrase",
+            altered.clone(),
+            &replacement_secret,
+        )?;
+        assert!(unlock(&path, &ctx, &secret).is_err());
+        assert!(unlock(&path, &altered, &secret).is_err());
+        assert_eq!(*unlock(&path, &altered, &replacement_secret)?, *key);
+        remove(&path, "replacement password phrase")?;
         assert!(context(&path)?.is_none());
         assert!(unlock(&path, &ctx, &secret).is_err());
         assert_eq!(
