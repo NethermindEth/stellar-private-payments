@@ -25,6 +25,7 @@ const { outputFiles } = await build({
                     async create(password) { this.password = password; this.created++; this.state = 'unlocked'; },
                     async unlock(password) { if (password !== this.password) throw Object.assign(Error('wrong'), {code:'wrong-password'}); this.state = 'unlocked'; },
                     async walletContext() { return this.context; },
+                    async passkeyContext() { return null; },
                     async enrollWallet(password, context, secret) { if (password !== this.password) throw Error('wrong'); this.context = context; this.secret = secret; },
                     async unlockWallet(context, secret) { if (secret !== this.secret) throw Error('wrong'); this.state = 'unlocked'; },
                     async reset() { this.context = null; this.state = 'new'; },
@@ -56,6 +57,7 @@ try {
     };
     await page.evaluate(() => access.setup()); await start(); await create();
     await page.getByTestId('storage-freighter-skip').click();
+    await page.getByTestId('storage-passkey-skip').click();
     await page.waitForFunction(() => window.finished);
     assert.equal(await page.evaluate(() => storage.context), null);
 
@@ -67,6 +69,7 @@ try {
     assert.equal(await page.evaluate(() => storage.context), null);
     await page.evaluate(() => { window.fault = null; window.signatures = 0; });
     await page.getByTestId('storage-freighter-enable').click();
+    await page.getByTestId('storage-passkey-skip').click();
     await page.waitForFunction(() => window.finished);
     assert.equal(await page.evaluate(() => window.signatures), 2);
 
@@ -88,6 +91,7 @@ try {
     await create(2);
     assert.equal(await page.evaluate(() => storage.context), null);
     await page.getByTestId('storage-freighter-skip').click();
+    await page.getByTestId('storage-passkey-skip').click();
     await page.waitForFunction(() => window.finished);
     console.log('PASS: password-first setup, skip, enrollment retry, wallet unlock, password fallback, reset');
 } finally { await browser.close(); }

@@ -1,7 +1,8 @@
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { enrollFreighter, unlockFreighter } from './storage-freighter.js';
+import { enrollPasskey, unlockPasskey } from './storage-passkey.js';
 
-// Password and optional Freighter access to the encrypted local database.
+// Password, optional Freighter and passkey access to the encrypted local database.
 //
 // The SDK keeps the database encrypted and unlocks it inside its storage
 // worker; this module asks for a password or an enrolled wallet signature.
@@ -47,8 +48,12 @@ const COPY = {
 export async function unlockStorage(storage) {
     let status = await storage.status();
     while (status !== 'unlocked') {
-        status = await showPasswordDialog(storage, status, status === 'locked'
-            ? await storage.walletContext().catch(() => null) : null);
+        const [walletContext, passkeyContext] = status === 'locked'
+            ? await Promise.all([
+                storage.walletContext().catch(() => null),
+                storage.passkeyContext().catch(() => null),
+            ]) : [null, null];
+        status = await showPasswordDialog(storage, status, walletContext, passkeyContext);
     }
 }
 
@@ -56,7 +61,7 @@ export async function unlockStorage(storage) {
  * The dialog for one storage status. Resolves with the status after the
  * user's action: "unlocked", or "new" after a reset.
  */
-function showPasswordDialog(storage, status, walletContext) {
+function showPasswordDialog(storage, status, walletContext, passkeyContext) {
     return new Promise((resolve) => {
         const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
         overlay.setAttribute('role', 'dialog');
@@ -72,11 +77,11 @@ function showPasswordDialog(storage, status, walletContext) {
             overlay.remove();
             resolve(next);
         };
-        renderPasswordForm(card, storage, status, finish, walletContext);
+        renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
     });
 }
 
-function renderPasswordForm(card, storage, status, finish, walletContext) {
+function renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext) {
     const copy = COPY[status];
     if (!copy) throw new Error(`unexpected storage status: ${status}`);
     const creating = status !== 'locked';
@@ -218,11 +223,29 @@ function renderPasswordForm(card, storage, status, finish, walletContext) {
         });
         card.appendChild(wallet);
     }
+    if (!creating && passkeyContext) {
+        const passkey = actionButton('Unlock with passkey', 'storage-passkey-unlock');
+        passkey.addEventListener('click', async () => {
+            if (passkey.disabled) return;
+            setBusy(true);
+            error.classList.add('hidden');
+            passkey.textContent = 'Confirm your passkey…';
+            try {
+                await unlockPasskey(storage);
+                finish('unlocked');
+            } catch (e) {
+                showError(e?.message || 'Passkey could not unlock your data. Use your password.');
+                setBusy(false);
+                passkey.textContent = 'Unlock with passkey';
+            }
+        });
+        card.appendChild(passkey);
+    }
     if (!creating) {
         const forgot = el('button', 'mt-4 w-full text-center text-sm text-slate-400 underline-offset-4 transition hover:text-cyan-100 hover:underline', 'Forgot password?');
         forgot.type = 'button';
         forgot.dataset.testid = 'storage-password-forgot';
-        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish, walletContext));
+        forgot.addEventListener('click', () => renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext));
         card.appendChild(forgot);
     }
     password.input.focus();
@@ -239,11 +262,14 @@ function renderFreighterOffer(card, storage, password, finish) {
     card.replaceChildren();
     card.parentElement.dataset.mode = 'freighter';
     const enable = actionButton('Enable Freighter unlocking', 'storage-freighter-enable');
-    const skip = actionButton('Continue with password only', 'storage-freighter-skip');
+    const skip = actionButton('Skip Freighter', 'storage-freighter-skip');
     const error = el('p', 'mt-4 hidden text-sm text-rose-100');
     error.setAttribute('role', 'alert');
     error.dataset.testid = 'storage-freighter-error';
-    const done = () => { password = undefined; finish('unlocked'); };
+    const done = () => {
+        renderPasskeyOffer(card, storage, password, finish);
+        password = undefined;
+    };
     enable.addEventListener('click', async () => {
         if (enable.disabled) return;
         enable.disabled = skip.disabled = true;
@@ -267,12 +293,44 @@ function renderFreighterOffer(card, storage, password, finish) {
     enable.focus();
 }
 
-function renderResetConfirmation(card, storage, status, finish, walletContext) {
+function renderPasskeyOffer(card, storage, password, finish) {
+    card.replaceChildren();
+    card.parentElement.dataset.mode = 'passkey';
+    const enable = actionButton('Enable passkey unlocking', 'storage-passkey-enable');
+    const skip = actionButton('Continue without a passkey', 'storage-passkey-skip');
+    const error = el('p', 'mt-4 hidden text-sm text-rose-100');
+    error.setAttribute('role', 'alert');
+    error.dataset.testid = 'storage-passkey-error';
+    const done = () => { password = undefined; finish('unlocked'); };
+    enable.addEventListener('click', async () => {
+        if (enable.disabled) return;
+        enable.disabled = skip.disabled = true;
+        enable.textContent = 'Confirm your passkey…';
+        error.classList.add('hidden');
+        try {
+            await enrollPasskey(storage, password);
+            done();
+        } catch (e) {
+            error.textContent = e?.message || 'Could not enable a passkey. Your password still works.';
+            error.classList.remove('hidden');
+            enable.disabled = skip.disabled = false;
+            enable.textContent = 'Try passkey again';
+        }
+    });
+    skip.addEventListener('click', done);
+    card.append(eyebrow(), heading('Unlock with a passkey too?'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-300', 'Use your device’s screen lock, fingerprint, or security key to unlock your local data. Your password and any enrolled Freighter account will still work.'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-400', 'Create a passkey, then confirm it once to check that it can unlock encrypted storage. Some passkey providers do not support this. Keep your password as a backup.'),
+        error, enable, skip);
+    enable.focus();
+}
+
+function renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext) {
     card.replaceChildren();
     const title = heading('Reset local data?');
     const text = el('div', 'mt-3 space-y-3 text-sm leading-6 text-slate-300');
     text.append(
-        el('p', null, 'Without the password or an enrolled Freighter account, the encrypted data in this browser cannot be opened. Resetting deletes it: your operation history and settings here are lost.'),
+        el('p', null, 'Without the password, an enrolled Freighter account, or a working passkey, the encrypted data in this browser cannot be opened. Resetting deletes it: your operation history and settings here are lost.'),
         el('p', null, 'Your funds stay on-chain. After you choose a new password, connect your wallet again: your keys are derived again and your notes sync from the chain.'),
     );
     const error = el('p', 'mt-4 hidden rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100');
@@ -283,7 +341,7 @@ function renderResetConfirmation(card, storage, status, finish, walletContext) {
     reset.dataset.testid = 'storage-reset-confirm';
     const cancel = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish, walletContext));
+    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext));
     reset.addEventListener('click', async () => {
         if (reset.disabled) return;
         reset.disabled = cancel.disabled = true;

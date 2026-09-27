@@ -194,6 +194,58 @@ impl Storage {
         Ok(())
     }
 
+    /// Public credential context for the optional passkey unlock method.
+    #[wasm_bindgen(js_name = passkeyContext)]
+    pub async fn passkey_context(&self) -> Result<JsValue, JsValue> {
+        match self
+            .request(
+                StorageWorkerRequest::PasskeyContext,
+                STORAGE_OPEN_TIMEOUT_MS,
+            )
+            .await?
+        {
+            StorageWorkerResponse::PasskeyContext(context) => {
+                Ok(serde_wasm_bindgen::to_value(&context)?)
+            }
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Add a passkey-derived secret after authenticating the existing password.
+    /// The database key stays inside the worker.
+    #[wasm_bindgen(js_name = enrollPasskey)]
+    pub async fn enroll_passkey(
+        &self,
+        password: String,
+        context: JsValue,
+        secret: String,
+    ) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::EnrollPasskey {
+                password: Password(password),
+                context: serde_wasm_bindgen::from_value(context)?,
+                secret: Password(secret),
+            },
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Unlock using the secret derived from the enrolled passkey PRF.
+    #[wasm_bindgen(js_name = unlockPasskey)]
+    pub async fn unlock_passkey(&self, context: JsValue, secret: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::UnlockPasskey {
+                context: serde_wasm_bindgen::from_value(context)?,
+                secret: Password(secret),
+            },
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Replace the password. Rejects with `code: "wrong-password"` when
     /// `current` is wrong; the database itself is not rewritten.
     #[wasm_bindgen(js_name = changePassword)]

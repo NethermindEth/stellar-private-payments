@@ -193,6 +193,24 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::UnlockWallet { context, secret } => {
             return open_with(super::storage_access::unlock_wallet(&context, &secret.0)).await;
         }
+        StorageWorkerRequest::PasskeyContext => {
+            StorageWorkerResponse::PasskeyContext(super::storage_access::passkey_context().await?)
+        }
+        StorageWorkerRequest::EnrollPasskey {
+            password,
+            context,
+            secret,
+        } => {
+            anyhow::ensure!(
+                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
+                "unlock the database first"
+            );
+            super::storage_access::enroll_passkey(&password.0, context, &secret.0)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::UnlockPasskey { context, secret } => {
+            return open_with(super::storage_access::unlock_passkey(&context, &secret.0)).await;
+        }
         StorageWorkerRequest::ChangePassword { current, new } => {
             if super::storage_access::change_password(&current.0, &new.0)? {
                 StorageWorkerResponse::Saved

@@ -24,6 +24,7 @@ use stellar_private_payments::state::{
     SqliteStorage,
     database_key::{DatabaseKey, OpenPurpose},
     encrypted_migration::{copy_into_encrypted, has_tables},
+    passkey_vault::{self, PasskeyContext},
     password_vault::{
         PasswordRecord, VaultError, read_record_database, validate_new_password,
         write_record_database,
@@ -66,6 +67,7 @@ pub(super) async fn create(password: &str) -> Result<SqliteStorage> {
     // Whatever is there without a password record cannot be unlocked.
     pools::delete_encrypted(ENCRYPTED_DB)?;
     wallet_vault::clear(Path::new(KEY_DB))?;
+    passkey_vault::clear(Path::new(KEY_DB))?;
     write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(&key, password)?)?;
     if status == StorageStatus::Unencrypted {
         copy_plaintext(&key).await?;
@@ -102,6 +104,24 @@ pub(super) async fn unlock_wallet(
 ) -> Result<Option<SqliteStorage>> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
+    open_key(&key).await
+}
+
+pub(super) async fn passkey_context() -> Result<Option<PasskeyContext>> {
+    pools::ensure_encrypted().await?;
+    passkey_vault::context(Path::new(KEY_DB))
+}
+
+pub(super) fn enroll_passkey(password: &str, context: PasskeyContext, secret: &str) -> Result<()> {
+    passkey_vault::enroll(Path::new(KEY_DB), password, context, secret)
+}
+
+pub(super) async fn unlock_passkey(
+    context: &PasskeyContext,
+    secret: &str,
+) -> Result<Option<SqliteStorage>> {
+    pools::ensure_encrypted().await?;
+    let key = passkey_vault::unlock(Path::new(KEY_DB), context, secret)?;
     open_key(&key).await
 }
 

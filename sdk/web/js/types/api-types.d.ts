@@ -95,6 +95,14 @@ export interface WalletUnlockContext {
   salt: string;
 }
 
+export interface PasskeyUnlockContext {
+  version: 1;
+  credentialId: string;
+  rpId: string;
+  origin: string;
+  salt: string;
+}
+
 export interface Storage {
   status(): Promise<StorageStatus>;
   /**
@@ -107,6 +115,10 @@ export interface Storage {
   /** Low-level enrollment: secret must be derived from a verified wallet signature. */
   enrollWallet(password: string, context: WalletUnlockContext, secret: string): Promise<void>;
   unlockWallet(context: WalletUnlockContext, secret: string): Promise<void>;
+  passkeyContext(): Promise<PasskeyUnlockContext | undefined>;
+  /** Low-level enrollment: secret must be derived from a user-verified WebAuthn PRF assertion. */
+  enrollPasskey(password: string, context: PasskeyUnlockContext, secret: string): Promise<void>;
+  unlockPasskey(context: PasskeyUnlockContext, secret: string): Promise<void>;
   changePassword(current: string, next: string): Promise<void>;
   /** Delete the local database and its password, for a forgotten password. */
   reset(): Promise<void>;

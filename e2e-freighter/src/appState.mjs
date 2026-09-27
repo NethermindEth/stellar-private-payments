@@ -73,6 +73,8 @@ export async function answerStoragePassword(page) {
     observe: async () => {
       const skip = page.getByTestId('storage-freighter-skip');
       if (await skip.isVisible()) await skip.click();
+      const skipPasskey = page.getByTestId('storage-passkey-skip');
+      if (await skipPasskey.isVisible()) await skipPasskey.click();
       return page.evaluate((selector) => {
         const node = document.querySelector(selector);
         return {
