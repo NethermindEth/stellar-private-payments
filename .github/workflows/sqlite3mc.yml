@@ -100,6 +100,9 @@ jobs:
       - name: Test encrypted Chromium storage
         run: |
           node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/chromium-storage
+      - name: Reject an unqualified cipher backend
+        run: |
+          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/backend-mismatch --backend-version-fault
       - name: Test optional storage unlocking with virtual WebAuthn
         run: |
           npm ci --prefix app

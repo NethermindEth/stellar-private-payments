@@ -109,8 +109,11 @@ jobs:
   npm:
     needs: tag
     if: needs.tag.outputs.npm != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      CC_wasm32_unknown_unknown: clang-18
+      AR_wasm32_unknown_unknown: llvm-ar-18
     permissions:
       contents: read
       id-token: write
@@ -149,8 +152,21 @@ jobs:
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
         run: npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package
+      - name: Qualify the release tarball in Chromium
+        if: steps.registry.outputs.publish == 'true'
+        run: |
+          set -eu
+          clang-18 --version
+          llvm-ar-18 --version
+          google-chrome --version
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          node scripts/check-sqlite3mc-package.js --output-directory ../../target/npm-release
+          tar -xzf ../../target/npm-release/stellar-private-payments-*.tgz -C ../../target/npm-release
+          node scripts/test-sqlite3mc.js --package-root ../../target/npm-release/package \
+            --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" \
+            --artifacts ../../target/sqlite3mc-checks/release-chromium
       - if: steps.registry.outputs.publish == 'true'
-        run: npm publish --ignore-scripts --provenance
+        run: npm publish ../../target/npm-release/stellar-private-payments-*.tgz --ignore-scripts --provenance
 
   cli-ready:
     needs: tag
@@ -302,7 +318,7 @@ jobs:
           cp deployments/testnet/circuit_keys/*.json testdata/
 
       - name: Build with required SQLite3MC
-        run: cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+        run: cargo build --locked -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
 
       - name: Package
         shell: bash

@@ -10,7 +10,7 @@ export function beginStorageActivity() {
         if (released) return;
         released = true;
         pending--;
-        completedAt = Date.now();
+        completedAt = performance.now();
     };
 }
 export async function withStorageActivity(operation) {

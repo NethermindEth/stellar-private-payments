@@ -22,7 +22,8 @@ function parseArgs(argv) {
   const args = { browser: "chromium" };
   for (let index = 0; index < argv.length; index++) {
     const name = argv[index].replace(/^--/, "");
-    if (["artifacts", "browser", "binary", "driver", "legacy-db", "legacy-gvk"].includes(name)) args[name] = argv[++index];
+    if (["artifacts", "browser", "binary", "driver", "legacy-db", "legacy-gvk", "package-root"].includes(name)) args[name] = argv[++index];
+    else if (name === "backend-version-fault") args[name] = true;
     else throw Error(`unknown argument: ${argv[index]}`);
   }
   if (!args.artifacts) throw Error("--artifacts is required");
@@ -32,7 +33,7 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 const scripts = dirname(fileURLToPath(import.meta.url));
-const web = resolve(scripts, "..");
+const web = args["package-root"] ? resolve(args["package-root"]) : resolve(scripts, "..");
 const artifacts = resolve(args.artifacts);
 const profile = join(artifacts, "profile");
 await mkdir(artifacts, { recursive: true });
@@ -50,6 +51,13 @@ const server = createServer(async (request, response) => {
       const path = join(web, normalize(requestPath).replace(/^\/+/, ""));
       if (!path.startsWith(web)) throw Error("invalid path");
       body = await readFile(path);
+      if (args["backend-version-fault"] && path.endsWith('/storage-worker-module_bg.wasm')) {
+        // Test-only response fault: preserve WASM layout but alter the linked
+        // library's version string. Never modify the package on disk.
+        const version = body.toString('latin1').match(/SQLite3 Multiple Ciphers [0-9]+\.[0-9]+\.[0-9]+/)?.[0];
+        assert(version, 'linked cipher version string must exist');
+        body.write(version.replace(/[0-9]/g, '0'), body.indexOf(version), 'latin1');
+      }
       type = contentTypes.get(extname(path)) || "application/octet-stream";
     }
     response.writeHead(200, { "Content-Type": type, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" });
@@ -145,6 +153,11 @@ try {
   const version = await ctx.session();
   await ctx.load();
 
+  if (args["backend-version-fault"]) {
+    await expectFailure(() => ctx.connect(), "Unsupported SQLite3MC backend");
+    assert.deepEqual(await ctx.snapshot(), [], "backend rejection must not touch OPFS");
+    ctx.checks.push("a mismatched cipher backend is rejected before opening OPFS");
+  } else {
   let legacyGvk;
   if (args["legacy-db"]) {
     await ctx.injectLegacy(await readFile(args["legacy-db"]));
@@ -240,6 +253,8 @@ try {
   assert(!(await ctx.marked()), "reset kept the old data");
   await ctx.close();
   ctx.checks.push("reset discards the database and a new password starts over");
+
+  }
 
   const result = { browser: args.browser, version, checks: ctx.checks, passed: true };
   await writeFile(join(artifacts, "result.json"), `${JSON.stringify(result, null, 2)}\n`);

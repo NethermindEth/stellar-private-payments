@@ -158,3 +158,22 @@ fn an_interrupted_copy_is_recognised_and_can_be_redone() -> Result<()> {
     assert!(copy_into_encrypted(&f.db(), None, &encrypted, &key).is_err());
     Ok(())
 }
+
+#[test]
+fn migrates_analyzed_database_without_copying_optimizer_statistics() -> Result<()> {
+    let f = Fixture::new()?;
+    seed_plaintext(&f.db())?;
+    let conn = Connection::open(f.db())?;
+    conn.execute_batch("ANALYZE")?;
+    let stats: i64 = conn.query_row("SELECT count(*) FROM sqlite_stat1", [], |row| row.get(0))?;
+    assert!(stats > 0);
+    let before = fingerprint(&conn)?;
+    drop(conn);
+    let key = DatabaseKey::generate()?;
+    encrypt_in_place(&f.db(), &key)?;
+    let conn = super::super::database_key::open(&f.db(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(fingerprint(&conn)?, before);
+    conn.execute_batch("ANALYZE")?;
+    assert_eq!(fingerprint(&conn)?, before);
+    Ok(())
+}

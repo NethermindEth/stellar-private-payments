@@ -184,12 +184,27 @@ export async function ensureStorage() {
     if (!storageOpening) {
         storageOpening = (async () => {
             const storage = await Storage.connect();
-            installStoragePauseOnUnload(storage);
-            await unlockStorage(storage);
-            storageHandle = storage;
-            bindAppStorage(storage);
-            startAutoLock(() => { lockStorage().catch(() => window.location.reload()); });
-            window.dispatchEvent(new Event(STORAGE_UNLOCKED_EVENT));
+            const removeLifecycle = installStoragePauseOnUnload(storage);
+            let stopAutoLock;
+            try {
+                await unlockStorage(storage, { onOpened: () => {
+                    // Start as soon as create/unlock finishes, including the
+                    // optional enrollment screens that still retain a password.
+                    if (!stopAutoLock) stopAutoLock = startAutoLock(() => {
+                        disposeClient();
+                        storage.close().finally(() => window.location.reload()).catch(() => {});
+                    });
+                } });
+                storageHandle = storage;
+                bindAppStorage(storage);
+                window.dispatchEvent(new Event(STORAGE_UNLOCKED_EVENT));
+            } catch (error) {
+                stopAutoLock?.();
+                removeLifecycle();
+                await storage.close().catch(() => {});
+                storage.free();
+                throw error;
+            }
         })().catch((err) => {
             storageOpening = null;
             throw err;
@@ -232,7 +247,6 @@ export function isStorageUnlocked() {
     return storageHandle !== null;
 }
 
-let pauseOnUnloadInstalled = false;
 
 /**
  * Ask the storage worker to release its OPFS sync access handles as soon as
@@ -247,17 +261,20 @@ let pauseOnUnloadInstalled = false;
  * message.
  */
 function installStoragePauseOnUnload(storage) {
-    if (pauseOnUnloadInstalled) {
-        return;
-    }
-    pauseOnUnloadInstalled = true;
-    window.addEventListener('pagehide', () => {
+    const pause = () => {
         try {
             storage.call('Pause', 1_000)?.catch(() => {});
         } catch {
             // Best-effort: nothing to do if the worker is already gone.
         }
-    });
+    };
+    const restore = event => { if (event.persisted) window.location.reload(); };
+    window.addEventListener('pagehide', pause);
+    window.addEventListener('pageshow', restore);
+    return () => {
+        window.removeEventListener('pagehide', pause);
+        window.removeEventListener('pageshow', restore);
+    };
 }
 
 /**

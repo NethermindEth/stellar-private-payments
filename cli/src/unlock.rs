@@ -204,6 +204,15 @@ fn change_password_with(
 /// Generate the database key and write its password record, before anything
 /// uses the key, so the database never exists without a way to unlock it.
 fn seal_new_key(database: &Path, password: &str) -> Result<DatabaseKey> {
+    let record_path = password_vault::record_path(database);
+    match std::fs::symlink_metadata(&record_path) {
+        Ok(_) => bail!(
+            "refusing to replace existing password record {}; preserve it with its matching database backup, or move it aside explicitly before creating new storage",
+            record_path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
     let key = DatabaseKey::generate()?;
     password_vault::write_record(
         &password_vault::record_path(database),
@@ -299,6 +308,34 @@ mod tests {
                 .map(|answer| Zeroizing::new(answer.to_string()))
                 .ok_or_else(|| anyhow::anyhow!("no scripted answer for {label}"))
         }
+    }
+
+    #[test]
+    fn creating_storage_preserves_an_existing_backup_key_record() -> Result<()> {
+        let f = Fixture::new();
+        let key = DatabaseKey::generate()?;
+        let record_path = password_vault::record_path(&f.db());
+        password_vault::write_record(&record_path, &PasswordRecord::seal(&key, PASSWORD)?)?;
+        let before = std::fs::read(&record_path)?;
+        let file = f.password_file(PASSWORD);
+        for plaintext in [false, true] {
+            if plaintext {
+                drop(SqliteStorage::connect_file(f.db())?);
+            }
+            let error = unlock_with(&f.db(), Some(&file), &mut |_: &str| unreachable!())
+                .expect_err("existing key record must be preserved");
+            assert!(
+                error
+                    .to_string()
+                    .contains("refusing to replace existing password record")
+            );
+            assert_eq!(std::fs::read(&record_path)?, before);
+            assert_eq!(
+                *PasswordRecord::from_json(&String::from_utf8(before.clone())?)?.open(PASSWORD)?,
+                *key
+            );
+        }
+        Ok(())
     }
 
     #[test]
