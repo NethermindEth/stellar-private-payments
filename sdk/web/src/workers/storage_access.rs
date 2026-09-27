@@ -34,6 +34,42 @@ use stellar_private_payments::state::{
 
 use crate::protocol::StorageStatus;
 
+// Retain a zeroizing key only after an optional method successfully opens a
+// database whose password record is absent. Never expose it to the page.
+thread_local! {
+    static RECOVERY_KEY: std::cell::RefCell<Option<DatabaseKey>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn clear_recovery_key() {
+    RECOVERY_KEY.with(|key| key.borrow_mut().take());
+}
+
+pub(super) fn recover_password(password: &str) -> Result<()> {
+    ensure!(
+        read_record()?.is_none(),
+        "a password is already set; use changePassword"
+    );
+    validate_new_password(password)?;
+    RECOVERY_KEY.with(|cell| {
+        let mut recovery = cell.borrow_mut();
+        let key = recovery
+            .as_ref()
+            .ok_or_else(|| anyhow!("unlock with an enrolled method to recover password access"))?;
+        write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(key, password)?)?;
+        recovery.take();
+        Ok(())
+    })
+}
+
+async fn open_optional_key(key: DatabaseKey) -> Result<Option<SqliteStorage>> {
+    let recover = read_record()?.is_none();
+    let storage = open_key(&key).await?;
+    if recover && storage.is_some() {
+        RECOVERY_KEY.with(|cell| *cell.borrow_mut() = Some(key));
+    }
+    Ok(storage)
+}
+
 const ENCRYPTED_DB: &str = "spp.encrypted.db";
 const KEY_DB: &str = "spp.key.db";
 /// The unencrypted database of earlier versions.
@@ -42,11 +78,19 @@ const PLAINTEXT_DB: &str = "spp.db";
 /// Report what the database needs before it can be used.
 pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
     if unlocked {
-        return Ok(StorageStatus::Unlocked);
+        return Ok(if RECOVERY_KEY.with(|key| key.borrow().is_some()) {
+            StorageStatus::PasswordRecoveryRequired
+        } else {
+            StorageStatus::Unlocked
+        });
     }
     pools::ensure_encrypted().await?;
-    if read_record()?.is_some() && pools::encrypted_exists(ENCRYPTED_DB)? {
-        return Ok(StorageStatus::Locked);
+    if pools::encrypted_exists(ENCRYPTED_DB)? {
+        return Ok(if read_record()?.is_some() {
+            StorageStatus::Locked
+        } else {
+            StorageStatus::RecoveryRequired
+        });
     }
     Ok(if pools::plaintext_exists(PLAINTEXT_DB).await? {
         StorageStatus::Unencrypted
@@ -104,7 +148,7 @@ pub(super) async fn unlock_wallet(
 ) -> Result<Option<SqliteStorage>> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    open_key(&key).await
+    open_optional_key(key).await
 }
 
 pub(super) async fn passkey_context() -> Result<Option<PasskeyContext>> {
@@ -122,7 +166,15 @@ pub(super) async fn unlock_passkey(
 ) -> Result<Option<SqliteStorage>> {
     pools::ensure_encrypted().await?;
     let key = passkey_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    open_key(&key).await
+    open_optional_key(key).await
+}
+
+pub(super) fn remove_wallet(password: &str) -> Result<()> {
+    wallet_vault::remove(Path::new(KEY_DB), password)
+}
+
+pub(super) fn remove_passkey(password: &str) -> Result<()> {
+    passkey_vault::remove(Path::new(KEY_DB), password)
 }
 
 async fn open_key(key: &DatabaseKey) -> Result<Option<SqliteStorage>> {

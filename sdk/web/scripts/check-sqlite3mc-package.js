@@ -15,6 +15,8 @@ const required = new Set([
   'dist/licenses/SQLite3MC.txt', 'dist/licenses/sqlite-wasm-vfs-LICENSE.txt',
   'dist/circuits/NOTICE.txt', 'dist/circuits/source-bundle.tar.gz',
 ]);
+const pinnedCipherVersion = readFileSync(join(root, 'sdk/native/sqlite3mc_source.rs'), 'utf8').match(/const VERSION: &str = "([^"]+)";/)?.[1];
+if (!pinnedCipherVersion) throw new Error('cannot read pinned SQLite3MC version');
 const notice = readFileSync(join(root, 'vendor/sqlite3mc-NOTICE.txt'));
 const vfsNotice = readFileSync(join(root, 'vendor/sqlite-wasm-vfs/LICENSE'));
 
@@ -42,12 +44,19 @@ function verify(read) {
   if (!read('dist/licenses/SQLite3MC.txt').equals(notice)) throw new Error('SQLite3MC notice differs from reviewed notice');
   if (!read('dist/licenses/sqlite-wasm-vfs-LICENSE.txt').equals(vfsNotice)) throw new Error('VFS notice differs from reviewed notice');
   const bindings = read('dist/stellar_private_payments_web.js').toString();
-  for (const method of ['static connect(', 'changePassword(']) {
+  for (const method of ['static connect(', 'changePassword(', 'recoverPassword(']) {
     if (!bindings.includes(method)) throw new Error(`WASM bindings lack ${method}`);
   }
   if (!read('js/index.js').toString().includes('connect: connectStorage')) throw new Error('JavaScript facade lacks encrypted storage access');
   for (const name of ['dist/stellar_private_payments_web_bg.wasm', 'dist/workers/storage-worker-module_bg.wasm']) {
     if (!read(name).subarray(0, 4).equals(Buffer.from([0, 97, 115, 109]))) throw new Error(`invalid WASM artifact: ${name}`);
+  }
+  // Inspect the shipped worker, not a build-cache stamp that could belong to
+  // another artifact. This string is emitted by SQLite3MC's version function.
+  const worker = read('dist/workers/storage-worker-module_bg.wasm');
+  const versions = [...worker.toString('latin1').matchAll(/SQLite3 Multiple Ciphers ([0-9]+\.[0-9]+\.[0-9]+)/g)].map(match => match[1]);
+  if (!versions.length || versions.some(version => version !== pinnedCipherVersion)) {
+    throw new Error(`storage worker cipher version differs from pinned ${pinnedCipherVersion}: ${versions.join(', ') || 'missing'}`);
   }
 }
 

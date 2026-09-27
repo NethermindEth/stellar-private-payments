@@ -1,3 +1,4 @@
+import { mountStorageMethods } from '../storage-methods.js';
 // The header's lock button and the Local Data settings: locking, the
 // inactivity delay and changing the password.
 
@@ -7,6 +8,7 @@ import {
     ensureStorage,
     isStorageUnlocked,
     lockStorage,
+    unlockedStorage,
 } from '../wasm-facade.js';
 import {
     MIN_PASSWORD_LENGTH,
@@ -136,5 +138,11 @@ export const LocalData = {
         bindLockButton();
         bindAutoLock();
         bindChangePassword();
+        const methods = document.getElementById('settings-unlock-methods');
+        const renderMethods = () => {
+            if (methods && isStorageUnlocked()) mountStorageMethods(methods, unlockedStorage());
+        };
+        window.addEventListener(STORAGE_UNLOCKED_EVENT, renderMethods);
+        renderMethods();
     },
 };

@@ -5,7 +5,9 @@ import { build } from '../../../app/node_modules/esbuild/lib/main.js';
 
 const { outputFiles } = await build({
     stdin: {
-        contents: `export { unlockStorage } from './js/storage-access.js';
+        contents: `export { unlockStorage, startAutoLock } from './js/storage-access.js';
+            export { beginStorageActivity } from './js/storage-activity.js';
+            export { mountStorageMethods } from './js/storage-methods.js';
             import { Keypair, hash } from '@stellar/stellar-sdk';
             export function setup(status = 'new', enrolled = false) {
                 const key = Keypair.random();
@@ -26,6 +28,7 @@ const { outputFiles } = await build({
                     async unlock(password) { if (password !== this.password) throw Object.assign(Error('wrong'), {code:'wrong-password'}); this.state = 'unlocked'; },
                     async walletContext() { return this.context; },
                     async passkeyContext() { return null; },
+                    async removeWallet(password) { if (password !== this.password) throw Error('wrong password'); this.context = null; },
                     async enrollWallet(password, context, secret) { if (password !== this.password) throw Error('wrong'); this.context = context; this.secret = secret; },
                     async unlockWallet(context, secret) { if (secret !== this.secret) throw Error('wrong'); this.state = 'unlocked'; },
                     async reset() { this.context = null; this.state = 'new'; },
@@ -72,6 +75,23 @@ try {
     await page.getByTestId('storage-passkey-skip').click();
     await page.waitForFunction(() => window.finished);
     assert.equal(await page.evaluate(() => window.signatures), 2);
+    await page.evaluate(async () => {
+        const panel = document.createElement('div'); document.body.appendChild(panel);
+        await access.mountStorageMethods(panel, storage);
+    });
+    const oldSalt = await page.evaluate(() => storage.context.salt);
+    await page.getByTestId('storage-method-password').fill(password);
+    await page.getByTestId('storage-method-freighter-replace').click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="storage-method-message"]').textContent.includes('access saved'));
+    assert.notEqual(await page.evaluate(() => storage.context.salt), oldSalt);
+    await page.getByTestId('storage-method-password').fill(password);
+    await page.getByTestId('storage-method-freighter-remove').click();
+    await page.getByTestId('storage-method-freighter-enable').waitFor();
+    assert.equal(await page.evaluate(() => storage.context), null);
+    await page.getByTestId('storage-method-password').fill(password);
+    await page.getByTestId('storage-method-freighter-enable').click();
+    await page.getByTestId('storage-method-freighter-replace').waitFor();
+
 
     await page.evaluate(() => { storage.state = 'locked'; }); await start();
     await page.getByTestId('storage-freighter-unlock').click();
@@ -93,5 +113,25 @@ try {
     await page.getByTestId('storage-freighter-skip').click();
     await page.getByTestId('storage-passkey-skip').click();
     await page.waitForFunction(() => window.finished);
-    console.log('PASS: password-first setup, skip, enrollment retry, wallet unlock, password fallback, reset');
+    const locks = await page.evaluate(() => {
+        const originalNow = Date.now;
+        const originalInterval = window.setInterval;
+        let clock = Date.now(); let check; let locks = 0;
+        Date.now = () => clock;
+        window.setInterval = callback => { check = callback; return 0; };
+        try {
+            localStorage.setItem('spp.autoLockMinutes', '5');
+            access.startAutoLock(() => { locks++; });
+            const release = access.beginStorageActivity();
+            clock += 600_000; check();
+            if (locks !== 0) throw Error('auto-lock interrupted foreground work');
+            release();
+            clock += 299_000; check();
+            if (locks !== 0) throw Error('auto-lock ignored completion grace period');
+            clock += 2_000; check(); check();
+            return locks;
+        } finally { Date.now = originalNow; window.setInterval = originalInterval; }
+    });
+    assert.equal(locks, 1, 'idle lock runs once after foreground work finishes');
+    console.log('PASS: method replacement/removal, guarded inactivity locking; password-first setup, skip, enrollment retry, wallet unlock, password fallback, reset');
 } finally { await browser.close(); }

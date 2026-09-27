@@ -102,10 +102,13 @@ export async function enrollPasskey(storage, password, credentials = navigator.c
     if (credential.getClientExtensionResults()?.prf?.enabled !== true) throw unsupported();
     const context = { version: 1, ...site, credentialId, salt: hex(random(32)) };
     let secret;
+    let repeated;
     try {
         secret = await passkeySecret(context, credentials, origin);
+        repeated = await passkeySecret(context, credentials, origin);
+        if (secret !== repeated) throw new Error('This passkey could not reproduce its encryption secret. Try another provider or use your password.');
         await storage.enrollPasskey(password, context, secret);
-    } finally { secret = undefined; }
+    } finally { secret = repeated = undefined; }
 }
 
 export async function unlockPasskey(storage, credentials = navigator.credentials, origin = location.origin) {

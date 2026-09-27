@@ -26,6 +26,7 @@ function fixture() {
         if (state.fault === 'rp-hash') auth[0] ^= 1;
         const credentialId = !creating && state.fault === 'credential' ? new Uint8Array(32) : id;
         const output = state.fault === 'short-prf' ? prf.slice(0, 16) : prf.slice();
+        if (!creating && state.fault === 'unstable-prf' && state.gets > 1) output[0] ^= 1;
         if (!creating) state.outputs.push(output);
         return {
             id: encode(credentialId), rawId: credentialId.buffer, type: 'public-key',
@@ -68,7 +69,7 @@ function fixture() {
 test('creation and verified PRF assertion precede persistence; later unlock reproduces secret', async () => {
     const f = fixture();
     await enrollPasskey(f.storage, password, f.credentials, origin);
-    assert.equal(f.state.creates, 1); assert.equal(f.state.gets, 1);
+    assert.equal(f.state.creates, 1); assert.equal(f.state.gets, 2);
     assert.match(f.state.secret, /^[a-f0-9]{64}$/);
     assert(!JSON.stringify(f.state.context).includes(f.state.secret));
     await unlockPasskey(f.storage, f.credentials, origin);
@@ -76,7 +77,7 @@ test('creation and verified PRF assertion precede persistence; later unlock repr
     assert(f.state.outputs.every(output => output.every(byte => byte === 0)), 'PRF bytes cleared');
 });
 
-for (const fault of ['cancel-create', 'cancel-get', 'timeout', 'unsupported', 'missing-prf', 'short-prf', 'invalid-prf', 'origin', 'challenge', 'cross-origin', 'type', 'no-uv', 'no-up', 'rp-hash', 'credential']) {
+for (const fault of ['cancel-create', 'cancel-get', 'timeout', 'unstable-prf', 'unsupported', 'missing-prf', 'short-prf', 'invalid-prf', 'origin', 'challenge', 'cross-origin', 'type', 'no-uv', 'no-up', 'rp-hash', 'credential']) {
     test(`enrollment rejects ${fault} without persisting access`, async () => {
         const f = fixture(); f.state.fault = fault;
         await assert.rejects(enrollPasskey(f.storage, password, f.credentials, origin));

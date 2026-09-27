@@ -1,3 +1,5 @@
+import { lastStorageActivity, storageActivityPending } from './storage-activity.js';
+import { openStorage, settledStorageStatus } from './storage-open.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { enrollFreighter, unlockFreighter } from './storage-freighter.js';
 import { enrollPasskey, unlockPasskey } from './storage-passkey.js';
@@ -29,9 +31,15 @@ const COPY = {
     },
     unencrypted: {
         title: 'Encrypt your local data',
-        text: 'An earlier version of this app stored your notes, keys and history in this browser unencrypted. Choose a password to encrypt them; you enter it once per session.',
+        text: 'An earlier version of this app stored your notes, keys and history in this browser unencrypted. Choose a password to encrypt them; you enter it once per session. Encryption cannot securely erase earlier plaintext copies or browser backups.',
         submit: 'Encrypt and continue',
         busy: 'Encrypting…',
+    },
+    'password-recovery-required': {
+        title: 'Restore password access',
+        text: 'Your enrolled method unlocked the database. Choose a new password to restore password access. Your data and enrolled methods will be preserved.',
+        submit: 'Save password and continue',
+        busy: 'Saving password…',
     },
     locked: {
         title: 'Unlock your local data',
@@ -46,9 +54,9 @@ const COPY = {
  * @param {import('stellar-private-payments').Storage} storage
  */
 export async function unlockStorage(storage) {
-    let status = await storage.status();
+    let status = await settledStorageStatus(storage);
     while (status !== 'unlocked') {
-        const [walletContext, passkeyContext] = status === 'locked'
+        const [walletContext, passkeyContext] = ['locked', 'recovery-required'].includes(status)
             ? await Promise.all([
                 storage.walletContext().catch(() => null),
                 storage.passkeyContext().catch(() => null),
@@ -77,13 +85,15 @@ function showPasswordDialog(storage, status, walletContext, passkeyContext) {
             overlay.remove();
             resolve(next);
         };
-        renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
+        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext);
+        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
     });
 }
 
 function renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext) {
     const copy = COPY[status];
     if (!copy) throw new Error(`unexpected storage status: ${status}`);
+    const recovering = status === 'password-recovery-required';
     const creating = status !== 'locked';
     card.replaceChildren();
 
@@ -119,6 +129,8 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
         form.appendChild(el('p', 'text-xs leading-5 text-slate-400',
             `At least ${MIN_PASSWORD_LENGTH} characters. A passphrase of four or more random words works well.`));
 
+    }
+    if (creating && !recovering) {
         const field = el('div');
         const label = el('label', 'text-xs font-medium uppercase tracking-[0.22em] text-slate-500', 'Lock after inactivity');
         label.htmlFor = 'storage-auto-lock';
@@ -175,15 +187,20 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
         setBusy(true);
         submit.textContent = copy.busy;
         try {
-            if (creating) {
-                await storage.create(value);
+            if (recovering) {
+                try { await storage.recoverPassword(value); }
+                catch (error) {
+                    if (await settledStorageStatus(storage) !== 'unlocked') throw error;
+                }
+            } else if (creating) {
+                await openStorage(storage, () => storage.create(value));
                 setAutoLockMinutes(Number(autoLock.value));
             } else {
-                await storage.unlock(value);
+                await openStorage(storage, () => storage.unlock(value));
             }
             password.input.value = '';
             if (confirm) confirm.input.value = '';
-            if (creating) {
+            if (creating && !recovering) {
                 renderFreighterOffer(card, storage, value, finish);
             } else {
                 finish('unlocked');
@@ -213,7 +230,7 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
             error.classList.add('hidden');
             wallet.textContent = 'Approve in Freighter…';
             try {
-                await unlockFreighter(storage, new FreighterSigner());
+                await openStorage(storage, () => unlockFreighter(storage, new FreighterSigner()));
                 finish('unlocked');
             } catch (e) {
                 showError(e?.message || 'Freighter could not unlock your data. Use your password.');
@@ -231,7 +248,7 @@ function renderPasswordForm(card, storage, status, finish, walletContext, passke
             error.classList.add('hidden');
             passkey.textContent = 'Confirm your passkey…';
             try {
-                await unlockPasskey(storage);
+                await openStorage(storage, () => unlockPasskey(storage));
                 finish('unlocked');
             } catch (e) {
                 showError(e?.message || 'Passkey could not unlock your data. Use your password.');
@@ -320,9 +337,36 @@ function renderPasskeyOffer(card, storage, password, finish) {
     skip.addEventListener('click', done);
     card.append(eyebrow(), heading('Unlock with a passkey too?'),
         el('p', 'mt-3 text-sm leading-6 text-slate-300', 'Use your device’s screen lock, fingerprint, or security key to unlock your local data. Your password and any enrolled Freighter account will still work.'),
-        el('p', 'mt-3 text-sm leading-6 text-slate-400', 'Create a passkey, then confirm it once to check that it can unlock encrypted storage. Some passkey providers do not support this. Keep your password as a backup.'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-400', 'Create a passkey, then confirm it twice to check that it can unlock encrypted storage. Some passkey providers do not support this. Keep your password as a backup.'),
         error, enable, skip);
     enable.focus();
+}
+
+function renderRecovery(card, storage, finish, walletContext, passkeyContext) {
+    card.replaceChildren();
+    const error = el('p', 'mt-4 text-sm text-rose-100');
+    error.setAttribute('role', 'alert');
+    card.append(eyebrow(), heading('Local data needs recovery'),
+        el('p', 'mt-3 text-sm leading-6 text-slate-300', 'Encrypted data exists, but its password record is missing or unavailable. Nothing has been deleted. Restore a complete backup, try an enrolled unlock method, or explicitly reset local data.'), error);
+    for (const [available, label, testid, unlock] of [
+        [walletContext, 'Unlock with Freighter', 'storage-freighter-unlock', () => unlockFreighter(storage, new FreighterSigner())],
+        [passkeyContext, 'Unlock with passkey', 'storage-passkey-unlock', () => unlockPasskey(storage)],
+    ]) {
+        if (!available) continue;
+        const button = actionButton(label, testid);
+        button.addEventListener('click', async () => {
+            for (const control of card.querySelectorAll('button')) control.disabled = true;
+            try { await openStorage(storage, unlock); finish(await settledStorageStatus(storage)); }
+            catch (e) {
+                error.textContent = e?.message || String(e);
+                for (const control of card.querySelectorAll('button')) control.disabled = false;
+            }
+        });
+        card.appendChild(button);
+    }
+    const reset = actionButton('Reset local data…', 'storage-recovery-reset');
+    reset.addEventListener('click', () => renderResetConfirmation(card, storage, 'recovery-required', finish, walletContext, passkeyContext));
+    card.appendChild(reset);
 }
 
 function renderResetConfirmation(card, storage, status, finish, walletContext, passkeyContext) {
@@ -341,7 +385,10 @@ function renderResetConfirmation(card, storage, status, finish, walletContext, p
     reset.dataset.testid = 'storage-reset-confirm';
     const cancel = el('button', 'inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext));
+    cancel.addEventListener('click', () => {
+        if (status === 'recovery-required') renderRecovery(card, storage, finish, walletContext, passkeyContext);
+        else renderPasswordForm(card, storage, status, finish, walletContext, passkeyContext);
+    });
     reset.addEventListener('click', async () => {
         if (reset.disabled) return;
         reset.disabled = cancel.disabled = true;
@@ -442,11 +489,14 @@ export function startAutoLock(lock) {
     for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
         window.addEventListener(type, touch, { capture: true, passive: true });
     }
+    let locking = false;
     const check = () => {
+        if (locking) return;
         const minutes = autoLockMinutes();
-        if (minutes === 0 || Date.now() - lastActivity < minutes * 60_000 || operationInProgress()) {
+        if (minutes === 0 || Date.now() - Math.max(lastActivity, lastStorageActivity()) < minutes * 60_000 || operationInProgress()) {
             return;
         }
+        locking = true;
         lock();
     };
     window.setInterval(check, 15_000);
@@ -454,7 +504,7 @@ export function startAutoLock(lock) {
 }
 
 function operationInProgress() {
-    return document.querySelector('[data-status="submitting"], [data-state="generating"]') !== null;
+    return storageActivityPending() || document.querySelector('[data-status="submitting"], [data-state="generating"]') !== null;
 }
 
 function el(tag, className, text) {

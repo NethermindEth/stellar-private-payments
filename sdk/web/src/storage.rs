@@ -246,6 +246,41 @@ impl Storage {
         Ok(())
     }
 
+    /// Remove Freighter access after authenticating the current password.
+    #[wasm_bindgen(js_name = removeWallet)]
+    pub async fn remove_wallet(&self, password: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::RemoveWallet(Password(password)),
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Remove passkey access after authenticating the current password.
+    #[wasm_bindgen(js_name = removePasskey)]
+    pub async fn remove_passkey(&self, password: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::RemovePasskey(Password(password)),
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Restore an absent password record after unlocking with an enrolled
+    /// method. Rejects if a password record already exists or recovery is
+    /// not unlocked.
+    #[wasm_bindgen(js_name = recoverPassword)]
+    pub async fn recover_password(&self, password: String) -> Result<(), JsValue> {
+        self.request(
+            StorageWorkerRequest::RecoverPassword(Password(password)),
+            STORAGE_PASSWORD_TIMEOUT_MS,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Replace the password. Rejects with `code: "wrong-password"` when
     /// `current` is wrong; the database itself is not rewritten.
     #[wasm_bindgen(js_name = changePassword)]

@@ -9,6 +9,7 @@ mod output;
 mod session;
 mod signer;
 mod stellar_cli;
+mod storage_owner;
 mod unlock;
 
 use std::path::PathBuf;
@@ -300,6 +301,22 @@ fn main() -> Result<()> {
         },
     )?;
 
+    // Hold ownership for the whole command, including password prompts,
+    // migration, SQLite access, and atomic key-record replacement.
+    let _storage_owner = if matches!(
+        &cli.command,
+        Commands::Version
+            | Commands::Config {
+                command: ConfigCommands::Init
+            }
+    ) {
+        None
+    } else {
+        let database = config.db_path();
+        Some(storage_owner::acquire(database.parent().ok_or_else(
+            || anyhow::anyhow!("database directory is missing"),
+        )?)?)
+    };
     match cli.command {
         Commands::Onboard {
             accept,

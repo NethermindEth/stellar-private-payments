@@ -1,3 +1,4 @@
+import { withStorageActivity } from './storage-activity.js';
 import { contract } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
@@ -337,7 +338,7 @@ async function refreshState() {
 // -----------------------------
 // Transaction Submissions
 // -----------------------------
-async function insertMembershipLeaf() {
+async function insertMembershipLeafOperation() {
   const originalText = addToAllowlistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -381,7 +382,7 @@ async function insertMembershipLeaf() {
   }
 }
 
-async function insertNonMembershipLeaf() {
+async function insertNonMembershipLeafOperation() {
   const originalText = addToBlocklistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -414,7 +415,7 @@ async function insertNonMembershipLeaf() {
   }
 }
 
-async function removeNonMembershipLeaf() {
+async function removeNonMembershipLeafOperation() {
   const originalText = removeFromBlocklistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -508,3 +509,15 @@ init().catch(err => {
   setStatus('Init failed', 'error');
   console.error('Init error:', err);
 });
+
+async function insertMembershipLeaf(...args) {
+    return withStorageActivity(() => insertMembershipLeafOperation(...args));
+}
+
+async function insertNonMembershipLeaf(...args) {
+    return withStorageActivity(() => insertNonMembershipLeafOperation(...args));
+}
+
+async function removeNonMembershipLeaf(...args) {
+    return withStorageActivity(() => removeNonMembershipLeafOperation(...args));
+}
