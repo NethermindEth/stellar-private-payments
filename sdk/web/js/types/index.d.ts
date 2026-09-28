@@ -27,7 +27,7 @@ export type {
   VerifierEntry,
 } from './crates/stellar_private_payments_web.js';
 
-export { DisclosureRequest, default } from './crates/stellar_private_payments_web.js';
+export { DisclosureRequest, ProverBridge, default } from './crates/stellar_private_payments_web.js';
 
 // JS facade (`js/index.js`) — options and wrapped session entry points.
 export * from './api-types.js';

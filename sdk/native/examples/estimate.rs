@@ -1,9 +1,8 @@
 //! Demonstrates cost/plan estimation without proving or submitting.
 //!
 //! This example shows how to obtain an [`Estimate`] (transaction count) from
-//! [`PrivatePool::estimate`] and how to introspect a
-//! [`PreparedTransactionPlan`] cursor. It uses a read-only client and only
-//! plans transactions; no proof is built and nothing is submitted.
+//! [`PrivatePool::estimate`]. It uses a read-only client and only plans
+//! transactions; no proof is built and nothing is submitted.
 //!
 //! Run:
 //!   cargo run --release --example estimate
@@ -20,7 +19,7 @@
 
 mod common;
 
-use stellar_private_payments::{Error, types::TransferRecipient};
+use stellar_private_payments::Error;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::init_tracing()?;
@@ -39,7 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Amount:    {} stroops", u128::from(amount));
     println!();
 
-    println!("Estimating transaction count...");
+    // `PrivatePool::estimate()` provides the number of transactions required to
+    // perform a transfer or withdraw. These operations may require multiple
+    // transactions because several note merges may need to be performed to
+    // create a note with the required amount. Deposits only require one
+    // transaction.
+    println!("Estimating transaction count for a transfer/withdraw...");
     match pool.estimate(amount) {
         Ok(estimate) => {
             println!(
@@ -56,52 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!();
-    println!("Deposit plan introspection (always a single transaction):");
-    let deposit_plan = pool.prepare_deposit(amount)?;
-    print_plan_cursor(&deposit_plan);
-
-    let notes = pool.spendable_notes().map_err(|e| {
-        if common::is_retention_gap_error(&e) {
-            common::skip_on_retention_gap(&e);
-        }
-        Box::new(e) as Box<dyn std::error::Error>
-    })?;
-    println!();
-    if notes.is_empty() {
-        println!("No spendable notes available; skipping transfer-plan demo.");
-        println!("Deposit first, then re-run this example to see a multi-tx spend plan.");
-    } else {
-        let total: u128 = notes
-            .iter()
-            .map(|n| u128::from(n.amount))
-            .fold(0u128, u128::saturating_add);
-        println!(
-            "Spend plan introspection ({} spendable note(s) totaling {} stroops):",
-            notes.len(),
-            total
-        );
-        if u128::from(amount) > total {
-            println!(
-                "Skipping: requested amount ({} stroops) exceeds available notes ({} stroops).",
-                u128::from(amount),
-                total
-            );
-            println!("Lower SPP_AMOUNT_STROOPS or deposit more to see a spend plan.");
-        } else {
-            let recipient = TransferRecipient::from(account.user_address().as_str());
-            let transfer_plan = pool.prepare_transfer(&notes, recipient, amount)?;
-            print_plan_cursor(&transfer_plan);
-        }
-    }
-
-    println!();
     println!("No transactions were built, signed, or submitted.");
 
     Ok(())
-}
-
-fn print_plan_cursor(plan: &stellar_private_payments::plan::PreparedTransactionPlan) {
-    println!("  total transactions: {}", plan.tx_count());
-    println!("  current transaction: {}", plan.current_tx());
-    println!("  is complete: {}", plan.is_complete());
 }

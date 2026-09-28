@@ -115,6 +115,20 @@
                                     <span class="text-slate-500">Balance</span>
                                     <span id="move-funds-balance" class="font-mono font-medium text-white">—</span>
                                 </p>
+                                <div data-signing-account="move" class="mt-5 hidden">
+                                    <label for="signing-account-select" class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Sign and pay with</label>
+                                    <select id="signing-account-select" data-signing-select data-testid="signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                                    </select>
+                                    <p data-signing-warning data-testid="signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
+                                    <div data-signing-other class="mt-3 hidden">
+                                        <div class="flex gap-2">
+                                            <input id="signing-account-input" data-signing-input data-testid="signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                            <button data-signing-use data-testid="signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                                        </div>
+                                        <p data-signing-error data-testid="signing-account-error" class="mt-2 text-xs text-amber-200"></p>
+                                    </div>
+                                    <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
+                                </div>
                             </div>
                         </div>
 
@@ -190,9 +204,10 @@
                                     <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Withdraw</p>
                                     <h3 class="mt-2 text-xl font-semibold text-white">Release funds back to a public Stellar address</h3>
                                     <div class="mt-6 space-y-4">
-                                        <div>
-                                            <label for="withdraw-recipient" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Address</label>
-                                            <input id="withdraw-recipient" type="text" placeholder="Leave blank to withdraw to connected wallet" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <div data-recipient-account="withdraw">
+                                            <label for="withdraw-recipient-select" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Address</label>
+                                            <select id="withdraw-recipient-select" data-recipient-select data-testid="withdraw-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
+                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
                                         </div>
                                         <div>
                                             <label for="withdraw-amount" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Amount</label>
@@ -280,12 +295,30 @@
                                         <label for="advanced-public-withdraw" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public withdraw</label>
                                         <input id="advanced-public-withdraw" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
                                     </div>
-                                    <div>
-                                        <label for="advanced-public-recipient" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public recipient</label>
-                                        <input id="advanced-public-recipient" type="text" placeholder="Leave blank to default to connected wallet" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                    <div data-recipient-account="advanced">
+                                        <label for="advanced-public-recipient-select" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public recipient</label>
+                                        <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
+                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
                                     </div>
                                     <p class="text-[11px] text-slate-500">Public funds withdrawn to the recipient.</p>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div data-signing-account="advanced" class="mt-6 rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
+                            <div>
+                                <label for="advanced-signing-account-select" class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Sign and pay with</label>
+                                <select id="advanced-signing-account-select" data-signing-select data-testid="advanced-signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                                </select>
+                                    <p data-signing-warning data-testid="advanced-signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
+                                <div data-signing-other class="mt-3 hidden">
+                                    <div class="flex gap-2">
+                                        <input id="advanced-signing-account-input" data-signing-input data-testid="advanced-signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <button data-signing-use data-testid="advanced-signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                                    </div>
+                                    <p data-signing-error data-testid="advanced-signing-account-error" class="mt-2 text-xs text-amber-200"></p>
+                                </div>
+                                <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
                             </div>
                         </div>
 
@@ -392,6 +425,10 @@
                         <dd id="settings-asp-secret" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                 </dl>
+                <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 hidden rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
+                    <p class="text-sm text-slate-300">Freighter's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
+                    <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="mt-3 rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Make it the note owner</button>
+                </div>
             </section>
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
@@ -403,6 +440,13 @@
                     <button id="settings-register-btn" type="button" class="rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Register now</button>
                 </div>
                 <p class="mt-3 text-sm text-slate-400">Register your public keys so other users can transfer using only your Stellar address.</p>
+            </section>
+
+            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Signing Accounts</p>
+                <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Freighter.</p>
+                <ul id="settings-signing-accounts" data-testid="settings-signing-accounts" class="mt-4 space-y-2"></ul>
+                <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-500"></p>
             </section>
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">

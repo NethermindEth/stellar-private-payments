@@ -210,7 +210,9 @@ fn run_step(
     let asp_membership = ASPMembershipClient::new(env, &contracts.asp_membership);
     let asp_non_membership = ASPNonMembershipClient::new(env, &contracts.asp_non_membership);
     let pool_client = PoolContractClient::new(env, &contracts.pool);
-    let ext_data_hash_bytes = hash_ext_data(env, ext_data);
+    let ext_data_hash_bytes = env.as_contract(&contracts.pool, || {
+        hash_ext_data(env, ext_data, &contracts.token)
+    });
 
     let mut membership_trees =
         build_membership_trees(case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));

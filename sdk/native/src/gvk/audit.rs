@@ -52,8 +52,8 @@ struct TxGroup {
 }
 
 /// Cursor over private transacts for one pool
-pub struct GvkAudit<S: Storage> {
-    storage: S,
+pub struct GvkAudit {
+    storage: crate::Handle<dyn Storage>,
     pool_contract_id: String,
     d_priv: Field,
     after: Option<(u32, String)>,
@@ -62,8 +62,12 @@ pub struct GvkAudit<S: Storage> {
     exhausted: bool,
 }
 
-impl<S: Storage> GvkAudit<S> {
-    pub fn new(storage: S, pool_contract_id: impl Into<String>, d_priv: Field) -> Self {
+impl GvkAudit {
+    pub fn new(
+        storage: crate::Handle<dyn Storage>,
+        pool_contract_id: impl Into<String>,
+        d_priv: Field,
+    ) -> Self {
         Self {
             storage,
             pool_contract_id: pool_contract_id.into(),
@@ -397,7 +401,11 @@ mod tests {
             }])
         })?;
 
-        let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
+        let mut audit = GvkAudit::new(
+            crate::Handle::from_box(Box::new(storage) as Box<dyn Storage>),
+            "CPOOL",
+            d_priv,
+        );
         let tx = audit.next_tx().await?.expect("one tx");
         assert_eq!(tx.outputs.len(), 1);
         let output = tx.outputs[0].note.as_ref().expect("recovered output note");
@@ -468,7 +476,11 @@ mod tests {
             }])
         })?;
 
-        let mut audit = GvkAudit::new(storage, "CPOOL", d_priv);
+        let mut audit = GvkAudit::new(
+            crate::Handle::from_box(Box::new(storage) as Box<dyn Storage>),
+            "CPOOL",
+            d_priv,
+        );
         let tx = audit.next_tx().await?.expect("transact tx");
         assert_eq!(tx.outputs.len(), 1);
         assert_eq!(tx.inputs.len(), 1);

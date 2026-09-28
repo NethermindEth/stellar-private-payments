@@ -118,9 +118,14 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
 What `spp onboard` does:
 
 1. Accepts the disclaimer.
-2. Signs the key-derivation message via `stellar keys` (the secret never enters
-   the `spp` process).
-3. Derives and stores the privacy note/encryption keys and ASP blinding.
+2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v1]`
+   via `stellar message sign` using the account alias (the Stellar secret key
+   never enters the `spp` process).
+3. Strictly verifies the SEP-53 signature against the account's own public key,
+   then derives and stores the privacy note/encryption keys and ASP blinding.
+   An invalid signature or one made by another account aborts onboarding
+   without saving privacy keys. Existing keys skip signing, verification, and
+   derivation.
 4. Optionally registers the public keys on-chain so other accounts can transfer
    to this address without knowing the raw keys.
 
@@ -221,7 +226,7 @@ pool admin must insert that wallet's ASP membership leaf into the
    Run it with `cargo run --release --example <name>`, once per wallet with that
    wallet's `SPP_WALLET_PATH` and `STELLAR_SECRET_KEY` exported, then delete the
    file. Note there is no `Client::account_for_secret`; an account session is
-   opened with `Client::account(user_address, signer_address, signer)`, which
+   opened with `Client::account(user_address, signer)`, which
    is what `common::build_account` wraps.
 
 3. As the pool admin, invoke `insert_leaf` once per participant:
@@ -239,17 +244,16 @@ required by most examples; everything else has a sensible default.
 
 | Variable | Default | Required by |
 | --- | --- | --- |
-| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw` |
+| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
+| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
-| `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw`** |
+| `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw`/`plan` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw` and `plan`** |
 | `SPP_REGISTER` | unset | `account_pool` (set to `1` to call `register_public_keys`) |
-| `SPP_VERBOSE_PLAN` | unset | `deposit` (set to `1` for step-by-step logs) |
 
 > `SPP_BOOTNODE_URL` is read directly by the examples and overrides the default
 > public bootnode. Every example that opens a client reads it, not just `sync`.
@@ -292,7 +296,7 @@ cargo run --release --example account_pool
 # Deployment-level sync and operational feed.
 cargo run --release --example sync
 
-# Transaction-count estimation and plan introspection.
+# Transaction-count estimation.
 cargo run --release --example estimate
 
 # Deposit 1 XLM into the pool (proving + submission).
@@ -305,6 +309,10 @@ SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 # recipient exported for `transfer` above, which `withdraw` would otherwise
 # use as the withdrawal destination.
 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
+
+# Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
+# 4 notes, then withdraws all of them step by step).
+env -u SPP_RECIPIENT_ADDRESS cargo run --release --example plan
 ```
 
 Run order for a full demo:
@@ -312,9 +320,10 @@ Run order for a full demo:
 1. `account_pool` to confirm the wallet is onboarded and read the pool config.
 2. `sync` to catch the wallet state up to chain tip.
 3. `deposit` — **run it twice**, so the wallet holds two notes.
-4. `estimate` to inspect the plan cursor after the deposit.
+4. `estimate` to inspect the expected transaction count after the deposit.
 5. `transfer` to send private value to the recipient (spends one note).
 6. `withdraw` to move funds back to a public address (spends the other).
+7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
 > **Each spend consumes a note.** With the default `SPP_AMOUNT_STROOPS`
 > (1 XLM), one `deposit` creates exactly one 1-XLM note, and `transfer` and
@@ -326,8 +335,8 @@ Run order for a full demo:
 > `transfer` and `withdraw` require spendable notes. If the wallet has none,
 > they print a skip message and exit 0. Run `deposit` first.
 
-> **Timing:** `deposit`, `transfer`, and `withdraw` invoke the local Groth16
-> prover. Measured on testnet, a single-transaction operation completes in
+> **Timing:** `deposit`, `transfer`, `withdraw`, and `plan` invoke the local
+> Groth16 prover. Measured on testnet, a single-transaction operation completes in
 > roughly 5–10 seconds end to end: about 2 seconds of proving, with most of the
 > remainder spent waiting for the ledger to close. If one of these runs takes
 > substantially longer, suspect the build rather than the prover —
@@ -385,18 +394,11 @@ curl -s -X POST https://soroban-testnet.stellar.org \
 
 If `deploymentLedger` is below `oldestLedger`, the deployment has expired.
 
-Past the cliff the examples exit 0 with a retention-gap note and a remedy list.
-Two distinct underlying errors produce it — with no bootnode configured the SDK
-reports `RPC sync gap: main RPC lacks history ...`, and with one configured that
-cannot serve the range you get:
-
-```text
-bootnode indexer: jsonrpc error: -32602 - unsupported filters (requested startLedger=..., cursor=<none>)
-```
-
-Both are infrastructure limits, not example-code faults. **The graceful message
-is not a workaround** — the examples still cannot sync, so they cannot show you
-real state. To actually run them you need one of:
+Past the cliff, the SDK returns `Error::RetentionGap` — with no bootnode
+configured, or with one configured that also can't close the gap — and the
+examples exit 0 with a note and a remedy list. **The graceful message is not a
+workaround** — the examples still cannot sync, so they cannot show you real
+state. To actually run them you need one of:
 
 - A bootnode holding the missing range — see [Local bootnode](#local-bootnode) —
   pointed at by both `spp onboard --bootnode-url` and `SPP_BOOTNODE_URL`.
@@ -408,14 +410,8 @@ Retrying later does **not** help: the window moves forward, not back.
 An already-synced wallet is unaffected, because it syncs incrementally and never
 needs the missing history. This is specifically a first-run problem.
 
-> **Implementation note for maintainers:** the examples classify this condition
-> by matching substrings in the error text (`sync gap`, `retention`,
-> `unsupported filters`, `bootnode indexer`) in
-> `common::is_retention_gap_error`. That is deliberate, not an oversight. The
-> robust alternative is a dedicated error variant in the SDK, but
-> `stellar-private-payments` is consumed by `cli`, `sdk/tests`, and `sdk/web`, so the typed-error change
-> was kept out of scope here. If you add a retention-gap error type to the SDK,
-> switch these detectors to match on it.
+> **Implementation note for maintainers:** `common::is_retention_gap_error`
+> matches on `Error::RetentionGap(_)`.
 
 ### Insufficient funds
 

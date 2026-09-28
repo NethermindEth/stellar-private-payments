@@ -2,12 +2,7 @@
 //! be running (see `make integration-tests`), deployed to via the repo's
 //! own `deploy.sh`.
 
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Mutex,
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -15,7 +10,7 @@ use serde_json::Value;
 use stellar_private_payments::types::{
     ContractConfig, Field, GvkAuthoritySetting, GvkMode, NotePublicKey,
 };
-use tokio::{process::Command, sync::OnceCell};
+use tokio::process::Command;
 
 use crate::{keypair::TestKeypair, pool::PoolOptions};
 
@@ -28,14 +23,11 @@ const RPC_PORT: u16 = 8000;
 /// `http://localhost:8000`, matching the port `make integration-tests` maps.
 const STELLAR_CLI_NETWORK: &str = "local";
 
-static SHARED: OnceCell<LocalNetwork> = OnceCell::const_new();
-
 /// A `stellar/quickstart` local network, already running externally.
 pub struct LocalNetwork {
     rpc_url: String,
     admin: TestKeypair,
     gvk_authority: GvkAuthoritySetting,
-    identities: Mutex<HashMap<String, DeploymentIdentity>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,25 +36,22 @@ struct DeployCacheEntry {
     config: ContractConfig,
 }
 
+/// The account a [`LocalNetwork::deploy`] call used, returned alongside its
+/// [`ContractConfig`] for later admin-authorized calls.
 #[derive(Clone, Serialize, Deserialize)]
-struct DeploymentIdentity {
-    admin_secret: String,
-    gvk_authority: Option<GvkAuthoritySetting>,
+pub struct DeploymentIdentity {
+    pub admin_secret: String,
+    pub gvk_authority: Option<GvkAuthoritySetting>,
 }
 
 impl LocalNetwork {
-    /// Process-wide handle, resolved once and reused by every test.
-    pub async fn shared() -> Result<&'static Self> {
-        SHARED.get_or_try_init(Self::start).await
-    }
-
-    /// Wait until the local network's RPC endpoint reports healthy.
+    /// Connect to the local network, waiting until it reports healthy, and
+    /// fund a fresh account for this instance's own bootstrap needs.
     pub async fn start() -> Result<Self> {
         let network = Self {
             rpc_url: format!("http://localhost:{RPC_PORT}/rpc"),
             admin: TestKeypair::generate(),
             gvk_authority: GvkAuthoritySetting::generate()?,
-            identities: Mutex::new(HashMap::new()),
         };
         network.wait_healthy().await?;
         network.fund(&network.admin.address()).await?;
@@ -72,32 +61,6 @@ impl LocalNetwork {
 
     pub fn admin(&self) -> &TestKeypair {
         &self.admin
-    }
-
-    fn identity_for(&self, contract_id: &str) -> DeploymentIdentity {
-        self.identities
-            .lock()
-            .expect("identities mutex poisoned")
-            .get(contract_id)
-            .cloned()
-            .expect("no registered identity for contract; deploy() must run first")
-    }
-
-    fn admin_for(&self, contract_id: &str) -> String {
-        self.identity_for(contract_id).admin_secret
-    }
-
-    pub fn gvk_authority_for(&self, contract_id: &str) -> Option<GvkAuthoritySetting> {
-        self.identity_for(contract_id).gvk_authority
-    }
-
-    fn register_identity(&self, config: &ContractConfig, identity: &DeploymentIdentity) {
-        let mut identities = self.identities.lock().expect("identities mutex poisoned");
-        identities.insert(config.asp_membership.clone(), identity.clone());
-        identities.insert(config.asp_non_membership.clone(), identity.clone());
-        for pool in &config.pools {
-            identities.insert(pool.pool_contract_id.clone(), identity.clone());
-        }
     }
 
     pub fn gvk_authority(&self) -> &GvkAuthoritySetting {
@@ -134,11 +97,16 @@ impl LocalNetwork {
     /// `getHealth` already reports healthy.
     pub async fn fund(&self, address: &str) -> Result<()> {
         const MAX_ATTEMPTS: u32 = 10;
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .context("build friendbot client")?;
         let url = format!("http://localhost:{RPC_PORT}/friendbot?addr={address}");
         let mut last_error = String::new();
         for _ in 0..MAX_ATTEMPTS {
-            match reqwest::get(&url).await {
+            match client.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => return Ok(()),
                 Ok(resp) => {
                     let status = resp.status();
@@ -165,10 +133,8 @@ impl LocalNetwork {
         asp_levels: u32,
         pool_levels: u32,
         pools: &[PoolOptions],
-    ) -> Result<ContractConfig> {
+    ) -> Result<(ContractConfig, DeploymentIdentity)> {
         let root = repo_root();
-        ensure_local_vk_file(&root)?;
-        let deployer_secret = self.admin.secret();
 
         let native_token_id = if pools.iter().any(|p| p.asset.is_native()) {
             Some(native_asset_contract_id().await?)
@@ -190,9 +156,12 @@ impl LocalNetwork {
         if let Ok(cached) = std::fs::read(deploy_cache_path(&key))
             && let Ok(entry) = serde_json::from_slice::<DeployCacheEntry>(&cached)
         {
-            self.register_identity(&entry.config, &entry.identity);
-            return Ok(entry.config);
+            return Ok((entry.config, entry.identity));
         }
+
+        let deployer = TestKeypair::generate();
+        self.fund(&deployer.address()).await?;
+        let deployer_secret = deployer.secret();
 
         let needs_gvk = pools.iter().any(|p| p.gvk_mode != GvkMode::Off);
 
@@ -252,10 +221,9 @@ impl LocalNetwork {
             admin_secret: deployer_secret,
             gvk_authority: needs_gvk.then(|| self.gvk_authority.clone()),
         };
-        self.register_identity(&config, &identity);
 
         let entry = DeployCacheEntry {
-            identity,
+            identity: identity.clone(),
             config: config.clone(),
         };
         std::fs::write(
@@ -263,7 +231,7 @@ impl LocalNetwork {
             serde_json::to_vec(&entry).context("serialize deploy cache entry")?,
         )
         .context("write deploy cache")?;
-        Ok(config)
+        Ok((config, identity))
     }
 
     pub async fn establish_trustline(&self, holder_secret: &str, code: &str) -> Result<()> {
@@ -331,19 +299,30 @@ impl LocalNetwork {
             .context("parse contract id from stellar contract asset deploy output")
     }
 
-    pub async fn insert_asp_membership_leaf(&self, contract_id: &str, leaf: Field) -> Result<()> {
-        self.invoke_contract(contract_id, &["insert_leaf", "--leaf", &leaf.to_string()])
-            .await
+    pub async fn insert_asp_membership_leaf(
+        &self,
+        contract_id: &str,
+        admin_secret: &str,
+        leaf: Field,
+    ) -> Result<()> {
+        self.invoke_contract(
+            contract_id,
+            admin_secret,
+            &["insert_leaf", "--leaf", &leaf.to_string()],
+        )
+        .await
     }
 
     pub async fn insert_asp_non_membership_leaf(
         &self,
         contract_id: &str,
+        admin_secret: &str,
         note_public_key: NotePublicKey,
     ) -> Result<()> {
         let key = Field::try_from_le_bytes(*note_public_key.as_ref())?;
         self.invoke_contract(
             contract_id,
+            admin_secret,
             &[
                 "insert_leaf",
                 "--key",
@@ -358,17 +337,27 @@ impl LocalNetwork {
     pub async fn delete_asp_non_membership_leaf(
         &self,
         contract_id: &str,
+        admin_secret: &str,
         note_public_key: NotePublicKey,
     ) -> Result<()> {
         let key = Field::try_from_le_bytes(*note_public_key.as_ref())?;
-        self.invoke_contract(contract_id, &["delete_leaf", "--key", &key.to_string()])
-            .await
+        self.invoke_contract(
+            contract_id,
+            admin_secret,
+            &["delete_leaf", "--key", &key.to_string()],
+        )
+        .await
     }
 
-    async fn invoke_contract(&self, contract_id: &str, args: &[&str]) -> Result<()> {
+    async fn invoke_contract(
+        &self,
+        contract_id: &str,
+        admin_secret: &str,
+        args: &[&str],
+    ) -> Result<()> {
         let output = Command::new("stellar")
             .args(["contract", "invoke", "--id", contract_id])
-            .args(["--source-account", &self.admin_for(contract_id)])
+            .args(["--source-account", admin_secret])
             .args(["--network", STELLAR_CLI_NETWORK])
             .arg("--")
             .args(args)
@@ -466,24 +455,22 @@ async fn acquire_deploy_lock(key: &str) -> Result<std::fs::File> {
     .context("acquire deploy lock")
 }
 
+/// Held for a test's entire critical section touching ASP tree state on
+/// `contract_id` (leaf mutations and the deposits that prove against its
+/// root), so a proof generated by one test sharing a deployed pool can't be
+/// invalidated by a concurrent leaf mutation from another (or vice versa).
+///
+/// Potential improvements:
+/// - Consider `serial_test` when main SDK traits become Send + Sync;
+/// - Consider adding concurrency to the ASP membership tree. Reduce need for
+///   serialization/locks.
+pub async fn lock_asp_tree(contract_id: &str) -> Result<std::fs::File> {
+    acquire_deploy_lock(&format!("asp-tree-{contract_id}")).await
+}
+
 pub(crate) fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("integration-tests has a parent directory")
         .to_path_buf()
-}
-
-fn ensure_local_vk_file(root: &Path) -> Result<()> {
-    let local_dir = root.join("deployments/local");
-    let link = local_dir.join("circuit_keys");
-    if link.is_symlink() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(&local_dir).context("create deployments/local")?;
-    if link.exists() {
-        std::fs::remove_dir_all(&link).context("remove stale deployments/local/circuit_keys")?;
-    }
-    std::os::unix::fs::symlink(root.join("deployments/testnet/circuit_keys"), &link)
-        .context("symlink deployments/local/circuit_keys to deployments/testnet/circuit_keys")?;
-    Ok(())
 }

@@ -1,15 +1,16 @@
 use crate::{
-    Error, ExtData, PoolContract, PoolContractClient, Proof,
-    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+    Error, ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data,
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
+    pool::DataKey,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::Address as _,
+    testutils::{Address as _, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
@@ -32,14 +33,11 @@ fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32) -> ExtData {
     }
 }
 
-fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
+/// Computes the hash `internal_transact` checks the proof against, by calling
+/// the real `hash_ext_data` inside `pool`'s contract frame rather than
+/// reimplementing the encoding.
+fn compute_ext_hash(env: &Env, pool: &Address, token: &Address, ext: &ExtData) -> BytesN<32> {
+    env.as_contract(pool, || hash_ext_data(env, ext, token))
 }
 
 fn register_mock_token(env: &Env) -> Address {
@@ -125,6 +123,22 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     }
 }
 
+/// Same admin, verifier and ASP contracts as `base`, but a different token.
+fn setup_with_token(env: &Env, base: &TestSetup, token: Address) -> TestSetup {
+    TestSetup {
+        admin: base.admin.clone(),
+        token,
+        verifier: base.verifier.clone(),
+        asp_membership_address: base.asp_membership_address.clone(),
+        asp_non_membership_address: base.asp_non_membership_address.clone(),
+        asp_membership_client: ASPMembershipClient::new(env, &base.asp_membership_address),
+        asp_non_membership_client: ASPNonMembershipClient::new(
+            env,
+            &base.asp_non_membership_address,
+        ),
+    }
+}
+
 fn register_pool(
     env: &Env,
     setup: &TestSetup,
@@ -158,13 +172,14 @@ fn asp_roots(setup: &TestSetup) -> (U256, U256) {
 fn mk_transact_proof(
     env: &Env,
     pool: &PoolContractClient,
+    token: &Address,
     asp_membership_root: U256,
     asp_non_membership_root: U256,
     nullifier: u32,
 ) -> (Proof, ExtData) {
     let root = pool.get_root();
     let ext = mk_ext_data(env, Address::generate(env), 0);
-    let ext_hash = compute_ext_hash(env, &ext);
+    let ext_hash = compute_ext_hash(env, &pool.address, token, &ext);
     let proof = Proof {
         proof: mk_mock_groth16_proof(env),
         root,
@@ -214,6 +229,7 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -251,6 +267,7 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     let (proof, ext) = mk_transact_proof(
         &env,
         &pool,
+        &setup.token,
         asp_membership_root,
         asp_non_membership_root,
         nullifier,
@@ -283,6 +300,32 @@ fn test_env() -> Env {
     }
 }
 
+fn insert_pair(env: &Env, pool_id: &Address, left: u32, right: u32) {
+    env.as_contract(pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            env,
+            U256::from_u32(env, left),
+            U256::from_u32(env, right),
+        )
+        .unwrap_or_else(|err| panic!("expected leaf insertion to succeed: {err:?}"));
+    });
+}
+
+fn tree_state(env: &Env, pool_id: &Address) -> TreeState {
+    env.as_contract(pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&MerkleDataKey::State)
+            .unwrap_or_else(|| panic!("expected the tree state to be stored"))
+    })
+}
+
+/// Keys of every persistent entry in the environment, the footprint an
+/// insertion may touch.
+fn persistent_keys(env: &Env, pool_id: &Address) -> Vec<Val> {
+    env.as_contract(pool_id, || env.storage().persistent().all().keys())
+}
+
 #[test]
 fn pool_constructor_sets_state() {
     let env = test_env();
@@ -306,19 +349,18 @@ fn pool_constructor_sets_state() {
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .get(&crate::pool::DataKey::MaximumDepositAmount)
             .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
-    let has_merkle_root = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .has(&MerkleDataKey::CurrentRootIndex)
+    let root_index = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
     });
 
     assert_eq!(stored_admin, setup.admin);
     assert_eq!(stored_max, max);
-    assert!(has_merkle_root);
+    assert_eq!(root_index, 0);
     let _root = pool.get_root();
 }
 
@@ -346,6 +388,318 @@ fn merkle_init_only_once() {
         let result = MerkleTreeWithHistory::init(&env, levels);
         assert!(result.is_err());
     });
+}
+
+#[test]
+fn the_depth_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        assert_eq!(
+            env.storage()
+                .instance()
+                .get::<_, u32>(&MerkleDataKey::Levels),
+            Some(levels)
+        );
+        assert!(!env.storage().persistent().has(&MerkleDataKey::Levels));
+    });
+}
+
+#[test]
+fn the_filled_subtrees_are_one_entry() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let levels = 8u32;
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    assert_eq!(
+        tree_state(&env, &pool_id).filled_subtrees.len(),
+        levels.saturating_sub(1)
+    );
+}
+
+/// The pool keeps two persistent entries, the administrator and the tree, and
+/// insertions rewrite the tree's entry and create no other, so the persistent
+/// keys a transaction touches do not depend on how many leaves the tree holds.
+///
+/// The listing covers every contract in the environment, so the pool is
+/// registered alone, with placeholder addresses for the contracts it names.
+#[test]
+fn the_tree_is_one_persistent_entry() {
+    let env = test_env();
+    let pool_id = env.register(
+        PoolContract,
+        (
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            U256::from_u32(&env, 1000),
+            8u32,
+            policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        ),
+    );
+    let keys_after_init = persistent_keys(&env, &pool_id);
+    let admin_key: Val = crate::pool::DataKey::Admin.into_val(&env);
+    let state_key: Val = MerkleDataKey::State.into_val(&env);
+    assert_eq!(keys_after_init.len(), 2);
+    assert!(keys_after_init.contains(admin_key));
+    assert!(keys_after_init.contains(state_key));
+
+    for pair in 0..3u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+
+    assert_eq!(persistent_keys(&env, &pool_id), keys_after_init);
+}
+
+/// The entry's size is part of a transaction's declared footprint too, so it
+/// is fixed at `init` rather than growing with the ring.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 91 Merkle insertions exceed the 6h job limit"
+)]
+fn the_tree_entry_size_is_fixed() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let entry_len = || tree_state(&env, &pool_id).to_xdr(&env).len();
+    let len_after_init = entry_len();
+
+    insert_pair(&env, &pool_id, 0, 1);
+    let len_after_one_pair = entry_len();
+    for pair in 1..=ROOT_HISTORY_SIZE {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+
+    assert_eq!(len_after_one_pair, len_after_init);
+    assert_eq!(entry_len(), len_after_init);
+}
+
+/// Filling every ring slot with the empty root at `init` changes nothing
+/// about when that root stops being known: the ninetieth insertion overwrites
+/// slot zero, where the empty root lived before the slots were prefilled.
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+)]
+fn the_empty_root_is_evicted_at_the_ninetieth_insertion() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let empty_root = pool.get_root();
+    assert!(pool.is_known_root(&empty_root));
+
+    for pair in 0..ROOT_HISTORY_SIZE.saturating_sub(1) {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    assert!(pool.is_known_root(&empty_root));
+
+    insert_pair(&env, &pool_id, 178, 179);
+
+    assert!(!pool.is_known_root(&empty_root));
+}
+
+#[test]
+fn the_root_slot_follows_the_leaf_count() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    for pair in 0..3u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    let third_root = pool.get_root();
+
+    let slot = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
+    });
+    let slot_three = tree_state(&env, &pool_id)
+        .roots
+        .get(3)
+        .unwrap_or_else(|| panic!("expected the third slot to hold a root"));
+
+    assert_eq!(slot, 3);
+    assert_eq!(slot_three, third_root);
+}
+
+#[test]
+fn the_root_slot_wraps_after_ninety_inserts() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let first_root = pool.get_root();
+
+    insert_pair(&env, &pool_id, 0, 1);
+    let slot_one_root = pool.get_root();
+    for pair in 1..89u32 {
+        let left = pair.saturating_mul(2);
+        insert_pair(&env, &pool_id, left, left.saturating_add(1));
+    }
+    let slot_eighty_nine_root = pool.get_root();
+    insert_pair(&env, &pool_id, 178, 179);
+
+    let slot = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::current_root_index(&env)
+            .unwrap_or_else(|err| panic!("expected the tree to be initialized: {err:?}"))
+    });
+    assert_eq!(slot, 0);
+    assert!(!pool.is_known_root(&first_root));
+    assert!(pool.is_known_root(&slot_one_root));
+    assert!(pool.is_known_root(&slot_eighty_nine_root));
+}
+
+#[test]
+fn is_known_root_finds_the_previous_root_after_one_insert() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let previous = pool.get_root();
+
+    insert_pair(&env, &pool_id, 1, 2);
+
+    assert!(pool.is_known_root(&previous));
+}
+
+#[test]
+fn the_configuration_lives_in_the_instance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        let persistent = env.storage().persistent();
+        for key in [
+            DataKey::Token,
+            DataKey::Verifier,
+            DataKey::MaximumDepositAmount,
+            DataKey::ASPMembership,
+            DataKey::ASPNonMembership,
+            DataKey::PolicyFlags,
+        ] {
+            assert!(instance.has(&key), "{key:?} should live in the instance");
+            assert!(
+                !persistent.has(&key),
+                "{key:?} should not have a persistent entry"
+            );
+        }
+    });
+}
+
+#[test]
+fn update_asp_membership_rewrites_the_instance_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_membership = Address::generate(&env);
+    pool.update_asp_membership(&new_asp_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected the membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_membership);
+}
+
+#[test]
+fn update_asp_non_membership_rewrites_the_instance_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let new_asp_non_membership = Address::generate(&env);
+    pool.update_asp_non_membership(&new_asp_non_membership);
+
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected the non-membership address to be stored"))
+    });
+    assert_eq!(stored, new_asp_non_membership);
 }
 
 #[test]
@@ -378,15 +732,9 @@ fn merkle_insert_updates_root_and_index() {
             MerkleTreeWithHistory::is_known_root(&env, &root)
                 .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
         );
-
-        // nextIndex should now be 2 (stored in persistent storage)
-        let next: u64 = env
-            .storage()
-            .persistent()
-            .get(&MerkleDataKey::NextIndex)
-            .unwrap_or_else(|| panic!("expected next index to be stored"));
-        assert_eq!(next, 2);
     });
+
+    assert_eq!(tree_state(&env, &pool_id).next_index, 2);
 }
 
 #[test]
@@ -666,7 +1014,7 @@ fn transact_rejects_bad_public_amount() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     // Get actual roots
     let asp_membership_root = setup.asp_membership_client.get_root();
@@ -711,7 +1059,7 @@ fn transact_rejects_non_canonical_nullifier() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -807,7 +1155,7 @@ fn get_policy_flags_errors_when_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
@@ -918,14 +1266,21 @@ fn transact_errors_when_policy_flags_unset() {
 
     env.as_contract(&pool_id, || {
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB8);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xB8,
+    );
 
     assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
@@ -953,7 +1308,7 @@ fn transact_rejects_non_canonical_output_commitment() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -1000,7 +1355,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
     let sender = Address::generate(&env);
     let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
+    let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
 
     let asp_membership_root = setup.asp_membership_client.get_root();
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
@@ -1154,7 +1509,14 @@ fn transact_rejects_replay_of_spent_nullifier() {
     let nullifier = 0xC0FFEE;
     mark_nullifier_spent(&env, &pool_id, &U256::from_u32(&env, nullifier));
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+    );
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("spent nullifier must be refused");
@@ -1173,7 +1535,14 @@ fn transact_rejects_deposit_above_maximum() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD1);
+    let (proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD1,
+    );
     // try_from rather than `as`: the boundary is the whole point of this test,
     // so a value that did not fit i32 must fail loudly instead of wrapping
     // into a negative deposit.
@@ -1199,7 +1568,14 @@ fn transact_accepts_deposit_at_maximum_bound() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xD2);
+    let (proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD2,
+    );
     let at_max = i32::try_from(max).expect("max must fit i32");
     let at = mk_ext_data(&env, Address::generate(&env), at_max);
 
@@ -1234,7 +1610,14 @@ fn transact_rejects_zeroed_proof() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE1,
+    );
     proof.proof = Groth16Proof {
         a: G1Affine::from_array(&env, &[0u8; 64]),
         b: G2Affine::from_array(&env, &[0u8; 128]),
@@ -1274,7 +1657,14 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     env.mock_all_auths();
 
     let dup = U256::from_u32(&env, 0xDEAD);
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xDEAD);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xDEAD,
+    );
     proof.input_nullifiers.push_back(dup);
 
     let err = pool
@@ -1319,7 +1709,14 @@ fn transact_rejects_root_never_inserted() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE1);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE1,
+    );
     proof.root = U256::from_u32(&env, 0xFF);
 
     let err = pool
@@ -1361,7 +1758,14 @@ fn transact_rejects_evicted_root() {
         rotate_root(&env, &pool_id, left, right);
     }
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE2);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE2,
+    );
     proof.root = evicted_root;
 
     let err = pool
@@ -1392,7 +1796,14 @@ fn transact_reports_unknown_root_before_later_checks() {
         );
     });
 
-    let (mut proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, nullifier);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+    );
     proof.root = U256::from_u32(&env, 0xFF);
     proof.ext_data_hash = mk_bytesn32(&env, 0x99);
 
@@ -1415,7 +1826,14 @@ fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE4);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE4,
+    );
     assert_eq!(ext.ext_amount, I256::from_i32(&env, 0));
 
     let err = pool
@@ -1444,7 +1862,14 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
     // Authorization is mocked, so NotAuthorized cannot be a genuine answer.
     env.mock_all_auths();
 
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE5);
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE5,
+    );
     assert!(
         !proof.proof.is_empty(),
         "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
@@ -1486,10 +1911,17 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         Address::generate(&env),
         i32::try_from(deposit_amount).expect("the deposit must fit i32"),
     );
-    let (mut proof, _) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xE6);
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+    );
     // Everything before verification must pass, or the revert being asserted
     // would be an earlier check rather than the verifier.
-    proof.ext_data_hash = compute_ext_hash(&env, &deposit);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
     proof.public_amount = U256::from_u32(&env, deposit_amount);
 
     assert_eq!(token.balance(&sender), funded);
@@ -1513,4 +1945,79 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// Cross-pool regression test for proof-domain binding.
+///
+/// Pool A and Pool B share a verifier, ASP contracts and tree depth but have
+/// distinct addresses and tokens, as when one verifier is reused across pools
+/// for different assets. Before `hash_ext_data` bound `pool`/`token`, Pool A's
+/// `(proof, ExtData)` cleared every check on Pool B up to the shared
+/// verifier; now Pool B must refuse it at the `ext_data_hash` check.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+
+    // Pool B reuses Pool A's verifier and ASP contracts but a different token.
+    let pool_a_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8, 0);
+    let setup_b = setup_with_token(&env, &setup, register_mock_token(&env));
+    let pool_b_id = register_pool(&env, &setup_b, U256::from_u32(&env, 1000), 8, 0);
+
+    assert_ne!(
+        setup.token, setup_b.token,
+        "the two pools must have distinct token/asset identity"
+    );
+    assert_ne!(
+        pool_a_id, pool_b_id,
+        "the two pools must be distinct contract instances"
+    );
+
+    let pool_a = PoolContractClient::new(&env, &pool_a_id);
+    let pool_b = PoolContractClient::new(&env, &pool_b_id);
+
+    // Equal genesis roots, so the root check cannot be what stops the replay.
+    assert_eq!(
+        pool_a.get_root(),
+        pool_b.get_root(),
+        "genesis roots must collide for this test to be meaningful"
+    );
+
+    env.mock_all_auths();
+    // Policy flags 0: neither ASP root is compared, so an ASP mismatch cannot
+    // masquerade as a domain-binding rejection.
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool_a,
+        &setup.token,
+        U256::from_u32(&env, 0),
+        U256::from_u32(&env, 0),
+        0xF00D,
+    );
+
+    // Baseline: on the pool it was built for, the proof still clears every
+    // check ahead of the verifier and is refused only there.
+    let err_a = pool_a
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof always fails the verifier's pairing check");
+    assert_eq!(
+        err_a,
+        Ok(Error::InvalidProof),
+        "sanity check: Pool A must reach the verifier boundary, not an earlier check"
+    );
+
+    // The same (proof, ext) values, submitted unchanged to Pool B.
+    let err_b = pool_b.try_transact(&proof, &ext, &Address::generate(&env));
+
+    match err_b {
+        // Pool B's own hash differs from Pool A's for the identical `ext`,
+        // so the replay is refused before the verifier is reached.
+        Err(Ok(Error::WrongExtHash)) => {}
+        Err(Ok(Error::InvalidProof)) => panic!(
+            "domain binding missing: Pool B accepted Pool A's ext_data_hash \
+             and reached the verifier boundary ({err_b:?})"
+        ),
+        other => panic!("unexpected result reaching a check this test does not isolate: {other:?}"),
+    }
 }
