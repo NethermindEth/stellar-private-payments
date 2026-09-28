@@ -358,10 +358,11 @@ fn next_sink_id() -> u64 {
 
 /// Register worker bridges so telemetry configuration and log dumps reach
 /// their isolates. Multiple clients (and shared bridges forked across them)
-/// can be registered concurrently; a sink is also dropped early if its
-/// worker stops responding. The returned [`SinkRegistration`] owns the
-/// sinks just registered and unregisters them on drop, so a sink never
-/// outlives the client it was forked for.
+/// can be registered concurrently. The returned [`SinkRegistration`] owns
+/// the sinks just registered and unregisters them on drop, so a sink never
+/// outlives the client it was forked for — a failed or timed-out push/dump
+/// does not evict it early, since a busy worker looks the same as a dead
+/// one from here.
 pub(crate) fn register_worker_sinks(
     storage: Option<StorageBridge>,
     prover: Option<ProverBridge>,
@@ -417,7 +418,7 @@ pub(crate) fn current_worker_config() -> WorkerTelemetryConfig {
 /// Fire-and-forget: diagnostics must never block or break the caller.
 pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
     let sinks: Vec<(u64, WorkerSink)> = WORKER_SINKS.with(|s| s.borrow().clone());
-    for (id, sink) in sinks {
+    for (_id, sink) in sinks {
         let config = config.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let result = match sink {
@@ -438,7 +439,6 @@ pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
             };
             if let Err(e) = result {
                 tracing::debug!("telemetry config push to worker failed: {e:#}");
-                drop_sink(id);
             }
         });
     }
@@ -477,10 +477,7 @@ pub async fn dump_all_logs() -> String {
         out.push_str(&format!("\n== {label} ({id}) ==\n"));
         match result {
             Ok(logs) => out.push_str(&logs),
-            Err(e) => {
-                out.push_str(&format!("<unavailable: {e:#}>\n"));
-                drop_sink(id);
-            }
+            Err(e) => out.push_str(&format!("<unavailable: {e:#}>\n")),
         }
     }
     out
