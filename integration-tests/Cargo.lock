@@ -1838,6 +1838,7 @@ dependencies = [
  "ed25519-dalek",
  "rand 0.8.8",
  "reqwest",
+ "serde",
  "serde_json",
  "stellar-private-payments",
  "stellar-strkey 0.0.18",

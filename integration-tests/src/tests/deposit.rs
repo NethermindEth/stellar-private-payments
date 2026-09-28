@@ -4,13 +4,13 @@
 use anyhow::Result;
 use stellar_private_payments::types::NoteAmount;
 
-use super::support::setup;
+use super::support::setup_default;
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
 #[tokio::test]
 async fn deposit_basic() -> Result<()> {
-    let session = setup().await?;
+    let session = setup_default().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let pool = session.pool()?;
 
