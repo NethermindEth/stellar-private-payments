@@ -136,6 +136,10 @@ impl Storage {
     }
 
     pub(super) fn migrate_connection(conn: &mut Connection) -> Result<()> {
+        anyhow::ensure!(
+            !super::private_vault::is_private(conn)?,
+            "private vaults must be opened through public storage"
+        );
         MIGRATIONS.to_latest(conn)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())

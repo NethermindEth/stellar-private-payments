@@ -362,6 +362,12 @@ public connection with its key. Joins read public tables directly; public
 events are ingested and processed once. Notes reference commitment hashes, and
 scan cursors use pool addresses and leaf indexes rather than public row IDs.
 
+The vault uses `schema_private.sql` and its own migration sequence, starting at
+version 1 with SQLite application ID `0x53505056` (`SPPV`). Fresh creation never
+creates public tables. Unlocking runs private migrations, independently of
+native database schema changes. Earlier private-only files marked as native
+version 3 adopt this private format while retaining their records.
+
 Complete older vaults migrate once: public events and progress commit to the
 public database before their duplicate tables are removed from the vault.
 No private tables are exported. Further unlocks need no public-history copy.

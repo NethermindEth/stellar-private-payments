@@ -177,3 +177,64 @@ fn migrates_analyzed_database_without_copying_optimizer_statistics() -> Result<(
     assert_eq!(fingerprint(&conn)?, before);
     Ok(())
 }
+
+#[test]
+fn browser_copy_preserves_legacy_version_and_native_encryption_migrates_it() -> Result<()> {
+    let f = Fixture::new()?;
+    let source = Connection::open(f.db())?;
+    source.execute_batch(include_str!("schema.sql"))?;
+    source.pragma_update(None, "user_version", 1)?;
+    source.execute(
+        "INSERT INTO app_settings VALUES ('private-marker','\"retained\"')",
+        [],
+    )?;
+    drop(source);
+    let key = DatabaseKey::generate()?;
+    let copied = f.0.join("browser-copy.db");
+    copy_into_encrypted(&f.db(), None, &copied, &key)?;
+    let conn = super::super::database_key::open(&copied, &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+        1
+    );
+    assert!(
+        conn.prepare("SELECT gvk_ciphertext FROM pool_commitments")
+            .is_err()
+    );
+    drop(conn);
+    let mut public = SqliteStorage::connect_public(f.0.join("public.db"))?;
+    public.open_private_vault(&copied, &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        public
+            .get_setting_json::<String>("private-marker")?
+            .as_deref(),
+        Some("retained")
+    );
+    assert_eq!(
+        public
+            .conn
+            .pragma_query_value(Some("vault"), "user_version", |r| r.get::<_, i64>(0))?,
+        1
+    );
+    encrypt_in_place(&f.db(), &key)?;
+    let storage = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        storage
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+        3
+    );
+    assert!(
+        storage
+            .conn
+            .prepare("SELECT gvk_ciphertext FROM pool_commitments")
+            .is_ok()
+    );
+    assert_eq!(
+        storage
+            .get_setting_json::<String>("private-marker")?
+            .as_deref(),
+        Some("retained")
+    );
+    Ok(())
+}

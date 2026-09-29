@@ -76,77 +76,9 @@ impl Storage {
         }
     }
 
-    /// One-time upgrade of a complete encrypted wallet to a private-only
-    /// vault. Public events/progress commit first; private tables then drop
-    /// their duplicate public state in a separate transaction. Either failure
-    /// can be retried without losing the only copy of a record.
-    pub fn migrate_private_vault(&mut self, vault: &mut Self) -> Result<()> {
-        ensure!(
-            self.public_only && !vault.public_only,
-            "expected public storage and private vault"
-        );
-        let legacy: bool = vault.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='contracts')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !legacy {
-            return Ok(());
-        }
-        self.import_legacy_chain(vault)?;
-        for key in ["explorer", "bootnode_config"] {
-            if self.get_setting_json::<serde_json::Value>(key)?.is_none()
-                && let Some(value) = vault.get_setting_json::<serde_json::Value>(key)?
-            {
-                self.set_setting_json(key, &value)?;
-            }
-        }
-        let tx = vault.conn.transaction()?;
-        tx.execute_batch(
-            "DELETE FROM app_settings WHERE key IN ('explorer','bootnode_config');
-             ALTER TABLE app_settings RENAME TO private_settings;
-             DROP TABLE pool_commitments;
-             DROP TABLE pool_nullifiers;
-             DROP TABLE public_keys;
-             DROP TABLE asp_membership_leaves;
-             DROP TABLE indexing_metadata;
-             DROP TABLE raw_contract_events;
-             DROP TABLE contracts;",
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Attach the authenticated private-only vault. The public database is
-    /// main; only private tables are in vault, so unqualified joins can read
-    /// both schemas without copying or opening a second public handle.
-    pub fn attach_private_vault(
-        &mut self,
-        path: impl AsRef<Path>,
-        key: &super::database_key::DatabaseKey,
-    ) -> Result<()> {
-        ensure!(
-            self.public_only && !self.private_attached,
-            "private vault already attached"
-        );
-        super::database_key::attach(&self.conn, path.as_ref(), key)?;
-        let valid: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM vault.sqlite_schema WHERE name='private_settings')
-             AND NOT EXISTS(SELECT 1 FROM vault.sqlite_schema WHERE name IN ('contracts','raw_contract_events','pool_commitments','pool_nullifiers','public_keys','asp_membership_leaves','indexing_metadata'))",
-            [], |r| r.get(0),
-        )?;
-        if !valid {
-            self.conn.execute_batch("DETACH DATABASE vault")?;
-            anyhow::bail!("expected a private-only vault");
-        }
-        self.private_attached = true;
-        self.public_only = false;
-        Ok(())
-    }
-
-    fn import_legacy_chain(&mut self, source: &Self) -> Result<()> {
+    pub(super) fn import_legacy_chain(&mut self, source: &Connection) -> Result<()> {
         let tx = self.conn.transaction()?;
-        let mut events = source.conn.prepare(
+        let mut events = source.prepare(
             "SELECT r.id,r.ledger,c.address,r.topics,r.value FROM raw_contract_events r
              JOIN contracts c ON c.contract_id=r.contract_id ORDER BY r.ledger,r.id",
         )?;
@@ -177,14 +109,20 @@ impl Storage {
             ensure!(matches, "public cache conflicts with a stored chain event");
         }
         // Progress commits in the same transaction as the events it covers.
-        for m in source.get_sync_metadata()? {
+        let mut progress = source.prepare("SELECT c.address,m.last_cursor,m.last_indexed_ledger,m.last_fully_indexed_ledger FROM indexing_metadata m JOIN contracts c ON c.contract_id=m.contract_id")?;
+        let mut metadata = progress.query([])?;
+        while let Some(m) = metadata.next()? {
+            let address: String = m.get(0)?;
+            let cursor: Option<String> = m.get(1)?;
+            let indexed: i64 = m.get(2)?;
+            let fully_indexed: i64 = m.get(3)?;
             tx.execute(
                 "INSERT OR IGNORE INTO contracts(address) VALUES (?1)",
-                [&m.contract_id],
+                [&address],
             )?;
             let contract: i64 = tx.query_row(
                 "SELECT contract_id FROM contracts WHERE address=?1",
-                [&m.contract_id],
+                [&address],
                 |r| r.get(0),
             )?;
             let existing: Option<i64> = tx
@@ -194,12 +132,12 @@ impl Storage {
                     |r| r.get(0),
                 )
                 .optional()?;
-            if existing.is_some_and(|ledger| ledger >= i64::from(m.last_indexed_ledger)) {
+            if existing.is_some_and(|ledger| ledger >= indexed) {
                 continue;
             }
             tx.execute(
                 "INSERT INTO indexing_metadata VALUES (?1,?2,?3,?4) ON CONFLICT(contract_id) DO UPDATE SET last_cursor=excluded.last_cursor,last_indexed_ledger=excluded.last_indexed_ledger,last_fully_indexed_ledger=excluded.last_fully_indexed_ledger",
-                params![contract, m.cursor, m.last_indexed_ledger, m.last_fully_indexed_ledger],
+                params![contract, cursor, indexed, fully_indexed],
             )?;
         }
         tx.commit()?;

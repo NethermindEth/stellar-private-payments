@@ -1,5 +1,6 @@
 mod disclaimer;
 pub(crate) mod events_parsers;
+mod private_vault;
 mod processor;
 mod public_cache;
 mod storage;

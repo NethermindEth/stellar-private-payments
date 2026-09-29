@@ -130,8 +130,8 @@ fn close_storage() {
 async fn open_with(
     open: impl std::future::Future<
         Output = Result<(
-            SqliteStorage,
             stellar_private_payments::state::database_key::DatabaseKey,
+            stellar_private_payments::state::database_key::OpenPurpose,
         )>,
     >,
 ) -> Result<StorageWorkerResponse> {
@@ -141,11 +141,30 @@ async fn open_with(
     );
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
     match open.await {
-        Ok((vault, key)) => {
-            if let Err(error) = with_public_mut!(public => super::storage_access::attach_vault(public, vault, &key)?)
+        Ok((key, purpose)) => {
+            if let Err(error) = with_public_mut!(public => super::storage_access::attach_vault(public, &key, purpose)?)
             {
+                let error = super::storage_access::migration_error(error).await;
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
                 return Err(error);
+            }
+            if let Err(error) = super::storage_access::finish_migration().await {
+                // Cleanup failed after attachment. Drop private access and
+                // restore public browsing before allowing an unlock retry.
+                STORAGE.with(|s| s.borrow_mut().take());
+                match super::storage_access::open_public().await {
+                    Ok(public) => {
+                        STORAGE.with(|s| *s.borrow_mut() = Some(public));
+                        INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
+                    }
+                    Err(reopen_error) => {
+                        close_storage();
+                        return Err(error.context(format!(
+                            "public storage could not reopen: {reopen_error:#}; reload this page"
+                        )));
+                    }
+                }
+                return Err(error.context("Legacy migration committed, but plaintext cleanup failed; retry unlocking to finish cleanup"));
             }
             start();
             Ok(StorageWorkerResponse::Saved)

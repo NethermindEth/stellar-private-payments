@@ -67,6 +67,13 @@ through reused row IDs. Public events are stored and processed once. Private
 note scanning resumes only after unlocking. A missing public cache must be
 synced again before chain-dependent private queries can return complete data.
 
+Private vaults have their own schema migrations and version sequence, identified
+by SQLite `application_id` `0x53505056` (`SPPV`). New vaults create only private
+tables. Native database migrations refuse private-vault files. Earlier unmarked
+private-only version-3 vaults adopt private format version 1 without recreating
+their records; complete legacy vaults use a fixed conversion of versions 1–3.
+Unknown formats or future versions are refused rather than replaced.
+
 Older complete vaults migrate on unlock: public events and indexing progress
 are committed to the public database first, then duplicate public tables are
 removed from the vault. Conflicting events stop migration without removing the

@@ -119,6 +119,9 @@ jobs:
             --artifacts target/sqlite3mc-checks/chromium-migration \
             --legacy-db target/sqlite3mc-checks/legacy/spp.db \
             --legacy-gvk target/sqlite3mc-checks/legacy/gvk.json
+          node e2e-freighter/tests/storage/sqlite3mc.mjs --binary "$(command -v google-chrome)" \
+            --artifacts target/sqlite3mc-checks/chromium-migration-refusal \
+            --legacy-db target/sqlite3mc-checks/legacy/spp.db --legacy-future-version
       - name: Package verified encrypted SDK
         # No publication. Lifecycle scripts are disabled so packaging cannot
         # rebuild artifacts after the browser tests.

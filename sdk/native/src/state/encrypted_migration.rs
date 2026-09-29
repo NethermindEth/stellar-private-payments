@@ -60,7 +60,7 @@ fn tables(conn: &Connection) -> Result<Vec<(String, bool)>> {
     Ok(result)
 }
 
-fn check_integrity(conn: &Connection) -> Result<()> {
+pub(super) fn check_integrity(conn: &Connection) -> Result<()> {
     let mut statement = conn.prepare("PRAGMA integrity_check")?;
     let messages = statement
         .query_map([], |r| r.get::<_, String>(0))?
@@ -131,7 +131,8 @@ fn fingerprint(conn: &Connection) -> Result<String> {
 }
 
 /// Copy a plaintext database into an empty connection that the caller has
-/// already keyed with SQLite3MC, then bring the copy's schema up to date.
+/// already keyed with SQLite3MC, preserving its schema version. The native
+/// database and browser vault owners apply their own migrations afterwards.
 ///
 /// Both connections must be owned exclusively and outside transactions. Rows
 /// are copied as SQL values, never as pages, and the copy must match the
@@ -211,7 +212,6 @@ pub fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> 
         tx.commit()?;
     }
     source.commit()?;
-    super::storage::Storage::migrate_connection(destination)?;
     check_integrity(destination)
 }
 
@@ -302,6 +302,15 @@ pub fn encrypt_in_place(
         }
     }
     copy_into_encrypted(&path, None, &staging, key)?;
+    // Native storage keeps the complete database layout. Browser copies use
+    // the private vault's separate, fixed legacy conversion instead.
+    let migrated = super::Storage::connect_encrypted(
+        &staging,
+        key,
+        super::database_key::OpenPurpose::OpenExisting,
+    )?;
+    check_integrity(&migrated.conn)?;
+    drop(migrated);
     std::fs::File::open(&staging)?.sync_all()?;
     std::fs::rename(&staging, &path)?;
     if let Some(directory) = path.parent() {

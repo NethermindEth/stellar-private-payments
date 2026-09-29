@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** Exercise real SDK WASM/OPFS using the shared Playwright storage harness.
  * --legacy-db PATH imports an earlier plaintext wallet; --legacy-gvk FILE
- * checks that its GVK authority survives. --package-root PATH tests an
+ * checks that its GVK authority survives. --legacy-future-version checks
+ * failed conversion preserves that source. --package-root PATH tests an
  * extracted npm package without loading SDK files from the source tree.
  */
 import assert from 'node:assert/strict';
@@ -13,9 +14,11 @@ import { createStorageHarness, snapshotOPFS } from '../../src/storage-harness.mj
 const { values: args } = parseArgs({ options: {
   artifacts: { type: 'string' }, binary: { type: 'string' }, browser: { type: 'string', default: 'chromium' },
   'legacy-db': { type: 'string' }, 'legacy-gvk': { type: 'string' },
+  'legacy-future-version': { type: 'boolean' },
   'package-root': { type: 'string' }, 'backend-version-fault': { type: 'boolean' },
 } });
 if (!args.artifacts) throw Error('--artifacts is required');
+if (args['legacy-future-version'] && !args['legacy-db']) throw Error('--legacy-future-version requires --legacy-db');
 const artifacts = resolve(args.artifacts);
 const harness = await createStorageHarness({
   artifacts, binary: args.binary, browser: args.browser,
@@ -71,6 +74,31 @@ try {
     await assert.rejects(ctx.connect(), /Unsupported SQLite3MC backend/);
     assert.deepEqual(await ctx.snapshot(), [], "backend rejection must not touch OPFS");
     ctx.checks.push("a mismatched cipher backend is rejected before opening OPFS");
+  } else if (args['legacy-future-version']) {
+    const future = await readFile(args['legacy-db']);
+    // SQLite stores user_version in its header. The generic encrypted copy
+    // must preserve it; only the dedicated vault converter may interpret it.
+    future.writeUInt32BE(4, 60);
+    await ctx.injectLegacy(future);
+    assert.equal(await ctx.connect(), 'unencrypted');
+    const plaintext = files => files.filter(file => file.path.startsWith('.opfs-sahpool/'));
+    const original = plaintext(await ctx.snapshot());
+    const failed = await ctx.outcome('createWallet', WALLET_CONTEXT, WALLET_SECRET);
+    assert.equal(await ctx.status(), 'locked');
+    assert.deepEqual(plaintext(await ctx.snapshot()), original, 'a failed conversion deleted or changed the original plaintext database');
+    assert.match(failed, /original plaintext data is preserved.*unsupported legacy vault version/);
+    assert.deepEqual(await harness.page.evaluate(() => storage.walletContext()), WALLET_CONTEXT);
+    // The envelope and encrypted copy survive failure. Retry must refuse the
+    // same unsupported version, preserve the source, and keep public access.
+    await ctx.close();
+    await harness.restart();
+    await ctx.load();
+    assert.equal(await ctx.connect(), 'locked');
+    assert.match(await ctx.outcome('unlockWallet', WALLET_CONTEXT, WALLET_SECRET), /unsupported legacy vault version/);
+    assert.deepEqual(plaintext(await ctx.snapshot()), original);
+    assert.deepEqual(await harness.page.evaluate(() => storage.call('SyncState')), { SyncState: [] });
+    await ctx.close();
+    ctx.checks.push('unsupported legacy conversion retains the original plaintext and wallet envelope across retry and browser restart; public access remains usable');
   } else {
     let legacyGvk;
     if (args["legacy-db"]) {

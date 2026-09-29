@@ -43,7 +43,7 @@ pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
 pub(super) async fn create_wallet(
     context: WalletContext,
     secret: &str,
-) -> Result<(SqliteStorage, DatabaseKey)> {
+) -> Result<(DatabaseKey, OpenPurpose)> {
     ensure!(
         matches!(
             status(false).await?,
@@ -53,7 +53,8 @@ pub(super) async fn create_wallet(
     );
     let key = DatabaseKey::generate()?;
     wallet_vault::create(Path::new(KEY_DB), &key, context, secret)?;
-    Ok((open_key(&key).await?, key))
+    let purpose = prepare_vault(&key).await?;
+    Ok((key, purpose))
 }
 
 pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
@@ -64,26 +65,14 @@ pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
 pub(super) async fn unlock_wallet(
     context: &WalletContext,
     secret: &str,
-) -> Result<(SqliteStorage, DatabaseKey)> {
+) -> Result<(DatabaseKey, OpenPurpose)> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    Ok((open_key(&key).await?, key))
+    let purpose = prepare_vault(&key).await?;
+    Ok((key, purpose))
 }
 
-/// Replace the legacy full vault with private tables, then share one
-/// connection with the public database. The SAH VFS permits only one handle
-/// per filename, so close the standalone vault before attaching it.
-pub(super) fn attach_vault(
-    public: &mut SqliteStorage,
-    mut vault: SqliteStorage,
-    key: &DatabaseKey,
-) -> Result<()> {
-    public.migrate_private_vault(&mut vault)?;
-    drop(vault);
-    public.attach_private_vault(ENCRYPTED_DB, key)
-}
-
-async fn open_key(key: &DatabaseKey) -> Result<SqliteStorage> {
+async fn prepare_vault(key: &DatabaseKey) -> Result<OpenPurpose> {
     let plaintext = pools::plaintext_exists(PLAINTEXT_DB).await?;
     let complete =
         pools::encrypted_exists(ENCRYPTED_DB)? && has_tables(Path::new(ENCRYPTED_DB), key)?;
@@ -91,14 +80,37 @@ async fn open_key(key: &DatabaseKey) -> Result<SqliteStorage> {
         // Creating the wallet vault was interrupted: finish it.
         pools::delete_encrypted(ENCRYPTED_DB)?;
         if !plaintext {
-            return SqliteStorage::connect_encrypted(ENCRYPTED_DB, key, OpenPurpose::CreateNew);
+            return Ok(OpenPurpose::CreateNew);
         }
         copy_plaintext(key).await?;
-    } else if plaintext {
-        // The copy committed, but deleting the unencrypted database did not.
+    }
+    Ok(OpenPurpose::OpenExisting)
+}
+
+pub(super) fn attach_vault(
+    public: &mut SqliteStorage,
+    key: &DatabaseKey,
+    purpose: OpenPurpose,
+) -> Result<()> {
+    public.open_private_vault(ENCRYPTED_DB, key, purpose)
+}
+
+/// Delete the legacy source only after conversion and attachment succeeded.
+pub(super) async fn finish_migration() -> Result<()> {
+    if pools::plaintext_exists(PLAINTEXT_DB).await? {
         pools::remove_plaintext(PLAINTEXT_DB).await?;
     }
-    SqliteStorage::connect_encrypted(ENCRYPTED_DB, key, OpenPurpose::OpenExisting)
+    Ok(())
+}
+
+pub(super) async fn migration_error(error: anyhow::Error) -> anyhow::Error {
+    if pools::plaintext_exists(PLAINTEXT_DB).await.unwrap_or(false) {
+        anyhow!(
+            "Legacy database migration failed; the original plaintext data is preserved. Retry unlocking to resume migration. If it keeps failing, stop and seek help recovering the existing browser profile. This app has no local-data export; reset deletes the original too. Details: {error:#}"
+        )
+    } else {
+        error
+    }
 }
 
 /// Explicitly delete all local data. The caller closes connections first.
@@ -118,15 +130,18 @@ pub(super) fn release() {
     pools::release();
 }
 
-/// Copy `spp.db` into a new encrypted database, then delete `spp.db`.
+/// Copy `spp.db`, retaining the source until the vault conversion succeeds.
 async fn copy_plaintext(key: &DatabaseKey) -> Result<()> {
-    copy_into_encrypted(
+    let copied = copy_into_encrypted(
         Path::new(PLAINTEXT_DB),
         Some(pools::PLAINTEXT_VFS),
         Path::new(ENCRYPTED_DB),
         key,
-    ).map_err(|error| anyhow!("Legacy database migration failed; the original plaintext data is preserved. Retry unlocking to resume migration. If it keeps failing, stop and seek help recovering the existing browser profile. This app has no local-data export; reset deletes the original too. Details: {error:#}"))?;
-    pools::remove_plaintext(PLAINTEXT_DB).await
+    );
+    match copied {
+        Ok(()) => Ok(()),
+        Err(error) => Err(migration_error(error).await),
+    }
 }
 
 /// The OPFS pools behind the SQLite files.

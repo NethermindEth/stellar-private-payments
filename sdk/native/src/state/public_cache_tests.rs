@@ -56,6 +56,156 @@ fn tables(storage: &Storage, schema: &str) -> Result<Vec<String>> {
 }
 
 #[test]
+fn fresh_private_vault_has_its_own_format_and_reopens_without_native_tables() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let mut public = Storage::connect_public(f.public())?;
+    public.save_events_batch(&event("public-event", "pool"))?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
+    public.set_setting_json("private-marker", &"retained")?;
+    assert_eq!(
+        tables(&public, "vault")?,
+        [
+            "account_commitment_scan",
+            "accounts",
+            "app_user_operations",
+            "disclaimer_acceptances",
+            "keypairs",
+            "private_settings",
+            "user_notes"
+        ]
+    );
+    assert_eq!(
+        public
+            .conn
+            .pragma_query_value(Some("vault"), "application_id", |r| r.get::<_, i32>(0))?,
+        super::super::private_vault::APPLICATION_ID
+    );
+    assert_eq!(
+        public
+            .conn
+            .pragma_query_value(Some("vault"), "user_version", |r| r.get::<_, i64>(0))?,
+        1
+    );
+    drop(public);
+    // A native opener must refuse the different layout before applying its
+    // migration list, even when the vault's version is lower than native's.
+    let bytes = std::fs::read(f.vault())?;
+    assert!(Storage::connect_encrypted(f.vault(), &key, OpenPurpose::OpenExisting).is_err());
+    assert_eq!(std::fs::read(f.vault())?, bytes);
+    let mut public = Storage::connect_public(f.public())?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        public
+            .get_setting_json::<String>("private-marker")?
+            .as_deref(),
+        Some("retained")
+    );
+    assert!(!tables(&public, "vault")?.contains(&"contracts".to_string()));
+    assert!(
+        public
+            .open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn unmarked_private_v3_adopts_the_private_version_without_recreating_tables() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let mut public = Storage::connect_public(f.public())?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
+    public.set_setting_json("private-marker", &"retained")?;
+    public.insert_operation("owner", "pool", "sent", "42", "out", None, None)?;
+    public.conn.execute_batch(
+        "INSERT INTO vault.accounts VALUES (7,'owner');
+        INSERT INTO vault.user_notes VALUES (zeroblob(32),7,1,zeroblob(32),zeroblob(32),'42');
+        INSERT INTO vault.account_commitment_scan VALUES ('pool',7,99);",
+    )?;
+    public
+        .conn
+        .pragma_update(Some("vault"), "application_id", 0)?;
+    public
+        .conn
+        .pragma_update(Some("vault"), "user_version", 3)?;
+    drop(public);
+    let bytes = std::fs::read(f.vault())?;
+    assert!(Storage::connect_encrypted(f.vault(), &key, OpenPurpose::OpenExisting).is_err());
+    assert_eq!(std::fs::read(f.vault())?, bytes);
+    let mut public = Storage::connect_public(f.public())?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        public
+            .conn
+            .pragma_query_value(Some("vault"), "user_version", |r| r.get::<_, i64>(0))?,
+        1
+    );
+    assert_eq!(
+        public
+            .conn
+            .pragma_query_value(Some("vault"), "application_id", |r| r.get::<_, i32>(0))?,
+        super::super::private_vault::APPLICATION_ID
+    );
+    assert_eq!(
+        public
+            .get_setting_json::<String>("private-marker")?
+            .as_deref(),
+        Some("retained")
+    );
+    assert_eq!(public.list_operations("owner", "pool", 10)?.len(), 1);
+    assert_eq!(
+        public.conn.query_row(
+            "SELECT account_id,spent,amount FROM vault.user_notes",
+            [],
+            |r| Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, bool>(1)?,
+                r.get::<_, String>(2)?
+            ))
+        )?,
+        (7, true, "42".into())
+    );
+    assert_eq!(public.conn.query_row("SELECT last_leaf_index FROM vault.account_commitment_scan WHERE pool_contract_id='pool'", [], |r| r.get::<_, i64>(0))?, 99);
+    Ok(())
+}
+
+#[test]
+fn future_vault_and_legacy_versions_are_refused_without_replacing_records() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let mut public = Storage::connect_public(f.public())?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
+    public.set_setting_json("private-marker", &"retained")?;
+    public
+        .conn
+        .pragma_update(Some("vault"), "user_version", 2)?;
+    drop(public);
+    let bytes = std::fs::read(f.vault())?;
+    let mut public = Storage::connect_public(f.public())?;
+    assert!(
+        public
+            .open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(f.vault())?, bytes);
+    assert!(public.is_public_only());
+    public.set_setting_json("explorer", &"https://explorer.example")?;
+    let legacy = f.0.join("future-native.db");
+    let storage = Storage::connect_encrypted(&legacy, &key, OpenPurpose::CreateNew)?;
+    storage.conn.pragma_update(None, "user_version", 4)?;
+    drop(storage);
+    let bytes = std::fs::read(&legacy)?;
+    assert!(
+        public
+            .open_private_vault(&legacy, &key, OpenPurpose::OpenExisting)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&legacy)?, bytes);
+    Ok(())
+}
+
+#[test]
 fn vault_contains_only_private_state_and_public_bytes_exclude_secrets() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
@@ -84,11 +234,12 @@ fn vault_contains_only_private_state_and_public_bytes_exclude_secrets() -> Resul
     let mut public = Storage::connect_public(f.public())?;
     assert!(public.get_setting_json::<String>("private-marker").is_err());
     assert!(public.set_setting_json("gvk_authority", &"secret").is_err());
-    public.migrate_private_vault(&mut vault)?;
+    drop(vault);
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
     assert_eq!(public.get_sync_metadata()?[0].cursor, "legacy-cursor");
     assert_eq!(public.get_sync_metadata()?[0].last_fully_indexed_ledger, 10);
     assert_eq!(
-        tables(&vault, "main")?,
+        tables(&public, "vault")?,
         [
             "account_commitment_scan",
             "accounts",
@@ -99,8 +250,6 @@ fn vault_contains_only_private_state_and_public_bytes_exclude_secrets() -> Resul
             "user_notes"
         ]
     );
-    drop(vault);
-    public.attach_private_vault(f.vault(), &key)?;
     assert_eq!(
         public
             .get_setting_json::<String>("private-marker")?
@@ -172,7 +321,6 @@ fn legacy_note_references_migrate_to_commitment_hashes_and_preserve_spent_state(
         INSERT INTO user_notes VALUES (zeroblob(32),1,99,123,zeroblob(32),zeroblob(32),'42');
         INSERT INTO indexing_metadata VALUES (73,'legacy-cursor',10,10);")?;
     drop(conn);
-    let mut vault = Storage::connect_encrypted(f.vault(), &key, OpenPurpose::OpenExisting)?;
     let mut public = Storage::connect_public(f.public())?;
     public.save_events_batch(&event("different-id", "different-pool"))?;
     public.save_sync_progress(
@@ -186,13 +334,11 @@ fn legacy_note_references_migrate_to_commitment_hashes_and_preserve_spent_state(
     )?;
     public.clear_indexing_cursors()?;
     public.clamp_last_fully_indexed_ledger(5)?;
-    public.migrate_private_vault(&mut vault)?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
     let metadata = public.get_sync_metadata()?;
     assert_eq!(metadata[0].cursor, "");
     assert_eq!(metadata[0].last_indexed_ledger, 20);
     assert_eq!(metadata[0].last_fully_indexed_ledger, 5);
-    drop(vault);
-    public.attach_private_vault(f.vault(), &key)?;
     public.save_commitment_events_batch(&vec![NewCommitmentEvent {
         commitment: Field(U256::zero()),
         ..commitment("commit", 0)
@@ -225,13 +371,24 @@ fn conflicting_public_import_keeps_legacy_vault_and_can_be_retried() -> Result<(
     public
         .conn
         .execute("UPDATE raw_contract_events SET value='tampered'", [])?;
-    assert!(public.migrate_private_vault(&mut vault).is_err());
-    assert!(tables(&vault, "main")?.contains(&"raw_contract_events".to_string()));
+    drop(vault);
+    assert!(
+        public
+            .open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)
+            .is_err()
+    );
+    let conn = super::super::database_key::open(&f.vault(), &key, OpenPurpose::OpenExisting)?;
+    assert!(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='raw_contract_events')",
+        [],
+        |r| r.get::<_, bool>(0)
+    )?);
+    drop(conn);
     public
         .conn
         .execute("UPDATE raw_contract_events SET value='public-value'", [])?;
-    public.migrate_private_vault(&mut vault)?;
-    assert!(!tables(&vault, "main")?.contains(&"raw_contract_events".to_string()));
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
+    assert!(!tables(&public, "vault")?.contains(&"raw_contract_events".to_string()));
     Ok(())
 }
 
@@ -248,16 +405,15 @@ fn cache_rebuild_changes_public_ids_without_erasing_private_notes_or_history() -
     vault.conn.execute("INSERT INTO user_notes(id,account_id,expected_nullifier,blinding,amount) SELECT commitment,1,zeroblob(32),zeroblob(32),'42' FROM pool_commitments", [])?;
     vault.set_setting_json("private-marker", &"never-public")?;
     let mut public = Storage::connect_public(f.public())?;
-    public.migrate_private_vault(&mut vault)?;
     drop(vault);
-    public.attach_private_vault(f.vault(), &key)?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
     public.save_commitment_events_batch(&vec![commitment("original", 0)])?;
     assert_eq!(public.list_user_notes("owner", 10)?.len(), 1);
     drop(public);
     std::fs::remove_file(f.public())?;
     let mut public = Storage::connect_public(f.public())?;
     public.save_events_batch(&event("another", "another-pool"))?;
-    public.attach_private_vault(f.vault(), &key)?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
     assert_eq!(
         public
             .get_setting_json::<String>("private-marker")?
@@ -283,11 +439,8 @@ fn attached_private_scans_follow_leaf_order_and_reconcile_only_matching_pools() 
     };
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
-    let mut vault = Storage::connect_encrypted(f.vault(), &key, OpenPurpose::CreateNew)?;
     let mut public = Storage::connect_public(f.public())?;
-    public.migrate_private_vault(&mut vault)?;
-    drop(vault);
-    public.attach_private_vault(f.vault(), &key)?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
     let signature = KeyDerivationSignature(vec![1; 64]);
     let (note, encryption) = encryption::derive_encryption_and_note_keypairs(signature.clone())?;
     public.save_encryption_and_note_keypairs(
@@ -352,21 +505,25 @@ fn attached_private_scans_follow_leaf_order_and_reconcile_only_matching_pools() 
 fn wrong_attachment_key_preserves_vault_and_public_storage_remains_usable() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
-    let mut vault = Storage::connect_encrypted(f.vault(), &key, OpenPurpose::CreateNew)?;
     let mut public = Storage::connect_public(f.public())?;
-    public.migrate_private_vault(&mut vault)?;
-    drop(vault);
+    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
+    drop(public);
+    let mut public = Storage::connect_public(f.public())?;
     let before = std::fs::read(f.vault())?;
     assert!(Storage::connect_public(f.vault()).is_err());
     assert!(
         public
-            .attach_private_vault(f.vault(), &DatabaseKey::generate()?)
+            .open_private_vault(
+                f.vault(),
+                &DatabaseKey::generate()?,
+                OpenPurpose::OpenExisting
+            )
             .is_err()
     );
     assert_eq!(std::fs::read(f.vault())?, before);
     assert!(public.is_public_only());
     public.set_setting_json("explorer", &"https://explorer.example")?;
-    public.attach_private_vault(f.vault(), &key)?;
+    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
     assert!(!public.is_public_only());
     Ok(())
 }
@@ -382,7 +539,12 @@ fn orphaned_legacy_note_aborts_upgrade_without_discarding_private_rows() -> Resu
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     conn.execute_batch("INSERT INTO accounts VALUES (1,'owner'); INSERT INTO user_notes VALUES (zeroblob(32),1,99,NULL,zeroblob(32),zeroblob(32),'42')")?;
     drop(conn);
-    assert!(Storage::connect_encrypted(f.vault(), &key, OpenPurpose::OpenExisting).is_err());
+    let mut public = Storage::connect_public(f.public())?;
+    assert!(
+        public
+            .open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)
+            .is_err()
+    );
     let conn = super::super::database_key::open(&f.vault(), &key, OpenPurpose::OpenExisting)?;
     assert_eq!(
         conn.query_row("SELECT amount FROM user_notes", [], |r| r
@@ -393,5 +555,27 @@ fn orphaned_legacy_note_aborts_upgrade_without_discarding_private_rows() -> Resu
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
         2
     );
+    Ok(())
+}
+
+#[test]
+fn legacy_v3_integrity_failure_remains_rejected_on_retry() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let vault = Storage::connect_encrypted(f.vault(), &key, OpenPurpose::CreateNew)?;
+    vault.conn.pragma_update(None, "foreign_keys", "OFF")?;
+    vault.conn.execute("INSERT INTO user_notes(id,account_id,expected_nullifier,blinding,amount) VALUES (zeroblob(32),99,zeroblob(32),zeroblob(32),'42')", [])?;
+    drop(vault);
+    let original = std::fs::read(f.vault())?;
+    let mut public = Storage::connect_public(f.public())?;
+    for _ in 0..2 {
+        assert!(
+            public
+                .open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)
+                .is_err()
+        );
+        assert!(public.is_public_only());
+        assert_eq!(std::fs::read(f.vault())?, original);
+    }
     Ok(())
 }
