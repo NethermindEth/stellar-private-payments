@@ -12,7 +12,7 @@ use stellar_private_payments::{
 
 use super::support::{TestSession, deploy, deploy_scoped, session};
 use crate::{
-    network::{DeploymentIdentity, LocalNetwork},
+    network::{DeploymentIdentity, LocalNetwork, lock_asp_tree},
     pool::{PoolAsset, PoolOptions},
 };
 
@@ -272,7 +272,9 @@ async fn wrong_key() -> Result<()> {
     let wrong_key = GvkAuthoritySetting::generate()?.private_key;
     let mut audit = audit(config, &pool_contract_id, wrong_key).await?;
 
+    let mut tx_count = 0;
     while let Some(tx) = audit.next_tx().await? {
+        tx_count += 1;
         assert!(
             tx.inputs.iter().all(|input| input.note.is_none()),
             "the wrong key should not decrypt any input note"
@@ -282,6 +284,7 @@ async fn wrong_key() -> Result<()> {
             "the wrong key should not decrypt any output note"
         );
     }
+    assert_eq!(tx_count, 2, "expected the deposit and the withdraw");
 
     Ok(())
 }
@@ -301,6 +304,8 @@ async fn policy_auditable() -> Result<()> {
         .context("deployment has no enabled pools")?
         .pool_contract_id
         .clone();
+
+    let _lock = lock_asp_tree(&alice.pool()?.config().contract_config.asp_non_membership).await?;
 
     alice.pool()?.deposit(NoteAmount::from(10_000_000)).await?;
     let alice_pk = note_pk(&alice).await?;
