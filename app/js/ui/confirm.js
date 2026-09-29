@@ -21,9 +21,10 @@
  * @param {string} opts.title - Dialog heading.
  * @param {Array<{label: string, value: string}>} [opts.rows] - Summary lines shown above the actions.
  * @param {string} [opts.confirmLabel] - Primary button label (default 'Confirm').
+ * @param {string} [opts.warning] - Caution shown below the summary; the user can still confirm.
  * @returns {Promise<boolean>} true on Confirm, false on every cancel path.
  */
-export function confirmAction({ title, rows = [], confirmLabel = 'Confirm' } = {}) {
+export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warning = '' } = {}) {
     return new Promise((resolve) => {
         const previouslyFocused = document.activeElement;
 
@@ -58,6 +59,15 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm' } = {
                 list.appendChild(row);
             });
             panel.appendChild(list);
+        }
+
+        if (warning) {
+            const note = document.createElement('p');
+            note.setAttribute('role', 'alert');
+            note.setAttribute('data-testid', 'confirm-dialog-warning');
+            note.className = 'mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200';
+            note.textContent = warning;
+            panel.appendChild(note);
         }
 
         const actions = document.createElement('div');

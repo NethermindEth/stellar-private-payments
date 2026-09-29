@@ -131,6 +131,14 @@ pub struct TransactParams {
     /// Pool Merkle root as a field element.
     pub pool_root: Field,
 
+    /// Pool contract address. Folded into `ext_data_hash` (not into
+    /// `ExtData`) so the proof cannot be replayed against another pool
+    /// sharing the same verifier.
+    pub pool_address: String,
+    /// This pool's configured token address, folded into `ext_data_hash`
+    /// alongside `pool_address`.
+    pub token_address: String,
+
     /// External recipient for extData (address/contract id as string, treated
     /// as opaque here).
     pub ext_recipient: String,
@@ -180,8 +188,12 @@ pub struct DepositParams {
     /// Pool Merkle root as a field element.
     pub pool_root: Field,
 
-    /// Pool contract address (recipient for extData).
+    /// Pool contract address (recipient for extData, and the pool address for
+    /// the domain-bound `ext_data_hash`).
     pub pool_address: String,
+    /// This pool's configured token address, for the domain-bound
+    /// `ext_data_hash`.
+    pub token_address: String,
     /// Total amount to deposit (stroops). Passed as `ext_amount > 0`.
     pub amount: ExtAmount,
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
@@ -224,6 +236,13 @@ pub struct WithdrawParams {
     /// Pool Merkle root (little-endian field bytes).
     pub pool_root: Field,
 
+    /// Pool contract address, for the domain-bound `ext_data_hash`. Distinct
+    /// from `withdraw_recipient`, which is the beneficiary rather than the
+    /// pool.
+    pub pool_address: String,
+    /// This pool's configured token address, for the domain-bound
+    /// `ext_data_hash`.
+    pub token_address: String,
     /// Address to receive withdrawn tokens (extData recipient).
     pub withdraw_recipient: String,
     /// Amount to withdraw in stroops. `withdraw()` sets `ext_amount =
@@ -270,8 +289,12 @@ pub struct TransferParams {
     /// Pool Merkle root (little-endian field bytes).
     pub pool_root: Field,
 
-    /// Pool contract address (extData recipient for transfers).
+    /// Pool contract address (extData recipient for transfers, and the pool
+    /// address for the domain-bound `ext_data_hash`).
     pub pool_address: String,
+    /// This pool's configured token address, for the domain-bound
+    /// `ext_data_hash`.
+    pub token_address: String,
     /// Notes to spend (1..=2). If one is provided, `transact()` pads the second
     /// input with a dummy.
     pub inputs: Vec<TransactInputNote>,
@@ -301,13 +324,14 @@ pub struct TransferParams {
 /// Deposit flow
 pub fn deposit<H>(params: DepositParams, hash_ext_data: H) -> Result<TransactArtifacts>
 where
-    H: Fn(&ExtData) -> Result<[u8; 32]>,
+    H: Fn(&ExtData, &str, &str) -> Result<[u8; 32]>,
 {
     let DepositParams {
         priv_key,
         encryption_pubkey,
         pool_root,
         pool_address,
+        token_address,
         amount,
         outputs,
         membership_proof,
@@ -325,6 +349,8 @@ where
             priv_key,
             encryption_pubkey,
             pool_root,
+            pool_address: pool_address.clone(),
+            token_address,
             ext_recipient: pool_address,
             ext_amount: amount,
             inputs: Vec::new(),
@@ -345,12 +371,14 @@ where
 /// Withdraw flow
 pub fn withdraw<H>(params: WithdrawParams, hash_ext_data: H) -> Result<TransactArtifacts>
 where
-    H: Fn(&ExtData) -> Result<[u8; 32]>,
+    H: Fn(&ExtData, &str, &str) -> Result<[u8; 32]>,
 {
     let WithdrawParams {
         priv_key,
         encryption_pubkey,
         pool_root,
+        pool_address,
+        token_address,
         withdraw_recipient,
         withdraw_amount,
         inputs,
@@ -407,6 +435,8 @@ where
             priv_key,
             encryption_pubkey,
             pool_root,
+            pool_address,
+            token_address,
             ext_recipient: withdraw_recipient,
             ext_amount: withdraw_amount
                 .checked_neg()
@@ -429,13 +459,14 @@ where
 /// Transfer flow
 pub fn transfer<H>(params: TransferParams, hash_ext_data: H) -> Result<TransactArtifacts>
 where
-    H: Fn(&ExtData) -> Result<[u8; 32]>,
+    H: Fn(&ExtData, &str, &str) -> Result<[u8; 32]>,
 {
     let TransferParams {
         priv_key,
         encryption_pubkey,
         pool_root,
         pool_address,
+        token_address,
         inputs,
         outputs,
         membership_proof,
@@ -453,6 +484,8 @@ where
             priv_key,
             encryption_pubkey,
             pool_root,
+            pool_address: pool_address.clone(),
+            token_address,
             ext_recipient: pool_address,
             ext_amount: ExtAmount::ZERO,
             inputs,
@@ -478,12 +511,14 @@ where
 /// - convenience derived values (nullifiers/commitments).
 pub fn transact<H>(params: TransactParams, hash_ext_data: H) -> Result<TransactArtifacts>
 where
-    H: Fn(&ExtData) -> Result<[u8; 32]>,
+    H: Fn(&ExtData, &str, &str) -> Result<[u8; 32]>,
 {
     let TransactParams {
         priv_key,
         encryption_pubkey,
         pool_root,
+        pool_address,
+        token_address,
         ext_recipient,
         ext_amount,
         inputs,
@@ -899,7 +934,7 @@ where
         encrypted_output1: encrypted_outputs[1].clone(),
     };
 
-    let ext_data_hash_be = hash_ext_data(&ext_data)?;
+    let ext_data_hash_be = hash_ext_data(&ext_data, &pool_address, &token_address)?;
     circuit.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
     if gvk_mode != GvkMode::Off {
         circuit.set_single("nonce", &be32_to_0x_hex(&ext_data_hash_be));
@@ -1280,6 +1315,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1296,7 +1332,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         )
         .expect("deposit builds");
 
@@ -1351,6 +1387,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1369,7 +1407,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         )
         .expect("blacklist-only transact builds");
 
@@ -1399,6 +1437,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1417,7 +1457,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         )
         .expect("open transact builds");
 
@@ -1449,6 +1489,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1467,7 +1509,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         )
         .expect("allowlist transact builds");
 
@@ -1499,6 +1541,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1517,7 +1561,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         let err = res.expect_err("membership proof at the pool depth must be rejected");
@@ -1540,6 +1584,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1558,7 +1604,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         assert!(res.is_err());
@@ -1576,6 +1622,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1594,7 +1642,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         assert!(res.is_err());
@@ -1612,6 +1660,8 @@ mod tests {
                 priv_key: NotePrivateKey([1u8; 32]),
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
                 inputs: Vec::new(),
@@ -1630,7 +1680,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         assert!(res.is_err());
@@ -1660,6 +1710,8 @@ mod tests {
                 priv_key,
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 withdraw_recipient: "G...".into(),
                 withdraw_amount: ExtAmount::from(7),
                 inputs: vec![input],
@@ -1673,7 +1725,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         )
         .expect("withdraw builds");
 
@@ -1720,6 +1772,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 inputs: vec![input],
                 outputs: vec![out],
                 membership_proof: Some(zero_membership(asp_depth_usize)),
@@ -1731,7 +1784,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         assert!(res.is_err());
@@ -1762,6 +1815,8 @@ mod tests {
                 priv_key,
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 withdraw_recipient: "G...".into(),
                 withdraw_amount: ExtAmount::ONE,
                 inputs: vec![input0],
@@ -1775,7 +1830,7 @@ mod tests {
                 gvk_mode: GvkMode::Off,
                 admin_view_key: None,
             },
-            |_| Ok([0u8; 32]),
+            |_, _, _| Ok([0u8; 32]),
         );
 
         assert!(res.is_ok());
@@ -1788,7 +1843,7 @@ mod tests {
         .expect("valid admin key")
     }
 
-    fn fixed_ext_data_hash(_ext: &ExtData) -> Result<[u8; 32]> {
+    fn fixed_ext_data_hash(_ext: &ExtData, _pool: &str, _token: &str) -> Result<[u8; 32]> {
         let mut bytes = [0u8; 32];
         bytes[0] = 0xAA;
         Ok(Field::try_from_le_bytes(bytes)?.to_be_bytes())
@@ -1839,6 +1894,7 @@ mod tests {
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1878,6 +1934,7 @@ mod tests {
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1944,6 +2001,7 @@ mod tests {
                 encryption_pubkey: EncryptionPublicKey([2u8; 32]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
                 inputs: vec![input],
                 outputs: vec![out],
                 membership_proof: Some(zero_membership(asp_depth_usize)),

@@ -4,16 +4,13 @@
 use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    Prover, Signer,
-    types::{
-        ContractConfig, KeyDerivationSignature, NoteOwnerAddress, PoolConfigEntry, SignerAddress,
-    },
-    zk::encryption::{self, KEY_DERIVATION_MESSAGE},
+    Prover, Signer, Storage,
+    types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
 };
 
 use crate::{
     keypair::TestKeypair,
-    network::{self, LocalNetwork, NETWORK_PASSPHRASE},
+    network::{self, DeploymentIdentity, LocalNetwork, NETWORK_PASSPHRASE},
     pool::PoolOptions,
 };
 
@@ -22,17 +19,18 @@ const ASP_LEVELS: u32 = 10;
 const POOL_LEVELS: u32 = 20;
 
 pub struct TestSession {
-    pub account: Account<LocalStorage>,
+    pub account: Account,
     pub wallet: TestKeypair,
+    pub identity: DeploymentIdentity,
     pool_contract_ids: Vec<String>,
 }
 
 impl TestSession {
-    pub fn pool(&self) -> Result<PrivatePool<LocalStorage>> {
+    pub fn pool(&self) -> Result<PrivatePool> {
         self.pool_at(0)
     }
 
-    pub fn pool_at(&self, index: usize) -> Result<PrivatePool<LocalStorage>> {
+    pub fn pool_at(&self, index: usize) -> Result<PrivatePool> {
         let pool_contract_id = self
             .pool_contract_ids
             .get(index)
@@ -41,14 +39,17 @@ impl TestSession {
     }
 }
 
-pub async fn deploy_default() -> Result<ContractConfig> {
+pub async fn deploy_default() -> Result<(ContractConfig, DeploymentIdentity)> {
     deploy(&[PoolOptions::NONE]).await
 }
 
 /// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
 /// they share ASP membership/non-membership contracts).
-pub async fn deploy(pools: &[PoolOptions]) -> Result<ContractConfig> {
-    deploy_with_max_deposit(MAX_DEPOSIT_STROOPS, pools).await
+pub async fn deploy(pools: &[PoolOptions]) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
 }
 
 /// Like [`deploy`], but with an explicit `max_deposit` cap instead of the
@@ -56,23 +57,45 @@ pub async fn deploy(pools: &[PoolOptions]) -> Result<ContractConfig> {
 pub async fn deploy_with_max_deposit(
     max_deposit: u128,
     pools: &[PoolOptions],
-) -> Result<ContractConfig> {
-    let network = LocalNetwork::shared().await?;
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
     network
-        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools)
+        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
+}
+
+/// Like [`deploy`], but `scope` is folded into the deploy cache key,
+/// guaranteeing a deployment private to this scope instead of one shared
+/// with any other test using the same `pools`.
+pub async fn deploy_scoped(
+    pools: &[PoolOptions],
+    scope: &str,
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(
+            MAX_DEPOSIT_STROOPS,
+            ASP_LEVELS,
+            POOL_LEVELS,
+            pools,
+            Some(scope),
+        )
         .await
 }
 
 /// Open a new wallet session against an existing deployment.
-pub async fn session(config: ContractConfig) -> Result<TestSession> {
-    let network = LocalNetwork::shared().await?;
+pub async fn session(
+    (config, identity): (ContractConfig, DeploymentIdentity),
+) -> Result<TestSession> {
+    let network = LocalNetwork::start().await?;
     let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
-    build_session(network, config, pool_entries).await
+    build_session(&network, config, identity, pool_entries).await
 }
 
 async fn build_session(
     network: &LocalNetwork,
     config: ContractConfig,
+    identity: DeploymentIdentity,
     pool_entries: Vec<PoolConfigEntry>,
 ) -> Result<TestSession> {
     let wallet = TestKeypair::generate();
@@ -84,8 +107,9 @@ async fn build_session(
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?;
-    save_privacy_keys(&storage, &wallet, &config.network)?;
+    let storage = Handle::from_box(Box::new(LocalStorage::open(
+        storage_path.to_str().context("storage path is not UTF-8")?,
+    )?) as Box<dyn Storage>);
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store
@@ -115,32 +139,19 @@ async fn build_session(
         NETWORK_PASSPHRASE,
         SignerAddress::new(wallet.address()),
     )?) as Box<dyn Signer>);
-    let account = client.account(
-        NoteOwnerAddress::new(wallet.address()),
-        SignerAddress::new(wallet.address()),
-        signer,
-    )?;
+    let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
+    account
+        .derive_privacy_keys()
+        .await
+        .context("derive privacy keys")?;
 
     Ok(TestSession {
         account,
         wallet,
+        identity,
         pool_contract_ids: pool_entries
             .into_iter()
             .map(|e| e.pool_contract_id)
             .collect(),
     })
-}
-
-fn save_privacy_keys(storage: &LocalStorage, wallet: &TestKeypair, network: &str) -> Result<()> {
-    let signature = KeyDerivationSignature(wallet.sign(KEY_DERIVATION_MESSAGE.as_bytes()).to_vec());
-    let (note_keypair, encryption_keypair) =
-        encryption::derive_encryption_and_note_keypairs(signature.clone())?;
-    let membership_blinding = encryption::derive_membership_blinding(&signature, network)?;
-    storage.storage_mut().save_encryption_and_note_keypairs(
-        &wallet.address(),
-        &note_keypair,
-        &encryption_keypair,
-        &membership_blinding,
-    )?;
-    Ok(())
 }

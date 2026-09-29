@@ -75,10 +75,10 @@ fn user_notes_some() {
 }
 
 #[test]
-fn user_public_keys_on_account() {
+fn privacy_keys_on_account() {
     let account = test_account(Some(&[2, 3, 5])).expect("test account");
 
-    let (note, enc) = account.user_public_keys().expect("user public keys");
+    let (note, enc) = account.privacy_keys().expect("user public keys");
     let (expected_note, expected_enc) = seeded_user_public_keys().expect("seeded keys");
 
     assert_eq!(note.0, expected_note.0);

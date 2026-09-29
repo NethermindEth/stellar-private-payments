@@ -14,8 +14,10 @@ use std::io::Write;
 use anyhow::{Context, Result, bail};
 use stellar_private_payments::{
     state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
+    types::KeyDerivationSignature,
     zk::encryption::{
         KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
+        verify_owner_signature,
     },
 };
 
@@ -60,7 +62,7 @@ pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
             account.alias
         );
     }
-    if storage.get_user_keys(&account.address)?.is_none() {
+    if storage.get_private_keys(&account.address)?.is_none() {
         bail!(
             "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
@@ -102,7 +104,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     }
 
     // 4. Derive privacy keys.
-    if storage.get_user_keys(&account.address)?.is_some() {
+    if storage.get_private_keys(&account.address)?.is_some() {
         say(interactive, "Privacy keys already present.");
     } else {
         if interactive {
@@ -127,6 +129,9 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
 
 /// Delegate the SEP-53 key-derivation signature to the Stellar CLI (the secret
 /// never enters this process) and store the derived privacy keys.
+///
+/// Duplicates `Account::derive_privacy_keys` in the SDK; should be integrated
+/// as part of a broader refactor.
 fn derive_and_save_keys(
     config: &CliConfig,
     account: &Account,
@@ -138,19 +143,38 @@ fn derive_and_save_keys(
         config.stellar_config_dir.as_deref(),
     )
     .context("derive privacy-key signature via stellar CLI")?;
+    save_owner_keys(
+        storage,
+        &account.address,
+        &config.deployment.network,
+        signature,
+    )
+}
+
+/// Check that `signature` is the owner's own, then derive the privacy keys from
+/// it and store them under the owner. Nothing is stored for any other key's
+/// signature.
+fn save_owner_keys(
+    storage: &mut SqliteStorage,
+    owner_address: &str,
+    network: &str,
+    signature: KeyDerivationSignature,
+) -> Result<()> {
+    verify_owner_signature(owner_address, KEY_DERIVATION_MESSAGE, &signature)
+        .context("check the privacy-key signature against the account")?;
 
     let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
         .context("derive privacy keypairs from wallet signature")?;
-    let membership_blinding = derive_membership_blinding(&signature, &config.deployment.network)?;
+    let membership_blinding = derive_membership_blinding(&signature, network)?;
 
     storage
         .save_encryption_and_note_keypairs(
-            &account.address,
+            owner_address,
             &note_keypair,
             &encryption_keypair,
             &membership_blinding,
         )
-        .context("save privacy keys to local wallet database")
+        .context("save private keys to local wallet database")
 }
 
 fn configure_bootnode(
@@ -257,4 +281,73 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
         "y" | "yes" => true,
         _ => false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use stellar_private_payments::{
+        chain::LocalSigner,
+        state::SqliteStorage,
+        types::KeyDerivationSignature,
+        zk::encryption::{KEY_DERIVATION_MESSAGE, sep53_payload},
+    };
+
+    use super::save_owner_keys;
+
+    /// What `stellar message sign` returns for `signer`.
+    fn derivation_signature(signer: &LocalSigner) -> KeyDerivationSignature {
+        KeyDerivationSignature(
+            signer
+                .sign(&sep53_payload(KEY_DERIVATION_MESSAGE))
+                .as_bytes()
+                .to_vec(),
+        )
+    }
+
+    #[test]
+    fn the_owners_signature_stores_keys() {
+        let owner = LocalSigner::from_seed([1; 32]);
+        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+
+        save_owner_keys(
+            &mut storage,
+            owner.public_key(),
+            "testnet",
+            derivation_signature(&owner),
+        )
+        .expect("the owner's own signature must store keys");
+
+        assert!(
+            storage
+                .get_private_keys(owner.public_key())
+                .expect("read keys")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn another_accounts_signature_stores_nothing() {
+        let owner = LocalSigner::from_seed([1; 32]);
+        let other = LocalSigner::from_seed([2; 32]);
+        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+
+        let error = save_owner_keys(
+            &mut storage,
+            owner.public_key(),
+            "testnet",
+            derivation_signature(&other),
+        )
+        .expect_err("another account's signature must be refused");
+
+        assert!(
+            format!("{error:#}").contains("not made by the note owner"),
+            "{error:#}"
+        );
+        assert!(
+            storage
+                .get_private_keys(owner.public_key())
+                .expect("read keys")
+                .is_none()
+        );
+    }
 }

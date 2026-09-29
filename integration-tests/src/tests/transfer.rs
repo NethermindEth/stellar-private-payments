@@ -11,10 +11,10 @@ const TRANSFER_STROOPS: u128 = 4_000_000;
 
 #[tokio::test]
 async fn transfer_via_address() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
-    recipient.account.register_public_keys(None, None).await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
@@ -41,10 +41,10 @@ async fn transfer_via_address() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_via_keys() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
-    let (note_public_key, encryption_public_key) = recipient.account.user_public_keys().await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    let (note_public_key, encryption_public_key) = recipient.account.privacy_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
@@ -74,10 +74,10 @@ async fn transfer_via_keys() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_insufficient_balance() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
-    recipient.account.register_public_keys(None, None).await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
 
     sender
         .pool()?
@@ -101,9 +101,9 @@ async fn transfer_insufficient_balance() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_unregistered_recipient() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
 
     sender
         .pool()?
@@ -127,10 +127,10 @@ async fn transfer_unregistered_recipient() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_double_spend() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
-    recipient.account.register_public_keys(None, None).await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
     let pool = sender.pool()?;
 
     pool.deposit(NoteAmount::from(DEPOSIT_STROOPS)).await?;
@@ -148,16 +148,20 @@ async fn transfer_double_spend() -> Result<()> {
     let mut plan_a = pool
         .prepare_transfer(&wallet, recipient_address.as_str(), half)
         .await?;
-    let prepared_a = pool.prove_next(&mut plan_a).await?;
+    let mut prepared_a = pool.prove_next(&mut plan_a).await?;
+    pool.simulate(&mut prepared_a).await?;
     let signed_a = pool.sign(&prepared_a).await?;
-    let hash_a = pool.submit(signed_a).await?;
-    pool.confirm(&hash_a).await?;
 
     let mut plan_b = pool
         .prepare_transfer(&wallet, recipient_address.as_str(), half)
         .await?;
-    let prepared_b = pool.prove_next(&mut plan_b).await?;
+    let mut prepared_b = pool.prove_next(&mut plan_b).await?;
+    pool.simulate(&mut prepared_b).await?;
     let signed_b = pool.sign(&prepared_b).await?;
+
+    let hash_a = pool.submit(signed_a).await?;
+    pool.confirm(&hash_a).await?;
+
     let rejected = match pool.submit(signed_b).await {
         Err(_) => true,
         Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),

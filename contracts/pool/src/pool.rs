@@ -106,7 +106,13 @@ pub struct Proof {
     pub asp_non_membership_root: U256,
 }
 
-/// Storage keys for contract persistent data
+/// Storage keys for contract data
+///
+/// The configuration the constructor writes, [`DataKey::Token`],
+/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
+/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`], and
+/// [`DataKey::PolicyFlags`], lives in the contract's instance entry.
+/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -202,22 +208,13 @@ impl PoolContract {
             return Err(Error::InvalidPolicyFlags);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::Token, &token);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Verifier, &verifier);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPMembership, &asp_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPNonMembership, &asp_non_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::PolicyFlags, &policy_flags);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Token, &token);
+        instance.set(&DataKey::Verifier, &verifier);
+        instance.set(&DataKey::ASPMembership, &asp_membership);
+        instance.set(&DataKey::ASPNonMembership, &asp_non_membership);
+        instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
+        instance.set(&DataKey::PolicyFlags, &policy_flags);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -391,21 +388,23 @@ impl PoolContract {
         }
     }
 
-    /// Hash external data using Keccak256
+    /// Hash external data using Keccak256, bound to this pool and its token
     ///
-    /// Serializes the external data to XDR, hashes it with Keccak256,
-    /// and reduces the result modulo the BN256 field size.
+    /// Serializes the external data together with this contract's address and
+    /// configured token to XDR, hashes with Keccak256, and reduces the result
+    /// modulo the BN256 field size.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
     /// * `ext` - The external data to hash
+    /// * `token` - This pool's own configured token address
     ///
     /// # Returns
     ///
     /// Returns the 32-byte hash of the external data
-    fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
-        hash_ext_data(env, ext)
+    fn hash_ext_data(env: &Env, ext: &ExtData, token: &Address) -> BytesN<32> {
+        hash_ext_data(env, ext, token)
     }
 
     /// Execute a shielded transaction with deposit handling
@@ -432,6 +431,9 @@ impl PoolContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
+        // The tree entry is rewritten below; keep the configuration it
+        // reads on the same lifetime.
+        pool_core::extend_instance(env);
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
@@ -484,8 +486,11 @@ impl PoolContract {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-        // 3. External data hash check
-        let ext_hash = Self::hash_ext_data(env, &ext_data);
+        // 3. External data hash check, bound to this pool's address and its
+        // own configured token, so a hash computed for another pool or token
+        // cannot match here.
+        let token = Self::get_token(env)?;
+        let ext_hash = Self::hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }
@@ -565,7 +570,7 @@ impl PoolContract {
     /// Get the token contract address
     fn get_token(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)
     }
@@ -573,7 +578,7 @@ impl PoolContract {
     /// Get the maximum deposit amount
     fn get_maximum_deposit(env: &Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::MaximumDepositAmount)
             .ok_or(Error::NotInitialized)
     }
@@ -581,7 +586,7 @@ impl PoolContract {
     /// Get the verifier contract address
     fn get_verifier(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Verifier)
             .ok_or(Error::NotInitialized)
     }
@@ -601,7 +606,7 @@ impl PoolContract {
 
     fn load_policy_flags(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::PolicyFlags)
             .ok_or(Error::NotInitialized)
     }
@@ -662,7 +667,7 @@ impl PoolContract {
     /// Get the ASP Membership contract address
     fn get_asp_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPMembership)
             .ok_or(Error::NotInitialized)
     }
@@ -670,7 +675,7 @@ impl PoolContract {
     /// Get the ASP Non-Membership contract address
     fn get_asp_non_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPNonMembership)
             .ok_or(Error::NotInitialized)
     }
@@ -688,7 +693,7 @@ impl PoolContract {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
-            .persistent()
+            .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
         Ok(())
     }
@@ -709,7 +714,7 @@ impl PoolContract {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
-            .persistent()
+            .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
         Ok(())
     }

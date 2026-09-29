@@ -54,7 +54,7 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     );
     while leaves.len() > 1 {
         let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in leaves.chunks_exact(2) {
+        for pair in leaves.as_chunks::<2>().0 {
             next.push(poseidon2_compression(pair[0], pair[1]));
         }
         leaves = next;
@@ -216,7 +216,7 @@ pub fn merkle_proof(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, u
         path_indices_bits_lsb.push((index & 1) as u64);
 
         let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in level_nodes.chunks_exact(2) {
+        for pair in level_nodes.as_chunks::<2>().0 {
             next.push(poseidon2_compression(pair[0], pair[1]));
         }
         level_nodes = next;

@@ -35,10 +35,10 @@ async fn user_notes_basic() -> Result<()> {
 
 #[tokio::test]
 async fn user_notes_transfer() -> Result<()> {
-    let config = deploy_default().await?;
-    let sender = session(config.clone()).await?;
-    let recipient = session(config).await?;
-    recipient.account.register_public_keys(None, None).await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
@@ -87,7 +87,15 @@ async fn sync_inline_idempotent() -> Result<()> {
 #[tokio::test]
 async fn unknown_pool() -> Result<()> {
     let session = session(deploy_default().await?).await?;
+
+    // bad format
     let pool_res = session.account.pool("unknown-pool-contract-id");
+    assert!(pool_res.is_err());
+
+    // non-existent pool
+    let pool_res = session
+        .account
+        .pool("CBEDPYMAEPQ6JRXWKWXRM6CFHHJLKA5RHPRRLSD4UZXZRGNMBXOT3LMW");
     assert!(pool_res.is_err());
 
     Ok(())
@@ -98,7 +106,7 @@ async fn is_registered() -> Result<()> {
     let session = session(deploy_default().await?).await?;
     assert!(!session.account.is_registered().await?);
 
-    session.account.register_public_keys(None, None).await?;
+    session.account.register_public_keys().await?;
     assert!(session.account.is_registered().await?);
 
     Ok(())
@@ -150,7 +158,7 @@ async fn balance_native() -> Result<()> {
 #[tokio::test]
 async fn balance_classic() -> Result<()> {
     let session = session(deploy_default().await?).await?;
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
 
     network
         .establish_trustline(&session.wallet.secret(), "TEST")
@@ -176,7 +184,7 @@ async fn balance_classic() -> Result<()> {
 #[tokio::test]
 async fn balance_contract() -> Result<()> {
     let session = session(deploy_default().await?).await?;
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
 
     let contract_id = network.deploy_asset_sac("TOK").await?;
     network

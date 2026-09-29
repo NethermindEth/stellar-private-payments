@@ -36,6 +36,18 @@ const CONTRACT_ERRORS = {
  */
 const ERROR_PATTERNS = [
     {
+        // The wallet signed as another account than the one asked for: Freighter
+        // does not hold the chosen account and signs as its active one instead.
+        // Worded by the SDK's signer (sdk/web/src/signer.rs) for transactions,
+        // and by wallet-signer-guard.js for the app's own wallet calls.
+        test: (msg) => {
+            const lower = msg.toLowerCase();
+            return lower.includes('not the requested') ||
+                   lower.includes('signed with a different account');
+        },
+        message: 'The account chosen to sign and pay isn\'t in Freighter, so it signed with another account. Add the account to Freighter or pick another one.',
+    },
+    {
         // Pool InvalidProof (#7) or Verifier InvalidProof (#0)
         test: (msg) => {
             const lower = msg.toLowerCase();

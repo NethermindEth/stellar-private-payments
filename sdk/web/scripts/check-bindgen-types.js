@@ -173,11 +173,9 @@ const exportAliases = new Map([
   ['init', ['default', 'init']],
 ]);
 
-/** wasm-bindgen option parsers — used internally, not part of the public facade. */
+/** wasm-bindgen exports used internally by the JS facade, not part of the public API. */
 const internalWasmExports = new Set([
-  'AccountOptions',
   'PoolOptions',
-  'RegisterPublicKeysOptions',
   'VerifyDisclosureOptions',
   // Async/sync init plumbing (public entry re-exports only `default` / `init`).
   'InitInput',
@@ -185,6 +183,11 @@ const internalWasmExports = new Set([
   'SyncInitInput',
   'initSync',
   '__wbg_init',
+  'ProverHandle',
+  'SignerHandle',
+  'StorageHandle',
+  'registerTelemetrySinks',
+  'SinkRegistration',
 ]);
 
 function isInternalWasmExport(name) {

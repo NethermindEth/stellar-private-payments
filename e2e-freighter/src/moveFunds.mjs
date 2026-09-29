@@ -186,6 +186,16 @@ export async function submitAndConfirmOperation(
   const previousHashes = (await submittedToasts(page)).map((toast) => toast.transactionHash);
 
   if (fillBeforeSubmit) await fillBeforeSubmit();
+  // These scenarios use the connected owner unless the test chose another
+  // account. Make that choice through the UI now that it has no default.
+  if (flowName !== 'deposit') {
+    const signer = page.getByTestId(flowName === 'advanced' ? 'advanced-signing-account-select' : 'signing-account-select');
+    const owner = await signer.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
+    if (!(await signer.inputValue())) await signer.selectOption(owner);
+    if (flowName === 'withdraw' && !(await page.locator('#withdraw-recipient-select').inputValue())) {
+      await page.locator('#withdraw-recipient-select').selectOption(owner);
+    }
+  }
   if (amountSelector) {
     if (amount === undefined) throw new TypeError(`${flowName}: amount is required when amountSelector is set`);
     await page.fill(amountSelector, amount);

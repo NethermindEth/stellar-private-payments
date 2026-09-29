@@ -73,15 +73,15 @@ export class AppStorage {
     }
 
     /** Whether privacy keys are stored locally for an address (onboarding only). */
-    async userKeysExist(address) {
-        const response = await this.#call({ UserKeys: address }, 1_000);
-        return response.UserKeys != null;
+    async privacyKeysExist(address) {
+        const response = await this.#call({ PrivacyKeys: address }, 1_000);
+        return response.PrivacyKeys != null;
     }
 
     /** Public note/encryption keys only (onboarding; no ASP secret). */
-    async getUserPublicKeys(address) {
-        const response = await this.#call({ UserKeys: address }, 1_000);
-        return response.UserKeys ?? null;
+    async getPrivacyKeys(address) {
+        const response = await this.#call({ PrivacyKeys: address }, 1_000);
+        return response.PrivacyKeys ?? null;
     }
 
     async acceptDisclaimer(address, disclaimerHashHex) {
