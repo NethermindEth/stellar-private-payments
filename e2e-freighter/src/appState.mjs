@@ -11,11 +11,7 @@ export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 export const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
 export const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
 export const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
-export const STORAGE_PASSWORD_DIALOG_SELECTOR = '[data-testid="storage-password-dialog"]';
-
-// Private scenarios explicitly open local data, then use this password to
-// create, migrate or unlock it. Public connection must not ask for a password.
-export const APP_PASSWORD = process.env.E2E_APP_PASSWORD || 'e2e local data password';
+export const STORAGE_WALLET_DIALOG_SELECTOR = '[data-testid="storage-wallet-dialog"]';
 
 export async function readWalletState(page) {
   return (await page.locator('body').getAttribute(WALLET_STATE_ATTRIBUTE).catch(() => null)) || 'unknown';
@@ -37,58 +33,39 @@ export async function isBootnodeConsentVisible(page) {
   return page.locator(BOOTNODE_CONSENT_MODAL_SELECTOR).isVisible().catch(() => false);
 }
 
-export async function isStoragePasswordVisible(page) {
-  return page.locator(STORAGE_PASSWORD_DIALOG_SELECTOR).isVisible().catch(() => false);
+export async function isStorageWalletVisible(page) {
+  return page.locator(STORAGE_WALLET_DIALOG_SELECTOR).isVisible().catch(() => false);
 }
 
 export async function readAppLifecycle(page) {
-  const [walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible] = await Promise.all([
+  const [walletState, onboardingVisible, bootnodeConsentVisible, storageWalletVisible] = await Promise.all([
     readWalletState(page),
     isOnboardingWizardVisible(page),
     isBootnodeConsentVisible(page),
-    isStoragePasswordVisible(page),
+    isStorageWalletVisible(page),
   ]);
-  return { walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible };
+  return { walletState, onboardingVisible, bootnodeConsentVisible, storageWalletVisible };
 }
 
-/**
- * Answer the local-data password dialog with {@link APP_PASSWORD}, whichever
- * of its modes is open, and wait until the app accepts it. Unlocking derives
- * the key and may first encrypt an earlier database, so this can take a while.
- */
-export async function answerStoragePassword(page) {
-  const dialog = page.locator(STORAGE_PASSWORD_DIALOG_SELECTOR);
+/** Approve only the wallet messages requested by the local storage dialog. */
+export async function answerStorageWallet(page, context) {
+  const { approveOrWatch } = await import('./wallet.mjs');
+  const dialog = page.locator(STORAGE_WALLET_DIALOG_SELECTOR);
   const mode = await dialog.getAttribute('data-mode');
-  await page.getByTestId('storage-password-input').fill(APP_PASSWORD);
-  if (mode !== 'locked') {
-    await page.getByTestId('storage-password-confirm').fill(APP_PASSWORD);
+  const approvals = ['new', 'unencrypted'].includes(mode) ? 2 : 1;
+  await page.getByTestId('storage-wallet-submit').click();
+  for (let i = 0; i < approvals; i++) {
+    await approveOrWatch(context, 'signMessage', { timeoutMs: 30_000 });
   }
-  await page.getByTestId('storage-password-submit').click();
   const { value } = await waitForCondition({
-    operation: `storage:password-${mode}`,
-    timeoutMs: 120_000,
-    intervalMs: 200,
-    // Existing wallet scenarios use password-only storage. Dismiss the
-    // optional Freighter offer before waiting for the dialog to close.
-    observe: async () => {
-      const skip = page.getByTestId('storage-freighter-skip');
-      if (await skip.isVisible()) await skip.click();
-      const skipPasskey = page.getByTestId('storage-passkey-skip');
-      if (await skipPasskey.isVisible()) await skipPasskey.click();
-      return page.evaluate((selector) => {
-        const node = document.querySelector(selector);
-        return {
-          visible: Boolean(node?.checkVisibility()),
-          error: node?.querySelector('[data-testid="storage-password-error"]')?.textContent ?? '',
-        };
-      }, STORAGE_PASSWORD_DIALOG_SELECTOR);
-    },
+    operation: 'storage:wallet-unlock', timeoutMs: 120_000, intervalMs: 100,
+    observe: async () => ({
+      visible: await dialog.isVisible(),
+      error: await page.getByTestId('storage-wallet-error').textContent().catch(() => ''),
+    }),
     isReady: ({ visible, error }) => !visible || Boolean(error?.trim()),
   });
-  if (value.visible) {
-    throw new Error(`the local-data password was refused (${mode}): ${value.error.trim()}`);
-  }
-  return mode;
+  if (value.visible) throw Error(`Wallet storage failed: ${value.error}`);
 }
 
 /**

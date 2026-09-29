@@ -59,11 +59,11 @@ try {
     page.setDefaultTimeout(120_000);
     await page.goto(`http://localhost:${server.address().port}/`);
     await page.waitForFunction(() => window.ready);
-    const password = 'correct horse battery staple';
-    await page.evaluate(async password => {
-        await storage.create(password);
+    const wallet = { context: { version: 1, address: 'G' + 'A'.repeat(55), origin: 'https://storage.test', salt: '01'.repeat(32) }, secret: 'ab'.repeat(32) };
+    await page.evaluate(async wallet => {
+        await storage.createWallet(wallet.context, wallet.secret);
         await storage.call({SetSetting:{key:'crash-marker', value_json:JSON.stringify('committed')}});
-    }, password);
+    }, wallet);
     const worker = page.workers()[0];
     await worker.evaluate(() => { globalThis.armCrash = true; });
     const paused = page.waitForEvent('console', { predicate: message => message.text() === 'TEST_UNCOMMITTED_DB_WRITE', timeout: 120_000 });
@@ -91,20 +91,20 @@ try {
     const hot = await snapshot();
     assert(hot.some(file => file.logical === 'spp.encrypted.db-journal' && file.size > 4096), 'abrupt kill must leave a real rollback journal');
     assert.equal(await page.evaluate(async () => {
-        try { await storage.unlock('wrong password'); return false; } catch (error) { return error.code === 'wrong-password'; }
+        try { await storage.unlockWallet(await storage.walletContext(), 'cd'.repeat(32)); return false; } catch { return true; }
     }), true);
-    assert.deepEqual(await snapshot(), hot, 'wrong password must preserve hot-journal bytes');
-    await page.evaluate(password => storage.unlock(password), password);
+    assert.deepEqual(await snapshot(), hot, 'wrong wallet secret must preserve hot-journal bytes');
+    await page.evaluate(wallet => storage.unlockWallet(wallet.context, wallet.secret), wallet);
     assert.equal(await page.evaluate(async () => (await storage.call({GetSetting:'crash-marker'})).Setting), JSON.stringify('committed'));
     await page.evaluate(async () => {
         await storage.call({SetSetting:{key:'after-recovery',value_json:'true'}});
         await storage.close();
     });
     await page.reload(); await page.waitForFunction(() => window.ready);
-    await page.evaluate(password => storage.unlock(password), password);
+    await page.evaluate(wallet => storage.unlockWallet(wallet.context, wallet.secret), wallet);
     assert.equal(await page.evaluate(async () => (await storage.call({GetSetting:'after-recovery'})).Setting), 'true');
     await page.evaluate(() => storage.close());
-    console.log('PASS: real SAH hot-journal recovery after worker termination mid-write, wrong-password non-mutation, subsequent durable writes');
+    console.log('PASS: real SAH hot-journal recovery after worker termination mid-write, wrong-wallet-secret non-mutation, subsequent durable writes');
 } finally {
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));

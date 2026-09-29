@@ -16,10 +16,10 @@ test('retry after a timed-out status discovers completion without reopening', as
     await openStorage({ status: async () => 'unlocked' }, async () => { calls++; });
     assert.equal(calls, 0);
 });
-test('wrong password and unavailable status retain original failure', async () => {
+test('wrong wallet secret and unavailable status retain original failure', async () => {
     for (const after of ['locked', 'unavailable']) {
         let calls = 0;
-        const error = Error('wrong password');
+        const error = Error('wrong wallet secret');
         const storage = { status: async () => {
             if (calls && after === 'unavailable') throw Error('timed out');
             return 'locked';
@@ -45,7 +45,7 @@ test('opening and unresponsive workers have a bounded wait', async () => {
     }
 });
 test('recovery unlock is accepted without reopening', async () => {
-    await openStorage({ status: async () => 'password-recovery-required' }, async () => {
+    await openStorage({ status: async () => 'unlocked' }, async () => {
         assert.fail('must not reopen a recovered database');
     });
 });

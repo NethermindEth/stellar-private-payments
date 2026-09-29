@@ -1,6 +1,6 @@
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, ensurePrivateStorage } from '../wasm-facade.js';
+import { client, ensurePrivateStorage, isStorageUnlocked } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { Utils, Toast } from './core.js';
 import {
@@ -265,14 +265,19 @@ export async function runOnboardingWizard({
     address,
     networkPassphrase,
     bootnodeRequired = false,
-    publicOnly = false,
     signer = new FreighterSigner(),
 } = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
     const storage = client().storage();
-    const disclaimerState = publicOnly ? null : await storage.getDisclaimerState(address);
-    const storedPublicKeys = publicOnly ? null : await storage.getPrivacyKeys(address).catch(() => null);
+    // Existing vaults must open before we can read private onboarding state.
+    // First-run setup remains a single wizard and does not prompt ahead of it.
+    if (!isStorageUnlocked() && ['locked', 'recovery-required'].includes(await storage.privateStatus())) {
+        await ensurePrivateStorage();
+    }
+    const disclaimerState = isStorageUnlocked() ? await storage.getDisclaimerState(address) : await storage.getDisclaimerText();
+    let pendingDisclaimer = false;
+    const storedPublicKeys = isStorageUnlocked() ? await storage.getPrivacyKeys(address) : null;
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
@@ -291,15 +296,15 @@ export async function runOnboardingWizard({
         bootnodeRequired && !(bootnodeSetting?.enabled && bootnodeSetting?.url);
 
     const steps = [
-        ...(!publicOnly && !disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeUnresolved ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...(!publicOnly && !keysExist ? ['keys'] : []),
+        ...(!keysExist ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
         // user is unregistered — skip it rather than falsely suggesting registration.
-        ...((!publicOnly && !registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
+        ...((!registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
     ].flat();
 
     // Registration is optional (also available later from Settings), so it must
@@ -337,16 +342,16 @@ export async function runOnboardingWizard({
 
     STEP_ORDER.forEach(stepId => {
         const step = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
-        if (step) step.hidden = publicOnly && !steps.includes(stepId);
+        if (step) step.hidden = false;
         setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
     });
 
     const ensureNotCancelled = () => {
-        if (cancelled) throw new Error('Onboarding cancelled');
+        if (cancelled) throw Object.assign(new Error('Onboarding cancelled'), { code: 'unlock-cancelled' });
     };
 
     const waitForStep = (setup) => new Promise((resolve, reject) => {
-        closeHandler = () => reject(new Error('Onboarding cancelled'));
+        closeHandler = () => reject(Object.assign(new Error('Onboarding cancelled'), { code: 'unlock-cancelled' }));
         setup(
             (value) => {
                 closeHandler = null;
@@ -386,7 +391,8 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             accept.disabled = true;
-                            await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
+                            if (isStorageUnlocked()) await storage.acceptDisclaimer(address, disclaimerState.disclaimerHashHex);
+                            else pendingDisclaimer = true;
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
@@ -468,8 +474,8 @@ export async function runOnboardingWizard({
             });
             const panel = makePanel({
                 eyebrow: `Step ${i + 1} of ${steps.length}`,
-                title: 'Derive note keys and ASP secret',
-                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
+                title: 'Set up private payments',
+                body: 'Freighter first unlocks your encrypted local data. New storage needs two matching approvals. If privacy keys are missing, one separate message derives them and your ASP secret. These messages do not move funds.',
                 aside: secretWrap,
             });
             renderContent(panel);
@@ -477,16 +483,24 @@ export async function runOnboardingWizard({
             await waitForStep((resolve, reject) => {
                 const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const derive = makeButton({
-                    text: 'Derive and store keys',
+                    text: 'Set up private payments',
                     variant: 'primary',
                     onClick: async () => {
                         try {
                             derive.disabled = true;
+                            await ensurePrivateStorage();
+                            if (pendingDisclaimer) {
+                                await storage.acceptDisclaimer(address, disclaimerState.disclaimerHashHex);
+                                pendingDisclaimer = false;
+                            }
                             await client().openAccount(
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await client().account().derivePrivacyKeys();
+                            const existing = await storage.getPrivacyKeys(address);
+                            const result = existing?.noteKeypair?.public
+                                ? { notePublicKey: existing.noteKeypair.public, encryptionPublicKey: existing.encryptionKeypair.public }
+                                : await client().account().derivePrivacyKeys();
                             state.keys = {
                                 pubKey: result.notePublicKey,
                                 encryptionKeypair: { publicKey: result.encryptionPublicKey },
@@ -685,37 +699,6 @@ export async function runOnboardingWizard({
         }
     }
 
-    if (publicOnly) {
-        renderWhy('keys');
-        renderContent(makePanel({
-            eyebrow: 'Public setup complete',
-            title: 'Set up private payments',
-            body: 'To store your private keys and use private payments, create or unlock your local password-protected storage. You can also continue browsing public activity and set this up later.',
-        }));
-        const privateSetup = await waitForStep(resolve => {
-            const later = makeButton({ text: 'Continue with public data', variant: 'ghost', onClick: () => resolve(false) });
-            const setup = makeButton({
-                text: 'Set up private payments', variant: 'primary',
-                onClick: async () => {
-                    setup.disabled = true;
-                    later.disabled = true;
-                    try {
-                        await ensurePrivateStorage();
-                        resolve(true);
-                    } catch (error) {
-                        if (error?.code !== 'unlock-cancelled') setError(error?.message || 'Could not open private storage');
-                        setup.disabled = false;
-                        later.disabled = false;
-                    }
-                },
-            });
-            renderActions([later, setup]);
-        });
-        ensureNotCancelled();
-        if (privateSetup) {
-            return runOnboardingWizard({ address, networkPassphrase, bootnodeRequired, signer });
-        }
-    }
 
     hideModal();
 }

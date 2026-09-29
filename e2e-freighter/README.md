@@ -174,10 +174,11 @@ to the repo root), controlled by two env vars:
   for you to click.
 - `HEADFUL=1` — runs Chrome with a visible window instead of headless.
 
-The app encrypts its local data and asks for a password when the wallet
-connects. `connectApp` answers that dialog with `E2E_APP_PASSWORD`
-(default `e2e local data password`): it sets the password on a fresh
-profile, encrypts data an earlier version left unencrypted, or unlocks.
+The app encrypts private local data with a wallet-only envelope. The runner
+approves two matching Freighter messages during setup, one during later unlocks,
+and a separate privacy-key derivation message when keys are missing. App passwords
+and passkeys are not part of this flow. The extension's own password remains
+managed by the disposable test profile.
 
 ### Mode 1 — Headless, auto-approve (what CI runs)
 

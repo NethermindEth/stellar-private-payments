@@ -115,7 +115,6 @@ fn start_processor() {
 
 /// Stop serving the database, keeping the OPFS pools for another open.
 fn detach() {
-    super::storage_access::clear_recovery_key();
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
     PUBLIC_STORAGE.with(|s| s.borrow_mut().take());
@@ -132,28 +131,22 @@ fn close_storage() {
 /// Create or unlock the database while no other open is in progress. A
 /// failure leaves the worker locked, so the user can try again.
 async fn open_with(
-    open: impl std::future::Future<Output = Result<Option<SqliteStorage>>>,
+    open: impl std::future::Future<Output = Result<SqliteStorage>>,
 ) -> Result<StorageWorkerResponse> {
     anyhow::ensure!(
         INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
         "the database is already open, opening or closed"
     );
-    super::storage_access::clear_recovery_key();
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
     match open.await {
-        Ok(Some(mut storage)) => {
+        Ok(mut storage) => {
             if let Err(error) = with_public_mut!(cache => storage.synchronize_public_cache(cache)?)
             {
-                super::storage_access::clear_recovery_key();
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
                 return Err(error);
             }
             start(storage);
             Ok(StorageWorkerResponse::Saved)
-        }
-        Ok(None) => {
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
-            Ok(StorageWorkerResponse::WrongPassword)
         }
         Err(e) => {
             INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
@@ -189,12 +182,10 @@ fn requires_private(req: &StorageWorkerRequest) -> bool {
         GetSetting(key) | SetSetting { key, .. } => !SqliteStorage::is_public_setting(key),
         Status
         | OpenPublic
-        | Create(_)
-        | Unlock(_)
+        | CreateWallet { .. }
         | WalletContext
-        | PasskeyContext
+        | DisclaimerText
         | UnlockWallet { .. }
-        | UnlockPasskey { .. }
         | Reset
         | Pause
         | Ping
@@ -221,12 +212,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
     }
     if matches!(
         req,
-        StorageWorkerRequest::Create(_)
-            | StorageWorkerRequest::Unlock(_)
+        StorageWorkerRequest::CreateWallet { .. }
             | StorageWorkerRequest::UnlockWallet { .. }
-            | StorageWorkerRequest::UnlockPasskey { .. }
             | StorageWorkerRequest::WalletContext
-            | StorageWorkerRequest::PasskeyContext
     ) && INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending))
     {
         return Err(anyhow!("private data is opening; retry shortly"));
@@ -259,73 +247,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 super::storage_access::status(matches!(state, InitState::Ready)).await?,
             ),
         },
-        StorageWorkerRequest::Create(password) => {
-            return open_with(async {
-                Ok(Some(super::storage_access::create(&password.0).await?))
-            })
-            .await;
-        }
-        StorageWorkerRequest::Unlock(password) => {
-            return open_with(super::storage_access::unlock(&password.0)).await;
+        StorageWorkerRequest::CreateWallet { context, secret } => {
+            return open_with(super::storage_access::create_wallet(context, &secret.0)).await;
         }
         StorageWorkerRequest::WalletContext => {
             StorageWorkerResponse::WalletContext(super::storage_access::wallet_context().await?)
         }
-        StorageWorkerRequest::EnrollWallet {
-            password,
-            context,
-            secret,
-        } => {
-            anyhow::ensure!(
-                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
-                "unlock the database first"
-            );
-            super::storage_access::enroll_wallet(&password.0, context, &secret.0)?;
-            StorageWorkerResponse::Saved
-        }
         StorageWorkerRequest::UnlockWallet { context, secret } => {
             return open_with(super::storage_access::unlock_wallet(&context, &secret.0)).await;
-        }
-        StorageWorkerRequest::PasskeyContext => {
-            StorageWorkerResponse::PasskeyContext(super::storage_access::passkey_context().await?)
-        }
-        StorageWorkerRequest::EnrollPasskey {
-            password,
-            context,
-            secret,
-        } => {
-            anyhow::ensure!(
-                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
-                "unlock the database first"
-            );
-            super::storage_access::enroll_passkey(&password.0, context, &secret.0)?;
-            StorageWorkerResponse::Saved
-        }
-        StorageWorkerRequest::UnlockPasskey { context, secret } => {
-            return open_with(super::storage_access::unlock_passkey(&context, &secret.0)).await;
-        }
-        StorageWorkerRequest::RemoveWallet(password) => {
-            super::storage_access::remove_wallet(&password.0)?;
-            StorageWorkerResponse::Saved
-        }
-        StorageWorkerRequest::RemovePasskey(password) => {
-            super::storage_access::remove_passkey(&password.0)?;
-            StorageWorkerResponse::Saved
-        }
-        StorageWorkerRequest::RecoverPassword(password) => {
-            anyhow::ensure!(
-                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)),
-                "unlock the database first"
-            );
-            super::storage_access::recover_password(&password.0)?;
-            StorageWorkerResponse::Saved
-        }
-        StorageWorkerRequest::ChangePassword { current, new } => {
-            if super::storage_access::change_password(&current.0, &new.0)? {
-                StorageWorkerResponse::Saved
-            } else {
-                StorageWorkerResponse::WrongPassword
-            }
         }
         StorageWorkerRequest::Reset => {
             anyhow::ensure!(
@@ -455,6 +384,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             kick_processor();
             StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::DisclaimerText => {
+            use stellar_private_payments::state::{
+                CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD,
+            };
+            StorageWorkerResponse::DisclaimerState(DisclaimerStatePayload {
+                disclaimer_text_md: CURRENT_DISCLAIMER_TEXT_MD.into(),
+                disclaimer_hash_hex: CURRENT_DISCLAIMER_HASH_HEX.into(),
+                accepted: false,
+            })
         }
         StorageWorkerRequest::DisclaimerState(address) => {
             tracing::trace!(

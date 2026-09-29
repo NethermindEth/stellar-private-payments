@@ -15,7 +15,7 @@ const fixtures = {
       ensurePrivateStorage = async () => { counts.prompts++; if (!state.unlocked) throw Object.assign(Error('cancelled'), { code:'unlock-cancelled' }); };`,
     './core.js': 'export const App = app, Utils = utils, Toast = { show: message => messages.push(message) };',
     './pool.js': 'export const closeAppPool = () => {}, createAppPool = async () => {}',
-    './onboarding-wizard.js': 'export const runOnboardingWizard = async options => { counts.onboard++; counts.publicOnboard += Number(options.publicOnly); };',
+    './onboarding-wizard.js': 'export const runOnboardingWizard = async options => { counts.onboard++; if ("publicOnly" in options) throw Error("split onboarding is forbidden"); };',
     './confirm.js': 'export const confirmAction = async () => false;',
     '../db-locked.js': 'export const isDbLockedError = () => false, showDbLockedModal = () => {};',
     '../signing-account.js': 'export const rememberedSigners = () => [];',
@@ -55,15 +55,15 @@ function harness() {
 }
 
 for (const auto of [false, true]) {
-    test(`${auto ? 'automatic' : 'manual'} wallet connection syncs publicly with public onboarding and without reading private preferences`, async () => {
+    test(`${auto ? 'automatic' : 'manual'} wallet connection syncs publicly with unified onboarding and without reading private preferences`, async () => {
         const c = harness();
         await c.navigation.Wallet.connect({ auto });
         assert.equal(c.document.body.dataset.walletState, 'locked');
         assert.equal(c.counts.background, 1);
         assert.equal(c.counts.prompts, 0);
         assert.equal(c.counts.privateReads, 0);
-        assert.equal(c.counts.onboard, 1);
-        assert.equal(c.counts.publicOnboard, 1);
+        assert.equal(c.counts.onboard, auto ? 0 : 1);
+        assert.equal(c.counts.publicOnboard, 0);
         await c.navigation.Wallet.saveSettings();
         assert.equal(c.counts.privateWrites, 0, 'ordinary settings must not write private telemetry preferences while locked');
     });
@@ -83,7 +83,7 @@ test('first connection keeps private setup deferred; an explicit unlock resumes 
     c.window.dispatchEvent(new Event('spp:storage-unlocked'));
     await ready;
     assert.equal(c.counts.onboard, 2);
-    assert.equal(c.counts.publicOnboard, 1);
+    assert.equal(c.counts.publicOnboard, 0);
     // Let the remainder of connect() record the successful owner.
     await c.navigation.Wallet._connectPromise;
     assert.equal(c.state.remembered, 'OWNER');

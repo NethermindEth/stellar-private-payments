@@ -34,7 +34,7 @@ export async function prepare({ page, context }) {
 
 export async function run({ page, context, ...wallet }) {
   assert(await page.locator('#onboarding-modal').isVisible(), 'First connection must show onboarding');
-  assert(!await page.getByTestId('storage-password-dialog').isVisible(), 'Onboarding must start before asking for a password');
+  assert(!await page.getByTestId('storage-wallet-dialog').isVisible(), 'Onboarding must start before asking for a password');
   await driveWizard(page, context, { ...wallet, publicOnly: true });
   await waitForCondition({
     operation: 'first-connect:public-feed', timeoutMs: 60_000, intervalMs: 100,
@@ -45,7 +45,7 @@ export async function run({ page, context, ...wallet }) {
     }),
     isReady: ({ synced, feed }) => synced === 'Synced' && Boolean(feed.trim()),
   });
-  assert(!await page.getByTestId('storage-password-dialog').isVisible(), 'public connection asked for a password');
+  assert(!await page.getByTestId('storage-wallet-dialog').isVisible(), 'public connection asked for a password');
   assert(errors.length === 0, `Browser errors: ${errors.join('\n')}`);
   const delay = await page.evaluate(() => window.publicReadyAt) - firstIndexedAt;
   console.log(`First connection: feed and badge updated ${delay} ms after indexer catch-up`);

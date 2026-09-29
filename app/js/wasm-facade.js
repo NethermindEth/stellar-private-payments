@@ -203,7 +203,7 @@ export async function ensurePrivateStorage() {
     if (!privateOpening) {
         privateOpening = (async () => {
             await unlockStorage(storageHandle, { onOpened: () => {
-                // Also protect the optional enrollment screens after creation.
+                // Protect the remaining onboarding steps as soon as the vault opens.
                 if (!stopAutoLock) stopAutoLock = startAutoLock(() => void lockStorage());
             } });
             privateUnlocked = true;
@@ -226,13 +226,14 @@ export async function lockStorage() {
     await closeAndReload(storageHandle);
 }
 
-/**
- * Replace the database password. Rejects with `code: "wrong-password"` when
- * `current` is wrong.
- */
-export async function changeStoragePassword(current, next) {
-    await ensurePrivateStorage();
-    await withStorageActivity(() => storageHandle.changePassword(current, next));
+/** Delete local databases without requiring private access or wallet approval. */
+export async function resetLocalData() {
+    await ensureStorage();
+    // Stop the indexer before deletion so it cannot repopulate the empty cache
+    // with progress from the old session.
+    disposeClient();
+    await withStorageActivity(() => storageHandle.reset());
+    await lockStorage();
 }
 
 /** Settings access to the currently unlocked worker; never opens a dialog. */

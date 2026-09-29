@@ -7,7 +7,7 @@ use serde::Deserialize;
 use wasm_bindgen::{JsCast, prelude::*};
 
 use crate::{
-    protocol::{Password, StorageWorkerRequest, StorageWorkerResponse},
+    protocol::{StorageWorkerRequest, StorageWorkerResponse, UnlockSecret},
     workers::storage::{StorageBridge, StorageWorker},
 };
 use gloo_worker::Spawnable;
@@ -16,9 +16,8 @@ pub(crate) const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js
 const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
 /// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
 const STORAGE_OPEN_TIMEOUT_MS: u32 = 15_000;
-/// Deriving the key from a password takes a second or two, and encrypting an
-/// earlier unencrypted database copies all of it.
-const STORAGE_PASSWORD_TIMEOUT_MS: u32 = 120_000;
+/// Legacy envelope opening and plaintext migration can be expensive.
+const STORAGE_UNLOCK_TIMEOUT_MS: u32 = 120_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,30 +66,21 @@ impl Storage {
         // the request is pending, and the worker must outlive the request.
         let bridge = self.bridge.clone();
         match bridge.call(request, timeout_ms).await {
-            Ok(StorageWorkerResponse::WrongPassword) => Err(wrong_password()),
             Ok(response) => Ok(response),
             Err(e) => Err(js_sys::Error::new(&e.to_string()).into()),
         }
     }
 }
 
-/// A wrong password as a JS `Error` with `code: "wrong-password"`, so callers
-/// can ask again rather than report a failure.
-fn wrong_password() -> JsValue {
-    let error = js_sys::Error::new("wrong password");
-    // Setting a property on a fresh Error cannot fail.
-    let _ = js_sys::Reflect::set(&error, &"code".into(), &"wrong-password".into());
-    error.into()
-}
-
 #[wasm_bindgen]
 impl Storage {
     /// Spawn the storage worker and open the public chain cache. Private data
-    /// stays closed until [`create`] or [`unlock`]; ask [`status`] which it
-    /// needs. Connect once per page; use [`fork`] for additional handles.
+    /// stays closed until [`create_wallet`] or [`unlock_wallet`]; ask
+    /// [`status`] which it needs. Connect once per page; use [`fork`] for
+    /// additional handles.
     ///
-    /// [`create`]: Storage::create
-    /// [`unlock`]: Storage::unlock
+    /// [`create_wallet`]: Storage::create_wallet
+    /// [`unlock_wallet`]: Storage::unlock_wallet
     /// [`status`]: Storage::status
     /// [`fork`]: Storage::fork
     pub async fn connect(options: JsValue) -> Result<Storage, JsError> {
@@ -122,9 +112,9 @@ impl Storage {
         Ok(storage)
     }
 
-    /// What the database needs: `"new"` or `"unencrypted"` (choose a password
-    /// with [`Storage::create`]), `"locked"` ([`Storage::unlock`]) or
-    /// `"unlocked"`.
+    /// What the database needs: `"new"` or `"unencrypted"` (approve wallet
+    /// setup with [`Storage::create_wallet`]), `"locked"`
+    /// ([`Storage::unlock_wallet`]) or `"unlocked"`.
     pub async fn status(&self) -> Result<JsValue, JsValue> {
         match self
             .request(StorageWorkerRequest::Status, STORAGE_OPEN_TIMEOUT_MS)
@@ -135,29 +125,7 @@ impl Storage {
         }
     }
 
-    /// Set the first password: create the database, or encrypt the
-    /// unencrypted one of an earlier version. The database is open afterwards.
-    pub async fn create(&self, password: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::Create(Password(password)),
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Open the database. A wrong password rejects with
-    /// `code: "wrong-password"` and leaves the storage ready for another try.
-    pub async fn unlock(&self, password: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::Unlock(Password(password)),
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Public signing context for the optional wallet unlock method.
+    /// Public signing context for the enrolled wallet.
     #[wasm_bindgen(js_name = walletContext)]
     pub async fn wallet_context(&self) -> Result<JsValue, JsValue> {
         match self
@@ -171,22 +139,16 @@ impl Storage {
         }
     }
 
-    /// Add a wallet-derived secret after authenticating the existing password.
-    /// The database key stays inside the worker.
-    #[wasm_bindgen(js_name = enrollWallet)]
-    pub async fn enroll_wallet(
-        &self,
-        password: String,
-        context: JsValue,
-        secret: String,
-    ) -> Result<(), JsValue> {
+    /// Create a wallet-only private vault. The database key stays in the
+    /// worker.
+    #[wasm_bindgen(js_name = createWallet)]
+    pub async fn create_wallet(&self, context: JsValue, secret: String) -> Result<(), JsValue> {
         self.request(
-            StorageWorkerRequest::EnrollWallet {
-                password: Password(password),
+            StorageWorkerRequest::CreateWallet {
                 context: serde_wasm_bindgen::from_value(context)?,
-                secret: Password(secret),
+                secret: UnlockSecret(secret),
             },
-            STORAGE_PASSWORD_TIMEOUT_MS,
+            STORAGE_UNLOCK_TIMEOUT_MS,
         )
         .await?;
         Ok(())
@@ -198,119 +160,15 @@ impl Storage {
         self.request(
             StorageWorkerRequest::UnlockWallet {
                 context: serde_wasm_bindgen::from_value(context)?,
-                secret: Password(secret),
+                secret: UnlockSecret(secret),
             },
-            STORAGE_PASSWORD_TIMEOUT_MS,
+            STORAGE_UNLOCK_TIMEOUT_MS,
         )
         .await?;
         Ok(())
     }
 
-    /// Public credential context for the optional passkey unlock method.
-    #[wasm_bindgen(js_name = passkeyContext)]
-    pub async fn passkey_context(&self) -> Result<JsValue, JsValue> {
-        match self
-            .request(
-                StorageWorkerRequest::PasskeyContext,
-                STORAGE_OPEN_TIMEOUT_MS,
-            )
-            .await?
-        {
-            StorageWorkerResponse::PasskeyContext(context) => {
-                Ok(serde_wasm_bindgen::to_value(&context)?)
-            }
-            other => Err(unexpected(&other)),
-        }
-    }
-
-    /// Add a passkey-derived secret after authenticating the existing password.
-    /// The database key stays inside the worker.
-    #[wasm_bindgen(js_name = enrollPasskey)]
-    pub async fn enroll_passkey(
-        &self,
-        password: String,
-        context: JsValue,
-        secret: String,
-    ) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::EnrollPasskey {
-                password: Password(password),
-                context: serde_wasm_bindgen::from_value(context)?,
-                secret: Password(secret),
-            },
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Unlock using the secret derived from the enrolled passkey PRF.
-    #[wasm_bindgen(js_name = unlockPasskey)]
-    pub async fn unlock_passkey(&self, context: JsValue, secret: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::UnlockPasskey {
-                context: serde_wasm_bindgen::from_value(context)?,
-                secret: Password(secret),
-            },
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Remove Freighter access after authenticating the current password.
-    #[wasm_bindgen(js_name = removeWallet)]
-    pub async fn remove_wallet(&self, password: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::RemoveWallet(Password(password)),
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Remove passkey access after authenticating the current password.
-    #[wasm_bindgen(js_name = removePasskey)]
-    pub async fn remove_passkey(&self, password: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::RemovePasskey(Password(password)),
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Restore an absent password record after unlocking with an enrolled
-    /// method. Rejects if a password record already exists or recovery is
-    /// not unlocked.
-    #[wasm_bindgen(js_name = recoverPassword)]
-    pub async fn recover_password(&self, password: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::RecoverPassword(Password(password)),
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Replace the password. Rejects with `code: "wrong-password"` when
-    /// `current` is wrong; the database itself is not rewritten.
-    #[wasm_bindgen(js_name = changePassword)]
-    pub async fn change_password(&self, current: String, next: String) -> Result<(), JsValue> {
-        self.request(
-            StorageWorkerRequest::ChangePassword {
-                current: Password(current),
-                new: Password(next),
-            },
-            STORAGE_PASSWORD_TIMEOUT_MS,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Delete the local database and its password, for a forgotten password.
-    /// Everything in it is synced again from the chain and the wallet
-    /// afterwards; [`Storage::create`] sets a new password.
+    /// Explicitly delete all local public and private data.
     pub async fn reset(&self) -> Result<(), JsValue> {
         self.request(StorageWorkerRequest::Reset, STORAGE_OPEN_TIMEOUT_MS)
             .await?;

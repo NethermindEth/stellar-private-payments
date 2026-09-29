@@ -36,7 +36,7 @@ function requireField(value, name) {
 
 /**
  * Connect to worker-backed local persistence. Connect once per page, check
- * `status()`, then `create(password)` or `unlock(password)` before accessing
+ * `status()`, then `createWallet(context, secret)` or `unlockWallet(context, secret)` before accessing
  * private data. {@link Client.new} can sync public chain data while locked.
  */
 async function connectStorage(options = {}) {

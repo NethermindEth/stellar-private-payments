@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Exercise the built SDK's password-protected storage in a fresh, isolated
+ * Exercise the built SDK's wallet-protected storage in a fresh, isolated
  * browser profile through WebDriver.
  *
  * --legacy-db PATH also checks the migration of an earlier version's
  * unencrypted database: the file (made by the native SDK, e.g.
  * `gvkey-gen generate --db PATH`) is placed where earlier versions kept it,
- * then encrypted by the first `create`. With --legacy-gvk FILE, the GVK
+ * then encrypted by the first `createWallet`. With --legacy-gvk FILE, the GVK
  * authority key saved in it must survive.
  */
 import assert from "node:assert/strict";
@@ -86,8 +86,6 @@ const processDriver = spawn(driver, command, { stdio: ["ignore", log, log] });
 const driverUrl = `http://127.0.0.1:${driverPort}`;
 const origin = `http://127.0.0.1:${serverPort}/test.html`;
 
-const PASSWORD = "correct horse battery staple";
-const NEW_PASSWORD = "a different passphrase for spp";
 // The application signature tests cover deriving this secret. Here exercise
 // the real WASM worker, encrypted OPFS envelopes, and browser restarts.
 const WALLET_CONTEXT = { version: 1, address: `G${'A'.repeat(55)}`, origin: new URL(origin).origin, salt: '01'.repeat(32) };
@@ -125,8 +123,8 @@ ctx.load = async () => {
 };
 ctx.connect = async () => ctx.js("window.storage=await sdk.Storage.connect();return await storage.status();");
 ctx.status = async () => ctx.js("return await storage.status();");
-ctx.create = async password => ctx.js("await storage.create(arguments[0]);return true;", [password]);
-ctx.unlock = async password => ctx.js("await storage.unlock(arguments[0]);return true;", [password]);
+ctx.create = async () => ctx.js("await storage.createWallet(arguments[0], arguments[1]);return true;", [WALLET_CONTEXT, WALLET_SECRET]);
+ctx.unlock = async () => ctx.js("await storage.unlockWallet(arguments[0], arguments[1]);return true;", [WALLET_CONTEXT, WALLET_SECRET]);
 // The error code of a password operation, or "ok".
 ctx.outcome = async (operation, ...values) => ctx.js(`try{await storage.${operation}(...arguments);return 'ok';}catch(e){return e.code||String(e);}`, values);
 ctx.setMarker = async () => ctx.js("await storage.call({SetSetting:{key:'integration-protected',value_json:JSON.stringify(arguments[0])}});return true;", [ctx.marker]);
@@ -173,19 +171,29 @@ try {
     ctx.checks.push("a fresh profile reports a new database");
   }
 
-  assert.match(await ctx.outcome("create", "too short"), /at least 15 characters/);
+  assert.notEqual(await ctx.outcome("createWallet", WALLET_CONTEXT, "invalid"), "ok");
   assert.notEqual(await ctx.status(), "unlocked");
-  ctx.checks.push("a short password is refused");
+  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
+  assert(await ctx.js("return ['create','unlock','enrollWallet','passkeyContext','unlockPasskey','changePassword','recoverPassword'].every(name => typeof storage[name] === 'undefined');"));
+  ctx.checks.push("invalid wallet secrets are rejected without records; password/passkey APIs are absent");
 
-  await ctx.create(PASSWORD);
+  await ctx.create();
   assert.equal(await ctx.status(), "unlocked");
+  if (!args["legacy-db"]) {
+    // Simulate an interrupted first setup: retain its envelope, remove only
+    // the empty encrypted database, and resume with the same wallet context.
+    await ctx.close();
+    await ctx.js("const root=await navigator.storage.getDirectory();const dir=await(await root.getDirectoryHandle('.opfs-sahpool-encrypted')).getDirectoryHandle('.opaque');for await(const [name,h] of dir.entries()){const header=new TextDecoder().decode(await(await h.getFile()).slice(0,512).arrayBuffer()).split('\\0')[0];if(header==='spp.encrypted.db')await dir.removeEntry(name);}return true;");
+    await ctx.load();
+    assert.equal(await ctx.connect(), "locked");
+    assert.notEqual(await ctx.outcome("createWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");
+    await ctx.unlock();
+    assert.deepEqual(await ctx.js("return await storage.walletContext();"), WALLET_CONTEXT);
+    ctx.checks.push("interrupted setup resumes with its saved wallet key instead of replacing it");
+  }
   await ctx.setMarker();
-  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
-  assert.notEqual(await ctx.outcome("enrollWallet", "wrong password", WALLET_CONTEXT, WALLET_SECRET), "ok");
-  assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
-  assert.equal(await ctx.outcome("enrollWallet", PASSWORD, WALLET_CONTEXT, WALLET_SECRET), "ok");
   assert.deepEqual(await ctx.js("return await storage.walletContext();"), WALLET_CONTEXT);
-  ctx.checks.push("wallet enrollment authenticates password and persists public signing context");
+  ctx.checks.push("wallet-only creation persists signing context and opens encrypted storage");
   if (args["legacy-db"]) {
     const snapshot = await ctx.snapshot();
     assert(!snapshot.some(file => file.path.startsWith(".opfs-sahpool/")), "the unencrypted pool is still there");
@@ -213,24 +221,15 @@ try {
   ctx.checks.push("second tab reports the database lock");
 
   const locked = await ctx.snapshot();
-  assert.equal(await ctx.outcome("unlock", "not the password at all"), "wrong-password");
+  assert.notEqual(await ctx.outcome("unlockWallet", WALLET_CONTEXT, "cd".repeat(32)), "ok");
   assert.equal(await ctx.status(), "locked");
-  assert.deepEqual(await ctx.snapshot(), locked, "a wrong password modified OPFS");
-  ctx.checks.push("a wrong password is refused without modifying OPFS and can be retried");
-  await ctx.unlock(PASSWORD);
+  assert.deepEqual(await ctx.snapshot(), locked, "a wrong wallet secret modified OPFS");
+  ctx.checks.push("a wrong wallet secret is refused without modifying OPFS and can be retried");
+  await ctx.unlock();
   assert(await ctx.marked());
   ctx.checks.push("unlock opens the database with its data");
 
-  assert.equal(await ctx.outcome("changePassword", "not the password at all", NEW_PASSWORD), "wrong-password");
-  assert.equal(await ctx.outcome("changePassword", PASSWORD, NEW_PASSWORD), "ok");
   await ctx.close();
-  await ctx.load();
-  assert.equal(await ctx.connect(), "locked");
-  assert.equal(await ctx.outcome("unlock", PASSWORD), "wrong-password");
-  await ctx.unlock(NEW_PASSWORD);
-  assert(await ctx.marked());
-  await ctx.close();
-  ctx.checks.push("change password needs the current one and keeps the data");
 
   await ctx.request("DELETE", `/session/${ctx.sid}`); ctx.sid = null;
   await ctx.session(); await ctx.load();
@@ -239,7 +238,7 @@ try {
   assert.equal(await ctx.status(), "locked");
   assert.equal(await ctx.outcome("unlockWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");
   assert(await ctx.marked());
-  ctx.checks.push("wallet unlock survives password change and browser-process restart; wrong secret stays locked");
+  ctx.checks.push("wallet unlock survives browser-process restart; wrong secret stays locked");
   const final = await ctx.snapshot();
   assert(final.some(file => file.path.startsWith(".opfs-sahpool-encrypted/")));
   assert(!final.some(file => file.protected), "a protected value is readable in OPFS");
@@ -249,10 +248,10 @@ try {
   assert.equal(await ctx.status(), "new");
   assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
   assert.notEqual(await ctx.outcome("unlockWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");
-  await ctx.create(PASSWORD);
+  await ctx.create();
   assert(!(await ctx.marked()), "reset kept the old data");
   await ctx.close();
-  ctx.checks.push("reset discards the database and a new password starts over");
+  ctx.checks.push("reset discards the database and a new wallet envelope starts over");
 
   }
 

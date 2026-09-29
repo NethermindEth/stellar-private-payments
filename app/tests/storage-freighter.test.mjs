@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Keypair, hash } from '@stellar/stellar-sdk';
-import { enrollFreighter, unlockFreighter } from '../js/storage-freighter.js';
+import { createFreighter, unlockFreighter } from '../js/storage-freighter.js';
 
 const origin = 'https://storage.test';
 function fixture() {
@@ -23,8 +23,7 @@ function fixture() {
     };
     const storage = {
         async walletContext() { return structuredClone(state.context); },
-        async enrollWallet(password, context, secret) {
-            assert.equal(password, 'correct horse battery staple');
+        async createWallet(context, secret) {
             state.context = structuredClone(context); state.secret = secret;
         },
         async unlockWallet(context, secret) {
@@ -36,7 +35,7 @@ function fixture() {
 
 test('enrollment checks repeatable signatures; a later unlock supports base64 and hex', async () => {
     const f = fixture();
-    await enrollFreighter(f.storage, 'correct horse battery staple', f.signer, origin);
+    await createFreighter(f.storage, f.signer, origin);
     assert.equal(f.calls.length, 2);
     assert.deepEqual(f.calls[0], f.calls[1]);
     assert.match(f.calls[0].message, /Domain: spp\/database-key-wrap\/v1\/wallet-signature/);
@@ -51,14 +50,14 @@ test('enrollment checks repeatable signatures; a later unlock supports base64 an
 for (const fault of ['reported-account', 'signature', 'cancel', 'cancel-second']) {
     test(`enrollment failure (${fault}) never persists access`, async () => {
         const f = fixture(); f.state.fault = fault;
-        await assert.rejects(enrollFreighter(f.storage, 'correct horse battery staple', f.signer, origin));
+        await assert.rejects(createFreighter(f.storage, f.signer, origin));
         assert.equal(f.state.context, null);
     });
 }
 
 test('wrong account, origin, invalid signature and cancellation cannot unlock', async () => {
     const f = fixture();
-    await enrollFreighter(f.storage, 'correct horse battery staple', f.signer, origin);
+    await createFreighter(f.storage, f.signer, origin);
     for (const fault of ['account', 'reported-account', 'signature', 'cancel']) {
         f.state.fault = fault;
         await assert.rejects(unlockFreighter(f.storage, f.signer, origin));

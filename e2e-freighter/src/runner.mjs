@@ -15,10 +15,10 @@ import { requireAppUrl } from './env.mjs';
 import { waitForCondition } from './waits.mjs';
 import {
   APP_RUNTIME_READY_TIMEOUT_MS,
-  answerStoragePassword,
+  answerStorageWallet,
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
-  isStoragePasswordVisible,
+  isStorageWalletVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
 } from './appState.mjs';
@@ -44,12 +44,11 @@ export {
 } from './wallet.mjs';
 
 export {
-  APP_PASSWORD,
   APP_RUNTIME_READY_TIMEOUT_MS,
-  answerStoragePassword,
+  answerStorageWallet,
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
-  isStoragePasswordVisible,
+  isStorageWalletVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
 } from './appState.mjs';
@@ -154,19 +153,26 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context, priv
       timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
       intervalMs: 100,
       observe: () => readAppLifecycle(page),
-      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible }) =>
-        ['ready', 'locked'].includes(walletState) || onboardingVisible || bootnodeConsentVisible || storagePasswordVisible,
+      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible, storageWalletVisible }) =>
+        ['ready', 'locked'].includes(walletState) || onboardingVisible || bootnodeConsentVisible || storageWalletVisible,
     });
     if (lifecycle.bootnodeConsentVisible) {
       await page.getByRole('button', { name: 'Use bootnode', exact: true }).click();
       await page.locator('#bootnode-consent-modal').waitFor({ state: 'hidden' });
-    } else if (lifecycle.storagePasswordVisible) {
-      if (!privateAccess) throw new Error('Public connection unexpectedly requested a storage password');
-      await answerStoragePassword(page);
+    } else if (lifecycle.storageWalletVisible) {
+      if (!privateAccess) {
+        await page.getByTestId('storage-wallet-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+        await waitForCondition({
+          operation: 'app:public-after-cancel', timeoutMs: 10_000,
+          observe: () => readAppLifecycle(page), isReady: state => state.walletState === 'locked',
+        });
+        break;
+      }
+      await answerStorageWallet(page, context);
     } else if (lifecycle.walletState === 'locked' && privateAccess) {
       await page.locator('#storage-lock-btn').click();
-      await page.locator('[data-testid="storage-password-dialog"]').waitFor();
-      await answerStoragePassword(page);
+      await page.locator('[data-testid="storage-wallet-dialog"]').waitFor();
+      await answerStorageWallet(page, context);
       await waitForCondition({
         operation: 'app:resume-after-unlock',
         timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
