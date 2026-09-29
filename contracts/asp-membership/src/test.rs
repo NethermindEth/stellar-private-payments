@@ -9,6 +9,7 @@ use soroban_sdk::{
     Address, Bytes, Env, IntoVal, U256, Vec,
     testutils::{Address as _, MockAuth, MockAuthInvoke},
     vec,
+    xdr::ToXdr,
 };
 use taceo_poseidon2::bn254::t2;
 
@@ -19,6 +20,14 @@ fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
             .get(&DataKey::State)
             .expect("tree state is set in the constructor")
     })
+}
+
+fn stored_root(env: &Env, contract_id: &Address) -> U256 {
+    let state = tree_state(env, contract_id);
+    state
+        .roots
+        .get(root_index_for(state.next_index).expect("slot fits"))
+        .expect("the slot holds a root")
 }
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -106,9 +115,9 @@ fn test_get_root() {
     assert_ne!(initial_root, zero, "Initial root should not be zero"); // As we define zero in a different way
 
     // Verify initial root matches what's in storage
-    let stored_root = tree_state(&env, &contract_id).root;
+    let stored_initial_root = stored_root(&env, &contract_id);
     assert_eq!(
-        initial_root, stored_root,
+        initial_root, stored_initial_root,
         "get_root should match stored root"
     );
 
@@ -124,7 +133,7 @@ fn test_get_root() {
     );
 
     // Verify new root also matches storage
-    let stored_new_root = tree_state(&env, &contract_id).root;
+    let stored_new_root = stored_root(&env, &contract_id);
     assert_eq!(
         new_root, stored_new_root,
         "get_root should match updated stored root"
@@ -583,7 +592,7 @@ fn test_merkle_consistency() {
     ];
 
     // Get the on-chain root
-    let on_chain_root = tree_state(&env, &contract_id).root;
+    let on_chain_root = stored_root(&env, &contract_id);
 
     // Empty roots should match
     assert_eq!(
@@ -599,7 +608,7 @@ fn test_merkle_consistency() {
         client.insert_leaf(&leaf);
 
         // Get the on-chain root
-        let on_chain_root = tree_state(&env, &contract_id).root;
+        let on_chain_root = stored_root(&env, &contract_id);
 
         // Enforce roots match after inserting a leaf
         assert_eq!(
@@ -659,7 +668,8 @@ fn the_tree_state_is_one_entry() {
 
     let state = tree_state(&env, &contract_id);
     assert_eq!(state.next_index, 1);
-    assert_eq!(state.root, root);
+    assert_eq!(state.roots.len(), ROOT_HISTORY_SIZE);
+    assert_eq!(stored_root(&env, &contract_id), root);
 }
 
 #[test]
@@ -674,4 +684,188 @@ fn the_depth_lives_in_the_instance() {
         assert_eq!(instance.get::<_, u32>(&DataKey::Levels), Some(levels));
         assert!(!env.storage().persistent().has(&DataKey::Levels));
     });
+}
+
+#[test]
+fn the_root_slot_follows_the_leaf_count() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    for i in 1..=3u32 {
+        client.insert_leaf(&U256::from_u32(&env, i));
+    }
+
+    let state = tree_state(&env, &contract_id);
+    assert_eq!(root_index_for(state.next_index), Ok(3));
+    assert_eq!(state.roots.get(3), Some(client.get_root()));
+}
+
+#[test]
+fn the_root_slot_wraps_after_ninety_inserts() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.insert_leaf(&U256::from_u32(&env, 1));
+    let slot_one_root = client.get_root();
+    for i in 2..ROOT_HISTORY_SIZE {
+        client.insert_leaf(&U256::from_u32(&env, i));
+    }
+    let slot_eighty_nine_root = client.get_root();
+    client.insert_leaf(&U256::from_u32(&env, ROOT_HISTORY_SIZE));
+
+    let state = tree_state(&env, &contract_id);
+    assert_eq!(root_index_for(state.next_index), Ok(0));
+    assert_eq!(state.roots.get(1), Some(slot_one_root));
+    assert_eq!(state.roots.get(89), Some(slot_eighty_nine_root));
+    assert_eq!(state.roots.get(0), Some(client.get_root()));
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 91 Merkle insertions exceed the 6h job limit"
+)]
+fn the_tree_entry_size_is_fixed() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let entry_len = || tree_state(&env, &contract_id).to_xdr(&env).len();
+    let len_after_init = entry_len();
+
+    client.insert_leaf(&U256::from_u32(&env, 1));
+    let len_after_one_insert = entry_len();
+    for i in 2..=ROOT_HISTORY_SIZE + 1 {
+        client.insert_leaf(&U256::from_u32(&env, i));
+    }
+
+    assert_eq!(len_after_one_insert, len_after_init);
+    assert_eq!(entry_len(), len_after_init);
+}
+
+/// Inserts leaves `1..=count` and returns the root after each one.
+fn insert_roots(env: &Env, client: &ASPMembershipClient<'_>, count: u32) -> Vec<U256> {
+    let mut roots = Vec::new(env);
+    for i in 1..=count {
+        client.insert_leaf(&U256::from_u32(env, i));
+        roots.push_back(client.get_root());
+    }
+    roots
+}
+
+#[test]
+fn is_known_root_finds_the_current_and_previous_root() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let roots = insert_roots(&env, &client, 2);
+
+    assert!(client.is_known_root(&roots.get(1).expect("two roots")));
+    assert!(client.is_known_root(&roots.get(0).expect("two roots")));
+}
+
+#[test]
+fn is_known_root_rejects_zero_and_unknown_roots() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    insert_roots(&env, &client, 2);
+
+    assert!(!client.is_known_root(&U256::from_u32(&env, 0)));
+    assert!(!client.is_known_root(&U256::from_u32(&env, 12345)));
+}
+
+#[test]
+fn is_known_root_errors_when_the_state_is_missing() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().remove(&DataKey::State);
+    });
+
+    assert!(matches!(
+        client.try_is_known_root(&U256::from_u32(&env, 1)),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+)]
+fn the_empty_root_is_evicted_at_the_ninetieth_insertion() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let empty_root = client.get_root();
+    assert!(client.is_known_root(&empty_root));
+
+    insert_roots(&env, &client, ROOT_HISTORY_SIZE - 1);
+    assert!(client.is_known_root(&empty_root));
+
+    client.insert_leaf(&U256::from_u32(&env, ROOT_HISTORY_SIZE));
+    assert!(!client.is_known_root(&empty_root));
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 91 Merkle insertions exceed the 6h job limit"
+)]
+fn the_oldest_root_is_evicted_first_once_the_ring_is_full() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let roots = insert_roots(&env, &client, ROOT_HISTORY_SIZE);
+    for root in roots.iter() {
+        assert!(client.is_known_root(&root));
+    }
+
+    client.insert_leaf(&U256::from_u32(&env, ROOT_HISTORY_SIZE + 1));
+    assert!(!client.is_known_root(&roots.get(0).expect("ninety roots")));
+    for root in roots.iter().skip(1) {
+        assert!(client.is_known_root(&root));
+    }
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 180 Merkle insertions exceed the 6h job limit"
+)]
+fn only_the_last_ninety_roots_are_known_after_two_laps() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 8u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let lap = ROOT_HISTORY_SIZE;
+
+    let roots = insert_roots(&env, &client, 2 * lap);
+
+    for (i, root) in roots.iter().enumerate() {
+        let known = client.is_known_root(&root);
+        assert_eq!(known, i >= lap as usize, "root of insertion {}", i + 1);
+    }
 }

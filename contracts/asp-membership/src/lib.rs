@@ -10,7 +10,13 @@ use soroban_sdk::{
 };
 use soroban_utils::{poseidon2_compress, zero_hash};
 
+/// Number of roots kept in history for proof verification
+const ROOT_HISTORY_SIZE: u32 = 90;
+
 /// The tree state an insertion mutates, kept in one persistent entry.
+///
+/// The entry's size is fixed at construction: `roots` holds
+/// `ROOT_HISTORY_SIZE` slots from the first ledger on.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TreeState {
@@ -19,8 +25,17 @@ struct TreeState {
     /// Left-sibling hashes along the insertion path, element `i` holding the
     /// hash at level `i`
     filled_subtrees: Vec<U256>,
-    /// Current Merkle root
-    root: U256,
+    /// Root history ring, `ROOT_HISTORY_SIZE` slots from construction onward
+    roots: Vec<U256>,
+}
+
+/// Returns the root history slot that holds the root produced by the insertion
+/// that set the leaf counter to `next_index`.
+fn root_index_for(next_index: u64) -> Result<u32, Error> {
+    let slot = next_index
+        .checked_rem(u64::from(ROOT_HISTORY_SIZE))
+        .ok_or(Error::Overflow)?;
+    u32::try_from(slot).map_err(|_| Error::Overflow)
 }
 
 /// Storage keys for contract data
@@ -111,14 +126,18 @@ impl ASPMembership {
             filled.push_back(zero_hash(&env, lvl).ok_or(Error::NotInitialized)?);
         }
 
-        // Initial root is the zero hash at the top level
-        let root = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
+        // Every slot starts at the empty root
+        let empty_root = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
+        let mut roots = Vec::new(&env);
+        for _ in 0..ROOT_HISTORY_SIZE {
+            roots.push_back(empty_root.clone());
+        }
         store.set(
             &DataKey::State,
             &TreeState {
                 next_index: 0,
                 filled_subtrees: filled,
-                root,
+                roots,
             },
         );
 
@@ -162,7 +181,44 @@ impl ASPMembership {
             .persistent()
             .get(&DataKey::State)
             .ok_or(Error::NotInitialized)?;
-        Ok(state.root)
+        state
+            .roots
+            .get(root_index_for(state.next_index)?)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Check if a root is in the recent root history
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `root` - The Merkle root to check
+    ///
+    /// # Returns
+    /// `true` if the root is among the last `ROOT_HISTORY_SIZE` roots. The
+    /// zero root is never known.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
+    pub fn is_known_root(env: Env, root: U256) -> Result<bool, Error> {
+        if root == U256::from_u32(&env, 0u32) {
+            return Ok(false);
+        }
+
+        let state: TreeState = env
+            .storage()
+            .persistent()
+            .get(&DataKey::State)
+            .ok_or(Error::NotInitialized)?;
+
+        let mut slot = root_index_for(state.next_index)?;
+        for _ in 0..ROOT_HISTORY_SIZE {
+            if state.roots.get(slot).as_ref() == Some(&root) {
+                return Ok(true);
+            }
+            slot = slot.checked_sub(1).unwrap_or(ROOT_HISTORY_SIZE - 1);
+        }
+        Ok(false)
     }
 
     /// Hash two U256 values using Poseidon2 compression
@@ -237,7 +293,9 @@ impl ASPMembership {
         }
 
         state.next_index = actual_index.checked_add(1).ok_or(Error::Overflow)?;
-        state.root = current_hash.clone();
+        state
+            .roots
+            .set(root_index_for(state.next_index)?, current_hash.clone());
         store.set(&DataKey::State, &state);
 
         // Emit event with leaf details
