@@ -5,12 +5,12 @@ use stellar_private_payments::{
     Client, Handle, LocalStorage, Storage,
     gvk::GvkAudit,
     types::{
-        ContractConfig, Field, GvkAuthoritySetting, GvkMode, NoteAmount, PolicyFlags,
-        TransferRecipient,
+        BabyJubJubPoint, ContractConfig, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting,
+        GvkMode, NoteAmount, PolicyFlags, TransferRecipient,
     },
 };
 
-use super::support::{TestSession, deploy, session};
+use super::support::{TestSession, deploy, deploy_scoped, session};
 use crate::{
     network::{DeploymentIdentity, LocalNetwork},
     pool::{PoolAsset, PoolOptions},
@@ -337,6 +337,156 @@ async fn policy_auditable() -> Result<()> {
     assert_eq!(
         outputs, expected_outputs,
         "the rejected deposit must not appear in the audit"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn audit_skips_dummy() -> Result<()> {
+    let options = PoolOptions {
+        gvk_mode: GvkMode::Traceable,
+        asset: PoolAsset::Native,
+        ..PoolOptions::NONE
+    };
+    let (config, identity) = deploy_scoped(&[options], "audit_skips_dummy").await?;
+    let alice = session((config.clone(), identity.clone())).await?;
+    let bob = session((config.clone(), identity.clone())).await?;
+    let pool_contract_id = config
+        .enabled_pools()
+        .next()
+        .context("deployment has no enabled pools")?
+        .pool_contract_id
+        .clone();
+
+    // deposit, 2 dummy inputs + 1 dummy output
+    alice.pool()?.deposit(NoteAmount::from(10_000_000)).await?;
+    // deposit, 2 dummy inputs + 1 dummy output
+    bob.pool()?.deposit(NoteAmount::from(20_000_000)).await?;
+
+    // transfer, 1 dummy input
+    let (bob_note_pubkey, bob_encryption_pubkey) = bob.account.privacy_keys().await?;
+    alice
+        .pool()?
+        .transfer(
+            TransferRecipient::keys(bob_note_pubkey, bob_encryption_pubkey),
+            NoteAmount::from(3_000_000),
+        )
+        .await?;
+
+    // withdraw, 1 dummy output
+    bob.pool()?
+        .withdraw(NoteAmount::from(21_000_000), bob.wallet.address())
+        .await?;
+
+    let alice_pk = note_pk(&alice).await?;
+    let bob_pk = note_pk(&bob).await?;
+
+    let d_priv = gvk_key(&identity);
+    let mut audit = audit(config, &pool_contract_id, d_priv).await?;
+
+    let mut input_slots = 0;
+    let mut output_slots = 0;
+    let mut inputs = HashSet::new();
+    let mut outputs = HashSet::new();
+    while let Some(tx) = audit.next_tx().await? {
+        input_slots += tx.inputs.len();
+        output_slots += tx.outputs.len();
+        for input in tx.inputs {
+            if let Some(audited) = input.note {
+                inputs.insert((audited.note.pk, audited.note.amount()?));
+            }
+        }
+        for output in tx.outputs {
+            if let Some(audited) = output.note {
+                outputs.insert((audited.note.pk, audited.note.amount()?));
+            }
+        }
+    }
+
+    assert_eq!(input_slots, 8, "4 transactions x 2 input slots each");
+    assert_eq!(output_slots, 8, "4 transactions x 2 output slots each");
+
+    let expected_inputs = HashSet::from([
+        (alice_pk, NoteAmount::from(10_000_000)),
+        (bob_pk, NoteAmount::from(20_000_000)),
+        (bob_pk, NoteAmount::from(3_000_000)),
+    ]);
+    assert_eq!(inputs.len(), expected_inputs.len());
+    assert_eq!(inputs, expected_inputs);
+
+    let expected_outputs = HashSet::from([
+        (alice_pk, NoteAmount::from(10_000_000)),
+        (bob_pk, NoteAmount::from(20_000_000)),
+        (alice_pk, NoteAmount::from(7_000_000)),
+        (bob_pk, NoteAmount::from(3_000_000)),
+        (bob_pk, NoteAmount::from(2_000_000)),
+    ]);
+    assert_eq!(outputs.len(), expected_outputs.len());
+    assert_eq!(outputs, expected_outputs);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn ciphertext_field_oor() -> Result<()> {
+    let options = PoolOptions {
+        gvk_mode: GvkMode::ViewOnly,
+        asset: PoolAsset::Native,
+        ..PoolOptions::NONE
+    };
+    let (config, identity) = deploy(&[options]).await?;
+    let alice = session((config, identity)).await?;
+    let pool = alice.pool()?;
+
+    let mut plan = pool.prepare_deposit(NoteAmount::from(10_000_000))?;
+    let mut prepared = pool.prove_next(&mut plan).await?;
+
+    // c1 element with mod
+    let outputs = prepared
+        .prepared
+        .output_gvk_ciphertexts
+        .as_mut()
+        .context("view-only pool must encrypt every output note")?;
+    outputs[0].c1 = Field(Field::modulus());
+
+    let simulated = pool.simulate(&mut prepared).await;
+    assert!(
+        simulated.is_err(),
+        "the pool must reject a non-canonical GVK ciphertext field"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn viewonly_input_encrypted() -> Result<()> {
+    let options = PoolOptions {
+        gvk_mode: GvkMode::ViewOnly,
+        asset: PoolAsset::Native,
+        ..PoolOptions::NONE
+    };
+    let (config, identity) = deploy(&[options]).await?;
+    let alice = session((config, identity)).await?;
+    let pool = alice.pool()?;
+
+    let mut plan = pool.prepare_deposit(NoteAmount::from(10_000_000))?;
+    let mut prepared = pool.prove_next(&mut plan).await?;
+
+    prepared.prepared.input_gvk_ciphertexts = Some(vec![GlobalViewKeyCiphertext {
+        r: BabyJubJubPoint {
+            x: Field::ONE,
+            y: Field::ONE,
+        },
+        c1: Field::ONE,
+        c2: Field::ONE,
+        c3: Field::ONE,
+    }]);
+
+    let simulated = pool.simulate(&mut prepared).await;
+    assert!(
+        simulated.is_err(),
+        "a view-only pool must reject any input ciphertext"
     );
 
     Ok(())

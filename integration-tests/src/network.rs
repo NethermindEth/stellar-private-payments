@@ -133,6 +133,7 @@ impl LocalNetwork {
         asp_levels: u32,
         pool_levels: u32,
         pools: &[PoolOptions],
+        scope: Option<&str>,
     ) -> Result<(ContractConfig, DeploymentIdentity)> {
         let root = repo_root();
 
@@ -147,10 +148,13 @@ impl LocalNetwork {
             .map(|p| p.pool_spec(native_token_id.as_deref()))
             .collect();
 
-        let key = format!(
+        let mut key = format!(
             "{max_deposit}-{asp_levels}-{pool_levels}-{}",
             pool_specs.join(",")
         );
+        if let Some(scope) = scope {
+            key = format!("{key}-{scope}");
+        }
         let _guard = acquire_deploy_lock(&key).await?;
 
         if let Ok(cached) = std::fs::read(deploy_cache_path(&key))

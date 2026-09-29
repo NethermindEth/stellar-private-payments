@@ -48,7 +48,26 @@ pub async fn deploy_default() -> Result<(ContractConfig, DeploymentIdentity)> {
 pub async fn deploy(pools: &[PoolOptions]) -> Result<(ContractConfig, DeploymentIdentity)> {
     let network = LocalNetwork::start().await?;
     network
-        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools)
+        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
+}
+
+/// Like [`deploy`], but `scope` is folded into the
+/// deploy cache key, guaranteeing a deployment private to this scope instead
+/// of one shared with any other test using the same `pools`.
+pub async fn deploy_scoped(
+    pools: &[PoolOptions],
+    scope: &str,
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(
+            MAX_DEPOSIT_STROOPS,
+            ASP_LEVELS,
+            POOL_LEVELS,
+            pools,
+            Some(scope),
+        )
         .await
 }
 
