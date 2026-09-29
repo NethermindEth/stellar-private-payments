@@ -41,7 +41,7 @@ const { outputFiles } = await build({
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
 try {
     const page = await browser.newPage();
-    await page.route('https://storage.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body></body>' }));
+    await page.route('https://storage.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>.fixed{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.max-w-md{max-width:28rem}.w-full{width:100%}</style><body></body>' }));
     await page.goto('https://storage.test/');
     await page.addScriptTag({ content: outputFiles[0].text });
     const start = () => page.evaluate(() => { window.finished = false; window.opened = false; access.unlockStorage(storage, { onOpened: () => { window.opened = true; }, onReset: async () => { await storage.reset(); await access.closeAndReload(storage); } }).then(() => { window.finished = true; }); });
@@ -64,10 +64,23 @@ try {
     assert.equal(await page.evaluate(() => window.signatures), 1);
 
     await page.evaluate(() => { storage.state = 'locked'; }); await start();
+    for (const dismiss of ['cancel', 'escape', 'backdrop']) {
+        await page.getByTestId('storage-reset').click();
+        await page.getByTestId('confirm-dialog').waitFor();
+        assert.equal(await page.getByTestId('storage-wallet-dialog').isVisible(), false);
+        assert.equal(await page.getByTestId('confirm-dialog-title').textContent(), 'Delete local data?');
+        assert(await page.getByTestId('confirm-dialog-cancel').evaluate(node => node === document.activeElement));
+        if (dismiss === 'cancel') await page.getByTestId('confirm-dialog-cancel').click();
+        else if (dismiss === 'escape') await page.keyboard.press('Escape');
+        else await page.getByTestId('confirm-dialog').locator('..').click({ position: { x: 2, y: 2 } });
+        await page.getByTestId('storage-wallet-dialog').waitFor();
+        assert.equal(await page.evaluate(() => storage.state), 'locked', 'cancellation must preserve data');
+        assert(await page.getByTestId('storage-reset').evaluate(node => node === document.activeElement));
+    }
     await page.getByTestId('storage-reset').click();
     await Promise.all([
         page.waitForEvent('load'),
-        page.getByTestId('storage-reset-confirm').click(),
+        page.getByTestId('confirm-dialog-confirm').click(),
     ]);
     assert.equal(await page.evaluate(() => typeof window.storage), 'undefined', 'reset must discard the old runtime and its sync cursors');
     await page.addScriptTag({ content: outputFiles[0].text });

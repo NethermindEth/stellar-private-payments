@@ -15,7 +15,7 @@ import {
 } from '../storage-access.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { Toast } from './core.js';
-import { confirmAction } from './confirm.js';
+import { confirmLocalDataDeletion } from './confirm.js';
 
 function renderLockButton() {
     const button = document.getElementById('storage-lock-btn');
@@ -64,11 +64,7 @@ function bindDeleteLocalData() {
     button?.addEventListener('click', async () => {
         button.disabled = true;
         try {
-            const confirmed = await confirmAction({
-                title: 'Delete local data?',
-                confirmLabel: 'Delete local data',
-                warning: 'This deletes local keys, notes, history, settings and cached chain data in this browser. Local-only history may be lost. This cannot be undone and does not securely erase older copies.',
-            });
+            const confirmed = await confirmLocalDataDeletion();
             if (confirmed) await resetLocalData();
         } catch (error) {
             Toast.show(error?.message || 'Could not delete local data. Reload and try again.', 'error');

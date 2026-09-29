@@ -121,3 +121,12 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
         cancelBtn.focus();
     });
 }
+
+/** Shared wording and confirmation behavior for deleting this browser's data. */
+export function confirmLocalDataDeletion() {
+    return confirmAction({
+        title: 'Delete local data?',
+        confirmLabel: 'Delete local data',
+        warning: 'This deletes local keys, notes, history, settings and cached chain data in this browser. Local-only history may be lost. This cannot be undone and does not securely erase older copies.',
+    });
+}

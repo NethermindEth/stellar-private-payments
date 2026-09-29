@@ -1,3 +1,4 @@
+import { confirmLocalDataDeletion } from './ui/confirm.js';
 import { lastStorageActivity, storageActivityPending, withStorageActivity } from './storage-activity.js';
 import { openStorage, settledStorageStatus } from './storage-open.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
@@ -95,22 +96,21 @@ export async function unlockStorage(storage, { onOpened = () => {}, onReset } = 
             if (!creating && onReset) {
                 const reset = button('Delete local data');
                 reset.dataset.testid = 'storage-reset';
-                reset.onclick = () => {
-                    const warning = el('p', 'text-sm text-rose-300', 'Delete all local keys, notes, history and cached chain data? Unsynced local history may be lost. Deletion is not secure erasure. This cannot be undone.');
-                    const confirm = button('Confirm deletion');
-                    confirm.dataset.testid = 'storage-reset-confirm';
-                    confirm.onclick = async () => {
-                        if (busy) return;
-                        busy = true;
-                        confirm.disabled = true;
-                        cancel.disabled = true;
-                        try {
-                            await onReset();
-                        }
-                        catch (failure) { await render(failure.message); }
-                        finally { busy = false; cancel.disabled = false; }
-                    };
-                    card.replaceChildren(title, warning, confirm, cancel);
+                reset.onclick = async () => {
+                    if (busy) return;
+                    busy = true;
+                    // The shared confirmation replaces this dialog temporarily;
+                    // cancellation returns to the same locked-storage screen.
+                    overlay.style.display = 'none';
+                    try {
+                        if (await confirmLocalDataDeletion()) await onReset();
+                    } catch (failure) {
+                        await render(failure.message);
+                    } finally {
+                        busy = false;
+                        overlay.style.display = '';
+                        if (reset.isConnected) reset.focus();
+                    }
                 };
                 card.append(reset);
             }
