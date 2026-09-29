@@ -40,7 +40,10 @@ pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
 }
 
 /// Save the envelope first so interrupted creation or migration is resumable.
-pub(super) async fn create_wallet(context: WalletContext, secret: &str) -> Result<SqliteStorage> {
+pub(super) async fn create_wallet(
+    context: WalletContext,
+    secret: &str,
+) -> Result<(SqliteStorage, DatabaseKey)> {
     ensure!(
         matches!(
             status(false).await?,
@@ -50,7 +53,7 @@ pub(super) async fn create_wallet(context: WalletContext, secret: &str) -> Resul
     );
     let key = DatabaseKey::generate()?;
     wallet_vault::create(Path::new(KEY_DB), &key, context, secret)?;
-    open_key(&key).await
+    Ok((open_key(&key).await?, key))
 }
 
 pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
@@ -58,10 +61,26 @@ pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
     wallet_vault::context(Path::new(KEY_DB))
 }
 
-pub(super) async fn unlock_wallet(context: &WalletContext, secret: &str) -> Result<SqliteStorage> {
+pub(super) async fn unlock_wallet(
+    context: &WalletContext,
+    secret: &str,
+) -> Result<(SqliteStorage, DatabaseKey)> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    open_key(&key).await
+    Ok((open_key(&key).await?, key))
+}
+
+/// Replace the legacy full vault with private tables, then share one
+/// connection with the public database. The SAH VFS permits only one handle
+/// per filename, so close the standalone vault before attaching it.
+pub(super) fn attach_vault(
+    public: &mut SqliteStorage,
+    mut vault: SqliteStorage,
+    key: &DatabaseKey,
+) -> Result<()> {
+    public.migrate_private_vault(&mut vault)?;
+    drop(vault);
+    public.attach_private_vault(ENCRYPTED_DB, key)
 }
 
 async fn open_key(key: &DatabaseKey) -> Result<SqliteStorage> {

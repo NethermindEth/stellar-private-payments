@@ -59,15 +59,20 @@ private keys, decrypted notes, note amounts/blindings/nullifier associations,
 disclaimer acceptances, and private operation history remain in the encrypted
 `spp.encrypted.db` vault. Private worker requests fail while that vault is locked.
 
-The vault retains a chain snapshot to preserve its internal foreign keys. On the
-first successful unlock, an explicit allowlist seeds the public cache from the
-vault; no private tables are exported. On every unlock, cached chain events are
-merged by event ID and contract address and their progress is committed in the
-same vault transaction. Existing conflicting events are rejected. New public
-chain data is not confidential or authenticated by at-rest encryption; existing
-chain/proof validation remains necessary. Public ingestion commits to the cache
-first, then the open vault, so a crash between writes can be replayed on unlock.
-Private note scanning resumes only after unlocking. The native CLI continues to
+The vault contains only private tables. Once unlocked, it is attached to the
+public connection with its encryption key; joins read public chain tables
+directly. Notes use commitment hashes and scan progress uses pool addresses and
+leaf indexes, so rebuilding the public cache cannot retarget private references
+through reused row IDs. Public events are stored and processed once. Private
+note scanning resumes only after unlocking. A missing public cache must be
+synced again before chain-dependent private queries can return complete data.
+
+Older complete vaults migrate on unlock: public events and indexing progress
+are committed to the public database first, then duplicate public tables are
+removed from the vault. Conflicting events stop migration without removing the
+vault's copy; interruption can be retried. Only public records are exported.
+Public data is neither confidential nor authenticated by at-rest encryption;
+existing chain/proof validation remains necessary. The native CLI continues to
 use a single encrypted database.
 
 ### Wallet access and recovery

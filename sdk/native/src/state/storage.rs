@@ -22,12 +22,14 @@ pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema.sql")),
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
+    M::up(include_str!("schema_v3_private_references.sql")),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
     pub(super) conn: Connection,
     pub(super) public_only: bool,
+    pub(super) private_attached: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +54,6 @@ pub struct StoredPrivateKeys {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PoolCommitmentRow {
-    pub commitment_id: i64,
     pub commitment: Field,
     pub leaf_index: u32,
     pub encrypted_output: Vec<u8>,
@@ -130,6 +131,7 @@ impl Storage {
         Ok(Self {
             conn,
             public_only: false,
+            private_attached: false,
         })
     }
 
@@ -409,7 +411,10 @@ impl Storage {
         let raw: Option<String> = self
             .conn
             .query_row(
-                "SELECT value FROM app_settings WHERE key = ?1",
+                &format!(
+                    "SELECT value FROM {} WHERE key = ?1",
+                    self.setting_table(key)
+                ),
                 params![key],
                 |row| row.get(0),
             )
@@ -425,9 +430,7 @@ impl Storage {
         let value_json = serde_json::to_string(value).context("failed to encode app setting")?;
         self.conn
             .execute(
-                "INSERT INTO app_settings (key, value)
-                 VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                &format!("INSERT INTO {} (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", self.setting_table(key)),
                 params![key, value_json],
             )
             .context("failed to upsert app setting")?;
@@ -526,11 +529,11 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                n.spent,
                 c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN pool_commitments c ON c.commitment = n.id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1
@@ -580,11 +583,11 @@ impl Storage {
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                n.spent,
                 c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN pool_commitments c ON c.commitment = n.id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND pool.address = ?2
@@ -635,10 +638,10 @@ impl Storage {
                 c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN pool_commitments c ON c.commitment = n.id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND pool.address = ?2 AND n.nullifier_id IS NULL
+             WHERE a.address = ?1 AND pool.address = ?2 AND n.spent = 0
              ORDER BY r.ledger DESC",
         )?;
 
@@ -679,10 +682,10 @@ impl Storage {
             "SELECT pool.address, n.amount
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN pool_commitments c ON c.commitment = n.id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND n.nullifier_id IS NULL
+             WHERE a.address = ?1 AND n.spent = 0
              ORDER BY pool.address",
         )?;
 
@@ -902,13 +905,13 @@ impl Storage {
             "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments pc ON pc.id = n.commitment_id
+             JOIN pool_commitments pc ON pc.commitment = n.id
              JOIN raw_contract_events r ON r.id = pc.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE a.address = ?2
                AND c.address = ?1
                AND pc.commitment = ?3
-               AND n.nullifier_id IS NULL
+               AND n.spent = 0
              LIMIT 1",
         )?;
 
@@ -948,7 +951,7 @@ impl Storage {
             "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments pc ON pc.id = n.commitment_id
+             JOIN pool_commitments pc ON pc.commitment = n.id
              JOIN raw_contract_events r ON r.id = pc.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE a.address = ?2
@@ -1439,16 +1442,13 @@ impl Storage {
             return Ok(false);
         }
 
-        let pool_ids: Vec<i64> = self
+        let pool_ids: Vec<String> = self
             .conn
             .prepare(
-                "SELECT DISTINCT r.contract_id
-                 FROM pool_commitments c
-                 JOIN raw_contract_events r ON r.id = c.event_id
-                 ORDER BY r.contract_id",
+                "SELECT DISTINCT pool.address FROM pool_commitments c JOIN raw_contract_events r ON r.id=c.event_id JOIN contracts pool ON pool.contract_id=r.contract_id ORDER BY pool.address",
             )?
             .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<i64>, _>>()?;
+            .collect::<core::result::Result<Vec<String>, _>>()?;
 
         if pool_ids.is_empty() {
             return Ok(false);
@@ -1495,8 +1495,8 @@ impl Storage {
 
             for account in &accounts {
                 tx.execute(
-                    "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
-                     VALUES (?1, ?2, 0)",
+                    "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_leaf_index)
+                     VALUES (?1, ?2, -1)",
                     params![pool_contract_id, account.account_id],
                 )?;
             }
@@ -1511,8 +1511,8 @@ impl Storage {
                         break;
                     }
 
-                    let last_commitment_id: i64 = tx.query_row(
-                        "SELECT last_commitment_id
+                    let last_leaf_index: i64 = tx.query_row(
+                        "SELECT last_leaf_index
                          FROM account_commitment_scan
                          WHERE pool_contract_id = ?1 AND account_id = ?2",
                         params![pool_contract_id, account.account_id],
@@ -1522,25 +1522,24 @@ impl Storage {
                     let quota = pool_quota.min(ACCOUNT_CHUNK);
                     let commitments: Vec<PoolCommitmentRow> = {
                         let mut stmt = tx.prepare(
-                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output, c.gvk_ciphertext
+                            "SELECT c.commitment, c.leaf_index, c.encrypted_output, c.gvk_ciphertext
                              FROM pool_commitments c
                              JOIN raw_contract_events r ON r.id = c.event_id
-                             WHERE r.contract_id = ?1 AND c.id > ?2
-                             ORDER BY c.id ASC
+                             JOIN contracts pool ON pool.contract_id=r.contract_id
+                             WHERE pool.address = ?1 AND c.leaf_index > ?2
+                             ORDER BY c.leaf_index ASC
                              LIMIT ?3",
                         )?;
 
                         let rows = stmt.query_map(
-                            params![pool_contract_id, last_commitment_id, quota],
+                            params![pool_contract_id, last_leaf_index, quota],
                             |row| {
-                                let commitment_id: i64 = row.get(0)?;
-                                let commitment: Field = row.get(1)?;
-                                let leaf_index_i64: i64 = row.get(2)?;
-                                let leaf_index = col_u32(leaf_index_i64, 2)?;
-                                let encrypted_output: Vec<u8> = row.get(3)?;
-                                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 4)?;
+                                let commitment: Field = row.get(0)?;
+                                let leaf_index_i64: i64 = row.get(1)?;
+                                let leaf_index = col_u32(leaf_index_i64, 1)?;
+                                let encrypted_output: Vec<u8> = row.get(2)?;
+                                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 3)?;
                                 Ok(PoolCommitmentRow {
-                                    commitment_id,
                                     commitment,
                                     leaf_index,
                                     encrypted_output,
@@ -1563,46 +1562,30 @@ impl Storage {
                     progressed_this_cycle = true;
                     did_progress_in_pool = true;
 
-                    let mut max_scanned_id = last_commitment_id;
+                    let mut max_scanned_id = last_leaf_index;
                     let scanned_count = u32::try_from(commitments.len())
                         .map_err(|_| anyhow::anyhow!("commitments batch length exceeds u32"))?;
 
                     for row in commitments {
-                        if row.commitment_id > max_scanned_id {
-                            max_scanned_id = row.commitment_id;
+                        if i64::from(row.leaf_index) > max_scanned_id {
+                            max_scanned_id = i64::from(row.leaf_index);
                         }
 
                         let Some(derived) = derive(account, &row)? else {
                             continue;
                         };
 
-                        let nullifier_id: Option<i64> = tx
-                            .query_row(
-                                "SELECT n.id
-                                 FROM pool_nullifiers n
-                                 JOIN raw_contract_events r ON r.id = n.event_id
-                                 WHERE r.contract_id = ?1 AND n.nullifier = ?2
-                                 LIMIT 1",
-                                params![pool_contract_id, derived.expected_nullifier],
-                                |r| r.get(0),
-                            )
-                            .optional()?;
-
                         tx.execute(
                             "INSERT OR IGNORE INTO user_notes (
                                 id,
                                 account_id,
-                                commitment_id,
-                                nullifier_id,
                                 expected_nullifier,
                                 blinding,
                                 amount
-                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            ) VALUES (?1, ?2, ?3, ?4, ?5)",
                             params![
                                 row.commitment,
                                 account.account_id,
-                                row.commitment_id,
-                                nullifier_id,
                                 derived.expected_nullifier,
                                 derived.blinding,
                                 derived.amount.to_string()
@@ -1612,7 +1595,7 @@ impl Storage {
 
                     tx.execute(
                         "UPDATE account_commitment_scan
-                         SET last_commitment_id = ?1
+                         SET last_leaf_index = ?1
                          WHERE pool_contract_id = ?2 AND account_id = ?3",
                         params![max_scanned_id, pool_contract_id, account.account_id],
                     )?;
@@ -1632,104 +1615,22 @@ impl Storage {
         Ok(did_any_progress)
     }
 
+    /// Mark matching private notes spent, using stable nullifier values and
+    /// pool identity. No public row IDs or duplicated scan metadata are kept.
     pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
-        if limit == 0 {
-            return Ok(false);
-        }
-
-        let pool_ids: Vec<i64> = self
-            .conn
-            .prepare(
-                "SELECT DISTINCT r.contract_id
-                 FROM pool_nullifiers n
-                 JOIN raw_contract_events r ON r.id = n.event_id
-                 ORDER BY r.contract_id",
-            )?
-            .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<i64>, _>>()?;
-
-        if pool_ids.is_empty() {
-            return Ok(false);
-        }
-
-        let mut did_any = false;
-
-        for pool_contract_id in pool_ids {
-            let tx = self.conn.transaction()?;
-
-            tx.execute(
-                "INSERT OR IGNORE INTO nullifier_scan_state (pool_contract_id, last_nullifier_id)
-                 VALUES (?1, 0)",
-                params![pool_contract_id],
-            )?;
-
-            let last_nullifier_id: i64 = tx.query_row(
-                "SELECT last_nullifier_id FROM nullifier_scan_state WHERE pool_contract_id = ?1",
-                params![pool_contract_id],
-                |row| row.get(0),
-            )?;
-
-            let nullifiers: Vec<(i64, Field)> = {
-                let mut stmt = tx.prepare(
-                    "SELECT n.id, n.nullifier
-                     FROM pool_nullifiers n
-                     JOIN raw_contract_events r ON r.id = n.event_id
-                     WHERE r.contract_id = ?1 AND n.id > ?2
-                     ORDER BY n.id ASC
-                     LIMIT ?3",
-                )?;
-
-                let rows =
-                    stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
-                        let id: i64 = row.get(0)?;
-                        let nullifier: Field = row.get(1)?;
-                        Ok((id, nullifier))
-                    })?;
-
-                let mut out = Vec::new();
-                for r in rows {
-                    out.push(r?);
-                }
-                out
-            };
-
-            let mut max_id = last_nullifier_id;
-
-            for (nullifier_id, nullifier) in nullifiers {
-                did_any = true;
-                if nullifier_id > max_id {
-                    max_id = nullifier_id;
-                }
-
-                tx.execute(
-                    "UPDATE user_notes
-                     SET nullifier_id = ?1
-                     WHERE nullifier_id IS NULL
-                       AND expected_nullifier = ?2
-                       AND EXISTS (
-                           SELECT 1
-                           FROM pool_commitments c
-                           JOIN raw_contract_events r ON r.id = c.event_id
-                           WHERE c.id = user_notes.commitment_id
-                             AND r.contract_id = ?3
-                       )",
-                    params![nullifier_id, nullifier, pool_contract_id],
-                )?;
-            }
-
-            if max_id > last_nullifier_id {
-                tx.execute(
-                    "UPDATE nullifier_scan_state
-                     SET last_nullifier_id = ?1
-                     WHERE pool_contract_id = ?2",
-                    params![max_id, pool_contract_id],
-                )?;
-            }
-
-            tx.commit()?;
-        }
-
-        Ok(did_any)
+        let changed = self.conn.execute(
+            "UPDATE user_notes SET spent=1 WHERE id IN (
+                SELECT u.id FROM user_notes u
+                JOIN pool_commitments c ON c.commitment=u.id
+                JOIN raw_contract_events cr ON cr.id=c.event_id
+                JOIN pool_nullifiers n ON n.nullifier=u.expected_nullifier
+                JOIN raw_contract_events nr ON nr.id=n.event_id
+                WHERE u.spent=0 AND nr.contract_id=cr.contract_id
+                LIMIT ?1
+            )",
+            [limit],
+        )?;
+        Ok(changed > 0)
     }
 }
 
@@ -1932,7 +1833,7 @@ mod tests {
         assert_eq!(note_count, 1);
 
         let scanned: i64 = storage.conn.query_row(
-            "SELECT last_commitment_id FROM account_commitment_scan WHERE account_id = ?1",
+            "SELECT last_leaf_index FROM account_commitment_scan WHERE account_id = ?1",
             params![account_id],
             |row| row.get(0),
         )?;
@@ -1967,12 +1868,12 @@ mod tests {
 
         assert!(storage.reconcile_nullifiers(100)?);
 
-        let nullifier_id: Option<i64> = storage.conn.query_row(
-            "SELECT nullifier_id FROM user_notes WHERE account_id = ?1",
+        let spent: bool = storage.conn.query_row(
+            "SELECT spent FROM user_notes WHERE account_id = ?1",
             params![account_id],
             |row| row.get(0),
         )?;
-        assert!(nullifier_id.is_some());
+        assert!(spent);
 
         Ok(())
     }
@@ -2993,20 +2894,14 @@ mod tests {
             params!["GUSER"],
             |row| row.get(0),
         )?;
-        let commitment_id: i64 = storage.conn.query_row(
-            "SELECT id FROM pool_commitments WHERE commitment = ?1",
-            params![commitment],
-            |row| row.get(0),
-        )?;
         storage.conn.execute(
             "INSERT INTO user_notes (
-                id, account_id, commitment_id, nullifier_id,
+                id, account_id,
                 expected_nullifier, blinding, amount
-             ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 commitment,
                 account_id,
-                commitment_id,
                 Field(crate::types::U256::from(1)),
                 Field(crate::types::U256::from(2)),
                 NoteAmount::from(99u128).to_string(),

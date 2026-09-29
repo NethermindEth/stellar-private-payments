@@ -143,6 +143,24 @@ pub(crate) fn configure(conn: &Connection, key: &DatabaseKey) -> Result<()> {
     // function.
     unsafe {
         let db = conn.handle();
+        configure_cipher(conn)?;
+        let mut raw = Zeroizing::new([0u8; 36]);
+        raw[..4].copy_from_slice(b"raw:");
+        raw[4..].copy_from_slice(key.as_ref());
+        ensure!(
+            sqlite3_key(db, raw.as_ptr().cast(), 36) == rusqlite::ffi::SQLITE_OK,
+            "key setup failed"
+        );
+    }
+    Ok(())
+}
+
+#[allow(unsafe_code)]
+fn configure_cipher(conn: &Connection) -> Result<()> {
+    // SAFETY: the connection owns the live SQLite handle and all names are
+    // static NUL-terminated strings. This sets codec defaults, not a main key.
+    unsafe {
+        let db = conn.handle();
         let cipher = sqlite3mc_cipher_index(c"chacha20".as_ptr());
         ensure!(
             cipher > 0 && sqlite3mc_config(db, c"cipher".as_ptr(), cipher) == cipher,
@@ -162,13 +180,33 @@ pub(crate) fn configure(conn: &Connection, key: &DatabaseKey) -> Result<()> {
                 "cipher configuration failed"
             );
         }
-        let mut raw = Zeroizing::new([0u8; 36]);
-        raw[..4].copy_from_slice(b"raw:");
-        raw[4..].copy_from_slice(key.as_ref());
-        ensure!(
-            sqlite3_key(db, raw.as_ptr().cast(), 36) == rusqlite::ffi::SQLITE_OK,
-            "key setup failed"
-        );
+    }
+    Ok(())
+}
+
+/// Attach an already authenticated vault using the same raw-key and cipher
+/// configuration as a standalone encrypted open. Never key the public main DB.
+pub(crate) fn attach(conn: &Connection, path: &Path, key: &DatabaseKey) -> Result<()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let absolute = std::path::absolute(path)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let path = absolute.as_path();
+    #[cfg(not(target_arch = "wasm32"))]
+    validate_read_only(path, Some(key))?;
+    configure_cipher(conn)?;
+    let path = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("database path must be UTF-8"))?;
+    let mut raw = Zeroizing::new([0u8; 36]);
+    raw[..4].copy_from_slice(b"raw:");
+    raw[4..].copy_from_slice(key.as_ref());
+    conn.execute(
+        "ATTACH DATABASE ?1 AS vault KEY ?2",
+        rusqlite::params![path, &raw[..]],
+    )?;
+    if let Err(error) = conn.pragma_update(Some("vault"), "journal_mode", "DELETE") {
+        conn.execute_batch("DETACH DATABASE vault")?;
+        return Err(error.into());
     }
     Ok(())
 }

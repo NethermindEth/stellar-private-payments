@@ -93,8 +93,8 @@ try {
     assert.equal((await call({ GetSetting: 'private-marker' })).Setting, JSON.stringify('PRIVATE_SECRET_MARKER_9384'));
     assert.equal((await call({ ListOperations: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', limit: 10 } })).Operations.length, 1);
     checks.push('wrong wallet secret leaves public access usable; correct wallet secret restores private data after locked sync');
-    // An old installation has a complete encrypted vault and no public cache.
-    // Reproduce that layout without changing the vault or its key records.
+    // A public cache can be rebuilt while locked. The private-only vault
+    // retains private data and stable references, not a second chain history.
     await page.evaluate(async () => {
         await storage.call('ProcessPendingState', 120_000);
         await storage.close();
@@ -109,6 +109,10 @@ try {
     await load();
     assert.equal(await page.evaluate(() => storage.status()), 'locked');
     assert.equal((await feed()).OperationalFeed.length, 0);
+    const vaultBeforeRebuild = (await snapshot()).filter(f => f.logical === 'spp.encrypted.db');
+    await saveEvent(0);
+    await saveEvent(1);
+    assert.deepEqual((await snapshot()).filter(f => f.logical === 'spp.encrypted.db'), vaultBeforeRebuild);
     await page.evaluate(async wallet => {
         await storage.unlockWallet(wallet.context, wallet.secret);
         await facade.ensurePrivateStorage();
@@ -116,7 +120,7 @@ try {
     await call('ProcessPendingState');
     assert.equal((await feed()).OperationalFeed.length, 2);
     assert.equal((await call({ ListOperations: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', limit: 10 } })).Operations.length, 1);
-    checks.push('existing encrypted vault seeds a missing public cache on unlock without losing private history');
+    checks.push('public cache rebuild leaves vault bytes unchanged and private history survives unlock');
     // Losing the wallet record must never turn existing encrypted data into
     // a fresh profile or allow createWallet to overwrite it.
     await page.evaluate(async () => {

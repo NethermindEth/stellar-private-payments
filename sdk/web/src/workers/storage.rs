@@ -43,7 +43,6 @@ enum InitState {
 }
 
 thread_local! {
-    static PUBLIC_STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Locked) };
@@ -73,7 +72,7 @@ macro_rules! with_storage_mut {
 }
 macro_rules! with_public {
     ($storage:ident => $body:expr) => {
-        with_connection!(PUBLIC_STORAGE, borrow_mut, as_mut, $storage => $body)
+        with_connection!(STORAGE, borrow_mut, as_mut, $storage => $body)
     };
 }
 macro_rules! with_public_mut {
@@ -94,8 +93,7 @@ pub fn worker_main() {
 }
 
 /// Serve `storage`, which has just been created or unlocked.
-fn start(storage: SqliteStorage) {
-    STORAGE.with(|s| *s.borrow_mut() = Some(storage));
+fn start() {
     start_processor();
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
     kick_processor();
@@ -117,7 +115,6 @@ fn start_processor() {
 fn detach() {
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
-    PUBLIC_STORAGE.with(|s| s.borrow_mut().take());
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
 }
 
@@ -131,7 +128,12 @@ fn close_storage() {
 /// Create or unlock the database while no other open is in progress. A
 /// failure leaves the worker locked, so the user can try again.
 async fn open_with(
-    open: impl std::future::Future<Output = Result<SqliteStorage>>,
+    open: impl std::future::Future<
+        Output = Result<(
+            SqliteStorage,
+            stellar_private_payments::state::database_key::DatabaseKey,
+        )>,
+    >,
 ) -> Result<StorageWorkerResponse> {
     anyhow::ensure!(
         INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
@@ -139,13 +141,13 @@ async fn open_with(
     );
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
     match open.await {
-        Ok(mut storage) => {
-            if let Err(error) = with_public_mut!(cache => storage.synchronize_public_cache(cache)?)
+        Ok((vault, key)) => {
+            if let Err(error) = with_public_mut!(public => super::storage_access::attach_vault(public, vault, &key)?)
             {
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
                 return Err(error);
             }
-            start(storage);
+            start();
             Ok(StorageWorkerResponse::Saved)
         }
         Err(e) => {
@@ -228,12 +230,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 !INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending)),
                 "storage is opening"
             );
-            if PUBLIC_STORAGE.with(|s| s.borrow().is_none()) {
+            if STORAGE.with(|s| s.borrow().is_none()) {
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
                 let opened = super::storage_access::open_public().await;
                 INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
                 let storage = opened?;
-                PUBLIC_STORAGE.with(|s| *s.borrow_mut() = Some(storage));
+                STORAGE.with(|s| *s.borrow_mut() = Some(storage));
                 start_processor();
                 kick_processor();
             }
@@ -302,7 +304,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     InitState::Pending => {}
                     InitState::Locked => {
                         anyhow::ensure!(
-                            PUBLIC_STORAGE.with(|s| s.borrow().is_some()),
+                            STORAGE.with(|s| s.borrow().is_some()),
                             "public storage is not initialized"
                         );
                         kick_processor();
@@ -331,9 +333,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 events_data.events.len()
             );
             with_public_mut!(s => s.save_events_batch(&events_data)?)?;
-            if STORAGE.with(|s| s.borrow().is_some()) {
-                with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
-            }
             tracing::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
@@ -350,25 +349,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 metadata.len()
             );
             with_public_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
-            if STORAGE.with(|s| s.borrow().is_some()) {
-                with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
-            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClearIndexingCursors => {
             tracing::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
             with_public_mut!(s => s.clear_indexing_cursors()?)?;
-            if STORAGE.with(|s| s.borrow().is_some()) {
-                with_storage_mut!(s => s.clear_indexing_cursors()?)?;
-            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger) => {
             tracing::trace!("[{WORKER_NAME}] clamping last_fully_indexed_ledger to {max_ledger}");
             with_public_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
-            if STORAGE.with(|s| s.borrow().is_some()) {
-                with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
-            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::SavePrivateKeys(
@@ -677,15 +667,12 @@ async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
 
 async fn process_until_empty() -> anyhow::Result<()> {
     loop {
-        // Public processing continues while locked. Private processing starts
-        // only after a successful open and cache import.
-        if PUBLIC_STORAGE.with(|s| s.borrow().is_none()) {
+        // Parse public events once. When the private vault is attached,
+        // the same connection additionally scans/decrypts private notes.
+        if STORAGE.with(|s| s.borrow().is_none()) {
             break;
         }
-        let mut did_work = with_public_mut!(storage => process_local_state_batch(storage)?)?;
-        if STORAGE.with(|s| s.borrow().is_some()) {
-            did_work |= with_storage_mut!(storage => process_local_state_batch(storage)?)?;
-        }
+        let did_work = with_public_mut!(storage => process_local_state_batch(storage)?)?;
         if !did_work {
             break;
         }

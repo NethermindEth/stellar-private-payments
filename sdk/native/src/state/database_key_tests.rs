@@ -103,7 +103,7 @@ fn encrypted_create_reopen_preserves_schema_and_hides_contents() -> Result<()> {
     let conn = open(&f.db(), &key, OpenPurpose::OpenExisting)?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-        2
+        3
     );
     assert_eq!(
         conn.pragma_query_value(None, "temp_store", |r| r.get::<_, i64>(0))?,

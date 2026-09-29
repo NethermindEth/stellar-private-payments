@@ -355,12 +355,19 @@ explorer/bootnode settings are available immediately. Private requests reject
 while locked, including key access, decrypted notes, balances, private history,
 and all settings other than `explorer` and `bootnode_config`.
 
-The existing `spp.encrypted.db` remains the encrypted private vault. It retains
-chain rows referenced by its private notes, so each file has local foreign keys.
-The first unlock seeds the public cache from explicitly selected public data;
-subsequent unlocks replay public events into the vault using event IDs and
-contract addresses rather than file-local IDs. Public progress commits together
-with imported events. No private tables are copied into the cache. Wallet setup and legacy plaintext migration resume from the saved wallet envelope.
+The existing `spp.encrypted.db` becomes a private-only vault. It holds account
+keys, decrypted notes, private settings, disclaimer acceptances, operation
+history and private scan progress. On unlock, the worker attaches it to the
+public connection with its key. Joins read public tables directly; public
+events are ingested and processed once. Notes reference commitment hashes, and
+scan cursors use pool addresses and leaf indexes rather than public row IDs.
+
+Complete older vaults migrate once: public events and progress commit to the
+public database before their duplicate tables are removed from the vault.
+No private tables are exported. Further unlocks need no public-history copy.
+Rebuilding a missing public cache requires syncing again before chain-dependent
+private queries are complete; private records survive the rebuild. Wallet setup
+and legacy plaintext migration resume from the saved wallet envelope.
 
 The app opens an unlock dialog on private access, with an option to continue
 using public data. Manual/automatic locking closes workers and reloads to clear
