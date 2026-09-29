@@ -1,6 +1,6 @@
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client } from '../wasm-facade.js';
+import { client, ensurePrivateStorage } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { Utils, Toast } from './core.js';
 import {
@@ -265,13 +265,14 @@ export async function runOnboardingWizard({
     address,
     networkPassphrase,
     bootnodeRequired = false,
+    publicOnly = false,
     signer = new FreighterSigner(),
 } = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
     const storage = client().storage();
-    const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getPrivacyKeys(address).catch(() => null);
+    const disclaimerState = publicOnly ? null : await storage.getDisclaimerState(address);
+    const storedPublicKeys = publicOnly ? null : await storage.getPrivacyKeys(address).catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
@@ -290,15 +291,15 @@ export async function runOnboardingWizard({
         bootnodeRequired && !(bootnodeSetting?.enabled && bootnodeSetting?.url);
 
     const steps = [
-        ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(!publicOnly && !disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeUnresolved ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...(!keysExist ? ['keys'] : []),
+        ...(!publicOnly && !keysExist ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
         // user is unregistered — skip it rather than falsely suggesting registration.
-        ...((!registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
+        ...((!publicOnly && !registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
     ].flat();
 
     // Registration is optional (also available later from Settings), so it must
@@ -335,6 +336,8 @@ export async function runOnboardingWizard({
     };
 
     STEP_ORDER.forEach(stepId => {
+        const step = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
+        if (step) step.hidden = publicOnly && !steps.includes(stepId);
         setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
     });
 
@@ -369,7 +372,7 @@ export async function runOnboardingWizard({
             markdown.className = 'space-y-3 text-sm text-slate-300';
             renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', markdown);
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Review the operating disclaimer',
                 aside: markdown,
             });
@@ -405,7 +408,7 @@ export async function runOnboardingWizard({
             statusValue.textContent = persisted ? 'already persisted' : 'not persisted yet';
             statusWrap.appendChild(statusValue);
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Request durable browser storage',
                 body: 'The app keeps your privacy keys, ASP secret, local notes, and settings in browser storage. Persistent storage reduces the chance of silent eviction.',
                 aside: statusWrap,
@@ -464,7 +467,7 @@ export async function runOnboardingWizard({
                 }
             });
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Derive note keys and ASP secret',
                 body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
                 aside: secretWrap,
@@ -540,7 +543,7 @@ export async function runOnboardingWizard({
             }
 
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Set your retention fallback',
                 body: 'Choose whether this operator station keeps a bootnode archive URL, relies on browser reminders, or both. You can change bootnode settings later.',
                 aside: inputWrap,
@@ -607,7 +610,7 @@ export async function runOnboardingWizard({
             const wrap = document.getElementById('tpl-wizard-explorer').content.firstElementChild.cloneNode(true);
             wrap.querySelector('#wizard-explorer-url').value = state.explorerBaseUrl;
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Choose the explorer base link',
                 aside: wrap,
             });
@@ -648,7 +651,7 @@ export async function runOnboardingWizard({
 
         if (stepId === 'registration') {
             const panel = makePanel({
-                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
                 title: 'Register your public keys in the address book',
                 body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
                 aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings. Note: registering publishes your public address to key binding on-chain as an opt-in public event.',
@@ -679,6 +682,38 @@ export async function runOnboardingWizard({
                 renderActions([later, register]);
             });
             ensureNotCancelled();
+        }
+    }
+
+    if (publicOnly) {
+        renderWhy('keys');
+        renderContent(makePanel({
+            eyebrow: 'Public setup complete',
+            title: 'Set up private payments',
+            body: 'To store your private keys and use private payments, create or unlock your local password-protected storage. You can also continue browsing public activity and set this up later.',
+        }));
+        const privateSetup = await waitForStep(resolve => {
+            const later = makeButton({ text: 'Continue with public data', variant: 'ghost', onClick: () => resolve(false) });
+            const setup = makeButton({
+                text: 'Set up private payments', variant: 'primary',
+                onClick: async () => {
+                    setup.disabled = true;
+                    later.disabled = true;
+                    try {
+                        await ensurePrivateStorage();
+                        resolve(true);
+                    } catch (error) {
+                        if (error?.code !== 'unlock-cancelled') setError(error?.message || 'Could not open private storage');
+                        setup.disabled = false;
+                        later.disabled = false;
+                    }
+                },
+            });
+            renderActions([later, setup]);
+        });
+        ensureNotCancelled();
+        if (privateSetup) {
+            return runOnboardingWizard({ address, networkPassphrase, bootnodeRequired, signer });
         }
     }
 

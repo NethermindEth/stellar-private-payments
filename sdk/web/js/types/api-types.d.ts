@@ -69,17 +69,17 @@ export interface StorageConnectOptions {
 }
 
 /**
- * What the local database needs before use: `"new"` and `"unencrypted"` need
+ * What private storage needs before use: `"new"` and `"unencrypted"` need
  * a password from {@link Storage.create}, `"locked"` needs
  * {@link Storage.unlock}.
  */
 export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'opening' | 'recovery-required' | 'password-recovery-required' | 'unlocked';
 
 /**
- * Worker-backed local persistence in an encrypted OPFS database.
+ * Worker-backed public chain cache and encrypted private OPFS vault.
  *
- * Connect once per page via {@link Storage.connect}, then create or unlock
- * the database with the user's password. The key never leaves the storage
+ * Connect once per page via {@link Storage.connect} for public access, then
+ * create or unlock the vault before private access. The key never leaves the storage
  * worker. Call {@link Storage.fork} for additional handles (e.g. app code
  * alongside {@link Client.new}).
  *

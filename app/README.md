@@ -78,3 +78,16 @@ make serve-debug
 # Build frontend with debug logs enabled
 make build-debug
 ```
+
+### Local data access
+
+Public chain data and explorer/bootnode settings are available while locked.
+Private balances, notes, keys, and operation history require unlocking with the
+password or an enrolled Freighter/passkey method. Cancelling the unlock dialog
+keeps public access available. Locking reloads the page to clear private state;
+it does not require unlocking again to resume public browsing or syncing.
+
+First connection opens onboarding for retention, durable storage, and explorer
+settings before requesting a password. Users can then choose **Set up private
+payments**, which opens private storage and continues with the disclaimer, key
+derivation, and optional registration, or **Continue with public data**.

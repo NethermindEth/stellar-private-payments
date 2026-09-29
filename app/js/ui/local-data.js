@@ -5,7 +5,7 @@ import { mountStorageMethods } from '../storage-methods.js';
 import {
     STORAGE_UNLOCKED_EVENT,
     changeStoragePassword,
-    ensureStorage,
+    ensurePrivateStorage,
     isStorageUnlocked,
     lockStorage,
     unlockedStorage,
@@ -40,8 +40,9 @@ function bindLockButton() {
             return;
         }
         try {
-            await ensureStorage();
+            await ensurePrivateStorage();
         } catch (error) {
+            if (error?.code === 'unlock-cancelled') return;
             const message = error?.message || 'Could not open local data';
             if (isDbLockedError(message)) showDbLockedModal(message);
             else Toast.show(message, 'error');
@@ -140,7 +141,16 @@ export const LocalData = {
         bindChangePassword();
         const methods = document.getElementById('settings-unlock-methods');
         const renderMethods = () => {
-            if (methods && isStorageUnlocked()) mountStorageMethods(methods, unlockedStorage());
+            if (!methods) return;
+            if (isStorageUnlocked()) mountStorageMethods(methods, unlockedStorage());
+            else {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'text-sm text-cyan-200 underline';
+                button.textContent = 'Unlock private data to manage access';
+                button.addEventListener('click', () => ensurePrivateStorage().catch(() => {}));
+                methods.replaceChildren(button);
+            }
         };
         window.addEventListener(STORAGE_UNLOCKED_EVENT, renderMethods);
         renderMethods();

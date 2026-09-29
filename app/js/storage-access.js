@@ -24,8 +24,8 @@ export const AUTO_LOCK_CHOICES = [5, 15, 30, 60, 0];
 
 const COPY = {
     new: {
-        title: 'Protect your local data',
-        text: 'This app keeps your notes, keys and history encrypted in this browser. Choose a password to protect them; you enter it once per session.',
+        title: 'Protect your private data',
+        text: 'This app keeps your notes, keys and history encrypted in this browser. Choose a password to access them when needed. Public chain data and ordinary settings stay available while locked.',
         submit: 'Set password',
         busy: 'Setting up…',
     },
@@ -42,7 +42,7 @@ const COPY = {
         busy: 'Saving password…',
     },
     locked: {
-        title: 'Unlock your local data',
+        title: 'Unlock your private data',
         text: 'Enter your password to open your notes, keys and history in this browser.',
         submit: 'Unlock',
         busy: 'Unlocking…',
@@ -72,7 +72,7 @@ export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
  * user's action: "unlocked", or "new" after a reset.
  */
 function showPasswordDialog(storage, status, walletContext, passkeyContext, onOpened) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
         overlay.setAttribute('role', 'dialog');
         overlay.setAttribute('aria-modal', 'true');
@@ -83,6 +83,21 @@ function showPasswordDialog(storage, status, walletContext, passkeyContext, onOp
         overlay.appendChild(card);
         document.body.appendChild(overlay);
 
+        const cancel = el('button', 'absolute right-5 top-5 rounded-xl px-4 py-2 text-sm text-slate-300 hover:text-white', 'Continue with public data');
+        cancel.type = 'button';
+        cancel.dataset.testid = 'storage-password-cancel';
+        overlay.appendChild(cancel);
+        cancel.addEventListener('click', () => {
+            // Never abandon an in-flight create/unlock or wallet prompt.
+            if (card.querySelector('button:disabled')) return;
+            overlay.remove();
+            // An enrollment offer means the vault has already opened.
+            if (card.querySelector('[data-testid="storage-freighter-skip"], [data-testid="storage-passkey-skip"]')) {
+                resolve('unlocked');
+            } else {
+                reject(Object.assign(new Error('Private data remains locked.'), { code: 'unlock-cancelled' }));
+            }
+        });
         const finish = (next) => {
             overlay.remove();
             resolve(next);

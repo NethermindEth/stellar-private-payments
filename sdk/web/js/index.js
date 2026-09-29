@@ -36,8 +36,8 @@ function requireField(value, name) {
 
 /**
  * Connect to worker-backed local persistence. Connect once per page, check
- * `status()`, then `create(password)` or `unlock(password)` before passing the
- * storage (or a fork) to {@link Client.new}.
+ * `status()`, then `create(password)` or `unlock(password)` before accessing
+ * private data. {@link Client.new} can sync public chain data while locked.
  */
 async function connectStorage(options = {}) {
   return WasmStorage.connect({
@@ -127,8 +127,8 @@ function wrapClient(wasmClient, telemetrySinks) {
 async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
 
-  // The database is encrypted: only the app can ask for its password.
-  const storage = requireField(options.storage, 'storage (connect and unlock it first)');
+  // Public syncing works immediately; private access requires an explicit unlock.
+  const storage = requireField(options.storage, 'storage (connect it first)');
 
   let prover = options.prover;
   if (!prover) {

@@ -85,9 +85,9 @@ fn wrong_password() -> JsValue {
 
 #[wasm_bindgen]
 impl Storage {
-    /// Spawn the storage worker. The database stays closed until [`create`]
-    /// or [`unlock`]; ask [`status`] which one it needs. Connect once per
-    /// page; use [`fork`] for additional handles.
+    /// Spawn the storage worker and open the public chain cache. Private data
+    /// stays closed until [`create`] or [`unlock`]; ask [`status`] which it
+    /// needs. Connect once per page; use [`fork`] for additional handles.
     ///
     /// [`create`]: Storage::create
     /// [`unlock`]: Storage::unlock
@@ -116,7 +116,7 @@ impl Storage {
         // handle JS drops while the worker still loads can lose the worker,
         // and a second tab's lock surfaces here rather than on first use.
         storage
-            .status()
+            .request(StorageWorkerRequest::OpenPublic, STORAGE_OPEN_TIMEOUT_MS)
             .await
             .map_err(|e| JsError::new(&js_message(&e)))?;
         Ok(storage)

@@ -26,7 +26,8 @@ const MIGRATION_ARRAY: &[M] = &[
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
-    conn: Connection,
+    pub(super) conn: Connection,
+    pub(super) public_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +127,10 @@ impl Storage {
 
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         Self::migrate_connection(&mut conn)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            public_only: false,
+        })
     }
 
     pub(super) fn migrate_connection(conn: &mut Connection) -> Result<()> {
@@ -401,6 +405,7 @@ impl Storage {
     }
 
     pub fn get_setting_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        self.check_setting_access(key)?;
         let raw: Option<String> = self
             .conn
             .query_row(
@@ -416,6 +421,7 @@ impl Storage {
     }
 
     pub fn set_setting_json<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+        self.check_setting_access(key)?;
         let value_json = serde_json::to_string(value).context("failed to encode app setting")?;
         self.conn
             .execute(

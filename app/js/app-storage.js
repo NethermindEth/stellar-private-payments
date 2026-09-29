@@ -30,12 +30,16 @@ export async function storageCall(storage, request, timeoutMs = 5_000) {
  */
 export class AppStorage {
     #storage;
+    #unlock;
 
-    constructor(storage) {
+    constructor(storage, unlock = async () => {}) {
         this.#storage = storage;
+        this.#unlock = unlock;
     }
 
     async #call(request, timeoutMs = 5_000) {
+        const key = request?.GetSetting ?? request?.SetSetting?.key;
+        if (!['explorer', 'bootnode_config'].includes(key)) await this.#unlock();
         return storageCall(this.#storage, request, timeoutMs);
     }
 

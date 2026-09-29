@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { build } from '../node_modules/esbuild/lib/main.js';
 
 const { outputFiles } = await build({
-    stdin: { contents: "export { ensureStorage } from './js/wasm-facade.js';", resolveDir: new URL('../', import.meta.url).pathname },
+    stdin: { contents: "export { ensureStorage, ensurePrivateStorage, isStorageUnlocked } from './js/wasm-facade.js';", resolveDir: new URL('../', import.meta.url).pathname },
     bundle: true, write: false, format: 'iife', globalName: 'facade',
     plugins: [{ name: 'sdk-fixture', setup(builder) {
         builder.onResolve({ filter: /^stellar-private-payments$/ }, () => ({ path: 'sdk', namespace: 'fixture' }));
@@ -12,14 +12,14 @@ const { outputFiles } = await build({
         builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'wallet'
             ? 'export class FreighterSigner {}'
             : `export default async function init() {}
-               export const Storage = { connect: async () => globalThis.nextStorage };
+               export const Storage = { connect: async () => { if (globalThis.connectError) throw Error('OPFS unavailable'); return globalThis.nextStorage; } };
                export const Client = {}, DisclosureRequest = {}, bootnodeRequired = () => {},
                  deriveAspUserLeaf = () => {}, verifySelectiveDisclosure = () => {},
                  configureTelemetry = () => {}, dump_recent_logs = () => {}, debugLogsEnabled = () => false;` }));
     } }],
 });
 
-test('failed opening closes and frees its worker; retries own lifecycle hooks; BFCache restores reload', async () => {
+test('public startup does not unlock; failed private access retains public storage; BFCache restores reload', async () => {
     let reloads = 0; const timers = new Set();
     const window = Object.assign(new EventTarget(), {
         location: { href: 'https://storage.test/', reload() { reloads++; } },
@@ -36,15 +36,21 @@ test('failed opening closes and frees its worker; retries own lifecycle hooks; B
         async call(request) { assert.equal(request, 'Pause'); this.paused++; },
     });
     context.nextStorage = storage('error');
+    context.connectError = true;
     vm.runInContext(outputFiles[0].text, context);
-    await assert.rejects(context.facade.ensureStorage(), /broken password record/);
-    const failed = context.nextStorage;
-    assert.equal(failed.closed, 1); assert.equal(failed.freed, 1);
-    window.dispatchEvent(new Event('pagehide'));
-    assert.equal(failed.paused, 0, 'failed worker must not retain lifecycle listeners');
-    context.nextStorage = storage('unlocked');
+    await assert.rejects(context.facade.ensureStorage(), /OPFS unavailable/);
+    context.connectError = false;
     await context.facade.ensureStorage();
+    assert.equal(timers.size, 0, 'public access must not start a private session');
+    assert.equal(context.facade.isStorageUnlocked(), false);
+    await assert.rejects(context.facade.ensurePrivateStorage(), /broken password record/);
+    assert.equal(context.nextStorage.closed, 0, 'public cache must remain usable after a failed unlock');
+    assert.equal(context.nextStorage.freed, 0);
+    await context.facade.ensureStorage();
+    context.nextStorage.status = async () => 'unlocked';
+    await Promise.all([context.facade.ensurePrivateStorage(), context.facade.ensurePrivateStorage()]);
     assert.equal(timers.size, 1);
+    assert.equal(context.facade.isStorageUnlocked(), true);
     window.dispatchEvent(new Event('pagehide'));
     assert.equal(context.nextStorage.paused, 1);
     window.dispatchEvent(new Event('pageshow'));

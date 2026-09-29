@@ -39,6 +39,9 @@ export const STORAGE_UNLOCKED_EVENT = 'spp:storage-unlocked';
 
 let storageHandle = null;
 let storageOpening = null;
+let privateOpening = null;
+let privateUnlocked = false;
+let stopAutoLock = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
@@ -81,7 +84,7 @@ export function circuitsBaseUrl() {
 }
 
 function bindAppStorage(sdkStorage) {
-    appStorageInstance = new AppStorage(sdkStorage);
+    appStorageInstance = new AppStorage(sdkStorage, ensurePrivateStorage);
 }
 
 function wrapSdkClient(sdk) {
@@ -109,6 +112,7 @@ function wrapSdkClient(sdk) {
             { networkPassphrase, userAddress, signerAddress },
             signer = new FreighterSigner(),
         ) {
+            await ensurePrivateStorage();
             const effectiveSigner = signerAddress ?? userAddress;
             if (
                 boundUserAddress === userAddress &&
@@ -174,38 +178,15 @@ export function disposeClient() {
     boundSignerAddress = null;
 }
 
-/**
- * Open local persistence (and app storage helpers) without building a Client.
- * The database is encrypted: the first call asks for the password (or for a
- * new one) and resolves once it is unlocked.
- * @returns {Promise<import('./app-storage.js').AppStorage>}
- */
+/** Open the public chain cache and ordinary settings without an unlock prompt. */
 export async function ensureStorage() {
     await ensureWasmInit();
     if (!storageOpening) {
         storageOpening = (async () => {
             const storage = await Storage.connect();
-            const removeLifecycle = installStoragePauseOnUnload(storage);
-            let stopAutoLock;
-            try {
-                await unlockStorage(storage, { onOpened: () => {
-                    // Start as soon as create/unlock finishes, including the
-                    // optional enrollment screens that still retain a password.
-                    if (!stopAutoLock) stopAutoLock = startAutoLock(() => {
-                        disposeClient();
-                        void closeAndReload(storage);
-                    });
-                } });
-                storageHandle = storage;
-                bindAppStorage(storage);
-                window.dispatchEvent(new Event(STORAGE_UNLOCKED_EVENT));
-            } catch (error) {
-                stopAutoLock?.();
-                removeLifecycle();
-                await storage.close().catch(() => {});
-                storage.free();
-                throw error;
-            }
+            installStoragePauseOnUnload(storage);
+            storageHandle = storage;
+            bindAppStorage(storage);
         })().catch((err) => {
             storageOpening = null;
             throw err;
@@ -215,11 +196,32 @@ export async function ensureStorage() {
     return appStorageInstance;
 }
 
+/** Ask for access only when the user requests private data or a private operation. */
+export async function ensurePrivateStorage() {
+    await ensureStorage();
+    if (privateUnlocked) return appStorageInstance;
+    if (!privateOpening) {
+        privateOpening = (async () => {
+            await unlockStorage(storageHandle, { onOpened: () => {
+                // Also protect the optional enrollment screens after creation.
+                if (!stopAutoLock) stopAutoLock = startAutoLock(() => void lockStorage());
+            } });
+            privateUnlocked = true;
+            window.dispatchEvent(new Event(STORAGE_UNLOCKED_EVENT));
+        })().finally(() => { privateOpening = null; });
+    }
+    await privateOpening;
+    return appStorageInstance;
+}
+
 /**
- * Lock the local database: close it and reload the page, which then asks for
- * the password again before anything reads local data.
+ * Drop private data and keys by closing workers and reloading. The next page
+ * opens the public cache without prompting; private access requires an unlock.
  */
 export async function lockStorage() {
+    privateUnlocked = false;
+    stopAutoLock?.();
+    stopAutoLock = null;
     disposeClient();
     await closeAndReload(storageHandle);
 }
@@ -229,19 +231,19 @@ export async function lockStorage() {
  * `current` is wrong.
  */
 export async function changeStoragePassword(current, next) {
-    await ensureStorage();
+    await ensurePrivateStorage();
     await withStorageActivity(() => storageHandle.changePassword(current, next));
 }
 
 /** Settings access to the currently unlocked worker; never opens a dialog. */
 export function unlockedStorage() {
-    if (!storageHandle) throw new Error('Unlock local data first.');
+    if (!privateUnlocked) throw new Error('Unlock private data first.');
     return storageHandle;
 }
 
 /** Whether the local database has been unlocked on this page. */
 export function isStorageUnlocked() {
-    return storageHandle !== null;
+    return privateUnlocked;
 }
 
 

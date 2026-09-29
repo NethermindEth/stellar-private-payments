@@ -71,6 +71,12 @@ async fn open_optional_key(key: DatabaseKey) -> Result<Option<SqliteStorage>> {
 }
 
 const ENCRYPTED_DB: &str = "spp.encrypted.db";
+const PUBLIC_DB: &str = "spp.public.db";
+
+pub(super) async fn open_public() -> Result<SqliteStorage> {
+    pools::ensure_encrypted().await?;
+    SqliteStorage::connect_public(PUBLIC_DB)
+}
 const KEY_DB: &str = "spp.key.db";
 /// The unencrypted database of earlier versions.
 const PLAINTEXT_DB: &str = "spp.db";
@@ -223,6 +229,7 @@ pub(super) async fn reset() -> Result<()> {
     pools::ensure_encrypted().await?;
     pools::delete_encrypted(ENCRYPTED_DB)?;
     pools::delete_encrypted(KEY_DB)?;
+    pools::delete_encrypted(PUBLIC_DB)?;
     if pools::plaintext_exists(PLAINTEXT_DB).await? {
         pools::remove_plaintext(PLAINTEXT_DB).await?;
     }

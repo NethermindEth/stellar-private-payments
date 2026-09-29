@@ -17,6 +17,9 @@ pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), Err
 /// more work may remain.
 pub fn process_local_state_batch(storage: &mut SqliteStorage) -> anyhow::Result<bool> {
     let did_raw = process_events(storage, PROCESS_FETCH_LIMIT)?;
+    if storage.is_public_only() {
+        return Ok(did_raw);
+    }
     let mut derive = derive_user_note;
     let did_notes = process_notes(storage, PROCESS_FETCH_LIMIT, &mut derive)?;
     Ok(did_raw || did_notes)
