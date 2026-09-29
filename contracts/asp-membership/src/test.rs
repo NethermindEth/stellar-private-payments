@@ -22,11 +22,30 @@ fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
     })
 }
 
+fn next_index(env: &Env, contract_id: &Address) -> u64 {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("next index is set in the constructor")
+    })
+}
+
+/// The root stored under its own instance key.
 fn stored_root(env: &Env, contract_id: &Address) -> U256 {
-    let state = tree_state(env, contract_id);
-    state
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::Root)
+            .expect("root is set in the constructor")
+    })
+}
+
+/// The root at the ring slot the leaf counter names.
+fn ring_root(env: &Env, contract_id: &Address) -> U256 {
+    tree_state(env, contract_id)
         .roots
-        .get(root_index_for(state.next_index).expect("slot fits"))
+        .get(root_index_for(next_index(env, contract_id)).expect("slot fits"))
         .expect("the slot holds a root")
 }
 
@@ -187,7 +206,7 @@ fn test_insert_leaf() {
     client.insert_leaf(&leaf2);
 
     // Check NextIndex after both insertions
-    let next_index1 = tree_state(&env, &contract_id).next_index;
+    let next_index1 = next_index(&env, &contract_id);
     assert_eq!(next_index1, 2, "NextIndex should be 2 after two insertions");
 }
 
@@ -303,7 +322,7 @@ fn test_new_admin_can_insert_after_update() {
     client.insert_leaf(&leaf);
 
     // Verify the insertion succeeded
-    let next_index = tree_state(&env, &contract_id).next_index;
+    let next_index = next_index(&env, &contract_id);
     assert_eq!(
         next_index, 1,
         "NextIndex should be 1 after insertion by new admin"
@@ -370,7 +389,7 @@ fn test_multiple_insertions() {
     }
 
     // Verify NextIndex was updated correctly
-    let next_index = tree_state(&env, &contract_id).next_index;
+    let next_index = next_index(&env, &contract_id);
     assert_eq!(
         next_index, 5,
         "NextIndex should be 5 after inserting 5 leaves"
@@ -394,7 +413,7 @@ fn test_insert_leaf_errors_when_admin_unset() {
         Err(Ok(Error::NotInitialized))
     ));
 
-    let next_index = tree_state(&env, &contract_id).next_index;
+    let next_index = next_index(&env, &contract_id);
     assert_eq!(next_index, 0, "a rejected insert must not advance the tree");
 }
 
@@ -666,10 +685,13 @@ fn the_tree_state_is_one_entry() {
     client.insert_leaf(&U256::from_u32(&env, 1));
     let root = client.get_root();
 
-    let state = tree_state(&env, &contract_id);
-    assert_eq!(state.next_index, 1);
-    assert_eq!(state.roots.len(), ROOT_HISTORY_SIZE);
+    assert_eq!(next_index(&env, &contract_id), 1);
+    assert_eq!(
+        tree_state(&env, &contract_id).roots.len(),
+        ROOT_HISTORY_SIZE
+    );
     assert_eq!(stored_root(&env, &contract_id), root);
+    assert_eq!(ring_root(&env, &contract_id), root);
 }
 
 #[test]
@@ -698,9 +720,11 @@ fn the_root_slot_follows_the_leaf_count() {
         client.insert_leaf(&U256::from_u32(&env, i));
     }
 
-    let state = tree_state(&env, &contract_id);
-    assert_eq!(root_index_for(state.next_index), Ok(3));
-    assert_eq!(state.roots.get(3), Some(client.get_root()));
+    assert_eq!(root_index_for(next_index(&env, &contract_id)), Ok(3));
+    assert_eq!(
+        tree_state(&env, &contract_id).roots.get(3),
+        Some(client.get_root())
+    );
 }
 
 #[test]
@@ -720,7 +744,7 @@ fn the_root_slot_wraps_after_ninety_inserts() {
     client.insert_leaf(&U256::from_u32(&env, ROOT_HISTORY_SIZE));
 
     let state = tree_state(&env, &contract_id);
-    assert_eq!(root_index_for(state.next_index), Ok(0));
+    assert_eq!(root_index_for(next_index(&env, &contract_id)), Ok(0));
     assert_eq!(state.roots.get(1), Some(slot_one_root));
     assert_eq!(state.roots.get(89), Some(slot_eighty_nine_root));
     assert_eq!(state.roots.get(0), Some(client.get_root()));

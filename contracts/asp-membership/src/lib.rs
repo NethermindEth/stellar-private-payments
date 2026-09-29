@@ -20,8 +20,6 @@ const ROOT_HISTORY_SIZE: u32 = 90;
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TreeState {
-    /// Next available index for leaf insertion
-    next_index: u64,
     /// Left-sibling hashes along the insertion path, element `i` holding the
     /// hash at level `i`
     filled_subtrees: Vec<U256>,
@@ -40,8 +38,9 @@ fn root_index_for(next_index: u64) -> Result<u32, Error> {
 
 /// Storage keys for contract data
 ///
-/// [`DataKey::Levels`] is an instance key. [`DataKey::Admin`] and
-/// [`DataKey::State`] are persistent keys.
+/// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
+/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::State`] are
+/// persistent keys. Every key has a fixed name and a fixed value size.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -49,6 +48,10 @@ enum DataKey {
     Admin,
     /// Number of levels in the Merkle tree
     Levels,
+    /// Next available index for leaf insertion
+    NextIndex,
+    /// Current Merkle root, the newest entry of the root history
+    Root,
     /// The [`TreeState`] entry
     State,
 }
@@ -118,6 +121,7 @@ impl ASPMembership {
         store.set(&DataKey::Admin, &admin);
         let instance = env.storage().instance();
         instance.set(&DataKey::Levels, &levels);
+        store.set(&DataKey::NextIndex, &0u64);
 
         // The top level is the root itself and is never read back as a
         // sibling, so it is not written.
@@ -132,10 +136,10 @@ impl ASPMembership {
         for _ in 0..ROOT_HISTORY_SIZE {
             roots.push_back(empty_root.clone());
         }
+        instance.set(&DataKey::Root, &empty_root);
         store.set(
             &DataKey::State,
             &TreeState {
-                next_index: 0,
                 filled_subtrees: filled,
                 roots,
             },
@@ -176,14 +180,9 @@ impl ASPMembership {
     ///
     /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
-        let state: TreeState = env
-            .storage()
-            .persistent()
-            .get(&DataKey::State)
-            .ok_or(Error::NotInitialized)?;
-        state
-            .roots
-            .get(root_index_for(state.next_index)?)
+        env.storage()
+            .instance()
+            .get(&DataKey::Root)
             .ok_or(Error::NotInitialized)
     }
 
@@ -205,20 +204,17 @@ impl ASPMembership {
             return Ok(false);
         }
 
+        // The current root is the common case and needs no ring read
+        if root == Self::get_root(env.clone())? {
+            return Ok(true);
+        }
+
         let state: TreeState = env
             .storage()
             .persistent()
             .get(&DataKey::State)
             .ok_or(Error::NotInitialized)?;
-
-        let mut slot = root_index_for(state.next_index)?;
-        for _ in 0..ROOT_HISTORY_SIZE {
-            if state.roots.get(slot).as_ref() == Some(&root) {
-                return Ok(true);
-            }
-            slot = slot.checked_sub(1).unwrap_or(ROOT_HISTORY_SIZE - 1);
-        }
-        Ok(false)
+        Ok(state.roots.contains(&root))
     }
 
     /// Hash two U256 values using Poseidon2 compression
@@ -263,8 +259,10 @@ impl ASPMembership {
         let levels: u32 = instance
             .get(&DataKey::Levels)
             .ok_or(Error::NotInitialized)?;
+        let actual_index: u64 = store
+            .get(&DataKey::NextIndex)
+            .ok_or(Error::NotInitialized)?;
         let mut state: TreeState = store.get(&DataKey::State).ok_or(Error::NotInitialized)?;
-        let actual_index = state.next_index;
         let mut current_index = actual_index;
 
         // Check if tree is full (capacity is 2^levels leaves)
@@ -292,11 +290,13 @@ impl ASPMembership {
             current_index >>= 1;
         }
 
-        state.next_index = actual_index.checked_add(1).ok_or(Error::Overflow)?;
+        let next_index = actual_index.checked_add(1).ok_or(Error::Overflow)?;
         state
             .roots
-            .set(root_index_for(state.next_index)?, current_hash.clone());
+            .set(root_index_for(next_index)?, current_hash.clone());
         store.set(&DataKey::State, &state);
+        store.set(&DataKey::NextIndex, &next_index);
+        instance.set(&DataKey::Root, &current_hash);
 
         // Emit event with leaf details
         LeafAddedEvent {

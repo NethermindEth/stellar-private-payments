@@ -431,9 +431,10 @@ const EXPECTED: &[Pinned] = expected! {
     "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
     "pool transact, transfer, allowlist and blocklist, fresh tree" => 10, 4, 4444, 4, 530_972_009;
+    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_972_009;
     "pool get_root" => 2, 0, 0, 0, 0;
     "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_972_185;
-    "asp-membership insert_leaf, first leaf" => 6, 4, 840, 0, 0;
+    "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
@@ -568,6 +569,18 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
         1,
         0,
     ));
+
+    let stale_member = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
+    let stale_member_row = "pool transact, transfer, membership root one insert old";
+    let (old_membership_root, _) = stale_member.roots();
+    ASPMembershipClient::new(&stale_member.env, &stale_member.asp_membership)
+        .insert_leaf(&U256::from_u32(&stale_member.env, 7));
+    let (mut proof, ext) = stale_member.proof(stale_member.client().get_root(), 1, 0);
+    proof.asp_membership_root = old_membership_root;
+    stale_member
+        .client()
+        .transact(&proof, &ext, &stale_member.sender);
+    rows.push(measure(&stale_member.env, stale_member_row));
 
     let read = PoolFixture::new(policy::BLOCKLIST_BIT);
     read.client().get_root();
