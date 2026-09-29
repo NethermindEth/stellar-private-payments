@@ -10,10 +10,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use super::{
-    database_key::DatabaseKey,
-    password_vault::{PasswordRecord, read_optional_record},
-};
+use super::database_key::DatabaseKey;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,15 +25,7 @@ pub struct WalletContext {
 #[serde(deny_unknown_fields)]
 struct WalletRecord {
     context: WalletContext,
-    sealed: Envelope,
-}
-
-// The untagged legacy variant is read only during migration.
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum Envelope {
-    Wallet(WalletEnvelope),
-    Legacy(PasswordRecord),
+    sealed: WalletEnvelope,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,7 +36,7 @@ struct WalletEnvelope {
     ciphertext: String,
 }
 
-impl Envelope {
+impl WalletEnvelope {
     fn seal(key: &DatabaseKey, secret: &str) -> Result<Self> {
         validate_secret(secret)?;
         let material = Zeroizing::new(hex::decode(secret)?);
@@ -58,35 +47,30 @@ impl Envelope {
         let ciphertext = cipher
             .encrypt(Nonce::from_slice(&nonce), key.as_ref())
             .map_err(|_| anyhow!("cannot seal wallet key"))?;
-        Ok(Self::Wallet(WalletEnvelope {
+        Ok(Self {
             version: 2,
             nonce: STANDARD.encode(nonce),
             ciphertext: STANDARD.encode(ciphertext),
-        }))
+        })
     }
 
     fn open(&self, secret: &str) -> Result<DatabaseKey> {
-        match self {
-            Self::Legacy(record) => Ok(record.open(secret)?),
-            Self::Wallet(record) => {
-                ensure!(record.version == 2, "unsupported wallet envelope version");
-                let nonce = STANDARD.decode(&record.nonce)?;
-                let ciphertext = STANDARD.decode(&record.ciphertext)?;
-                ensure!(
-                    nonce.len() == 24 && ciphertext.len() == 48,
-                    "invalid wallet envelope"
-                );
-                let material = Zeroizing::new(hex::decode(secret)?);
-                let cipher = XSalsa20Poly1305::new_from_slice(&material)
-                    .map_err(|_| anyhow!("invalid wallet secret"))?;
-                let bytes = Zeroizing::new(
-                    cipher
-                        .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
-                        .map_err(|_| anyhow!("wallet could not unlock this database"))?,
-                );
-                Ok(DatabaseKey::new(bytes.as_slice().try_into()?))
-            }
-        }
+        ensure!(self.version == 2, "unsupported wallet envelope version");
+        let nonce = STANDARD.decode(&self.nonce)?;
+        let ciphertext = STANDARD.decode(&self.ciphertext)?;
+        ensure!(
+            nonce.len() == 24 && ciphertext.len() == 48,
+            "invalid wallet envelope"
+        );
+        let material = Zeroizing::new(hex::decode(secret)?);
+        let cipher = XSalsa20Poly1305::new_from_slice(&material)
+            .map_err(|_| anyhow!("invalid wallet secret"))?;
+        let bytes = Zeroizing::new(
+            cipher
+                .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+                .map_err(|_| anyhow!("wallet could not unlock this database"))?,
+        );
+        Ok(DatabaseKey::new(bytes.as_slice().try_into()?))
     }
 }
 
@@ -109,41 +93,12 @@ pub fn create(path: &Path, key: &DatabaseKey, context: WalletContext, secret: &s
     validate_context(&context)?;
     let record = WalletRecord {
         context,
-        sealed: Envelope::seal(key, secret)?,
+        sealed: WalletEnvelope::seal(key, secret)?,
     };
     connection(path)?.execute(
         "INSERT INTO wallet_record (id, record) VALUES (1, ?1)",
         [serde_json::to_string(&record)?],
     )?;
-    Ok(())
-}
-
-/// Called only after the actual database was opened successfully. Replace the
-/// legacy envelope and retire old browser unlock methods in one transaction.
-pub fn finish_wallet_migration(
-    path: &Path,
-    key: &DatabaseKey,
-    context: &WalletContext,
-    secret: &str,
-) -> Result<()> {
-    let record = read(path)?.ok_or_else(|| anyhow!("wallet record is missing"))?;
-    ensure!(&record.context == context, "wallet enrollment changed");
-    ensure!(*record.sealed.open(secret)? == **key, "wallet key mismatch");
-    if matches!(record.sealed, Envelope::Wallet(_)) && !has_legacy_credentials(path)? {
-        return Ok(());
-    }
-    let record = WalletRecord {
-        context: context.clone(),
-        sealed: Envelope::seal(key, secret)?,
-    };
-    let mut conn = connection(path)?;
-    let tx = conn.transaction()?;
-    tx.execute(
-        "UPDATE wallet_record SET record = ?1 WHERE id = 1",
-        [serde_json::to_string(&record)?],
-    )?;
-    tx.execute_batch("DROP TABLE IF EXISTS password_record; DROP TABLE IF EXISTS passkey_record;")?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -158,15 +113,38 @@ fn connection(path: &Path) -> Result<Connection> {
 }
 
 fn read(path: &Path) -> Result<Option<WalletRecord>> {
-    let json = read_optional_record(path, "wallet_record")?;
+    let json = read_optional_record(path)?;
     json.map(|json| Ok(serde_json::from_str(&json)?))
         .transpose()
 }
 
-/// Detect old browser credentials without exposing an authentication route.
-pub fn has_legacy_credentials(path: &Path) -> Result<bool> {
-    Ok(read_optional_record(path, "password_record")?.is_some()
-        || read_optional_record(path, "passkey_record")?.is_some())
+/// Open existing metadata without creating a file or table. Read/write mode
+/// permits SQLite to recover a hot journal, but SQLITE_OPEN_CREATE is omitted.
+fn read_optional_record(path: &Path) -> Result<Option<String>> {
+    use rusqlite::{Connection, Error, ErrorCode, OpenFlags, OptionalExtension};
+    let conn = match Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => conn,
+        Err(Error::SqliteFailure(error, _)) if error.code == ErrorCode::CannotOpen => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+        ["wallet_record"],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    Ok(conn
+        .query_row("SELECT record FROM wallet_record WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .optional()?)
 }
 
 pub fn context(path: &Path) -> Result<Option<WalletContext>> {
@@ -194,10 +172,9 @@ pub fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<Data
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::state::password_vault::{read_record_database, write_record_database};
 
     #[test]
-    fn wallet_only_creation_and_legacy_migration_preserve_key() -> Result<()> {
+    fn wallet_creation_and_unlock_preserve_key() -> Result<()> {
         struct TestDir(std::path::PathBuf);
         impl Drop for TestDir {
             fn drop(&mut self) {
@@ -227,40 +204,32 @@ mod tests {
         let mut altered = ctx.clone();
         altered.origin = "https://other.test".into();
         assert!(unlock(&path, &altered, &secret).is_err());
-        assert!(read_record_database(&path)?.is_none());
         assert_eq!(*unlock(&path, &ctx, &secret)?, *key);
         let bytes = std::fs::read(&path)?;
         assert!(create(&path, &DatabaseKey::generate()?, ctx.clone(), &secret).is_err());
         assert!(unlock(&path, &ctx, &"cd".repeat(32)).is_err());
         assert_eq!(std::fs::read(&path)?, bytes);
-        finish_wallet_migration(&path, &key, &ctx, &secret)?;
+        assert_eq!(*unlock(&path, &ctx, &secret)?, *key);
         assert_eq!(
             std::fs::read(&path)?,
             bytes,
-            "ordinary unlock must not rewrite the envelope"
+            "unlock must not rewrite the envelope"
         );
-
-        let legacy = dir.0.join("legacy.db");
-        write_record_database(&legacy, &PasswordRecord::seal(&key, "legacy password")?)?;
-        let old = WalletRecord {
-            context: ctx.clone(),
-            sealed: Envelope::Legacy(PasswordRecord::seal(&key, &secret)?),
-        };
-        connection(&legacy)?.execute(
-            "INSERT INTO wallet_record VALUES(1, ?1)",
-            [serde_json::to_string(&old)?],
-        )?;
-        connection(&legacy)?.execute_batch("CREATE TABLE passkey_record(id INTEGER PRIMARY KEY, record TEXT); INSERT INTO passkey_record VALUES(1, 'legacy');")?;
-        let before = std::fs::read(&legacy)?;
-        assert!(finish_wallet_migration(&legacy, &key, &ctx, &"cd".repeat(32)).is_err());
-        assert_eq!(std::fs::read(&legacy)?, before);
-        finish_wallet_migration(&legacy, &key, &ctx, &secret)?;
-        assert!(!has_legacy_credentials(&legacy)?);
-        assert_eq!(*unlock(&legacy, &ctx, &secret)?, *key);
-        assert!(matches!(
-            read(&legacy)?.expect("migrated wallet record").sealed,
-            Envelope::Wallet(_)
-        ));
+        Ok(())
+    }
+    #[test]
+    fn reading_absent_metadata_does_not_create_files_or_tables() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("spp-wallet-metadata-{}.db", std::process::id()));
+        assert!(context(&path)?.is_none());
+        assert!(!path.exists());
+        let conn = rusqlite::Connection::open(&path)?;
+        conn.execute_batch("CREATE TABLE unrelated (value TEXT)")?;
+        drop(conn);
+        let before = std::fs::read(&path)?;
+        assert!(context(&path)?.is_none());
+        assert_eq!(std::fs::read(&path)?, before);
+        std::fs::remove_file(path)?;
         Ok(())
     }
 }

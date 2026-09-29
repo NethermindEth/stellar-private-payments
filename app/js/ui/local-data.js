@@ -95,7 +95,7 @@ export const LocalData = {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'text-sm text-cyan-200 underline';
-                button.textContent = 'Unlock private data to manage access';
+                button.textContent = 'Unlock to view the enrolled Freighter account';
                 button.addEventListener('click', () => ensurePrivateStorage().catch(() => {}));
                 methods.replaceChildren(button);
             }

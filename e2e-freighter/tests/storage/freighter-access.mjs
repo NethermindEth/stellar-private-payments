@@ -6,6 +6,7 @@ import { build } from '../../../app/node_modules/esbuild/lib/main.js';
 const { outputFiles } = await build({
     stdin: {
         contents: `export { unlockStorage, startAutoLock, MAX_BUSY_LOCK_DELAY_MS } from './js/storage-access.js';
+            export { closeAndReload } from './js/storage-lock.js';
             export { beginStorageActivity } from './js/storage-activity.js';
             import { Keypair, hash } from '@stellar/stellar-sdk';
             export function setup(status = 'new', enrolled = false) {
@@ -43,7 +44,7 @@ try {
     await page.route('https://storage.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body></body>' }));
     await page.goto('https://storage.test/');
     await page.addScriptTag({ content: outputFiles[0].text });
-    const start = () => page.evaluate(() => { window.finished = false; window.opened = false; access.unlockStorage(storage, { onOpened: () => { window.opened = true; } }).then(() => { window.finished = true; }); });
+    const start = () => page.evaluate(() => { window.finished = false; window.opened = false; access.unlockStorage(storage, { onOpened: () => { window.opened = true; }, onReset: async () => { await storage.reset(); await access.closeAndReload(storage); } }).then(() => { window.finished = true; }); });
     await page.evaluate(() => access.setup()); await start();
     assert.equal(await page.locator('input[type=password]').count(), 0);
     assert.equal(await page.getByTestId('storage-auto-lock').inputValue(), '5');
@@ -134,7 +135,7 @@ try {
 
     await page.evaluate(() => access.setup('recovery-required')); await start();
     assert.equal(await page.getByTestId('storage-wallet-submit').count(), 0);
-    assert.match(await page.getByTestId('storage-wallet-dialog').textContent(), /previous app version/);
+    assert.match(await page.getByTestId('storage-wallet-dialog').textContent(), /Restore a complete browser-profile backup/);
     assert.equal(await page.evaluate(() => storage.created), 0);
-    console.log('PASS: wallet-only setup, approval retry, unlock, explicit reset, migration retry, legacy protection and bounded inactivity locking');
+    console.log('PASS: wallet-only setup, approval retry, unlock, explicit reset, migration retry, missing-record protection and bounded inactivity locking');
 } finally { await browser.close(); }

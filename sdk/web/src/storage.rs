@@ -16,7 +16,7 @@ pub(crate) const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js
 const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
 /// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
 const STORAGE_OPEN_TIMEOUT_MS: u32 = 15_000;
-/// Legacy envelope opening and plaintext migration can be expensive.
+/// Plaintext migration and public history replay can be expensive.
 const STORAGE_UNLOCK_TIMEOUT_MS: u32 = 120_000;
 
 #[derive(Debug, Deserialize)]
@@ -168,7 +168,9 @@ impl Storage {
         Ok(())
     }
 
-    /// Explicitly delete all local public and private data.
+    /// Explicitly delete all local public and private data and close this
+    /// session. Connect a new Storage before further use; all existing
+    /// forks are closed.
     pub async fn reset(&self) -> Result<(), JsValue> {
         self.request(StorageWorkerRequest::Reset, STORAGE_OPEN_TIMEOUT_MS)
             .await?;

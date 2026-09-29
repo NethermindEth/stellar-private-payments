@@ -1,6 +1,5 @@
 import { lastStorageActivity, storageActivityPending, withStorageActivity } from './storage-activity.js';
 import { openStorage, settledStorageStatus } from './storage-open.js';
-import { closeAndReload } from './storage-lock.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { createFreighter, unlockFreighter } from './storage-freighter.js';
 
@@ -9,7 +8,7 @@ const DEFAULT_AUTO_LOCK_MINUTES = 5;
 export const AUTO_LOCK_CHOICES = [5, 15, 30, 60, 0];
 
 /** Wallet approval opens the private vault; public indexing stays available. */
-export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
+export async function unlockStorage(storage, { onOpened = () => {}, onReset } = {}) {
     if (await settledStorageStatus(storage) === 'unlocked') { onOpened(); return; }
     await new Promise((resolve, reject) => {
         const overlay = el('div', 'fixed inset-0 z-[70] flex items-center justify-center bg-ink-950/90 px-4 py-8 backdrop-blur-sm');
@@ -42,7 +41,7 @@ export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
             const title = el('h2', 'text-xl font-semibold text-white', blocked ? 'Existing data needs recovery' : creating ? 'Protect your private data with Freighter' : 'Unlock your private data');
             title.id = 'storage-wallet-title';
             const text = el('p', 'text-sm leading-6', blocked
-                ? 'This vault has no Freighter unlock record. Its data has been preserved. Open it with the previous app version and enable Freighter access, then return here. Reset permanently deletes local data.'
+                ? 'This vault has no usable Freighter unlock record. Its data has been preserved. Restore a complete browser-profile backup or explicitly delete local data to start again.'
                 : creating
                     ? 'Approve two matching messages in Freighter to protect your keys, notes and history. Future sessions need one approval from this same wallet account. There is no separate app password or passkey.'
                     : 'Approve the local-storage message in the enrolled Freighter account. This does not authorize a transaction.');
@@ -93,7 +92,7 @@ export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
             }
             actions.append(cancel);
             card.append(actions);
-            if (!creating) {
+            if (!creating && onReset) {
                 const reset = button('Delete local data');
                 reset.dataset.testid = 'storage-reset';
                 reset.onclick = () => {
@@ -106,10 +105,7 @@ export async function unlockStorage(storage, { onOpened = () => {} } = {}) {
                         confirm.disabled = true;
                         cancel.disabled = true;
                         try {
-                            await storage.reset();
-                            // The active indexer holds cursors in memory. Restart
-                            // it against the empty public cache after deletion.
-                            await closeAndReload(storage);
+                            await onReset();
                         }
                         catch (failure) { await render(failure.message); }
                         finally { busy = false; cancel.disabled = false; }

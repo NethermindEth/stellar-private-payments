@@ -205,40 +205,6 @@ fn provider_rejects_wrong_password_and_existing_database() -> Result<()> {
 }
 
 #[test]
-fn record_database_replaces_its_record() -> Result<()> {
-    let f = Fixture::new()?;
-    let path = f.0.join("spp.key.db");
-    assert_eq!(read_record_database(&path)?, None);
-
-    let key = DatabaseKey::generate()?;
-    let first = PasswordRecord::seal(&key, PASSWORD)?;
-    write_record_database(&path, &first)?;
-    assert_eq!(read_record_database(&path)?, Some(first));
-
-    let second = PasswordRecord::seal(&key, OTHER_PASSWORD)?;
-    write_record_database(&path, &second)?;
-    let stored = read_record_database(&path)?.expect("record is stored");
-    assert_eq!(stored, second);
-    assert_eq!(*stored.open(OTHER_PASSWORD)?, *key);
-    Ok(())
-}
-
-#[test]
-fn reading_absent_metadata_does_not_create_files_or_tables() -> Result<()> {
-    let f = Fixture::new()?;
-    let path = f.0.join("absent.db");
-    assert!(read_record_database(&path)?.is_none());
-    assert!(!path.exists());
-    let conn = rusqlite::Connection::open(&path)?;
-    conn.execute_batch("CREATE TABLE unrelated (value TEXT)")?;
-    drop(conn);
-    let before = fs::read(&path)?;
-    assert!(read_record_database(&path)?.is_none());
-    assert_eq!(fs::read(&path)?, before);
-    Ok(())
-}
-
-#[test]
 fn replacing_record_does_not_follow_preplanted_temporary_symlink() -> Result<()> {
     let f = Fixture::new()?;
     let path = record_path(&f.db());

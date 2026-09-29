@@ -262,10 +262,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "the database is being opened"
             );
             detach();
-            super::storage_access::reset().await?;
-            let cache = super::storage_access::open_public().await?;
-            PUBLIC_STORAGE.with(|s| *s.borrow_mut() = Some(cache));
-            start_processor();
+            // Reset ends this worker's session. In-flight indexer requests must
+            // never write old progress into a newly created public cache.
+            INIT_STATE.with(|s| {
+                *s.borrow_mut() = InitState::Failed("storage reset; open a new worker".into())
+            });
+            let result = super::storage_access::reset().await;
+            super::storage_access::release();
+            result?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Pause => {

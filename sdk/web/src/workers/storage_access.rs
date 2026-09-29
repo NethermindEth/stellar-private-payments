@@ -29,9 +29,7 @@ pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
     if wallet_vault::context(Path::new(KEY_DB))?.is_some() {
         return Ok(StorageStatus::Locked);
     }
-    if pools::encrypted_exists(ENCRYPTED_DB)?
-        || wallet_vault::has_legacy_credentials(Path::new(KEY_DB))?
-    {
+    if pools::encrypted_exists(ENCRYPTED_DB)? {
         return Ok(StorageStatus::RecoveryRequired);
     }
     Ok(if pools::plaintext_exists(PLAINTEXT_DB).await? {
@@ -63,9 +61,7 @@ pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
 pub(super) async fn unlock_wallet(context: &WalletContext, secret: &str) -> Result<SqliteStorage> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    let storage = open_key(&key).await?;
-    wallet_vault::finish_wallet_migration(Path::new(KEY_DB), &key, context, secret)?;
-    Ok(storage)
+    open_key(&key).await
 }
 
 async fn open_key(key: &DatabaseKey) -> Result<SqliteStorage> {

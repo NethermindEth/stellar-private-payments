@@ -80,17 +80,14 @@ message: SEP-0053 does not enforce origin binding at the wallet level. Only appr
 the local-storage message on the trusted app origin. Treat that signature as a
 decryption secret.
 
-Existing Freighter-enrolled vaults remain compatible. After successfully opening
-the database, the worker atomically replaces a legacy wallet envelope with the
-direct wallet envelope and drops password/passkey record tables. The database
-key and data are preserved. Old vaults without a Freighter record are never
-silently overwritten: use the previous app version to enroll Freighter before
-upgrading, or explicitly reset. Interrupted wallet setup or plaintext migration
-resumes with the saved wallet envelope and the same key.
+Browser storage supports the current wallet envelope and migration from the
+original plaintext database. Intermediate development-only password/passkey
+browser formats are unsupported; use an explicit local reset for those profiles.
+Existing encrypted data is never silently overwritten. Interrupted wallet setup
+or plaintext migration resumes with the saved wallet envelope and the same key.
 
-Neither migration nor native password changes rotate the database key or revoke
-older backups and copied envelopes. True key rotation is not implemented.
-Dropping legacy credential tables is not secure erasure. A destructive reset
+Native password changes do not rotate the database key or revoke older backups
+and copied envelopes. True key rotation is not implemented. A destructive reset
 generates a new key on the next setup but cannot erase previous copies.
 
 Reset deletes local settings, history and keys. Chain data and wallet-derived
@@ -113,7 +110,7 @@ from malicious same-origin JavaScript, a compromised browser/OS, or memory reads
 ### Metadata and locking
 
 Unencrypted envelope metadata contains the wallet address, origin, salt and sealed
-key. Legacy records may additionally contain passkey metadata and KDF parameters. Browser
+key. Browser
 auto-lock preferences and account/signing Stellar addresses in `localStorage`
 are also stored unencrypted. These are not decryption
 secrets but can fingerprint a profile.

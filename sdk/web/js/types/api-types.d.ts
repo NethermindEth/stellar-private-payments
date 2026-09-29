@@ -98,7 +98,7 @@ export interface Storage {
   walletContext(): Promise<WalletUnlockContext | undefined>;
   createWallet(context: WalletUnlockContext, secret: string): Promise<void>;
   unlockWallet(context: WalletUnlockContext, secret: string): Promise<void>;
-  /** Explicitly delete all local public and private data. */
+  /** Delete all local data and close this session and its forks. Connect again to reopen. */
   reset(): Promise<void>;
   fork(): Storage;
   /** Releases the database for this handle and all forks. Connect again to reopen. */

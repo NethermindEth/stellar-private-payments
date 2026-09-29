@@ -245,6 +245,9 @@ try {
   ctx.checks.push("encrypted browser-process restart, and no protected value readable in OPFS");
 
   await ctx.js("await storage.reset();return true;");
+  assert.notEqual(await ctx.outcome("status"), "ok", "reset must close the old session");
+  await ctx.load();
+  await ctx.connect();
   assert.equal(await ctx.status(), "new");
   assert.equal(await ctx.js("return (await storage.walletContext()) ?? null;"), null);
   assert.notEqual(await ctx.outcome("unlockWallet", WALLET_CONTEXT, WALLET_SECRET), "ok");

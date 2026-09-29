@@ -202,7 +202,7 @@ export async function ensurePrivateStorage() {
     if (privateUnlocked) return appStorageInstance;
     if (!privateOpening) {
         privateOpening = (async () => {
-            await unlockStorage(storageHandle, { onOpened: () => {
+            await unlockStorage(storageHandle, { onReset: resetLocalData, onOpened: () => {
                 // Protect the remaining onboarding steps as soon as the vault opens.
                 if (!stopAutoLock) stopAutoLock = startAutoLock(() => void lockStorage());
             } });

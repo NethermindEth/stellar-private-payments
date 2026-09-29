@@ -114,7 +114,10 @@ fn main() {
     files.extend(MUSL_SOURCES.iter().map(|path| shim.join("musl").join(path)));
     let archive = out.join("libwsqlite3.a");
     let stamp = out.join("build.sha256");
-    let signature = signature(&files, &cc, &ar);
+    let mut inputs = files.clone();
+    inputs.push(source.join(sqlite3mc_source::SOURCE_FILES[1]));
+    collect_headers(&shim, &mut inputs);
+    let signature = signature(&inputs, &cc, &ar);
     if fs::read_to_string(&stamp).ok().as_deref() != Some(&signature) || !archive.is_file() {
         let mut objects = Vec::new();
         for (index, file) in files.iter().enumerate() {
@@ -208,11 +211,35 @@ fn tool(kind: &str, fallbacks: &[&str]) -> String {
         .to_string()
 }
 
+fn collect_headers(directory: &Path, files: &mut Vec<PathBuf>) {
+    let mut entries: Vec<_> = fs::read_dir(directory)
+        .expect("read shim directory")
+        .map(|entry| entry.expect("read shim entry").path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            collect_headers(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "h") {
+            files.push(path);
+        }
+    }
+}
+
 fn signature(files: &[PathBuf], cc: &str, ar: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(env!("CARGO_PKG_VERSION"));
-    hash.update(cc);
-    hash.update(ar);
+    hash.update(include_bytes!("main.rs"));
+    for tool in [cc, ar] {
+        let version = Command::new(tool)
+            .arg("--version")
+            .output()
+            .expect("read compiler version");
+        assert!(version.status.success(), "cannot identify {tool}");
+        hash.update(tool);
+        hash.update(version.stdout);
+        hash.update(version.stderr);
+    }
     hash.update(FLAGS.join("\0"));
     for file in files {
         hash.update(

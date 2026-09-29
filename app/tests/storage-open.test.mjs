@@ -11,7 +11,7 @@ test('timed-out opening completes without a second create/unlock', async () => {
     });
     assert.equal(calls, 1);
 });
-test('retry after a timed-out status discovers completion without reopening', async () => {
+test('already unlocked storage does not reopen', async () => {
     let calls = 0;
     await openStorage({ status: async () => 'unlocked' }, async () => { calls++; });
     assert.equal(calls, 0);
@@ -43,9 +43,4 @@ test('opening and unresponsive workers have a bounded wait', async () => {
         await assert.rejects(settledStorageStatus({ status }, { timeoutMs: 20 }),
             error => error.code === 'storage-opening-timeout' && /Reload/.test(error.message));
     }
-});
-test('recovery unlock is accepted without reopening', async () => {
-    await openStorage({ status: async () => 'unlocked' }, async () => {
-        assert.fail('must not reopen a recovered database');
-    });
 });

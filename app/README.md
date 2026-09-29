@@ -92,5 +92,5 @@ storage, private setup, explorer and optional registration. Private setup asks
 for two matching Freighter approvals when creating storage, then a separate
 privacy-key derivation signature if needed. Returning unlocks need one approval.
 The default inactivity timeout is five minutes, selectable during setup and in
-Settings. Existing vaults without Freighter access remain intact and require
-enrollment through the previous version or explicit reset.
+Settings. Vaults with missing wallet records remain intact and require a complete backup
+or explicit reset. Intermediate development-only browser formats require reset.

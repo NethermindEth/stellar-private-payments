@@ -84,7 +84,7 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 | `createWallet(context, secret)` | Create the private vault or encrypt an earlier plaintext database with a wallet-derived secret |
 | `unlockWallet(context, secret)` | Open the vault with its enrolled wallet secret |
 | `walletContext()` | Read the public signing context before unlock |
-| `reset()` | Explicitly delete local public and private data and the wallet record |
+| `reset()` | Delete local public/private data and the wallet record, closing this session and its forks; connect again before use |
 | `close()` | Release the database for this handle and its forks |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
@@ -307,12 +307,11 @@ See `app/js/storage-freighter.js` for the application implementation.
 There are no browser password, passkey, enrollment-removal or password-recovery
 APIs. The native CLI retains password support.
 
-Existing vaults with a Freighter record unlock with their original signing
-context. After a successful open, the worker upgrades legacy envelopes and
-removes old password/passkey records in one transaction. Data and the database
-key are preserved. A vault without a Freighter record reports `recovery-required`
-and refuses creation. Enroll Freighter using the previous version before upgrading,
-or explicitly reset. Interrupted first setup reuses the saved wallet key.
+Plaintext databases from earlier releases are encrypted during wallet setup.
+Interrupted setup reuses the saved wallet key. Intermediate development-only
+password/passkey browser formats are unsupported and require an explicit reset;
+existing encrypted data is never silently overwritten. A missing wallet record
+reports `recovery-required` and refuses creation.
 
 ### Storage API migration (0.3.0)
 
@@ -359,7 +358,7 @@ The app opens an unlock dialog on private access, with an option to continue
 using public data. Manual/automatic locking closes workers and reloads to clear
 private values from memory; reopening the public cache does not prompt. Public
 sync can resume with a connected runtime. Reset deletes both files and the key
-records. Public settings and followed contracts are readable at rest; see
+records and closes the worker session, rejecting late requests from old clients. Public settings and followed contracts are readable at rest; see
 [the security model](../../SECURITY.md).
 
 Run `node tests/storage/public-private.mjs` from `e2e-freighter` after building the

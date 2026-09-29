@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const root = new URL('../../../', import.meta.url).pathname;
 const inputs = [
     'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'contracts', 'sdk/native/Cargo.toml', 'sdk/native/build.rs',
-    'sdk/native/sqlite3mc_source.rs', 'sdk/native/sqlite3mc_version.rs', 'sdk/web/Cargo.toml', 'sdk/web/scripts/build.sh',
+    'sdk/native/circuits.json', 'sdk/native/sqlite3mc_source.rs', 'sdk/native/sqlite3mc_version.rs', 'sdk/web/Cargo.toml', 'sdk/web/scripts/build.sh',
     'sdk/native/src', 'sdk/web/src', 'circuits/src', 'circuits/Cargo.toml',
     'circuit-keys/src', 'circuit-keys/Cargo.toml', 'tools/sqlite3mc-build',
     'vendor/sqlite-wasm-vfs/src', 'vendor/sqlite-wasm-vfs/Cargo.toml',
@@ -20,7 +20,10 @@ async function visit(path) {
         hash.update(path + '\0'); hash.update(await readFile(resolve(root, path))); hash.update('\0');
         return;
     }
-    for (const entry of entries.sort((a,b) => a.name.localeCompare(b.name))) await visit(`${path}/${entry.name}`);
+    for (const entry of entries.sort((a,b) => a.name.localeCompare(b.name))) {
+        if (['target', 'test_snapshots'].includes(entry.name)) continue;
+        await visit(`${path}/${entry.name}`);
+    }
 }
 for (const path of inputs) await visit(path);
 const digest = hash.digest('hex');

@@ -6,6 +6,7 @@ mod storage;
 
 pub mod database_key;
 pub mod encrypted_migration;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod password_vault;
 pub mod wallet_vault;
 

@@ -166,6 +166,8 @@ try {
     assert.deepEqual(await snapshot(), stranded, 'missing wallet record must never cause implicit data deletion');
     checks.push('missing wallet record refuses creation and preserves encrypted bytes until explicit reset');
     await page.evaluate(() => storage.reset());
+    await assert.rejects(call({ SaveSyncProgress: { metadata: [], fully_indexed: true } }), /storage reset/);
+    await load();
     assert.equal(await page.evaluate(() => storage.status()), 'new');
     assert.equal((await feed()).OperationalFeed.length, 0);
     checks.push('explicit reset removes the public cache, private vault and enrolled key records');

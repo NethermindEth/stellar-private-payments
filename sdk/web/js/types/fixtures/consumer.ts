@@ -11,6 +11,8 @@ import {
 } from '../index.js';
 
 declare const rpcUrl: string;
+declare const walletContext: import('../index.js').WalletUnlockContext;
+declare const walletSecret: string; // Derived from a verified wallet signature.
 declare const signer: import('../signer.js').WalletSigner;
 
 async function typedConsumer(config: ContractConfig) {
@@ -19,9 +21,11 @@ async function typedConsumer(config: ContractConfig) {
   const storage = await Storage.connect();
   const status: import('../index.js').StorageStatus = await storage.status();
   if (status === 'locked') {
-    await storage.unlock('correct horse battery staple');
+    await storage.unlockWallet(walletContext, walletSecret);
+  } else if (status === 'new' || status === 'unencrypted') {
+    await storage.createWallet(walletContext, walletSecret);
   } else if (status !== 'unlocked') {
-    await storage.create('correct horse battery staple');
+    throw new Error(`Storage is ${status}`);
   }
   const client = await Client.new({
     rpcUrl,
