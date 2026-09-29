@@ -12,6 +12,15 @@ use soroban_sdk::{
 };
 use taceo_poseidon2::bn254::t2;
 
+fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::State)
+            .expect("tree state is set in the constructor")
+    })
+}
+
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
 /// uses for test snapshots.
@@ -97,12 +106,7 @@ fn test_get_root() {
     assert_ne!(initial_root, zero, "Initial root should not be zero"); // As we define zero in a different way
 
     // Verify initial root matches what's in storage
-    let stored_root: U256 = env.as_contract(&contract_id, || {
-        env.storage()
-            .instance()
-            .get(&DataKey::Root)
-            .expect("Root set in constructor")
-    });
+    let stored_root = tree_state(&env, &contract_id).root;
     assert_eq!(
         initial_root, stored_root,
         "get_root should match stored root"
@@ -120,12 +124,7 @@ fn test_get_root() {
     );
 
     // Verify new root also matches storage
-    let stored_new_root: U256 = env.as_contract(&contract_id, || {
-        env.storage()
-            .instance()
-            .get(&DataKey::Root)
-            .expect("Root set after insert")
-    });
+    let stored_new_root = tree_state(&env, &contract_id).root;
     assert_eq!(
         new_root, stored_new_root,
         "get_root should match updated stored root"
@@ -179,12 +178,7 @@ fn test_insert_leaf() {
     client.insert_leaf(&leaf2);
 
     // Check NextIndex after both insertions
-    let next_index1: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set after insert")
-    });
+    let next_index1 = tree_state(&env, &contract_id).next_index;
     assert_eq!(next_index1, 2, "NextIndex should be 2 after two insertions");
 }
 
@@ -300,12 +294,7 @@ fn test_new_admin_can_insert_after_update() {
     client.insert_leaf(&leaf);
 
     // Verify the insertion succeeded
-    let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set after insert")
-    });
+    let next_index = tree_state(&env, &contract_id).next_index;
     assert_eq!(
         next_index, 1,
         "NextIndex should be 1 after insertion by new admin"
@@ -372,12 +361,7 @@ fn test_multiple_insertions() {
     }
 
     // Verify NextIndex was updated correctly
-    let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set after inserts")
-    });
+    let next_index = tree_state(&env, &contract_id).next_index;
     assert_eq!(
         next_index, 5,
         "NextIndex should be 5 after inserting 5 leaves"
@@ -401,12 +385,7 @@ fn test_insert_leaf_errors_when_admin_unset() {
         Err(Ok(Error::NotInitialized))
     ));
 
-    let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NextIndex)
-            .expect("NextIndex set in constructor")
-    });
+    let next_index = tree_state(&env, &contract_id).next_index;
     assert_eq!(next_index, 0, "a rejected insert must not advance the tree");
 }
 
@@ -604,12 +583,7 @@ fn test_merkle_consistency() {
     ];
 
     // Get the on-chain root
-    let on_chain_root: U256 = env.as_contract(&contract_id, || {
-        env.storage()
-            .instance()
-            .get(&DataKey::Root)
-            .expect("Root set in constructor")
-    });
+    let on_chain_root = tree_state(&env, &contract_id).root;
 
     // Empty roots should match
     assert_eq!(
@@ -625,12 +599,7 @@ fn test_merkle_consistency() {
         client.insert_leaf(&leaf);
 
         // Get the on-chain root
-        let on_chain_root: U256 = env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .get(&DataKey::Root)
-                .expect("Root updated after insert")
-        });
+        let on_chain_root = tree_state(&env, &contract_id).root;
 
         // Enforce roots match after inserting a leaf
         assert_eq!(
@@ -673,17 +642,11 @@ fn the_filled_subtrees_are_one_entry() {
     let levels = 3u32;
     let contract_id = env.register(ASPMembership, (admin, levels));
 
-    let filled: Vec<U256> = env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .get(&DataKey::FilledSubtrees)
-            .unwrap_or_else(|| panic!("expected the filled subtrees to be stored"))
-    });
-
-    assert_eq!(filled.len(), levels);
+    assert_eq!(tree_state(&env, &contract_id).filled_subtrees.len(), levels);
 }
+
 #[test]
-fn the_depth_and_root_live_in_the_instance() {
+fn the_tree_state_is_one_entry() {
     let env = test_env();
     let admin = Address::generate(&env);
     let levels = 3u32;
@@ -694,12 +657,21 @@ fn the_depth_and_root_live_in_the_instance() {
     client.insert_leaf(&U256::from_u32(&env, 1));
     let root = client.get_root();
 
+    let state = tree_state(&env, &contract_id);
+    assert_eq!(state.next_index, 1);
+    assert_eq!(state.root, root);
+}
+
+#[test]
+fn the_depth_lives_in_the_instance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let levels = 3u32;
+    let contract_id = env.register(ASPMembership, (admin, levels));
+
     env.as_contract(&contract_id, || {
         let instance = env.storage().instance();
         assert_eq!(instance.get::<_, u32>(&DataKey::Levels), Some(levels));
-        assert_eq!(instance.get::<_, U256>(&DataKey::Root), Some(root));
-        let persistent = env.storage().persistent();
-        assert!(!persistent.has(&DataKey::Levels));
-        assert!(!persistent.has(&DataKey::Root));
+        assert!(!env.storage().persistent().has(&DataKey::Levels));
     });
 }

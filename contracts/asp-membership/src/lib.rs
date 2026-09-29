@@ -10,25 +10,32 @@ use soroban_sdk::{
 };
 use soroban_utils::{poseidon2_compress, zero_hash};
 
+/// The tree state an insertion mutates, kept in one persistent entry.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TreeState {
+    /// Next available index for leaf insertion
+    next_index: u64,
+    /// Left-sibling hashes along the insertion path, element `i` holding the
+    /// hash at level `i`
+    filled_subtrees: Vec<U256>,
+    /// Current Merkle root
+    root: U256,
+}
+
 /// Storage keys for contract data
 ///
-/// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
-/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::FilledSubtrees`]
-/// are persistent keys.
+/// [`DataKey::Levels`] is an instance key. [`DataKey::Admin`] and
+/// [`DataKey::State`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     /// Administrator address with permissions to modify the tree
     Admin,
-    /// Left-sibling hashes along the insertion path, element `i` holding the
-    /// hash at level `i`
-    FilledSubtrees,
     /// Number of levels in the Merkle tree
     Levels,
-    /// Next available index for leaf insertion
-    NextIndex,
-    /// Current Merkle root
-    Root,
+    /// The [`TreeState`] entry
+    State,
 }
 
 /// Contract error types
@@ -96,7 +103,6 @@ impl ASPMembership {
         store.set(&DataKey::Admin, &admin);
         let instance = env.storage().instance();
         instance.set(&DataKey::Levels, &levels);
-        store.set(&DataKey::NextIndex, &0u64);
 
         // The top level is the root itself and is never read back as a
         // sibling, so it is not written.
@@ -104,11 +110,17 @@ impl ASPMembership {
         for lvl in 0..levels {
             filled.push_back(zero_hash(&env, lvl).ok_or(Error::NotInitialized)?);
         }
-        store.set(&DataKey::FilledSubtrees, &filled);
 
-        // Set initial root to the zero hash at the top level
-        let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
-        instance.set(&DataKey::Root, &root_val);
+        // Initial root is the zero hash at the top level
+        let root = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
+        store.set(
+            &DataKey::State,
+            &TreeState {
+                next_index: 0,
+                filled_subtrees: filled,
+                root,
+            },
+        );
 
         Ok(())
     }
@@ -145,10 +157,12 @@ impl ASPMembership {
     ///
     /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Root)
-            .ok_or(Error::NotInitialized)
+        let state: TreeState = env
+            .storage()
+            .persistent()
+            .get(&DataKey::State)
+            .ok_or(Error::NotInitialized)?;
+        Ok(state.root)
     }
 
     /// Hash two U256 values using Poseidon2 compression
@@ -193,9 +207,8 @@ impl ASPMembership {
         let levels: u32 = instance
             .get(&DataKey::Levels)
             .ok_or(Error::NotInitialized)?;
-        let actual_index: u64 = store
-            .get(&DataKey::NextIndex)
-            .ok_or(Error::NotInitialized)?;
+        let mut state: TreeState = store.get(&DataKey::State).ok_or(Error::NotInitialized)?;
+        let actual_index = state.next_index;
         let mut current_index = actual_index;
 
         // Check if tree is full (capacity is 2^levels leaves)
@@ -204,33 +217,28 @@ impl ASPMembership {
         }
         let mut current_hash = leaf.clone();
 
-        let mut filled: Vec<U256> = store
-            .get(&DataKey::FilledSubtrees)
-            .ok_or(Error::NotInitialized)?;
-
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
             let is_right = current_index & 1 == 1;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left = filled.get(lvl).ok_or(Error::NotInitialized)?;
+                let left = state
+                    .filled_subtrees
+                    .get(lvl)
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                filled.set(lvl, current_hash.clone());
+                state.filled_subtrees.set(lvl, current_hash.clone());
                 let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
         }
 
-        // The last leaf of a full tree is a right child at every level and
-        // leaves `filled` untouched. Skipping the write there would save one
-        // write once in the tree's life, which is not worth the branch.
-        store.set(&DataKey::FilledSubtrees, &filled);
-
-        // Update the root with the computed hash
-        instance.set(&DataKey::Root, &current_hash);
+        state.next_index = actual_index.checked_add(1).ok_or(Error::Overflow)?;
+        state.root = current_hash.clone();
+        store.set(&DataKey::State, &state);
 
         // Emit event with leaf details
         LeafAddedEvent {
@@ -240,11 +248,6 @@ impl ASPMembership {
         }
         .publish(&env);
 
-        // Update NextIndex
-        store.set(
-            &DataKey::NextIndex,
-            &(actual_index.checked_add(1).ok_or(Error::Overflow)?),
-        );
         Ok(())
     }
 }
