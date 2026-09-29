@@ -256,16 +256,16 @@ async function importSigningAccount(context) {
 }
 
 // Connect the app while D is active, then close the onboarding it opens for D.
-// Freighter keeps D connected to the app; the app keeps no note owner, because
-// it remembers one only once connecting succeeds.
+// Freighter keeps D connected to the app in public mode. Cancelling private
+// onboarding leaves storage locked and does not remember D as the note owner.
 async function connectSigningAccount(context) {
   step('connecting account D to the app');
   const page = await appPage(context);
-  await connectApp(page, { appUrl: requireAppUrl(), context });
+  await connectApp(page, { appUrl: requireAppUrl(), context, privateAccess: false });
   if (await page.locator('#onboarding-close-btn').isVisible().catch(() => false)) {
     await page.locator('#onboarding-close-btn').click();
   }
-  await page.locator('#wallet-btn').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('body[data-wallet-state="locked"]').waitFor({ timeout: 15_000 });
   const remembered = await page.evaluate(() => localStorage.getItem('poolstellar_note_owner'));
   if (remembered) {
     throw new Error(`connecting account D left ${remembered} as the app's note owner`);

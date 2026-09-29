@@ -72,10 +72,10 @@ export interface StorageConnectOptions {
 
 /**
  * What private storage needs before use: `"new"` and `"unencrypted"` need
- * a password from {@link Storage.create}, `"locked"` needs
- * {@link Storage.unlock}.
+ * wallet setup through {@link Storage.createWallet}, `"locked"` needs
+ * {@link Storage.unlockWallet}.
  */
-export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'opening' | 'recovery-required' | 'password-recovery-required' | 'unlocked';
+export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'opening' | 'recovery-required' | 'unlocked';
 
 /**
  * Worker-backed public chain cache and encrypted private OPFS vault.
@@ -85,8 +85,7 @@ export type StorageStatus = 'new' | 'unencrypted' | 'locked' | 'opening' | 'reco
  * worker. Call {@link Storage.fork} for additional handles (e.g. app code
  * alongside {@link Client.new}).
  *
- * `unlock` and `changePassword` reject with an `Error` whose `code` is
- * `"wrong-password"` when the password is wrong.
+ * Failed wallet approval or a mismatched secret leaves private storage locked.
  */
 export interface WalletUnlockContext {
   version: 1;
@@ -95,36 +94,13 @@ export interface WalletUnlockContext {
   salt: string;
 }
 
-export interface PasskeyUnlockContext {
-  version: 1;
-  credentialId: string;
-  rpId: string;
-  origin: string;
-  salt: string;
-}
-
 export interface Storage {
   status(): Promise<StorageStatus>;
-  /**
-   * Set the first password (at least 15 characters): create the database, or
-   * encrypt an earlier version's unencrypted one. Opens it.
-   */
-  create(password: string): Promise<void>;
-  unlock(password: string): Promise<void>;
+  /** Low-level API: secret is 32-byte hex derived from a verified wallet signature. */
   walletContext(): Promise<WalletUnlockContext | undefined>;
-  /** Low-level enrollment: secret must be derived from a verified wallet signature. */
-  enrollWallet(password: string, context: WalletUnlockContext, secret: string): Promise<void>;
+  createWallet(context: WalletUnlockContext, secret: string): Promise<void>;
   unlockWallet(context: WalletUnlockContext, secret: string): Promise<void>;
-  passkeyContext(): Promise<PasskeyUnlockContext | undefined>;
-  /** Low-level enrollment: secret must be derived from a user-verified WebAuthn PRF assertion. */
-  enrollPasskey(password: string, context: PasskeyUnlockContext, secret: string): Promise<void>;
-  unlockPasskey(context: PasskeyUnlockContext, secret: string): Promise<void>;
-  removeWallet(password: string): Promise<void>;
-  removePasskey(password: string): Promise<void>;
-  /** Restore an absent record only after optional-method recovery unlock. */
-  recoverPassword(password: string): Promise<void>;
-  changePassword(current: string, next: string): Promise<void>;
-  /** Delete the local database and its password, for a forgotten password. */
+  /** Explicitly delete all local public and private data. */
   reset(): Promise<void>;
   fork(): Storage;
   /** Releases the database for this handle and all forks. Connect again to reopen. */

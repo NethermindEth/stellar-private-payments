@@ -3,7 +3,7 @@
 
 import { createLogger } from './logger.mjs';
 import { waitForCondition } from './waits.mjs';
-import { answerStoragePassword, readWalletState, waitForWalletRuntimeReady } from './appState.mjs';
+import { answerStorageWallet, readWalletState, waitForWalletRuntimeReady } from './appState.mjs';
 
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
@@ -23,7 +23,7 @@ const WIZARD_BUTTON_PRIORITY = [
   // choice that actually persists.
   'Save retention setup',
   'Register later', // registration step: skip (excluded from the reappear gate)
-  'Derive and store keys', // keys step: required, triggers a signMessage approval
+  'Set up private payments', // keys step: required, triggers a signMessage approval
   'Continue', // the storage step's own follow-on panel after a successful request
 ];
 
@@ -60,6 +60,14 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
         return;
       }
     }
+    if (publicOnly) {
+      await page.locator('#onboarding-close-btn').click();
+      await waitForCondition({
+        operation: 'onboarding:public-cancel', timeoutMs: 10_000,
+        observe: () => readWalletState(page), isReady: state => state === 'locked',
+      });
+      return;
+    }
     const readButtons = () =>
       page.$$eval('#onboarding-modal button', (els) =>
         els
@@ -88,7 +96,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       );
     }
 
-    const priorities = [publicOnly ? 'Continue with public data' : 'Set up private payments', ...WIZARD_BUTTON_PRIORITY];
+    const priorities = WIZARD_BUTTON_PRIORITY;
     const choice = priorities.find((text) => buttons.some((b) => b.text === text));
     if (!choice) throw new Error(`${logTag}: no recognized button among [${buttons.map((b) => b.text).join(', ')}]`);
 
@@ -97,12 +105,16 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     await page.getByRole('button', { name: choice, exact: true }).first().click();
 
     if (choice === 'Set up private payments') {
-      await page.getByTestId('storage-password-dialog').waitFor();
-      await answerStoragePassword(page);
-    }
-
-    if (choice === 'Derive and store keys') {
-      const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
+      // Wallet storage opens first; key derivation is a separate message only
+      // when no privacy keys are already stored.
+      const dialog = page.getByTestId('storage-wallet-dialog');
+      await waitForCondition({
+        operation: 'onboarding:private-access', timeoutMs: 10_000,
+        observe: async () => ({ dialog: await dialog.isVisible(), continue: await page.getByRole('button', { name: 'Continue', exact: true }).isVisible().catch(() => false) }),
+        isReady: state => state.dialog || state.continue,
+      }).catch(() => {});
+      if (await dialog.isVisible()) await answerStorageWallet(page, context);
+      const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 5000 }).catch(() => null);
       if (approvalPage) await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
     }
 

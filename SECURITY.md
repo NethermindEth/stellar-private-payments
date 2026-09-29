@@ -35,14 +35,20 @@ To protect user confidentiality during transaction proving and indexing, the SDK
 
 ## Encrypted local storage
 
-The native CLI and browser encrypt SQLite pages with SQLite3 Multiple Ciphers
-(ChaCha20 with per-page authentication). A random database key is sealed under a
-password using Argon2id (64 MiB, three iterations, one lane) and an authenticated
-XSalsa20-Poly1305 envelope. Key records are readable before unlocking and contain
-public parameters plus sealed keys. Passwords and raw database keys are not
-written to those records. Supported record KDF costs are bounded by the current
-production profile; increasing costs requires an explicit format/compatibility
-decision.
+The native CLI and browser private vault encrypt SQLite pages with SQLite3 Multiple
+Ciphers (ChaCha20 with per-page authentication), using random 256-bit database
+keys. The native CLI seals its key under a password with Argon2id (64 MiB,
+three iterations, one lane) and XSalsa20-Poly1305. KDF costs read from native
+records are capped at that profile.
+
+The browser uses Freighter alone. A verified SEP-0053 signature over an
+origin-, account-, and random-salt-bound message feeds HKDF-SHA-256. The resulting
+256-bit secret directly seals the random database key with XSalsa20-Poly1305,
+using a fresh 24-byte nonce. New setup verifies two matching signatures before
+saving a record; subsequent unlocks need one approval. The database key remains
+inside the storage worker. The page necessarily handles the signature and wrapping
+secret transiently; neither is persisted or logged. There is no browser password
+or passkey fallback. Native CLI password support is unchanged.
 
 The browser opens `spp.public.db` without a password. It contains public chain
 events, derived commitments/nullifiers/registered keys, indexing progress, and
@@ -64,37 +70,35 @@ first, then the open vault, so a crash between writes can be replayed on unlock.
 Private note scanning resumes only after unlocking. The native CLI continues to
 use a single encrypted database.
 
-In the browser, Freighter and passkeys are optional independent unlock methods.
-Each grants access to the same database key. Security therefore depends on every
-enrolled account/device, not just the password. Freighter signatures and WebAuthn
-PRF outputs used to unlock storage are secrets. The app checks reproducibility
-before enrolling either method. Use Settings → Local Data to inspect, replace,
-or remove optional methods with the current password. One credential per method
-is supported; replacing a passkey replaces access on this browser's database,
-not on another device's database or passkey provider.
+### Wallet access and recovery
 
-### What changing or removing access means
+The enrolled Freighter account is the sole browser unlock method. Settings shows
+its address. Losing access to that account prevents unlocking the vault. A
+compromised wallet signing key can reproduce the signature and decrypt a copied
+vault and its key record. A malicious site may ask the user to sign the same
+message: SEP-0053 does not enforce origin binding at the wallet level. Only approve
+the local-storage message on the trusted app origin. Treat that signature as a
+decryption secret.
 
-Changing a password re-seals the existing database key. **It does not rotate the
-database key**, disable other methods, invalidate an old copy of the key record,
-or revoke a leaked database key. Removing/replacing Freighter or passkey access
-only updates the current key record. Anyone with an older complete backup and
-its former unlock method can still decrypt that copy. True key rotation with
-re-encryption is not implemented. Treat a copied database key as a compromise;
-a destructive local reset creates a fresh key but cannot erase previous copies.
+Existing Freighter-enrolled vaults remain compatible. After successfully opening
+the database, the worker atomically replaces a legacy wallet envelope with the
+direct wallet envelope and drops password/passkey record tables. The database
+key and data are preserved. Old vaults without a Freighter record are never
+silently overwritten: use the previous app version to enroll Freighter before
+upgrading, or explicitly reset. Interrupted wallet setup or plaintext migration
+resumes with the saved wallet envelope and the same key.
+
+Neither migration nor native password changes rotate the database key or revoke
+older backups and copied envelopes. True key rotation is not implemented.
+Dropping legacy credential tables is not secure erasure. A destructive reset
+generates a new key on the next setup but cannot erase previous copies.
 
 Reset deletes local settings, history and keys. Chain data and wallet-derived
 keys can be recovered through sync and onboarding, but local-only settings and
-history should not be assumed recoverable. Back up the encrypted database and
-its matching key record together while the database is closed. If encrypted
-data exists without a readable password record, the browser requires explicit
-recovery/reset and refuses to overwrite it as a new database. If an enrolled
-Freighter or passkey envelope survives, unlocking with it allows setting a new
-password without deleting data or other methods. This recovery route is enabled
-only after a successful optional-method unlock with an absent password record;
-it cannot replace an existing password. The temporary worker key is zeroized
-when recovery completes or the worker closes. Without a surviving unlock method
-or complete backup, reset remains destructive.
+history should not be assumed recoverable. Keep database files and their matching
+key records together when backing up a closed profile; the browser app has no
+built-in local-data export. Missing credentials require recovery or explicit
+reset, never automatic recreation.
 
 ### Migration and deletion limits
 
@@ -108,8 +112,8 @@ from malicious same-origin JavaScript, a compromised browser/OS, or memory reads
 
 ### Metadata and locking
 
-Unencrypted envelope metadata identifies enabled methods, including wallet
-address, passkey credential ID, origin/RP ID, salts and KDF parameters. Browser
+Unencrypted envelope metadata contains the wallet address, origin, salt and sealed
+key. Legacy records may additionally contain passkey metadata and KDF parameters. Browser
 auto-lock preferences and account/signing Stellar addresses in `localStorage`
 are also stored unencrypted. These are not decryption
 secrets but can fingerprint a profile.
@@ -117,11 +121,10 @@ secrets but can fingerprint a profile.
 Browser locking requests storage closure and reloads the page, with a three-second
 fallback reload if the worker does not acknowledge closure. Auto-lock waits for guarded
 foreground work (including key derivation, registration, admin operations and
-unlock-method changes), then starts a fresh inactivity interval. Guarded work
+wallet setup), then starts a fresh inactivity interval. Guarded work
 can defer an expired idle lock by at most ten additional minutes; a stuck wallet
 prompt or transaction marker cannot keep storage unlocked indefinitely. Deadlines
-use a monotonic clock. Locking also runs on the optional enrollment screens as
-soon as the private vault opens. Locking clears the page's private state by
+use a monotonic clock. Locking starts as soon as the private vault opens, including during onboarding. Locking clears the page's private state by
 reloading; the page can resume public syncing without an unlock prompt when a
 runtime is connected. Private balances and history remain unavailable until the
 next explicit unlock. SQLite's synchronous transactions complete before the

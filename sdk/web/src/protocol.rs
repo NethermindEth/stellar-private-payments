@@ -66,39 +66,16 @@ pub enum StorageWorkerRequest {
     Status,
     /// Open only the public chain cache; leaves the private vault locked.
     OpenPublic,
-    /// Set the first password: create the database, or encrypt the one an
-    /// earlier version left unencrypted.
-    Create(Password),
-    Unlock(Password),
     WalletContext,
-    EnrollWallet {
-        password: Password,
+    CreateWallet {
         context: stellar_private_payments::state::wallet_vault::WalletContext,
-        secret: Password,
+        secret: UnlockSecret,
     },
     UnlockWallet {
         context: stellar_private_payments::state::wallet_vault::WalletContext,
-        secret: Password,
+        secret: UnlockSecret,
     },
-    PasskeyContext,
-    EnrollPasskey {
-        password: Password,
-        context: stellar_private_payments::state::passkey_vault::PasskeyContext,
-        secret: Password,
-    },
-    UnlockPasskey {
-        context: stellar_private_payments::state::passkey_vault::PasskeyContext,
-        secret: Password,
-    },
-    RecoverPassword(Password),
-    RemoveWallet(Password),
-    RemovePasskey(Password),
-    ChangePassword {
-        current: Password,
-        new: Password,
-    },
-    /// Delete the local database and its password record, for a forgotten
-    /// password. Everything in it can be synced again.
+    /// Explicitly delete local storage.
     Reset,
     Ping,
     Pause,
@@ -112,6 +89,7 @@ pub enum StorageWorkerRequest {
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
     SavePrivateKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
+    DisclaimerText,
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     GetSetting(String),
@@ -173,20 +151,20 @@ pub enum StorageWorkerRequest {
     },
 }
 
-/// A password in a worker message. Debug never shows it and this Rust copy is
-/// zeroized on drop; browser message serialization can still make other
-/// copies.
+/// A wallet wrapping secret in a worker message. Debug never shows it and this
+/// Rust copy is zeroized on drop; browser message serialization can still make
+/// other copies.
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Password(pub String);
+pub struct UnlockSecret(pub String);
 
-impl std::fmt::Debug for Password {
+impl std::fmt::Debug for UnlockSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Password([REDACTED])")
+        f.write_str("UnlockSecret([REDACTED])")
     }
 }
 
-impl Drop for Password {
+impl Drop for UnlockSecret {
     fn drop(&mut self) {
         zeroize::Zeroize::zeroize(&mut self.0);
     }
@@ -196,22 +174,19 @@ impl Drop for Password {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageStatus {
-    /// Nothing stored yet: choose a password to create the database.
+    /// Nothing stored yet: approve wallet setup to create the database.
     New,
-    /// An earlier version's unencrypted database: choose a password to
+    /// An earlier version's unencrypted database: approve wallet setup to
     /// encrypt it.
     Unencrypted,
-    /// Set up; enter the password to unlock.
+    /// Set up; approve the enrolled wallet to unlock.
     Locked,
     /// An open operation is still running.
     Opening,
-    /// Encrypted data exists without its password record. Never recreate
+    /// Encrypted data exists without a supported wallet record. Never recreate
     /// implicitly.
     #[serde(rename = "recovery-required")]
     RecoveryRequired,
-    /// Open via an optional method; restore the missing password record.
-    #[serde(rename = "password-recovery-required")]
-    PasswordRecoveryRequired,
     /// Open and ready.
     Unlocked,
 }
@@ -221,8 +196,6 @@ pub enum StorageStatus {
 pub enum StorageWorkerResponse {
     Status(StorageStatus),
     WalletContext(Option<stellar_private_payments::state::wallet_vault::WalletContext>),
-    PasskeyContext(Option<stellar_private_payments::state::passkey_vault::PasskeyContext>),
-    WrongPassword,
     Pong,
     SyncState(Vec<SyncMetadata>),
     Saved,

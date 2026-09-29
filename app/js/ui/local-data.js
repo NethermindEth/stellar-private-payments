@@ -1,23 +1,21 @@
-import { mountStorageMethods } from '../storage-methods.js';
 // The header's lock button and the Local Data settings: locking, the
-// inactivity delay and changing the password.
+// inactivity delay and wallet identity.
 
 import {
     STORAGE_UNLOCKED_EVENT,
-    changeStoragePassword,
     ensurePrivateStorage,
     isStorageUnlocked,
     lockStorage,
+    resetLocalData,
     unlockedStorage,
 } from '../wasm-facade.js';
 import {
-    MIN_PASSWORD_LENGTH,
     autoLockMinutes,
-    passwordField,
     setAutoLockMinutes,
 } from '../storage-access.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { Toast } from './core.js';
+import { confirmAction } from './confirm.js';
 
 function renderLockButton() {
     const button = document.getElementById('storage-lock-btn');
@@ -61,76 +59,20 @@ function bindAutoLock() {
     select.addEventListener('change', () => setAutoLockMinutes(Number(select.value)));
 }
 
-function bindChangePassword() {
-    const form = document.getElementById('settings-change-password');
-    const fields = document.getElementById('settings-password-fields');
-    const message = document.getElementById('settings-password-message');
-    const button = document.getElementById('settings-change-password-btn');
-    if (!form || !fields || !message || !button) return;
-
-    const current = passwordField({
-        label: 'Current password',
-        autocomplete: 'current-password',
-        testid: 'settings-current-password',
-        id: 'settings-current-password',
-    });
-    const next = passwordField({
-        label: 'New password',
-        autocomplete: 'new-password',
-        testid: 'settings-new-password',
-        id: 'settings-new-password',
-    });
-    const confirm = passwordField({
-        label: 'Confirm new password',
-        autocomplete: 'new-password',
-        testid: 'settings-confirm-password',
-        id: 'settings-confirm-password',
-    });
-    fields.append(current.field, next.field, confirm.field);
-
-    const show = (text, ok) => {
-        message.textContent = text;
-        message.className = ok
-            ? 'rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100'
-            : 'rounded-2xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100';
-    };
-
-    form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        message.classList.add('hidden');
-        if (!current.input.value) {
-            show('Enter your current password.', false);
-            current.input.focus();
-            return;
-        }
-        if ([...next.input.value].length < MIN_PASSWORD_LENGTH) {
-            show(`Use a new password of at least ${MIN_PASSWORD_LENGTH} characters.`, false);
-            next.input.focus();
-            return;
-        }
-        if (confirm.input.value !== next.input.value) {
-            show("New passwords don't match.", false);
-            confirm.input.focus();
-            return;
-        }
+function bindDeleteLocalData() {
+    const button = document.getElementById('settings-delete-local-data');
+    button?.addEventListener('click', async () => {
         button.disabled = true;
-        button.textContent = 'Changing…';
         try {
-            await changeStoragePassword(current.input.value, next.input.value);
-            for (const field of [current, next, confirm]) field.input.value = '';
-            show('Password changed.', true);
+            const confirmed = await confirmAction({
+                title: 'Delete local data?',
+                confirmLabel: 'Delete local data',
+                warning: 'This deletes local keys, notes, history, settings and cached chain data in this browser. Local-only history may be lost. This cannot be undone and does not securely erase older copies.',
+            });
+            if (confirmed) await resetLocalData();
         } catch (error) {
-            if (error?.code === 'wrong-password') {
-                show('The current password is wrong.', false);
-                current.input.value = '';
-                current.input.focus();
-            } else {
-                show(error?.message || 'Could not change the password.', false);
-            }
-        } finally {
-            button.disabled = false;
-            button.textContent = 'Change password';
-        }
+            Toast.show(error?.message || 'Could not delete local data. Reload and try again.', 'error');
+        } finally { button.disabled = false; }
     });
 }
 
@@ -138,11 +80,17 @@ export const LocalData = {
     init() {
         bindLockButton();
         bindAutoLock();
-        bindChangePassword();
+        bindDeleteLocalData();
         const methods = document.getElementById('settings-unlock-methods');
-        const renderMethods = () => {
+        const renderMethods = async () => {
             if (!methods) return;
-            if (isStorageUnlocked()) mountStorageMethods(methods, unlockedStorage());
+            if (isStorageUnlocked()) {
+                const context = await unlockedStorage().walletContext();
+                const identity = document.createElement('p');
+                identity.className = 'break-all text-sm text-slate-300';
+                identity.textContent = `Freighter account: ${context?.address || 'Unavailable'}`;
+                methods.replaceChildren(identity);
+            }
             else {
                 const button = document.createElement('button');
                 button.type = 'button';

@@ -143,7 +143,7 @@ async fn blob_worker_url(file: &str) -> String {
 }
 
 /// Password of the e2e tests' local database.
-const TEST_DATABASE_PASSWORD: &str = "e2e test database password";
+const TEST_WALLET_SECRET: &str = "abababababababababababababababababababababababababababababababab";
 
 // The one `Storage` for this page. See `open_test_storage`.
 thread_local! {
@@ -173,15 +173,24 @@ async fn open_test_storage() -> Storage {
         .expect("storage worker must start");
     // Each e2e test runs in a fresh browser profile, so this creates the
     // database; unlock covers a reused profile.
+    let context = serde_wasm_bindgen::to_value(
+        &stellar_private_payments::state::wallet_vault::WalletContext {
+            version: 1,
+            address: format!("G{}", "A".repeat(55)),
+            origin: "http://localhost".into(),
+            salt: "01".repeat(32),
+        },
+    )
+    .unwrap();
     let status = storage.status().await.expect("storage status");
     if status.as_string().as_deref() == Some("locked") {
         storage
-            .unlock(TEST_DATABASE_PASSWORD.to_string())
+            .unlock_wallet(context, TEST_WALLET_SECRET.to_string())
             .await
             .expect("unlock the test database");
     } else {
         storage
-            .create(TEST_DATABASE_PASSWORD.to_string())
+            .create_wallet(context, TEST_WALLET_SECRET.to_string())
             .await
             .expect("create the test database");
     }
@@ -459,7 +468,7 @@ fn response_status(response: &PoolExecuteResult) -> String {
 
 /// Number of confirmed transaction hashes in a pool execute response.
 fn response_hash_count(response: &PoolExecuteResult) -> u32 {
-    response.hashes().len() as u32
+    u32::try_from(response.hashes().len()).expect("transaction hash count fits u32")
 }
 
 /// SEP-0043 error code from a pool execute response, when present.

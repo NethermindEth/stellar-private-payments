@@ -39,7 +39,7 @@ export class AppStorage {
 
     async #call(request, timeoutMs = 5_000) {
         const key = request?.GetSetting ?? request?.SetSetting?.key;
-        if (!['explorer', 'bootnode_config'].includes(key)) await this.#unlock();
+        if (request !== 'DisclaimerText' && !['explorer', 'bootnode_config'].includes(key)) await this.#unlock();
         return storageCall(this.#storage, request, timeoutMs);
     }
 
@@ -69,6 +69,13 @@ export class AppStorage {
 
     async setBootnodeConfig(url) {
         await this.setSetting(SETTING_BOOTNODE_CONFIG, { enabled: true, url });
+    }
+
+    async privateStatus() { return this.#storage.status(); }
+
+    async getDisclaimerText() {
+        const response = await this.#call('DisclaimerText');
+        return response.DisclaimerState;
     }
 
     async getDisclaimerState(address) {

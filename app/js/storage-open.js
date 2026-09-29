@@ -18,7 +18,7 @@ export async function settledStorageStatus(storage, { timeoutMs = 120_000 } = {}
         await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(0, deadline - performance.now()))));
     }
 }
-const isOpen = status => ['unlocked', 'password-recovery-required'].includes(status);
+const isOpen = status => status === 'unlocked';
 export async function openStorage(storage, operation) {
     if (isOpen(await settledStorageStatus(storage))) return;
     try { await operation(); }

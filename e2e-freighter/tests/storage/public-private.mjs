@@ -80,31 +80,28 @@ try {
         await walk(root); return out;
     });
     await load();
-    assert.equal(await page.getByTestId('storage-password-dialog').count(), 0);
+    assert.equal(await page.getByTestId('storage-wallet-dialog').count(), 0);
     assert.equal(await page.evaluate(() => storage.status()), 'new');
     await page.evaluate(() => appStorage.setBootnodeConfig('https://public.example'));
     await saveEvent(0);
     assert.equal((await feed()).OperationalFeed.length, 1);
     await assert.rejects(call({ GetSetting: 'private-marker' }), /locked/);
     await page.click('#unlock');
-    await page.getByTestId('storage-password-cancel').click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.waitForFunction(() => window.unlockError === 'unlock-cancelled');
     assert.equal((await feed()).OperationalFeed.length, 1);
     checks.push('fresh app opens and syncs public events without creating a password; cancellation preserves public access');
 
-    const password = 'correct horse battery staple';
-    await page.click('#unlock');
-    await page.getByTestId('storage-password-input').fill(password);
-    await page.getByTestId('storage-password-confirm').fill(password);
-    await page.getByTestId('storage-password-submit').click();
-    await page.getByTestId('storage-freighter-skip').click();
-    await page.getByTestId('storage-passkey-skip').click();
-    await page.waitForFunction(() => facade.isStorageUnlocked());
+    const wallet = { context: { version: 1, address: 'G' + 'A'.repeat(55), origin: 'https://storage.test', salt: '01'.repeat(32) }, secret: 'ab'.repeat(32) };
+    await page.evaluate(async wallet => {
+        await storage.createWallet(wallet.context, wallet.secret);
+        await facade.ensurePrivateStorage();
+    }, wallet);
     await call({ SetSetting: { key: 'private-marker', value_json: JSON.stringify('PRIVATE_SECRET_MARKER_9384') } });
     await call({ RecordOperation: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', op_type: 'sent', amount: '12345', direction: 'out', counterparty: 'PRIVATE_PEER_9384', tx_hash: null } });
     await page.evaluate(() => facade.lockStorage());
     await page.waitForFunction(() => window.ready && !facade.isStorageUnlocked());
-    assert.equal(await page.getByTestId('storage-password-dialog').count(), 0);
+    assert.equal(await page.getByTestId('storage-wallet-dialog').count(), 0);
     assert.equal(await page.evaluate(() => storage.status()), 'locked');
     for (const request of [{ GetSetting: 'private-marker' }, { PrivacyKeys: 'PRIVATE_OWNER_9384' }, { UserNotes: ['PRIVATE_OWNER_9384', 10] }, { ListOperations: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', limit: 10 } }]) {
         await assert.rejects(call(request), /locked/);
@@ -118,17 +115,15 @@ try {
     }
     checks.push('lock reloads into public mode; private calls fail closed; public syncing continues and OPFS contains no private markers');
 
-    await page.click('#unlock');
-    await page.getByTestId('storage-password-input').fill('incorrect password');
-    await page.getByTestId('storage-password-submit').click();
-    await page.getByTestId('storage-password-error').waitFor({ state: 'visible' });
+    await assert.rejects(page.evaluate(wallet => storage.unlockWallet(wallet.context, 'cd'.repeat(32)), wallet));
     assert.equal((await feed()).OperationalFeed.length, 2);
-    await page.getByTestId('storage-password-input').fill(password);
-    await page.getByTestId('storage-password-submit').click();
-    await page.waitForFunction(() => facade.isStorageUnlocked());
+    await page.evaluate(async wallet => {
+        await storage.unlockWallet(wallet.context, wallet.secret);
+        await facade.ensurePrivateStorage();
+    }, wallet);
     assert.equal((await call({ GetSetting: 'private-marker' })).Setting, JSON.stringify('PRIVATE_SECRET_MARKER_9384'));
     assert.equal((await call({ ListOperations: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', limit: 10 } })).Operations.length, 1);
-    checks.push('wrong password leaves public access usable; correct password restores private data after locked sync');
+    checks.push('wrong wallet secret leaves public access usable; correct wallet secret restores private data after locked sync');
     // An old installation has a complete encrypted vault and no public cache.
     // Reproduce that layout without changing the vault or its key records.
     await page.evaluate(async () => {
@@ -145,14 +140,31 @@ try {
     await load();
     assert.equal(await page.evaluate(() => storage.status()), 'locked');
     assert.equal((await feed()).OperationalFeed.length, 0);
-    await page.click('#unlock');
-    await page.getByTestId('storage-password-input').fill(password);
-    await page.getByTestId('storage-password-submit').click();
-    await page.waitForFunction(() => facade.isStorageUnlocked());
+    await page.evaluate(async wallet => {
+        await storage.unlockWallet(wallet.context, wallet.secret);
+        await facade.ensurePrivateStorage();
+    }, wallet);
     await call('ProcessPendingState');
     assert.equal((await feed()).OperationalFeed.length, 2);
     assert.equal((await call({ ListOperations: { address: 'PRIVATE_OWNER_9384', pool_contract_id: 'PUBLIC_POOL', limit: 10 } })).Operations.length, 1);
     checks.push('existing encrypted vault seeds a missing public cache on unlock without losing private history');
+    // Losing the wallet record must never turn existing encrypted data into
+    // a fresh profile or allow createWallet to overwrite it.
+    await page.evaluate(async () => {
+        await storage.close();
+        const root = await navigator.storage.getDirectory();
+        const opaque = await (await root.getDirectoryHandle('.opfs-sahpool-encrypted')).getDirectoryHandle('.opaque');
+        for await (const [name, handle] of opaque.entries()) {
+            const header = new Uint8Array(await (await handle.getFile()).slice(0, 512).arrayBuffer());
+            if (new TextDecoder().decode(header).split('\0')[0] === 'spp.key.db') await opaque.removeEntry(name);
+        }
+    });
+    await load();
+    assert.equal(await page.evaluate(() => storage.status()), 'recovery-required');
+    const stranded = await snapshot();
+    await assert.rejects(page.evaluate(wallet => storage.createWallet(wallet.context, wallet.secret), wallet), /existing local data/);
+    assert.deepEqual(await snapshot(), stranded, 'missing wallet record must never cause implicit data deletion');
+    checks.push('missing wallet record refuses creation and preserves encrypted bytes until explicit reset');
     await page.evaluate(() => storage.reset());
     assert.equal(await page.evaluate(() => storage.status()), 'new');
     assert.equal((await feed()).OperationalFeed.length, 0);

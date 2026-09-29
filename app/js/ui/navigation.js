@@ -474,12 +474,13 @@ export const Wallet = {
                 await client().backgroundSync();
                 await loadRuntimeState();
                 App.events.dispatchEvent(new Event('public:ready'));
-                await runOnboardingWizard({
+                // Automatic reconnection resumes public syncing without asking
+                // to reopen the vault the user just locked.
+                if (!auto || isStorageUnlocked()) await runOnboardingWizard({
                     address,
                     networkPassphrase,
                     bootnodeRequired,
                     signer,
-                    publicOnly: !isStorageUnlocked(),
                 });
                 if (!isStorageUnlocked()) {
                     document.body.dataset.walletState = 'locked';

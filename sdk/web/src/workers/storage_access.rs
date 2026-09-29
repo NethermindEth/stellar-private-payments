@@ -1,74 +1,13 @@
-//! Opening the browser database with a password.
-//!
-//! The database is always encrypted. Its random key is sealed with the user's
-//! password ([`PasswordRecord`]) and kept in a small plain SQLite file next to
-//! it, so replacing the record is a transaction. All of this runs in the
-//! storage worker: the page sends the password and never receives the key.
-//!
-//! What exists in OPFS decides the state, so an interrupted setup resumes
-//! without further bookkeeping:
-//! - a password record and the encrypted database: set up, locked;
-//! - otherwise, an earlier version's unencrypted `spp.db`: encrypted once the
-//!   user chooses a password;
-//! - otherwise: new.
-//!
-//! The password record is written before the encrypted database exists. Rows
-//! are copied from `spp.db` in one transaction, so an encrypted database
-//! without tables holds an interrupted copy, which unlocking repeats. `spp.db`
-//! is deleted only after the copy has committed.
-
-use std::path::Path;
-
+//! Public chain cache and a private vault unlocked exclusively by a wallet.
+use crate::protocol::StorageStatus;
 use anyhow::{Result, anyhow, ensure};
+use std::path::Path;
 use stellar_private_payments::state::{
     SqliteStorage,
     database_key::{DatabaseKey, OpenPurpose},
     encrypted_migration::{copy_into_encrypted, has_tables},
-    passkey_vault::{self, PasskeyContext},
-    password_vault::{
-        PasswordRecord, VaultError, read_record_database, validate_new_password,
-        write_record_database,
-    },
     wallet_vault::{self, WalletContext},
 };
-
-use crate::protocol::StorageStatus;
-
-// Retain a zeroizing key only after an optional method successfully opens a
-// database whose password record is absent. Never expose it to the page.
-thread_local! {
-    static RECOVERY_KEY: std::cell::RefCell<Option<DatabaseKey>> = const { std::cell::RefCell::new(None) };
-}
-
-pub(super) fn clear_recovery_key() {
-    RECOVERY_KEY.with(|key| key.borrow_mut().take());
-}
-
-pub(super) fn recover_password(password: &str) -> Result<()> {
-    ensure!(
-        read_record()?.is_none(),
-        "a password is already set; use changePassword"
-    );
-    validate_new_password(password)?;
-    RECOVERY_KEY.with(|cell| {
-        let mut recovery = cell.borrow_mut();
-        let key = recovery
-            .as_ref()
-            .ok_or_else(|| anyhow!("unlock with an enrolled method to recover password access"))?;
-        write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(key, password)?)?;
-        recovery.take();
-        Ok(())
-    })
-}
-
-async fn open_optional_key(key: DatabaseKey) -> Result<Option<SqliteStorage>> {
-    let recover = read_record()?.is_none();
-    let storage = open_key(&key).await?;
-    if recover && storage.is_some() {
-        RECOVERY_KEY.with(|cell| *cell.borrow_mut() = Some(key));
-    }
-    Ok(storage)
-}
 
 const ENCRYPTED_DB: &str = "spp.encrypted.db";
 const PUBLIC_DB: &str = "spp.public.db";
@@ -84,19 +23,16 @@ const PLAINTEXT_DB: &str = "spp.db";
 /// Report what the database needs before it can be used.
 pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
     if unlocked {
-        return Ok(if RECOVERY_KEY.with(|key| key.borrow().is_some()) {
-            StorageStatus::PasswordRecoveryRequired
-        } else {
-            StorageStatus::Unlocked
-        });
+        return Ok(StorageStatus::Unlocked);
     }
     pools::ensure_encrypted().await?;
-    if pools::encrypted_exists(ENCRYPTED_DB)? {
-        return Ok(if read_record()?.is_some() {
-            StorageStatus::Locked
-        } else {
-            StorageStatus::RecoveryRequired
-        });
+    if wallet_vault::context(Path::new(KEY_DB))?.is_some() {
+        return Ok(StorageStatus::Locked);
+    }
+    if pools::encrypted_exists(ENCRYPTED_DB)?
+        || wallet_vault::has_legacy_credentials(Path::new(KEY_DB))?
+    {
+        return Ok(StorageStatus::RecoveryRequired);
     }
     Ok(if pools::plaintext_exists(PLAINTEXT_DB).await? {
         StorageStatus::Unencrypted
@@ -105,37 +41,17 @@ pub(super) async fn status(unlocked: bool) -> Result<StorageStatus> {
     })
 }
 
-/// Set the first password: create the database, or encrypt `spp.db` into it.
-pub(super) async fn create(password: &str) -> Result<SqliteStorage> {
-    let status = status(false).await?;
+/// Save the envelope first so interrupted creation or migration is resumable.
+pub(super) async fn create_wallet(context: WalletContext, secret: &str) -> Result<SqliteStorage> {
     ensure!(
-        matches!(status, StorageStatus::New | StorageStatus::Unencrypted),
-        "a password is already set; unlock the database or reset it"
+        matches!(
+            status(false).await?,
+            StorageStatus::New | StorageStatus::Unencrypted
+        ),
+        "existing local data must be unlocked or explicitly reset"
     );
-    validate_new_password(password)?;
     let key = DatabaseKey::generate()?;
-    // Whatever is there without a password record cannot be unlocked.
-    pools::delete_encrypted(ENCRYPTED_DB)?;
-    wallet_vault::clear(Path::new(KEY_DB))?;
-    passkey_vault::clear(Path::new(KEY_DB))?;
-    write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(&key, password)?)?;
-    if status == StorageStatus::Unencrypted {
-        copy_plaintext(&key).await?;
-        return SqliteStorage::connect_encrypted(ENCRYPTED_DB, &key, OpenPurpose::OpenExisting);
-    }
-    SqliteStorage::connect_encrypted(ENCRYPTED_DB, &key, OpenPurpose::CreateNew)
-}
-
-/// Open the database with `password`; `None` means the password is wrong.
-pub(super) async fn unlock(password: &str) -> Result<Option<SqliteStorage>> {
-    pools::ensure_encrypted().await?;
-    let record =
-        read_record()?.ok_or_else(|| anyhow!("no password is set yet; create the database"))?;
-    let key = match record.open(password) {
-        Ok(key) => key,
-        Err(VaultError::WrongPassword) => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
+    wallet_vault::create(Path::new(KEY_DB), &key, context, secret)?;
     open_key(&key).await
 }
 
@@ -144,87 +60,33 @@ pub(super) async fn wallet_context() -> Result<Option<WalletContext>> {
     wallet_vault::context(Path::new(KEY_DB))
 }
 
-pub(super) fn enroll_wallet(password: &str, context: WalletContext, secret: &str) -> Result<()> {
-    wallet_vault::enroll(Path::new(KEY_DB), password, context, secret)
-}
-
-pub(super) async fn unlock_wallet(
-    context: &WalletContext,
-    secret: &str,
-) -> Result<Option<SqliteStorage>> {
+pub(super) async fn unlock_wallet(context: &WalletContext, secret: &str) -> Result<SqliteStorage> {
     pools::ensure_encrypted().await?;
     let key = wallet_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    open_optional_key(key).await
+    let storage = open_key(&key).await?;
+    wallet_vault::finish_wallet_migration(Path::new(KEY_DB), &key, context, secret)?;
+    Ok(storage)
 }
 
-pub(super) async fn passkey_context() -> Result<Option<PasskeyContext>> {
-    pools::ensure_encrypted().await?;
-    passkey_vault::context(Path::new(KEY_DB))
-}
-
-pub(super) fn enroll_passkey(password: &str, context: PasskeyContext, secret: &str) -> Result<()> {
-    passkey_vault::enroll(Path::new(KEY_DB), password, context, secret)
-}
-
-pub(super) async fn unlock_passkey(
-    context: &PasskeyContext,
-    secret: &str,
-) -> Result<Option<SqliteStorage>> {
-    pools::ensure_encrypted().await?;
-    let key = passkey_vault::unlock(Path::new(KEY_DB), context, secret)?;
-    open_optional_key(key).await
-}
-
-pub(super) fn remove_wallet(password: &str) -> Result<()> {
-    wallet_vault::remove(Path::new(KEY_DB), password)
-}
-
-pub(super) fn remove_passkey(password: &str) -> Result<()> {
-    passkey_vault::remove(Path::new(KEY_DB), password)
-}
-
-async fn open_key(key: &DatabaseKey) -> Result<Option<SqliteStorage>> {
+async fn open_key(key: &DatabaseKey) -> Result<SqliteStorage> {
     let plaintext = pools::plaintext_exists(PLAINTEXT_DB).await?;
     let complete =
         pools::encrypted_exists(ENCRYPTED_DB)? && has_tables(Path::new(ENCRYPTED_DB), key)?;
     if !complete {
-        // Setting the password was interrupted: finish it.
+        // Creating the wallet vault was interrupted: finish it.
         pools::delete_encrypted(ENCRYPTED_DB)?;
         if !plaintext {
-            return Ok(Some(SqliteStorage::connect_encrypted(
-                ENCRYPTED_DB,
-                key,
-                OpenPurpose::CreateNew,
-            )?));
+            return SqliteStorage::connect_encrypted(ENCRYPTED_DB, key, OpenPurpose::CreateNew);
         }
         copy_plaintext(key).await?;
     } else if plaintext {
         // The copy committed, but deleting the unencrypted database did not.
         pools::remove_plaintext(PLAINTEXT_DB).await?;
     }
-    Ok(Some(SqliteStorage::connect_encrypted(
-        ENCRYPTED_DB,
-        key,
-        OpenPurpose::OpenExisting,
-    )?))
+    SqliteStorage::connect_encrypted(ENCRYPTED_DB, key, OpenPurpose::OpenExisting)
 }
 
-/// Seal the database key with `new`; `false` means `current` is wrong.
-pub(super) fn change_password(current: &str, new: &str) -> Result<bool> {
-    let record =
-        read_record()?.ok_or_else(|| anyhow!("no password is set yet; create the database"))?;
-    let key = match record.open(current) {
-        Ok(key) => key,
-        Err(VaultError::WrongPassword) => return Ok(false),
-        Err(e) => return Err(e.into()),
-    };
-    validate_new_password(new)?;
-    write_record_database(Path::new(KEY_DB), &PasswordRecord::seal(&key, new)?)?;
-    Ok(true)
-}
-
-/// Delete the database, its password record and any unencrypted `spp.db`.
-/// The caller closes the database first.
+/// Explicitly delete all local data. The caller closes connections first.
 pub(super) async fn reset() -> Result<()> {
     pools::ensure_encrypted().await?;
     pools::delete_encrypted(ENCRYPTED_DB)?;
@@ -239,10 +101,6 @@ pub(super) async fn reset() -> Result<()> {
 /// Release the OPFS pools so another worker can take them.
 pub(super) fn release() {
     pools::release();
-}
-
-fn read_record() -> Result<Option<PasswordRecord>> {
-    read_record_database(Path::new(KEY_DB))
 }
 
 /// Copy `spp.db` into a new encrypted database, then delete `spp.db`.

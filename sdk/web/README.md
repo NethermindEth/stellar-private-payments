@@ -45,8 +45,10 @@ await client.backgroundSync();
 
 // Ask for private access when the user opens their account, not at app startup.
 const status = await storage.status();
-if (status === 'new' || status === 'unencrypted') await storage.create(password);
-else if (status === 'locked') await storage.unlock(password);
+// Obtain context and a verified, reproducible signature-derived secret.
+// See app/js/storage-freighter.js for the full Freighter flow.
+if (status === 'new' || status === 'unencrypted') await storage.createWallet(context, secret);
+else if (status === 'locked') await storage.unlockWallet(context, secret);
 else if (status !== 'unlocked') throw new Error(`Resolve storage status: ${status}`);
 
 const account = await client.account({ networkPassphrase }, signer);
@@ -79,15 +81,15 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 |--------|----------------------------------------------------------|
 | `Storage.connect({ workerUrl? })` | Open the public chain cache once per page; the private vault stays closed |
 | `status()` | `"new"`, `"unencrypted"` (earlier version's data), `"locked"` or `"unlocked"` |
-| `create(password)` | Set the first password (at least 15 characters): create the database, or encrypt the earlier unencrypted one |
-| `unlock(password)` | Open the database; a wrong password rejects with `code: "wrong-password"` |
-| `changePassword(current, next)` | Seal the key with a new password; the database is not rewritten |
-| `reset()` | Delete the local database and its password, for a forgotten password |
+| `createWallet(context, secret)` | Create the private vault or encrypt an earlier plaintext database with a wallet-derived secret |
+| `unlockWallet(context, secret)` | Open the vault with its enrolled wallet secret |
+| `walletContext()` | Read the public signing context before unlock |
+| `reset()` | Explicitly delete local public and private data and the wallet record |
 | `close()` | Release the database for this handle and its forks |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
 
-The package exports a `Storage` namespace with `connect` only; the other methods are on the handle. The random vault key is unsealed using the password (Argon2id) inside the storage worker, so the page never holds it. `Client.new` accepts locked storage for public chain syncing and lookups. Private account data and operations require an unlocked vault.
+The package exports a `Storage` namespace with `connect` only; the other methods are on the handle. The random vault key is unsealed using a signature-derived wallet secret inside the storage worker, so the page never holds the database key. `Client.new` accepts locked storage for public chain syncing and lookups. Private account data and operations require an unlocked vault.
 
 ### Free functions
 
@@ -289,111 +291,54 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 `Storage.connect()` defaults to the bundled storage worker URL via `import.meta.url`. Override it with `workerUrl`. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.
 
-### Optional Freighter database unlocking
+### Wallet-only private storage
 
-The app creates or migrates storage with a password first, then offers Freighter
-unlocking. Skipping or declining the wallet request keeps password access. Once
-enrolled, the locked screen offers both methods; manual and inactivity locking
-still close the worker and reload the page. Reset removes both unlock methods.
+Freighter signs an origin-, account-, and random-salt-bound local-storage message
+using SEP-0053. The app validates account, origin and signature and confirms two
+matching signatures during initial setup. HKDF-SHA-256 derives a 32-byte wrapping
+secret. The worker uses it directly with XSalsa20-Poly1305 to seal a random database
+key in `wallet_record` in `spp.key.db`. Neither the signature nor wrapping secret
+is persisted. Subsequent sessions need one wallet approval; privacy-key derivation
+is a separate message when keys are missing.
 
-Freighter signs an origin-, account-, and random-salt-bound local storage message
-using SEP-0053. Enrollment verifies the signature and asks for it twice before
-saving anything, to check reproducibility. HKDF-SHA-256 derives a secret from the
-signature. The storage worker authenticates the password and uses its existing
-Argon2id/secretbox envelope format to seal the same database key with this secret
-in a separate `wallet_record` in `spp.key.db`. The database key never leaves the
-worker. Password changes preserve wallet access. No password, signature, or
-derived secret is persisted; signatures for this message must be treated as
-secrets because they grant local database access.
+`Storage.walletContext`, `Storage.createWallet`, and `Storage.unlockWallet`
+are low-level APIs: the caller must derive the secret from a verified signature.
+See `app/js/storage-freighter.js` for the application implementation.
+There are no browser password, passkey, enrollment-removal or password-recovery
+APIs. The native CLI retains password support.
 
-The low-level `Storage.walletContext`, `Storage.enrollWallet`, and
-`Storage.unlockWallet` methods support the app flow in
-`app/js/storage-freighter.js`. The SDK accepts the derived secret; the app
-verifies the account, origin, signature, and reproducibility before enrollment.
-The research branch's key-vault format is not used.
+Existing vaults with a Freighter record unlock with their original signing
+context. After a successful open, the worker upgrades legacy envelopes and
+removes old password/passkey records in one transaction. Data and the database
+key are preserved. A vault without a Freighter record reports `recovery-required`
+and refuses creation. Enroll Freighter using the previous version before upgrading,
+or explicitly reset. Interrupted first setup reuses the saved wallet key.
 
-Focused checks (after installing app and e2e dependencies):
+### Storage API migration (0.3.0)
 
-```sh
-node --test app/tests/storage-freighter.test.mjs
-node e2e-freighter/tests/storage/freighter-access.mjs
-cargo test --locked -p stellar-private-payments --lib wallet_vault
-# Build the SDK first. Use a new artifacts directory for each browser run.
-node sdk/web/scripts/test-sqlite3mc.js --artifacts /tmp/storage-check
-```
+Use `Storage.connect` for public persistence and `createWallet` or `unlockWallet`
+before private operations. This replaces browser password/passkey APIs from 0.2.0.
+`Client.new` and public syncing work while locked. Status may be `opening`
+(wait and re-query) or `recovery-required` (existing data cannot be opened through
+the supported wallet route). A closed handle rejects further requests. An RPC
+timeout does not cancel work in the worker; re-query status before retrying.
+The app bounds this wait to two minutes.
 
-The UI check uses a simulated signer with real Ed25519 signatures; the SDK
-browser check exercises real WASM and encrypted OPFS across browser restarts.
+Wallet compromise can expose a copied vault. Losing the wallet account loses
+vault access. Migration does not rotate keys or revoke backups. See
+[the at-rest security model](../../SECURITY.md).
 
-
-### Optional passkey database unlocking
-
-After the Freighter setup step (enabled or skipped), the app offers passkey
-unlocking. Create a passkey and confirm it twice to verify encryption support
-before saving access. The locked screen shows an explicit **Unlock with
-passkey** button when enrolled. Password and Freighter access remain available,
-and manual/inactivity locking uses the same worker shutdown as before.
-
-This requires the [WebAuthn PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension)
-and user verification (for example a device PIN or biometric). Providers without
-PRF support cannot unlock encrypted local storage; setup reports this and lets
-the user retry or skip. A successful creation alone never enrolls access.
-The app verifies reproducible PRF output and validates each assertion's challenge, origin, credential ID, relying
-party hash, and user presence/verification flags. HKDF-SHA-256 derives a secret
-from the PRF output, bound to the site, credential and a random salt. Assertion
-signatures are not encryption material. The browser mediates WebAuthn; this is
-local decryption, not a server authentication protocol.
-
-`Storage.passkeyContext`, `Storage.enrollPasskey`, and `Storage.unlockPasskey`
-provide the worker API. Enrollment authenticates the existing password and
-stores a separate encrypted key envelope in `passkey_record` in `spp.key.db`.
-Only public credential metadata and the sealed database key are stored; PRF
-output and derived secrets are never persisted. The database key stays in the
-worker. Changing the password preserves both optional methods; resetting local
-storage removes both envelopes (it does not delete the provider's passkey).
-
-After building the SDK and installing app and e2e dependencies, run:
+Focused checks after building the SDK:
 
 ```sh
 npm run test:storage --prefix e2e-freighter
-cargo test --locked -p stellar-private-payments --lib passkey_vault
+cargo test --locked -p stellar-private-payments --lib wallet_vault
+node sdk/web/scripts/test-sqlite3mc.js --artifacts /tmp/storage-check
 ```
 
-The passkey browser test uses Chromium's CDP virtual authenticator with PRF
-support and the real WebAuthn API, WASM worker, and encrypted OPFS database.
-It covers unsupported PRF, enrollment, reload/unlock, password changes,
-cancellation, missing credentials, password/Freighter fallback, and reset.
-Override the Chromium executable with `CHROMIUM=/path/to/chrome`. Node tests
-inject malformed WebAuthn responses to check origin, challenge, credential,
-user-verification, and PRF validation. These tests run in the SQLite3MC CI job;
-no real passkey or Freighter wallet is needed.
-
-
-### Storage API migration (0.2.0)
-
-This release intentionally changes the pre-1.0 SDK API. Replace `Storage.open`
-with `Storage.connect` to open public persistence. Inspect `status()` and call
-`create` or `unlock` before private reads or writes; `Client.new` and public
-syncing work while locked. Status can also be `opening` (wait and re-query)
-or `recovery-required` (encrypted data exists without a readable password
-record; unlock with a surviving optional method, restore a complete backup, or
-explicitly reset). `password-recovery-required` means an optional method opened
-the database without a password record: call `recoverPassword(newPassword)` to
-restore it while preserving data and methods. Existing password records cannot
-be replaced through this route. A closed handle rejects
-further requests. Timed-out opening requests may still finish in the worker;
-check status before retrying. The app does this automatically.
-
-Optional unlock enrollment authenticates the password and atomically replaces
-that method's existing envelope. `removeWallet(password)` and
-`removePasskey(password)` revoke the corresponding envelope on this database
-copy. Settings exposes enable/replace/remove controls. This is not database-key
-rotation and cannot revoke old backups or a copied database key. See
-[the at-rest security model](../../docs/src/security.md).
-
-The app bounds opening-status polling to two minutes and asks for a reload if
-the worker remains pending or unresponsive. Package checks inspect the shipped
-storage worker for the pinned SQLite3MC version string.
+The UI suite uses real Ed25519 signatures from a simulated signer. The storage
+suite exercises real WASM/OPFS, process restarts and abrupt worker termination.
+The real extension runner additionally covers first-run onboarding and reload.
 
 ### Public cache and private vault
 
@@ -408,8 +353,7 @@ chain rows referenced by its private notes, so each file has local foreign keys.
 The first unlock seeds the public cache from explicitly selected public data;
 subsequent unlocks replay public events into the vault using event IDs and
 contract addresses rather than file-local IDs. Public progress commits together
-with imported events. No private tables are copied into the cache. Setup and
-legacy plaintext migration retain their existing password and recovery behavior.
+with imported events. No private tables are copied into the cache. Wallet setup and legacy plaintext migration resume from the saved wallet envelope.
 
 The app opens an unlock dialog on private access, with an option to continue
 using public data. Manual/automatic locking closes workers and reloads to clear

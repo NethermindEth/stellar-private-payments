@@ -16,7 +16,7 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 **Storage**
 
-Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database (`spp.encrypted.db`) lives on OPFS behind the storage worker, encrypted with SQLite3 Multiple Ciphers. Its random key is sealed with the user's password (Argon2id) in `spp.key.db` next to it and unsealed inside the worker, so the page never holds the key. The first password encrypts an unencrypted `spp.db` left by earlier versions, then deletes it.
+Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser, the storage worker opens a plaintext public chain cache (`spp.public.db`) and keeps the private vault (`spp.encrypted.db`) locked until requested. The vault is encrypted with SQLite3 Multiple Ciphers and retains chain rows referenced by private notes; the cache contains only public chain data and explorer/bootnode settings. Its random key is sealed with a verified wallet-signature-derived secret (HKDF-SHA-256 and XSalsa20-Poly1305) in `spp.key.db` next to it and unsealed inside the worker, so the page never holds the key. Wallet setup encrypts an unencrypted `spp.db` left by earlier versions, then deletes it.
 
 ## Browser SDK (`sdk/web`)
 
@@ -25,7 +25,7 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.connect() → status() → create(password) | unlock(password) → bootnodeRequired() → Client.new() → backgroundSync() → client.account(options, signer) → account.pool() → PrivatePool ops
+init() → Storage.connect() → status() → createWallet(context, secret) | unlockWallet(context, secret) → bootnodeRequired() → Client.new() → backgroundSync() → client.account(options, signer) → account.pool() → PrivatePool ops
 ```
 
 The app wraps this in `wasm-facade.js` and `ui/pool.js`: `bootnodeRequired` → `initializeRuntime` → `client().backgroundSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.
@@ -62,8 +62,8 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Storage` (WASM, wasm-bindgen API)**
 
-- Spawns the storage worker once per page (`Storage.connect({ workerUrl? })`); the database stays closed until `create(password)` or `unlock(password)`, as `status()` asks.
-- `changePassword(current, next)` re-seals the key; `reset()` deletes the local database for a forgotten password; `close()` releases it.
+- Spawns the storage worker once per page (`Storage.connect({ workerUrl? })`); the private vault stays closed until `createWallet(context, secret)` or `unlockWallet(context, secret)`, as `status()` asks.
+- `walletContext()` returns signing context; `reset()` explicitly deletes local data; `close()` releases storage.
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 
@@ -172,7 +172,7 @@ flowchart LR
 Single entry for the main app pages. Owns singleton lifecycle:
 
 1. `bootnodeRequired(rpcUrl)` — probe retention; configure/persist bootnode if needed
-2. `initializeRuntime(rpcUrl)` — `init()`, `Storage.connect` plus the password dialog (`storage-access.js`), `Client.new` (loads stored bootnode)
+2. `initializeRuntime(rpcUrl)` — `init()`, `Storage.connect` for public storage; wallet approval opens private storage on demand, `Client.new` (loads stored bootnode)
 3. `client().backgroundSync()` — spawn indexer
 4. `client().openAccount({ networkPassphrase, userAddress }, signer)` — `Client.account`
 5. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `account().pool({ poolContract })`

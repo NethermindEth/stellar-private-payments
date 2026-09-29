@@ -458,7 +458,7 @@
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5" data-testid="settings-local-data">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Local Data</p>
-                <p class="mt-2 text-sm text-slate-400">Your notes, keys and history are encrypted in this browser. Public chain data and explorer/bootnode settings remain available while locked. Each enabled unlock method independently grants access to private data.</p>
+                <p class="mt-2 text-sm text-slate-400">Your notes, keys and history are encrypted in this browser. Public chain data and explorer/bootnode settings remain available while locked.</p>
                 <div class="mt-5 space-y-5">
                     <div>
                         <label for="settings-auto-lock" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Lock after inactivity</label>
@@ -471,17 +471,15 @@
                         </select>
                     </div>
                     <div class="space-y-4 border-t border-white/10 pt-5">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Unlock methods</p>
-                        <p class="text-sm text-slate-400">Use your current password to enable, replace, or remove Freighter and passkey access. Only enroll accounts and devices you trust. Replacing or removing a method affects this database copy; old backups and copies of its key may still grant access.</p>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Unlock wallet</p>
+                        <p class="text-sm text-slate-400">Your Freighter account unlocks private data in this browser. Losing access to that account prevents unlocking this vault. A compromised wallet can also unlock it. There is no password or passkey fallback.</p>
                         <div id="settings-unlock-methods" class="space-y-4" data-testid="settings-unlock-methods"></div>
                     </div>
-                    <form id="settings-change-password" data-testid="settings-change-password" class="space-y-4 border-t border-white/10 pt-5" novalidate>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Change Password</p>
-                        <p class="text-sm text-slate-400">Changing your password does not rotate the database key or disable Freighter/passkey access. It cannot revoke a copied key or an older backup.</p>
-                        <div id="settings-password-fields" class="space-y-4"></div>
-                        <p id="settings-password-message" data-testid="settings-password-message" role="status" class="hidden rounded-2xl px-4 py-3 text-sm"></p>
-                        <button id="settings-change-password-btn" data-testid="settings-change-password-btn" type="submit" class="inline-flex w-full items-center justify-center rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 hover:border-cyan-300/20 disabled:cursor-wait disabled:opacity-70">Change password</button>
-                    </form>
+                    <div class="space-y-3 border-t border-white/10 pt-5">
+                        <p class="text-sm text-slate-400">Delete this browser’s local data without unlocking. You will need to set up private access again.</p>
+                        <button id="settings-delete-local-data" data-testid="settings-delete-local-data" type="button" class="rounded-xl border border-rose-400/25 px-4 py-3 text-sm text-rose-200 hover:bg-rose-400/10 disabled:opacity-50">Delete local data</button>
+                    </div>
+
                 </div>
             </section>
 
