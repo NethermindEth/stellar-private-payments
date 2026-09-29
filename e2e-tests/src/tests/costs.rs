@@ -430,7 +430,7 @@ const EXPECTED: &[Pinned] = expected! {
     "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_972_009;
     "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 10, 4, 4444, 4, 530_972_009;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_972_009;
     "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_972_009;
     "pool get_root" => 2, 0, 0, 0, 0;
     "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_972_185;
@@ -564,11 +564,8 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     rows.push(measure(&stale.env, stale_row));
 
     let both = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
-    rows.push(both.transact(
-        "pool transact, transfer, allowlist and blocklist, fresh tree",
-        1,
-        0,
-    ));
+    let both_row = "pool transact, transfer, allowlist and blocklist, fresh tree";
+    rows.push(both.transact(both_row, 1, 0));
 
     let stale_member = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
     let stale_member_row = "pool transact, transfer, membership root one insert old";
@@ -594,10 +591,11 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     print_table(&rows);
     assert_pinned(&rows);
     assert_same_footprint(&rows, transfer_row, stale_row);
+    assert_same_footprint(&rows, both_row, stale_member_row);
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (10, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (11, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

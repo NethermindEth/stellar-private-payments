@@ -48,9 +48,11 @@ enum DataKey {
     Admin,
     /// Number of levels in the Merkle tree
     Levels,
-    /// Next available index for leaf insertion
+    /// Next available index for leaf insertion, kept outside [`TreeState`]
+    /// for off-chain readers
     NextIndex,
-    /// Current Merkle root, the newest entry of the root history
+    /// Current Merkle root, mirroring the newest slot of the root history
+    /// for off-chain readers
     Root,
     /// The [`TreeState`] entry
     State,
@@ -204,11 +206,8 @@ impl ASPMembership {
             return Ok(false);
         }
 
-        // The current root is the common case and needs no ring read
-        if root == Self::get_root(env.clone())? {
-            return Ok(true);
-        }
-
+        // The ring is read even for the current root, so a transaction
+        // simulated before another insertion declares the same entries.
         let state: TreeState = env
             .storage()
             .persistent()

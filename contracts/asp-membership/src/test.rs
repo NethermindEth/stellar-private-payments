@@ -748,6 +748,10 @@ fn the_root_slot_wraps_after_ninety_inserts() {
     assert_eq!(state.roots.get(1), Some(slot_one_root));
     assert_eq!(state.roots.get(89), Some(slot_eighty_nine_root));
     assert_eq!(state.roots.get(0), Some(client.get_root()));
+    assert_eq!(
+        stored_root(&env, &contract_id),
+        ring_root(&env, &contract_id)
+    );
 }
 
 #[test]
