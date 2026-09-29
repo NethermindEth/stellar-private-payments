@@ -1,6 +1,6 @@
 /** Isolated browser checks for the wallet-only Freighter setup UI. */
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { createStorageHarness } from '../../src/storage-harness.mjs';
 import { build } from '../../../app/node_modules/esbuild/lib/main.js';
 
 const { outputFiles } = await build({
@@ -38,11 +38,12 @@ const { outputFiles } = await build({
         build.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export class FreighterSigner { constructor() { return globalThis.signer; } }' }));
     } }],
 });
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
+const harness = await createStorageHarness({ routes: {
+    '/': '<!doctype html><style>.fixed{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.max-w-md{max-width:28rem}.w-full{width:100%}</style><body></body>',
+} });
 try {
-    const page = await browser.newPage();
-    await page.route('https://storage.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>.fixed{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}.max-w-md{max-width:28rem}.w-full{width:100%}</style><body></body>' }));
-    await page.goto('https://storage.test/');
+    const page = harness.page;
+    await page.goto(harness.origin);
     await page.addScriptTag({ content: outputFiles[0].text });
     const start = () => page.evaluate(() => { window.finished = false; window.opened = false; access.unlockStorage(storage, { onOpened: () => { window.opened = true; }, onReset: async () => { await storage.reset(); await access.closeAndReload(storage); } }).then(() => { window.finished = true; }); });
     await page.evaluate(() => access.setup()); await start();
@@ -151,4 +152,4 @@ try {
     assert.match(await page.getByTestId('storage-wallet-dialog').textContent(), /Restore a complete browser-profile backup/);
     assert.equal(await page.evaluate(() => storage.created), 0);
     console.log('PASS: wallet-only setup, approval retry, unlock, explicit reset, migration retry, missing-record protection and bounded inactivity locking');
-} finally { await browser.close(); }
+} finally { await harness.close(); }

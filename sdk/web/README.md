@@ -330,13 +330,21 @@ vault access. Migration does not rotate keys or revoke backups. See
 Focused checks after building the SDK:
 
 ```sh
+npm ci --prefix app
+npm ci --prefix e2e-freighter
 npm run test:storage --prefix e2e-freighter
 cargo test --locked -p stellar-private-payments --lib wallet_vault
-node sdk/web/scripts/test-sqlite3mc.js --artifacts /tmp/storage-check
+node e2e-freighter/tests/storage/sqlite3mc.mjs --artifacts /tmp/storage-check
 ```
 
 The UI suite uses real Ed25519 signatures from a simulated signer. The storage
 suite exercises real WASM/OPFS, process restarts and abrupt worker termination.
+All storage tests share a Playwright browser/server harness; no ChromeDriver is
+needed. Set `CHROMIUM` to a system Chromium/Chrome binary, or install Playwright's
+Chromium in `e2e-freighter` with `npx playwright install chromium`.
+The SDK check also accepts `--legacy-db PATH` and `--legacy-gvk PATH` to verify
+plaintext migration, `--backend-version-fault` to verify rejection of an
+unqualified cipher, and `--package-root PATH` to test an extracted npm tarball.
 The real extension runner additionally covers first-run onboarding and reload.
 
 ### Public cache and private vault

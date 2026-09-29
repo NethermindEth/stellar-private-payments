@@ -68,13 +68,18 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: sdk/web/package-lock.json
+          cache-dependency-path: |
+            sdk/web/package-lock.json
+            app/package-lock.json
+            e2e-freighter/package-lock.json
       - name: Install build dependencies
         run: |
           # The Rust builder reuses sqlite-wasm-rs headers/shims from the locked registry source.
           cargo fetch --locked
           cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
           npm ci --prefix sdk/web
+          npm ci --prefix app
+          npm ci --prefix e2e-freighter
           make circuits
       - name: Cache verified binaryen
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -82,11 +87,10 @@ jobs:
           path: target/tmp/binaryen/binaryen-version_131
           key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
       - name: Record browser and compiler versions
-        # The hosted image supplies matching Chrome/ChromeDriver.
+        # Playwright drives the hosted browser directly, without ChromeDriver.
         # Record these rolling test versions; engine sources and Rust remain pinned.
         run: |
           google-chrome --version
-          "$CHROMEWEBDRIVER/chromedriver" --version
           clang-18 --version
           llvm-ar-18 --version
       - name: Build and lint encrypted WASM
@@ -97,16 +101,11 @@ jobs:
           npm run check:artifacts --prefix sdk/web
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
-      - name: Test encrypted Chromium storage
-        run: |
-          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/chromium-storage
       - name: Reject an unqualified cipher backend
         run: |
-          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts target/sqlite3mc-checks/backend-mismatch --backend-version-fault
-      - name: Test wallet storage and public/private access
+          node e2e-freighter/tests/storage/sqlite3mc.mjs --binary "$(command -v google-chrome)" --artifacts target/sqlite3mc-checks/backend-mismatch --backend-version-fault
+      - name: Test wallet storage, restart and public/private access
         run: |
-          npm ci --prefix app
-          npm ci --prefix e2e-freighter
           CHROMIUM="$(command -v google-chrome)" npm run test:storage --prefix e2e-freighter
       - name: Test migrating an earlier unencrypted database in Chromium
         run: |
@@ -116,7 +115,7 @@ jobs:
           cargo run --locked --quiet -p gvkey-gen -- generate \
             --db target/sqlite3mc-checks/legacy/spp.db \
             --out-file target/sqlite3mc-checks/legacy/gvk.json
-          node sdk/web/scripts/test-sqlite3mc.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" \
+          node e2e-freighter/tests/storage/sqlite3mc.mjs --binary "$(command -v google-chrome)" \
             --artifacts target/sqlite3mc-checks/chromium-migration \
             --legacy-db target/sqlite3mc-checks/legacy/spp.db \
             --legacy-gvk target/sqlite3mc-checks/legacy/gvk.json
@@ -137,4 +136,6 @@ jobs:
           name: sqlite3mc-browser-checks-${{ github.sha }}
           path: |
             target/sqlite3mc-checks/**/result.json
-            target/sqlite3mc-checks/**/driver.log
+            target/sqlite3mc-checks/**/browser.log
+            e2e-freighter/test-results/storage/**/result.json
+            e2e-freighter/test-results/storage/**/browser.log

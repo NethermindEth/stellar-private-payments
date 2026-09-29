@@ -4,6 +4,38 @@ End-to-end tests that drive the deployed app through a real Freighter
 extension in Chrome/Chromium, submitting real transactions on Stellar
 testnet.
 
+## Isolated storage tests
+
+After building the SDK with `bash sdk/web/scripts/build.sh`, run the storage
+suite from the repository root:
+
+```sh
+npm ci --prefix app
+npm ci --prefix e2e-freighter
+CHROMIUM=/usr/bin/chromium npm run test:storage --prefix e2e-freighter
+```
+
+These tests use one Playwright/HTTP harness and fresh browser profiles. They
+require no extension, funded account, running app, or ChromeDriver. Omit
+`CHROMIUM` to use Playwright's bundled Chromium after installing it with
+`npx playwright install chromium` from `e2e-freighter`.
+
+The SDK lifecycle suite also accepts a native plaintext database for migration
+or an extracted npm package for release qualification:
+
+```sh
+node e2e-freighter/tests/storage/sqlite3mc.mjs --artifacts /tmp/storage-migration \
+  --legacy-db /tmp/legacy/spp.db --legacy-gvk /tmp/legacy/gvk.json
+node e2e-freighter/tests/storage/sqlite3mc.mjs --artifacts /tmp/storage-package \
+  --package-root /tmp/npm-release/package
+```
+
+It verifies wrong-secret non-mutation, interrupted setup, second-tab exclusion,
+browser-process restart and reset. The adjacent SAH suite terminates a real
+worker mid-write and verifies recovery from its rollback journal. Qualification
+CI uses the same harness; npm releases test the extracted tarball before
+publishing that exact archive.
+
 ## Requirements
 
 Run `bash scripts/e2e-preflight.sh --fix` from the repo root first — it

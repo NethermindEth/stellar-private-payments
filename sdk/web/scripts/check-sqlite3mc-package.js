@@ -34,7 +34,7 @@ function npmPack(...args) {
 function verifyNames(names) {
   for (const name of required) if (!names.has(name)) throw new Error(`package is missing ${name}`);
   for (const name of names) {
-    if (isAbsolute(name) || name.split('/').includes('..') || name.includes('test-sqlite3mc') || name.startsWith('scripts/')) {
+    if (isAbsolute(name) || name.split('/').includes('..') || name.startsWith('scripts/')) {
       throw new Error(`unexpected package entry: ${name}`);
     }
   }

@@ -3,12 +3,8 @@
  * neither changes production SQLite/VFS code nor simulates journal recovery.
  */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { resolve, sep, extname } from 'node:path';
-import { chromium } from 'playwright';
+import { createStorageHarness, snapshotOPFS } from '../../src/storage-harness.mjs';
 
-const sdkRoot = new URL('../../../sdk/web/', import.meta.url).pathname;
 const loader = `
 const write = FileSystemSyncAccessHandle.prototype.write;
 FileSystemSyncAccessHandle.prototype.write = function(bytes, options) {
@@ -35,29 +31,10 @@ const sdk = await import('/sdk/js/index.js'); await sdk.default();
 window.storage = await sdk.Storage.connect({workerUrl:'/crash-worker.js'});
 window.ready = true;
 </script>`;
-const server = createServer(async (request, response) => {
-    try {
-        const path = new URL(request.url, 'http://localhost').pathname;
-        let body; let type = 'text/javascript';
-        if (path === '/') { body = html; type = 'text/html'; }
-        else if (path === '/crash-worker.js') body = loader;
-        else {
-            const file = resolve(sdkRoot, '.' + path.replace(/^\/sdk/, ''));
-            if (!path.startsWith('/sdk/') || !file.startsWith(resolve(sdkRoot) + sep)) throw Error('invalid path');
-            body = await readFile(file);
-            if (extname(file) === '.wasm') type = 'application/wasm';
-        }
-        response.writeHead(200, { 'Content-Type': type, 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' });
-        response.end(body);
-    } catch { response.writeHead(404); response.end(); }
-});
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-let browser;
+const harness = await createStorageHarness({ routes: { '/': html, '/crash-worker.js': loader } });
 try {
-    browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
-    const page = await browser.newPage();
-    page.setDefaultTimeout(120_000);
-    await page.goto(`http://localhost:${server.address().port}/`);
+    const page = harness.page;
+    await page.goto(harness.origin);
     await page.waitForFunction(() => window.ready);
     const wallet = { context: { version: 1, address: 'G' + 'A'.repeat(55), origin: 'https://storage.test', salt: '01'.repeat(32) }, secret: 'ab'.repeat(32) };
     await page.evaluate(async wallet => {
@@ -77,19 +54,9 @@ try {
     await page.reload();
     await page.waitForFunction(() => window.ready);
     assert.equal(await page.evaluate(() => storage.status()), 'locked');
-    const snapshot = () => page.evaluate(async () => {
-        const root = await navigator.storage.getDirectory();
-        const opaque = await (await root.getDirectoryHandle('.opfs-sahpool-encrypted')).getDirectoryHandle('.opaque');
-        const files = [];
-        for await (const [name, handle] of opaque.entries()) {
-            const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
-            const logical = new TextDecoder().decode(bytes.subarray(0,512)).split('\0')[0];
-            files.push({name, logical, size:bytes.length, digest:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))});
-        }
-        return files.sort((a,b) => a.name.localeCompare(b.name));
-    });
+    const snapshot = () => snapshotOPFS(page);
     const hot = await snapshot();
-    assert(hot.some(file => file.logical === 'spp.encrypted.db-journal' && file.size > 4096), 'abrupt kill must leave a real rollback journal');
+    assert(hot.some(file => file.logical === 'spp.encrypted.db-journal' && file.bytes > 4096), 'abrupt kill must leave a real rollback journal');
     assert.equal(await page.evaluate(async () => {
         try { await storage.unlockWallet(await storage.walletContext(), 'cd'.repeat(32)); return false; } catch { return true; }
     }), true);
@@ -106,6 +73,5 @@ try {
     await page.evaluate(() => storage.close());
     console.log('PASS: real SAH hot-journal recovery after worker termination mid-write, wrong-wallet-secret non-mutation, subsequent durable writes');
 } finally {
-    if (browser) await browser.close();
-    await new Promise(resolve => server.close(resolve));
+    await harness.close();
 }

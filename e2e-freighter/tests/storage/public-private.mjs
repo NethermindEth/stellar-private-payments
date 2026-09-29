@@ -1,13 +1,10 @@
 /** Public browsing and syncing with a locked private vault, using real WASM/OPFS. */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { resolve, extname, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { chromium } from 'playwright';
+import { createStorageHarness, snapshotOPFS } from '../../src/storage-harness.mjs';
 import { build } from '../../../app/node_modules/esbuild/lib/main.js';
 const root = new URL('../../../', import.meta.url).pathname;
-const sdkRoot = resolve(root, 'sdk/web');
 const require = createRequire(resolve(root, 'app/package.json'));
 const { xdr, nativeToScVal } = require('@stellar/stellar-sdk');
 const event = index => ({
@@ -35,50 +32,22 @@ window.appStorage = await facade.ensureStorage();
 document.querySelector('#unlock').onclick = () => facade.ensurePrivateStorage().catch(e => window.unlockError = e.code || e.message);
 window.ready = true;
 </script></body>`;
-const server = createServer(async (request, response) => {
-    try {
-        const path = new URL(request.url, 'http://localhost').pathname;
-        let body; let type = 'text/javascript';
-        if (path === '/') { body = html; type = 'text/html'; }
-        else if (path === '/sdk-proxy.js') body = `export * from '/sdk/js/index.js'; export { default } from '/sdk/js/index.js'; import { Storage as Base } from '/sdk/js/index.js'; export const Storage = { connect: async options => { window.storage = await Base.connect(options); return window.storage; } };`;
-        else if (path === '/facade.js') body = outputFiles[0].text;
-        else {
-            const file = resolve(sdkRoot, '.' + path.replace(/^\/sdk/, ''));
-            if (!path.startsWith('/sdk/') || !file.startsWith(sdkRoot + sep)) throw Error('invalid path');
-            body = await readFile(file);
-            if (extname(file) === '.wasm') type = 'application/wasm';
-        }
-        response.writeHead(200, { 'Content-Type': type, 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' });
-        response.end(body);
-    } catch { response.writeHead(404); response.end(); }
-});
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-let browser;
+const harness = await createStorageHarness({ routes: {
+    '/': html,
+    '/sdk-proxy.js': `export * from '/sdk/js/index.js'; export { default } from '/sdk/js/index.js'; import { Storage as Base } from '/sdk/js/index.js'; export const Storage = { connect: async options => { window.storage = await Base.connect(options); return window.storage; } };`,
+    '/facade.js': outputFiles[0].text,
+} });
 const checks = [];
 try {
-    browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
-    const page = await browser.newPage();
-    page.setDefaultTimeout(120_000);
-    const load = async () => { await page.goto(`http://localhost:${server.address().port}/`); await page.waitForFunction(() => window.ready); };
+    const page = harness.page;
+    const load = async () => { await page.goto(harness.origin); await page.waitForFunction(() => window.ready); };
     const call = request => page.evaluate(request => storage.call(request, 120_000), request);
     const saveEvent = async index => {
         assert.equal(await call({ SaveEvents: { events: [event(index)], cursor: `cursor-${index}`, latestLedger: index + 10 } }), 'Saved');
         assert.equal(await call('ProcessPendingState'), 'Saved');
     };
     const feed = () => call({ OperationalFeed: { limit: 100, asp_membership_contract_id: 'PUBLIC_POOL', public_key_registry_contract_id: 'REGISTRY' } });
-    const snapshot = () => page.evaluate(async () => {
-        const root = await navigator.storage.getDirectory(); const out = [];
-        async function walk(dir) {
-            for await (const [, h] of dir.entries()) {
-                if (h.kind === 'directory') await walk(h);
-                else {
-                    const bytes = new Uint8Array(await (await h.getFile()).arrayBuffer());
-                    out.push({ name: new TextDecoder().decode(bytes.subarray(0, 512)).split('\0')[0], text: new TextDecoder().decode(bytes), size: bytes.length });
-                }
-            }
-        }
-        await walk(root); return out;
-    });
+    const snapshot = () => snapshotOPFS(page, { includeText: true });
     await load();
     assert.equal(await page.getByTestId('storage-wallet-dialog').count(), 0);
     assert.equal(await page.evaluate(() => storage.status()), 'new');
@@ -109,9 +78,9 @@ try {
     await saveEvent(1);
     assert.equal((await feed()).OperationalFeed.length, 2);
     const files = await snapshot();
-    assert(files.find(f => f.name === 'spp.public.db').text.includes('PUBLIC_CHAIN_EVENT_1'));
+    assert(files.find(f => f.logical === 'spp.public.db').text.includes('PUBLIC_CHAIN_EVENT_1'));
     for (const secret of ['PRIVATE_SECRET_MARKER_9384', 'PRIVATE_OWNER_9384', 'PRIVATE_PEER_9384']) {
-        assert(files.every(f => !f.text.includes(secret)), `plaintext OPFS leak: ${secret}`);
+        assert(files.every(f => !f.text?.includes(secret)), `plaintext OPFS leak: ${secret}`);
     }
     checks.push('lock reloads into public mode; private calls fail closed; public syncing continues and OPFS contains no private markers');
 
@@ -173,6 +142,5 @@ try {
     checks.push('explicit reset removes the public cache, private vault and enrolled key records');
     console.log(JSON.stringify({ ok: true, checks }, null, 2));
 } finally {
-    await browser?.close();
-    await new Promise(resolve => server.close(resolve));
+    await harness.close();
 }
