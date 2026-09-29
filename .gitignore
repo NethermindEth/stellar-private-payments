@@ -58,6 +58,7 @@ e2e-freighter/playwright-report/
 
 # Testdata
 testdata/*
+sdk/native/test_snapshots/*
 
 # mdBook
 docs/book/

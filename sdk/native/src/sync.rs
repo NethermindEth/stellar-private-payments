@@ -268,7 +268,7 @@ impl BackgroundSync {
     /// A temporary RPC failure during startup must not permanently stop the
     /// background task. Retry with the same interruptible delay as fetch
     /// rounds; configuration and storage errors still fail explicitly.
-    async fn initialize_indexer(&self) -> Result<Option<Indexer<S>>, Error> {
+    async fn initialize_indexer(&self) -> Result<Option<Indexer<Handle<dyn Storage>>>, Error> {
         loop {
             if self.is_stopped() {
                 return Ok(None);
@@ -631,7 +631,7 @@ mod tests {
         let observer = storage.fork().expect("storage observer");
         let sync = BackgroundSync::new(
             RpcClient::new(&server.uri()).expect("RPC client"),
-            storage,
+            Handle::from_box(Box::new(storage) as Box<dyn Storage>),
             test_config().clone(),
             None,
             SyncKick::new(SyncMode::Background),

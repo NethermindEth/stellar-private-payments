@@ -1,5 +1,5 @@
 use super::*;
-use crate::{LocalStorage, Storage as StorageTrait, state::SqliteStorage};
+use crate::{LocalStorage, state::SqliteStorage};
 use std::{
     fs,
     io::{BufRead, BufReader, Read, Write},
@@ -253,7 +253,7 @@ fn provider_failure_and_threaded_forks() -> Result<()> {
     storage
         .storage_mut()
         .set_setting_json("protected", &MARKER)?;
-    let fork = storage.fork()?;
+    let fork = storage.fork_connection()?;
     drop(storage);
     let value = std::thread::spawn(move || fork.storage().get_setting_json::<String>("protected"))
         .join()
@@ -274,7 +274,7 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
         OpenPurpose::CreateNew,
         &Provider(&key),
     ))?;
-    let writer = storage.fork()?;
+    let writer = storage.fork_connection()?;
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let writing = done.clone();
     let handle = std::thread::spawn(move || -> Result<()> {
@@ -287,7 +287,7 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
         }
         Ok(())
     });
-    let forked = (0..300).try_for_each(|_| storage.fork().map(drop));
+    let forked = (0..300).try_for_each(|_| storage.fork_connection().map(drop));
     done.store(true, std::sync::atomic::Ordering::Relaxed);
     handle.join().expect("writer thread")?;
     forked?;

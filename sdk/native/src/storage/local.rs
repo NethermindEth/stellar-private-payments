@@ -104,6 +104,28 @@ impl LocalStorage {
         })
     }
 
+    /// Open an independent connection, retaining the encryption key. The
+    /// concrete connection can be moved to another thread before being used
+    /// there.
+    pub fn fork_connection(&self) -> Result<Self, Error> {
+        if let Some(key) = &self.database_key {
+            let db = SqliteStorage::reopen_encrypted(&self.path, key)
+                .context("fork encrypted storage")?;
+            return Ok(Self {
+                path: self.path.clone(),
+                db: RefCell::new(db),
+                database_key: Some(key.clone()),
+            });
+        }
+        let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
+        let forked = Self {
+            path: self.path.clone(),
+            database_key: None,
+            db: RefCell::new(db),
+        };
+        Ok(forked)
+    }
+
     pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
         self.db.borrow()
     }
@@ -147,23 +169,10 @@ impl ContractDataStorage for LocalStorage {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<Self, Error> {
-        if let Some(key) = &self.database_key {
-            let db = SqliteStorage::reopen_encrypted(&self.path, key)
-                .context("fork encrypted storage")?;
-            return Ok(Self {
-                path: self.path.clone(),
-                db: RefCell::new(db),
-                database_key: Some(key.clone()),
-            });
-        }
-        let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
-        let forked = Self {
-            path: self.path.clone(),
-            database_key: None,
-            db: RefCell::new(db),
-        };
-        Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
+    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> {
+        Ok(crate::Handle::from_box(
+            Box::new(self.fork_connection()?) as Box<dyn Storage>
+        ))
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {
