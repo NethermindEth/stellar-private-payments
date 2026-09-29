@@ -1,8 +1,4 @@
 use super::*;
-use crate::state::{
-    SqliteStorage,
-    database_key::{DatabaseKeyProvider, OpenPurpose},
-};
 use std::{fs, path::PathBuf};
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -28,10 +24,6 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
-}
-
-fn provider(f: &Fixture, password: &str) -> PasswordKeyProvider {
-    PasswordKeyProvider::new(f.db(), Zeroizing::new(password.to_owned()))
 }
 
 #[test]
@@ -141,66 +133,6 @@ fn production_parameters_derive_a_key() -> Result<()> {
         PasswordRecord::seal_with(&key, PASSWORD, Kdf::generate_with(MEMORY_KIB, ITERATIONS)?)?;
     assert_eq!(record.kdf.memory_kib, 64 * 1024);
     assert_eq!(*record.open(PASSWORD)?, *key);
-    Ok(())
-}
-
-#[test]
-fn provider_creates_record_then_database_and_reopens_it() -> Result<()> {
-    let f = Fixture::new()?;
-    let key = futures::executor::block_on(
-        provider(&f, PASSWORD).acquire("test", OpenPurpose::CreateNew),
-    )?;
-    assert!(record_path(&f.db()).is_file());
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(record_path(&f.db()))?.permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-    }
-    let mut storage = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::CreateNew)?;
-    storage.set_setting_json("marker", &"kept")?;
-    drop(storage);
-
-    let reopened = futures::executor::block_on(
-        provider(&f, PASSWORD).acquire("test", OpenPurpose::OpenExisting),
-    )?;
-    assert_eq!(
-        SqliteStorage::connect_encrypted(f.db(), &reopened, OpenPurpose::OpenExisting)?
-            .get_setting_json::<String>("marker")?
-            .as_deref(),
-        Some("kept")
-    );
-    Ok(())
-}
-
-#[test]
-fn provider_rejects_wrong_password_and_existing_database() -> Result<()> {
-    let f = Fixture::new()?;
-    let key = futures::executor::block_on(
-        provider(&f, PASSWORD).acquire("test", OpenPurpose::CreateNew),
-    )?;
-    drop(SqliteStorage::connect_encrypted(
-        f.db(),
-        &key,
-        OpenPurpose::CreateNew,
-    )?);
-    let record = fs::read(record_path(&f.db()))?;
-
-    let wrong = futures::executor::block_on(
-        provider(&f, OTHER_PASSWORD).acquire("test", OpenPurpose::OpenExisting),
-    );
-    assert_eq!(
-        wrong.err().and_then(|e| e.downcast::<VaultError>().ok()),
-        Some(VaultError::WrongPassword)
-    );
-
-    // Creating over an existing database must not replace its record.
-    assert!(
-        futures::executor::block_on(
-            provider(&f, OTHER_PASSWORD).acquire("test", OpenPurpose::CreateNew)
-        )
-        .is_err()
-    );
-    assert_eq!(fs::read(record_path(&f.db()))?, record);
     Ok(())
 }
 

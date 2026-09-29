@@ -213,47 +213,16 @@ fn create_and_open_purposes_are_exclusive() -> Result<()> {
     Ok(())
 }
 
-struct Provider<'a>(&'a DatabaseKey);
-#[async_trait::async_trait(?Send)]
-impl DatabaseKeyProvider for Provider<'_> {
-    async fn acquire(&self, _id: &str, _purpose: OpenPurpose) -> Result<DatabaseKey> {
-        Ok(DatabaseKey::new(**self.0))
-    }
-}
-struct Unavailable;
-#[async_trait::async_trait(?Send)]
-impl DatabaseKeyProvider for Unavailable {
-    async fn acquire(&self, _id: &str, _purpose: OpenPurpose) -> Result<DatabaseKey> {
-        anyhow::bail!("provider unavailable")
-    }
-}
-
 #[test]
-fn provider_failure_and_threaded_forks() -> Result<()> {
+fn threaded_forks_retain_key_after_original_closes() -> Result<()> {
     let f = Fixture::new()?;
     let path = f.db();
     let path = path.to_str().expect("UTF-8 temp directory");
-    assert!(
-        futures::executor::block_on(LocalStorage::open_with_key_provider(
-            path,
-            "test",
-            OpenPurpose::CreateNew,
-            &Unavailable
-        ))
-        .is_err()
-    );
-    assert!(!f.db().exists());
     let key = DatabaseKey::generate()?;
-    let storage = futures::executor::block_on(LocalStorage::open_with_key_provider(
-        path,
-        "test",
-        OpenPurpose::CreateNew,
-        &Provider(&key),
-    ))?;
-    storage
-        .storage_mut()
-        .set_setting_json("protected", &MARKER)?;
+    seed(&f.db(), &key)?;
+    let storage = LocalStorage::open_with_key(path, &key)?;
     let fork = storage.fork_connection()?;
+    drop(key);
     drop(storage);
     let value = std::thread::spawn(move || fork.storage().get_setting_json::<String>("protected"))
         .join()
@@ -268,12 +237,8 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
     let path = f.db();
     let path = path.to_str().expect("UTF-8 temp directory");
     let key = DatabaseKey::generate()?;
-    let storage = futures::executor::block_on(LocalStorage::open_with_key_provider(
-        path,
-        "test",
-        OpenPurpose::CreateNew,
-        &Provider(&key),
-    ))?;
+    seed(&f.db(), &key)?;
+    let storage = LocalStorage::open_with_key(path, &key)?;
     let writer = storage.fork_connection()?;
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let writing = done.clone();

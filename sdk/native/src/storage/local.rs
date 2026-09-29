@@ -45,25 +45,6 @@ impl LocalStorage {
         })
     }
 
-    /// Open encrypted storage after acquiring its key. Provider failure leaves
-    /// the database untouched; forks retain a zeroizing shared key until
-    /// closed.
-    pub async fn open_with_key_provider(
-        storage_path: &str,
-        database_id: &str,
-        purpose: crate::state::database_key::OpenPurpose,
-        provider: &(impl crate::state::database_key::DatabaseKeyProvider + ?Sized),
-    ) -> Result<Self, Error> {
-        let key = provider.acquire(database_id, purpose).await?;
-        let path = PathBuf::from(storage_path);
-        let db = SqliteStorage::connect_encrypted(&path, &key, purpose)?;
-        Ok(Self {
-            path,
-            db: RefCell::new(db),
-            database_key: Some(std::sync::Arc::new(key)),
-        })
-    }
-
     /// Open an encrypted database with its password, reading the password
     /// record next to it (see [`crate::state::password_vault::record_path`]).
     #[cfg(not(target_arch = "wasm32"))]

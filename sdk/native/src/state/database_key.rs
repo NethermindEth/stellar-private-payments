@@ -1,6 +1,6 @@
 //! Opt-in encrypted storage. Keys are random 256-bit secrets supplied by the
 //! caller. Opening/creating a database must be serialized by its owner; key
-//! wrapping and wallet signing belong to the key provider, never to the SQLite
+//! wrapping and wallet signing belong to the caller, never to the SQLite
 //! layer.
 use anyhow::{Result, bail, ensure};
 use rusqlite::{Connection, OpenFlags};
@@ -56,14 +56,6 @@ impl AsRef<[u8]> for DatabaseKey {
 pub enum OpenPurpose {
     CreateNew,
     OpenExisting,
-}
-
-#[async_trait::async_trait(?Send)]
-pub trait DatabaseKeyProvider {
-    /// Return the same recoverable key for subsequent opens of this database.
-    /// Use a dedicated domain for future wallet wrapping, never the SEP-53
-    /// privacy-key signature or a raw wallet signature as this database key.
-    async fn acquire(&self, database_id: &str, purpose: OpenPurpose) -> Result<DatabaseKey>;
 }
 
 #[allow(unsafe_code)]

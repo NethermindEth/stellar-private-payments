@@ -216,58 +216,6 @@ pub fn record_path(database: &std::path::Path) -> std::path::PathBuf {
     name.into()
 }
 
-/// Supplies the database key of a native database from its password record.
-///
-/// Creating a database first writes a new record and only then returns the
-/// key, so a database never exists without a way to unlock it.
-#[cfg(not(target_arch = "wasm32"))]
-pub struct PasswordKeyProvider {
-    database: std::path::PathBuf,
-    password: Zeroizing<String>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl PasswordKeyProvider {
-    pub fn new(database: impl Into<std::path::PathBuf>, password: Zeroizing<String>) -> Self {
-        Self {
-            database: database.into(),
-            password,
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait::async_trait(?Send)]
-impl super::database_key::DatabaseKeyProvider for PasswordKeyProvider {
-    async fn acquire(
-        &self,
-        _database_id: &str,
-        purpose: super::database_key::OpenPurpose,
-    ) -> Result<DatabaseKey> {
-        use super::database_key::OpenPurpose;
-        let path = record_path(&self.database);
-        match purpose {
-            OpenPurpose::CreateNew => {
-                // A record without its database is left over from a create
-                // that failed; replacing it cannot lock anyone out.
-                anyhow::ensure!(
-                    !self.database.exists(),
-                    "a database already exists at {}",
-                    self.database.display()
-                );
-                let key = DatabaseKey::generate()?;
-                write_record(&path, &PasswordRecord::seal(&key, &self.password)?)?;
-                Ok(key)
-            }
-            OpenPurpose::OpenExisting => {
-                let json = std::fs::read_to_string(&path)
-                    .map_err(|e| anyhow::anyhow!("read password record {}: {e}", path.display()))?;
-                Ok(PasswordRecord::from_json(&json)?.open(&self.password)?)
-            }
-        }
-    }
-}
-
 /// Replace the record at `path` atomically: write a private temporary file,
 /// flush it, then rename it over the old record and flush the directory.
 #[cfg(not(target_arch = "wasm32"))]
