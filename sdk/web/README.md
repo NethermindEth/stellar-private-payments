@@ -26,12 +26,7 @@ const signer = new FreighterSigner();
 await init();
 
 const storage = await Storage.connect();
-// The database is encrypted with the user's password.
-if ((await storage.status()) === 'locked') {
-  await storage.unlock(password); // rejects with code 'wrong-password'
-} else if ((await storage.status()) !== 'unlocked') {
-  await storage.create(password); // "new", or "unencrypted" data of an earlier version
-}
+// Public chain syncing and ordinary settings work while private data is locked.
 
 if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
@@ -47,6 +42,12 @@ const client = await Client.new({
 });
 
 await client.backgroundSync();
+
+// Ask for private access when the user opens their account, not at app startup.
+const status = await storage.status();
+if (status === 'new' || status === 'unencrypted') await storage.create(password);
+else if (status === 'locked') await storage.unlock(password);
+else if (status !== 'unlocked') throw new Error(`Resolve storage status: ${status}`);
 
 const account = await client.account({ networkPassphrase }, signer);
 await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
@@ -76,7 +77,7 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 
 | Method | Description                                              |
 |--------|----------------------------------------------------------|
-| `Storage.connect({ workerUrl? })` | Spawn the storage worker once per page; the encrypted database stays closed |
+| `Storage.connect({ workerUrl? })` | Open the public chain cache once per page; the private vault stays closed |
 | `status()` | `"new"`, `"unencrypted"` (earlier version's data), `"locked"` or `"unlocked"` |
 | `create(password)` | Set the first password (at least 15 characters): create the database, or encrypt the earlier unencrypted one |
 | `unlock(password)` | Open the database; a wrong password rejects with `code: "wrong-password"` |
@@ -86,7 +87,7 @@ const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHa
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ PrivacyKeys: address }` probe) |
 
-The package exports a `Storage` namespace with `connect` only; the other methods are on the handle. The key is derived from the password (Argon2id) and unsealed inside the storage worker, so the page never holds it. `Client.new` needs an unlocked storage.
+The package exports a `Storage` namespace with `connect` only; the other methods are on the handle. The random vault key is unsealed using the password (Argon2id) inside the storage worker, so the page never holds it. `Client.new` accepts locked storage for public chain syncing and lookups. Private account data and operations require an unlocked vault.
 
 ### Free functions
 
@@ -371,8 +372,9 @@ no real passkey or Freighter wallet is needed.
 ### Storage API migration (0.2.0)
 
 This release intentionally changes the pre-1.0 SDK API. Replace `Storage.open`
-with `Storage.connect`, inspect `status()`, and call `create` or `unlock` before
-passing storage to `Client.new`. Status can also be `opening` (wait and re-query)
+with `Storage.connect` to open public persistence. Inspect `status()` and call
+`create` or `unlock` before private reads or writes; `Client.new` and public
+syncing work while locked. Status can also be `opening` (wait and re-query)
 or `recovery-required` (encrypted data exists without a readable password
 record; unlock with a surviving optional method, restore a complete backup, or
 explicitly reset). `password-recovery-required` means an optional method opened
@@ -392,3 +394,30 @@ rotation and cannot revoke old backups or a copied database key. See
 The app bounds opening-status polling to two minutes and asks for a reload if
 the worker remains pending or unresponsive. Package checks inspect the shipped
 storage worker for the pinned SQLite3MC version string.
+
+### Public cache and private vault
+
+`Storage.connect()` opens `spp.public.db` without asking for credentials. Public
+chain ingestion, event processing, recipient lookups, operational feeds, and
+explorer/bootnode settings are available immediately. Private requests reject
+while locked, including key access, decrypted notes, balances, private history,
+and all settings other than `explorer` and `bootnode_config`.
+
+The existing `spp.encrypted.db` remains the encrypted private vault. It retains
+chain rows referenced by its private notes, so each file has local foreign keys.
+The first unlock seeds the public cache from explicitly selected public data;
+subsequent unlocks replay public events into the vault using event IDs and
+contract addresses rather than file-local IDs. Public progress commits together
+with imported events. No private tables are copied into the cache. Setup and
+legacy plaintext migration retain their existing password and recovery behavior.
+
+The app opens an unlock dialog on private access, with an option to continue
+using public data. Manual/automatic locking closes workers and reloads to clear
+private values from memory; reopening the public cache does not prompt. Public
+sync can resume with a connected runtime. Reset deletes both files and the key
+records. Public settings and followed contracts are readable at rest; see
+[the security model](../../SECURITY.md).
+
+Run `node tests/storage/public-private.mjs` from `e2e-freighter` after building the
+SDK to verify public syncing, on-demand unlock, cancellation, private access
+denial, and OPFS confidentiality in Chromium.

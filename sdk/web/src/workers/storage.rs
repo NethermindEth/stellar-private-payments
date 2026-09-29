@@ -43,36 +43,42 @@ enum InitState {
 }
 
 thread_local! {
+    static PUBLIC_STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Locked) };
 }
 
-macro_rules! with_storage {
-    ($storage:ident => $body:expr) => {
-        STORAGE.with(|s| {
-            let borrow = s.borrow();
-            // We must return the Result from the closure
+macro_rules! with_connection {
+    ($cell:ident, $borrow:ident, $access:ident, $storage:ident => $body:expr) => {
+        $cell.with(|cell| {
+            let mut borrow = cell.$borrow();
             let $storage = borrow
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
-
-            // This ensures the body expression's Result is returned by the closure
+                .$access()
+                .ok_or_else(|| anyhow!("storage is not initialized"))?;
             Ok::<_, anyhow::Error>($body)
         })
     };
 }
 
+macro_rules! with_storage {
+    ($storage:ident => $body:expr) => {
+        with_connection!(STORAGE, borrow_mut, as_mut, $storage => $body)
+    };
+}
 macro_rules! with_storage_mut {
     ($storage:ident => $body:expr) => {
-        STORAGE.with(|s| {
-            let mut borrow = s.borrow_mut();
-            let $storage = borrow
-                .as_mut()
-                .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
-
-            Ok::<_, anyhow::Error>($body)
-        })
+        with_storage!($storage => $body)
+    };
+}
+macro_rules! with_public {
+    ($storage:ident => $body:expr) => {
+        with_connection!(PUBLIC_STORAGE, borrow_mut, as_mut, $storage => $body)
+    };
+}
+macro_rules! with_public_mut {
+    ($storage:ident => $body:expr) => {
+        with_public!($storage => $body)
     };
 }
 
@@ -90,13 +96,21 @@ pub fn worker_main() {
 /// Serve `storage`, which has just been created or unlocked.
 fn start(storage: SqliteStorage) {
     STORAGE.with(|s| *s.borrow_mut() = Some(storage));
+    start_processor();
+    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
+    kick_processor();
+    tracing::debug!("[{WORKER_NAME}] initialized");
+}
+
+fn start_processor() {
+    if PROCESSOR_TX.with(|cell| cell.borrow().is_some()) {
+        return;
+    }
     let (tx, rx) = mpsc::channel::<()>(1);
     PROCESSOR_TX.with(|cell| *cell.borrow_mut() = Some(tx));
     spawn_local(async move {
         run_processor_loop(rx).await;
     });
-    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-    tracing::debug!("[{WORKER_NAME}] initialized");
 }
 
 /// Stop serving the database, keeping the OPFS pools for another open.
@@ -104,6 +118,7 @@ fn detach() {
     super::storage_access::clear_recovery_key();
     PROCESSOR_TX.with(|s| s.borrow_mut().take());
     STORAGE.with(|s| s.borrow_mut().take());
+    PUBLIC_STORAGE.with(|s| s.borrow_mut().take());
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
 }
 
@@ -123,9 +138,16 @@ async fn open_with(
         INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
         "the database is already open, opening or closed"
     );
+    super::storage_access::clear_recovery_key();
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
     match open.await {
-        Ok(Some(storage)) => {
+        Ok(Some(mut storage)) => {
+            if let Err(error) = with_public_mut!(cache => storage.synchronize_public_cache(cache)?)
+            {
+                super::storage_access::clear_recovery_key();
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
+                return Err(error);
+            }
             start(storage);
             Ok(StorageWorkerResponse::Saved)
         }
@@ -160,12 +182,75 @@ pub(crate) async fn StorageWorker(
     .await
 }
 
+// New operations require private access unless deliberately classified here.
+fn requires_private(req: &StorageWorkerRequest) -> bool {
+    use StorageWorkerRequest::*;
+    match req {
+        GetSetting(key) | SetSetting { key, .. } => !SqliteStorage::is_public_setting(key),
+        Status
+        | OpenPublic
+        | Create(_)
+        | Unlock(_)
+        | WalletContext
+        | PasskeyContext
+        | UnlockWallet { .. }
+        | UnlockPasskey { .. }
+        | Reset
+        | Pause
+        | Ping
+        | SyncState
+        | ProcessPendingState
+        | SaveEvents(_)
+        | SaveSyncProgress { .. }
+        | ClearIndexingCursors
+        | ClampLastFullyIndexedLedger(_)
+        | RecipientLookup { .. }
+        | OperationalFeed { .. }
+        | ListPoolGvkEvents { .. }
+        | PoolHasCommitments { .. }
+        | ConfigureTelemetry(_)
+        | DumpLogs => false,
+        _ => true,
+    }
+}
+
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     if let InitState::Failed(message) = INIT_STATE.with(|s| s.borrow().clone()) {
         return Err(anyhow!(message));
     }
+    if matches!(
+        req,
+        StorageWorkerRequest::Create(_)
+            | StorageWorkerRequest::Unlock(_)
+            | StorageWorkerRequest::UnlockWallet { .. }
+            | StorageWorkerRequest::UnlockPasskey { .. }
+            | StorageWorkerRequest::WalletContext
+            | StorageWorkerRequest::PasskeyContext
+    ) && INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending))
+    {
+        return Err(anyhow!("private data is opening; retry shortly"));
+    }
+    if requires_private(&req) && !INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Ready)) {
+        return Err(anyhow!("private data is locked; unlock it first"));
+    }
     let resp = match req {
+        StorageWorkerRequest::OpenPublic => {
+            anyhow::ensure!(
+                !INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending)),
+                "storage is opening"
+            );
+            if PUBLIC_STORAGE.with(|s| s.borrow().is_none()) {
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
+                let opened = super::storage_access::open_public().await;
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Locked);
+                let storage = opened?;
+                PUBLIC_STORAGE.with(|s| *s.borrow_mut() = Some(storage));
+                start_processor();
+                kick_processor();
+            }
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::Status => match INIT_STATE.with(|s| s.borrow().clone()) {
             InitState::Pending => {
                 StorageWorkerResponse::Status(crate::protocol::StorageStatus::Opening)
@@ -249,6 +334,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             detach();
             super::storage_access::reset().await?;
+            let cache = super::storage_access::open_public().await?;
+            PUBLIC_STORAGE.with(|s| *s.borrow_mut() = Some(cache));
+            start_processor();
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Pause => {
@@ -280,7 +368,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     }
                     InitState::Pending => {}
                     InitState::Locked => {
-                        return Err(anyhow!("the database is locked; unlock it first"));
+                        anyhow::ensure!(
+                            PUBLIC_STORAGE.with(|s| s.borrow().is_some()),
+                            "public storage is not initialized"
+                        );
+                        kick_processor();
+                        return Ok(StorageWorkerResponse::Pong);
                     }
                 }
 
@@ -289,7 +382,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::SyncState => {
             tracing::trace!("[{WORKER_NAME}] get current sync");
-            let state = with_storage!(s => s.get_sync_metadata()?)?;
+            let state = with_public!(s => s.get_sync_metadata()?)?;
             let resp = StorageWorkerResponse::SyncState(state);
             tracing::trace!("[{WORKER_NAME}] sending current sync");
             resp
@@ -304,7 +397,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving {} raw contract events",
                 events_data.events.len()
             );
-            with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
+            with_public_mut!(s => s.save_events_batch(&events_data)?)?;
+            if STORAGE.with(|s| s.borrow().is_some()) {
+                with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
+            }
             tracing::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
@@ -320,17 +416,26 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving bulk sync progress for {} contracts (fully_indexed={fully_indexed})",
                 metadata.len()
             );
-            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            with_public_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            if STORAGE.with(|s| s.borrow().is_some()) {
+                with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClearIndexingCursors => {
             tracing::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
-            with_storage_mut!(s => s.clear_indexing_cursors()?)?;
+            with_public_mut!(s => s.clear_indexing_cursors()?)?;
+            if STORAGE.with(|s| s.borrow().is_some()) {
+                with_storage_mut!(s => s.clear_indexing_cursors()?)?;
+            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger) => {
             tracing::trace!("[{WORKER_NAME}] clamping last_fully_indexed_ledger to {max_ledger}");
-            with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
+            with_public_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
+            if STORAGE.with(|s| s.borrow().is_some()) {
+                with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
+            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::SavePrivateKeys(
@@ -373,14 +478,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::GetSetting(key) => {
             tracing::trace!("[{WORKER_NAME}] fetch setting {key}");
-            let value_json = with_storage!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
-                .map(|value| value.to_string());
+            let value = if SqliteStorage::is_public_setting(&key) {
+                with_public!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
+            } else {
+                with_storage!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
+            };
+            let value_json = value.map(|value| value.to_string());
             StorageWorkerResponse::Setting(value_json)
         }
         StorageWorkerRequest::SetSetting { key, value_json } => {
             tracing::trace!("[{WORKER_NAME}] set setting {key}");
             let value: serde_json::Value = serde_json::from_str(&value_json)?;
-            with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
+            if SqliteStorage::is_public_setting(&key) {
+                with_public_mut!(s => s.set_setting_json(&key, &value)?)?;
+            } else {
+                with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
+            }
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::PrivacyKeys(address) => {
@@ -515,7 +628,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] lookup public keys for {}",
                 Sensitive(&address)
             );
-            let lookup = with_storage!(s =>
+            let lookup = with_public!(s =>
                 s.recipient_lookup(&address, &public_key_registry_contract_id)?
             )?;
             StorageWorkerResponse::RecipientLookup(lookup)
@@ -526,7 +639,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             public_key_registry_contract_id,
         } => {
             tracing::trace!("[{WORKER_NAME}] fetch operational feed");
-            let list = with_storage!(s =>
+            let list = with_public!(s =>
                 s.get_operational_feed(
                     limit,
                     &asp_membership_contract_id,
@@ -583,7 +696,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         } => {
             tracing::trace!("[{WORKER_NAME}] list pool gvk events for {pool_contract_id}");
             let events =
-                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
+                with_public!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
             StorageWorkerResponse::PoolGvkEvents(events)
         }
         StorageWorkerRequest::PoolHasCommitments {
@@ -594,7 +707,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] verify {} pool commitment(s) for {pool_contract_id}",
                 commitments.len()
             );
-            let found = with_storage!(s =>
+            let found = with_public!(s =>
                 s.pool_has_commitments(&pool_contract_id, &commitments)?
             )?;
             StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
@@ -621,7 +734,15 @@ async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
 
 async fn process_until_empty() -> anyhow::Result<()> {
     loop {
-        let did_work = with_storage_mut!(storage => process_local_state_batch(storage)?)?;
+        // Public processing continues while locked. Private processing starts
+        // only after a successful open and cache import.
+        if PUBLIC_STORAGE.with(|s| s.borrow().is_none()) {
+            break;
+        }
+        let mut did_work = with_public_mut!(storage => process_local_state_batch(storage)?)?;
+        if STORAGE.with(|s| s.borrow().is_some()) {
+            did_work |= with_storage_mut!(storage => process_local_state_batch(storage)?)?;
+        }
         if !did_work {
             break;
         }

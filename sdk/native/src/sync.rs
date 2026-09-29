@@ -247,43 +247,8 @@ impl<S: Storage> BackgroundSync<S> {
             self.bootnode_url.as_deref().unwrap_or("<none>")
         );
 
-        let indexer = match Indexer::init(
-            self.rpc.clone(),
-            self.storage.fork()?,
-            &self.contract_config,
-        )
-        .await
-        {
-            Ok(indexer) => {
-                tracing::info!("background sync: main RPC indexer ready");
-                indexer
-            }
-            Err(e) if is_rpc_sync_gap(&e) => {
-                if self.is_stopped() {
-                    return Ok(());
-                }
-                tracing::warn!("background sync: main RPC sync gap, switching to bootnode");
-                match self.bootnode_catch_up().await {
-                    Ok(()) => {}
-                    Err(_) if self.is_stopped() => {
-                        tracing::info!("background sync stopped during bootnode catch-up");
-                        return Ok(());
-                    }
-                    Err(e) => return Err(e),
-                }
-                if self.is_stopped() {
-                    return Ok(());
-                }
-                tracing::info!("background sync: bootnode catch-up finished, resuming main RPC");
-                Indexer::init(
-                    self.rpc.clone(),
-                    self.storage.fork()?,
-                    &self.contract_config,
-                )
-                .await
-                .context("indexer")?
-            }
-            Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
+        let Some(indexer) = self.initialize_indexer().await? else {
+            return Ok(());
         };
 
         loop {
@@ -295,6 +260,45 @@ impl<S: Storage> BackgroundSync<S> {
                 tracing::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
+        }
+    }
+
+    /// A temporary RPC failure during startup must not permanently stop the
+    /// background task. Retry with the same interruptible delay as fetch
+    /// rounds; configuration and storage errors still fail explicitly.
+    async fn initialize_indexer(&self) -> Result<Option<Indexer<S>>, Error> {
+        loop {
+            if self.is_stopped() {
+                return Ok(None);
+            }
+            match Indexer::init(
+                self.rpc.clone(),
+                self.storage.fork()?,
+                &self.contract_config,
+            )
+            .await
+            {
+                Ok(indexer) => {
+                    tracing::info!("background sync: main RPC indexer ready");
+                    return Ok(Some(indexer));
+                }
+                Err(e) if is_rpc_sync_gap(&e) => {
+                    tracing::warn!("background sync: main RPC sync gap, switching to bootnode");
+                    match self.bootnode_catch_up().await {
+                        Ok(()) => {}
+                        Err(_) if self.is_stopped() => return Ok(None),
+                        Err(e) => return Err(e),
+                    }
+                    tracing::info!(
+                        "background sync: bootnode catch-up finished, resuming main RPC"
+                    );
+                }
+                Err(IndexerError::Rpc(e)) if is_transient_rpc_error(&e) => {
+                    tracing::warn!("background sync startup failed; retrying: {e}");
+                    self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
+                }
+                Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
+            }
         }
     }
 
@@ -316,6 +320,18 @@ fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
         RpcError::RetentionHandoff { from_ledger } => Some(*from_ledger),
         _ => None,
     }
+}
+
+fn is_transient_rpc_error(error: &RpcError) -> bool {
+    matches!(
+        error,
+        RpcError::Reqwest(_)
+            | RpcError::Timeout
+            | RpcError::JsonRpc {
+                code: -32603 | -32099..=-32000,
+                ..
+            }
+    )
 }
 
 fn is_rpc_sync_gap(err: &IndexerError) -> bool {
@@ -568,6 +584,113 @@ mod tests {
             started.elapsed() < Duration::from_millis(500),
             "kick should interrupt the 5s wait"
         );
+    }
+
+    #[tokio::test]
+    async fn background_sync_recovers_after_failed_startup_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "tip",
+                json!([]),
+                100,
+            )))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getLatestLedger"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
+                "id": "latest", "protocolVersion": 22, "sequence": 100,
+            }))))
+            .mount(&server)
+            .await;
+        struct TestDirectory(std::path::PathBuf);
+        impl Drop for TestDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let mut suffix = [0u8; 16];
+        getrandom::getrandom(&mut suffix).expect("random test directory suffix");
+        let dir =
+            TestDirectory(std::env::temp_dir().join(format!("spp-sync-{}", hex::encode(suffix))));
+        std::fs::create_dir(&dir.0).expect("create test directory");
+        let storage =
+            crate::LocalStorage::open(dir.0.join("sync.db").to_str().expect("UTF-8 test path"))
+                .expect("open test storage");
+        let observer = storage.fork().expect("storage observer");
+        let sync = BackgroundSync::new(
+            RpcClient::new(&server.uri()).expect("RPC client"),
+            storage,
+            test_config().clone(),
+            None,
+            SyncKick::new(SyncMode::Background),
+        );
+        let stop = sync.stop_handle();
+        let observe = async {
+            let result = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if observer
+                        .get_sync_state()
+                        .await
+                        .expect("read sync progress")
+                        .iter()
+                        .any(|entry| entry.last_fully_indexed_ledger == 100)
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await;
+            stop.request();
+            result
+        };
+        let (run, caught_up) = tokio::join!(sync.run(), observe);
+        run.expect("startup failure should be retried");
+        caught_up.expect("background sync should reach the tip without restarting the client");
+
+        // Stopping while startup is failing must interrupt the retry delay,
+        // rather than leave a task alive after locking or changing clients.
+        server.reset().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let sync = BackgroundSync::new(
+            RpcClient::new(&server.uri()).expect("RPC client"),
+            observer.fork().expect("retry storage"),
+            test_config().clone(),
+            None,
+            SyncKick::new(SyncMode::Background),
+        );
+        let stop = sync.stop_handle();
+        let cancel = async {
+            while server
+                .received_requests()
+                .await
+                .expect("mock requests")
+                .is_empty()
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            stop.request();
+        };
+        let (run, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(sync.run(), cancel)
+        })
+        .await
+        .expect("stop should interrupt startup retry");
+        run.expect("stopping background sync should succeed");
     }
 
     #[tokio::test]

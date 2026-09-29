@@ -1,6 +1,7 @@
 // App lifecycle state shared by the runner and onboarding driver.
 // `body[data-wallet-state]` transitions from `disconnected` to `connecting`
-// to `ready`. Onboarding must complete before the runtime can become ready.
+// to `locked` (public indexing) or `ready` (private account access).
+// Onboarding must complete before the private runtime can become ready.
 
 import { waitForCondition } from './waits.mjs';
 
@@ -12,9 +13,8 @@ export const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
 export const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
 export const STORAGE_PASSWORD_DIALOG_SELECTOR = '[data-testid="storage-password-dialog"]';
 
-// The app encrypts its local data and asks for this password the first time
-// it opens storage on a page: to create the database, to encrypt an earlier
-// unencrypted one, or to unlock it.
+// Private scenarios explicitly open local data, then use this password to
+// create, migrate or unlock it. Public connection must not ask for a password.
 export const APP_PASSWORD = process.env.E2E_APP_PASSWORD || 'e2e local data password';
 
 export async function readWalletState(page) {

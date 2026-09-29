@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, ensurePrivateStorage, STORAGE_UNLOCKED_EVENT } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -164,7 +164,7 @@ async function loadRuntimeState() {
     const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
-    const telemetrySetting = await storage.getSetting('telemetry_config');
+    const telemetrySetting = isStorageUnlocked() ? await storage.getSetting('telemetry_config') : null;
     App.state.settings.telemetry = telemetrySetting || { level: 'info', revealSensitive: false };
     try {
         await configureTelemetrySettings({
@@ -236,17 +236,17 @@ function renderSettingsDrawer() {
     document.getElementById('settings-reveal-sensitive').checked = !!App.state.settings.telemetry?.revealSensitive;
     // Production release compiles out debug/trace logging and sensitive
     // reveal; disable those controls when the build doesn't support them.
-    const debugSupported = debugLogsEnabled();
+    const debugSupported = debugLogsEnabled() && isStorageUnlocked();
     document.querySelectorAll('#settings-log-level option').forEach((opt) => {
         if (opt.value !== 'info') {
             opt.disabled = !debugSupported;
-            opt.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
+            opt.title = debugSupported ? '' : 'Requires unlocked private data and a debug build';
         }
     });
     const revealSensitiveInput = document.getElementById('settings-reveal-sensitive');
     if (revealSensitiveInput) {
         revealSensitiveInput.disabled = !debugSupported;
-        revealSensitiveInput.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
+        revealSensitiveInput.title = debugSupported ? '' : 'Requires unlocked private data and a debug build';
     }
     renderOwnerSwitch();
 }
@@ -425,6 +425,10 @@ export const Wallet = {
                 this.connect({ auto: false }).catch(() => {});
             }
         });
+        window.addEventListener(STORAGE_UNLOCKED_EVENT, () => {
+            const owner = App.state.wallet.address ?? rememberedNoteOwner();
+            if (owner && !this._connectPromise) this.connect({ auto: true, owner }).catch(() => {});
+        });
         renderWallet();
     },
 
@@ -468,13 +472,19 @@ export const Wallet = {
                 const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
                 await initializeRuntime(rpcUrl);
                 await client().backgroundSync();
-
+                await loadRuntimeState();
+                App.events.dispatchEvent(new Event('public:ready'));
                 await runOnboardingWizard({
                     address,
                     networkPassphrase,
                     bootnodeRequired,
                     signer,
+                    publicOnly: !isStorageUnlocked(),
                 });
+                if (!isStorageUnlocked()) {
+                    document.body.dataset.walletState = 'locked';
+                    return;
+                }
 
                 await client().openAccount(accountSession(App.state.wallet), signer);
                 const keys = await client().account().privacyKeys();
@@ -491,6 +501,11 @@ export const Wallet = {
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
+                if (error?.code === 'unlock-cancelled') {
+                    document.body.dataset.walletState = 'locked';
+                    App.events.dispatchEvent(new Event('public:ready'));
+                    return;
+                }
                 const message = error?.message || '';
                 // Freighter no longer holds the remembered owner, so it could
                 // not sign as it; let the next connection take another.
@@ -603,7 +618,7 @@ export const Wallet = {
             const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
-            const debugSupported = debugLogsEnabled();
+            const debugSupported = debugLogsEnabled() && isStorageUnlocked();
             const logLevel = debugSupported ? (document.getElementById('settings-log-level')?.value || 'info') : 'info';
             const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
@@ -613,7 +628,7 @@ export const Wallet = {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
-            await storage.setSetting('telemetry_config', { level: logLevel, revealSensitive });
+            if (isStorageUnlocked()) await storage.setSetting('telemetry_config', { level: logLevel, revealSensitive });
 
             App.state.settings.explorerBaseUrl = explorerBaseUrl;
             App.state.settings.bootnode = { enabled: !!bootnodeEnabled, url: bootnodeEnabled ? bootnodeUrl : '' };

@@ -108,7 +108,7 @@ export async function launch({ userDataDir, headless = true, video = false } = {
 //
 // The app displays a truncated address. Connection is asserted from the
 // wallet button's visibility; the returned address is for logging only.
-export async function connectApp(page, { appUrl = requireAppUrl(), context } = {}) {
+export async function connectApp(page, { appUrl = requireAppUrl(), context, privateAccess = true } = {}) {
   if (!context) throw new Error('connectApp: context is required (needed to watch for the connect approval)');
   await page.goto(appUrl);
   await page.waitForLoadState('domcontentloaded');
@@ -146,58 +146,42 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     }
   }
 
-  // Opening local data asks for its password, and a missing-history check can
-  // require explicit bootnode consent, before the onboarding wizard is shown.
-  // Treat these modals as intentional paused connect states instead of timing
-  // out while `Wallet.connect()` is blocked.
-  const pausedOrReady = ({ walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible }) =>
-    walletState === 'ready' || onboardingVisible || bootnodeConsentVisible || storagePasswordVisible;
-  await waitForCondition({
-    operation: 'app:connect-or-setup-modal',
-    timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
-    intervalMs: 100,
-    observe: () => readAppLifecycle(page),
-    isReady: pausedOrReady,
-  });
-
-  if (await isStoragePasswordVisible(page)) {
-    const mode = await answerStoragePassword(page);
-    log.info(`connectApp: answered the local-data password dialog (${mode})`);
-    await waitForCondition({
-      operation: 'app:connect-after-password',
+  // Connecting starts public indexing. Private scenarios explicitly unlock;
+  // public scenarios must never manufacture a password prompt to make progress.
+  for (;;) {
+    const { value: lifecycle } = await waitForCondition({
+      operation: 'app:connect-or-setup-modal',
       timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
       intervalMs: 100,
       observe: () => readAppLifecycle(page),
-      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
-        walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
+      isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible, storagePasswordVisible }) =>
+        ['ready', 'locked'].includes(walletState) || onboardingVisible || bootnodeConsentVisible || storagePasswordVisible,
     });
-  }
-
-  if (await isBootnodeConsentVisible(page)) {
-    log.info('connectApp: bootnode consent is open — accepting the configured default');
-    await page.getByRole('button', { name: 'Use bootnode', exact: true }).click();
-    await waitForCondition({
-      operation: 'app:bootnode-consent-close',
-      timeoutMs: 10_000,
-      intervalMs: 100,
-      observe: () => isBootnodeConsentVisible(page),
-      isReady: (visible) => !visible,
-    });
-
-    // The app continues into onboarding only after it persists the consent.
-    await waitForCondition({
-      operation: 'app:bootnode-consent-continue',
-      timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
-      intervalMs: 100,
-      observe: () => readAppLifecycle(page),
-      isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
-    });
+    if (lifecycle.bootnodeConsentVisible) {
+      await page.getByRole('button', { name: 'Use bootnode', exact: true }).click();
+      await page.locator('#bootnode-consent-modal').waitFor({ state: 'hidden' });
+    } else if (lifecycle.storagePasswordVisible) {
+      if (!privateAccess) throw new Error('Public connection unexpectedly requested a storage password');
+      await answerStoragePassword(page);
+    } else if (lifecycle.walletState === 'locked' && privateAccess) {
+      await page.locator('#storage-lock-btn').click();
+      await page.locator('[data-testid="storage-password-dialog"]').waitFor();
+      await answerStoragePassword(page);
+      await waitForCondition({
+        operation: 'app:resume-after-unlock',
+        timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
+        observe: () => readAppLifecycle(page),
+        isReady: ({ walletState, onboardingVisible }) => walletState === 'ready' || onboardingVisible,
+      });
+    } else {
+      break;
+    }
   }
 
   // The caller completes onboarding before continuing with the scenario.
   if (await isOnboardingWizardVisible(page)) {
     log.info('connectApp: onboarding wizard is open — returning for the caller to drive it');
-  } else {
+  } else if (privateAccess) {
     // An address can render before the runtime and selected pool are usable.
     await waitForWalletRuntimeReady(page, { timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS });
 
@@ -229,7 +213,14 @@ async function main() {
     await unlockFreighter(context);
 
     const page = context.pages().find((p) => p.url().startsWith('https://')) || (await context.newPage());
-    const address = await connectApp(page, { context });
+    const testFile = args.find((a) => !a.startsWith('--'));
+    const testModule = testFile ? await import(path.resolve(testFile)) : null;
+    page.on('console', message => {
+      if (message.type() === 'error') log.error('browser:', message.text());
+    });
+    page.on('pageerror', error => log.error('browser:', error.message));
+    await testModule?.prepare?.({ page, context });
+    const address = await connectApp(page, { context, ...testModule?.connectionOptions });
     log.info('connected:', address);
 
     if (smoke) {
@@ -237,10 +228,8 @@ async function main() {
       return;
     }
 
-    const testFile = args.find((a) => !a.startsWith('--'));
     if (!testFile) throw new Error('runner: no test file given and --smoke not set');
     log.info('test:', testFile);
-    const testModule = await import(path.resolve(testFile));
     await testModule.run({
       context,
       page,

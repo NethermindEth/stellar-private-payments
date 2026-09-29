@@ -64,6 +64,8 @@ pub struct DisclaimerStatePayload {
 pub enum StorageWorkerRequest {
     /// What the database needs before it can be used; see [`StorageStatus`].
     Status,
+    /// Open only the public chain cache; leaves the private vault locked.
+    OpenPublic,
     /// Set the first password: create the database, or encrypt the one an
     /// earlier version left unencrypted.
     Create(Password),

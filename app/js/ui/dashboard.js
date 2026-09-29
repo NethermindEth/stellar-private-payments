@@ -1,4 +1,4 @@
-import { client } from '../wasm-facade.js';
+import { client, isStorageUnlocked, ensurePrivateStorage } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
@@ -22,8 +22,10 @@ function shortCounterparty(cp) {
 
 export const Dashboard = {
     _timer: null,
+    _generation: 0,
 
     init() {
+        App.events.addEventListener('public:ready', () => this.start());
         App.events.addEventListener('wallet:ready', () => {
             this.start();
         });
@@ -40,15 +42,26 @@ export const Dashboard = {
 
     start() {
         this.stop();
-        this.refresh().catch(() => {});
-        this._timer = setInterval(() => this.refresh().catch(() => {}), 10_000);
+        const generation = this._generation;
+        const poll = async () => {
+            try {
+                await this.refresh();
+            } catch (error) {
+                console.warn('[Dashboard] refresh failed:', error);
+            }
+            // A disconnect or a new session invalidates this polling loop,
+            // including a refresh that was still running when stop() fired.
+            if (generation !== this._generation) return;
+            const delay = App.state.profile.registryLookup?.registryFullySynced ? 10_000 : 1_000;
+            this._timer = setTimeout(poll, delay);
+        };
+        void poll();
     },
 
     stop() {
-        if (this._timer) {
-            clearInterval(this._timer);
-            this._timer = null;
-        }
+        this._generation++;
+        clearTimeout(this._timer);
+        this._timer = null;
     },
 
     clear() {
@@ -60,12 +73,20 @@ export const Dashboard = {
         if (!App.state.wallet.address) return;
         const address = App.state.wallet.address;
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
-            client().account().portfolio(),
+            isStorageUnlocked() ? Promise.resolve().then(() => client().account().portfolio()) : Promise.resolve(null),
             client().operationalFeed(5),
             client().recipientLookup(address),
         ]);
 
-        if (balancesRes.status === 'fulfilled') {
+        if (!isStorageUnlocked()) {
+            const container = document.getElementById('dashboard-balance-grid');
+            if (container) {
+                const button = el('button', 'rounded-2xl border border-white/10 p-5 text-slate-300', 'Unlock to view private balances and history');
+                button.dataset.testid = 'dashboard-unlock';
+                button.addEventListener('click', () => ensurePrivateStorage().catch(() => {}));
+                container.replaceChildren(button);
+            }
+        } else if (balancesRes.status === 'fulfilled') {
             App.state.balances = Array.isArray(balancesRes.value) ? balancesRes.value : [];
             this.renderBalances();
             App.events.dispatchEvent(new CustomEvent('balances:updated'));

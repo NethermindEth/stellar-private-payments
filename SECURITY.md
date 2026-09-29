@@ -44,6 +44,26 @@ written to those records. Supported record KDF costs are bounded by the current
 production profile; increasing costs requires an explicit format/compatibility
 decision.
 
+The browser opens `spp.public.db` without a password. It contains public chain
+events, derived commitments/nullifiers/registered keys, indexing progress, and
+explorer/bootnode settings. Those values, including the contracts followed and
+configured URLs, are readable in a copied browser profile. Do not put credentials
+in these URLs. Generic settings, GVK authority material, account associations,
+private keys, decrypted notes, note amounts/blindings/nullifier associations,
+disclaimer acceptances, and private operation history remain in the encrypted
+`spp.encrypted.db` vault. Private worker requests fail while that vault is locked.
+
+The vault retains a chain snapshot to preserve its internal foreign keys. On the
+first successful unlock, an explicit allowlist seeds the public cache from the
+vault; no private tables are exported. On every unlock, cached chain events are
+merged by event ID and contract address and their progress is committed in the
+same vault transaction. Existing conflicting events are rejected. New public
+chain data is not confidential or authenticated by at-rest encryption; existing
+chain/proof validation remains necessary. Public ingestion commits to the cache
+first, then the open vault, so a crash between writes can be replayed on unlock.
+Private note scanning resumes only after unlocking. The native CLI continues to
+use a single encrypted database.
+
 In the browser, Freighter and passkeys are optional independent unlock methods.
 Each grants access to the same database key. Security therefore depends on every
 enrolled account/device, not just the password. Freighter signatures and WebAuthn
@@ -101,8 +121,10 @@ unlock-method changes), then starts a fresh inactivity interval. Guarded work
 can defer an expired idle lock by at most ten additional minutes; a stuck wallet
 prompt or transaction marker cannot keep storage unlocked indefinitely. Deadlines
 use a monotonic clock. Locking also runs on the optional enrollment screens as
-soon as the database opens. Background sync
-is stopped when locking; SQLite's synchronous transactions complete before the
+soon as the private vault opens. Locking clears the page's private state by
+reloading; the page can resume public syncing without an unlock prompt when a
+runtime is connected. Private balances and history remain unavailable until the
+next explicit unlock. SQLite's synchronous transactions complete before the
 worker handles close. A forced browser/process termination instead relies on
 rollback-journal recovery. The Chromium regression suite terminates a real worker
 after an uncommitted OPFS write to exercise this path.

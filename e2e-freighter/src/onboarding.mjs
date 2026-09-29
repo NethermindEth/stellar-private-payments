@@ -3,7 +3,7 @@
 
 import { createLogger } from './logger.mjs';
 import { waitForCondition } from './waits.mjs';
-import { waitForWalletRuntimeReady } from './appState.mjs';
+import { answerStoragePassword, readWalletState, waitForWalletRuntimeReady } from './appState.mjs';
 
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
@@ -27,9 +27,9 @@ const WIZARD_BUTTON_PRIORITY = [
   'Continue', // the storage step's own follow-on panel after a successful request
 ];
 
-export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding' }) {
+export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding', publicOnly = false }) {
   const log = createLogger(`${logTag}/wizard`);
-  for (let step = 0; step < 10; step += 1) {
+  for (let step = 0; step < 20; step += 1) {
     // The modal remains in the DOM and may appear after asynchronous storage
     // checks, so visibility is checked after a short settle window.
     const modalHidden = async () => page.evaluate(
@@ -48,8 +48,15 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       if (await modalHidden()) {
         log.debug('wizard finished after', step, 'step(s)');
         // Wait until account and pool initialization complete.
-        const lifecycle = await waitForWalletRuntimeReady(page);
-        log.debug('wallet runtime ready:', lifecycle.walletState);
+        if (publicOnly) {
+          await waitForCondition({
+            operation: 'onboarding:public-ready', timeoutMs: 10_000,
+            observe: () => readWalletState(page), isReady: state => state === 'locked',
+          });
+        } else {
+          const lifecycle = await waitForWalletRuntimeReady(page);
+          log.debug('wallet runtime ready:', lifecycle.walletState);
+        }
         return;
       }
     }
@@ -81,12 +88,18 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       );
     }
 
-    const choice = WIZARD_BUTTON_PRIORITY.find((text) => buttons.some((b) => b.text === text));
+    const priorities = [publicOnly ? 'Continue with public data' : 'Set up private payments', ...WIZARD_BUTTON_PRIORITY];
+    const choice = priorities.find((text) => buttons.some((b) => b.text === text));
     if (!choice) throw new Error(`${logTag}: no recognized button among [${buttons.map((b) => b.text).join(', ')}]`);
 
     const previousButtonText = buttons.map((button) => button.text).join('|');
     log.debug('step', step, 'clicking', choice);
-    await page.getByText(choice, { exact: true }).first().click({ force: true });
+    await page.getByRole('button', { name: choice, exact: true }).first().click();
+
+    if (choice === 'Set up private payments') {
+      await page.getByTestId('storage-password-dialog').waitFor();
+      await answerStoragePassword(page);
+    }
 
     if (choice === 'Derive and store keys') {
       const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
@@ -104,5 +117,5 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       isReady: ({ hidden, buttonText }) => hidden || buttonText !== previousButtonText,
     });
   }
-  throw new Error(`${logTag}: wizard did not finish within 10 steps`);
+  throw new Error(`${logTag}: wizard did not finish within 20 steps`);
 }
