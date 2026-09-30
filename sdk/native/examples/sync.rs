@@ -100,7 +100,7 @@ fn probe_bootnode(client: &stellar_private_payments::blocking::Client) -> Result
     runtime
         .block_on(stellar_private_payments::bootnode_required(
             fetcher.rpc(),
-            client.storage().as_ref(),
+            client.storage(),
             client.contract_config(),
         ))
         .map_err(|e| format!("bootnode probe: {e}"))

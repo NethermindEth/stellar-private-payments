@@ -70,6 +70,9 @@ stellar-private-payments/
 ├── tools/                      # Auxiliary tools
 │   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
 │   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
+├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
+├── integration-tests-app/      # Real-Freighter browser e2e suite (see integration-tests-app/README.md)
+├── integration-tests-web/      # Pre-signing SDK browser e2e suite (see integration-tests-web/README.md)
 ├── e2e-tests/                  # End-to-end integration tests
 ├── deployments/                # Deployment scripts, testnet config, legal notices
 ├── docs/                       # Project documentation (mdBook source)

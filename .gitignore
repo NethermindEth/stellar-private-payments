@@ -46,15 +46,15 @@ app/e2e/.freighter-extension/
 app/e2e/test-results/
 app/e2e/playwright-report/
 
-# e2e-freighter: vendored third-party extension, not for committing
-e2e-freighter/vendor/
-e2e-freighter/node_modules/
-e2e-freighter/.chrome-profile*/
-e2e-freighter/.tmp-profiles/
-e2e-freighter/profile-snapshot/
-e2e-freighter/profile-snapshot*.tar*
-e2e-freighter/test-results/
-e2e-freighter/playwright-report/
+# integration-tests-app: vendored third-party extension, not for committing
+integration-tests-app/vendor/
+integration-tests-app/node_modules/
+integration-tests-app/.chrome-profile*/
+integration-tests-app/.tmp-profiles/
+integration-tests-app/profile-snapshot/
+integration-tests-app/profile-snapshot*.tar*
+integration-tests-app/test-results/
+integration-tests-app/playwright-report/
 
 # Testdata
 testdata/*
@@ -80,10 +80,5 @@ js-license-scan-report.json
 spp-example-wallet.sqlite
 spp-example-wallet.sqlite-*
 spp-*-wallet/
-
-# E2E test account material written by deployments/scripts/e2e-accounts-setup.sh.
-# Contains testnet secret keys — must never be committed.
-deployments/*/.e2e-accounts.env
-deployments/scripts/.e2e-wallet-*/
 
 deployments/local/

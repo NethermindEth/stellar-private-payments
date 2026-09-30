@@ -1,0 +1,124 @@
+name: Integration Tests (Web)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  integration-tests-web:
+    name: Pre-signing SDK e2e tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          profile: minimal
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          components: clippy
+          override: true
+
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --component rustfmt --profile minimal
+
+      - name: Cache
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          workspaces: |
+            .
+            integration-tests-web
+          cache-targets: "true"
+
+      - name: Run Fmt
+        working-directory: integration-tests-web
+        run: cargo +nightly fmt --all -- --check --config-path ../rustfmt.toml
+
+      # tests/e2e.rs include_str!'s this file; only parsed at test runtime.
+      - name: Provide a placeholder local deployment
+        run: |
+          mkdir -p deployments/local
+          echo '{}' > deployments/local/deployments.json
+
+      - name: Run Clippy
+        working-directory: integration-tests-web
+        env:
+          RUSTFLAGS: "-Dwarnings"
+        run: cargo clippy --target wasm32-unknown-unknown --all-targets
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        with:
+          version: v27.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+
+      - name: Cache binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Build circuit artifacts
+        run: |
+          make circuits
+
+      - name: Build sdk/web dist
+        run: |
+          npm ci --prefix sdk/web
+          npm run build --prefix sdk/web
+
+      - name: Run browser e2e tests
+        env:
+          E2E_STATIC_ORIGIN: http://127.0.0.1:8099
+        run: |
+          export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
+          test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
+
+          # sdk/web's own (fast, non-e2e) browser unit tests — no network needed.
+          E2E_SKIP_LOCALNET=1 bash integration-tests-web/run.sh \
+            cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web
+
+          # integration-tests-web's e2e tests. Each gets a fresh browser/OPFS
+          # database because sync cursors are global to the database, while
+          # note derivation is account-specific.
+          for test_name in \
+            e2e_smoke_client_construction \
+            e2e_foreign_derivation_signature_is_refused \
+            e2e_seed_deposit_creates_spendable_notes \
+            e2e_deposit_halts_at_signing \
+            e2e_transfer_halts_at_signing \
+            e2e_withdraw_halts_at_signing \
+            e2e_session_account_setup_and_sync
+          do
+            bash integration-tests-web/run.sh \
+              cargo test --target wasm32-unknown-unknown \
+              --manifest-path integration-tests-web/Cargo.toml \
+              "$test_name" -- --include-ignored
+          done

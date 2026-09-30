@@ -5,7 +5,7 @@ use anyhow::Context;
 use crate::types::{ContractConfig, DisclosureReceipt, DisclosureVerificationReport};
 
 use crate::{
-    Error, Prover,
+    Error, ProverHandle,
     chain::{RpcClient, StateFetcher},
     disclosure::verify_disclosure_receipt as verify_disclosure_receipt_async,
 };
@@ -15,7 +15,7 @@ use super::runtime::block_on;
 pub fn verify_disclosure_receipt(
     rpc_url: impl AsRef<str>,
     contract_config: ContractConfig,
-    prover: &dyn Prover,
+    prover: &ProverHandle,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
 ) -> Result<DisclosureVerificationReport, Error> {

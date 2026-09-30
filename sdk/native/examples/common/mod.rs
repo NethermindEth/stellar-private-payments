@@ -32,7 +32,7 @@
 use std::path::PathBuf;
 
 use stellar_private_payments::{
-    CircuitStore, Error, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Signer,
+    CircuitStore, Error, LocalProver, LocalSigner, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
@@ -189,10 +189,10 @@ pub fn build_client_for_pool(
 ) -> Result<Client, String> {
     let rpc_url = env_or("SPP_RPC_URL", "https://soroban-testnet.stellar.org");
     let artifacts = read_artifacts_for_pool(pool)?;
-    let prover = Handle::from_box(Box::new(
+    let prover = ProverHandle::from(
         LocalProver::from_artifacts(&[(pool.circuit_stem(), artifacts)])
             .map_err(|e| format!("init local prover: {e}"))?,
-    ) as Box<dyn Prover>);
+    );
     Client::init(&rpc_url, storage, prover, config, bootnode_url())
         .map_err(|e| format!("init client: {e}"))
 }
@@ -211,10 +211,10 @@ pub fn build_signer(
     secret_key: &str,
     network_passphrase: &str,
     signer_address: SignerAddress,
-) -> Result<Handle<dyn Signer>, String> {
+) -> Result<SignerHandle, String> {
     let signer = LocalSigner::new(secret_key, network_passphrase, signer_address)
         .map_err(|e| format!("build signer: {e}"))?;
-    Ok(Handle::from_box(Box::new(signer) as Box<dyn Signer>))
+    Ok(SignerHandle::from(signer))
 }
 
 /// Build an account session from `STELLAR_SECRET_KEY`.

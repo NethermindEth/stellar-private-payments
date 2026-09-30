@@ -205,7 +205,8 @@ impl<S: ContractDataStorage> Indexer<S> {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait ContractDataStorage {
     /// Gets the last synced ledger and cursor for all contracts.
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>>;
@@ -220,8 +221,9 @@ pub trait ContractDataStorage {
     ) -> anyhow::Result<()>;
 }
 
-#[async_trait::async_trait(?Send)]
-impl ContractDataStorage for crate::Handle<dyn crate::storage::Storage> {
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+impl ContractDataStorage for crate::storage::StorageHandle {
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
         (**self).get_sync_state().await
     }

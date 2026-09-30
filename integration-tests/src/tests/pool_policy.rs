@@ -120,7 +120,6 @@ async fn allowlist() -> Result<()> {
     )
     .await?;
     let pool = session.pool()?;
-    let _lock = lock_asp_tree(&pool.config().contract_config.asp_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let blocked_deposit = pool.deposit(deposit_amount).await;
@@ -368,7 +367,6 @@ async fn allowlist_per_user() -> Result<()> {
     let alice = session(deployment.clone()).await?;
     let bob = session(deployment).await?;
     let network = LocalNetwork::start().await?;
-    let _lock = lock_asp_tree(&alice.pool()?.config().contract_config.asp_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
 
