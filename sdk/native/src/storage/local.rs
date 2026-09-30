@@ -72,6 +72,20 @@ impl LocalStorage {
         self.db.borrow_mut()
     }
 
+    /// Open an independent connection, retaining the key for encrypted storage.
+    pub fn fork(&self) -> Result<Self, Error> {
+        let db = if let Some(key) = &self.database_key {
+            SqliteStorage::reopen_encrypted(&self.path, key).context("fork encrypted storage")?
+        } else {
+            SqliteStorage::connect_file(&self.path).context("fork storage")?
+        };
+        Ok(Self {
+            path: self.path.clone(),
+            database_key: self.database_key.clone(),
+            db: RefCell::new(db),
+        })
+    }
+
     pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>, Error> {
         self.storage()
             .get_gvk_authority_setting()
@@ -107,23 +121,8 @@ impl ContractDataStorage for LocalStorage {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> { {
-        if let Some(key) = &self.database_key {
-            let db = SqliteStorage::reopen_encrypted(&self.path, key)
-                .context("fork encrypted storage")?;
-            return Ok(Self {
-                path: self.path.clone(),
-                db: RefCell::new(db),
-                database_key: Some(key.clone()),
-            });
-        }
-    
-        let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
-        let forked = Self {
-            path: self.path.clone(),
-            database_key: None,
-            db: RefCell::new(db),
-        };
+    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> {
+        let forked = LocalStorage::fork(self)?;
         Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
     }
 

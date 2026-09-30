@@ -254,11 +254,15 @@ fn provider_failure_and_threaded_forks() -> Result<()> {
         .storage_mut()
         .set_setting_json("protected", &MARKER)?;
     let fork = storage.fork()?;
+    let shared_fork = StorageTrait::fork(&storage)?;
     drop(storage);
     let value = std::thread::spawn(move || fork.storage().get_setting_json::<String>("protected"))
         .join()
         .expect("fork thread")?;
     assert_eq!(value.as_deref(), Some(MARKER));
+    assert!(!futures::executor::block_on(
+        shared_fork.privacy_keys_exist("GTESTACCOUNTWITHNOSTOREDKEYS")
+    )?);
     Ok(())
 }
 
