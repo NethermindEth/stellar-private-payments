@@ -1,0 +1,7 @@
+# The SQLite3MC build script downloads its verified amalgamation with curl.
+# cross supplies the target C compiler and archiver; ensure curl is present too.
+[target.x86_64-unknown-linux-musl]
+pre-build = ["command -v curl >/dev/null || (apt-get update && apt-get install --assume-yes curl ca-certificates)"]
+
+[target.aarch64-unknown-linux-musl]
+pre-build = ["command -v curl >/dev/null || (apt-get update && apt-get install --assume-yes curl ca-certificates)"]

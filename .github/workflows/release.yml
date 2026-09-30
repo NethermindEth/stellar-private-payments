@@ -262,9 +262,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Only qualified SQLite3MC targets; ARM64 and macOS remain deferred.
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
+          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -274,12 +276,11 @@ jobs:
         with:
           toolchain: stable
 
+      # cross supplies the musl toolchains inside its containers. Native
+      # Linux and macOS builds use the repository's Rust toolchain.
       - name: Add target
+        if: ${{ !matrix.cross }}
         run: rustup target add ${{ matrix.target }}
-
-      - name: Install musl compiler
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
         with:
@@ -301,8 +302,21 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cross
+
       - name: Build with required SQLite3MC
-        run: cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --locked -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          else
+            cargo build --locked -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          fi
 
       - name: Package
         shell: bash
