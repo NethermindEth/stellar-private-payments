@@ -59,6 +59,10 @@ jobs:
           path: target/tmp/binaryen/binaryen-version_131
           key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
 
+      # SQLite3MC source discovery uses offline workspace metadata.
+      - name: Fetch locked workspace dependencies
+        run: cargo fetch --locked
+
       - name: Build npm package
         run: npm run build --prefix sdk/web
 
