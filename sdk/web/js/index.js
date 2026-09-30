@@ -54,7 +54,7 @@ async function openEncryptedStorage(options) {
   // Leave the provider's own buffer intact; clear the copy owned by this call.
   const transport = new Uint8Array(supplied);
   try {
-    return await WasmStorage.openEncrypted(options.workerUrl ?? storageWorkerUrl, transport, createNew);
+    return await WasmStorage.open({ workerUrl: options.workerUrl ?? storageWorkerUrl, key: transport, createNew, directory: options.directory });
   } finally {
     transport.fill(0);
   }

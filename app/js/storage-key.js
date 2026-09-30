@@ -13,11 +13,14 @@ export async function openWalletStorage({ locks = globalThis.navigator?.locks, .
     return locks.request(RECORD_KEY, { mode: 'exclusive' }, () => openLockedWalletStorage(options));
 }
 
-async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature, confirmAccount,
+async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature, confirmAccount, hasExistingStorage,
     records = localStorage, origin = location.origin, crypto = globalThis.crypto }) {
     let record = JSON.parse(records.getItem(RECORD_KEY) || 'null');
     const fresh = !record;
     if (fresh) {
+        if (hasExistingStorage && await hasExistingStorage()) {
+            throw Object.assign(new Error('Encrypted local data exists, but its unlocking record is missing. Restore an encrypted backup or reset local storage. Your existing data has been preserved.'), { code: 'storage-recovery-required' });
+        }
         record = { version: 1, address: await getAddress(), origin,
             salt: encode(crypto.getRandomValues(new Uint8Array(32))), pending: true };
     }
@@ -82,7 +85,7 @@ async function openLockedWalletStorage({ storage, getAddress, signMessage, verif
                 iv: decode(record.iv), additionalData: aad }, wrappingKey, decode(record.envelope)));
         }
         if (key.length !== 32) throw new Error('Invalid database key envelope.');
-        const open = createNew => storage.open({ keyProvider: async () => key, createNew });
+        const open = createNew => storage.open({ keyProvider: async () => key, createNew, directory: record.directory });
         let handle;
         try {
             handle = await open(record.pending === true);

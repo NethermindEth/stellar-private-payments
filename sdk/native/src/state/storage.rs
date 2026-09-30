@@ -68,6 +68,11 @@ pub(crate) type DeriveNoteFn<'a> =
     dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
 
 impl Storage {
+    /// Validate every database page and foreign-key relationship after restoring a backup.
+    pub fn check_integrity(&self) -> Result<()> {
+        super::encrypted_migration::check_integrity(&self.conn)
+    }
+
     /// Open encrypted storage with an explicit key and create/open policy.
     pub fn connect_encrypted(
         path: impl AsRef<Path>,

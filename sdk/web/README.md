@@ -286,3 +286,37 @@ public chain data and settings, live in that encrypted database. No plaintext
 fallback or automatic migration is performed. Existing plaintext files remain
 untouched. Callers without a key provider receive an error before a worker is
 started. SDK callers provide the database key. The browser app obtains it by verifying a dedicated Freighter storage signature and using HKDF-SHA-256 and AES-256-GCM to unwrap its random database key. Enrollment requires two matching signatures; subsequent unlocks require one from the enrolled account. There is no storage password fallback. The app provides manual Lock/Unlock and a configurable inactivity timeout; locking closes storage and reloads to discard decrypted memory.
+
+### Encrypted backups and recovery
+
+The app's **Local storage backup and recovery** controls export the encrypted OPFS
+files together with the wallet key envelope. Export is available while unlocked;
+it closes storage for a consistent snapshot and leaves the app locked. The backup
+contains no raw database key or decrypted settings. Keep it somewhere outside the
+browser profile and retain access to the original unlocking wallet account.
+
+Import is available while locked and requires a backup from the same app origin
+(scheme, host, and port). It writes a separate OPFS directory, asks the enrolled
+wallet to unlock it, and checks SQLite integrity and foreign keys before switching
+the active envelope and directory in one localStorage write. Failed imports keep
+the current storage unchanged. A restored backup contains data as of export time;
+later local changes are not merged. The previous encrypted directory is retained
+locally until reset. Backups currently support up to 256 MiB of stored files and
+use the SDK's OPFS SAH-pool file layout; incompatible formats are rejected.
+
+If encrypted files survive but the envelope is missing, the app stops enrollment
+and offers import or reset. The wallet signature alone cannot reconstruct the lost
+random database key. **Reset local storage** requires typing `DELETE`, removes all
+encrypted storage directories and envelopes for this app origin, and deletes legacy
+signer associations. It preserves unrelated browser data and pre-existing plaintext
+storage. Reset does not move on-chain funds, but private local data without a backup
+may be unrecoverable. Close other app tabs before resetting.
+
+For isolated browser validation after building the SDK, run:
+
+```sh
+node integration-tests-app/scripts/test-storage-backup.mjs
+```
+
+This test uses ephemeral signing keys and an isolated Chromium profile; it needs no
+Stellar network or funded accounts. Set `E2E_CHROMIUM_PATH` to override Chromium.

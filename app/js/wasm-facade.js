@@ -28,6 +28,7 @@ import { openWalletStorage } from './storage-key.js';
 import { confirmStorageAccount } from './storage-account-dialog.js';
 import { verifyStorageSignature } from './storage-signature.js';
 import { migratePrivateSigners } from './private-signers.js';
+import { STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage, acquireStorageLease } from './storage-backup.js';
 import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
 import { StrKey } from '@stellar/stellar-sdk';
 
@@ -216,12 +217,8 @@ export async function ensureStorage({ unlock = false } = {}) {
         if (!storageOpening) {
             setStorageState('unlocking');
             storageOpening = openWalletStorage({
-                storage: Storage,
-                confirmAccount: details => confirmStorageAccount({ ...details, watchAccount: startWalletWatcher }),
-                getAddress: getWalletAddress,
-                signMessage: signWalletMessage,
-                verifySignature: (address, message, signature) =>
-                    verifyStorageSignature(StrKey.decodeEd25519PublicKey(address), message, signature),
+                ...walletStorageOptions(),
+                hasExistingStorage: async () => hasEncryptedStorage(await navigator.storage.getDirectory()),
             }).then(async handle => {
                 const settings = new AppStorage(handle);
                 try {
@@ -239,6 +236,7 @@ export async function ensureStorage({ unlock = false } = {}) {
                 setStorageState('ready');
                 installStoragePauseOnUnload();
             }).catch(error => {
+                if (error?.code === 'storage-recovery-required') document.body.dataset.storageRecovery = 'required';
                 setStorageState('locked');
                 throw error;
             }).finally(() => { storageOpening = null; });
@@ -246,6 +244,71 @@ export async function ensureStorage({ unlock = false } = {}) {
         await storageOpening;
     }
     return appStorageInstance;
+}
+
+function walletStorageOptions() {
+    return {
+        storage: Storage,
+        confirmAccount: details => confirmStorageAccount({ ...details, watchAccount: startWalletWatcher }),
+        getAddress: getWalletAddress,
+        signMessage: signWalletMessage,
+        verifySignature: (address, message, signature) =>
+            verifyStorageSignature(StrKey.decodeEd25519PublicKey(address), message, signature),
+    };
+}
+
+export async function manageStorageBackup(action, text) {
+    if (storageOpening || storageLocking) throw new Error('Wait for the current storage operation to finish.');
+    if (action === 'export' ? !isStorageUnlocked() : isStorageUnlocked()) {
+        throw new Error(action === 'export' ? 'Unlock local storage to export a backup.' : 'Lock local storage before importing or resetting it.');
+    }
+    const backup = action === 'import' ? parseBackup(text) : null;
+    if (!['export', 'import', 'reset'].includes(action)) throw new Error('Unknown storage action.');
+    storageLocking = true;
+    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    setStorageState('locking');
+    try {
+        await ensureWasmInit();
+        return await navigator.locks.request(STORAGE_RECORD_KEY, { mode: 'exclusive' }, async () => {
+            const root = await navigator.storage.getDirectory();
+            if (action === 'export') {
+                stopAutoLock?.();
+                stopAutoLock = null;
+                clearAutoLockSetting();
+                disposeClient();
+                const handle = storageHandle;
+                storageHandle = null;
+                appStorageInstance = null;
+                await handle.close();
+                const release = await acquireStorageLease(root);
+                try { return await exportStorageBackup({ root }); }
+                finally { await release(); }
+            }
+            const release = await acquireStorageLease(root);
+            if (action === 'reset') {
+                // Release the handles so deletion is possible. The Web Lock
+                // still prevents app tabs from starting an open during reset.
+                await release();
+                return resetStorage({ root });
+            }
+            try { await importStorageBackup({ backup, root, validate: async record => {
+                let value = JSON.stringify(record);
+                const handle = await openWalletStorage({
+                    ...walletStorageOptions(),
+                    // This operation already owns the cross-tab storage lock.
+                    locks: { request: async (_name, _options, callback) => callback() },
+                    records: { getItem: () => value, setItem: (_key, next) => { value = next; } },
+                });
+                try {
+                    const response = await handle.call('CheckIntegrity', 120_000);
+                    if (response !== 'Saved') throw new Error('Backup integrity check failed. Existing data has been preserved.');
+                } finally { await handle.close(); }
+            } }); } finally { await release(); }
+        });
+    } finally {
+        storageLocking = false;
+        setStorageState('locked');
+    }
 }
 
 let pauseOnUnloadInstalled = false;
