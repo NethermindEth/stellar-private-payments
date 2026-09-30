@@ -77,15 +77,6 @@ impl Storage {
                 LEGACY_MIGRATIONS.to_latest(&mut vault)?;
                 super::encrypted_migration::check_integrity(&vault)?;
                 self.convert_legacy_vault(&mut vault)?;
-            } else if private {
-                // The first private-only layout used native version 3 without
-                // a format marker. Its private tables are exactly version 1.
-                ensure!(version == 3, "unsupported unmarked private vault version");
-                ensure!(!public_tables, "invalid private vault layout");
-                let tx = vault.transaction()?;
-                tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-                tx.pragma_update(None, "user_version", 1)?;
-                tx.commit()?;
             } else {
                 let count: i64 =
                     vault.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get(0))?;

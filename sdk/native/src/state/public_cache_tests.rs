@@ -111,66 +111,6 @@ fn fresh_private_vault_has_its_own_format_and_reopens_without_native_tables() ->
 }
 
 #[test]
-fn unmarked_private_v3_adopts_the_private_version_without_recreating_tables() -> Result<()> {
-    let f = Fixture::new()?;
-    let key = DatabaseKey::generate()?;
-    let mut public = Storage::connect_public(f.public())?;
-    public.open_private_vault(f.vault(), &key, OpenPurpose::CreateNew)?;
-    public.set_setting_json("private-marker", &"retained")?;
-    public.insert_operation("owner", "pool", "sent", "42", "out", None, None)?;
-    public.conn.execute_batch(
-        "INSERT INTO vault.accounts VALUES (7,'owner');
-        INSERT INTO vault.user_notes VALUES (zeroblob(32),7,1,zeroblob(32),zeroblob(32),'42');
-        INSERT INTO vault.account_commitment_scan VALUES ('pool',7,99);",
-    )?;
-    public
-        .conn
-        .pragma_update(Some("vault"), "application_id", 0)?;
-    public
-        .conn
-        .pragma_update(Some("vault"), "user_version", 3)?;
-    drop(public);
-    let bytes = std::fs::read(f.vault())?;
-    assert!(Storage::connect_encrypted(f.vault(), &key, OpenPurpose::OpenExisting).is_err());
-    assert_eq!(std::fs::read(f.vault())?, bytes);
-    let mut public = Storage::connect_public(f.public())?;
-    public.open_private_vault(f.vault(), &key, OpenPurpose::OpenExisting)?;
-    assert_eq!(
-        public
-            .conn
-            .pragma_query_value(Some("vault"), "user_version", |r| r.get::<_, i64>(0))?,
-        1
-    );
-    assert_eq!(
-        public
-            .conn
-            .pragma_query_value(Some("vault"), "application_id", |r| r.get::<_, i32>(0))?,
-        super::super::private_vault::APPLICATION_ID
-    );
-    assert_eq!(
-        public
-            .get_setting_json::<String>("private-marker")?
-            .as_deref(),
-        Some("retained")
-    );
-    assert_eq!(public.list_operations("owner", "pool", 10)?.len(), 1);
-    assert_eq!(
-        public.conn.query_row(
-            "SELECT account_id,spent,amount FROM vault.user_notes",
-            [],
-            |r| Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, bool>(1)?,
-                r.get::<_, String>(2)?
-            ))
-        )?,
-        (7, true, "42".into())
-    );
-    assert_eq!(public.conn.query_row("SELECT last_leaf_index FROM vault.account_commitment_scan WHERE pool_contract_id='pool'", [], |r| r.get::<_, i64>(0))?, 99);
-    Ok(())
-}
-
-#[test]
 fn future_vault_and_legacy_versions_are_refused_without_replacing_records() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
