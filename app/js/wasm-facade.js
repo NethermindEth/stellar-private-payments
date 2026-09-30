@@ -26,6 +26,7 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { AppStorage } from './app-storage.js';
 import { openWalletStorage } from './storage-key.js';
 import { confirmStorageAccount } from './storage-account-dialog.js';
+import { verifyStorageSignature } from './storage-signature.js';
 import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
 import { StrKey } from '@stellar/stellar-sdk';
 
@@ -218,13 +219,8 @@ export async function ensureStorage({ unlock = false } = {}) {
                 confirmAccount: details => confirmStorageAccount({ ...details, watchAccount: startWalletWatcher }),
                 getAddress: getWalletAddress,
                 signMessage: signWalletMessage,
-                verifySignature: async (address, message, signature) => {
-                    const publicKey = await crypto.subtle.importKey('raw',
-                        StrKey.decodeEd25519PublicKey(address), { name: 'Ed25519' }, false, ['verify']);
-                    const payload = new TextEncoder().encode(`Stellar Signed Message:\n${message}`);
-                    const digest = await crypto.subtle.digest('SHA-256', payload);
-                    return crypto.subtle.verify('Ed25519', publicKey, signature, digest);
-                },
+                verifySignature: (address, message, signature) =>
+                    verifyStorageSignature(StrKey.decodeEd25519PublicKey(address), message, signature),
             }).then(async handle => {
                 const settings = new AppStorage(handle);
                 try {
