@@ -24,8 +24,9 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
-import { openPasswordStorage } from './storage-key.js';
-import { requestStoragePassword } from './storage-password.js';
+import { openWalletStorage } from './storage-key.js';
+import { getWalletAddress, signWalletMessage } from './wallet.js';
+import { StrKey } from '@stellar/stellar-sdk';
 
 export { DisclosureRequest };
 
@@ -207,15 +208,24 @@ export function disposeClient() {
  * Open local persistence (and app storage helpers) without building a Client.
  * @returns {Promise<import('./app-storage.js').AppStorage>}
  */
-export async function ensureStorage() {
+export async function ensureStorage({ unlock = false } = {}) {
+    if (storageWasLocked() && !unlock) throw new Error('Local data is locked. Use Unlock to continue.');
     if (storageLocking) throw new Error('Storage is locking.');
     await ensureWasmInit();
     if (!storageHandle) {
         if (!storageOpening) {
             setStorageState('unlocking');
-            storageOpening = openPasswordStorage({
+            storageOpening = openWalletStorage({
                 storage: Storage,
-                requestPassword: requestStoragePassword,
+                getAddress: getWalletAddress,
+                signMessage: signWalletMessage,
+                verifySignature: async (address, message, signature) => {
+                    const publicKey = await crypto.subtle.importKey('raw',
+                        StrKey.decodeEd25519PublicKey(address), { name: 'Ed25519' }, false, ['verify']);
+                    const payload = new TextEncoder().encode(`Stellar Signed Message:\n${message}`);
+                    const digest = await crypto.subtle.digest('SHA-256', payload);
+                    return crypto.subtle.verify('Ed25519', publicKey, signature, digest);
+                },
             }).then(handle => {
                 storageHandle = handle;
                 sessionStorage.removeItem(LOCKED_SESSION_KEY);
@@ -349,7 +359,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
 /** SDK deployment client + cached account session. */
 export function client() {
     if (!wrappedClient) {
-        throw new Error('Runtime not initialized. Call initializeRuntime first.');
+        throw new Error(storageWasLocked() ? 'Local data is locked. Use Unlock to continue.' : 'Runtime not initialized. Call initializeRuntime first.');
     }
     return wrappedClient;
 }
@@ -373,5 +383,5 @@ export async function dumpTelemetryLogs() {
 
 /** Whether the WASM build supports debug/trace logging and sensitive reveal. */
 export function debugLogsEnabled() {
-    return sdkDebugLogsEnabled();
+    return wasmReady && sdkDebugLogsEnabled();
 }

@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webcrypto } from 'node:crypto';
-import { openPasswordStorage } from '../../../app/js/storage-key.js';
+import { openWalletStorage } from '../../../app/js/storage-key.js';
 
 function fixture() {
   const values = new Map();
-  const requests = [];
   const records = { getItem: key => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value) };
+  let signature = new Uint8Array(64).fill(7);
+  const signedAddresses = [];
   const keys = [];
   let databaseKey;
   const options = {
     records, origin: 'https://storage.test', crypto: webcrypto,
-    requestPassword: async request => { requests.push(request); return 'test storage password'; },
+    getAddress: async () => 'owner-a',
+    signMessage: async (_, { address }) => {
+      signedAddresses.push(address);
+      return { signedMessage: Buffer.from(signature).toString('base64'), signerAddress: address };
+    },
+    verifySignature: async () => true,
     storage: { open: async ({ keyProvider, createNew }) => {
       const key = await keyProvider();
       keys.push(key);
@@ -22,91 +28,94 @@ function fixture() {
       return { encrypted: true };
     } },
   };
-  return { options, values, requests, keys };
+  return { options, values, signedAddresses, keys, setSignature: value => { signature = value; } };
 }
 
-test('creates and reopens with a password, without calling any wallet signer', async () => {
+test('creates a wrapped random key and reopens with the original storage identity', async () => {
   const f = fixture();
-  assert.deepEqual(await openPasswordStorage(f.options), { encrypted: true });
+  assert.deepEqual(await openWalletStorage(f.options), { encrypted: true });
   const saved = [...f.values.values()][0];
-  const record = JSON.parse(saved);
-  assert.equal(record.pending, false);
-  assert.equal(record.version, 2);
-  assert.equal(record.address, undefined);
-  assert.equal(record.kdf, 'PBKDF2-SHA-256');
-  assert.ok(!saved.includes('test storage password'));
-  await openPasswordStorage(f.options);
-  assert.deepEqual(f.requests.map(request => request.creating), [true, false]);
+  assert.equal(JSON.parse(saved).pending, false);
+  f.options.getAddress = async () => 'owner-b';
+  await openWalletStorage(f.options);
+  assert.deepEqual(f.signedAddresses, ['owner-a', 'owner-a', 'owner-a']);
   assert.equal([...f.values.values()][0], saved);
   assert.ok(f.keys.every(key => key.every(byte => byte === 0)));
 });
 
-test('wrong password preserves records and DB, and a retry can unlock', async () => {
+test('wrong signature cannot unwrap or replace an existing key', async () => {
   const f = fixture();
-  await openPasswordStorage(f.options);
+  await openWalletStorage(f.options);
   const saved = [...f.values.values()][0];
-  let attempts = 0;
-  f.options.requestPassword = async request => {
-    if (attempts++ === 0) return 'wrong password';
-    assert.match(request.error, /Incorrect storage password/);
-    assert.equal([...f.values.values()][0], saved);
-    assert.equal(f.keys.length, 1);
-    return 'test storage password';
-  };
-  await openPasswordStorage(f.options);
-  assert.equal(attempts, 2);
+  f.setSignature(new Uint8Array(64).fill(8));
+  await assert.rejects(openWalletStorage(f.options));
   assert.equal([...f.values.values()][0], saved);
+  assert.equal(f.keys.length, 1);
 });
 
-test('cancellation leaves new storage and records untouched', async () => {
+test('rejection leaves new storage and key records untouched', async () => {
   const f = fixture();
-  f.options.requestPassword = async () => { throw new Error('Storage unlocking cancelled.'); };
-  await assert.rejects(openPasswordStorage(f.options), /cancelled/);
+  f.options.signMessage = async () => { throw new Error('User rejected'); };
+  await assert.rejects(openWalletStorage(f.options), /User rejected/);
   assert.equal(f.values.size, 0);
   assert.equal(f.keys.length, 0);
 });
 
-test('interrupted DB creation reuses its saved password envelope', async () => {
+test('interrupted DB creation reuses its saved key envelope', async () => {
   const f = fixture();
-  await openPasswordStorage(f.options);
+  await openWalletStorage(f.options);
   const [name, saved] = [...f.values][0];
   f.values.set(name, JSON.stringify({ ...JSON.parse(saved), pending: true }));
-  await openPasswordStorage(f.options);
+  await openWalletStorage(f.options);
   assert.equal(JSON.parse(f.values.get(name)).pending, false);
   assert.equal(f.keys.length, 3);
 });
 
-test('failure before DB creation retains the key for the next attempt', async () => {
+test('invalid wallet signature never creates storage', async () => {
   const f = fixture();
-  const open = f.options.storage.open;
-  f.options.storage.open = async () => { throw new Error('worker unavailable'); };
-  await assert.rejects(openPasswordStorage(f.options), /worker unavailable/);
-  const [name, saved] = [...f.values][0];
-  assert.equal(JSON.parse(saved).pending, true);
-  f.options.storage.open = open;
-  await openPasswordStorage(f.options);
-  assert.equal(JSON.parse(f.values.get(name)).envelope, JSON.parse(saved).envelope);
-});
-
-test('unsupported prior records are preserved without prompting or signing', async () => {
-  const f = fixture();
-  const old = JSON.stringify({ version: 1, address: 'previous-account', salt: 'old-record' });
-  f.values.set('poolstellar_encrypted_storage_v1', old);
-  await assert.rejects(openPasswordStorage(f.options), /Existing data has been preserved/);
-  assert.equal([...f.values.values()][0], old);
-  assert.equal(f.requests.length, 0);
+  f.options.verifySignature = async () => false;
+  await assert.rejects(openWalletStorage(f.options), /Invalid wallet signature/);
+  assert.equal(f.values.size, 0);
   assert.equal(f.keys.length, 0);
 });
 
-test('origin mismatch and damaged KDF metadata preserve existing storage', async () => {
+test('non-reproducible enrollment signatures never create a database or record', async () => {
   const f = fixture();
-  await openPasswordStorage(f.options);
-  const [name, saved] = [...f.values][0];
-  for (const patch of [{ origin: 'https://other.test' }, { iterations: 1 }, { salt: 'AA==' }]) {
-    const changed = JSON.stringify({ ...JSON.parse(saved), ...patch });
-    f.values.set(name, changed);
-    await assert.rejects(openPasswordStorage(f.options), /Existing data has been preserved/);
-    assert.equal(f.values.get(name), changed);
-    assert.equal(f.keys.length, 1);
+  let calls = 0;
+  f.options.signMessage = async () => ({ signedMessage: Buffer.alloc(64, ++calls).toString('base64'), signerAddress: 'owner-a' });
+  await assert.rejects(openWalletStorage(f.options), /reproducible/);
+  assert.equal(f.values.size, 0);
+  assert.equal(f.keys.length, 0);
+});
+
+test('password records are preserved and rejected before requesting a signature', async () => {
+  const f = fixture();
+  const record = JSON.stringify({ version: 2, kdf: 'PBKDF2-SHA-256' });
+  f.values.set('poolstellar_encrypted_storage_v1', record);
+  await assert.rejects(openWalletStorage(f.options), /metadata/);
+  assert.equal(f.values.get('poolstellar_encrypted_storage_v1'), record);
+  assert.equal(f.signedAddresses.length, 0);
+});
+
+test('damaged key metadata and origin changes are rejected before signing', async () => {
+  for (const patch of [{ salt: 'AA==' }, { iv: 'AA==' }, { envelope: 'AA==' }, { origin: 'https://other.test' }]) {
+    const f = fixture();
+    await openWalletStorage(f.options);
+    const name = 'poolstellar_encrypted_storage_v1';
+    const damaged = JSON.stringify({ ...JSON.parse(f.values.get(name)), ...patch });
+    f.values.set(name, damaged);
+    await assert.rejects(openWalletStorage(f.options));
+    assert.equal(f.values.get(name), damaged);
+    assert.equal(f.signedAddresses.length, 2);
   }
+});
+
+test('a different reported signer cannot open existing storage', async () => {
+  const f = fixture();
+  await openWalletStorage(f.options);
+  const saved = [...f.values.values()][0];
+  f.options.signMessage = async () => ({ signedMessage: Buffer.alloc(64, 7).toString('base64'), signerAddress: 'owner-b' });
+  await assert.rejects(openWalletStorage(f.options), /different account/);
+  assert.equal([...f.values.values()][0], saved);
+  assert.equal(f.keys.length, 1);
 });

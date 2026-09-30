@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -200,6 +200,11 @@ function renderSyncStatus() {
     if (!dot || !text) return;
     if (!App.state.wallet.connected) {
         text.textContent = 'Offline';
+        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        return;
+    }
+    if (!isStorageUnlocked()) {
+        text.textContent = 'Locked';
         dot.className = 'h-2 w-2 rounded-full bg-slate-500';
         return;
     }
@@ -465,6 +470,15 @@ export const Wallet = {
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
+
+                // Restore only the public wallet session after locking. Opening
+                // the database requires the separate, explicit Unlock action.
+                if (storageWasLocked() && !isStorageUnlocked()) {
+                    rememberNoteOwner(address);
+                    document.body.dataset.walletState = 'locked';
+                    this.startWatcher();
+                    return;
+                }
 
                 const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
                 await initializeRuntime(rpcUrl);

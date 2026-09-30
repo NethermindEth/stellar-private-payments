@@ -227,7 +227,7 @@ npm run check:types
 
 ## Build & publish (maintainers)
 
-Every browser build includes the pinned SQLite3 Multiple Ciphers backend; plain Cargo builds compile it automatically through the SDK build script. No generated configuration or extra `--config` argument is needed. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Every persistent storage open requires a caller-owned key provider; keyless opens are rejected. The demo app obtains this key from a password dialog, using PBKDF2-SHA-256 and AES-256-GCM to unwrap a random database key. Storage unlocking does not request a wallet signature.
+Every browser build includes the pinned SQLite3 Multiple Ciphers backend; plain Cargo builds compile it automatically through the SDK build script. No generated configuration or extra `--config` argument is needed. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Every persistent storage open requires a caller-owned key provider; keyless opens are rejected. The demo app obtains this key through Freighter message signing, using HKDF-SHA-256 and AES-256-GCM to unwrap a random database key. Storage unlocking uses its own signing domain, separate from privacy-key derivation and transactions.
 
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
@@ -285,4 +285,4 @@ otherwise an existing encrypted database is required. All tables, including
 public chain data and settings, live in that encrypted database. No plaintext
 fallback or automatic migration is performed. Existing plaintext files remain
 untouched. Callers without a key provider receive an error before a worker is
-started. Wallet/password unlocking is outside this foundation's scope.
+started. SDK callers provide the database key. The browser app obtains it by verifying a dedicated Freighter storage signature and using HKDF-SHA-256 and AES-256-GCM to unwrap its random database key. Enrollment requires two matching signatures; subsequent unlocks require one from the enrolled account. There is no storage password fallback. The app provides manual Lock/Unlock and a configurable inactivity timeout; locking closes storage and reloads to discard decrypted memory.

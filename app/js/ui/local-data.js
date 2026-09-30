@@ -11,6 +11,18 @@ export const LocalData = {
         const button = document.getElementById('storage-lock-btn');
         const render = () => {
             const unlocked = isStorageUnlocked();
+            // Verification is public; only database-backed views and receipt
+            // generation require unlocked local data.
+            document.querySelectorAll('[data-view-panel]').forEach(panel => {
+                const blocked = !unlocked && panel.dataset.viewPanel !== 'disclosure';
+                panel.inert = blocked;
+                panel.style.display = blocked ? 'none' : '';
+            });
+            const generate = document.getElementById('disclosure-generate');
+            if (generate) { generate.inert = !unlocked; generate.hidden = !unlocked; }
+
+            const notice = document.getElementById('storage-locked-notice');
+            if (notice) notice.hidden = unlocked;
             button.textContent = unlocked ? 'Lock' : 'Unlock';
             button.title = unlocked ? 'Lock local data' : 'Unlock local data';
             button.dataset.state = unlocked ? 'unlocked' : 'locked';
@@ -24,7 +36,7 @@ export const LocalData = {
                 return;
             }
             try {
-                await ensureStorage();
+                await ensureStorage({ unlock: true });
                 if (rememberedNoteOwner() && await getConnectedAddress()) await Wallet.connect({ auto: true });
             } catch (error) {
                 if (error?.code === 'unlock-cancelled') return;

@@ -84,6 +84,10 @@
             </div>
         </header>
 
+        <section id="storage-locked-notice" role="status" class="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-slate-200">
+            Local data is locked. Use Unlock to view your private data and make payments. Your wallet can remain connected. Disclosure verification is available while locked.
+        </section>
+
         <main id="main-content" class="flex-1">
             <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active" aria-hidden="false">
                 <div class="space-y-6">
@@ -502,7 +506,7 @@
                     <option value="60">1 hour</option>
                     <option value="0">Never</option>
                 </select>
-                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Enter your storage password to unlock it again.</p>
+                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                     <button id="settings-save-btn" type="button" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Save settings</button>
