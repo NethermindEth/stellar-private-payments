@@ -94,6 +94,8 @@ unused = 'warn'
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
+    # SQLite WASM SAH fixes, pinned to an exact revision in Cargo.toml.
+    "https://github.com/Spxg/sqlite-wasm-rs.git",
     "https://github.com/wasmerio/wasmer"
 ]
 

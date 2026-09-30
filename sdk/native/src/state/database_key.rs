@@ -86,7 +86,8 @@ unsafe extern "C" {
 
 // The caller owns the OPFS pool and checks logical filename absence for
 // CreateNew. Native creation reserves a new path atomically. An empty regular
-// file left by interrupted creation can be retried; populated files are refused.
+// file left by interrupted creation can be retried; populated files are
+// refused.
 pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
     // A native filesystem filename is never a SQLite URI. An absolute path
     // prevents a literal "file:" filename from selecting a different database.

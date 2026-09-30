@@ -51,6 +51,10 @@ jobs:
         with:
           tool: trunk@0.21.14
 
+      # SQLite3MC source discovery uses offline workspace metadata.
+      - name: Fetch locked workspace dependencies
+        run: cargo fetch --locked
+
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 

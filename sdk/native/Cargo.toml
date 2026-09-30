@@ -61,7 +61,7 @@ ark-relations = { workspace = true }
 ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
-crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+crypto_secretbox.workspace = true
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }

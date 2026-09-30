@@ -163,7 +163,6 @@ fn sqlite_wasm_source(root: &Path) -> PathBuf {
             "--format-version",
             "1",
             "--locked",
-            "--offline",
             "--filter-platform",
             TARGET,
         ])
@@ -185,7 +184,7 @@ fn sqlite_wasm_source(root: &Path) -> PathBuf {
         .and_then(|package| package["manifest_path"].as_str())
         .map(PathBuf::from)
         .and_then(|path| path.parent().map(Path::to_path_buf))
-        .expect("locked sqlite-wasm-rs 0.5.5 source; run cargo fetch --locked")
+        .expect("locked sqlite-wasm-rs 0.5.5 source")
 }
 
 fn tool(kind: &str, fallbacks: &[&str]) -> String {

@@ -23,6 +23,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 # external
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] }
