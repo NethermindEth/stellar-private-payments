@@ -471,8 +471,8 @@ fn response_status(response: &PoolExecuteResult) -> String {
 }
 
 /// Number of confirmed transaction hashes in a pool execute response.
-fn response_hash_count(response: &PoolExecuteResult) -> u32 {
-    response.hashes().len() as u32
+fn response_hash_count(response: &PoolExecuteResult) -> usize {
+    response.hashes().len()
 }
 
 /// SEP-0043 error code from a pool execute response, when present.

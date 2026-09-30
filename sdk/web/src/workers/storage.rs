@@ -55,11 +55,9 @@ enum OpenRequest {
 
 #[cfg(target_arch = "wasm32")]
 fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
-    // `OpfsSAHError`'s `Display`/`Debug` impls use fixed messages and do not
-    // interpolate the wrapped `JsValue`, so the real DOMException (thrown by
-    // the browser when another tab/worker still holds the OPFS sync access
-    // handles) must be inspected directly rather than via `to_string()`.
-    let sqlite_wasm_vfs::sahpool::OpfsSAHError::CreateSyncAccessHandle(js_err) = err else {
+    // Inspect the original DOMException to distinguish another tab's OPFS
+    // lock from other failures to acquire a sync access handle.
+    let sqlite_wasm_vfs::sahpool::OpfsSAHError::Opfs { value: js_err, .. } = err else {
         return false;
     };
     js_err
@@ -223,7 +221,7 @@ fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
                 Ok(p.borrow()
                     .as_ref()
                     .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                    .exists("spp.db")?)
+                    .exists("spp.db"))
             })? {
                 return SqliteStorage::connect_existing_plaintext("spp.db");
             }
@@ -236,7 +234,7 @@ fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
                     Ok(p.borrow()
                         .as_ref()
                         .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                        .exists("spp.encrypted.db")?)
+                        .exists("spp.encrypted.db"))
                 })?;
                 anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
             }
@@ -259,9 +257,9 @@ fn close_storage() {
     #[cfg(target_arch = "wasm32")]
     SAH_POOL.with(|s| {
         if let Some(pool) = s.borrow().as_ref()
-            && let Err(e) = pool.pause_vfs()
+            && let Err(e) = pool.pause()
         {
-            tracing::debug!("[{WORKER_NAME}] pause_vfs failed: {e:#}");
+            tracing::debug!("[{WORKER_NAME}] pause failed: {e:#}");
         }
     });
 }
@@ -328,7 +326,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::Pause => {
             tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
-            // `pause_vfs` refuses to release handles while SQLite still has
+            // `pause` refuses to release handles while SQLite still has
             // files open on this VFS, so the live connection must be closed
             // first — this worker is about to be torn down by the browser
             // anyway, and any in-flight request will simply fail from here on.

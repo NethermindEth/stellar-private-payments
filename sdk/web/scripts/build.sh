@@ -124,7 +124,7 @@ rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
 mkdir -p "$WEB/dist/licenses"
 cp "$ROOT/vendor/sqlite3mc-NOTICE.txt" "$WEB/dist/licenses/SQLite3MC.txt"
-cp "$ROOT/vendor/sqlite-wasm-vfs/LICENSE" "$WEB/dist/licenses/sqlite-wasm-vfs-LICENSE.txt"
+cp "$ROOT/vendor/sqlite-wasm-vfs-LICENSE.txt" "$WEB/dist/licenses/sqlite-wasm-vfs-LICENSE.txt"
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"
