@@ -5796,7 +5796,3 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
-
-[[patch.unused]]
-name = "cranelift-control"
-version = "0.133.0"
