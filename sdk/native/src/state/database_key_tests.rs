@@ -213,6 +213,62 @@ fn create_and_open_purposes_are_exclusive() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn empty_creation_reservations_can_be_retried() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    fs::write(f.db(), [])?;
+    // An empty file is not an existing encrypted database, but must not block
+    // a retry of the interrupted creation.
+    assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting).is_err());
+    assert_eq!(fs::metadata(f.db())?.len(), 0);
+    seed(&f.db(), &key)?;
+    let storage = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        storage.get_setting_json::<String>("protected")?.as_deref(),
+        Some(MARKER)
+    );
+    Ok(())
+}
+
+#[test]
+fn interrupted_before_schema_creation_can_be_retried() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    // Opening the raw connection reserves a file, but schema creation has not
+    // happened yet. Dropping it reproduces interruption at that boundary.
+    drop(open(&f.db(), &key, OpenPurpose::CreateNew)?);
+    assert_eq!(fs::metadata(f.db())?.len(), 0);
+    seed(&f.db(), &key)?;
+    assert!(fs::metadata(f.db())?.len() > 0);
+    Ok(())
+}
+
+#[test]
+fn creation_retry_preserves_nonempty_files_and_rejects_symlinks() -> Result<()> {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    fs::write(f.db(), b"existing data")?;
+    let before = snapshot(&f.db())?;
+    assert!(open(&f.db(), &key, OpenPurpose::CreateNew).is_err());
+    assert_eq!(snapshot(&f.db())?, before);
+    let target = f.0.join("empty-target.db");
+    fs::write(&target, [])?;
+    let link = f.0.join("symlink.db");
+    symlink(&target, &link)?;
+    assert!(open(&link, &key, OpenPurpose::CreateNew).is_err());
+    assert!(fs::symlink_metadata(&link)?.file_type().is_symlink());
+    assert_eq!(fs::metadata(&target)?.len(), 0);
+    // An active creator owns the empty file until initialization finishes.
+    let reservation = reserve_creation(&target)?;
+    assert!(open(&target, &key, OpenPurpose::CreateNew).is_err());
+    assert_eq!(fs::metadata(&target)?.len(), 0);
+    drop(reservation);
+    seed(&target, &key)?;
+    Ok(())
+}
+
 struct Provider<'a>(&'a DatabaseKey);
 #[async_trait::async_trait(?Send)]
 impl DatabaseKeyProvider for Provider<'_> {

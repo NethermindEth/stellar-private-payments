@@ -53,7 +53,9 @@ impl AsRef<[u8]> for DatabaseKey {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenPurpose {
+    /// Create a database; native zero-byte reservations may be retried.
     CreateNew,
+    /// Authenticate an existing, nonempty database without creating a file.
     OpenExisting,
 }
 
@@ -83,8 +85,8 @@ unsafe extern "C" {
 }
 
 // The caller owns the OPFS pool and checks logical filename absence for
-// CreateNew. Native creation reserves a new path atomically, refusing existing
-// files.
+// CreateNew. Native creation reserves a new path atomically. An empty regular
+// file left by interrupted creation can be retried; populated files are refused.
 pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
     // A native filesystem filename is never a SQLite URI. An absolute path
     // prevents a literal "file:" filename from selecting a different database.
@@ -96,15 +98,46 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
         validate_read_only(path, Some(key))?;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if matches!(purpose, OpenPurpose::CreateNew) {
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)?;
-    }
+    let _reservation = if matches!(purpose, OpenPurpose::CreateNew) {
+        Some(reserve_creation(path)?)
+    } else {
+        None
+    };
     connect(path, key, purpose)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reserve_creation(path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).mode(0o600);
+    let file = match options.create_new(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let metadata = std::fs::symlink_metadata(path)?;
+            ensure!(
+                metadata.is_file() && metadata.len() == 0,
+                "database already exists and is not an empty regular file"
+            );
+            // Open without truncation or replacement. Check the opened file
+            // matches the path inspected above before changing it.
+            let file = options.create_new(false).open(path)?;
+            let opened = file.metadata()?;
+            ensure!(
+                opened.dev() == metadata.dev() && opened.ino() == metadata.ino(),
+                "database changed while reserving creation"
+            );
+            file
+        }
+        Err(error) => return Err(error.into()),
+    };
+    // Serialize creators that encounter the same empty reservation. The owner
+    // must still serialize database use, as for every encrypted open.
+    file.try_lock()?;
+    ensure!(file.metadata()?.len() == 0, "database is no longer empty");
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
 }
 
 /// Open a raw encrypted SQLite connection with explicit create/open policy.

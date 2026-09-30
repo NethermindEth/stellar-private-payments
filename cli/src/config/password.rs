@@ -186,9 +186,6 @@ fn unlock_with_password(
     if plaintext {
         encrypted_migration::encrypt_in_place(database, &key)?;
     } else {
-        if !nonempty && database.exists() {
-            fs::remove_file(database)?;
-        }
         drop(SqliteStorage::connect_encrypted(
             database,
             &key,
@@ -269,6 +266,19 @@ mod tests {
         )
         .expect("password test fixture operation");
         assert_eq!(key.as_ref(), reopened.as_ref());
+        let record = fs::read(record_path(&db)).expect("read saved record");
+        fs::write(&db, []).expect("simulate empty creation reservation");
+        let retried = unlock_with_password(
+            &db,
+            "password",
+            read_record(&db).expect("read saved password record"),
+        )
+        .expect("retry empty creation reservation");
+        assert_eq!(key.as_ref(), retried.as_ref());
+        assert_eq!(
+            fs::read(record_path(&db)).expect("read saved record"),
+            record
+        );
         fs::remove_dir_all(dir).expect("password test fixture operation");
     }
     #[test]
