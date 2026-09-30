@@ -283,6 +283,28 @@ and are separate from privacy-key derivation. The public signing context and sea
 key live in `spp.db.key`; back it up together with `spp.db`. Existing plaintext
 databases are encrypted before use. Wrong identities or signatures preserve files.
 
+### CLI storage threat model
+
+Storage encryption protects a copied database and its `.key` file when the attacker
+cannot use the enrolled signing identity. There is no independent storage password:
+anyone who obtains that identity's private key, or can make it sign the storage
+unlock message, can unwrap the database key and read the copied database.
+
+If a Stellar CLI identity is stored as a plaintext secret in a configuration file,
+an attacker who can read that file together with `spp.db` and `spp.db.key` can decrypt
+the data. Encrypting the database does not provide a separate security boundary
+against that level of filesystem access. An OS secure store or supported hardware
+signer can protect the signing key, subject to its own access and approval controls.
+Encryption also does not protect decrypted data from a compromised running process.
+
+Each CLI invocation that opens storage invokes the Stellar CLI to sign the unlock
+message. Depending on the identity's setup, this can require a secure-store or
+hardware-wallet approval on each invocation. The unlocked key is cached only for
+that command. This dependence on the wallet's security and availability is the
+intentional tradeoff of wallet-based storage unlocking.
+
+### Existing password storage
+
 Password-based key records are incompatible and are preserved without modification.
 Use the previous branch to recover that data, or select a new `--data-dir` for wallet
 storage. There is no password fallback. Browser storage already uses a wallet-wrapped
