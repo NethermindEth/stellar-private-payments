@@ -312,20 +312,25 @@ fn corrupt_ciphertext_is_rejected_without_changes() -> Result<()> {
 }
 
 #[test]
-fn key_debug_is_redacted_and_plaintext_remains_usable() -> Result<()> {
+fn keyless_opens_reject_new_and_plaintext_files_without_changes() -> Result<()> {
     let key = DatabaseKey::generate()?;
     assert_eq!(format!("{key:?}"), "DatabaseKey([REDACTED])");
     assert_ne!(*key, [0; 32]);
     let f = Fixture::new()?;
-    let mut plain = SqliteStorage::connect_file(f.db())?;
-    plain.set_setting_json("plain", &"legacy")?;
-    drop(plain);
-    assert!(fs::read(f.db())?.starts_with(b"SQLite format 3"));
-    assert_eq!(
-        SqliteStorage::connect_existing_plaintext(f.db())?
-            .get_setting_json::<String>("plain")?
-            .as_deref(),
-        Some("legacy")
-    );
+    assert!(SqliteStorage::connect_file(f.db()).is_err());
+    assert!(SqliteStorage::connect_existing_plaintext(f.db()).is_err());
+    assert!(LocalStorage::open(f.db().to_str().expect("UTF-8 path")).is_err());
+    assert!(!f.db().exists());
+    let conn = rusqlite::Connection::open(f.db())?;
+    conn.execute_batch(
+        "CREATE TABLE legacy(value TEXT); INSERT INTO legacy VALUES ('preserved');",
+    )?;
+    drop(conn);
+    let before = snapshot(&f.db())?;
+    assert!(SqliteStorage::connect_file(f.db()).is_err());
+    assert!(SqliteStorage::connect_existing_plaintext(f.db()).is_err());
+    assert!(LocalStorage::open(f.db().to_str().expect("UTF-8 path")).is_err());
+    assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting).is_err());
+    assert_eq!(before, snapshot(&f.db())?);
     Ok(())
 }

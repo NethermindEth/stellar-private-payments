@@ -164,16 +164,9 @@ async fn open_test_storage() -> Storage {
     }
 
     let worker_url = blob_worker_url("storage-worker.js").await;
-    let options = Object::new();
-    Reflect::set(
-        &options,
-        &JsValue::from_str("workerUrl"),
-        &JsValue::from_str(&worker_url),
-    )
-    .unwrap();
-    let storage = Storage::open(options.into())
+    let storage = Storage::open_encrypted(worker_url, vec![42; 32], true)
         .await
-        .expect("storage worker must start and answer its ping");
+        .expect("encrypted storage worker must start and answer its ping");
 
     // Borrow only after the await, never across it.
     let handle = storage.fork();

@@ -10,8 +10,8 @@
 //!     types::{CircuitStem, ContractConfig, NoteOwnerAddress, PolicyFlags, SignerAddress},
 //! };
 //!
-//! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
-//! let storage = Handle::from_box(Box::new(LocalStorage::open("wallet.sqlite")?) as Box<dyn
+//! # async fn example(deployment: ContractConfig, key: stellar_private_payments::state::database_key::DatabaseKey) -> Result<(), Box<dyn std::error::Error>> {
+//! let storage = Handle::from_box(Box::new(LocalStorage::open_encrypted("wallet.sqlite", key, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting)?) as Box<dyn
 //! Storage>);
 //!
 //! let store = CircuitStore::open("./circuits");

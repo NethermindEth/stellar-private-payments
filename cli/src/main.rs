@@ -71,6 +71,10 @@ struct Cli {
     #[arg(long, global = true)]
     sign_as: Option<String>,
 
+    /// Read the storage password from a private file instead of prompting.
+    #[arg(long, global = true, env = "SPP_STORAGE_PASSWORD_FILE")]
+    storage_password_file: Option<PathBuf>,
+
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
     json: bool,
@@ -267,6 +271,7 @@ fn main() -> Result<()> {
         config_path,
         file_config,
         CliConfigOverrides {
+            storage_password_file: cli.storage_password_file,
             deployment_path: cli.deployment,
             network: cli.network,
             data_dir: cli.data_dir,

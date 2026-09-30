@@ -12,8 +12,6 @@ use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, path::Path};
 
-// shouldn't be changed for WASM OPFS otherwise the db will be lost
-const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
@@ -26,7 +24,7 @@ const MIGRATION_ARRAY: &[M] = &[
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
-    conn: Connection,
+    pub(super) conn: Connection,
 }
 
 #[derive(Debug, Clone)]
@@ -88,43 +86,26 @@ impl Storage {
         Self::connect_with_connection(super::database_key::reopen(path.as_ref(), key)?)
     }
 
-    /// Open an existing plaintext database without permitting encrypted journal
-    /// recovery before the missing-key check. Used by the OPFS owner.
-    pub fn connect_existing_plaintext(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        #[cfg(not(target_arch = "wasm32"))]
-        let absolute = std::path::absolute(path)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let path = absolute.as_path();
-        super::database_key::validate_read_only(path, None)?;
-        Self::connect_with_connection(Connection::open(path)?)
+    /// Keyless persistent storage is unsupported. Use `connect_encrypted`.
+    pub fn connect_existing_plaintext(_path: impl AsRef<Path>) -> Result<Self> {
+        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
     }
 
+    /// Keyless persistent storage is unsupported. Use `connect_encrypted`.
     pub fn connect() -> Result<Self> {
-        Self::connect_file(DB_NAME)
+        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
     }
 
-    pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        #[cfg(not(target_arch = "wasm32"))]
-        let absolute = std::path::absolute(path)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let path = absolute.as_path();
-        // Reject a missing key before a recovery-capable handle can write a hot
-        // encrypted journal back into the database. OPFS does this in its
-        // owner.
-        #[cfg(not(target_arch = "wasm32"))]
-        if path.exists() && std::fs::metadata(path)?.len() > 0 {
-            super::database_key::validate_read_only(path, None)?;
-        }
-        Self::connect_with_connection(Connection::open(path)?)
+    /// Keyless persistent storage is unsupported. No file is opened or created.
+    pub fn connect_file(_path: impl AsRef<Path>) -> Result<Self> {
+        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
     }
 
     pub fn connect_in_memory() -> Result<Self> {
         Self::connect_with_connection(Connection::open_in_memory()?)
     }
 
-    fn connect_with_connection(mut conn: Connection) -> Result<Self> {
+    pub(super) fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         MIGRATIONS.to_latest(&mut conn)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self { conn })
@@ -2923,7 +2904,6 @@ mod tests {
     #[tokio::test]
     async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
         use crate::{
-            storage::LocalStorage,
             types::BabyJubJubPoint,
             zk::gvk::{GvkNote, generate_gvk_nonce},
         };
@@ -2936,7 +2916,7 @@ mod tests {
                 .expect("clock")
                 .as_nanos()
         ));
-        let mut storage = Storage::connect_file(&path)?;
+        let mut storage = crate::state::test_storage(&path)?;
         let d_priv = Field(crate::types::U256::from(0xAD00));
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
@@ -3007,10 +2987,10 @@ mod tests {
 
         drop(storage);
 
-        let rows = Storage::connect_file(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
+        let rows = crate::state::test_storage(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
         assert_eq!(rows.len(), 1);
 
-        let local = LocalStorage::open(path.to_str().expect("temp path utf-8"))
+        let local = crate::state::test_local_storage(path.to_str().expect("temp path utf-8"))
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut audit = crate::gvk::GvkAudit::new(
             crate::Handle::from_box(Box::new(local) as Box<dyn crate::storage::Storage>),

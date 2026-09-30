@@ -147,6 +147,34 @@ spp() {
       SPP_BIN="$REPO_ROOT/target/release/spp"
     fi
   fi
+  # Archive the incompatible key record created by the previous implementation.
+  # This is isolated E2E state: keep a complete backup and let onboarding rebuild it.
+  if [ -f "$DATA_DIR/spp.db.key" ] && python3 - "$DATA_DIR/spp.db.key" <<'KEY_FORMAT'
+import sys
+with open(sys.argv[1], "rb") as record:
+    is_old = record.read(16) == b"SQLite format 3\0"
+sys.exit(0 if is_old else 1)
+KEY_FORMAT
+  then
+    backup="$DATA_DIR.backup-$(date +%Y%m%d%H%M%S)-$$"
+    mv -- "$DATA_DIR" "$backup" || die "could not archive incompatible E2E storage"
+    step "archived previous E2E storage to $backup; rebuilding with password encryption"
+  fi
+  # Persist a generated password for this isolated test data directory only.
+  if [ -z "${SPP_STORAGE_PASSWORD_FILE:-}" ]; then
+    mkdir -p "$DATA_DIR"
+    SPP_STORAGE_PASSWORD_FILE="$DATA_DIR/storage-password"
+    if [ ! -e "$SPP_STORAGE_PASSWORD_FILE" ]; then
+      ( umask 077; python3 - "$SPP_STORAGE_PASSWORD_FILE" <<'PASSWORD'
+import os, secrets, sys
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w") as output:
+    output.write(secrets.token_urlsafe(48) + "\n")
+PASSWORD
+      ) || die "could not create the isolated storage password"
+    fi
+    export SPP_STORAGE_PASSWORD_FILE
+  fi
   "$SPP_BIN" "$@"
 }
 

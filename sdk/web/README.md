@@ -25,7 +25,8 @@ const signer = new FreighterSigner();
 
 await init();
 
-const storage = await Storage.open();
+// keyProvider must return the same recoverable 32-byte key on later opens.
+const storage = await Storage.open({ keyProvider, createNew: false });
 
 if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
@@ -226,7 +227,7 @@ npm run check:types
 
 ## Build & publish (maintainers)
 
-Every browser build includes the pinned SQLite3 Multiple Ciphers backend; `npm run build` and `make serve` configure it automatically through a Rust build tool. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Creating an encrypted database remains an explicit runtime choice.
+Every browser build includes the pinned SQLite3 Multiple Ciphers backend; `npm run build` and `make serve` configure it automatically through a Rust build tool. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Every persistent storage open requires a caller-owned key provider; keyless opens are rejected. The demo app obtains this key from a password dialog, using PBKDF2-SHA-256 and AES-256-GCM to unwrap a random database key. Storage unlocking does not request a wallet signature.
 
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
@@ -274,4 +275,14 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. `Client.new()` also requires `keyProvider` when storage is omitted. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+
+## Mandatory storage encryption
+
+`Storage.open` and `Storage.openEncrypted` both open encrypted storage and
+require `keyProvider`. `createNew: true` creates a new encrypted database;
+otherwise an existing encrypted database is required. All tables, including
+public chain data and settings, live in that encrypted database. No plaintext
+fallback or automatic migration is performed. Existing plaintext files remain
+untouched. Callers without a key provider receive an error before a worker is
+started. Wallet/password unlocking is outside this foundation's scope.

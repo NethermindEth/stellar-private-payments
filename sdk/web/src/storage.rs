@@ -21,6 +21,9 @@ const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
 #[serde(rename_all = "camelCase")]
 struct OpenOptions {
     worker_url: Option<String>,
+    key: Vec<u8>,
+    #[serde(default)]
+    create_new: bool,
 }
 
 /// Handle [`crate::client::Client::new`] takes.
@@ -53,36 +56,6 @@ impl Clone for Storage {
 impl Storage {
     pub(crate) fn bridge(&self) -> StorageBridge {
         self.bridge.clone()
-    }
-
-    pub(crate) async fn open_internal(worker_url: String) -> Result<Self, JsError> {
-        crate::wasm_start();
-
-        let storage = Self {
-            bridge: StorageBridge::new(
-                StorageWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&worker_url),
-            ),
-        };
-
-        storage
-            .bridge
-            .call(
-                StorageWorkerRequest::OpenPlaintext,
-                STORAGE_OPEN_PING_TIMEOUT_MS,
-            )
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        storage
-            .bridge
-            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        Ok(storage)
     }
 }
 
@@ -135,26 +108,24 @@ impl Storage {
         Ok(())
     }
 
-    /// Spawn the storage worker and verify it is ready.
+    /// Open encrypted storage with a required 32-byte key in the options.
     ///
     /// Call once per page session. Use [`Storage::fork`] for additional handles
     /// (e.g. app code alongside [`crate::Client`]).
     #[wasm_bindgen(js_name = open)]
     pub async fn open(options: JsValue) -> Result<Storage, JsError> {
-        let opts: OpenOptions = if options.is_null() || options.is_undefined() {
-            OpenOptions { worker_url: None }
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-
-        Self::open_internal(
+        let opts: OpenOptions = serde_wasm_bindgen::from_value(options)
+            .map_err(|_| JsError::new("storage encryption is mandatory; supply a 32-byte key"))?;
+        Self::open_encrypted(
             opts.worker_url
                 .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+            opts.key,
+            opts.create_new,
         )
         .await
     }
 
-    /// New handle to the same storage worker (shared `spp.db`).
+    /// New handle to the same storage worker (shared encrypted database).
     pub fn fork(&self) -> Storage {
         Storage {
             bridge: self.bridge.clone(),

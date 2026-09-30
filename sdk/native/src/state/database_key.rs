@@ -1,7 +1,6 @@
-//! Opt-in encrypted storage. Keys are random 256-bit secrets supplied by the
-//! caller. Opening/creating a database must be serialized by its owner; key
-//! wrapping and wallet signing belong to the key provider, never to the SQLite
-//! layer.
+//! Mandatory encrypted storage. Keys are random 256-bit secrets supplied by
+//! the caller. Opening/creating a database must be serialized by its owner; key
+//! wrapping belongs to the key provider, never to the SQLite layer.
 use anyhow::{Result, bail, ensure};
 use rusqlite::{Connection, OpenFlags};
 use std::{
@@ -61,8 +60,8 @@ pub enum OpenPurpose {
 #[async_trait::async_trait(?Send)]
 pub trait DatabaseKeyProvider {
     /// Return the same recoverable key for subsequent opens of this database.
-    /// Use a dedicated domain for future wallet wrapping, never the SEP-53
-    /// privacy-key signature or a raw wallet signature as this database key.
+    /// Wrapping and unlocking belong to the provider; SQLite only receives the
+    /// random database key.
     async fn acquire(&self, database_id: &str, purpose: OpenPurpose) -> Result<DatabaseKey>;
 }
 
@@ -106,6 +105,16 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
             .open(path)?;
     }
     connect(path, key, purpose)
+}
+
+/// Open a raw encrypted SQLite connection with explicit create/open policy.
+/// The key is installed before any schema access. Callers own migrations.
+pub fn open_connection(
+    path: impl AsRef<Path>,
+    key: &DatabaseKey,
+    purpose: OpenPurpose,
+) -> Result<Connection> {
+    open(path.as_ref(), key, purpose)
 }
 
 // Another connection to a database an open connection has already unlocked

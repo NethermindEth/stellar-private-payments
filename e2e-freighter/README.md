@@ -417,3 +417,7 @@ APPROVE=auto bash e2e-freighter/scripts/provision.sh
 directory per run — never point two concurrent runs at the same restored
 copy (Chrome's profile storage is single-writer). `scripts/run-e2e.sh` does
 this automatically and cleans up afterward.
+
+Browser storage uses a separate password dialog. The runner fills it with
+`E2E_STORAGE_PASSWORD`, defaulting to `spp-e2e-storage-test-password` for isolated
+test profiles. This password is unrelated to Freighter approvals.

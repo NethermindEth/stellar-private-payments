@@ -120,35 +120,34 @@ try {
   await waitForDriver();
   const version = await ctx.session();
   await ctx.load();
-  await ctx.js("window.storage=await sdk.Storage.open();await storage.call({SetSetting:{key:'integration-legacy',value_json:JSON.stringify('legacy-preserved')}});return true;");
+  const untouched = await ctx.snapshot();
+  await expectFailure(() => ctx.js("window.storage=await sdk.Storage.open();return true;"), "keyProvider is required");
+  assert.deepEqual(await ctx.snapshot(), untouched);
+  ctx.legacy = untouched;
+  ctx.checks.push("keyless open rejects without modifying OPFS");
+  await ctx.encrypted(true);
   await ctx.close();
-  ctx.legacy = await ctx.snapshot();
-  await ctx.load();
-  await ctx.js("window.storage=await sdk.Storage.open();return true;");
-  assert.equal((await ctx.js("return await storage.call({GetSetting:'integration-legacy'});" )).Setting, '"legacy-preserved"');
-  await ctx.close();
-  ctx.checks.push("plaintext create, close and worker restart");
 
   // The app shows its "another tab" modal only for this exact message.
   const firstTab = await ctx.request("GET", `/session/${ctx.sid}/window`);
   await ctx.load();
-  await ctx.js("window.storage=await sdk.Storage.open();return true;");
+  await ctx.encrypted();
   const secondTab = await ctx.request("POST", `/session/${ctx.sid}/window/new`, { type: "tab" });
   await ctx.request("POST", `/session/${ctx.sid}/window`, { handle: secondTab.handle });
   await ctx.load();
-  await expectFailure(() => ctx.js("window.storage=await sdk.Storage.open();return true;"), "Another tab or window is using this app's local database");
+  await expectFailure(() => ctx.encrypted(), "Another tab or window is using this app's local database");
   await ctx.request("DELETE", `/session/${ctx.sid}/window`);
   await ctx.request("POST", `/session/${ctx.sid}/window`, { handle: firstTab });
   await ctx.close();
   ctx.checks.push("second tab reports the database lock");
 
   {
-    await ctx.encrypted(true);
+    await ctx.encrypted();
     await ctx.js("await storage.call({SetSetting:{key:'integration-protected',value_json:JSON.stringify(arguments[0])}});window.fork=storage.fork();return true;", [ctx.marker]);
     assert.match((await ctx.js("return await fork.call({GetSetting:'integration-protected'});" )).Setting, new RegExp(ctx.marker));
     await ctx.close();
     assert(await ctx.js("try{await fork.call('Ping');return false;}catch{return true;}finally{fork.free();}"));
-    ctx.checks.push("encrypted create, fork and close invalidates forks");
+    ctx.checks.push("encrypted fork and close invalidates forks");
     const before = await ctx.snapshot();
     for (const [label, supplied, create] of [["wrong key", randomBytes(32), false], ["zero key", Buffer.alloc(32), false], ["missing key", Buffer.alloc(0), false], ["short key", Buffer.alloc(31), false], ["long key", Buffer.alloc(33), false], ["create existing", ctx.key, true]]) {
       await expectFailure(() => ctx.encrypted(create, supplied));
@@ -171,7 +170,7 @@ try {
     const encryptedFiles = final.filter(file => file.path.startsWith(".opfs-sahpool-encrypted/"));
     assert(encryptedFiles.length && !encryptedFiles.some(file => file.protected));
     assert.deepEqual(final.filter(file => !file.path.startsWith(".opfs-sahpool-encrypted/")), ctx.legacy);
-    ctx.checks.push("encrypted artifact scan and original plaintext byte identity");
+    ctx.checks.push("encrypted artifact scan and no plaintext storage");
   }
   const result = { browser: args.browser, version, checks: ctx.checks, passed: true };
   await writeFile(join(artifacts, "result.json"), `${JSON.stringify(result, null, 2)}\n`);

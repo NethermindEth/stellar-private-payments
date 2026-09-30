@@ -22,6 +22,8 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import { openPasswordStorage } from './storage-key.js';
+import { requestStoragePassword } from './storage-password.js';
 
 export { DisclosureRequest };
 
@@ -32,6 +34,7 @@ const CIRCUITS_BASE_URL = new URL(
 ).href;
 
 let storageHandle = null;
+let storageOpening = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
@@ -174,9 +177,22 @@ export function disposeClient() {
 export async function ensureStorage() {
     await ensureWasmInit();
     if (!storageHandle) {
-        storageHandle = await Storage.open();
-        bindAppStorage(storageHandle);
-        installStoragePauseOnUnload();
+        if (!storageOpening) {
+            document.body.dataset.storageState = 'unlocking';
+            storageOpening = openPasswordStorage({
+                storage: Storage,
+                requestPassword: requestStoragePassword,
+            }).then(handle => {
+                document.body.dataset.storageState = 'ready';
+                storageHandle = handle;
+                bindAppStorage(handle);
+                installStoragePauseOnUnload();
+            }).catch(error => {
+                document.body.dataset.storageState = 'failed';
+                throw error;
+            }).finally(() => { storageOpening = null; });
+        }
+        await storageOpening;
     }
     return appStorageInstance;
 }

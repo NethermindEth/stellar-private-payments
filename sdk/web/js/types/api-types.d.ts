@@ -65,6 +65,9 @@ export interface TelemetryConfig {
 
 /** Options for {@link Storage.open}. */
 export interface StorageOpenOptions {
+  keyProvider: DatabaseKeyProvider;
+  /** Refuse an existing database when true; require an existing one otherwise. */
+  createNew?: boolean;
   workerUrl?: string;
 }
 
@@ -76,14 +79,10 @@ export type DatabaseKeyProvider = (
   purpose: 'create' | 'open',
 ) => Uint8Array | Promise<Uint8Array>;
 
-export interface EncryptedStorageOpenOptions extends StorageOpenOptions {
-  keyProvider: DatabaseKeyProvider;
-  /** Refuse an existing database when true; require an existing one otherwise. */
-  createNew?: boolean;
-}
+export type EncryptedStorageOpenOptions = StorageOpenOptions;
 
 /**
- * Worker-backed local persistence (`spp.db` on OPFS).
+ * Worker-backed local persistence (`spp.encrypted.db` on OPFS).
  *
  * Open once per page via {@link Storage.open}. Call {@link Storage.fork} for
  * additional handles (e.g. app code alongside {@link Client.new}).
@@ -97,7 +96,7 @@ export interface Storage {
 
 /** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
-  open(options?: StorageOpenOptions | null): Promise<Storage>;
+  open(options: StorageOpenOptions): Promise<Storage>;
   openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
 };
 
@@ -109,6 +108,9 @@ export interface ClientNewOptions {
   /** Required unless `prover` is supplied (an already-configured prover skips this). */
   circuitsBaseUrl?: string;
   storage?: Storage;
+  /** Required when storage is not supplied. */
+  keyProvider?: DatabaseKeyProvider;
+  createNew?: boolean;
   storageWorkerUrl?: string;
   prover?: ProverBridge;
   proverWorkerUrl?: string;

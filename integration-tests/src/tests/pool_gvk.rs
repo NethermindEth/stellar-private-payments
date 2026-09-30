@@ -28,8 +28,10 @@ async fn audit(
         std::process::id()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = Handle::from_box(Box::new(LocalStorage::open(
+    let storage = Handle::from_box(Box::new(LocalStorage::open_encrypted(
         storage_path.to_str().context("storage path is not UTF-8")?,
+        stellar_private_payments::state::database_key::DatabaseKey::generate()?,
+        stellar_private_payments::state::database_key::OpenPurpose::CreateNew,
     )?) as Box<dyn Storage>);
 
     let client = Client::init_readonly(network.rpc_url(), storage, contract_config, None)?;

@@ -46,7 +46,6 @@ enum InitState {
 }
 
 enum OpenRequest {
-    Plaintext,
     Encrypted {
         key: stellar_private_payments::state::database_key::DatabaseKey,
         purpose: stellar_private_payments::state::database_key::OpenPurpose,
@@ -126,14 +125,9 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default();
-        let cfg = if matches!(opening, OpenRequest::Encrypted { .. }) {
-            sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
-                directory: ".opfs-sahpool-encrypted".into(),
-                ..cfg
-            }
-        } else {
-            cfg
+        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
+            directory: ".opfs-sahpool-encrypted".into(),
+            ..Default::default()
         };
         let mut attempt = 0;
         loop {
@@ -215,18 +209,6 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 /// Open the database `opening` asks for, once the OPFS pool is installed.
 fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
     match opening {
-        OpenRequest::Plaintext => {
-            #[cfg(target_arch = "wasm32")]
-            if SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                Ok(p.borrow()
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                    .exists("spp.db"))
-            })? {
-                return SqliteStorage::connect_existing_plaintext("spp.db");
-            }
-            SqliteStorage::connect()
-        }
         OpenRequest::Encrypted { key, purpose } => {
             #[cfg(target_arch = "wasm32")]
             {
@@ -307,7 +289,9 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
-        StorageWorkerRequest::OpenPlaintext => return open_requested(OpenRequest::Plaintext).await,
+        StorageWorkerRequest::OpenPlaintext => {
+            anyhow::bail!("storage encryption is mandatory; an encryption key is required")
+        }
         StorageWorkerRequest::OpenEncrypted { key, create_new } => {
             use stellar_private_payments::state::database_key::{DatabaseKey, OpenPurpose};
             anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
@@ -1202,6 +1186,15 @@ impl Storage for StorageBridge {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plaintext_worker_request_is_rejected_while_storage_stays_locked() {
+        let error = futures::executor::block_on(router(StorageWorkerRequest::OpenPlaintext))
+            .expect_err("plaintext storage must not open");
+        assert!(error.to_string().contains("encryption is mandatory"));
+        STORAGE.with(|storage| assert!(storage.borrow().is_none()));
+        INIT_STATE.with(|state| assert!(matches!(*state.borrow(), InitState::Locked)));
+    }
 
     #[test]
     fn dump_logs_returns_ring_buffer_contents() {

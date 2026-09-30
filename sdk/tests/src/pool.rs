@@ -75,7 +75,11 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     )?;
 
     let storage_path = db_path.to_string_lossy().into_owned();
-    let storage = LocalStorage::open(&storage_path)?;
+    let storage = LocalStorage::open_encrypted(
+        &storage_path,
+        seed::database_key(),
+        stellar_private_payments::state::database_key::OpenPurpose::OpenExisting,
+    )?;
     let artifacts = test_prover_artifacts()?;
     let stem = CircuitStem::transact(
         PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,

@@ -35,13 +35,11 @@ function requireField(value, name) {
 }
 
 /**
- * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
+ * Open encrypted worker-backed persistence with a required key provider.
  * then pass the instance (or a fork) to {@link Client.new}.
  */
-async function openStorage(options = {}) {
-  return WasmStorage.open({
-    workerUrl: options.workerUrl ?? storageWorkerUrl,
-  });
+async function openStorage(options) {
+  return openEncryptedStorage(options);
 }
 
 /** Open encrypted storage using a caller-owned key provider. */
@@ -148,6 +146,8 @@ async function newClient(options) {
     options.storage ??
     (await openStorage({
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
+      keyProvider: options.keyProvider,
+      createNew: options.createNew,
     }));
 
   let prover = options.prover;

@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use stellar_private_payments::{
     state::SqliteStorage,
     types::{
@@ -13,6 +13,32 @@ use stellar_private_payments::{
     },
     zk::{crypto, encryption, merkle::MerklePrefixTree},
 };
+
+/// Synthetic encryption key shared by this test fixture's connections.
+pub fn database_key() -> stellar_private_payments::state::database_key::DatabaseKey {
+    stellar_private_payments::state::database_key::DatabaseKey::new([42; 32])
+}
+
+fn open_storage(path: &Path) -> Result<SqliteStorage> {
+    use stellar_private_payments::state::database_key::OpenPurpose;
+    SqliteStorage::connect_encrypted(
+        path,
+        &database_key(),
+        if path.exists() {
+            OpenPurpose::OpenExisting
+        } else {
+            OpenPurpose::CreateNew
+        },
+    )
+}
+
+fn open_connection(path: &Path) -> Result<rusqlite::Connection> {
+    stellar_private_payments::state::database_key::open_connection(
+        path,
+        &database_key(),
+        stellar_private_payments::state::database_key::OpenPurpose::OpenExisting,
+    )
+}
 
 pub const POOL_MERKLE_LEVELS: u32 = 20;
 pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
@@ -35,7 +61,7 @@ pub fn seeded_user_public_keys() -> Result<(
 
 /// Open (or create) `path` with schema migrations applied.
 pub fn ensure_schema(storage_path: &Path) -> Result<()> {
-    let _storage = SqliteStorage::connect_file(storage_path).context("apply storage migrations")?;
+    let _storage = open_storage(storage_path).context("apply storage migrations")?;
     Ok(())
 }
 
@@ -51,7 +77,7 @@ pub fn seed_prove_wallet(
 ) -> Result<TransactChainContext> {
     ensure_schema(storage_path)?;
 
-    let mut storage = SqliteStorage::connect_file(storage_path).context("open seeded database")?;
+    let mut storage = open_storage(storage_path).context("open seeded database")?;
 
     let signature = test_derivation_signature();
     let (note_keypair, encryption_keypair) =
@@ -187,9 +213,8 @@ pub fn apply_proved_step(
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
 
-    let mut storage =
-        SqliteStorage::connect_file(storage_path).context("open storage for apply step")?;
-    let mut conn = Connection::open(storage_path).context("open storage connection")?;
+    let mut storage = open_storage(storage_path).context("open storage for apply step")?;
+    let mut conn = open_connection(storage_path).context("open storage connection")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
     let tx = conn.transaction()?;
@@ -293,8 +318,7 @@ fn chain_snapshot_from_storage(
     asp_membership_contract_id: &str,
     _network: &str,
 ) -> Result<TransactChainContext> {
-    let storage =
-        SqliteStorage::connect_file(storage_path).context("open storage for chain snapshot")?;
+    let storage = open_storage(storage_path).context("open storage for chain snapshot")?;
     let signature = test_derivation_signature();
     let (note_keypair, _) = encryption::derive_encryption_and_note_keypairs(signature)?;
     let note_pubkey_field = Field::try_from_le_bytes(*note_keypair.public.as_ref())?;
@@ -356,7 +380,7 @@ fn insert_user_notes(
     user_address: &str,
     rows: &[(Field, NoteAmount, Field, Field)],
 ) -> Result<()> {
-    let mut conn = Connection::open(storage_path).context("open seeded database for user_notes")?;
+    let mut conn = open_connection(storage_path).context("open seeded database for user_notes")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
     let tx = conn.transaction()?;
