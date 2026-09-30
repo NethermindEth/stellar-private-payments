@@ -4,9 +4,16 @@
 // bundle, driven with a local secret-key signer instead of Freighter.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 import { chromium } from 'playwright';
 import { CHROMIUM_PATH, requireAppUrl } from './env.mjs';
+
+// App modules are bundled into ui.js, not served as standalone files. Load
+// the production password helper into the isolated page without a server route.
+const storageKeyModuleUrl = `data:text/javascript;base64,${readFileSync(
+  new URL('../../app/js/storage-key.js', import.meta.url),
+).toString('base64')}`;
 
 export const FRIENDBOT_URL = 'http://localhost:8000/friendbot';
 export const RPC_URL = 'http://localhost:8000/rpc';
@@ -99,7 +106,7 @@ export async function closeIsolatedRegistration() {
 // wizard gates on (disclaimer, retention/bootnode, explorer,
 // storage-persist-prompted), so a driver account skips the wizard.
 async function registerAccount({
-  address, signTxName, signMsgName, signAuthName, rpcUrl, networkPassphrase, useSharedStorage, seedOnboarding,
+  address, signTxName, signMsgName, signAuthName, rpcUrl, networkPassphrase, useSharedStorage, seedOnboarding, storagePassword, storageKeyModuleUrl,
 }) {
   const { default: init, Client, Storage } = await import('stellar-private-payments');
   await init();
@@ -108,9 +115,17 @@ async function registerAccount({
     './js/stellar-private-payments/dist/circuits/',
     window.location.href,
   ).href;
+  const { openPasswordStorage } = await import(storageKeyModuleUrl);
+  const openStorage = () => openPasswordStorage({
+    storage: Storage,
+    requestPassword: async ({ error }) => {
+      if (error) throw new Error(error);
+      return storagePassword;
+    },
+  });
   const storage = useSharedStorage
-    ? (window.__recipientStorage ??= await Storage.open()).fork()
-    : await Storage.open();
+    ? (window.__recipientStorage ??= await openStorage()).fork()
+    : await openStorage();
   const client = await Client.new({ rpcUrl, contractConfig, circuitsBaseUrl, storage });
   const signer = {
     getPublicKey: async () => address,
@@ -163,6 +178,8 @@ export async function register(keypair) {
     signAuthName,
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK_PASSPHRASE,
+    storageKeyModuleUrl,
+    storagePassword: process.env.E2E_STORAGE_PASSWORD || 'spp-e2e-storage-test-password',
     useSharedStorage: true,
     seedOnboarding: false,
   });
@@ -192,6 +209,8 @@ export async function seedDriverOnboarding(page, keypair) {
     signAuthName,
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK_PASSPHRASE,
+    storageKeyModuleUrl,
+    storagePassword: process.env.E2E_STORAGE_PASSWORD || 'spp-e2e-storage-test-password',
     useSharedStorage: false,
     seedOnboarding: true,
   });
