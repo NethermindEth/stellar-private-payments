@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{ArgAction, Parser, Subcommand};
 use stellar_private_payments::{
     LocalStorage,
-    state::password_vault,
+    state::native_wallet,
     types::{BabyJubJubPoint, GvkAuthoritySetting},
     zk::gvk::validate_global_view_public_key,
 };
@@ -40,9 +40,9 @@ struct GenerateArgs {
     /// this path.
     #[arg(long = "db")]
     db: Option<PathBuf>,
-    /// File with the password of an encrypted wallet database.
-    #[arg(long = "password-file", env = "SPP_PASSWORD_FILE")]
-    password_file: Option<PathBuf>,
+    /// Stellar CLI identity that unlocks the encrypted wallet database.
+    #[arg(long = "storage-account", env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: Option<String>,
     /// Overwrite an existing output file or database authority setting.
     #[arg(long = "force", action = ArgAction::SetTrue)]
     force: bool,
@@ -61,9 +61,9 @@ struct ShowArgs {
     /// Wallet database to read the saved authority setting from.
     #[arg(long = "db")]
     db: PathBuf,
-    /// File with the password of an encrypted wallet database.
-    #[arg(long = "password-file", env = "SPP_PASSWORD_FILE")]
-    password_file: Option<PathBuf>,
+    /// Stellar CLI identity that unlocks the encrypted wallet database.
+    #[arg(long = "storage-account", env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -100,7 +100,7 @@ fn generate(args: GenerateArgs) -> Result<()> {
     }
 
     if let Some(path) = &args.db {
-        let storage = open_storage(path, args.password_file.as_deref())?;
+        let storage = open_storage(path, args.storage_account.as_deref())?;
         if storage.get_gvk_authority_setting()?.is_some() && !args.force {
             bail!(
                 "wallet database `{}` already has a saved GVK authority setting; pass --force to overwrite",
@@ -129,7 +129,7 @@ fn validate(args: ValidateArgs) -> Result<()> {
 }
 
 fn show(args: ShowArgs) -> Result<()> {
-    let storage = open_storage(&args.db, args.password_file.as_deref())?;
+    let storage = open_storage(&args.db, args.storage_account.as_deref())?;
     let setting = storage
         .get_gvk_authority_setting()?
         .ok_or_else(|| anyhow!("no GVK authority setting saved in {}", args.db.display()))?;
@@ -158,23 +158,23 @@ fn write_private_file(path: &std::path::Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-/// Open a wallet database. One the `spp` CLI encrypted has a password record
-/// next to it and needs `--password-file`.
-fn open_storage(
-    path: &std::path::Path,
-    password_file: Option<&std::path::Path>,
-) -> Result<LocalStorage> {
-    if password_vault::record_path(path).exists() {
-        let file = password_file.ok_or_else(|| {
-            anyhow!(
-                "wallet database {} is encrypted; pass --password-file",
-                path.display()
-            )
-        })?;
-        let password = password_vault::read_password_file(file)?;
-        return LocalStorage::open_with_password(&path.to_string_lossy(), &password)
-            .with_context(|| format!("open wallet database at {}", path.display()));
+/// Open a wallet database using its Stellar CLI storage identity when
+/// encrypted.
+fn open_storage(path: &std::path::Path, storage_account: Option<&str>) -> Result<LocalStorage> {
+    if let Some(alias) = storage_account {
+        let config_dir = std::env::var_os("SPP_STELLAR_CONFIG_DIR").map(PathBuf::from);
+        return LocalStorage::open_with_identity(
+            &path.to_string_lossy(),
+            alias,
+            config_dir.as_deref(),
+        )
+        .with_context(|| format!("open wallet database at {}", path.display()));
     }
+    anyhow::ensure!(
+        !native_wallet::record_path(path).exists(),
+        "wallet database {} is encrypted; pass --storage-account",
+        path.display()
+    );
     let is_new = !path.exists();
     let storage = LocalStorage::open(&path.to_string_lossy())
         .with_context(|| format!("open wallet database at {}", path.display()))?;

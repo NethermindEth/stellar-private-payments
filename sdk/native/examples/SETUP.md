@@ -104,8 +104,7 @@ Use the `spp` CLI to onboard each account. From the repository root:
 
 ```bash
 # Onboard Alice's wallet. The default data dir writes the encrypted SQLite
-# wallet to ~/.local/share/stellar-private-payments/spp.db. The first run asks
-# you to choose its password.
+# wallet to ~/.local/share/stellar-private-payments/spp.db, unlocked by Alice.
 cargo run --release -p stellar-private-payments-cli -- onboard \
   --account alice --accept --register
 
@@ -116,9 +115,13 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
   --data-dir ./spp-bob-wallet
 ```
 
-`spp` keeps the wallet encrypted and asks for its password on the terminal.
-Scripts can pass `--password-file <path>` (or set `SPP_PASSWORD_FILE`) instead;
-the examples below read the same file.
+`spp` keeps the wallet encrypted using a signature from the `--account` identity.
+Use `--storage-account <alias>` (or `SPP_STORAGE_ACCOUNT`) to select a different
+storage identity when multiple accounts share one database. It must remain the
+same for every command using that database, including accountless queries.
+You can persist this choice as `defaults.storage_account` in the CLI config.
+The examples below use that same Stellar CLI identity. Set
+`SPP_STELLAR_CONFIG_DIR` if the identity lives in a custom configuration directory.
 
 What `spp onboard` does:
 
@@ -252,7 +255,7 @@ required by most examples; everything else has a sensible default.
 | `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
-| `SPP_PASSWORD_FILE` | — | wallets created by the `spp` CLI, which are encrypted |
+| `SPP_STORAGE_ACCOUNT` | — | wallets created by the `spp` CLI, which are encrypted |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
 | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
@@ -280,7 +283,7 @@ in your shell. Use the wallet paths that match the onboarding commands above:
 # Alice's wallet (created by the default spp CLI data dir).
 export STELLAR_SECRET_KEY="S..."
 export SPP_WALLET_PATH="$HOME/.local/share/stellar-private-payments/spp.db"
-export SPP_PASSWORD_FILE="$HOME/.spp-alice-password"  # holds the wallet password
+export SPP_STORAGE_ACCOUNT=alice
 export SPP_RECIPIENT_ADDRESS="G..."  # Bob's public address
 ```
 
@@ -289,7 +292,7 @@ For the few steps that use Bob's wallet:
 ```bash
 export STELLAR_SECRET_KEY="S..."     # Bob's secret key
 export SPP_WALLET_PATH="./spp-bob-wallet/spp.db"
-export SPP_PASSWORD_FILE="$HOME/.spp-bob-password"
+export SPP_STORAGE_ACCOUNT=bob
 ```
 
 ## Run the examples

@@ -23,6 +23,7 @@ pub struct DefaultsSection {
     pub data_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
     pub stellar_config_dir: Option<PathBuf>,
+    pub storage_account: Option<String>,
 }
 
 const DEFAULT_DATA_DIR_TEMPLATE: &str = "~/.local/share/stellar-private-payments";
@@ -48,6 +49,7 @@ fn config_template(debug_build: bool) -> String {
 # network = "testnet"                        # a `stellar network` name
 # data_dir = "{DEFAULT_DATA_DIR_TEMPLATE}"
 # circuits_dir = "{circuits_dir}"
+# storage_account = "alice"                # identity that unlocks this database
 # stellar_config_dir = "~/.config/stellar"   # passed to the `stellar` CLI (--config-dir)
 "#
     )

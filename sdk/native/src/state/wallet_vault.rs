@@ -74,7 +74,7 @@ impl WalletEnvelope {
     }
 }
 
-fn validate_context(context: &WalletContext) -> Result<()> {
+pub(super) fn validate_context(context: &WalletContext) -> Result<()> {
     ensure!(
         context.version == 1
             && context.address.len() == 56
@@ -161,7 +161,7 @@ fn validate_secret(secret: &str) -> Result<()> {
 
 pub fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<DatabaseKey> {
     validate_secret(secret)?;
-    let record = read(path)?.ok_or_else(|| anyhow!("Freighter unlocking is not enabled"))?;
+    let record = read(path)?.ok_or_else(|| anyhow!("wallet unlocking is not enabled"))?;
     ensure!(
         &record.context == context,
         "wallet enrollment changed; try again"

@@ -8,7 +8,7 @@ mod storage;
 pub mod database_key;
 pub mod encrypted_migration;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod password_vault;
+pub mod native_wallet;
 pub mod wallet_vault;
 
 pub use disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};

@@ -32,6 +32,7 @@ pub struct LocalStorage {
     path: PathBuf,
     database_key: Option<std::sync::Arc<crate::state::database_key::DatabaseKey>>,
     db: RefCell<SqliteStorage>,
+    owner: Option<std::sync::Arc<std::fs::File>>,
 }
 
 impl LocalStorage {
@@ -42,30 +43,29 @@ impl LocalStorage {
             path,
             database_key: None,
             db: RefCell::new(db),
+            owner: None,
         })
     }
 
-    /// Open an encrypted database with its password, reading the password
-    /// record next to it (see [`crate::state::password_vault::record_path`]).
+    /// Unlock storage through a Stellar CLI identity, retaining exclusive
+    /// directory ownership until this connection and all its forks are dropped.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open_with_password(storage_path: &str, password: &str) -> Result<Self, Error> {
-        use crate::state::{
-            database_key::OpenPurpose,
-            password_vault::{PasswordRecord, record_path},
-        };
-        let path = PathBuf::from(storage_path);
-        let record = record_path(&path);
-        let json = std::fs::read_to_string(&record)
-            .with_context(|| format!("read password record {}", record.display()))?;
-        let key = PasswordRecord::from_json(&json)
-            .and_then(|record| record.open(password))
-            .context("unlock encrypted storage")?;
-        let db = SqliteStorage::connect_encrypted(&path, &key, OpenPurpose::OpenExisting)?;
-        Ok(Self {
-            path,
-            db: RefCell::new(db),
-            database_key: Some(std::sync::Arc::new(key)),
-        })
+    pub fn open_with_identity(
+        storage_path: &str,
+        alias: &str,
+        config_dir: Option<&std::path::Path>,
+    ) -> Result<Self, Error> {
+        let path = std::path::absolute(storage_path).context("resolve storage path")?;
+        let directory = path.parent().context("database has no parent directory")?;
+        std::fs::create_dir_all(directory).context("create storage directory")?;
+        let owner = std::fs::File::open(directory).context("open storage directory")?;
+        owner
+            .try_lock()
+            .context("storage directory is in use by another process")?;
+        let key = crate::state::native_wallet::unlock_with_stellar(&path, alias, config_dir)?;
+        let mut storage = Self::open_with_key(storage_path, &key)?;
+        storage.owner = Some(std::sync::Arc::new(owner));
+        Ok(storage)
     }
 
     /// Open encrypted storage with a key that has already unlocked it, for
@@ -79,6 +79,7 @@ impl LocalStorage {
         Ok(Self {
             path,
             db: RefCell::new(db),
+            owner: None,
             database_key: Some(std::sync::Arc::new(
                 crate::state::database_key::DatabaseKey::new(**key),
             )),
@@ -95,6 +96,7 @@ impl LocalStorage {
             return Ok(Self {
                 path: self.path.clone(),
                 db: RefCell::new(db),
+                owner: self.owner.clone(),
                 database_key: Some(key.clone()),
             });
         }
@@ -103,6 +105,7 @@ impl LocalStorage {
             path: self.path.clone(),
             database_key: None,
             db: RefCell::new(db),
+            owner: self.owner.clone(),
         };
         Ok(forked)
     }

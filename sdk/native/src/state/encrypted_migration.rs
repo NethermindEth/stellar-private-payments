@@ -277,7 +277,7 @@ pub fn is_plaintext_file(path: &std::path::Path) -> Result<bool> {
 /// The copy goes into `<path>.encrypting` and then replaces the original with
 /// a rename. The plaintext database is untouched until that rename, so an
 /// interruption leaves only a partial copy, which the next attempt discards.
-/// Write the database's password record before calling this, so the
+/// Write the database's key record before calling this, so the
 /// encrypted database is never left without one.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn encrypt_in_place(

@@ -37,9 +37,20 @@ To protect user confidentiality during transaction proving and indexing, the SDK
 
 The native CLI and browser private vault encrypt SQLite pages with SQLite3 Multiple
 Ciphers (ChaCha20 with per-page authentication), using random 256-bit database
-keys. The native CLI seals its key under a password with Argon2id (64 MiB,
-three iterations, one lane) and XSalsa20-Poly1305. KDF costs read from native
-records are capped at that profile.
+keys. The native CLI unlocks through an existing Stellar CLI identity using
+`stellar message sign`; it never imports that identity's secret key. A verified
+SEP-0053 signature feeds HKDF-SHA-256 to seal the database key with
+XSalsa20-Poly1305. The message binds the identity and a random per-database salt
+to a native-storage domain distinct from browser unlocking and privacy-key
+derivation. Setup verifies two matching signatures, and later opens sign once.
+`--storage-account` (or `SPP_STORAGE_ACCOUNT`, or `defaults.storage_account`)
+selects the storage identity, defaulting to `--account`. A transaction payer
+selected with `--sign-as` cannot change the storage identity.
+
+This ties native storage confidentiality to the identity's protection. If Stellar
+CLI stores that identity's secret in a readable config file, an attacker with both
+that file and the database/key record can decrypt storage. Use the Stellar CLI's
+secure store and protect the host. There is no independent password barrier.
 
 The browser uses Freighter alone. A verified SEP-0053 signature over an
 origin-, account-, and random-salt-bound message feeds HKDF-SHA-256. The resulting
@@ -48,7 +59,7 @@ using a fresh 24-byte nonce. New setup verifies two matching signatures before
 saving a record; subsequent unlocks need one approval. The database key remains
 inside the storage worker. The page necessarily handles the signature and wrapping
 secret transiently; neither is persisted or logged. There is no browser password
-or passkey fallback. Native CLI password support is unchanged.
+or passkey fallback.
 
 The browser opens `spp.public.db` without a password. It contains public chain
 events, derived commitments/nullifiers/registered keys, indexing progress, and
@@ -97,7 +108,13 @@ browser formats are unsupported; use an explicit local reset for those profiles.
 Existing encrypted data is never silently overwritten. Interrupted wallet setup
 or plaintext migration resumes with the saved wallet envelope and the same key.
 
-Native password changes do not rotate the database key or revoke older backups
+Native development-only password records are unsupported and preserved on error;
+use the previous CLI to recover those databases or select a new data directory.
+Interrupted native setup or migration reuses the saved wallet envelope and key,
+including when the database is missing or empty. Keep the matching `.key` record
+with every database backup. Losing the identity or record prevents unlocking.
+
+Changing CLI aliases does not rotate the database key or revoke older backups
 and copied envelopes. True key rotation is not implemented. A destructive reset
 generates a new key on the next setup but cannot erase previous copies.
 
@@ -141,12 +158,12 @@ rollback-journal recovery. The Chromium regression suite terminates a real worke
 after an uncommitted OPFS write to exercise this path.
 
 The CLI holds an advisory exclusive lock on its data directory for each storage
-command, before preflight, migration or password updates. Independent native SDK
-embedders must still enforce exclusive ownership during open/migration and key
-record updates; SQLite locks alone do not protect an immutable preflight.
+command, before preflight, migration or key-record creation. The SDK's
+`LocalStorage::open_with_identity` takes the same lock and retains it across
+forked connections. Embedders using the lower-level key/open APIs must enforce
+exclusive ownership during open/migration and key-record updates; SQLite locks alone do not protect an immutable preflight.
 Advisory locks cannot constrain programs that ignore them. Keep native data
-directories and password files private (`0700` directories, `0600` files).
-Password-file permissions are not automatically changed by the SDK.
+directories and identity files private (`0700` directories, `0600` files).
 
 ### Backend and release qualification
 

@@ -10,7 +10,6 @@ mod session;
 mod signer;
 mod stellar_cli;
 mod storage_owner;
-mod unlock;
 
 use std::path::PathBuf;
 
@@ -73,10 +72,9 @@ struct Cli {
     #[arg(long, global = true)]
     sign_as: Option<String>,
 
-    /// File holding the local database password, for scripts (default: ask
-    /// on the terminal)
-    #[arg(long, global = true, env = "SPP_PASSWORD_FILE")]
-    password_file: Option<PathBuf>,
+    /// Stellar CLI identity that unlocks the database (defaults to --account)
+    #[arg(long, global = true, env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: Option<String>,
 
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
@@ -197,11 +195,6 @@ enum Commands {
     },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
-    /// Manage the password of the local encrypted database
-    Password {
-        #[command(subcommand)]
-        command: PasswordCommands,
-    },
     /// Show the license / distribution notice
     License,
 }
@@ -240,17 +233,6 @@ enum DisclosureCommands {
         /// Return failure when any disclosed note has already been spent
         #[arg(long)]
         require_unspent: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum PasswordCommands {
-    /// Change the password: asks for the current one, then the new one twice
-    Change {
-        /// File holding the new password, for scripts (default: ask on the
-        /// terminal); --password-file supplies the current one
-        #[arg(long)]
-        new_password_file: Option<PathBuf>,
     },
 }
 
@@ -297,12 +279,12 @@ fn main() -> Result<()> {
             sign_as: cli.sign_as,
             stellar_config_dir: cli.stellar_config_dir,
             circuits_dir: cli.circuits_dir,
-            password_file: cli.password_file,
+            storage_account: cli.storage_account,
         },
     )?;
 
-    // Hold ownership for the whole command, including password prompts,
-    // migration, SQLite access, and atomic key-record replacement.
+    // Hold ownership for the whole command, including identity signing,
+    // migration, SQLite access, and key-record creation.
     let _storage_owner = if matches!(
         &cli.command,
         Commands::Version
@@ -420,11 +402,6 @@ fn main() -> Result<()> {
             ),
         },
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
-        Commands::Password { command } => match command {
-            PasswordCommands::Change { new_password_file } => {
-                cmd::password::change(&config, new_password_file.as_deref(), json)
-            }
-        },
         Commands::License => cmd::license::run(&config, json),
     }
 }

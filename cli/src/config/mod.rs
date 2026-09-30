@@ -44,7 +44,7 @@ pub struct CliConfigOverrides {
     pub sign_as: Option<String>,
     pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
-    pub password_file: Option<PathBuf>,
+    pub storage_account: Option<String>,
 }
 
 /// Resolved (offline) CLI configuration.
@@ -72,9 +72,8 @@ pub struct CliConfig {
     /// and signs every envelope. `None` means the owner pays for itself.
     pub sign_as: Option<String>,
     pub circuits_dir: Option<PathBuf>,
-    /// File with the local database password; without it, `spp` asks on the
-    /// terminal.
-    pub password_file: Option<PathBuf>,
+    /// Identity that unlocks storage, defaulting to the note owner.
+    pub storage_account: Option<String>,
     /// The database key once unlocked, so one command asks only once.
     database_key: Arc<OnceLock<DatabaseKey>>,
 }
@@ -94,7 +93,7 @@ impl CliConfig {
             sign_as,
             stellar_config_dir,
             circuits_dir,
-            password_file,
+            storage_account,
         } = overrides;
 
         let deployment_path = deployment_path.or(file.defaults.deployment.map(toml::expand_path));
@@ -123,7 +122,7 @@ impl CliConfig {
             account,
             sign_as,
             circuits_dir,
-            password_file,
+            storage_account: storage_account.or(file.defaults.storage_account),
             database_key: Arc::default(),
         })
     }
@@ -178,6 +177,21 @@ impl CliConfig {
             .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
     }
 
+    /// Storage ownership is independent of the transaction payer.
+    pub fn storage_alias(&self) -> Result<&str> {
+        let alias = self
+            .storage_account
+            .as_deref()
+            .or(self.account.as_deref())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage requires --storage-account <stellar keys alias> or --account"
+                )
+            })?;
+        stellar_cli::validate_alias("--storage-account", alias)?;
+        Ok(alias)
+    }
+
     /// The key of the local database, unlocking it on first use (and creating
     /// or encrypting it if needed).
     pub fn database_key(&self) -> Result<&DatabaseKey> {
@@ -186,7 +200,12 @@ impl CliConfig {
         }
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
-        let key = crate::unlock::unlock(&self.db_path(), self.password_file.as_deref())?;
+        let alias = self.storage_alias()?;
+        let key = stellar_private_payments::state::native_wallet::unlock_with_stellar(
+            &self.db_path(),
+            alias,
+            self.stellar_config_dir.as_deref(),
+        )?;
         Ok(self.database_key.get_or_init(|| key))
     }
 
@@ -297,6 +316,35 @@ mod tests {
             alias: "owner".to_string(),
             address: OWNER_ADDRESS.to_string(),
         }
+    }
+
+    #[test]
+    fn storage_identity_defaults_to_owner_and_never_to_payer() {
+        let mut config = config_with(Some("payer"));
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "owner"
+        );
+        config.storage_account = Some("vault-owner".into());
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "vault-owner"
+        );
+        config.account = None;
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "vault-owner"
+        );
+        config.storage_account = None;
+        assert!(config.storage_alias().is_err());
+        config.storage_account = Some(SECRET_SHAPED.into());
+        assert!(
+            config
+                .storage_alias()
+                .expect_err("raw secret keys must not be accepted as aliases")
+                .to_string()
+                .contains("not a raw secret key")
+        );
     }
 
     #[test]

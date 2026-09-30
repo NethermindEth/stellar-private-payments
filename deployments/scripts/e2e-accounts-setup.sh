@@ -120,10 +120,6 @@ EOF
 
 # Isolated wallet/data dir so a run never touches a developer's real spp state.
 DATA_DIR="$REPO_ROOT/deployments/scripts/.e2e-wallet-$NETWORK"
-# spp encrypts its database. This wallet gets its own random password, kept
-# next to it in the git-ignored data dir, so runs stay non-interactive.
-PASSWORD_FILE="$DATA_DIR/spp-password"
-
 ALIAS_A="$ALIAS_PREFIX-a"
 ALIAS_B="$ALIAS_PREFIX-b"
 ALIAS_C="$ALIAS_PREFIX-c"
@@ -150,11 +146,8 @@ spp() {
       SPP_BIN="$REPO_ROOT/target/release/spp"
     fi
   fi
-  if [ ! -s "$PASSWORD_FILE" ]; then
-    mkdir -p "$DATA_DIR"
-    ( umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$PASSWORD_FILE" )
-  fi
-  "$SPP_BIN" --password-file "$PASSWORD_FILE" "$@"
+  # All test accounts share a database unlocked by account A.
+  "$SPP_BIN" --storage-account "$ALIAS_A" "$@"
 }
 
 assert_env_file_ignored() {
