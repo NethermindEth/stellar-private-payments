@@ -27,6 +27,7 @@ import { AppStorage } from './app-storage.js';
 import { openWalletStorage } from './storage-key.js';
 import { confirmStorageAccount } from './storage-account-dialog.js';
 import { verifyStorageSignature } from './storage-signature.js';
+import { migratePrivateSigners } from './private-signers.js';
 import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
 import { StrKey } from '@stellar/stellar-sdk';
 
@@ -225,6 +226,7 @@ export async function ensureStorage({ unlock = false } = {}) {
                 const settings = new AppStorage(handle);
                 try {
                     await loadAutoLockSetting(settings);
+                    await migratePrivateSigners(settings);
                 } catch (error) {
                     await handle.close().catch(() => {});
                     clearAutoLockSetting();
