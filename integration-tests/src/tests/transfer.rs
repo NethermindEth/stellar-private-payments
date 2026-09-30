@@ -1,18 +1,19 @@
 //! Transfers between two wallets on a real pool contract, checking both
-//! balances afterward.
+//! balances afterward, plus the ways a transfer can be rejected.
 
 use anyhow::{Context, Result};
 use stellar_private_payments::types::{NoteAmount, TransferRecipient};
 
-use super::support::setup_default;
+use super::support::{deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
 
 #[tokio::test]
 async fn transfer_via_address() -> Result<()> {
-    let sender = setup_default().await?;
-    let recipient = setup_default().await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
     recipient.account.register_public_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -40,8 +41,9 @@ async fn transfer_via_address() -> Result<()> {
 
 #[tokio::test]
 async fn transfer_via_keys() -> Result<()> {
-    let sender = setup_default().await?;
-    let recipient = setup_default().await?;
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
     let (note_public_key, encryption_public_key) = recipient.account.privacy_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -66,6 +68,112 @@ async fn transfer_via_keys() -> Result<()> {
 
     let recipient_balance = recipient.pool()?.balance().await?;
     assert_eq!(recipient_balance, transfer_amount);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn transfer_insufficient_balance() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
+
+    sender
+        .pool()?
+        .deposit(NoteAmount::from(DEPOSIT_STROOPS))
+        .await?;
+
+    let transfer = sender
+        .pool()?
+        .transfer(
+            recipient.wallet.address(),
+            NoteAmount::from(DEPOSIT_STROOPS.saturating_add(1)),
+        )
+        .await;
+    assert!(
+        transfer.is_err(),
+        "transferring more than the wallet's pool balance must be rejected"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn transfer_unregistered_recipient() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+
+    sender
+        .pool()?
+        .deposit(NoteAmount::from(DEPOSIT_STROOPS))
+        .await?;
+
+    let transfer = sender
+        .pool()?
+        .transfer(
+            recipient.wallet.address(),
+            NoteAmount::from(TRANSFER_STROOPS),
+        )
+        .await;
+    assert!(
+        transfer.is_err(),
+        "transferring to an address with no registered public keys must be rejected"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn transfer_double_spend() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
+    let pool = sender.pool()?;
+
+    pool.deposit(NoteAmount::from(DEPOSIT_STROOPS)).await?;
+
+    let wallet = pool.spendable_notes().await?;
+    assert_eq!(
+        wallet.len(),
+        1,
+        "a single deposit should produce exactly one spendable note"
+    );
+
+    let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
+    let recipient_address = recipient.wallet.address();
+
+    let mut plan_a = pool
+        .prepare_transfer(&wallet, recipient_address.as_str(), half)
+        .await?;
+    let mut prepared_a = pool.prove_next(&mut plan_a).await?;
+
+    let mut plan_b = pool
+        .prepare_transfer(&wallet, recipient_address.as_str(), half)
+        .await?;
+    let mut prepared_b = pool.prove_next(&mut plan_b).await?;
+
+    pool.simulate(&mut prepared_a).await?;
+    let signed_a = pool.sign(&prepared_a).await?;
+    let hash_a = pool.submit(signed_a).await?;
+    pool.confirm(&hash_a).await?;
+
+    let rejected = match pool.simulate(&mut prepared_b).await {
+        Err(_) => true,
+        Ok(()) => {
+            let signed_b = pool.sign(&prepared_b).await?;
+            match pool.submit(signed_b).await {
+                Err(_) => true,
+                Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
+            }
+        }
+    };
+    assert!(
+        rejected,
+        "spending the same note a second time must be rejected on-chain"
+    );
 
     Ok(())
 }

@@ -39,3 +39,7 @@ cast_sign_loss = "deny"
 needless_return = "deny"
 panicking_overflow_checks = "deny"
 unwrap_used = "deny"
+
+# Optimized like release, but keeps dev's overflow checks and debug assertions.
+[profile.dev]
+opt-level = 2

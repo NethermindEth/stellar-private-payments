@@ -38,17 +38,55 @@ impl TestSession {
     }
 }
 
-pub async fn setup_default() -> Result<TestSession> {
-    setup(&[PoolOptions::NONE]).await
+pub async fn deploy_default() -> Result<(ContractConfig, DeploymentIdentity)> {
+    deploy(&[PoolOptions::NONE]).await
 }
 
 /// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
 /// they share ASP membership/non-membership contracts).
-pub async fn setup(pools: &[PoolOptions]) -> Result<TestSession> {
+pub async fn deploy(pools: &[PoolOptions]) -> Result<(ContractConfig, DeploymentIdentity)> {
     let network = LocalNetwork::start().await?;
-    let (config, identity) = network
-        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools)
-        .await?;
+    network
+        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
+}
+
+/// Like [`deploy`], but with an explicit `max_deposit` cap instead of the
+/// suite-wide default.
+pub async fn deploy_with_max_deposit(
+    max_deposit: u128,
+    pools: &[PoolOptions],
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
+}
+
+/// Like [`deploy`], but `scope` is folded into the deploy cache key,
+/// guaranteeing a deployment private to this scope instead of one shared
+/// with any other test using the same `pools`.
+pub async fn deploy_scoped(
+    pools: &[PoolOptions],
+    scope: &str,
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(
+            MAX_DEPOSIT_STROOPS,
+            ASP_LEVELS,
+            POOL_LEVELS,
+            pools,
+            Some(scope),
+        )
+        .await
+}
+
+/// Open a new wallet session against an existing deployment.
+pub async fn session(
+    (config, identity): (ContractConfig, DeploymentIdentity),
+) -> Result<TestSession> {
+    let network = LocalNetwork::start().await?;
     let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
     build_session(&network, config, identity, pool_entries).await
 }
