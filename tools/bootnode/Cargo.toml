@@ -16,7 +16,7 @@ path = "bin/bootnode.rs"
 
 [dependencies]
 # workspace
-stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "../../sdk/native", version = "0.2.0" }
 
 # external
 anyhow = { version = "1", default-features = false }
@@ -48,7 +48,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 # workspace
-stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "../../sdk/native", version = "0.2.0" }
 
 # external
 getrandom = { version = "0.4", default-features = false, features = ["std"] }
