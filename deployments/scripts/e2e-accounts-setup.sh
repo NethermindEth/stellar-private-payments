@@ -66,7 +66,8 @@ Idempotency:
   provisioning (identical to --verify). An env file left by an older,
   two-account version of this script (no C/D entries) is backfilled in place:
   C and D are provisioned and the file rewritten; A and B are untouched.
-  --force regenerates all keypairs and overwrites the env file.
+  --force clears the disposable local wallet database and its key record,
+  regenerates all keypairs and overwrites the env file.
 
 After a redeploy:
   Use --reregister to re-register the existing four accounts against the
@@ -124,6 +125,7 @@ ALIAS_A="$ALIAS_PREFIX-a"
 ALIAS_B="$ALIAS_PREFIX-b"
 ALIAS_C="$ALIAS_PREFIX-c"
 ALIAS_D="$ALIAS_PREFIX-d"
+STORAGE_ACCOUNT="$ALIAS_A"
 
 need stellar
 need curl
@@ -146,8 +148,21 @@ spp() {
       SPP_BIN="$REPO_ROOT/target/release/spp"
     fi
   fi
-  # All test accounts share a database unlocked by account A.
-  "$SPP_BIN" --storage-account "$ALIAS_A" "$@"
+  # All test accounts share one database; ephemeral runs use the first account.
+  "$SPP_BIN" --storage-account "$STORAGE_ACCOUNT" "$@"
+}
+
+reset_wallet_storage() {
+  step "resetting disposable local wallet storage"
+  # Rotating identities invalidates the old wallet envelope. Remove only the
+  # script's database, records and SQLite sidecars, keeping the keystore/config.
+  local name suffix
+  for name in spp.db spp.db.key spp.db.encrypting; do
+    for suffix in '' -journal -wal -shm; do
+      rm -f -- "$DATA_DIR/$name$suffix"
+    done
+  done
+  rm -f -- "$DATA_DIR/spp-password"
 }
 
 assert_env_file_ignored() {
@@ -558,6 +573,9 @@ backfill_cd() {
 do_provision() {
   assert_env_file_ignored
   mkdir -p "$DATA_DIR"
+  if [ "$FORCE" -eq 1 ]; then
+    reset_wallet_storage
+  fi
 
   ensure_keypair "$ALIAS_A"
   ensure_keypair "$ALIAS_B"
@@ -628,6 +646,9 @@ do_ephemeral() {
     esac
     aliases+=("$full")
   done
+
+  STORAGE_ACCOUNT="${aliases[0]}"
+  reset_wallet_storage
 
   # Generate fresh keypairs for all selected accounts
   local alias
