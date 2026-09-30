@@ -52,6 +52,13 @@ jobs:
           mkdir -p deployments/local
           echo '{}' > deployments/local/deployments.json
 
+      # The SDK's SQLite3MC build helper reads offline root-workspace metadata,
+      # even when Clippy builds this standalone integration-test crate.
+      - name: Fetch locked dependencies for both workspaces
+        run: |
+          cargo fetch --locked --manifest-path Cargo.toml
+          cargo fetch --locked --manifest-path integration-tests-web/Cargo.toml
+
       - name: Run Clippy
         working-directory: integration-tests-web
         env:
