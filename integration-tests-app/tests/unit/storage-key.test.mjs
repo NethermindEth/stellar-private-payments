@@ -3,6 +3,16 @@ import test from 'node:test';
 import { webcrypto } from 'node:crypto';
 import { openWalletStorage } from '../../../app/js/storage-key.js';
 
+function lockManager() {
+  const queues = new Map();
+  return { request(name, { mode }, callback) {
+    assert.equal(mode, 'exclusive');
+    const result = (queues.get(name) ?? Promise.resolve()).then(callback);
+    queues.set(name, result.catch(() => {}));
+    return result;
+  } };
+}
+
 function fixture() {
   const values = new Map();
   const records = { getItem: key => values.get(key) ?? null,
@@ -12,7 +22,7 @@ function fixture() {
   const keys = [];
   let databaseKey;
   const options = {
-    records, origin: 'https://storage.test', crypto: webcrypto,
+    records, origin: 'https://storage.test', crypto: webcrypto, locks: lockManager(),
     getAddress: async () => 'owner-a',
     signMessage: async (_, { address }) => {
       signedAddresses.push(address);
@@ -118,4 +128,59 @@ test('a different reported signer cannot open existing storage', async () => {
   await assert.rejects(openWalletStorage(f.options), /different account/);
   assert.equal([...f.values.values()][0], saved);
   assert.equal(f.keys.length, 1);
+});
+
+test('concurrent enrollment preserves the first envelope despite an OPFS lock failure', async () => {
+  const f = fixture();
+  let resumeSigning;
+  let signingStarted;
+  const started = new Promise(resolve => { signingStarted = resolve; });
+  const pause = new Promise(resolve => { resumeSigning = resolve; });
+  const sign = f.options.signMessage;
+  f.options.signMessage = async (...args) => {
+    signingStarted();
+    await pause;
+    return sign(...args);
+  };
+  let reads = 0;
+  const read = f.options.records.getItem;
+  f.options.records.getItem = name => { reads++; return read(name); };
+  const first = openWalletStorage(f.options);
+  await started;
+  let secondSigned = false;
+  const second = assert.rejects(openWalletStorage({ ...f.options,
+    signMessage: async (...args) => { secondSigned = true; return sign(...args); },
+    storage: { open: async () => { throw new Error('Another tab is using this database'); } },
+  }), /Another tab/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 1, 'the waiting tab must not read enrollment metadata yet');
+  assert.equal(secondSigned, false);
+  resumeSigning();
+  await first;
+  const saved = [...f.values.values()][0];
+  await second;
+  assert.equal(reads, 2);
+  assert.equal([...f.values.values()][0], saved);
+  assert.equal(f.signedAddresses.length, 3, 'only the first tab enrolls with two signatures');
+  await openWalletStorage(f.options);
+  assert.equal([...f.values.values()][0], saved);
+  assert.equal(f.keys.length, 2, 'the original database reopens after the lock failure');
+});
+
+test('a rejected enrollment releases the lock for the next attempt', async () => {
+  const f = fixture();
+  await assert.rejects(openWalletStorage({ ...f.options,
+    signMessage: async () => { throw new Error('User rejected'); },
+  }), /User rejected/);
+  assert.deepEqual(await openWalletStorage(f.options), { encrypted: true });
+});
+
+test('missing Web Locks fails before reading records or asking for signatures', async () => {
+  const f = fixture();
+  await assert.rejects(openWalletStorage({ ...f.options, locks: null,
+    records: { getItem: () => assert.fail('must not read records without a lock') },
+  }), /Web Locks are unavailable/);
+  assert.equal(f.signedAddresses.length, 0);
+  assert.equal(f.values.size, 0);
+  assert.equal(f.keys.length, 0);
 });

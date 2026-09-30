@@ -4,7 +4,16 @@ const encoder = new TextEncoder();
 const encode = bytes => btoa(String.fromCharCode(...bytes));
 const decode = value => Uint8Array.from(atob(value), char => char.charCodeAt(0));
 
-export async function openWalletStorage({ storage, getAddress, signMessage, verifySignature,
+export async function openWalletStorage({ locks = globalThis.navigator?.locks, ...options }) {
+    if (typeof locks?.request !== 'function') {
+        throw new Error('This browser cannot safely unlock local storage because Web Locks are unavailable. Use a browser with Web Locks support.');
+    }
+    // Serialize the record read, enrollment and database open across tabs. The
+    // OPFS lock alone is too late: enrollment saves its envelope before opening.
+    return locks.request(RECORD_KEY, { mode: 'exclusive' }, () => openLockedWalletStorage(options));
+}
+
+async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature,
     records = localStorage, origin = location.origin, crypto = globalThis.crypto }) {
     let record = JSON.parse(records.getItem(RECORD_KEY) || 'null');
     const fresh = !record;
