@@ -254,7 +254,6 @@ impl PrivatePool {
                 &chain_config.signer_address,
             )
             .await
-            .inspect_err(|error| tracing::error!(?error, "simulate transaction failed"))
             .context("simulate transaction")?;
 
         Ok(())

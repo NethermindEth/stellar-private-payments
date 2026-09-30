@@ -121,18 +121,16 @@ know), `trunk`, and Docker (for localnet).
 From the repo root:
 
 ```bash
-bash integration-tests-app/scripts/setup.sh           # one-time: profile snapshot, headed
-bash integration-tests-app/scripts/serve-and-run.sh   # whole suite
+make integration-tests-app-setup   # one-time: profile snapshot, headed
+make integration-tests-app-e2e     # whole suite
 ```
 
-`setup.sh` installs `node_modules`, fetches the vendored extension, and
-builds/verifies the profile snapshot — the one step that needs a headed
-browser (or `xvfb-run -a bash integration-tests-app/scripts/setup.sh` on CI/headless).
-It's idempotent: with a good existing snapshot it just verifies and exits, so
-it's safe to run before every session. `serve-and-run.sh` and `run-e2e.sh`
-also call it automatically the first time node_modules/the extension/the
-snapshot are found missing, so this step is optional — it just moves the
-one-time headed cost earlier, e.g. before switching to headless/CI.
+`integration-tests-app-setup` installs `node_modules`, fetches the vendored
+extension, and builds/verifies the profile snapshot — the one step that needs
+a headed browser (or `xvfb-run -a make integration-tests-app-setup` on
+CI/headless). It's idempotent, so it's safe to run before every session.
+`serve-and-run.sh`/`run-e2e.sh` also call it automatically when missing, so
+this step is optional — it just moves the headed cost earlier.
 
 ## Subsequent runs
 
@@ -285,15 +283,15 @@ extension fetch, Freighter profile provisioning, headed
 onboarding completion, the snapshot, and a verification pass):
 
 ```bash
-bash integration-tests-app/scripts/setup.sh
+make integration-tests-app-setup
 ```
 
-It is idempotent: with a working existing snapshot it verifies and exits.
-Re-run with `--force` if the vendored extension version changes or the
-profile is corrupted. The extension comes from the upstream
-`stellar/freighter` GitHub release and is pinned in
-`scripts/fetch-extension.sh`. The onboarding step requires headed rendering,
-so run setup on a machine with a desktop session.
+It is idempotent: with a working existing snapshot it verifies and exits. If
+the vendored extension version changed or the profile is corrupted, force a
+rebuild with `bash integration-tests-app/scripts/serve-and-run.sh -- bash integration-tests-app/scripts/setup.sh --force`.
+The extension comes from the upstream `stellar/freighter` GitHub release and
+is pinned in `scripts/fetch-extension.sh`. The onboarding step requires
+headed rendering, so run setup on a machine with a desktop session.
 
 What setup.sh does under the hood, if you ever need the pieces:
 

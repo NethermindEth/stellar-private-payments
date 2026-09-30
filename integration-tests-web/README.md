@@ -48,10 +48,9 @@ integration-tests-web/run.sh cargo test --target wasm32-unknown-unknown --manife
 ```
 
 `--include-ignored` is required. These e2e tests are `#[ignore]`d by default
-because they need localnet and the static server, which lets the
-PR-time `wasm-test` job run `sdk/web`'s own (unrelated) unit tests without
-either. Omit the flag and all seven are silently skipped — the run still
-reports success.
+because they need localnet and the static server, unlike `sdk/web`'s own
+unit tests run earlier in the same CI job. Omit the flag and all seven are
+silently skipped — the run still reports success.
 
 CI runs each ignored e2e test in a fresh browser/OPFS database because sync
 cursors are global to the database while note derivation is account-specific.

@@ -12,7 +12,7 @@
 //!
 //! Run via `integration-tests-web/run.sh` with `-- --include-ignored`.
 
-// Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny is
+// Tests favour `unwrap()` for brevity; this crate's `unwrap_used` deny is
 // meant for production paths, not assertions.
 #![allow(clippy::unwrap_used)]
 
