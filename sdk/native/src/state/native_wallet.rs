@@ -2,6 +2,7 @@
 //! Callers must hold exclusive directory ownership through database use.
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -67,14 +68,28 @@ fn unlock_with(
     address: &str,
     sign: &mut impl FnMut(&str) -> Result<KeyDerivationSignature>,
 ) -> Result<DatabaseKey> {
+    let nonempty = match fs::symlink_metadata(database) {
+        Ok(metadata) => {
+            ensure!(
+                metadata.is_file(),
+                "database must be a regular file, not a symlink or special file"
+            );
+            metadata.len() > 0
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.into()),
+    };
     let record = record_path(database);
     match fs::symlink_metadata(&record) {
         Ok(metadata) => {
             ensure!(
-                !metadata.file_type().is_symlink(),
-                "wallet record must not be a symlink"
+                metadata.is_file(),
+                "wallet record must be a regular file, not a symlink or special file"
             );
-            let bytes = fs::read(&record)?;
+            // The wallet record is itself SQLite, so inspect only its header,
+            // rather than loading the entire file or imposing a JSON-size cap.
+            let mut bytes = Vec::with_capacity(16);
+            fs::File::open(&record)?.take(16).read_to_end(&mut bytes)?;
             ensure!(
                 bytes.is_empty() || bytes.starts_with(b"SQLite format 3\0"),
                 "unsupported legacy password record at {}; use the previous CLI to recover it or choose a new --data-dir; existing files were preserved",
@@ -85,11 +100,6 @@ fn unlock_with(
         Err(e) => return Err(e.into()),
     }
     let plaintext = encrypted_migration::is_plaintext_file(database)?;
-    let nonempty = match fs::metadata(database) {
-        Ok(meta) => meta.len() > 0,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => return Err(e.into()),
-    };
     let key = if let Some(context) = wallet_vault::context(&record)? {
         wallet_vault::validate_context(&context)?;
         ensure!(

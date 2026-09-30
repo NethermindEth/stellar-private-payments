@@ -183,3 +183,81 @@ fn rejects_record_symlinks() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn rejects_directories_before_signing_or_creating_files() -> Result<()> {
+    for record in [false, true] {
+        let f = Fixture::new()?;
+        let path = if record { record_path(&f.db()) } else { f.db() };
+        fs::create_dir(&path)?;
+        let error = unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
+            .expect_err("directories must be rejected");
+        assert!(error.to_string().contains("regular file"));
+        assert!(path.is_dir());
+        assert_eq!(fs::read_dir(&f.0)?.count(), 1);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_database_symlinks_without_replacing_links_or_plaintext_targets() -> Result<()> {
+    for exists in [false, true] {
+        let f = Fixture::new()?;
+        let target = f.0.join("target.db");
+        if exists {
+            let conn = rusqlite::Connection::open(&target)?;
+            conn.execute_batch(
+                "CREATE TABLE secret(value TEXT); INSERT INTO secret VALUES ('preserve');",
+            )?;
+        }
+        let before = if exists {
+            Some(fs::read(&target)?)
+        } else {
+            None
+        };
+        std::os::unix::fs::symlink(&target, f.db())?;
+        let error = unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
+            .expect_err("database symlinks must be rejected");
+        assert!(error.to_string().contains("regular file"));
+        assert_eq!(fs::read_link(f.db())?, target);
+        assert!(!record_path(&f.db()).exists());
+        assert_eq!(fs::read(&target).ok(), before);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_special_files_before_reading_or_signing() -> Result<()> {
+    for record in [false, true] {
+        let f = Fixture::new()?;
+        let path = if record { record_path(&f.db()) } else { f.db() };
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&path)
+                .status()?
+                .success()
+        );
+        let error = unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
+            .expect_err("special files must be rejected");
+        assert!(error.to_string().contains("regular file"));
+        assert_eq!(fs::read_dir(&f.0)?.count(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_short_and_large_non_sqlite_records_without_modification() -> Result<()> {
+    for size in [1, 15, 16, 16 * 1024 * 1024] {
+        let f = Fixture::new()?;
+        let record = record_path(&f.db());
+        fs::File::create(&record)?.set_len(size)?;
+        let error = unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
+            .expect_err("non-SQLite records must be rejected");
+        assert!(error.to_string().contains("legacy password record"));
+        assert_eq!(fs::metadata(&record)?.len(), size);
+        assert!(!f.db().exists());
+    }
+    Ok(())
+}
