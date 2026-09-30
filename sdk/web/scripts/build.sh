@@ -8,11 +8,6 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROFILE"
-SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir "$CARGO_TARGET_DIR")"
-[[ -f "$SQLITE3MC_CONFIG" ]] || {
-  echo "error: SQLite3MC build did not produce Cargo link configuration" >&2; exit 1;
-}
-MC_ARGS=(--config "$SQLITE3MC_CONFIG")
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
 case "$PROFILE" in
@@ -31,9 +26,9 @@ echo "==> Verifying circuit artifacts match lockfile..."
 sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" "${MC_ARGS[@]}"
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker "${MC_ARGS[@]}"
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker "${MC_ARGS[@]}"
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2

@@ -4,14 +4,18 @@ use sha2::{Digest, Sha256};
 
 #[path = "sqlite3mc_source.rs"]
 mod sqlite3mc_source;
+mod sqlite3mc_wasm;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SQLITE3MC_AMALGAMATION_DIR");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
-    if env::var_os("DOCS_RS").is_none()
-        && env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32")
-    {
-        build_sqlite3mc();
+    if env::var_os("DOCS_RS").is_none() {
+        if env::var("TARGET").as_deref() == Ok("wasm32-unknown-unknown") {
+            let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+            sqlite3mc_wasm::build(&out_dir);
+        } else if env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
+            build_sqlite3mc();
+        }
     }
     println!("cargo:rerun-if-changed=src/state/disclaimer.md");
     println!("cargo:rerun-if-changed=circuits.json");

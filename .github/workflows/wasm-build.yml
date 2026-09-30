@@ -102,5 +102,4 @@ jobs:
 
       - name: Run wasm tests
         run: |
-          SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir target)"
-          cargo --config "$SQLITE3MC_CONFIG" test --target wasm32-unknown-unknown -p stellar-private-payments --lib
+          cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib

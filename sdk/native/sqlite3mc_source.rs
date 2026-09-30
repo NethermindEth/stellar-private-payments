@@ -1,6 +1,6 @@
 //! The pinned SQLite3MC amalgamation and its verified download. Included with
-//! `#[path]` by this crate's build script and by `tools/sqlite3mc-build`, so
-//! the version and hashes are defined once.
+//! `#[path]` by the build script; native and WASM builds share the version
+//! and hashes.
 
 use std::{
     env, fs,

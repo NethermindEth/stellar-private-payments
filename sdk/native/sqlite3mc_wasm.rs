@@ -1,3 +1,4 @@
+//! Compile the pinned encrypted WASM backend as part of the SDK build.
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -6,8 +7,7 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-#[path = "../../../sdk/native/sqlite3mc_source.rs"]
-mod sqlite3mc_source;
+use super::sqlite3mc_source;
 
 const TARGET: &str = "wasm32-unknown-unknown";
 
@@ -79,25 +79,9 @@ const FLAGS: &[&str] = &[
     "-DPRINTF_ALIAS_STANDARD_FUNCTION_NAMES_HARD",
 ];
 
-fn main() {
-    let mut args = env::args_os().skip(1);
-    let mut target_dir = None;
-    while let Some(arg) = args.next() {
-        if arg == "--target-dir" {
-            target_dir = args.next().map(PathBuf::from);
-        } else {
-            panic!("unknown argument: {}", arg.to_string_lossy());
-        }
-    }
-    let target_dir = target_dir
-        .or_else(|| env::var_os("CARGO_TARGET_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("target"));
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("repository root")
-        .to_path_buf();
-    let cache = target_dir.join("sqlite3mc");
+pub fn build(out_dir: &Path) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cache = out_dir.join("sqlite3mc");
     let source = sqlite3mc_source::sources(&cache);
     let sqlite_wasm = sqlite_wasm_source(&root);
     let out = cache.join(TARGET);
@@ -107,6 +91,7 @@ fn main() {
     let cc = tool("CC", &["clang", "clang-18"]);
     let ar = tool("AR", &["llvm-ar", "llvm-ar-18", "ar"]);
     let shim = sqlite_wasm.join("shim");
+    println!("cargo:rerun-if-changed={}", shim.display());
     let mut files = vec![
         source.join(sqlite3mc_source::SOURCE_FILES[0]),
         shim.join("printf/printf.c"),
@@ -114,6 +99,22 @@ fn main() {
     files.extend(MUSL_SOURCES.iter().map(|path| shim.join("musl").join(path)));
     let archive = out.join("libwsqlite3.a");
     let stamp = out.join("build.sha256");
+    for file in &files {
+        println!("cargo:rerun-if-changed={}", file.display());
+    }
+    for name in sqlite3mc_source::SOURCE_FILES {
+        println!("cargo:rerun-if-changed={}", source.join(name).display());
+    }
+    for kind in ["CC", "AR"] {
+        for name in [
+            format!("{kind}_{TARGET}"),
+            format!("{kind}_{}", TARGET.replace('-', "_")),
+            format!("TARGET_{kind}"),
+            kind.into(),
+        ] {
+            println!("cargo:rerun-if-env-changed={name}");
+        }
+    }
     let signature = signature(&files, &cc, &ar);
     if fs::read_to_string(&stamp).ok().as_deref() != Some(&signature) || !archive.is_file() {
         let mut objects = Vec::new();
@@ -151,25 +152,29 @@ fn main() {
         run(&mut command, "archive SQLite3MC for WASM");
         fs::write(&stamp, &signature).expect("write SQLite3MC build stamp");
     }
-    fs::write(
-        out.join("cargo.toml"),
-        format!(
-            "[target.wasm32-unknown-unknown]\nrustflags = [{}]\n\n[target.wasm32-unknown-unknown.wsqlite3]\nrustc-link-search = [{}]\nrustc-link-lib = [\"static=wsqlite3\"]\n",
-            serde_json::to_string(&format!("-Lnative={}", out.display()))
-                .expect("serialize native search path"),
-            serde_json::to_string(&out).expect("serialize link path"),
-        ),
-    ).expect("write Cargo link configuration");
-    println!("{}", out.join("cargo.toml").display());
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=wsqlite3");
 }
 
 fn sqlite_wasm_source(root: &Path) -> PathBuf {
     let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--locked"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--locked",
+            "--offline",
+            "--filter-platform",
+            TARGET,
+        ])
         .current_dir(root)
         .output()
         .expect("run cargo metadata");
-    assert!(output.status.success(), "cargo metadata failed");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let metadata: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("parse cargo metadata");
     metadata["packages"]

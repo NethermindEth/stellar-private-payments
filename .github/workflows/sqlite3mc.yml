@@ -92,8 +92,7 @@ jobs:
       - name: Build and lint encrypted WASM
         run: |
           bash sdk/web/scripts/build.sh
-          SQLITE3MC_CONFIG="$(cargo run --locked --quiet -p sqlite3mc-build -- --target-dir target)"
-          cargo --config "$SQLITE3MC_CONFIG" clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins -- -D warnings
+          cargo clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins -- -D warnings
           npm run check:artifacts --prefix sdk/web
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
