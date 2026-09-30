@@ -52,11 +52,13 @@ async function openStorage(options = {}) {
  * @returns {Promise<boolean>}
  */
 async function bootnodeRequired(rpcUrl, storage, options) {
-  return wasmBootnodeRequired(
-    rpcUrl,
-    storage.toHandle(),
-    requireField(options?.contractConfig, 'contractConfig'),
-  );
+  const contractConfig = requireField(options?.contractConfig, 'contractConfig');
+  const storageHandle = await storage.toHandle();
+  try {
+    return await wasmBootnodeRequired(rpcUrl, storageHandle, contractConfig);
+  } finally {
+    storageHandle.free();
+  }
 }
 
 /**
@@ -171,14 +173,21 @@ async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, op
   const circuitsBaseUrl = requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
   const resolvedProverWorkerUrl = options?.proverWorkerUrl ?? proverWorkerUrl;
 
-  const prover = WasmProverBridge.spawn(resolvedProverWorkerUrl);
-  await prover.configureCircuitsBase(circuitsBaseUrl);
-  await prover.ping();
-  const proverHandle = prover.toHandle();
-
-  return wasmVerifySelectiveDisclosure(rpcUrl, proverHandle, receiptJson, expectedVkHash, {
-    contractConfig,
-  });
+  const prover = ProverBridge.spawn(resolvedProverWorkerUrl);
+  try {
+    await prover.configureCircuitsBase(circuitsBaseUrl);
+    await prover.ping();
+    const proverHandle = prover.toHandle();
+    try {
+      return await wasmVerifySelectiveDisclosure(rpcUrl, proverHandle, receiptJson, expectedVkHash, {
+        contractConfig,
+      });
+    } finally {
+      proverHandle.free();
+    }
+  } finally {
+    prover.free();
+  }
 }
 
 export const Storage = { open: openStorage };

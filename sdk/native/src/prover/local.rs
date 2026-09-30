@@ -100,8 +100,8 @@ impl LocalProver {
         let stem = CircuitStem::transact(params.policy_flags, params.gvk_mode);
         self.transact
             .lock()
-            .expect("prover lock poisoned")
-            .get_mut(&stem)
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&stem)
             .ok_or_else(|| {
                 Error::Other(anyhow::anyhow!("no transact prover configured for {stem}"))
             })?
@@ -129,8 +129,8 @@ impl Prover for LocalProver {
                 "no disclosure circuit registered for {note_count} note(s)"
             ))
         })?;
-        let mut disclosure = self.disclosure.lock().expect("prover lock poisoned");
-        let engine = disclosure.get_mut(circuit.name).ok_or_else(|| {
+        let disclosure = self.disclosure.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = disclosure.get(circuit.name).ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "no disclosure prover configured for {}",
                 circuit.name
@@ -149,7 +149,7 @@ impl Prover for LocalProver {
     ) -> Result<bool, Error> {
         let circuit = validate_registered_receipt(receipt, expected_vk_hash)
             .context("validate disclosure receipt")?;
-        let disclosure = self.disclosure.lock().expect("prover lock poisoned");
+        let disclosure = self.disclosure.lock().unwrap_or_else(|e| e.into_inner());
         let engine = disclosure.get(circuit.name).ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "no disclosure verifier configured for {}",

@@ -66,13 +66,13 @@ impl ProverEngine {
         self.prover.get_uncompressed_proving_key()
     }
 
-    pub fn prove_transact(&mut self, params: TransactParams) -> Result<PreparedProverTx> {
+    pub fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx> {
         let artifacts = transact(params, hash_ext_data_offchain)?;
         self.prove(artifacts)
     }
 
     pub(crate) fn prove_disclosure(
-        &mut self,
+        &self,
         params: DisclosureProveParams,
         circuit: &'static RegisteredCircuit,
     ) -> Result<DisclosureReceipt> {
@@ -146,7 +146,7 @@ impl ProverEngine {
         crate::zk::disclosure::verify_receipt_proof(receipt, &vk_bytes, expected_vk_hash)
     }
 
-    fn prove(&mut self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
+    fn prove(&self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
         let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
         let ext_data = artifacts.ext_data.clone();
 

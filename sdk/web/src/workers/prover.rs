@@ -316,8 +316,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let prepared = TRANSACT_PROVERS.with(|cell| {
-                let mut borrow = cell.borrow_mut();
-                let engine = borrow.get_mut(&stem).ok_or_else(|| {
+                let borrow = cell.borrow();
+                let engine = borrow.get(&stem).ok_or_else(|| {
                     anyhow::anyhow!("transact prover for {stem} is not initialized")
                 })?;
                 engine.prove_transact(params)
@@ -368,8 +368,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
             let witness_bytes = DISCLOSURE_WITNESS_CALCS.with(|cell| {
-                let mut borrow = cell.borrow_mut();
-                let calc = borrow[idx].as_mut().ok_or_else(|| {
+                let borrow = cell.borrow();
+                let calc = borrow[idx].as_ref().ok_or_else(|| {
                     anyhow::anyhow!("disclosure witness calculator is not initialized")
                 })?;
                 calc.compute_witness(&circuit_inputs_json)
