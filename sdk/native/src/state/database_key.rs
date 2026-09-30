@@ -108,10 +108,13 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
 
 #[cfg(not(target_arch = "wasm32"))]
 fn reserve_creation(path: &Path) -> Result<std::fs::File> {
+    #[cfg(unix)]
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).mode(0o600);
+    options.read(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
     let file = match options.create_new(true).open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -120,12 +123,22 @@ fn reserve_creation(path: &Path) -> Result<std::fs::File> {
                 metadata.is_file() && metadata.len() == 0,
                 "database already exists and is not an empty regular file"
             );
+            #[cfg(not(unix))]
+            let inspected = same_file::Handle::from_path(path)?;
             // Open without truncation or replacement. Check the opened file
             // matches the path inspected above before changing it.
             let file = options.create_new(false).open(path)?;
+            #[cfg(unix)]
             let opened = file.metadata()?;
+            #[cfg(unix)]
             ensure!(
                 opened.dev() == metadata.dev() && opened.ino() == metadata.ino(),
+                "database changed while reserving creation"
+            );
+            #[cfg(not(unix))]
+            ensure!(
+                same_file::Handle::from_file(file.try_clone()?)? == inspected
+                    && std::fs::symlink_metadata(path)?.is_file(),
                 "database changed while reserving creation"
             );
             file
@@ -134,10 +147,56 @@ fn reserve_creation(path: &Path) -> Result<std::fs::File> {
     };
     // Serialize creators that encounter the same empty reservation. The owner
     // must still serialize database use, as for every encrypted open.
-    file.try_lock()?;
+    lock_creation(&file)?;
     ensure!(file.metadata()?.len() == 0, "database is no longer empty");
+    #[cfg(unix)]
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     Ok(file)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(windows)))]
+fn lock_creation(file: &std::fs::File) -> Result<()> {
+    file.try_lock()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn lock_creation(file: &std::fs::File) -> Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::{
+        Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx},
+        System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0},
+    };
+
+    // Windows byte-range locks also prevent I/O from SQLite's other handle.
+    // Reserve one byte beyond SQLite's maximum database size (2^48 bytes),
+    // leaving its data and lock bytes available. Closing the file releases it.
+    let mut overlapped = OVERLAPPED {
+        Anonymous: OVERLAPPED_0 {
+            Anonymous: OVERLAPPED_0_0 {
+                Offset: 0,
+                OffsetHigh: 0x0001_0000,
+            },
+        },
+        ..Default::default()
+    };
+    // SAFETY: file owns a live synchronous handle; overlapped stays valid for
+    // the nonblocking call, and the reserved byte range does not overflow.
+    let locked = unsafe {
+        LockFileEx(
+            file.as_raw_handle(),
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+            0,
+            1,
+            0,
+            &mut overlapped,
+        )
+    };
+    if locked == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
 }
 
 /// Open a raw encrypted SQLite connection with explicit create/open policy.
@@ -241,23 +300,46 @@ pub(crate) fn validation_connection(path: &Path) -> Result<Connection> {
     let path = path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("database path must be UTF-8"))?;
+    #[cfg(windows)]
+    let path = windows_uri_path(path);
+    #[cfg(windows)]
+    let path = path.as_str();
+    Connection::open_with_flags(
+        validation_uri(path),
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(Into::into)
+}
+
+fn validation_uri(path: &str) -> String {
     let encoded: String = path
         .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"/._-~".contains(&b) {
+        .enumerate()
+        .map(|(index, b)| {
+            if (b.is_ascii_alphanumeric() || b"/._-~".contains(&b))
+                && !(index == 0 && path.starts_with("//"))
+            {
                 char::from(b).to_string()
             } else {
                 format!("%{b:02X}")
             }
         })
         .collect();
-    Connection::open_with_flags(
-        format!("file:{encoded}?mode=ro&immutable=1"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(Into::into)
+    format!("file:{encoded}?mode=ro&immutable=1")
+}
+
+#[cfg(any(windows, test))]
+fn windows_uri_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    // Keep UNC and extended-length prefixes as paths, not URI authorities.
+    // SQLite's Windows VFS interprets these after URI percent decoding.
+    if path.as_bytes().get(1) == Some(&b':') {
+        format!("/{path}")
+    } else {
+        path
+    }
 }
 pub(crate) fn validate_read_only(path: &Path, key: Option<&DatabaseKey>) -> Result<()> {
     let conn = validation_connection(path)?;

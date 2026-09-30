@@ -31,14 +31,32 @@ impl Drop for Fixture {
 const MARKER: &str = "ENCRYPTED_STORAGE_TEST_PROTECTED_1ce596";
 
 #[test]
+fn windows_validation_paths_preserve_drive_unc_and_literal_characters() {
+    for (path, encoded) in [
+        (r"C:\wallet\state #%.db", "/C%3A/wallet/state%20%23%25.db"),
+        (r"\\server\share\state.db", "%2F/server/share/state.db"),
+        (r"\\?\C:\wallet\state.db", "%2F/%3F/C%3A/wallet/state.db"),
+    ] {
+        assert_eq!(
+            validation_uri(&windows_uri_path(path)),
+            format!("file:{encoded}?mode=ro&immutable=1")
+        );
+    }
+}
+
+#[test]
 fn encrypted_filenames_remain_literal() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
-    for name in [
-        "spaces #percent%?mode=memory.db",
-        "file:literal.db",
+    let names = [
+        "spaces #percent%.db",
         "unicode-ć.db",
-    ] {
+        #[cfg(unix)]
+        "spaces #percent%?mode=memory.db",
+        #[cfg(unix)]
+        "file:literal.db",
+    ];
+    for name in names {
         let path = f.0.join(name);
         seed(&path, &key)?;
         let before = fs::read(&path)?;
@@ -85,11 +103,14 @@ fn snapshot(path: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
 
 #[test]
 fn encrypted_create_reopen_preserves_schema_and_hides_contents() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
     seed(&f.db(), &key)?;
-    assert_eq!(fs::metadata(f.db())?.permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(f.db())?.permissions().mode() & 0o777, 0o600);
+    }
     let bytes = fs::read(f.db())?;
     assert!(!bytes.starts_with(b"SQLite format 3"));
     assert!(!bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()));
@@ -245,8 +266,7 @@ fn interrupted_before_schema_creation_can_be_retried() -> Result<()> {
 }
 
 #[test]
-fn creation_retry_preserves_nonempty_files_and_rejects_symlinks() -> Result<()> {
-    use std::os::unix::fs::symlink;
+fn creation_retry_preserves_nonempty_files_and_serializes_creators() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
     fs::write(f.db(), b"existing data")?;
@@ -255,17 +275,27 @@ fn creation_retry_preserves_nonempty_files_and_rejects_symlinks() -> Result<()> 
     assert_eq!(snapshot(&f.db())?, before);
     let target = f.0.join("empty-target.db");
     fs::write(&target, [])?;
-    let link = f.0.join("symlink.db");
-    symlink(&target, &link)?;
-    assert!(open(&link, &key, OpenPurpose::CreateNew).is_err());
-    assert!(fs::symlink_metadata(&link)?.file_type().is_symlink());
-    assert_eq!(fs::metadata(&target)?.len(), 0);
     // An active creator owns the empty file until initialization finishes.
     let reservation = reserve_creation(&target)?;
     assert!(open(&target, &key, OpenPurpose::CreateNew).is_err());
     assert_eq!(fs::metadata(&target)?.len(), 0);
     drop(reservation);
     seed(&target, &key)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn creation_retry_rejects_symlinks() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let target = f.0.join("empty-target.db");
+    fs::write(&target, [])?;
+    let link = f.0.join("symlink.db");
+    std::os::unix::fs::symlink(&target, &link)?;
+    assert!(open(&link, &key, OpenPurpose::CreateNew).is_err());
+    assert!(fs::symlink_metadata(&link)?.file_type().is_symlink());
+    assert_eq!(fs::metadata(&target)?.len(), 0);
     Ok(())
 }
 
