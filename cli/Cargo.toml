@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 base64.workspace = true
-crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+crypto_secretbox.workspace = true
 getrandom.workspace = true
 rpassword = "7.5.4"
 zeroize.workspace = true
