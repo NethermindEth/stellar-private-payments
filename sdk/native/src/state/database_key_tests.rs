@@ -85,11 +85,14 @@ fn snapshot(path: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
 
 #[test]
 fn encrypted_create_reopen_preserves_schema_and_hides_contents() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
     seed(&f.db(), &key)?;
-    assert_eq!(fs::metadata(f.db())?.permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(f.db())?.permissions().mode() & 0o777, 0o600);
+    }
     let bytes = fs::read(f.db())?;
     assert!(!bytes.starts_with(b"SQLite format 3"));
     assert!(!bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()));
