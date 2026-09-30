@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # workspace
-stellar-private-payments = { path = "../sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "../sdk/native", version = "0.3.0" }
 
 # external
 anyhow = { version = "1", default-features = false, features = ["std"] }
