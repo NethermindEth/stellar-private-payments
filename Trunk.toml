@@ -6,7 +6,7 @@ filehash = false
 release = true
 
 [watch]
-watch = ["app", "circuits", "sdk/web", "sdk/native", "contracts", "circuit-keys", "tools/sqlite3mc-build", "vendor/sqlite-wasm-vfs", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+watch = ["app", "circuits", "sdk/web", "sdk/native", "contracts", "circuit-keys", "tools/sqlite3mc-build", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
 # The pre_build hook writes sdk/web/dist and the profile marker; watching them
 # makes every SDK build trigger the next one.
 ignore = [

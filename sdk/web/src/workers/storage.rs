@@ -299,7 +299,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "the database is being opened"
             );
             tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
-            // `pause_vfs` refuses to release handles while SQLite still has
+            // `pause` refuses to release handles while SQLite still has
             // files open on this VFS, so the live connection must be closed
             // first — this worker is about to be torn down by the browser
             // anyway, and any in-flight request will simply fail from here on.

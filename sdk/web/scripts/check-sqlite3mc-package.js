@@ -18,7 +18,7 @@ const required = new Set([
 const pinnedCipherVersion = readFileSync(join(root, 'sdk/native/sqlite3mc_version.rs'), 'utf8').match(/const VERSION: &str = "([^"]+)";/)?.[1];
 if (!pinnedCipherVersion) throw new Error('cannot read pinned SQLite3MC version');
 const notice = readFileSync(join(root, 'vendor/sqlite3mc-NOTICE.txt'));
-const vfsNotice = readFileSync(join(root, 'vendor/sqlite-wasm-vfs/LICENSE'));
+const vfsNotice = readFileSync(join(root, 'vendor/sqlite-wasm-vfs-LICENSE.txt'));
 
 function npmPack(...args) {
   const result = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', ...args], {

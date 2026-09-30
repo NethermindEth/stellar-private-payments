@@ -203,7 +203,7 @@ mod pools {
         // SQLite owns the wrapper until release() destroys it.
         let rc = unsafe { sqlite_wasm_rs::sqlite3mc_vfs_create(c"opfs-sahpool".as_ptr(), 1) };
         if rc != sqlite_wasm_rs::SQLITE_OK {
-            util.pause_vfs()?;
+            util.pause()?;
             return Err(anyhow!("Failed to register encrypted OPFS storage"));
         }
         ENCRYPTED.with(|p| *p.borrow_mut() = Some(util));
@@ -211,7 +211,7 @@ mod pools {
     }
 
     pub(super) fn encrypted_exists(name: &str) -> Result<bool> {
-        with_encrypted(|pool| Ok(pool.exists(name)?))
+        with_encrypted(|pool| Ok(pool.exists(name)))
     }
 
     /// Delete `name` and its journal from the encrypted pool, if present.
@@ -228,7 +228,7 @@ mod pools {
             return Ok(false);
         }
         PLAINTEXT.with(|p| match p.borrow().as_ref() {
-            Some(pool) => Ok(pool.exists(name)?),
+            Some(pool) => Ok(pool.exists(name)),
             None => Ok(false),
         })
     }
@@ -238,7 +238,7 @@ mod pools {
         if let Some(pool) = PLAINTEXT.with(|p| p.borrow_mut().take()) {
             pool.delete_db(name)?;
             pool.delete_db(&format!("{name}-journal"))?;
-            pool.pause_vfs()?;
+            pool.pause()?;
         }
         let options = FileSystemRemoveOptions::new();
         options.set_recursive(true);
@@ -261,9 +261,9 @@ mod pools {
         for pool in [&ENCRYPTED, &PLAINTEXT] {
             pool.with(|p| {
                 if let Some(pool) = p.borrow().as_ref()
-                    && let Err(e) = pool.pause_vfs()
+                    && let Err(e) = pool.pause()
                 {
-                    tracing::debug!("[WORKER-STORAGE] pause_vfs failed: {e:#}");
+                    tracing::debug!("[WORKER-STORAGE] pause failed: {e:#}");
                 }
             });
         }
@@ -326,10 +326,9 @@ mod pools {
     }
 
     fn is_locked(err: &OpfsSAHError) -> bool {
-        // The error's Display and Debug do not include the wrapped JsValue, so
-        // inspect the DOMException the browser throws when another tab or
-        // worker still holds the OPFS sync access handles.
-        let OpfsSAHError::CreateSyncAccessHandle(js_err) = err else {
+        // Inspect the original DOMException to distinguish another tab's OPFS
+        // lock from other failures to acquire a sync access handle.
+        let OpfsSAHError::Opfs { value: js_err, .. } = err else {
             return false;
         };
         js_err

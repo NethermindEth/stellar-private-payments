@@ -155,7 +155,8 @@ Supported native and browser builds compile the same hash-pinned SQLite3MC
 amalgamation via `sdk/native/sqlite3mc_source.rs`. The WASM builder uses
 `sqlite-wasm-rs` shims and a Cargo link override; the crate's bundled older cipher
 source is not the supported browser backend. Build using the repository scripts.
-Native and WASM configure extension loading out. The vendored SAH VFS allows only
-one open handle per logical filename, so native multi-handle APIs must not be
-assumed supported on WASM. Backend upgrades, cross-platform file portability,
-and additional release architectures need separate qualification.
+Native and WASM configure extension loading out. The pinned upstream SAH VFS
+does not support multiple SQLite connections to the same database; native
+multi-handle APIs must not be assumed supported on WASM. Backend upgrades,
+cross-platform file portability, and additional release architectures need
+separate qualification.

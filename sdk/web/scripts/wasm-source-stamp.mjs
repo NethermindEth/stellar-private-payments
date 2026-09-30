@@ -6,9 +6,8 @@ const root = new URL('../../../', import.meta.url).pathname;
 const inputs = [
     'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'contracts', 'sdk/native/Cargo.toml', 'sdk/native/build.rs',
     'sdk/native/circuits.json', 'sdk/native/sqlite3mc_source.rs', 'sdk/native/sqlite3mc_version.rs', 'sdk/web/Cargo.toml', 'sdk/web/scripts/build.sh',
-    'sdk/native/src', 'sdk/web/src', 'circuits/src', 'circuits/Cargo.toml',
+    'sdk/native/src', 'sdk/web/src', 'vendor/sqlite-wasm-vfs-LICENSE.txt', 'circuits/src', 'circuits/Cargo.toml',
     'circuit-keys/src', 'circuit-keys/Cargo.toml', 'tools/sqlite3mc-build',
-    'vendor/sqlite-wasm-vfs/src', 'vendor/sqlite-wasm-vfs/Cargo.toml',
     'sdk/web/scripts/wasm-source-stamp.mjs',
 ];
 const hash = createHash('sha256');

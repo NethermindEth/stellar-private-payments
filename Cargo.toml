@@ -79,8 +79,9 @@ serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-sqlite-wasm-rs = { version = "0.5.5", default-features = false, features = ["sqlite3mc"] }
-sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
+sqlite-wasm-rs = { version = "0.5.5", default-features = false, features = ["sqlite3mc", "wasm-bindgen"] }
+# Pin the upstream SAH recovery fix; its later 0.3 API needs a coordinated rusqlite upgrade.
+sqlite-wasm-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8", default-features = false, features = ["sahpool"] }
 stellar-private-payments = { path = "sdk/native", version = "0.1.0" }
 taceo-poseidon2 = { version = "0.3", default-features = false, features = ["bn254", "t2", "t3", "t4"] }
 thiserror = { version = "2", default-features = false }
@@ -145,5 +146,6 @@ opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
-# SAH lock reporting and single-handle ownership needed for hot-journal recovery.
-sqlite-wasm-vfs = { path = "vendor/sqlite-wasm-vfs" }
+# The upstream SAH fix depends on matching VFS interfaces from this commit.
+rsqlite-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }
+sqlite-wasm-rs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }
