@@ -8,6 +8,12 @@ publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 
+# zip is used by sqlite3mc_source.rs, which build.rs includes with #[path];
+# cargo-shear does not follow #[path] modules. sqlite-wasm-rs enables the
+# WASM host adapter and encryption features for rusqlite.
+[package.metadata.cargo-shear]
+ignored = ["zip", "sqlite-wasm-rs"]
+
 [lib]
 name = "stellar_private_payments"
 
@@ -55,7 +61,7 @@ ark-relations = { workspace = true }
 ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
-crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+crypto_secretbox.workspace = true
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
@@ -66,20 +72,30 @@ futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
+[target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
+same-file = "1.0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = { workspace = true }
 getrandom = { workspace = true, features = ["js"] }
 gloo-timers = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
+serde_json = { workspace = true, features = ["std"] }
+cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
+zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
@@ -89,7 +105,7 @@ pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["bundled"] }
+rusqlite = { workspace = true, features = ["in_gecko"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

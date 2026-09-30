@@ -5,7 +5,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ARTIFACTS="$ROOT/target/circuits-artifacts"
+ARTIFACTS="${CIRCUIT_ARTIFACTS_DIR:-$ROOT/target/circuits-artifacts}"
 KEYS="$ROOT/deployments/testnet/circuit_keys"
 LOCK="$ROOT/deployments/testnet/circuits.json"
 CRATE_LOCK="$ROOT/sdk/native/circuits.json"

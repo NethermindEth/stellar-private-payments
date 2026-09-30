@@ -296,9 +296,9 @@ mod tests {
 
     fn open_audit_db(label: &str) -> anyhow::Result<(PathBuf, LocalStorage)> {
         let path = temp_db_path(label);
-        let db = SqliteStorage::connect_file(&path)?;
+        let db = crate::state::test_storage(&path)?;
         drop(db);
-        let storage = LocalStorage::open(path.to_str().expect("temp path utf-8"))?;
+        let storage = crate::state::test_local_storage(path.to_str().expect("temp path utf-8"))?;
         Ok((path, storage))
     }
 
@@ -306,7 +306,7 @@ mod tests {
         path: &PathBuf,
         f: impl FnOnce(&mut SqliteStorage) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        let mut db = SqliteStorage::connect_file(path)?;
+        let mut db = crate::state::test_storage(path)?;
         f(&mut db)
     }
 

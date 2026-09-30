@@ -380,7 +380,7 @@ mod signer_is_note_owner_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod derive_privacy_keys_tests {
     use super::*;
-    use crate::{Client, LocalSigner, LocalStorage, types::ContractConfig};
+    use crate::{Client, LocalSigner, types::ContractConfig};
 
     /// The real Stellar address for `SigningKey::from_bytes(&[7u8; 32])` —
     /// must match `SECRET` for `verify_owner_signature` to accept it.
@@ -400,7 +400,8 @@ mod derive_privacy_keys_tests {
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
             StorageHandle::from(
-                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+                crate::state::test_local_storage(db.to_string_lossy().as_ref())
+                    .expect("open storage"),
             ),
             ContractConfig {
                 network: PASSPHRASE.to_string(),

@@ -1,3 +1,5 @@
+import { LocalData } from './ui/local-data.js';
+import { storageWasLocked } from './wasm-facade.js';
 import { Templates } from './ui/templates.js';
 import { Shell, Wallet } from './ui/navigation.js';
 import { Transactions } from './ui/transactions.js';
@@ -12,6 +14,7 @@ import { rememberedNoteOwner } from './account-session.js';
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
     Shell.init();
+    LocalData.init();
     Wallet.init();
     Transactions.init();
     SigningAccount.init();
@@ -25,7 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reconnect on load only to an owner the user connected before. Without
     // one, connecting would take Freighter's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
-    if (rememberedNoteOwner() && await getConnectedAddress()) {
+    if (!storageWasLocked() && rememberedNoteOwner() && await getConnectedAddress()) {
         Wallet.connect({ auto: true }).catch(() => {});
     }
 });

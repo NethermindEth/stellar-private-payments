@@ -93,3 +93,28 @@ test('waitForNotesAfterIndexer waits for progress before reading the table', asy
   assert.equal(result.progress.ledger, 41);
   assert.equal(result.notes.matchingNotes[0].id, 'note-b');
 });
+
+test('waitForNotesAfterIndexer rejects only at the caller\'s await when it times out early', async () => {
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  let fireTimeout;
+  const page = {
+    on() {},
+    off() {},
+    isClosed() { return false; },
+  };
+  try {
+    const pending = waitForNotesAfterIndexer(page, {
+      afterLedger: 40,
+      indexer: { setTimer: (fn) => { fireTimeout = fn; return 1; }, clearTimer: () => {} },
+    });
+    fireTimeout();
+    // Let the rejection settle while the caller is busy elsewhere.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+    await assert.rejects(pending, { name: 'IndexerProgressTimeoutError' });
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});

@@ -148,9 +148,22 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
   // connect state instead of timing out while `Wallet.connect()` is blocked.
   await waitForCondition({
     operation: 'app:connect-or-setup-modal',
+    ignoreError: () => false,
     timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS,
     intervalMs: 100,
-    observe: () => readAppLifecycle(page),
+    observe: async () => {
+      const error = await page.locator('body').getAttribute('data-wallet-error');
+      if (error) throw new Error(`app connection failed: ${error}`);
+      const passwordDialog = page.getByTestId('storage-password-dialog');
+      if (await passwordDialog.isVisible()) {
+        const password = process.env.E2E_STORAGE_PASSWORD || 'spp-e2e-storage-test-password';
+        await page.getByTestId('storage-password').fill(password);
+        const confirmation = page.getByTestId('storage-password-confirm');
+        if (await confirmation.isVisible()) await confirmation.fill(password);
+        await page.getByTestId('storage-password-submit').click();
+      }
+      return readAppLifecycle(page);
+    },
     isReady: ({ walletState, onboardingVisible, bootnodeConsentVisible }) =>
       walletState === 'ready' || onboardingVisible || bootnodeConsentVisible,
   });

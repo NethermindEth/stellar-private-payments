@@ -11,3 +11,8 @@ rustflags = [
     "-Clink-arg=--initial-memory=67108864",
     "-Clink-arg=--max-memory=4294967296",
 ]
+
+# The SDK build script supplies the pinned SQLite3MC WASM archive. Suppress
+# sqlite-wasm-rs's default C build so it cannot link its older bundled engine.
+[target.wasm32-unknown-unknown.wsqlite3]
+rustc-link-lib = []

@@ -7,7 +7,7 @@ WEB="$ROOT/sdk/web"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
-ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
+ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROFILE"
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
 case "$PROFILE" in
@@ -26,9 +26,9 @@ echo "==> Verifying circuit artifacts match lockfile..."
 sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
-cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
@@ -117,6 +117,9 @@ done
 
 rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
+mkdir -p "$WEB/dist/licenses"
+cp "$ROOT/vendor/sqlite3mc-NOTICE.txt" "$WEB/dist/licenses/SQLite3MC.txt"
+cp "$ROOT/vendor/sqlite-wasm-vfs-LICENSE.txt" "$WEB/dist/licenses/sqlite-wasm-vfs-LICENSE.txt"
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"

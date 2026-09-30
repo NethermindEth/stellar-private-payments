@@ -18,6 +18,8 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
 
+Persistent databases are fully encrypted with SQLite3MC. Both the CLI and browser app unlock their random database keys with storage passwords. The browser requests password creation and confirmation on first use, then a password on later visits. Only KDF parameters and encrypted key envelopes are persisted. Freighter signatures are used for privacy-key derivation and transactions, not storage unlocking. The header provides an explicit Lock/Unlock button. Locking closes the storage worker and reloads the page to discard decrypted UI and WASM state; a tab-session marker suppresses automatic reconnection until the user unlocks again. Inactivity locking defaults to five minutes and can be set to 15, 30, or 60 minutes, or Never, in settings. Active transactions and proof generation can defer an expired timeout by at most ten minutes. The timeout preference is non-secret and is stored separately in localStorage.
+
 ## Browser SDK (`sdk/web`)
 
 The web SDK runs Rust on the main thread via WASM, with blocking work offloaded to Web Workers. It is built with `npm run build` in `sdk/web` and consumed by the app as a local npm dependency (`app/package.json` → `file:../sdk/web`).
@@ -62,7 +64,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Storage` (WASM, wasm-bindgen API)**
 
-- Spawns the storage worker once per page (`Storage.open({ workerUrl? })`).
+- Spawns the storage worker once per page (`Storage.open({ workerUrl?, keyProvider, createNew? })`).
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 

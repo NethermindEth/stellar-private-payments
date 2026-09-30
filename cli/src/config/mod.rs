@@ -1,3 +1,4 @@
+mod password;
 mod toml;
 
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ const SIGN_AS_FLAG: &str = "--sign-as";
 /// CLI flag overrides used to build a [`CliConfig`].
 #[derive(Debug, Default)]
 pub struct CliConfigOverrides {
+    pub storage_password_file: Option<PathBuf>,
     pub deployment_path: Option<PathBuf>,
     pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
@@ -52,6 +54,11 @@ pub struct CliConfigOverrides {
 /// need them.
 #[derive(Debug, Clone)]
 pub struct CliConfig {
+    pub storage_password_file: Option<PathBuf>,
+    database_key: std::sync::Arc<
+        std::sync::OnceLock<stellar_private_payments::state::database_key::DatabaseKey>,
+    >,
+    storage_owner: std::sync::Arc<std::sync::OnceLock<std::fs::File>>,
     /// TOML config file when loaded; otherwise None.
     pub config_file: Option<PathBuf>,
     /// File path when overridden; otherwise [`EMBEDDED_DEPLOYMENT_LABEL`].
@@ -78,6 +85,7 @@ impl CliConfig {
     ) -> Result<Self> {
         let file = file.unwrap_or_default();
         let CliConfigOverrides {
+            storage_password_file,
             deployment_path,
             network,
             data_dir,
@@ -104,6 +112,9 @@ impl CliConfig {
             .unwrap_or_else(|| deployment.network.clone());
 
         Ok(Self {
+            storage_password_file,
+            database_key: Default::default(),
+            storage_owner: Default::default(),
             config_file,
             deployment_source,
             deployment,
@@ -166,12 +177,30 @@ impl CliConfig {
             .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
     }
 
-    /// Open (creating if needed) the local sqlite database (`spp.db`).
-    pub fn open_storage(&self) -> Result<SqliteStorage> {
+    /// Unlock with a password, retaining the database key for this command.
+    pub fn database_key(
+        &self,
+    ) -> Result<&stellar_private_payments::state::database_key::DatabaseKey> {
+        if let Some(key) = self.database_key.get() {
+            return Ok(key);
+        }
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
-        let path = self.db_path();
-        SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
+        if self.storage_owner.get().is_none() {
+            let owner = std::fs::File::open(&self.data_dir)?;
+            owner
+                .try_lock()
+                .context("storage directory is in use by another process")?;
+            let _ = self.storage_owner.set(owner);
+        }
+        let key = password::unlock(&self.db_path(), self.storage_password_file.as_deref())?;
+        Ok(self.database_key.get_or_init(|| key))
+    }
+
+    /// Open the encrypted database, creating/unlocking its key automatically.
+    pub fn open_storage(&self) -> Result<SqliteStorage> {
+        SqliteStorage::reopen_encrypted(self.db_path(), self.database_key()?)
+            .with_context(|| format!("open {}", self.db_path().display()))
     }
 }
 

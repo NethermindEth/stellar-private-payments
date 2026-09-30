@@ -452,6 +452,7 @@ export const Wallet = {
             // flips as soon as Freighter supplies an address, while runtime
             // and pool initialization still make transaction controls unusable.
             document.body.dataset.walletState = 'connecting';
+            delete document.body.dataset.walletError;
             const signer = new FreighterSigner();
 
             try {
@@ -506,6 +507,7 @@ export const Wallet = {
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
+                document.body.dataset.walletError = message || 'Failed to connect wallet';
                 // Freighter no longer holds the remembered owner, so it could
                 // not sign as it; let the next connection take another.
                 const ownerNotInWallet = /not the requested|signed with a different account/i.test(message);

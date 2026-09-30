@@ -106,8 +106,12 @@ async fn build_session(
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage =
-        LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?.into();
+    let storage = LocalStorage::open_encrypted(
+        storage_path.to_str().context("storage path is not UTF-8")?,
+        stellar_private_payments::state::database_key::DatabaseKey::generate()?,
+        stellar_private_payments::state::database_key::OpenPurpose::CreateNew,
+    )?
+    .into();
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store

@@ -278,7 +278,7 @@ fn run_step(
 
     if let Some(pool_through) = bootstrap_pool_through {
         assert_eq!(leaves.len() % 2, 0, "Leaves should be even for this test");
-        for pair in leaves[..pool_through].chunks_exact(2) {
+        for pair in leaves[..pool_through].as_chunks::<2>().0 {
             let leaf_1 = scalar_to_u256(env, pair[0]);
             let leaf_2 = scalar_to_u256(env, pair[1]);
             env.as_contract(&contracts.pool, || {

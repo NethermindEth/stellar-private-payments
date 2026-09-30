@@ -148,7 +148,7 @@ jobs:
       - if: steps.registry.outputs.publish == 'true'
         run: npm run build
       - if: steps.registry.outputs.publish == 'true'
-        run: npm run check:artifacts && npm run check:bindgen && npm run check:types
+        run: npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package
       - if: steps.registry.outputs.publish == 'true'
         run: npm publish --ignore-scripts --provenance
 
@@ -262,6 +262,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
           - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
@@ -275,9 +276,8 @@ jobs:
         with:
           toolchain: stable
 
-      # Native (macOS) builds compile with rust-toolchain.toml, so
-      # add the target to that toolchain. The musl targets build via `cross`,
-      # which supplies the target inside its container.
+      # cross supplies the musl toolchains inside its containers. Native
+      # Linux and macOS builds use the repository's Rust toolchain.
       - name: Add target
         if: ${{ !matrix.cross }}
         run: rustup target add ${{ matrix.target }}
@@ -308,14 +308,14 @@ jobs:
         with:
           tool: cross
 
-      - name: Build
+      - name: Build with required SQLite3MC
         shell: bash
         run: |
           set -eu
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+            cross build --locked -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
           else
-            cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+            cargo build --locked -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
           fi
 
       - name: Package
@@ -325,7 +325,7 @@ jobs:
           mkdir -p out
           BIN="target/${{ matrix.target }}/release/spp"
           test -f "$BIN"
-          tar -C "$(dirname "$BIN")" -czf "out/spp-${{ matrix.target }}.tar.gz" spp
+          tar -czf "out/spp-${{ matrix.target }}.tar.gz" -C "$(dirname "$BIN")" spp -C "$GITHUB_WORKSPACE/vendor" sqlite3mc-NOTICE.txt
           cd out
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"

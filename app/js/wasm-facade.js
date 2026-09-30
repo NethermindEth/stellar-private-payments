@@ -1,3 +1,5 @@
+import { closeAndReload } from './storage-lock.js';
+import { startAutoLock } from './storage-timeout.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
@@ -22,6 +24,8 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import { openPasswordStorage } from './storage-key.js';
+import { requestStoragePassword } from './storage-password.js';
 
 export { DisclosureRequest };
 
@@ -32,6 +36,38 @@ const CIRCUITS_BASE_URL = new URL(
 ).href;
 
 let storageHandle = null;
+let stopAutoLock = null;
+let storageLocking = false;
+export const STORAGE_STATE_EVENT = 'spp:storage-state';
+const LOCKED_SESSION_KEY = 'spp.storageLocked';
+export function storageWasLocked() {
+    return sessionStorage.getItem(LOCKED_SESSION_KEY) === 'true';
+}
+export function isStorageUnlocked() { return !!storageHandle && !storageLocking; }
+function setStorageState(state) {
+    document.body.dataset.storageState = state;
+    window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
+}
+
+/** Close the worker, then reload to discard all decrypted UI and WASM state. */
+export async function lockStorage() {
+    if (storageLocking) return;
+    storageLocking = true;
+    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    stopAutoLock?.();
+    stopAutoLock = null;
+    disposeClient();
+    setStorageState('locking');
+    // Cover decrypted content immediately, including dialogs and settings.
+    document.body.inert = true;
+    document.body.style.visibility = 'hidden';
+    const handle = storageHandle;
+    storageHandle = null;
+    appStorageInstance = null;
+    await closeAndReload(handle);
+}
+
+let storageOpening = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
@@ -172,11 +208,27 @@ export function disposeClient() {
  * @returns {Promise<import('./app-storage.js').AppStorage>}
  */
 export async function ensureStorage() {
+    if (storageLocking) throw new Error('Storage is locking.');
     await ensureWasmInit();
     if (!storageHandle) {
-        storageHandle = await Storage.open();
-        bindAppStorage(storageHandle);
-        installStoragePauseOnUnload();
+        if (!storageOpening) {
+            setStorageState('unlocking');
+            storageOpening = openPasswordStorage({
+                storage: Storage,
+                requestPassword: requestStoragePassword,
+            }).then(handle => {
+                storageHandle = handle;
+                sessionStorage.removeItem(LOCKED_SESSION_KEY);
+                stopAutoLock = startAutoLock(() => void lockStorage());
+                setStorageState('ready');
+                bindAppStorage(handle);
+                installStoragePauseOnUnload();
+            }).catch(error => {
+                setStorageState('locked');
+                throw error;
+            }).finally(() => { storageOpening = null; });
+        }
+        await storageOpening;
     }
     return appStorageInstance;
 }

@@ -183,7 +183,7 @@ impl Client {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod divergent_session_tests {
     use super::*;
-    use crate::{LocalSigner, LocalStorage, types::SignerAddress};
+    use crate::{LocalSigner, types::SignerAddress};
 
     const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const DELEGATE: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
@@ -202,7 +202,8 @@ mod divergent_session_tests {
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
             StorageHandle::from(
-                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+                crate::state::test_local_storage(db.to_string_lossy().as_ref())
+                    .expect("open storage"),
             ),
             ContractConfig {
                 network: PASSPHRASE.to_string(),

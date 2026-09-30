@@ -35,7 +35,7 @@
 
     <link data-trunk rel="copy-dir" href="assets/" />
 </head>
-<body data-wallet-state="disconnected" class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
+<body data-storage-state="locked" data-wallet-state="disconnected" class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950">
         Skip to main content
     </a>
@@ -68,6 +68,7 @@
                             <span class="text-slate-600">·</span>
                             <span id="sync-status" class="text-slate-400">Offline</span>
                         </div>
+                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-200">Unlock</button>
                         <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
                             Connect Freighter
                         </button>
@@ -492,6 +493,16 @@
                         </div>
                     </div>
                 </div>
+
+                <label class="mt-6 block text-sm text-slate-200" for="settings-auto-lock">Automatically lock local data after inactivity</label>
+                <select id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                    <option value="5">5 minutes</option>
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="0">Never</option>
+                </select>
+                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Enter your storage password to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                     <button id="settings-save-btn" type="button" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Save settings</button>
