@@ -13,7 +13,7 @@ export async function openWalletStorage({ locks = globalThis.navigator?.locks, .
     return locks.request(RECORD_KEY, { mode: 'exclusive' }, () => openLockedWalletStorage(options));
 }
 
-async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature,
+async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature, confirmAccount,
     records = localStorage, origin = location.origin, crypto = globalThis.crypto }) {
     let record = JSON.parse(records.getItem(RECORD_KEY) || 'null');
     const fresh = !record;
@@ -26,6 +26,19 @@ async function openLockedWalletStorage({ storage, getAddress, signMessage, verif
         (!fresh && (typeof record.iv !== 'string' || decode(record.iv).length !== 12 ||
         typeof record.envelope !== 'string' || decode(record.envelope).length !== 48))) {
         throw new Error('Invalid storage key metadata. Restore the original metadata to unlock storage.');
+    }
+    if (confirmAccount) {
+        for (;;) {
+            const confirmed = await confirmAccount({ address: record.address, fresh });
+            if (!fresh) break;
+            if (typeof confirmed === 'string' && confirmed) record.address = confirmed;
+            // The user may switch accounts while the confirmation is visible.
+            // Confirm the updated account before binding any persistent data.
+            const selected = await getAddress();
+            if (selected === record.address) break;
+            if (typeof selected !== 'string' || !selected) throw new Error('Select an account in Freighter to unlock local storage.');
+            record.address = selected;
+        }
     }
     const message = `Stellar Private Payments storage unlock v1\nOrigin: ${origin}\nAccount: ${record.address}\nSalt: ${record.salt}`;
     const sign = async () => {

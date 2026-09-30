@@ -184,3 +184,67 @@ test('missing Web Locks fails before reading records or asking for signatures', 
   assert.equal(f.values.size, 0);
   assert.equal(f.keys.length, 0);
 });
+
+test('enrollment reconfirms an account changed in Freighter before binding storage', async () => {
+  const f = fixture();
+  let active = 'owner-a';
+  const confirmations = [];
+  f.options.getAddress = async () => active;
+  f.options.confirmAccount = async details => {
+    confirmations.push(details);
+    assert.equal(f.signedAddresses.length, 0);
+    assert.equal(f.values.size, 0);
+    active = 'owner-b';
+  };
+  await openWalletStorage(f.options);
+  assert.deepEqual(confirmations, [
+    { address: 'owner-a', fresh: true },
+    { address: 'owner-b', fresh: true },
+  ]);
+  assert.deepEqual(f.signedAddresses, ['owner-b', 'owner-b']);
+  assert.equal(JSON.parse([...f.values.values()][0]).address, 'owner-b');
+});
+
+test('unlock confirmation names the enrolled account even after switching accounts', async () => {
+  const f = fixture();
+  await openWalletStorage(f.options);
+  f.options.getAddress = async () => assert.fail('existing storage must use its enrolled account');
+  const confirmations = [];
+  f.options.confirmAccount = async details => { confirmations.push(details); };
+  await openWalletStorage(f.options);
+  assert.deepEqual(confirmations, [{ address: 'owner-a', fresh: false }]);
+  assert.equal(f.signedAddresses.at(-1), 'owner-a');
+});
+
+test('enrollment uses the live account confirmed in the dialog without prompting twice', async () => {
+  const f = fixture();
+  let active = 'owner-a';
+  let confirmations = 0;
+  f.options.getAddress = async () => active;
+  f.options.confirmAccount = async () => {
+    confirmations++;
+    active = 'owner-b';
+    return active;
+  };
+  await openWalletStorage(f.options);
+  assert.equal(confirmations, 1);
+  assert.deepEqual(f.signedAddresses, ['owner-b', 'owner-b']);
+  assert.equal(JSON.parse([...f.values.values()][0]).address, 'owner-b');
+});
+
+test('cancelling account confirmation never signs or changes storage', async () => {
+  for (const existing of [false, true]) {
+    const f = fixture();
+    if (existing) await openWalletStorage(f.options);
+    const saved = [...f.values];
+    const signatures = f.signedAddresses.length;
+    const opens = f.keys.length;
+    f.options.confirmAccount = async () => {
+      throw Object.assign(new Error('Storage unlock cancelled.'), { code: 'unlock-cancelled' });
+    };
+    await assert.rejects(openWalletStorage(f.options), { code: 'unlock-cancelled' });
+    assert.deepEqual([...f.values], saved);
+    assert.equal(f.signedAddresses.length, signatures);
+    assert.equal(f.keys.length, opens);
+  }
+});

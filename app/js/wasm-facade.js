@@ -25,7 +25,8 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
 import { openWalletStorage } from './storage-key.js';
-import { getWalletAddress, signWalletMessage } from './wallet.js';
+import { confirmStorageAccount } from './storage-account-dialog.js';
+import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
 import { StrKey } from '@stellar/stellar-sdk';
 
 export { DisclosureRequest };
@@ -214,6 +215,7 @@ export async function ensureStorage({ unlock = false } = {}) {
             setStorageState('unlocking');
             storageOpening = openWalletStorage({
                 storage: Storage,
+                confirmAccount: details => confirmStorageAccount({ ...details, watchAccount: startWalletWatcher }),
                 getAddress: getWalletAddress,
                 signMessage: signWalletMessage,
                 verifySignature: async (address, message, signature) => {

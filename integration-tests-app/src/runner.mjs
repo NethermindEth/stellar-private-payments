@@ -154,6 +154,8 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
       }
       // Storage unlock precedes onboarding and needs its own wallet approval.
       if (await page.locator('body').getAttribute('data-storage-state') === 'unlocking') {
+        const confirmAccount = page.getByTestId('storage-account-continue');
+        if (await confirmAccount.isVisible()) await confirmAccount.click();
         const approval = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 500 }).catch(error => {
           if (error.name !== 'WaitTimeoutError') throw error;
           return null;
