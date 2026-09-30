@@ -87,12 +87,12 @@ fn unlock_with(
                 "wallet record must be a regular file, not a symlink or special file"
             );
             // The wallet record is itself SQLite, so inspect only its header,
-            // rather than loading the entire file or imposing a JSON-size cap.
+            // rather than loading the entire file.
             let mut bytes = Vec::with_capacity(16);
             fs::File::open(&record)?.take(16).read_to_end(&mut bytes)?;
             ensure!(
                 bytes.is_empty() || bytes.starts_with(b"SQLite format 3\0"),
-                "unsupported legacy password record at {}; use the previous CLI to recover it or choose a new --data-dir; existing files were preserved",
+                "invalid wallet key record at {}; restore the matching .key file from backup or choose a new --data-dir; existing files were preserved",
                 record.display()
             );
         }

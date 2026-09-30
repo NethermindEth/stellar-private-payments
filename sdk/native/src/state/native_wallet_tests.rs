@@ -151,22 +151,22 @@ fn failed_migration_preserves_plaintext_and_retries_with_saved_record() -> Resul
     Ok(())
 }
 #[test]
-fn missing_and_legacy_records_never_replace_encrypted_data() -> Result<()> {
+fn missing_and_invalid_records_never_replace_encrypted_data() -> Result<()> {
     let f = Fixture::new()?;
     unlock_with(&f.db(), &address(), &mut sign)?;
     let before = fs::read(f.db())?;
     fs::remove_file(record_path(&f.db()))?;
     assert!(unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign")).is_err());
     assert_eq!(before, fs::read(f.db())?);
-    let legacy = b"{\"version\":1,\"ciphertext\":\"old-password-record\"}";
-    fs::write(record_path(&f.db()), legacy)?;
+    let invalid = b"not a SQLite wallet key record";
+    fs::write(record_path(&f.db()), invalid)?;
     assert!(
         unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
-            .expect_err("legacy password records must be refused")
+            .expect_err("invalid wallet key records must be refused")
             .to_string()
-            .contains("legacy password record")
+            .contains("invalid wallet key record")
     );
-    assert_eq!(legacy, fs::read(record_path(&f.db()))?.as_slice());
+    assert_eq!(invalid, fs::read(record_path(&f.db()))?.as_slice());
     assert_eq!(before, fs::read(f.db())?);
     Ok(())
 }
@@ -255,7 +255,7 @@ fn rejects_short_and_large_non_sqlite_records_without_modification() -> Result<(
         fs::File::create(&record)?.set_len(size)?;
         let error = unlock_with(&f.db(), &address(), &mut |_| panic!("must not sign"))
             .expect_err("non-SQLite records must be rejected");
-        assert!(error.to_string().contains("legacy password record"));
+        assert!(error.to_string().contains("invalid wallet key record"));
         assert_eq!(fs::metadata(&record)?.len(), size);
         assert!(!f.db().exists());
     }

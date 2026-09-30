@@ -303,12 +303,14 @@ hardware-wallet approval on each invocation. The unlocked key is cached only for
 that command. This dependence on the wallet's security and availability is the
 intentional tradeoff of wallet-based storage unlocking.
 
-### Existing password storage
+### Existing storage
 
-Password-based key records are incompatible and are preserved without modification.
-Use the previous branch to recover that data, or select a new `--data-dir` for wallet
-storage. There is no password fallback. Browser storage already uses a wallet-wrapped
-random database key through Freighter. The E2E setup uses the first provisioned
-Stellar identity to unlock its isolated database, without a storage password file.
+The CLI encrypts existing plaintext databases before use. Encrypted databases need
+their matching wallet key record; restore `spp.db` and `spp.db.key` together from
+backup. Invalid key records are rejected without replacing existing files.
+
+Browser storage uses a wallet-wrapped random database key through Freighter.
+See the [browser backup and recovery instructions](../web/README.md#encrypted-backups-and-recovery).
+The E2E setup uses the first provisioned Stellar identity to unlock its isolated database.
 
 SDK callers supply a key or key provider; keyless callers fail closed.

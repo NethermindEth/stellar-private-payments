@@ -98,9 +98,9 @@ test('non-reproducible enrollment signatures never create a database or record',
   assert.equal(f.keys.length, 0);
 });
 
-test('password records are preserved and rejected before requesting a signature', async () => {
+test('unsupported wallet record versions are preserved and rejected before signing', async () => {
   const f = fixture();
-  const record = JSON.stringify({ version: 2, kdf: 'PBKDF2-SHA-256' });
+  const record = JSON.stringify({ version: 999, address: 'owner-a' });
   f.values.set('poolstellar_encrypted_storage_v1', record);
   await assert.rejects(openWalletStorage(f.options), /metadata/);
   assert.equal(f.values.get('poolstellar_encrypted_storage_v1'), record);
