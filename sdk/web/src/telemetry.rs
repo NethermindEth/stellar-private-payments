@@ -3,31 +3,38 @@
 //! Provides a lightweight subscriber initialization point used by the main
 //! thread (`wasm_start`) and by each web worker.
 
-use std::{
-    cell::{Cell, RefCell},
-    sync::{
-        Arc, Mutex, Once,
-        atomic::{AtomicU64, Ordering},
-    },
+use serde::{Deserialize, Serialize};
+use std::sync::{
+    Arc, Mutex, Once,
+    atomic::{AtomicU64, Ordering},
 };
 use tracing::{
     Event, Id, Metadata, Subscriber,
     span::{Attributes, Record},
 };
 
+#[cfg(target_arch = "wasm32")]
 use crate::{
-    protocol::{
-        ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
-        WorkerTelemetryConfig,
-    },
-    workers::{prover::ProverBridge, storage::StorageBridge},
+    workers::prover::{ProverBridge, ProverWorkerRequest, ProverWorkerResponse},
+    workers::storage::{StorageBridge, StorageWorkerRequest, StorageWorkerResponse},
 };
-
+#[cfg(target_arch = "wasm32")]
+use std::cell::{Cell, RefCell};
 #[cfg(target_arch = "wasm32")]
 use tracing::Level;
 
 static TELEMETRY_INIT: Once = Once::new();
 static PANIC_HOOK_INIT: Once = Once::new();
+
+/// Telemetry configuration pushed from the main thread to worker isolates.
+/// Only the knobs that make sense per-isolate: sink targets and ring-buffer
+/// sizing stay per-isolate defaults and are not broadcast.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkerTelemetryConfig {
+    pub level: String,
+    pub reveal_sensitive: bool,
+}
 static RING_BUFFER: Mutex<Option<Arc<RingBuffer>>> = Mutex::new(None);
 static LOG_LEVEL: Mutex<tracing::level_filters::LevelFilter> =
     Mutex::new(tracing::level_filters::LevelFilter::INFO);
@@ -333,21 +340,25 @@ pub fn dump_recent_logs() -> String {
 
 /// Timeout for telemetry commands (config push, log dump) sent to workers.
 /// Short on purpose: diagnostics must never stall application I/O.
+#[cfg(target_arch = "wasm32")]
 const TELEMETRY_CMD_TIMEOUT_MS: u32 = 2_000;
 
 /// A registered worker bridge that receives telemetry configuration pushes
 /// and serves log dumps.
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 enum WorkerSink {
     Storage(StorageBridge),
     Prover(ProverBridge),
 }
 
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     static WORKER_SINKS: RefCell<Vec<(u64, WorkerSink)>> = const { RefCell::new(Vec::new()) };
     static NEXT_SINK_ID: Cell<u64> = const { Cell::new(0) };
 }
 
+#[cfg(target_arch = "wasm32")]
 fn next_sink_id() -> u64 {
     NEXT_SINK_ID.with(|id| {
         let next = id.get();
@@ -363,6 +374,7 @@ fn next_sink_id() -> u64 {
 /// outlives the client it was forked for — a failed or timed-out push/dump
 /// does not evict it early, since a busy worker looks the same as a dead
 /// one from here.
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn register_worker_sinks(
     storage: Option<StorageBridge>,
     prover: Option<ProverBridge>,
@@ -385,14 +397,17 @@ pub(crate) fn register_worker_sinks(
     SinkRegistration(ids)
 }
 
+#[cfg(target_arch = "wasm32")]
 fn drop_sink(id: u64) {
     WORKER_SINKS.with(|sinks| sinks.borrow_mut().retain(|(sink_id, _)| *sink_id != id));
 }
 
 /// Owns a set of registered worker sinks; unregisters them on drop.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub struct SinkRegistration(Vec<u64>);
 
+#[cfg(target_arch = "wasm32")]
 impl Drop for SinkRegistration {
     fn drop(&mut self) {
         for id in self.0.drain(..) {
@@ -416,6 +431,7 @@ pub(crate) fn current_worker_config() -> WorkerTelemetryConfig {
 
 /// Push telemetry configuration to all registered worker isolates.
 /// Fire-and-forget: diagnostics must never block or break the caller.
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
     let sinks: Vec<(u64, WorkerSink)> = WORKER_SINKS.with(|s| s.borrow().clone());
     for (_id, sink) in sinks {
@@ -443,9 +459,12 @@ pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
         });
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn broadcast_config(_config: WorkerTelemetryConfig) {}
 
 /// Aggregate recent logs from the main thread and every registered worker
 /// isolate into one string with per-isolate section headers.
+#[cfg(target_arch = "wasm32")]
 pub async fn dump_all_logs() -> String {
     let mut out = String::from("== main ==\n");
     out.push_str(&dump_recent_logs());
@@ -480,6 +499,12 @@ pub async fn dump_all_logs() -> String {
             Err(e) => out.push_str(&format!("<unavailable: {e:#}>\n")),
         }
     }
+    out
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn dump_all_logs() -> String {
+    let mut out = String::from("== main ==\n");
+    out.push_str(&dump_recent_logs());
     out
 }
 

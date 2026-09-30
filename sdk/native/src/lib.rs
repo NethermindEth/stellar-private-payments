@@ -6,28 +6,23 @@
 //!
 //! ```no_run
 //! use stellar_private_payments::{
-//!     CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, Storage,
+//!     CircuitStore, Client, LocalProver, LocalSigner, LocalStorage,
 //!     types::{CircuitStem, ContractConfig, NoteOwnerAddress, PolicyFlags, SignerAddress},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
-//! let storage = Handle::from_box(Box::new(LocalStorage::open("wallet.sqlite")?) as Box<dyn
-//! Storage>);
+//! let storage = LocalStorage::open("wallet.sqlite")?.into();
 //!
 //! let store = CircuitStore::open("./circuits");
 //! store.ensure_blocking()?;
 //! let artifacts = store.transact_artifacts()?;
-//! let prover = Handle::from_box(
-//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
-//! );
-//! let signer = Handle::from_box(
-//!     Box::new(LocalSigner::new(
-//!         "S...",
-//!         "Test SDF Network ; September 2015",
-//!         SignerAddress::new("G..."),
-//!     )?)
-//!         as Box<dyn stellar_private_payments::Signer>,
-//! );
+//! let prover = LocalProver::from_artifacts(&artifacts)?.into();
+//! let signer = LocalSigner::new(
+//!     "S...",
+//!     "Test SDF Network ; September 2015",
+//!     SignerAddress::new("G..."),
+//! )?
+//! .into();
 //!
 //! let client = Client::init(
 //!     "https://soroban-testnet.stellar.org",
@@ -86,9 +81,9 @@ pub use client::Client;
 pub use error::{Error, PlanExecutionError, RetentionGap};
 pub use handle::Handle;
 pub use pool::PrivatePool;
-pub use prover::{LocalProver, Prover};
-pub use signer::{LocalSigner, Signer};
-pub use storage::{LocalStorage, Storage};
+pub use prover::{LocalProver, Prover, ProverHandle};
+pub use signer::{LocalSigner, Signer, SignerHandle};
+pub use storage::{LocalStorage, Storage, StorageHandle};
 pub use sync::{BackgroundSync, BackgroundSyncStop, SyncMode, bootnode_required};
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).

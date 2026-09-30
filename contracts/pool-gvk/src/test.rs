@@ -1082,6 +1082,86 @@ fn transact_rejects_wrong_asp_root_when_flags_require() {
 }
 
 #[test]
+fn transact_accepts_a_previous_asp_membership_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (stale_root, non_member_root) = asp_roots(&setup);
+    setup
+        .asp_membership_client
+        .insert_leaf(&U256::from_u32(&env, 1));
+    assert_ne!(setup.asp_membership_client.get_root(), stale_root);
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        stale_root,
+        non_member_root,
+        0xB8,
+        VIEW_ONLY,
+    );
+    // Checked after the ASP roots, so reaching it means the stale root passed.
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+fn transact_rejects_an_evicted_asp_membership_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (evicted_root, non_member_root) = asp_roots(&setup);
+    for leaf in 1..=90u32 {
+        setup
+            .asp_membership_client
+            .insert_leaf(&U256::from_u32(&env, leaf));
+    }
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        evicted_root,
+        non_member_root,
+        0xB9,
+        VIEW_ONLY,
+    );
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    ));
+}
+
+#[test]
 fn transact_skips_asp_root_canonical_validation_when_flags_ignore_field() {
     let cases = [
         (0u32, 0xB5),

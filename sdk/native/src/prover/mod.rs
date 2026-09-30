@@ -66,13 +66,13 @@ impl ProverEngine {
         self.prover.get_uncompressed_proving_key()
     }
 
-    pub fn prove_transact(&mut self, params: TransactParams) -> Result<PreparedProverTx> {
+    pub fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx> {
         let artifacts = transact(params, hash_ext_data_offchain)?;
         self.prove(artifacts)
     }
 
     pub(crate) fn prove_disclosure(
-        &mut self,
+        &self,
         params: DisclosureProveParams,
         circuit: &'static RegisteredCircuit,
     ) -> Result<DisclosureReceipt> {
@@ -146,7 +146,7 @@ impl ProverEngine {
         crate::zk::disclosure::verify_receipt_proof(receipt, &vk_bytes, expected_vk_hash)
     }
 
-    fn prove(&mut self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
+    fn prove(&self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
         let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
         let ext_data = artifacts.ext_data.clone();
 
@@ -195,7 +195,8 @@ impl ProverEngine {
 ///
 /// Native sync clients use [`LocalProver`]; browser apps may supply a
 /// worker-backed implementation over channels.
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait Prover {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error>;
 
@@ -209,4 +210,22 @@ pub trait Prover {
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<bool, Error>;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub type ProverHandle = crate::Handle<dyn Prover>;
+#[cfg(not(target_arch = "wasm32"))]
+pub type ProverHandle = crate::Handle<dyn Prover + Send + Sync>;
+
+#[cfg(target_arch = "wasm32")]
+impl<T: Prover + 'static> From<T> for ProverHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Prover>)
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Prover + Send + Sync + 'static> From<T> for ProverHandle {
+    fn from(value: T) -> Self {
+        crate::Handle::from_box(Box::new(value) as Box<dyn Prover + Send + Sync>)
+    }
 }

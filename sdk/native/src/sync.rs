@@ -16,7 +16,8 @@ use anyhow::Context as _;
 use futures::task::AtomicWaker;
 
 use crate::{
-    Error, Handle, RetentionGap, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult,
+    Error, Handle, RetentionGap, StorageHandle, chain::RpcClient, sleep::sleep,
+    types::TransactionResult,
 };
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
@@ -95,7 +96,7 @@ impl SyncHandle {
     pub(crate) async fn ensure_synced(
         &self,
         rpc: &RpcClient,
-        storage: &dyn Storage,
+        storage: &StorageHandle,
         contract_config: &ContractConfig,
     ) -> Result<(), Error> {
         match self.mode() {
@@ -193,7 +194,7 @@ impl BackgroundSyncStop {
 #[must_use = "call/spawn BackgroundSync::run to keep the client up-to-date"]
 pub struct BackgroundSync {
     rpc: RpcClient,
-    storage: Handle<dyn Storage>,
+    storage: StorageHandle,
     contract_config: ContractConfig,
     bootnode_url: Option<String>,
     kick: Handle<SyncKick>,
@@ -203,7 +204,7 @@ pub struct BackgroundSync {
 impl BackgroundSync {
     pub(crate) fn new(
         rpc: RpcClient,
-        storage: Handle<dyn Storage>,
+        storage: StorageHandle,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
         kick: Handle<SyncKick>,
@@ -291,9 +292,7 @@ impl BackgroundSync {
                 tracing::info!("background sync stopped");
                 return Ok(());
             }
-            if let Err(e) =
-                catch_up_loop(&indexer, self.storage.as_ref(), Some(self.stop.as_ref())).await
-            {
+            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
                 tracing::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
@@ -304,7 +303,7 @@ impl BackgroundSync {
     /// cursors for main RPC resume.
     async fn bootnode_catch_up(&self) -> Result<(), Error> {
         bootnode_catch_up(
-            self.storage.as_ref(),
+            &self.storage,
             &self.contract_config,
             self.bootnode_url.as_deref(),
             Some(self.stop.as_ref()),
@@ -325,7 +324,7 @@ fn is_rpc_sync_gap(err: &IndexerError) -> bool {
 }
 
 async fn apply_bootnode_handoff(
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     contract_config: &ContractConfig,
     from_ledger: u32,
 ) -> Result<(), Error> {
@@ -356,7 +355,7 @@ async fn apply_bootnode_handoff(
 }
 
 async fn apply_bootnode_handoff_from_err(
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     contract_config: &ContractConfig,
     err: &RpcError,
 ) -> Result<(), Error> {
@@ -374,7 +373,7 @@ async fn apply_bootnode_handoff_from_err(
 /// history. Other indexer init errors are returned as [`Err`].
 pub async fn bootnode_required(
     rpc: &RpcClient,
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     contract_config: &ContractConfig,
 ) -> Result<bool, Error> {
     match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
@@ -390,7 +389,7 @@ pub async fn bootnode_required(
 /// pending state after each successful round.
 async fn catch_up_loop<I>(
     indexer: &Indexer<I>,
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     stop: Option<&AtomicBool>,
 ) -> Result<(), Error>
 where
@@ -411,7 +410,7 @@ where
 /// Sync historical range via bootnode until retention handoff, then clear
 /// cursors for main RPC resume.
 async fn bootnode_catch_up(
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
     stop: Option<&AtomicBool>,
@@ -479,7 +478,7 @@ async fn bootnode_catch_up(
 /// resumes on the main RPC.
 pub(crate) async fn catch_up(
     rpc: &RpcClient,
-    storage: &dyn Storage,
+    storage: &StorageHandle,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<(), Error> {
@@ -544,11 +543,7 @@ mod tests {
         types::{ContractsEventData, SyncMetadata},
     };
     use serde_json::json;
-    use std::{
-        cell::RefCell,
-        rc::Rc,
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{body_string_contains, method},
@@ -751,8 +746,8 @@ mod tests {
 
         #[derive(Clone)]
         struct MemStorage {
-            sync: Rc<RefCell<Vec<SyncMetadata>>>,
-            batches: Rc<RefCell<Vec<ContractsEventData>>>,
+            sync: std::sync::Arc<std::sync::Mutex<Vec<SyncMetadata>>>,
+            batches: std::sync::Arc<std::sync::Mutex<Vec<ContractsEventData>>>,
         }
 
         impl MemStorage {
@@ -769,21 +764,22 @@ mod tests {
                 self.save_sync_progress(metadata, false)
                     .await
                     .expect("save handoff progress");
-                let mut sync = self.sync.borrow_mut();
+                let mut sync = self.sync.lock().expect("lock poisoned");
                 for entry in sync.iter_mut() {
                     entry.cursor.clear();
                 }
             }
         }
 
-        #[async_trait::async_trait(?Send)]
+        #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
         impl ContractDataStorage for MemStorage {
             async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
-                Ok(self.sync.borrow().clone())
+                Ok(self.sync.lock().expect("lock poisoned").clone())
             }
 
             async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
-                self.batches.borrow_mut().push(batch);
+                self.batches.lock().expect("lock poisoned").push(batch);
                 Ok(())
             }
 
@@ -792,19 +788,19 @@ mod tests {
                 metadata: Vec<SyncMetadata>,
                 _fully_indexed: bool,
             ) -> anyhow::Result<()> {
-                *self.sync.borrow_mut() = metadata;
+                *self.sync.lock().expect("lock poisoned") = metadata;
                 Ok(())
             }
         }
 
         let storage = MemStorage {
-            sync: Rc::new(RefCell::new(vec![SyncMetadata {
+            sync: std::sync::Arc::new(std::sync::Mutex::new(vec![SyncMetadata {
                 contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4".into(),
                 cursor: "bootnode-cursor".into(),
                 last_indexed_ledger: 10,
                 last_fully_indexed_ledger: 0,
             }])),
-            batches: Rc::new(RefCell::new(Vec::new())),
+            batches: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         };
 
         let bootnode_client = RpcClient::new(&bootnode.uri()).expect("bootnode client");
@@ -829,10 +825,15 @@ mod tests {
             )
             .await;
         assert!(
-            storage.sync.borrow()[0].cursor.is_empty(),
+            storage.sync.lock().expect("lock poisoned")[0]
+                .cursor
+                .is_empty(),
             "cursors should clear on handoff"
         );
-        assert_eq!(storage.sync.borrow()[0].last_indexed_ledger, 2_999_000);
+        assert_eq!(
+            storage.sync.lock().expect("lock poisoned")[0].last_indexed_ledger,
+            2_999_000
+        );
         let _ = storage.batches;
     }
 }

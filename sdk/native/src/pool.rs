@@ -20,12 +20,11 @@ use crate::{
     },
     error::{Error, PlanExecutionError},
     gvk::GvkAudit,
-    handle::Handle,
     plan::PreparedTransactionPlan,
-    prover::Prover,
-    signer::Signer,
+    prover::ProverHandle,
+    signer::SignerHandle,
     sleep::sleep,
-    storage::Storage,
+    storage::StorageHandle,
     sync::{SyncHandle, confirm_tx},
     transact::transact_request_from_step,
     types::{
@@ -47,9 +46,9 @@ pub struct PrivatePool {
     config: PrivatePoolConfig,
     core: PoolCore,
     fetcher: StateFetcher,
-    storage: Handle<dyn Storage>,
-    prover: Handle<dyn Prover>,
-    signer: Handle<dyn Signer>,
+    storage: StorageHandle,
+    prover: ProverHandle,
+    signer: SignerHandle,
     sync: SyncHandle,
 }
 
@@ -57,9 +56,9 @@ impl PrivatePool {
     pub(crate) fn init(
         rpc: RpcClient,
         config: PrivatePoolConfig,
-        storage: Handle<dyn Storage>,
-        signer: Handle<dyn Signer>,
-        prover: Handle<dyn Prover>,
+        storage: StorageHandle,
+        signer: SignerHandle,
+        prover: ProverHandle,
         sync: SyncHandle,
     ) -> Result<Self, Error> {
         config.validate()?;
@@ -240,13 +239,7 @@ impl PrivatePool {
         expected_vk_hash: &str,
     ) -> Result<DisclosureVerificationReport, Error> {
         tracing::info!(expected_vk_hash = ?Sensitive(expected_vk_hash), "verify_disclosure started");
-        verify_disclosure_receipt(
-            &self.fetcher,
-            self.prover.as_ref(),
-            receipt,
-            expected_vk_hash,
-        )
-        .await
+        verify_disclosure_receipt(&self.fetcher, &self.prover, receipt, expected_vk_hash).await
     }
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
@@ -361,11 +354,7 @@ impl PrivatePool {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(
-                &self.rpc,
-                self.storage.as_ref(),
-                &self.config.contract_config,
-            )
+            .ensure_synced(&self.rpc, &self.storage, &self.config.contract_config)
             .await
     }
 

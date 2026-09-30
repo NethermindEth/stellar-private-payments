@@ -3,8 +3,7 @@
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    Prover, Signer, Storage,
+    Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
     types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
     zk::disclosure::find_circuit,
 };
@@ -105,9 +104,8 @@ async fn build_session(
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = Handle::from_box(Box::new(LocalStorage::open(
-        storage_path.to_str().context("storage path is not UTF-8")?,
-    )?) as Box<dyn Storage>);
+    let storage =
+        LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?.into();
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store
@@ -136,18 +134,18 @@ async fn build_session(
                 .with_context(|| format!("unregistered disclosure circuit: {name}"))
         })
         .collect::<Result<Vec<_>>>()?;
-    let prover = Handle::from_box(Box::new(
-        LocalProver::from_all_artifacts(&circuit_artifacts, &disclosure_artifacts)
-            .context("init local prover")?,
-    ) as Box<dyn Prover>);
+    let prover = LocalProver::from_all_artifacts(&circuit_artifacts, &disclosure_artifacts)
+        .context("init local prover")?
+        .into();
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
 
-    let signer = Handle::from_box(Box::new(LocalSigner::new(
+    let signer = LocalSigner::new(
         &wallet.secret(),
         NETWORK_PASSPHRASE,
         SignerAddress::new(wallet.address()),
-    )?) as Box<dyn Signer>);
+    )?
+    .into();
     let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
     account
         .derive_privacy_keys()

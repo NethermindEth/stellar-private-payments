@@ -9,6 +9,7 @@ use soroban_sdk::{Env, U256, Vec, contractclient, crypto::bn254::Bn254Fr};
 #[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
 pub trait ASPMembershipInterface {
     fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
+    fn is_known_root(env: Env, root: U256) -> Result<bool, soroban_sdk::Error>;
 }
 
 #[contractclient(crate_path = "soroban_sdk", name = "ASPNonMembershipClient")]

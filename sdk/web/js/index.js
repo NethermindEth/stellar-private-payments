@@ -52,11 +52,13 @@ async function openStorage(options = {}) {
  * @returns {Promise<boolean>}
  */
 async function bootnodeRequired(rpcUrl, storage, options) {
-  return wasmBootnodeRequired(
-    rpcUrl,
-    storage,
-    requireField(options?.contractConfig, 'contractConfig'),
-  );
+  const contractConfig = requireField(options?.contractConfig, 'contractConfig');
+  const storageHandle = await storage.toHandle();
+  try {
+    return await wasmBootnodeRequired(rpcUrl, storageHandle, contractConfig);
+  } finally {
+    storageHandle.free();
+  }
 }
 
 /**
@@ -166,13 +168,26 @@ async function newClient(options) {
 /**
  * Walletless selective-disclosure verification (no storage / Client).
  */
-function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options) {
-  requireField(options?.contractConfig, 'contractConfig');
-  requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
-  return wasmVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
-    proverWorkerUrl,
-    ...options,
-  });
+async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options) {
+  const contractConfig = requireField(options?.contractConfig, 'contractConfig');
+  const circuitsBaseUrl = requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
+  const resolvedProverWorkerUrl = options?.proverWorkerUrl ?? proverWorkerUrl;
+
+  const prover = ProverBridge.spawn(resolvedProverWorkerUrl);
+  try {
+    await prover.configureCircuitsBase(circuitsBaseUrl);
+    await prover.ping();
+    const proverHandle = prover.toHandle();
+    try {
+      return await wasmVerifySelectiveDisclosure(rpcUrl, proverHandle, receiptJson, expectedVkHash, {
+        contractConfig,
+      });
+    } finally {
+      proverHandle.free();
+    }
+  } finally {
+    prover.free();
+  }
 }
 
 export const Storage = { open: openStorage };

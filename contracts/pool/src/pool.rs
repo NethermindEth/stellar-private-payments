@@ -511,8 +511,9 @@ impl PoolContract {
             }
         }
         if policy::requires_membership_proofs(policy_flags) {
-            let member_root = Self::get_asp_membership_root(env)?;
-            if member_root != proof.asp_membership_root {
+            let asp_address = Self::get_asp_membership(env)?;
+            let client = ASPMembershipClient::new(env, &asp_address);
+            if !client.is_known_root(&proof.asp_membership_root) {
                 return Err(Error::InvalidProof);
             }
         }

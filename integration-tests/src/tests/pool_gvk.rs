@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    Client, Handle, LocalStorage, Storage,
+    Client, LocalStorage,
     gvk::GvkAudit,
     types::{
         BabyJubJubPoint, ContractConfig, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting,
@@ -28,9 +28,8 @@ async fn audit(
         std::process::id()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = Handle::from_box(Box::new(LocalStorage::open(
-        storage_path.to_str().context("storage path is not UTF-8")?,
-    )?) as Box<dyn Storage>);
+    let storage =
+        LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?.into();
 
     let client = Client::init_readonly(network.rpc_url(), storage, contract_config, None)?;
     client.sync().await?;

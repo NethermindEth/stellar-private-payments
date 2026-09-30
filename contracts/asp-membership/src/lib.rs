@@ -10,25 +10,52 @@ use soroban_sdk::{
 };
 use soroban_utils::{poseidon2_compress, zero_hash};
 
+/// Number of roots kept in history for proof verification
+const ROOT_HISTORY_SIZE: u32 = 90;
+
+/// The tree state an insertion mutates, kept in one persistent entry.
+///
+/// The entry's size is fixed at construction: `roots` holds
+/// `ROOT_HISTORY_SIZE` slots from the first ledger on.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TreeState {
+    /// Left-sibling hashes along the insertion path, element `i` holding the
+    /// hash at level `i`
+    filled_subtrees: Vec<U256>,
+    /// Root history ring, `ROOT_HISTORY_SIZE` slots from construction onward
+    roots: Vec<U256>,
+}
+
+/// Returns the root history slot that holds the root produced by the insertion
+/// that set the leaf counter to `next_index`.
+fn root_index_for(next_index: u64) -> Result<u32, Error> {
+    let slot = next_index
+        .checked_rem(u64::from(ROOT_HISTORY_SIZE))
+        .ok_or(Error::Overflow)?;
+    u32::try_from(slot).map_err(|_| Error::Overflow)
+}
+
 /// Storage keys for contract data
 ///
 /// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
-/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::FilledSubtrees`]
-/// are persistent keys.
+/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::State`] are
+/// persistent keys. Every key has a fixed name and a fixed value size.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     /// Administrator address with permissions to modify the tree
     Admin,
-    /// Left-sibling hashes along the insertion path, element `i` holding the
-    /// hash at level `i`
-    FilledSubtrees,
     /// Number of levels in the Merkle tree
     Levels,
-    /// Next available index for leaf insertion
+    /// Next available index for leaf insertion, kept outside [`TreeState`]
+    /// for off-chain readers
     NextIndex,
-    /// Current Merkle root
+    /// Current Merkle root, mirroring the newest slot of the root history
+    /// for off-chain readers
     Root,
+    /// The [`TreeState`] entry
+    State,
 }
 
 /// Contract error types
@@ -104,11 +131,21 @@ impl ASPMembership {
         for lvl in 0..levels {
             filled.push_back(zero_hash(&env, lvl).ok_or(Error::NotInitialized)?);
         }
-        store.set(&DataKey::FilledSubtrees, &filled);
 
-        // Set initial root to the zero hash at the top level
-        let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
-        instance.set(&DataKey::Root, &root_val);
+        // Every slot starts at the empty root
+        let empty_root = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
+        let mut roots = Vec::new(&env);
+        for _ in 0..ROOT_HISTORY_SIZE {
+            roots.push_back(empty_root.clone());
+        }
+        instance.set(&DataKey::Root, &empty_root);
+        store.set(
+            &DataKey::State,
+            &TreeState {
+                filled_subtrees: filled,
+                roots,
+            },
+        );
 
         Ok(())
     }
@@ -149,6 +186,34 @@ impl ASPMembership {
             .instance()
             .get(&DataKey::Root)
             .ok_or(Error::NotInitialized)
+    }
+
+    /// Check if a root is in the recent root history
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `root` - The Merkle root to check
+    ///
+    /// # Returns
+    /// `true` if the root is among the last `ROOT_HISTORY_SIZE` roots. The
+    /// zero root is never known.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
+    pub fn is_known_root(env: Env, root: U256) -> Result<bool, Error> {
+        if root == U256::from_u32(&env, 0u32) {
+            return Ok(false);
+        }
+
+        // The ring is read even for the current root, so a transaction
+        // simulated before another insertion declares the same entries.
+        let state: TreeState = env
+            .storage()
+            .persistent()
+            .get(&DataKey::State)
+            .ok_or(Error::NotInitialized)?;
+        Ok(state.roots.contains(&root))
     }
 
     /// Hash two U256 values using Poseidon2 compression
@@ -196,6 +261,7 @@ impl ASPMembership {
         let actual_index: u64 = store
             .get(&DataKey::NextIndex)
             .ok_or(Error::NotInitialized)?;
+        let mut state: TreeState = store.get(&DataKey::State).ok_or(Error::NotInitialized)?;
         let mut current_index = actual_index;
 
         // Check if tree is full (capacity is 2^levels leaves)
@@ -204,32 +270,31 @@ impl ASPMembership {
         }
         let mut current_hash = leaf.clone();
 
-        let mut filled: Vec<U256> = store
-            .get(&DataKey::FilledSubtrees)
-            .ok_or(Error::NotInitialized)?;
-
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
             let is_right = current_index & 1 == 1;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left = filled.get(lvl).ok_or(Error::NotInitialized)?;
+                let left = state
+                    .filled_subtrees
+                    .get(lvl)
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                filled.set(lvl, current_hash.clone());
+                state.filled_subtrees.set(lvl, current_hash.clone());
                 let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
         }
 
-        // The last leaf of a full tree is a right child at every level and
-        // leaves `filled` untouched. Skipping the write there would save one
-        // write once in the tree's life, which is not worth the branch.
-        store.set(&DataKey::FilledSubtrees, &filled);
-
-        // Update the root with the computed hash
+        let next_index = actual_index.checked_add(1).ok_or(Error::Overflow)?;
+        state
+            .roots
+            .set(root_index_for(next_index)?, current_hash.clone());
+        store.set(&DataKey::State, &state);
+        store.set(&DataKey::NextIndex, &next_index);
         instance.set(&DataKey::Root, &current_hash);
 
         // Emit event with leaf details
@@ -240,11 +305,6 @@ impl ASPMembership {
         }
         .publish(&env);
 
-        // Update NextIndex
-        store.set(
-            &DataKey::NextIndex,
-            &(actual_index.checked_add(1).ok_or(Error::Overflow)?),
-        );
         Ok(())
     }
 }
