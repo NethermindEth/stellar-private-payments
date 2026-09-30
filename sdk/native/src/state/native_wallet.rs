@@ -169,9 +169,6 @@ fn unlock_with(
         );
         encrypted_migration::encrypt_in_place(database, &key)?;
     } else {
-        if !nonempty && database.exists() {
-            fs::remove_file(database)?;
-        }
         drop(SqliteStorage::connect_encrypted(
             database,
             &key,

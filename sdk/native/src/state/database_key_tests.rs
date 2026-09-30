@@ -204,6 +204,59 @@ fn crash_writer() -> Result<()> {
 }
 
 #[test]
+fn create_resumes_an_empty_file_and_preserves_nonempty_files() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    fs::write(f.db(), [])?;
+    assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting).is_err());
+    assert_eq!(fs::metadata(f.db())?.len(), 0);
+    seed(&f.db(), &key)?;
+    let reopened = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
+    assert_eq!(
+        reopened.get_setting_json::<String>("protected")?.as_deref(),
+        Some(MARKER)
+    );
+    assert!(!fs::read(f.db())?.starts_with(b"SQLite format 3"));
+    drop(reopened);
+
+    let damaged = f.0.join("damaged.db");
+    fs::write(&damaged, [0])?;
+    assert!(SqliteStorage::connect_encrypted(&damaged, &key, OpenPurpose::CreateNew).is_err());
+    assert_eq!(fs::read(damaged)?, [0]);
+    Ok(())
+}
+
+#[test]
+fn create_refuses_empty_files_with_recovery_sidecars() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    fs::write(f.db(), [])?;
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let sidecar = f.0.join(format!("state.db{suffix}"));
+        fs::write(&sidecar, "preserve recovery data")?;
+        let before = snapshot(&f.db())?;
+        assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::CreateNew).is_err());
+        assert_eq!(before, snapshot(&f.db())?);
+        fs::remove_file(sidecar)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn create_refuses_symlinks_to_empty_files() -> Result<()> {
+    let f = Fixture::new()?;
+    let key = DatabaseKey::generate()?;
+    let target = f.0.join("target.db");
+    fs::write(&target, [])?;
+    std::os::unix::fs::symlink(&target, f.db())?;
+    assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::CreateNew).is_err());
+    assert_eq!(fs::metadata(target)?.len(), 0);
+    assert!(fs::symlink_metadata(f.db())?.file_type().is_symlink());
+    Ok(())
+}
+
+#[test]
 fn create_and_open_purposes_are_exclusive() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;

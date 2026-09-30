@@ -54,7 +54,10 @@ impl AsRef<[u8]> for DatabaseKey {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenPurpose {
+    /// Create storage, or retry native creation from an empty regular file
+    /// without SQLite recovery sidecars. Requires exclusive ownership.
     CreateNew,
+    /// Open initialized storage; missing and empty files remain errors.
     OpenExisting,
 }
 
@@ -76,8 +79,8 @@ unsafe extern "C" {
 }
 
 // The caller owns the OPFS pool and checks logical filename absence for
-// CreateNew. Native creation reserves a new path atomically, refusing existing
-// files.
+// CreateNew. Native creation reserves a new path atomically, or resumes an
+// empty regular file left by interrupted creation under exclusive ownership.
 pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Result<Connection> {
     // A native filesystem filename is never a SQLite URI. An absolute path
     // prevents a literal "file:" filename from selecting a different database.
@@ -90,6 +93,16 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
     }
     #[cfg(not(target_arch = "wasm32"))]
     if matches!(purpose, OpenPurpose::CreateNew) {
+        // An empty main file with recovery sidecars is not a fresh database.
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let mut sidecar = path.as_os_str().to_owned();
+            sidecar.push(suffix);
+            match std::fs::symlink_metadata(std::path::Path::new(&sidecar)) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+                Ok(_) => bail!("cannot create database while SQLite recovery sidecars exist"),
+            }
+        }
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -97,7 +110,25 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        options.open(path)?;
+        match options.open(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = std::fs::symlink_metadata(path)?;
+                ensure!(
+                    metadata.is_file() && metadata.len() == 0,
+                    "cannot create database over an existing nonempty file or non-regular path"
+                );
+                // Never truncate or unlink: a retry reuses the reserved file.
+                let file = options.create_new(false).open(path)?;
+                ensure!(file.metadata()?.len() == 0, "database is no longer empty");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     connect(path, key, purpose)
 }
