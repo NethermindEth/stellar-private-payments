@@ -146,7 +146,7 @@ write_lock() {
   else
     version="$(normalize_version "$version")"
   fi
-  witness="$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)"
+  witness="$(sed -n 's/^circom-witness-rs = { version = "=\{0,1\}\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)"
   [ -n "$witness" ] || { echo "could not read circom-witness-rs version from Cargo.toml" >&2; exit 1; }
   commit="$(git -C "$ROOT" rev-parse HEAD)"
   is_git_commit "$commit" || { echo "could not read git commit at $ROOT" >&2; exit 1; }
@@ -195,7 +195,7 @@ verify_lock() {
   check_meta repository "$GITHUB_REPO" || failed=1
   check_meta circom "$(trim_file "$ROOT/circuits/circom.lock")" || failed=1
   check_meta circomlib "$(trim_file "$ROOT/circuits/circomlib.lock")" || failed=1
-  check_meta circom-witness-rs "$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
+  check_meta circom-witness-rs "$(sed -n 's/^circom-witness-rs = { version = "=\{0,1\}\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
   commit="$(json_field meta commit)"
   if ! is_git_commit "$commit"; then
     echo "missing or invalid meta.commit in $LOCK" >&2

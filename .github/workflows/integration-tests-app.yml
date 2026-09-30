@@ -57,9 +57,9 @@ jobs:
       # deployments/scripts/deploy-local.sh needs the stellar CLI to deploy
       # fresh contracts to the local quickstart container.
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0
         with:
-          version: v27.1.0
+          version: v28.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
