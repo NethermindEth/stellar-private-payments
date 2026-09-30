@@ -79,3 +79,9 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
+
+[patch.crates-io]
+cranelift-control = { path = "../../vendor/cranelift-control" }
+# The upstream SAH fix depends on matching VFS interfaces from this commit.
+rsqlite-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }
+sqlite-wasm-rs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }

@@ -3,7 +3,7 @@ FROM rust:1.97.1-bookworm AS builder
 WORKDIR /workspace
 COPY . .
 
-RUN cargo build --manifest-path tools/bootnode/Cargo.toml --release
+RUN cargo build --locked --manifest-path tools/bootnode/Cargo.toml --release
 
 FROM debian:bookworm-slim
 
