@@ -148,6 +148,15 @@ try {
     await ctx.close();
     assert(await ctx.js("try{await fork.call('Ping');return false;}catch{return true;}finally{fork.free();}"));
     ctx.checks.push("encrypted fork and close invalidates forks");
+    await ctx.load(); await ctx.encrypted();
+    for (const minutes of [5, 15, 0]) {
+      await ctx.js("await storage.call({SetSetting:{key:'auto_lock_minutes',value_json:JSON.stringify(arguments[0])}});return true;", [minutes]);
+      assert.equal(JSON.parse((await ctx.js("return await storage.call({GetSetting:'auto_lock_minutes'});")).Setting), minutes);
+    }
+    await ctx.close(); await ctx.load(); await ctx.encrypted();
+    assert.equal(JSON.parse((await ctx.js("return await storage.call({GetSetting:'auto_lock_minutes'});")).Setting), 0);
+    await ctx.close();
+    ctx.checks.push("numeric settings round-trip and survive encrypted database reopen");
     const before = await ctx.snapshot();
     for (const [label, supplied, create] of [["wrong key", randomBytes(32), false], ["zero key", Buffer.alloc(32), false], ["missing key", Buffer.alloc(0), false], ["short key", Buffer.alloc(31), false], ["long key", Buffer.alloc(33), false], ["create existing", ctx.key, true]]) {
       await expectFailure(() => ctx.encrypted(create, supplied));

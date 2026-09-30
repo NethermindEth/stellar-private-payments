@@ -377,10 +377,12 @@ impl Storage {
     }
 
     pub fn get_setting_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        // The historical JSON column has NUMERIC affinity: SQLite stores bare
+        // JSON numbers as INTEGER/REAL. Cast on read to support existing rows.
         let raw: Option<String> = self
             .conn
             .query_row(
-                "SELECT value FROM app_settings WHERE key = ?1",
+                "SELECT CAST(value AS TEXT) FROM app_settings WHERE key = ?1",
                 params![key],
                 |row| row.get(0),
             )
@@ -1804,6 +1806,22 @@ fn optional_gvk_ciphertext_col(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numeric_app_settings_round_trip() -> anyhow::Result<()> {
+        let mut storage = super::Storage::connect_in_memory()?;
+        assert_eq!(storage.get_setting_json::<u32>("auto_lock_minutes")?, None);
+        for minutes in [5_u32, 15, 0] {
+            storage.set_setting_json("auto_lock_minutes", &minutes)?;
+            assert_eq!(
+                storage.get_setting_json::<u32>("auto_lock_minutes")?,
+                Some(minutes)
+            );
+        }
+        storage.set_setting_json("fraction", &1.5_f64)?;
+        assert_eq!(storage.get_setting_json::<f64>("fraction")?, Some(1.5));
+        Ok(())
+    }
+
     use super::*;
     use crate::{
         types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount},

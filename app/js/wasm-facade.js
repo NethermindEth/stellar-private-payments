@@ -1,5 +1,5 @@
 import { closeAndReload } from './storage-lock.js';
-import { startAutoLock } from './storage-timeout.js';
+import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting } from './storage-timeout.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
@@ -57,6 +57,7 @@ export async function lockStorage() {
     sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
     stopAutoLock?.();
     stopAutoLock = null;
+    clearAutoLockSetting();
     disposeClient();
     setStorageState('locking');
     // Cover decrypted content immediately, including dialogs and settings.
@@ -108,10 +109,6 @@ export async function loadDeploymentConfig() {
 
 export function circuitsBaseUrl() {
     return CIRCUITS_BASE_URL;
-}
-
-function bindAppStorage(sdkStorage) {
-    appStorageInstance = new AppStorage(sdkStorage);
 }
 
 function wrapSdkClient(sdk) {
@@ -226,12 +223,20 @@ export async function ensureStorage({ unlock = false } = {}) {
                     const digest = await crypto.subtle.digest('SHA-256', payload);
                     return crypto.subtle.verify('Ed25519', publicKey, signature, digest);
                 },
-            }).then(handle => {
+            }).then(async handle => {
+                const settings = new AppStorage(handle);
+                try {
+                    await loadAutoLockSetting(settings);
+                } catch (error) {
+                    await handle.close().catch(() => {});
+                    clearAutoLockSetting();
+                    throw error;
+                }
+                appStorageInstance = settings;
                 storageHandle = handle;
                 sessionStorage.removeItem(LOCKED_SESSION_KEY);
                 stopAutoLock = startAutoLock(() => void lockStorage());
                 setStorageState('ready');
-                bindAppStorage(handle);
                 installStoragePauseOnUnload();
             }).catch(error => {
                 setStorageState('locked');

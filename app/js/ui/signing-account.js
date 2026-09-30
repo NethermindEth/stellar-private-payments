@@ -20,13 +20,13 @@
  */
 
 import { StrKey, rpc } from '@stellar/stellar-sdk';
-import { getCurrentRpcUrl } from '../wasm-facade.js';
+import { savePrivateSigners } from '../private-signers.js';
+import { client, isStorageUnlocked, getCurrentRpcUrl } from '../wasm-facade.js';
 import { connectWallet } from '../wallet.js';
 import {
     activeSuggestion,
     addSigner,
     chosenSigner,
-    rememberSigners,
     removeSigner,
     signingPrivacyWarning,
 } from '../signing-account.js';
@@ -115,18 +115,24 @@ function renderKeepingSelections(overrides = {}) {
     renderSettings();
 }
 
-function setSigners(signers) {
+async function setSigners(signers) {
     const owner = App.state.wallet.address;
-    App.state.wallet.signers = signers;
-    rememberSigners(owner, signers);
+    try {
+        if (!isStorageUnlocked()) throw new Error('Unlock local data to change signing accounts.');
+        await savePrivateSigners(client().storage(), owner, signers);
+        if (App.state.wallet.address !== owner || !isStorageUnlocked()) return false;
+        App.state.wallet.signers = signers;
+    } catch (error) { Toast.show(error.message, 'error'); return false; }
     App.events.dispatchEvent(new Event('wallet:signers-changed'));
+    return true;
 }
 
 function renderSettings() {
     const list = document.getElementById('settings-signing-accounts');
     const empty = document.getElementById('settings-signing-accounts-empty');
     if (!list) return;
-    const { address: owner, signers = [] } = App.state.wallet;
+    const { address: owner } = App.state.wallet;
+    const signers = isStorageUnlocked() ? App.state.wallet.signers || [] : [];
 
     list.replaceChildren(...signers.map((signer) => {
         const item = document.createElement('li');
@@ -143,8 +149,8 @@ function renderSettings() {
         remove.setAttribute('aria-label', `Remove ${Utils.shortAddress(signer)}`);
         remove.className = 'shrink-0 rounded-full border border-rose-400/25 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10';
         remove.textContent = 'Remove';
-        remove.addEventListener('click', () => {
-            setSigners(removeSigner(App.state.wallet.signers, signer));
+        remove.addEventListener('click', async () => {
+            if (!await setSigners(removeSigner(App.state.wallet.signers, signer))) return;
             renderKeepingSelections();
         });
 
@@ -153,7 +159,7 @@ function renderSettings() {
     }));
 
     if (empty) {
-        empty.textContent = owner
+        empty.textContent = !isStorageUnlocked() ? 'Unlock local data to view saved signing accounts.' : owner
             ? 'No accounts added. Add one under "Sign and pay with" in Move Funds or Advanced.'
             : 'Connect a wallet to see the accounts added to sign for it.';
         empty.classList.toggle('hidden', signers.length > 0);
@@ -172,13 +178,13 @@ async function requestActiveAccount(p) {
     }
 }
 
-function useOtherAccount(p) {
+async function useOtherAccount(p) {
     const address = p.input?.value.trim() ?? '';
     if (!StrKey.isValidEd25519PublicKey(address)) {
         if (p.error) p.error.textContent = 'Enter a valid Stellar address (G…).';
         return;
     }
-    setSigners(addSigner(App.state.wallet.signers, address, App.state.wallet.address));
+    if (!await setSigners(addSigner(App.state.wallet.signers, address, App.state.wallet.address))) return;
     // The new account joins every picker; only this one switches to it.
     renderKeepingSelections({ [p.scope]: address });
 }
@@ -256,11 +262,11 @@ export const SigningAccount = {
      *
      * @param {string | null} signer - As returned by {@link forTransaction}.
      */
-    keep(signer) {
+    async keep(signer) {
         const { address: owner, signers = [] } = App.state.wallet;
         const added = addSigner(signers, signer, owner);
         if (added.length === signers.length) return;
-        setSigners(added);
+        if (!await setSigners(added)) return;
         renderKeepingSelections();
     },
 };

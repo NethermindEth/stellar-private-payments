@@ -9,8 +9,14 @@ import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 export const LocalData = {
     init() {
         const button = document.getElementById('storage-lock-btn');
+        const select = document.getElementById('settings-auto-lock');
+        let savingTimeout = false;
         const render = () => {
             const unlocked = isStorageUnlocked();
+            select.disabled = !unlocked || savingTimeout;
+            select.title = unlocked ? '' : 'Unlock to change';
+            select.value = unlocked ? String(autoLockMinutes()) : '';
+            document.getElementById('settings-auto-lock-hint').textContent = unlocked ? 'Saved in encrypted local storage.' : 'Unlock to change the inactivity timeout.';
             // Verification is public; only database-backed views and receipt
             // generation require unlocked local data.
             document.querySelectorAll('[data-view-panel]').forEach(panel => {
@@ -44,8 +50,14 @@ export const LocalData = {
                 else Toast.show(error?.message || 'Could not unlock local data.', 'error');
             }
         });
-        const select = document.getElementById('settings-auto-lock');
-        select.value = String(autoLockMinutes());
-        select.addEventListener('change', () => setAutoLockMinutes(Number(select.value)));
+        select.addEventListener('change', async () => {
+            if (!isStorageUnlocked() || savingTimeout) { render(); return; }
+            savingTimeout = true;
+            const minutes = Number(select.value);
+            render();
+            try { await setAutoLockMinutes(minutes); }
+            catch (error) { Toast.show(error.message, 'error'); }
+            finally { savingTimeout = false; render(); }
+        });
     },
 };

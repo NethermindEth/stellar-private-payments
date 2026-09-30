@@ -499,13 +499,15 @@
                 </div>
 
                 <label class="mt-6 block text-sm text-slate-200" for="settings-auto-lock">Automatically lock local data after inactivity</label>
-                <select id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                <select disabled id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                    <option value="" disabled>Unlock to change</option>
                     <option value="5">5 minutes</option>
                     <option value="15">15 minutes</option>
                     <option value="30">30 minutes</option>
                     <option value="60">1 hour</option>
                     <option value="0">Never</option>
                 </select>
+                <p id="settings-auto-lock-hint" class="mt-2 text-xs text-slate-400">Unlock to change the inactivity timeout.</p>
                 <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
