@@ -6,8 +6,7 @@ use crate::types::{
 };
 
 use crate::{
-    Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage,
-    types::TransactionResult,
+    Error, Handle, Signer, Storage, account::Account as AsyncAccount, types::TransactionResult,
 };
 
 use super::{pool::PrivatePool, runtime::block_on};
@@ -16,11 +15,11 @@ use super::{pool::PrivatePool, runtime::block_on};
 ///
 /// Construct via [`super::Client::account`].
 pub struct Account {
-    inner: AsyncAccount<LocalStorage>,
+    inner: AsyncAccount,
 }
 
 impl Account {
-    pub(crate) fn from_inner(inner: AsyncAccount<LocalStorage>) -> Self {
+    pub(crate) fn from_inner(inner: AsyncAccount) -> Self {
         Self { inner }
     }
 
@@ -38,7 +37,7 @@ impl Account {
         self.inner.signer()
     }
 
-    pub fn storage(&self) -> &LocalStorage {
+    pub fn storage(&self) -> &Handle<dyn Storage> {
         self.inner.storage()
     }
 

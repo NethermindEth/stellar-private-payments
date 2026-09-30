@@ -15,15 +15,15 @@ use crate::{
 /// Configure with local storage, a prover, and RPC; then sync and open
 /// [`Account`] sessions. Starts in [`SyncMode::Inline`]; call
 /// [`Self::background_sync`] to switch to background indexing.
-pub struct Client<S: Storage> {
+pub struct Client {
     rpc: RpcClient,
-    storage: S,
+    storage: Handle<dyn Storage>,
     prover: Handle<dyn Prover>,
     sync: SyncHandle,
     contract_config: ContractConfig,
 }
 
-impl<S: Storage> Client<S> {
+impl Client {
     #[tracing::instrument(
         name = "client_init",
         skip_all,
@@ -31,7 +31,7 @@ impl<S: Storage> Client<S> {
     )]
     pub fn init(
         rpc_url: impl AsRef<str>,
-        storage: S,
+        storage: Handle<dyn Storage>,
         prover: Handle<dyn Prover>,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
@@ -49,7 +49,7 @@ impl<S: Storage> Client<S> {
     /// Read-only client with a no-op prover (balance, notes, sync, portfolio).
     pub fn init_readonly(
         rpc_url: impl AsRef<str>,
-        storage: S,
+        storage: Handle<dyn Storage>,
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
@@ -62,7 +62,7 @@ impl<S: Storage> Client<S> {
         )
     }
 
-    pub fn storage(&self) -> &S {
+    pub fn storage(&self) -> &Handle<dyn Storage> {
         &self.storage
     }
 
@@ -86,7 +86,7 @@ impl<S: Storage> Client<S> {
     pub async fn sync(&self) -> Result<(), Error> {
         catch_up(
             &self.rpc,
-            &self.storage,
+            self.storage.as_ref(),
             &self.contract_config,
             self.sync.bootnode_url(),
         )
@@ -99,7 +99,7 @@ impl<S: Storage> Client<S> {
     /// retention gap. Does not spawn — call/spawn [`BackgroundSync::run`] on
     /// your runtime.
     #[must_use = "client sync is now in background mode; call/spawn BackgroundSync::run to keep the client up-to-date"]
-    pub fn background_sync(&mut self) -> Result<BackgroundSync<S>, Error> {
+    pub fn background_sync(&mut self) -> Result<BackgroundSync, Error> {
         self.sync.set_mode(SyncMode::Background);
         Ok(BackgroundSync::new(
             self.rpc.clone(),
@@ -154,7 +154,7 @@ impl<S: Storage> Client<S> {
         &self,
         user_address: NoteOwnerAddress,
         signer: Handle<dyn Signer>,
-    ) -> Result<Account<S>, Error> {
+    ) -> Result<Account, Error> {
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,
@@ -175,7 +175,7 @@ impl<S: Storage> Client<S> {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         self.sync
-            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
+            .ensure_synced(&self.rpc, self.storage.as_ref(), &self.contract_config)
             .await
     }
 }
@@ -191,7 +191,7 @@ mod divergent_session_tests {
     const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
-    fn test_client() -> Client<LocalStorage> {
+    fn test_client() -> Client {
         static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let db = std::env::temp_dir().join(format!(
             "spp-signer-owner-{}-{}.sqlite",
@@ -201,7 +201,9 @@ mod divergent_session_tests {
         let _ = std::fs::remove_file(&db);
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
-            LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            Handle::from_box(Box::new(
+                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ) as Box<dyn Storage>),
             ContractConfig {
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),

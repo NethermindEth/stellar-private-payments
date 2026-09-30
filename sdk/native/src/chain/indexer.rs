@@ -219,3 +219,22 @@ pub trait ContractDataStorage {
         fully_indexed: bool,
     ) -> anyhow::Result<()>;
 }
+
+#[async_trait::async_trait(?Send)]
+impl ContractDataStorage for crate::Handle<dyn crate::storage::Storage> {
+    async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
+        (**self).get_sync_state().await
+    }
+
+    async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
+        (**self).save_events_batch(batch).await
+    }
+
+    async fn save_sync_progress(
+        &self,
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()> {
+        (**self).save_sync_progress(metadata, fully_indexed).await
+    }
+}
