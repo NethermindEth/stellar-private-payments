@@ -69,6 +69,7 @@ x25519-dalek = { version = "2.0", default-features = false, features = ["static_
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 futures-timer = "3"
+hkdf = "0.13"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.10", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }

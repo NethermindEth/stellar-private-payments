@@ -269,23 +269,24 @@ All persistent SDK storage requires a 32-byte database key. Use
 and `connect_existing_plaintext` calls return an error without opening or
 creating a file. In-memory storage remains available for transient computation.
 
-The CLI prompts for a storage password and confirmation on first use. It creates
-a random database key and wraps it with Argon2id (64 MiB, three passes) and
-XSalsa20-Poly1305. Later commands prompt for the same password. The wrapped key
-lives in `spp.db.key`; back it up together with the database. Existing plaintext
-databases are converted before use. Wrong passwords preserve existing files.
+The CLI unlocks storage with a Stellar CLI identity: pass `--storage-account <alias>`
+or set `SPP_STORAGE_ACCOUNT` (also available as `defaults.storage_account` in the
+TOML config). It defaults to `--account`, independently of `--sign-as`. Commands
+without an account, such as `spp config show`, need an explicit storage identity.
+The signing key remains managed by `stellar keys`, including its secure store.
 
-For noninteractive use, pass `--storage-password-file` or set
-`SPP_STORAGE_PASSWORD_FILE` to a private file (mode 600). Passwords are never
-accepted as command-line values. The E2E setup script creates and reuses a random
-password file inside its isolated, ignored data directory.
+On first use, two matching signatures of a dedicated storage message confirm that
+unlocking is reproducible. HKDF-SHA-256 derives a wrapping key from the signature;
+XSalsa20-Poly1305 seals a random database key. Later commands require one signature,
+with the key cached for the command. These messages do not authorize transactions
+and are separate from privacy-key derivation. The public signing context and sealed
+key live in `spp.db.key`; back it up together with `spp.db`. Existing plaintext
+databases are encrypted before use. Wrong identities or signatures preserve files.
 
-The browser app also unlocks storage with a password. Its creation dialog requires
-confirmation; later visits prompt once, with retry on an incorrect password. It
-uses PBKDF2-SHA-256 (600,000 iterations) and AES-256-GCM to wrap a random database
-key, storing only KDF parameters and the encrypted envelope. The storage password
-is never saved. Freighter is used for privacy-key derivation and transactions,
-not for storage unlocking. Earlier browser unlock records are preserved and
-rejected as incompatible rather than overwritten.
+Password-based key records are incompatible and are preserved without modification.
+Use the previous branch to recover that data, or select a new `--data-dir` for wallet
+storage. There is no password fallback. Browser storage already uses a wallet-wrapped
+random database key through Freighter. The E2E setup uses the first provisioned
+Stellar identity to unlock its isolated database, without a storage password file.
 
 SDK callers supply a key or key provider; keyless callers fail closed.

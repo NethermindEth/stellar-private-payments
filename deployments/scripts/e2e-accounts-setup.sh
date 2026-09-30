@@ -125,6 +125,7 @@ ALIAS_A="$ALIAS_PREFIX-a"
 ALIAS_B="$ALIAS_PREFIX-b"
 ALIAS_C="$ALIAS_PREFIX-c"
 ALIAS_D="$ALIAS_PREFIX-d"
+STORAGE_ACCOUNT="$ALIAS_A"
 
 need stellar
 need curl
@@ -147,35 +148,29 @@ spp() {
       SPP_BIN="$REPO_ROOT/target/release/spp"
     fi
   fi
-  # Archive the incompatible key record created by the previous implementation.
-  # This is isolated E2E state: keep a complete backup and let onboarding rebuild it.
+  # Only isolated test storage is archived; Stellar identities stay in place.
   if [ -f "$DATA_DIR/spp.db.key" ] && python3 - "$DATA_DIR/spp.db.key" <<'KEY_FORMAT'
 import sys
 with open(sys.argv[1], "rb") as record:
-    is_old = record.read(16) == b"SQLite format 3\0"
-sys.exit(0 if is_old else 1)
+    is_wallet = record.read(16) == b"SQLite format 3\0"
+sys.exit(1 if is_wallet else 0)
 KEY_FORMAT
   then
-    backup="$DATA_DIR.backup-$(date +%Y%m%d%H%M%S)-$$"
-    mv -- "$DATA_DIR" "$backup" || die "could not archive incompatible E2E storage"
-    step "archived previous E2E storage to $backup; rebuilding with password encryption"
+    archive_e2e_storage
   fi
-  # Persist a generated password for this isolated test data directory only.
-  if [ -z "${SPP_STORAGE_PASSWORD_FILE:-}" ]; then
-    mkdir -p "$DATA_DIR"
-    SPP_STORAGE_PASSWORD_FILE="$DATA_DIR/storage-password"
-    if [ ! -e "$SPP_STORAGE_PASSWORD_FILE" ]; then
-      ( umask 077; python3 - "$SPP_STORAGE_PASSWORD_FILE" <<'PASSWORD'
-import os, secrets, sys
-fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-with os.fdopen(fd, "w") as output:
-    output.write(secrets.token_urlsafe(48) + "\n")
-PASSWORD
-      ) || die "could not create the isolated storage password"
-    fi
-    export SPP_STORAGE_PASSWORD_FILE
-  fi
-  "$SPP_BIN" "$@"
+  "$SPP_BIN" --storage-account "$STORAGE_ACCOUNT" "$@"
+}
+
+archive_e2e_storage() {
+  [ -e "$DATA_DIR/spp.db" ] || [ -e "$DATA_DIR/spp.db.key" ] || return 0
+  local backup="$DATA_DIR.backup-$(date +%Y%m%d%H%M%S)-$$"
+  ( umask 077; mkdir "$backup" ) || die "could not create E2E storage backup"
+  local file
+  for file in "$DATA_DIR"/spp.db* "$DATA_DIR/storage-password"; do
+    [ -e "$file" ] || continue
+    mv -- "$file" "$backup/" || die "could not archive previous E2E storage"
+  done
+  step "archived previous E2E storage to $backup; rebuilding with wallet encryption"
 }
 
 assert_env_file_ignored() {
@@ -657,6 +652,8 @@ do_ephemeral() {
     aliases+=("$full")
   done
 
+  STORAGE_ACCOUNT="${aliases[0]}"
+
   # Generate fresh keypairs for all selected accounts
   local alias
   for alias in "${aliases[@]}"; do
@@ -719,6 +716,9 @@ do_ephemeral() {
 }
 
 main() {
+  if [ "$FORCE" -eq 1 ] || [ "$EPHEMERAL" -eq 1 ]; then
+    archive_e2e_storage
+  fi
   if [ "$EPHEMERAL" -eq 1 ]; then
     do_ephemeral
     return
