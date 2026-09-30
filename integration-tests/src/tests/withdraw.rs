@@ -108,17 +108,25 @@ async fn withdraw_double_spend() -> Result<()> {
     let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
 
     let mut plan_a = pool.prepare_withdraw(&wallet, half, session.wallet.address())?;
-    let prepared_a = pool.prove_next(&mut plan_a).await?;
+    let mut prepared_a = pool.prove_next(&mut plan_a).await?;
+
+    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address())?;
+    let mut prepared_b = pool.prove_next(&mut plan_b).await?;
+
+    pool.simulate(&mut prepared_a).await?;
     let signed_a = pool.sign(&prepared_a).await?;
     let hash_a = pool.submit(signed_a).await?;
     pool.confirm(&hash_a).await?;
 
-    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address())?;
-    let prepared_b = pool.prove_next(&mut plan_b).await?;
-    let signed_b = pool.sign(&prepared_b).await?;
-    let rejected = match pool.submit(signed_b).await {
+    let rejected = match pool.simulate(&mut prepared_b).await {
         Err(_) => true,
-        Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
+        Ok(()) => {
+            let signed_b = pool.sign(&prepared_b).await?;
+            match pool.submit(signed_b).await {
+                Err(_) => true,
+                Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
+            }
+        }
     };
     assert!(
         rejected,

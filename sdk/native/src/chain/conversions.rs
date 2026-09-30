@@ -222,6 +222,52 @@ pub(crate) fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<BabyJubJub
     })
 }
 
+/// The pool's tree entry, minus the filled subtrees the reader never uses.
+#[derive(Debug)]
+pub(crate) struct TreeState {
+    /// Leaf counter after the last insertion.
+    pub next_index: u64,
+    /// Root history ring, whose newest slot is derived from `next_index`.
+    pub roots: Vec<U256>,
+}
+
+/// Decodes a `pool_core::merkle_with_history::TreeState` (`{ next_index: u64,
+/// filled_subtrees: Vec<U256>, roots: Vec<U256> }`) from contract storage.
+pub(crate) fn scval_to_tree_state(val: &xdr::ScVal) -> Result<TreeState, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "TreeState: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut next_index = None;
+    let mut roots = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "next_index" => next_index = Some(scval_to_u64(val)?),
+            "roots" => {
+                let xdr::ScVal::Vec(Some(items)) = val else {
+                    return Err(Error::UnexpectedScVal(format!(
+                        "TreeState.roots: expected ScVal::Vec, found: {val:?}"
+                    )));
+                };
+                roots = Some(items.iter().map(scval_to_u256).collect::<Result<_, _>>()?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(TreeState {
+        next_index: next_index
+            .ok_or_else(|| Error::UnexpectedScVal("TreeState missing field: next_index".into()))?,
+        roots: roots
+            .ok_or_else(|| Error::UnexpectedScVal("TreeState missing field: roots".into()))?,
+    })
+}
+
 /// Decode a `pool-gvk::gvk::GvkCiphertext` from an event or proof field.
 pub fn scval_to_global_view_key_ciphertext(
     val: &xdr::ScVal,
@@ -363,6 +409,33 @@ pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContrac
     })
 }
 
+/// Returns the contract settings held in an instance entry's storage map,
+/// each one keyed by the symbol its ledger key names.
+///
+/// A contract addresses a unit `DataKey` variant as a one-element vector
+/// holding the variant's symbol. An instance with no storage map yields
+/// nothing.
+///
+/// Entries under other key shapes are valid Soroban instance-storage keys,
+/// but they do not name unit `DataKey` variants and are therefore skipped.
+pub(crate) fn instance_storage_entries(
+    instance: &xdr::ScContractInstance,
+) -> impl Iterator<Item = (String, xdr::ScVal)> + '_ {
+    instance
+        .storage
+        .iter()
+        .flat_map(|map| map.iter())
+        .filter_map(|entry| {
+            let xdr::ScVal::Vec(Some(elements)) = &entry.key else {
+                return None;
+            };
+            let [xdr::ScVal::Symbol(name)] = elements.as_slice() else {
+                return None;
+            };
+            Some((name.to_utf8_string().ok()?, entry.val.clone()))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +522,135 @@ mod tests {
         let err = scval_to_baby_jub_jub_point(&xdr::ScVal::Void)
             .expect_err("non-map ScVal must be rejected");
         assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+
+    #[test]
+    fn tree_state_decodes_the_leaf_count_and_the_ring() {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let u256 = |v: u64| field_to_scval_u256(Field(U256::from(v)));
+        let scval = xdr::ScVal::Map(Some(xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: sym("filled_subtrees"),
+                    val: xdr::ScVal::Vec(Some(vec![u256(9)].try_into().expect("vec"))),
+                },
+                xdr::ScMapEntry {
+                    key: sym("next_index"),
+                    val: xdr::ScVal::U64(4),
+                },
+                xdr::ScMapEntry {
+                    key: sym("roots"),
+                    val: xdr::ScVal::Vec(Some(
+                        vec![u256(1), u256(2), u256(3)].try_into().expect("vec"),
+                    )),
+                },
+            ]
+            .try_into()
+            .expect("map entries"),
+        )));
+
+        let state = scval_to_tree_state(&scval).expect("decode TreeState");
+
+        assert_eq!(state.next_index, 4);
+        assert_eq!(
+            state.roots,
+            vec![U256::from(1u64), U256::from(2u64), U256::from(3u64)]
+        );
+    }
+
+    #[test]
+    fn tree_state_rejects_a_value_that_is_not_a_map() {
+        let err = scval_to_tree_state(&xdr::ScVal::U32(1)).expect_err("non-map must be rejected");
+        assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+
+    #[test]
+    fn tree_state_rejects_a_map_without_roots() {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let scval = xdr::ScVal::Map(Some(xdr::ScMap(
+            vec![xdr::ScMapEntry {
+                key: sym("next_index"),
+                val: xdr::ScVal::U64(4),
+            }]
+            .try_into()
+            .expect("map entries"),
+        )));
+
+        let err = scval_to_tree_state(&scval).expect_err("missing roots must be rejected");
+
+        assert!(err.to_string().contains("roots"), "{err}");
+    }
+
+    #[test]
+    fn instance_storage_entries_reads_one_symbol_vector_keys() {
+        let sym = |s: &str| xdr::ScSymbol(s.try_into().expect("symbol"));
+        let key = |s: &str| {
+            xdr::ScVal::Vec(Some(
+                xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(sym(s))]).expect("key vector"),
+            ))
+        };
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: Some(xdr::ScMap(
+                vec![
+                    xdr::ScMapEntry {
+                        key: key("Levels"),
+                        val: xdr::ScVal::U32(20),
+                    },
+                    xdr::ScMapEntry {
+                        key: key("PolicyFlags"),
+                        val: xdr::ScVal::U32(2),
+                    },
+                ]
+                .try_into()
+                .expect("storage map"),
+            )),
+        };
+
+        let entries: HashMap<String, xdr::ScVal> = instance_storage_entries(&instance).collect();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.get("Levels"), Some(&xdr::ScVal::U32(20)));
+        assert_eq!(entries.get("PolicyFlags"), Some(&xdr::ScVal::U32(2)));
+    }
+
+    /// Other key shapes are legitimate instance-storage keys, but they cannot
+    /// be flattened as unit `DataKey` variants and must not break the read.
+    #[test]
+    fn instance_storage_entries_skips_keys_that_are_not_unit_data_key_variants() {
+        let sym = |s: &str| xdr::ScSymbol(s.try_into().expect("symbol"));
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: Some(xdr::ScMap(
+                vec![
+                    xdr::ScMapEntry {
+                        key: xdr::ScVal::Symbol(sym("METADATA")),
+                        val: xdr::ScVal::Void,
+                    },
+                    xdr::ScMapEntry {
+                        key: xdr::ScVal::Vec(Some(
+                            vec![xdr::ScVal::Symbol(sym("Balance")), xdr::ScVal::U32(7)]
+                                .try_into()
+                                .expect("key vector"),
+                        )),
+                        val: xdr::ScVal::I128(xdr::Int128Parts { hi: 0, lo: 10 }),
+                    },
+                ]
+                .try_into()
+                .expect("storage map"),
+            )),
+        };
+
+        assert_eq!(instance_storage_entries(&instance).count(), 0);
+    }
+
+    #[test]
+    fn instance_storage_entries_yields_nothing_without_a_map() {
+        let instance = xdr::ScContractInstance {
+            executable: xdr::ContractExecutable::StellarAsset,
+            storage: None,
+        };
+
+        assert_eq!(instance_storage_entries(&instance).count(), 0);
     }
 }

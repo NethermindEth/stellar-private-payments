@@ -4,6 +4,7 @@
  */
 
 import { client, isRuntimeReady } from '../wasm-facade.js';
+import { accountSession } from '../account-session.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -15,6 +16,7 @@ App.events.addEventListener('pool:selected', () => {
 let cachedContractConfig = null;
 let activeSession = null;
 let activeSessionContractId = null;
+let activeSessionSigner = null;
 
 export async function getContractConfig() {
     if (cachedContractConfig) return cachedContractConfig;
@@ -33,6 +35,7 @@ export function getActivePoolContractId(config = null) {
 export function closeAppPool() {
     activeSession = null;
     activeSessionContractId = null;
+    activeSessionSigner = null;
 }
 
 export async function createAppPool() {
@@ -52,18 +55,27 @@ export async function createAppPool() {
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
     if (!poolContract) throw new Error('Pool contract ID not available');
-    await client().openAccount(
-        { networkPassphrase: App.state.wallet.networkPassphrase, userAddress: App.state.wallet.address },
-    );
+    const session = accountSession(App.state.wallet);
+    await client().openAccount(session);
     const pool = await client().account().pool({ poolContract });
     activeSession = pool;
     activeSessionContractId = poolContract;
+    activeSessionSigner = session.signerAddress;
     return pool;
 }
 
 export async function ensureAppPool() {
     const poolContract = getActivePoolContractId();
     if (!poolContract) throw new Error('Pool contract ID not available');
-    if (activeSession && activeSessionContractId === poolContract) return activeSession;
+    // A pool session signs as the account it was opened with, so one opened for
+    // another signer cannot be reused.
+    const signer = accountSession(App.state.wallet).signerAddress;
+    if (
+        activeSession &&
+        activeSessionContractId === poolContract &&
+        activeSessionSigner === signer
+    ) {
+        return activeSession;
+    }
     return createAppPool();
 }

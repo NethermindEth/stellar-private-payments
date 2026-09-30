@@ -56,16 +56,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client_for_bg = client;
     let background = client_for_bg.background_sync()?;
     let stop = background.stop_handle();
-    let handle = std::thread::spawn(move || run_background_sync(background));
-    std::thread::sleep(Duration::from_secs(5));
-    stop.request();
-    let bg_result = handle
-        .join()
-        .map_err(|e| format!("background sync thread panicked: {e:?}"))?;
-    match bg_result {
+    match run_background_sync(background, &stop) {
         Ok(()) => println!("Background sync stopped."),
-        Err(e) if is_retention_gap_error_str(&e) => print_retention_gap_note(),
-        Err(e) => return Err(Box::new(std::io::Error::other(e))),
+        Err(e) if is_retention_gap_error(&e) => print_retention_gap_note(),
+        Err(e) => return Err(Box::new(e)),
     }
 
     println!();
@@ -84,12 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Delegates to [`common::is_retention_gap_error`] so both detectors stay in
 /// step; keeping a second copy here is what let them drift apart.
-fn is_retention_gap_error(e: &dyn std::error::Error) -> bool {
+fn is_retention_gap_error(e: &stellar_private_payments::Error) -> bool {
     common::is_retention_gap_error(e)
-}
-
-fn is_retention_gap_error_str(msg: &str) -> bool {
-    common::is_retention_gap_message(msg)
 }
 
 fn print_retention_gap_note() {
@@ -110,18 +100,26 @@ fn probe_bootnode(client: &stellar_private_payments::blocking::Client) -> Result
     runtime
         .block_on(stellar_private_payments::bootnode_required(
             fetcher.rpc(),
-            client.storage(),
+            client.storage().as_ref(),
             client.contract_config(),
         ))
         .map_err(|e| format!("bootnode probe: {e}"))
 }
 
-/// Run the background indexer on a dedicated thread.
+/// Run the background indexer on a local task, isolating panics.
 fn run_background_sync(
-    background: stellar_private_payments::BackgroundSync<stellar_private_payments::LocalStorage>,
-) -> Result<(), String> {
-    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("tokio runtime: {e}"))?;
-    runtime
-        .block_on(background.run())
-        .map_err(|e| format!("background sync: {e}"))
+    background: stellar_private_payments::BackgroundSync,
+    stop: &stellar_private_payments::BackgroundSyncStop,
+) -> Result<(), stellar_private_payments::Error> {
+    let runtime = tokio::runtime::Runtime::new().map_err(anyhow::Error::from)?;
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        let handle = tokio::task::spawn_local(background.run());
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stop.request();
+        match handle.await {
+            Ok(result) => result,
+            Err(e) => Err(anyhow::anyhow!("background sync task panicked: {e}").into()),
+        }
+    })
 }

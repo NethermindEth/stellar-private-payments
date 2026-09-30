@@ -38,7 +38,7 @@ serde_json = { workspace = true, features = ["alloc"] }
 sha2 = { workspace = true }
 sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.18"
-stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
+stellar-xdr = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true, features = ["attributes"] }
@@ -84,6 +84,7 @@ sha2 = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
@@ -100,3 +101,7 @@ wasm-bindgen-test = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+harness = false
+name = "merkle_build"

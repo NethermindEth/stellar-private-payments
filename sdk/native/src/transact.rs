@@ -4,7 +4,7 @@ use crate::{
     Error,
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
     planner::Transact,
-    state::{SqliteStorage, StoredUserKeys},
+    state::{SqliteStorage, StoredPrivateKeys},
     types::{
         AspMembershipProof, AspMembershipSync, AspNonMembershipProof, BabyJubJubPoint,
         EncryptionKeyPair, EncryptionPublicKey, ExtAmount, ExtData, Field, GlobalViewKeyCiphertext,
@@ -28,6 +28,9 @@ pub struct TransactRequest {
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,
     pub pool_address: String,
+    /// This pool's configured token contract, for the domain-bound
+    /// `ext_data_hash`. Sourced from `TransactChainContext::token_contract_id`.
+    pub token_address: String,
     pub ext_recipient: String,
     pub ext_amount: ExtAmount,
     pub aspmem_root: Field,
@@ -102,6 +105,7 @@ pub(crate) fn transact_request_from_step(
         pool_root: Some(chain.pool_root),
         pool_next_index: chain.pool_next_index,
         pool_address: pool_address.to_string(),
+        token_address: chain.token_contract_id.clone(),
         ext_recipient: step.ext_recipient.clone(),
         ext_amount: step.ext_amount,
         aspmem_root: chain.asp_membership_root,
@@ -189,6 +193,8 @@ pub fn build_transact_params(
         priv_key: note_privkey,
         encryption_pubkey,
         pool_root,
+        pool_address: req.pool_address.clone(),
+        token_address: req.token_address.clone(),
         ext_recipient: req.ext_recipient.clone(),
         ext_amount: req.ext_amount,
         inputs,
@@ -208,7 +214,7 @@ pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field), Error> {
-    let StoredUserKeys {
+    let StoredPrivateKeys {
         note_keypair: NoteKeyPair {
             private,
             public: note_pub,
@@ -217,7 +223,7 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = crate::storage::map_user_keys(storage, user_address)?;
+    } = crate::storage::map_private_keys(storage, user_address)?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }

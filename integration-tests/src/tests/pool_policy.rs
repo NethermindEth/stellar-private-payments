@@ -3,7 +3,7 @@ use stellar_private_payments::types::{NoteAmount, PolicyFlags};
 
 use super::support::{deploy, session};
 use crate::{
-    network::LocalNetwork,
+    network::{LocalNetwork, lock_asp_tree},
     pool::{PoolAsset, PoolOptions},
 };
 
@@ -21,18 +21,20 @@ async fn blocklist_block() -> Result<()> {
     )
     .await?;
     let pool = session.pool()?;
+    let _lock = lock_asp_tree(&pool.config().contract_config.asp_non_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     pool.deposit(deposit_amount).await?;
     let balance = pool.balance().await?;
     assert_eq!(balance, deposit_amount);
 
-    let (note_public_key, _) = session.account.user_public_keys().await?;
+    let (note_public_key, _) = session.account.privacy_keys().await?;
 
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
     network
         .insert_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key,
         )
         .await?;
@@ -64,13 +66,15 @@ async fn blocklist_unblock() -> Result<()> {
     )
     .await?;
     let pool = session.pool()?;
+    let _lock = lock_asp_tree(&pool.config().contract_config.asp_non_membership).await?;
 
-    let (note_public_key, _) = session.account.user_public_keys().await?;
+    let (note_public_key, _) = session.account.privacy_keys().await?;
 
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
     network
         .insert_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key.clone(),
         )
         .await?;
@@ -92,6 +96,7 @@ async fn blocklist_unblock() -> Result<()> {
     network
         .delete_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key,
         )
         .await?;
@@ -115,6 +120,7 @@ async fn allowlist() -> Result<()> {
     )
     .await?;
     let pool = session.pool()?;
+    let _lock = lock_asp_tree(&pool.config().contract_config.asp_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let blocked_deposit = pool.deposit(deposit_amount).await;
@@ -132,9 +138,13 @@ async fn allowlist() -> Result<()> {
 
     let leaf = session.account.derive_asp_user_leaf().await?;
 
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
     network
-        .insert_asp_membership_leaf(&pool.config().contract_config.asp_membership, leaf)
+        .insert_asp_membership_leaf(
+            &pool.config().contract_config.asp_membership,
+            &session.identity.admin_secret,
+            leaf,
+        )
         .await?;
 
     pool.deposit(deposit_amount).await?;
@@ -172,13 +182,14 @@ async fn none_unblockable() -> Result<()> {
     )
     .await?;
     let pool = session.pool_at(0)?;
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
 
     // add to blocklist
-    let (note_public_key, _) = session.account.user_public_keys().await?;
+    let (note_public_key, _) = session.account.privacy_keys().await?;
     network
         .insert_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key,
         )
         .await?;
@@ -211,19 +222,24 @@ async fn allowlist_unblockable() -> Result<()> {
     )
     .await?;
     let pool = session.pool_at(0)?;
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
 
     // add to allowlist
     let leaf = session.account.derive_asp_user_leaf().await?;
     network
-        .insert_asp_membership_leaf(&pool.config().contract_config.asp_membership, leaf)
+        .insert_asp_membership_leaf(
+            &pool.config().contract_config.asp_membership,
+            &session.identity.admin_secret,
+            leaf,
+        )
         .await?;
 
     // add to blocklist
-    let (note_public_key, _) = session.account.user_public_keys().await?;
+    let (note_public_key, _) = session.account.privacy_keys().await?;
     network
         .insert_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key,
         )
         .await?;
@@ -296,10 +312,11 @@ async fn blocklist_per_user() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    let config = deploy(std::slice::from_ref(&options)).await?;
-    let alice = session(config.clone()).await?;
-    let bob = session(config).await?;
-    let network = LocalNetwork::shared().await?;
+    let deployment = deploy(std::slice::from_ref(&options)).await?;
+    let alice = session(deployment.clone()).await?;
+    let bob = session(deployment).await?;
+    let network = LocalNetwork::start().await?;
+    let _lock = lock_asp_tree(&alice.pool()?.config().contract_config.asp_non_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
 
@@ -312,10 +329,11 @@ async fn blocklist_per_user() -> Result<()> {
     assert_eq!(bob_balance, deposit_amount);
 
     // block alice only
-    let (alice_note_public_key, _) = alice.account.user_public_keys().await?;
+    let (alice_note_public_key, _) = alice.account.privacy_keys().await?;
     network
         .insert_asp_non_membership_leaf(
             &alice.pool()?.config().contract_config.asp_non_membership,
+            &alice.identity.admin_secret,
             alice_note_public_key,
         )
         .await?;
@@ -346,10 +364,11 @@ async fn allowlist_per_user() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    let config = deploy(std::slice::from_ref(&options)).await?;
-    let alice = session(config.clone()).await?;
-    let bob = session(config).await?;
-    let network = LocalNetwork::shared().await?;
+    let deployment = deploy(std::slice::from_ref(&options)).await?;
+    let alice = session(deployment.clone()).await?;
+    let bob = session(deployment).await?;
+    let network = LocalNetwork::start().await?;
+    let _lock = lock_asp_tree(&alice.pool()?.config().contract_config.asp_membership).await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
 
@@ -366,6 +385,7 @@ async fn allowlist_per_user() -> Result<()> {
     network
         .insert_asp_membership_leaf(
             &alice.pool()?.config().contract_config.asp_membership,
+            &alice.identity.admin_secret,
             alice_leaf,
         )
         .await?;
@@ -396,7 +416,7 @@ async fn both() -> Result<()> {
     )
     .await?;
     let pool = session.pool()?;
-    let network = LocalNetwork::shared().await?;
+    let network = LocalNetwork::start().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
 
     let not_allowed_deposit = pool.deposit(deposit_amount).await;
@@ -407,17 +427,22 @@ async fn both() -> Result<()> {
 
     let leaf = session.account.derive_asp_user_leaf().await?;
     network
-        .insert_asp_membership_leaf(&pool.config().contract_config.asp_membership, leaf)
+        .insert_asp_membership_leaf(
+            &pool.config().contract_config.asp_membership,
+            &session.identity.admin_secret,
+            leaf,
+        )
         .await?;
 
     pool.deposit(deposit_amount).await?;
     let balance = pool.balance().await?;
     assert_eq!(balance, deposit_amount);
 
-    let (note_public_key, _) = session.account.user_public_keys().await?;
+    let (note_public_key, _) = session.account.privacy_keys().await?;
     network
         .insert_asp_non_membership_leaf(
             &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
             note_public_key,
         )
         .await?;

@@ -43,7 +43,8 @@ than merely present.
 ## Account provisioning
 
 This suite uses accounts **A** (the account under test) and **B** (the transfer
-recipient), both funded on testnet and registered in the public-key registry.
+recipient and wrong-owner signature test signer), both funded on testnet and
+registered in the public-key registry.
 Provision them once:
 
 ```bash
@@ -83,11 +84,12 @@ sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -
 `--include-ignored` is required. These e2e tests are `#[ignore]`d by default
 precisely because they need testnet accounts and the static server, which lets
 the PR-time `wasm-test` job run the rest of this crate's tests (the spike and
-circuits tests) without either. Omit the flag and all six are silently skipped —
+circuits tests) without either. Omit the flag and all seven are silently skipped —
 the run still reports success.
 
-Run the suite **unfiltered** as shown above; the tests are designed to run in
-one page. To iterate on a single test while debugging, append a filter:
+CI runs each ignored e2e test in a fresh browser/OPFS database because sync
+cursors are global to the database while note derivation is account-specific.
+To reproduce that isolation or debug a single test, append a filter:
 
 ```bash
 sdk/web/scripts/e2e-browser-test.sh cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web e2e_deposit_halts_at_signing -- --include-ignored --nocapture
@@ -115,6 +117,7 @@ test page loads these assets cross-origin.
 
 Configuration is read at **compile time** via `option_env!`
 (`E2E_ACCOUNT_A_ADDRESS`, `E2E_ACCOUNT_A_SECRET`, `E2E_ACCOUNT_B_ADDRESS`,
+`E2E_ACCOUNT_B_SECRET`,
 `E2E_RPC_URL`, `E2E_BOOTNODE_URL`, `E2E_POOL_CONTRACT`, `E2E_STATIC_ORIGIN`).
 
 They must be **exported** for the `cargo` invocation, not merely present in the
@@ -139,10 +142,18 @@ Every flow test asserts four things together:
 4. progress events reached the `sign` stage (proving and simulation really
    completed, rather than the flow dying early).
 
-`signMessage` still succeeds — `Client::account` derives privacy keys from it on
-first use — returning a fixed 64-byte blob. The test signer intentionally does
-not reproduce a real SEP-53 signature, because key derivation only needs a
-64-byte input and the flows under test never submit.
+`signMessage` returns a real SEP-53 signature from the selected test account.
+`Client::account` verifies it against the note owner's public key before
+deriving and storing privacy keys on first use. Arbitrary 64-byte blobs fail
+this check. Both signer modes (transaction-signing and sentinel) use real
+message signatures; the account secret is needed when a message is signed,
+while a session with stored keys skips message signing.
+
+`e2e_foreign_derivation_signature_is_refused` requests a session for account A
+but returns account B's message signature. It checks that session creation
+fails with the owner-signature error, then repeats the attempt to verify that
+the first failure did not leave keys that would bypass verification. CI runs
+this regression alongside the signing-boundary tests.
 
 **Setup transactions are signed and submitted, by design.** Transfer and withdraw
 need pre-existing spendable notes, so the suite seeds them with genuinely

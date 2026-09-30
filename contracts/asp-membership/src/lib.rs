@@ -8,18 +8,21 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{get_zeroes, poseidon2_compress};
+use soroban_utils::{poseidon2_compress, zero_hash};
 
-/// Storage keys for contract persistent data
+/// Storage keys for contract data
+///
+/// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
+/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::FilledSubtrees`]
+/// are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     /// Administrator address with permissions to modify the tree
     Admin,
-    /// Filled subtree hashes at each level (indexed by level)
-    FilledSubtrees(u32),
-    /// Zero hash values for each level (indexed by level)
-    Zeroes(u32),
+    /// Left-sibling hashes along the insertion path, element `i` holding the
+    /// hash at level `i`
+    FilledSubtrees,
     /// Number of levels in the Merkle tree
     Levels,
     /// Next available index for leaf insertion
@@ -75,10 +78,13 @@ impl ASPMembership {
     ///   [1..32])
     ///
     /// # Returns
-    /// Returns `Ok(())` on success, or an error if already initialized
+    /// Returns `Ok(())` on success
     ///
-    /// # Panics
-    /// Panics if levels is 0 or greater than 32
+    /// # Errors
+    ///
+    /// Returns [`Error::WrongLevels`] if `levels` is zero or above 32, and
+    /// [`Error::NotInitialized`] if the zero hash table has no entry for a
+    /// level the tree needs.
     pub fn __constructor(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
 
@@ -88,20 +94,21 @@ impl ASPMembership {
 
         // Initialize admin and tree parameters
         store.set(&DataKey::Admin, &admin);
-        store.set(&DataKey::Levels, &levels);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Levels, &levels);
         store.set(&DataKey::NextIndex, &0u64);
 
-        // Initialize an empty tree with zero hashes at each level
-        let zeros: Vec<U256> = get_zeroes(&env);
-        for lvl in 0..=levels {
-            let zero_val = zeros.get(lvl).ok_or(Error::NotInitialized)?;
-            store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
-            store.set(&DataKey::Zeroes(lvl), &zero_val);
+        // The top level is the root itself and is never read back as a
+        // sibling, so it is not written.
+        let mut filled = Vec::new(&env);
+        for lvl in 0..levels {
+            filled.push_back(zero_hash(&env, lvl).ok_or(Error::NotInitialized)?);
         }
+        store.set(&DataKey::FilledSubtrees, &filled);
 
         // Set initial root to the zero hash at the top level
-        let root_val = zeros.get(levels).ok_or(Error::NotInitialized)?;
-        store.set(&DataKey::Root, &root_val);
+        let root_val = zero_hash(&env, levels).ok_or(Error::NotInitialized)?;
+        instance.set(&DataKey::Root, &root_val);
 
         Ok(())
     }
@@ -134,11 +141,12 @@ impl ASPMembership {
     /// # Returns
     /// The current Merkle root as U256
     ///
-    /// # Panics
-    /// Panics if the contract has not been initialized
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .ok_or(Error::NotInitialized)
     }
@@ -181,7 +189,10 @@ impl ASPMembership {
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
 
-        let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
+        let instance = env.storage().instance();
+        let levels: u32 = instance
+            .get(&DataKey::Levels)
+            .ok_or(Error::NotInitialized)?;
         let actual_index: u64 = store
             .get(&DataKey::NextIndex)
             .ok_or(Error::NotInitialized)?;
@@ -193,28 +204,33 @@ impl ASPMembership {
         }
         let mut current_hash = leaf.clone();
 
+        let mut filled: Vec<U256> = store
+            .get(&DataKey::FilledSubtrees)
+            .ok_or(Error::NotInitialized)?;
+
         // Update tree by recomputing hashes along the path to root
         for lvl in 0..levels {
             let is_right = current_index & 1 == 1;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = store
-                    .get(&DataKey::FilledSubtrees(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                let left = filled.get(lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
-                store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                let zero_val: U256 = store
-                    .get(&DataKey::Zeroes(lvl))
-                    .ok_or(Error::NotInitialized)?;
+                filled.set(lvl, current_hash.clone());
+                let zero_val = zero_hash(&env, lvl).ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
         }
 
+        // The last leaf of a full tree is a right child at every level and
+        // leaves `filled` untouched. Skipping the write there would save one
+        // write once in the tree's life, which is not worth the branch.
+        store.set(&DataKey::FilledSubtrees, &filled);
+
         // Update the root with the computed hash
-        store.set(&DataKey::Root, &current_hash);
+        instance.set(&DataKey::Root, &current_hash);
 
         // Emit event with leaf details
         LeafAddedEvent {

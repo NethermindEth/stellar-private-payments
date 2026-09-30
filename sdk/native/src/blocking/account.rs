@@ -6,8 +6,7 @@ use crate::types::{
 };
 
 use crate::{
-    Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage,
-    types::TransactionResult,
+    Error, Handle, Signer, Storage, account::Account as AsyncAccount, types::TransactionResult,
 };
 
 use super::{pool::PrivatePool, runtime::block_on};
@@ -16,11 +15,11 @@ use super::{pool::PrivatePool, runtime::block_on};
 ///
 /// Construct via [`super::Client::account`].
 pub struct Account {
-    inner: AsyncAccount<LocalStorage>,
+    inner: AsyncAccount,
 }
 
 impl Account {
-    pub(crate) fn from_inner(inner: AsyncAccount<LocalStorage>) -> Self {
+    pub(crate) fn from_inner(inner: AsyncAccount) -> Self {
         Self { inner }
     }
 
@@ -38,7 +37,7 @@ impl Account {
         self.inner.signer()
     }
 
-    pub fn storage(&self) -> &LocalStorage {
+    pub fn storage(&self) -> &Handle<dyn Storage> {
         self.inner.storage()
     }
 
@@ -57,8 +56,12 @@ impl Account {
         block_on(self.inner.balance(asset))
     }
 
-    pub fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        block_on(self.inner.user_public_keys())
+    pub fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.privacy_keys())
+    }
+
+    pub fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        block_on(self.inner.derive_privacy_keys())
     }
 
     pub fn asp_secret(&self) -> Result<Field, Error> {
@@ -78,17 +81,8 @@ impl Account {
     }
 
     /// Register this account's public keys on the deployment-wide registry.
-    ///
-    /// When both key arguments are `None`, loads the keys from local storage.
-    pub fn register_public_keys(
-        &self,
-        note_public_key: Option<NotePublicKey>,
-        encryption_public_key: Option<EncryptionPublicKey>,
-    ) -> Result<TransactionResult, Error> {
-        block_on(
-            self.inner
-                .register_public_keys(note_public_key, encryption_public_key),
-        )
+    pub fn register_public_keys(&self) -> Result<TransactionResult, Error> {
+        block_on(self.inner.register_public_keys())
     }
 
     pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, Error> {

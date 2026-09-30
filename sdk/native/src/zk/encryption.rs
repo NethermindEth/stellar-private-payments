@@ -41,6 +41,7 @@ use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
+use ed25519_dalek::{Signature as DalekSignature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -49,6 +50,45 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 /// Message signed to derive both privacy keypairs.
 pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
+
+/// Prefix a SEP-53 wallet puts in front of a message before hashing it.
+const SEP53_MESSAGE_PREFIX: &str = "Stellar Signed Message:\n";
+
+/// The bytes a SEP-53 wallet hashes with SHA-256 and signs for `message`.
+pub fn sep53_payload(message: &str) -> Vec<u8> {
+    [SEP53_MESSAGE_PREFIX.as_bytes(), message.as_bytes()].concat()
+}
+
+/// Check that `signature` is `owner_address`'s own SEP-53 signature of
+/// `message`.
+///
+/// The key-derivation signature *is* the note secret, so keys derived from
+/// anyone else's signature would be filed under the owner and silently wrong.
+/// Comparing addresses cannot rule that out — a wallet may sign with another
+/// account than the one it was asked for, and its reply need not say which —
+/// so the signature itself is checked against the owner's key.
+pub fn verify_owner_signature(
+    owner_address: &str,
+    message: &str,
+    signature: &KeyDerivationSignature,
+) -> Result<()> {
+    let signature: &[u8; 64] = signature
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("key-derivation signature must be 64 bytes"))?;
+    let owner = stellar_strkey::ed25519::PublicKey::from_string(owner_address)
+        .map_err(|_| anyhow!("note owner is not a valid account address"))?;
+    let owner_key = VerifyingKey::from_bytes(&owner.0)
+        .map_err(|e| anyhow!("note owner key is not a valid Ed25519 key: {e}"))?;
+
+    let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
+    // Strict, as the network itself verifies: a small-order owner key or `R`
+    // is refused, where the lenient check accepts forgeries for such a key.
+    owner_key
+        .verify_strict(&digest, &DalekSignature::from_bytes(signature))
+        .map_err(|_| anyhow!("the key-derivation signature was not made by the note owner's key"))
+}
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
 const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
@@ -403,6 +443,123 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
         Err(_) => {
             // Decryption failed - this note output is not for us
             Ok(Vec::new()) // Return empty vec
+        }
+    }
+}
+
+#[cfg(test)]
+mod owner_signature_tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use ed25519_dalek::{Signer as _, SigningKey};
+
+    /// A genuine `stellar message sign` output (stellar-cli 28.0.0) from a
+    /// throwaway key made only for this vector. It pins the SEP-53
+    /// reconstruction to what a real signer produces, not to what this module
+    /// itself would compute.
+    const CLI_ADDRESS: &str = "GDL5QP4UAHS3ASWFKFIDYNF457L3SHWXOLDTKWIFTFTAZ2K23XQH7BXF";
+    const CLI_MESSAGE: &str = "spp SEP-53 test vector";
+    const CLI_SIGNATURE: &str =
+        "jqX/w264/gvaGH3m2jb0SqicoR+dccjQsGWeYgaLknj8Qs5VkUND1c58XjMtWtQ6u8Ye77RX9hA8QAv0H6i8Cw==";
+
+    fn account(seed: u8) -> (SigningKey, String) {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let address = stellar_strkey::ed25519::PublicKey(key.verifying_key().to_bytes())
+            .to_string()
+            .to_string();
+        (key, address)
+    }
+
+    fn sign(key: &SigningKey, message: &str) -> KeyDerivationSignature {
+        let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
+        KeyDerivationSignature(key.sign(&digest).to_bytes().to_vec())
+    }
+
+    #[test]
+    fn a_signature_from_the_stellar_cli_verifies() {
+        let signature = KeyDerivationSignature(STANDARD.decode(CLI_SIGNATURE).expect("base64"));
+        verify_owner_signature(CLI_ADDRESS, CLI_MESSAGE, &signature)
+            .expect("a real SEP-53 signature by the owner must verify");
+    }
+
+    #[test]
+    fn the_owners_own_signature_verifies() {
+        let (owner, address) = account(1);
+        let signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature)
+            .expect("the owner signing for itself must verify");
+    }
+
+    /// The case the check exists for: a wallet that signed with another
+    /// account. Its keys would otherwise be filed under the owner.
+    #[test]
+    fn a_signature_by_another_account_is_refused() {
+        let (_, owner_address) = account(1);
+        let (other, _) = account(2);
+        let signature = sign(&other, KEY_DERIVATION_MESSAGE);
+        assert!(
+            verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
+        );
+    }
+
+    /// The identity point is a valid encoding of a small-order key. Anyone can
+    /// forge a signature for it, over any message, that passes the lenient
+    /// check: `R` the identity and `s` zero.
+    #[test]
+    fn a_forged_signature_for_a_small_order_owner_key_is_refused() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let owner_address = stellar_strkey::ed25519::PublicKey(identity)
+            .to_string()
+            .to_string();
+        let mut forged = vec![0u8; 64];
+        forged[..32].copy_from_slice(&identity);
+        let signature = KeyDerivationSignature(forged);
+        assert!(
+            verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
+        );
+    }
+
+    #[test]
+    fn a_signature_of_the_wrong_length_is_refused() {
+        let (owner, address) = account(1);
+        let mut signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        signature.0.pop();
+        assert!(verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature).is_err());
+    }
+
+    #[test]
+    fn an_owner_that_is_not_an_account_address_is_refused() {
+        let (owner, _) = account(1);
+        let signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        assert!(
+            verify_owner_signature("not-an-address", KEY_DERIVATION_MESSAGE, &signature).is_err()
+        );
+    }
+
+    #[test]
+    fn a_signature_over_another_message_is_refused() {
+        let (owner, address) = account(1);
+        let signature = sign(&owner, "some other message");
+        assert!(verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature).is_err());
+    }
+
+    /// The error reaches a UI toast, where wallet cancellations are recognised
+    /// by substring. A signature from the wrong key is not a cancellation.
+    #[test]
+    fn the_refusal_does_not_read_as_a_wallet_cancellation() {
+        let (_, owner_address) = account(1);
+        let (other, _) = account(2);
+        let rendered = verify_owner_signature(
+            &owner_address,
+            KEY_DERIVATION_MESSAGE,
+            &sign(&other, KEY_DERIVATION_MESSAGE),
+        )
+        .expect_err("a foreign signature must be refused")
+        .to_string()
+        .to_ascii_lowercase();
+        for word in ["rejected", "denied", "cancelled", "canceled"] {
+            assert!(!rendered.contains(word), "{word:?} in: {rendered}");
         }
     }
 }

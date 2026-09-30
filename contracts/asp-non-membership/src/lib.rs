@@ -28,6 +28,11 @@ use soroban_sdk::{
     vec,
 };
 use soroban_utils::{poseidon2_compress, poseidon2_hash2};
+
+/// Storage keys for contract data
+///
+/// [`DataKey::Root`] is an instance key. [`DataKey::Admin`] and
+/// [`DataKey::Node`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
@@ -102,11 +107,11 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(())` on success
     pub fn __constructor(env: Env, admin: Address) -> Result<(), Error> {
-        let store = env.storage().persistent();
-        store.set(&DataKey::Admin, &admin);
+        env.storage().persistent().set(&DataKey::Admin, &admin);
+        let instance = env.storage().instance();
         // Initialize with empty root (zero)
         let zero = U256::from_u32(&env, 0u32);
-        store.set(&DataKey::Root, &zero);
+        instance.set(&DataKey::Root, &zero);
         Ok(())
     }
 
@@ -334,7 +339,9 @@ impl ASPNonMembership {
     ///   structure
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
         let store = env.storage().persistent();
-        let root: U256 = store
+        let root: U256 = env
+            .storage()
+            .instance()
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
         let key_bits = Self::split_bits(&env, &key);
@@ -369,7 +376,8 @@ impl ASPNonMembership {
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
 
-        let root: U256 = store
+        let instance = env.storage().instance();
+        let root: U256 = instance
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
 
@@ -486,7 +494,7 @@ impl ASPNonMembership {
         }
 
         // Update root
-        store.set(&DataKey::Root, &rt);
+        instance.set(&DataKey::Root, &rt);
 
         // Emit event
         LeafInsertedEvent {
@@ -525,7 +533,8 @@ impl ASPNonMembership {
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
-        let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
+        let instance = env.storage().instance();
+        let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
         // Compute key bits once for both find and delete operations
         let key_bits = Self::split_bits(&env, &key);
@@ -613,7 +622,7 @@ impl ASPNonMembership {
         }
 
         // Update root
-        store.set(&DataKey::Root, &rt_new);
+        instance.set(&DataKey::Root, &rt_new);
 
         // Emit event
         LeafDeletedEvent {
@@ -655,7 +664,9 @@ impl ASPNonMembership {
         not_found_value: U256,
     ) -> Result<bool, Error> {
         let store = env.storage().persistent();
-        let root: U256 = store
+        let root: U256 = env
+            .storage()
+            .instance()
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
 
@@ -734,7 +745,7 @@ impl ASPNonMembership {
     /// Returns the current root hash as a U256 value, or zero if empty
     pub fn get_root(env: Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Root)
             .ok_or(Error::NotInitialized)
     }

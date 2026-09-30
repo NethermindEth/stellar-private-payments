@@ -57,6 +57,16 @@ until curl -fsS -X POST -H 'content-type: application/json' \
   sleep 1
 done
 
+# network.rs's deploy() reads verification keys from here.
+LOCAL_VK_DIR="$PKG_ROOT/../deployments/local"
+LOCAL_VK_LINK="$LOCAL_VK_DIR/circuit_keys"
+if [ ! -L "$LOCAL_VK_LINK" ]; then
+  step "linking $LOCAL_VK_LINK -> deployments/testnet/circuit_keys"
+  mkdir -p "$LOCAL_VK_DIR"
+  rm -rf "$LOCAL_VK_LINK"
+  ln -s ../testnet/circuit_keys "$LOCAL_VK_LINK"
+fi
+
 TEST_CMD=("$@")
 [ ${#TEST_CMD[@]} -gt 0 ] || TEST_CMD=(cargo test --lib)
 

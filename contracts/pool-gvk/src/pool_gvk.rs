@@ -87,9 +87,15 @@ impl From<MerkleError> for Error {
     }
 }
 
-/// Storage keys for contract persistent data.
+/// Storage keys for contract data.
 ///
 /// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
+/// The configuration the constructor writes, [`DataKey::Token`],
+/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
+/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
+/// [`DataKey::PolicyFlags`], [`DataKey::AdminViewKey`], and
+/// [`DataKey::GvkMode`], lives in the contract's instance entry.
+/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -226,26 +232,15 @@ impl PoolGvkContract {
         }
         Self::validate_admin_view_key(&env, &admin_view_key)?;
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::Token, &token);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Verifier, &verifier);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPMembership, &asp_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ASPNonMembership, &asp_non_membership);
-        env.storage()
-            .persistent()
-            .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::PolicyFlags, &policy_flags);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminViewKey, &admin_view_key);
-        env.storage().persistent().set(&DataKey::GvkMode, &gvk_mode);
+        let instance = env.storage().instance();
+        instance.set(&DataKey::Token, &token);
+        instance.set(&DataKey::Verifier, &verifier);
+        instance.set(&DataKey::ASPMembership, &asp_membership);
+        instance.set(&DataKey::ASPNonMembership, &asp_non_membership);
+        instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
+        instance.set(&DataKey::PolicyFlags, &policy_flags);
+        instance.set(&DataKey::AdminViewKey, &admin_view_key);
+        instance.set(&DataKey::GvkMode, &gvk_mode);
 
         MerkleTreeWithHistory::init(&env, levels)?;
 
@@ -285,7 +280,7 @@ impl PoolGvkContract {
     /// no corresponding setter — see [`DataKey::AdminViewKey`].
     pub fn get_admin_view_key(env: &Env) -> Result<BabyJubJubPoint, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::AdminViewKey)
             .ok_or(Error::NotInitialized)
     }
@@ -293,7 +288,7 @@ impl PoolGvkContract {
     /// Get the Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     pub fn get_gvk_mode(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::GvkMode)
             .ok_or(Error::NotInitialized)
     }
@@ -305,7 +300,7 @@ impl PoolGvkContract {
 
     fn load_policy_flags(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::PolicyFlags)
             .ok_or(Error::NotInitialized)
     }
@@ -353,7 +348,7 @@ impl PoolGvkContract {
     /// Get the ASP Membership contract address.
     fn get_asp_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPMembership)
             .ok_or(Error::NotInitialized)
     }
@@ -361,7 +356,7 @@ impl PoolGvkContract {
     /// Get the ASP Non-Membership contract address.
     fn get_asp_non_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::ASPNonMembership)
             .ok_or(Error::NotInitialized)
     }
@@ -379,7 +374,7 @@ impl PoolGvkContract {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
-            .persistent()
+            .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
         Ok(())
     }
@@ -400,7 +395,7 @@ impl PoolGvkContract {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
-            .persistent()
+            .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
         Ok(())
     }
@@ -444,7 +439,7 @@ impl PoolGvkContract {
     /// Get the token contract address.
     fn get_token(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)
     }
@@ -452,7 +447,7 @@ impl PoolGvkContract {
     /// Get the maximum deposit amount.
     fn get_maximum_deposit(env: &Env) -> Result<U256, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::MaximumDepositAmount)
             .ok_or(Error::NotInitialized)
     }
@@ -460,7 +455,7 @@ impl PoolGvkContract {
     /// Get the verifier contract address.
     fn get_verifier(env: &Env) -> Result<Address, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Verifier)
             .ok_or(Error::NotInitialized)
     }
@@ -655,16 +650,22 @@ impl PoolGvkContract {
             }
         }
 
-        let is_valid = client.verify(&proof.proof, &public_inputs);
-
-        Ok(is_valid)
+        // `try_verify`, not `verify`. `Groth16Error` and this contract's
+        // `Error` are separate `#[repr(u32)]` enums whose codes overlap.
+        // Catch verifier rejections here so callers always receive pool-gvk's
+        // own error domain rather than decoding a verifier code as a pool
+        // error.
+        match client.try_verify(&proof.proof, &public_inputs) {
+            Ok(Ok(is_valid)) => Ok(is_valid),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the GVK mode, for internal use where the getter's `Result`
     /// wrapping would otherwise need re-mapping.
     fn load_gvk_mode(env: &Env) -> Result<u32, Error> {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::GvkMode)
             .ok_or(Error::NotInitialized)
     }
@@ -680,6 +681,9 @@ impl PoolGvkContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
+        // The tree entry is rewritten below; keep the configuration it
+        // reads on the same lifetime.
+        pool_core::extend_instance(env);
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
@@ -716,16 +720,17 @@ impl PoolGvkContract {
         // `nonce` public input is required to equal (see `verify_proof`),
         // which *binds* the nonce to this transaction's parameters. It does
         // not make the nonce unique: `hash_ext_data` is a deterministic
-        // function of caller-chosen `ExtData`, so two transactions with
-        // identical `ExtData` share a nonce. `globalViewKey.circom` asks the
-        // contract for uniqueness, and this does not provide it — but the
-        // property that matters is upheld elsewhere: the ciphertext's
-        // ephemeral scalar is derived as
-        // `H(pk, amount, blinding, salt, D, nonce, idx)`, and `blinding` is
-        // fresh per output note, so colliding `(R, c)` additionally requires
-        // an identical note *and* salt. Only a prover can arrange that, and
-        // only against their own privacy.
-        let ext_hash = hash_ext_data(env, &ext_data);
+        // function of caller-chosen `ExtData` plus this pool's address and
+        // token, so two transactions with identical `ExtData` on the same
+        // pool share a nonce. `globalViewKey.circom` asks the contract for
+        // uniqueness, and this does not provide it — but the property that
+        // matters is upheld elsewhere: the ciphertext's ephemeral scalar is
+        // derived as `H(pk, amount, blinding, salt, D, nonce, idx)`, and
+        // `blinding` is fresh per output note, so colliding `(R, c)`
+        // additionally requires an identical note *and* salt. Only a prover
+        // can arrange that, and only against their own privacy.
+        let token = Self::get_token(env)?;
+        let ext_hash = hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }
