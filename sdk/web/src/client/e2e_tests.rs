@@ -19,6 +19,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use gloo_worker::Spawnable;
 use js_sys::{Function, Object, Reflect};
 use stellar_private_payments::{
     chain::{Limits, LocalSigner as ChainLocalSigner, ReadXdr, TransactionEnvelope, WriteXdr},
@@ -28,7 +29,12 @@ use wasm_bindgen::{JsValue, closure::Closure};
 use wasm_bindgen_test::*;
 
 use super::Client;
-use crate::{models::PoolExecuteResult, storage::Storage};
+use crate::{
+    models::PoolExecuteResult,
+    signer::{SignerHandle, WalletSigner},
+    storage::Storage,
+    workers::prover::{ProverBridge, ProverWorker},
+};
 
 const TEST_DEPLOYMENT_JSON: &str = include_str!("../../../../deployments/testnet/deployments.json");
 
@@ -178,12 +184,31 @@ async fn open_test_storage() -> Storage {
 /// Build a `Client` with a blob-wrapped prover worker.
 async fn build_test_client(storage: &Storage) -> Client {
     let prover_url = blob_worker_url("prover-worker.js").await;
+    let prover = ProverBridge::new(
+        ProverWorker::spawner()
+            .with_loader(true)
+            .as_module(true)
+            .spawn(&prover_url),
+    );
+    prover
+        .configure_circuits_base(test_circuits_base_url())
+        .await
+        .expect("prover worker must accept circuits base url");
+    prover
+        .ping()
+        .await
+        .expect("prover worker must start and answer its ping");
+    let prover_handle = prover.to_handle();
+    let storage_handle = storage
+        .to_handle()
+        .await
+        .expect("storage fork must accept a ping");
+
     Client::new(
         RPC_URL.to_string(),
-        storage,
-        prover_url,
+        &storage_handle,
+        &prover_handle,
         test_contract_config(),
-        test_circuits_base_url(),
         BOOTNODE_URL.map(str::to_owned),
     )
     .await
@@ -280,6 +305,16 @@ fn signer_with_mode(account: TestAccount, mode: SignerMode) -> JsValue {
     signer.into()
 }
 
+fn signer_handle(account: TestAccount, mode: SignerMode) -> SignerHandle {
+    WalletSigner::new(
+        signer_with_mode(account, mode),
+        TESTNET_PASSPHRASE.to_string(),
+        account_address(account).to_string(),
+    )
+    .expect("build wallet signer")
+    .to_handle()
+}
+
 /// Install real `signTransaction` / `signAuthEntry` methods via `LocalSigner`.
 fn install_real_signing(signer: &Object, account: TestAccount) {
     let local = Rc::new(test_account_signer(account));
@@ -357,7 +392,10 @@ async fn open_account_with(
     mode: SignerMode,
 ) -> super::Account {
     let account = client
-        .account(account_options(account), signer_with_mode(account, mode))
+        .account(
+            account_address(account).to_string(),
+            &signer_handle(account, mode),
+        )
         .await
         .expect("account session must open");
     account
@@ -367,30 +405,15 @@ async fn open_account_with(
     account
 }
 
-/// `Client::account` options naming `account` as the note owner.
-fn account_options(account: TestAccount) -> JsValue {
-    let address = account.address.unwrap_or_else(|| {
+/// `account`'s address, as the note owner.
+fn account_address(account: TestAccount) -> &'static str {
+    account.address.unwrap_or_else(|| {
         panic!(
             "E2E_ACCOUNT_{}_ADDRESS not compiled in: run via \
              `set -a; . deployments/testnet/.e2e-accounts.env; set +a`",
             account.label
         )
-    });
-
-    let options = Object::new();
-    Reflect::set(
-        &options,
-        &JsValue::from_str("networkPassphrase"),
-        &JsValue::from_str(TESTNET_PASSPHRASE),
-    )
-    .unwrap();
-    Reflect::set(
-        &options,
-        &JsValue::from_str("userAddress"),
-        &JsValue::from_str(address),
-    )
-    .unwrap();
-    options.into()
+    })
 }
 
 /// A wallet that signs the key-derivation message with another account must
@@ -412,9 +435,16 @@ async fn e2e_foreign_derivation_signature_is_refused() {
             &sign_message_fn(ACCOUNT_B),
         )
         .unwrap();
+        let signer = WalletSigner::new(
+            signer,
+            TESTNET_PASSPHRASE.to_string(),
+            ACCOUNT_A.address.unwrap().to_string(),
+        )
+        .expect("build wallet signer")
+        .to_handle();
 
         let account = client
-            .account(account_options(ACCOUNT_A), signer)
+            .account(account_address(ACCOUNT_A).to_string(), &signer)
             .await
             .expect("opening the session does not itself derive keys");
 

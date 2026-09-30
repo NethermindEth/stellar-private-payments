@@ -385,8 +385,6 @@ export const Transactions = {
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
                     ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
-                const countRow = await txCountRow(amount.value);
-                if (countRow) rows.push(countRow);
                 const confirmed = await confirmAction({
                     title: 'Confirm deposit',
                     rows,

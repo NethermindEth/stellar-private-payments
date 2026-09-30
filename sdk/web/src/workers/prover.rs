@@ -6,7 +6,7 @@ use anyhow::{Context as _, Result, anyhow};
 use futures::{FutureExt, try_join};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
-    Registrable,
+    Registrable, Spawnable,
     oneshot::{OneshotBridge, oneshot},
 };
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
@@ -30,7 +30,7 @@ use stellar_private_payments::{
     },
 };
 use tracing::Instrument;
-use wasm_bindgen::JsError;
+use wasm_bindgen::prelude::*;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
@@ -450,7 +450,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 const PROVE_TIMEOUT_MS: u32 = 30_000;
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
-pub(crate) struct ProverBridge {
+#[wasm_bindgen]
+pub struct ProverBridge {
     bridge: OneshotBridge<ProverWorker>,
 }
 
@@ -459,6 +460,64 @@ impl Clone for ProverBridge {
         Self {
             bridge: self.bridge.fork(),
         }
+    }
+}
+
+#[wasm_bindgen]
+impl ProverBridge {
+    #[wasm_bindgen(js_name = spawn)]
+    pub fn spawn_js(prover_worker_url: String) -> ProverBridge {
+        Self::new(
+            ProverWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&prover_worker_url),
+        )
+    }
+
+    #[wasm_bindgen(js_name = configureCircuitsBase)]
+    pub async fn configure_circuits_base_js(&self, base_url: String) -> Result<(), JsError> {
+        let base_url = crate::deployment::require_circuits_base_url(base_url)?;
+        self.configure_circuits_base(base_url)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = toHandle)]
+    pub fn to_handle(&self) -> ProverHandle {
+        ProverHandle::from_bridge(self)
+    }
+
+    /// New handle to the same prover worker.
+    pub fn fork(&self) -> ProverBridge {
+        self.clone()
+    }
+
+    #[wasm_bindgen(js_name = ping)]
+    pub async fn ping_js(&self) -> Result<(), JsError> {
+        self.ping().await.map_err(|e| JsError::new(&e.to_string()))
+    }
+}
+
+/// Handle [`crate::client::Client::new`] takes.
+#[wasm_bindgen]
+pub struct ProverHandle(stellar_private_payments::Handle<dyn stellar_private_payments::Prover>);
+
+impl ProverHandle {
+    pub(crate) fn inner(
+        &self,
+    ) -> stellar_private_payments::Handle<dyn stellar_private_payments::Prover> {
+        self.0.clone()
+    }
+}
+
+#[wasm_bindgen]
+impl ProverHandle {
+    #[wasm_bindgen(js_name = fromBridge)]
+    pub fn from_bridge(bridge: &ProverBridge) -> ProverHandle {
+        ProverHandle(stellar_private_payments::Handle::from_box(
+            Box::new(bridge.clone()) as Box<dyn stellar_private_payments::Prover>,
+        ))
     }
 }
 

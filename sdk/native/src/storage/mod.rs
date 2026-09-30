@@ -103,9 +103,7 @@ pub(crate) fn recipient_lookup_from_storage(
 #[async_trait::async_trait(?Send)]
 pub trait Storage: crate::chain::ContractDataStorage {
     /// Independent handle for a concurrent consumer
-    fn fork(&self) -> Result<Self, Error>
-    where
-        Self: Sized;
+    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error>;
 
     async fn ensure_ready(&self) -> Result<(), Error>;
 

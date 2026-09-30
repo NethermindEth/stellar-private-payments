@@ -107,7 +107,7 @@ impl ContractDataStorage for LocalStorage {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<Self, Error> {
+    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> { {
         if let Some(key) = &self.database_key {
             let db = SqliteStorage::reopen_encrypted(&self.path, key)
                 .context("fork encrypted storage")?;
@@ -117,12 +117,14 @@ impl Storage for LocalStorage {
                 database_key: Some(key.clone()),
             });
         }
+    
         let db = SqliteStorage::connect_file(self.path.as_path()).context("fork storage")?;
-        Ok(Self {
+        let forked = Self {
             path: self.path.clone(),
             database_key: None,
             db: RefCell::new(db),
-        })
+        };
+        Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {
