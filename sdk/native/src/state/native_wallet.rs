@@ -3,11 +3,9 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
-use anyhow::{Context, Result, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use anyhow::{Result, ensure};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::Zeroizing;
@@ -36,36 +34,10 @@ pub fn unlock_with_stellar(
     config_dir: Option<&Path>,
 ) -> Result<DatabaseKey> {
     let database = std::path::absolute(database)?;
-    ensure!(
-        !alias.is_empty()
-            && !alias.starts_with('-')
-            && !alias.chars().any(char::is_whitespace)
-            && !(alias.len() == 56 && alias.starts_with('S')),
-        "storage identity must be a Stellar CLI alias, not a secret key or seed phrase"
-    );
-    let run = |args: &[&str]| -> Result<Zeroizing<String>> {
-        let mut command =
-            Command::new(std::env::var_os("STELLAR_BIN").unwrap_or_else(|| "stellar".into()));
-        command.args(args);
-        if let Some(dir) = config_dir {
-            command.arg("--config-dir").arg(dir);
-        }
-        let output = command
-            .output()
-            .context("run Stellar CLI; install stellar or set STELLAR_BIN")?;
-        ensure!(
-            output.status.success(),
-            "Stellar CLI {} failed: {}",
-            args[0],
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let output = Zeroizing::new(String::from_utf8(output.stdout)?);
-        Ok(Zeroizing::new(output.trim().to_owned()))
-    };
-    let address = run(&["keys", "public-key", alias])?;
+    crate::stellar_cli::validate_alias("--storage-account", alias)?;
+    let address = crate::stellar_cli::public_key(alias, config_dir)?;
     unlock_with(&database, &address, &mut |message| {
-        let encoded = run(&["message", "sign", message, "--sign-with-key", alias])?;
-        Ok(KeyDerivationSignature(STANDARD.decode(encoded.as_bytes())?))
+        crate::stellar_cli::sign_message(alias, message, config_dir)
     })
 }
 
