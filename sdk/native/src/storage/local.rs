@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Mutex, MutexGuard},
+};
 
 use anyhow::Context;
 
@@ -31,7 +35,7 @@ use crate::{
 pub struct LocalStorage {
     path: PathBuf,
     database_key: std::sync::Arc<crate::state::database_key::DatabaseKey>,
-    db: RefCell<SqliteStorage>,
+    db: Mutex<SqliteStorage>,
 }
 
 impl LocalStorage {
@@ -54,7 +58,7 @@ impl LocalStorage {
         let db = SqliteStorage::connect_encrypted(&path, &key, purpose)?;
         Ok(Self {
             path,
-            db: RefCell::new(db),
+            db: Mutex::new(db),
             database_key: std::sync::Arc::new(key),
         })
     }
@@ -69,7 +73,7 @@ impl LocalStorage {
         Ok(Self {
             path,
             database_key: std::sync::Arc::new(crate::state::database_key::DatabaseKey::new(**key)),
-            db: RefCell::new(db),
+            db: Mutex::new(db),
         })
     }
 
@@ -86,12 +90,12 @@ impl LocalStorage {
         Self::open_encrypted(storage_path, key, purpose)
     }
 
-    pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
-        self.db.borrow()
+    pub fn storage(&self) -> MutexGuard<'_, SqliteStorage> {
+        self.db.lock().expect("storage lock poisoned")
     }
 
-    pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
-        self.db.borrow_mut()
+    pub fn storage_mut(&self) -> MutexGuard<'_, SqliteStorage> {
+        self.db.lock().expect("storage lock poisoned")
     }
 
     /// Open an independent connection, retaining the key for encrypted storage.
@@ -101,7 +105,7 @@ impl LocalStorage {
         Ok(Self {
             path: self.path.clone(),
             database_key: self.database_key.clone(),
-            db: RefCell::new(db),
+            db: Mutex::new(db),
         })
     }
 
@@ -118,7 +122,8 @@ impl LocalStorage {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl ContractDataStorage for LocalStorage {
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
         self.storage().get_sync_metadata()
@@ -138,11 +143,12 @@ impl ContractDataStorage for LocalStorage {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<crate::Handle<dyn Storage>, Error> {
+    fn fork(&self) -> Result<crate::storage::StorageHandle, Error> {
         let forked = LocalStorage::fork(self)?;
-        Ok(crate::Handle::from_box(Box::new(forked) as Box<dyn Storage>))
+        Ok(crate::storage::StorageHandle::from(forked))
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {

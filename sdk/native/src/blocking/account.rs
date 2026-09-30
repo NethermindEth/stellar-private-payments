@@ -6,7 +6,7 @@ use crate::types::{
 };
 
 use crate::{
-    Error, Handle, Signer, Storage, account::Account as AsyncAccount, types::TransactionResult,
+    Error, SignerHandle, StorageHandle, account::Account as AsyncAccount, types::TransactionResult,
 };
 
 use super::{pool::PrivatePool, runtime::block_on};
@@ -33,11 +33,11 @@ impl Account {
         self.inner.signer_address()
     }
 
-    pub fn signer(&self) -> &Handle<dyn Signer> {
+    pub fn signer(&self) -> &SignerHandle {
         self.inner.signer()
     }
 
-    pub fn storage(&self) -> &Handle<dyn Storage> {
+    pub fn storage(&self) -> &StorageHandle {
         self.inner.storage()
     }
 

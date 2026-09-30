@@ -1,0 +1,136 @@
+name: Integration Tests (App)
+
+# Smoke subset on every PR; the whole suite on demand from the Actions tab.
+#
+# Both build the app from this checkout and serve it on localhost:8080.
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each run gets its own local `stellar/quickstart` container and deploys
+# fresh contracts to it (deployments/scripts/localnet.sh), and every test
+# account is generated and funded ephemerally at run time
+# (integration-tests-app/src/testAccount.mjs). No concurrency group needed;
+# there is no shared state — persistent or otherwise — for overlapping runs
+# to interfere with.
+
+jobs:
+  integration-tests-app:
+    name: App e2e (via Freighter)
+    # Fork PRs must not run this job: untrusted code must not drive a real
+    # browser/Docker session on our runners. Same guard as integration-tests-web.yml.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          profile: minimal
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          cache-targets: "true"
+
+      - name: Install Trunk
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: trunk@0.21.14
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
+      # deployments/scripts/deploy-local.sh needs the stellar CLI to deploy
+      # fresh contracts to the local quickstart container.
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@8e402ea28202950b272fbabc34caad4d2f64fe87 # v27.1.0
+        with:
+          version: v27.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            integration-tests-app/package-lock.json
+
+      - name: Install test dependencies
+        run: |
+          npm ci --prefix integration-tests-app
+          cd integration-tests-app && npx playwright install ffmpeg
+
+      - name: Locate Chromium
+        run: |
+          CHROMIUM_PATH=$(command -v chromium || command -v google-chrome || echo "")
+          if [ -z "$CHROMIUM_PATH" ]; then
+            echo "Error: Neither chromium nor google-chrome found in PATH" >&2
+            exit 1
+          fi
+          echo "E2E_CHROMIUM_PATH=$CHROMIUM_PATH" >> "$GITHUB_ENV"
+
+      # On a miss build.sh downloads and sha256-verifies binaryen itself; this
+      # only persists the extracted tree between runs (same as webclient).
+      - name: Cache binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+
+      # circuit-compiler regenerates a fresh Groth16 trusted-setup keypair for
+      # every circuit (~7 minutes) whenever testdata/ lacks them — and
+      # testdata/ is NOT restored by rust-cache (it lives outside target/).
+      # Seed it from the committed keys instead (same as webclient).
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      # Artifacts land in target/circuits-artifacts/ (same path make serve and
+      # spp read). Building explicitly here keeps the served-app cold build short.
+      - name: Build circuit artifacts
+        run: make circuits
+
+      # Empty = the whole suite. run-all.sh takes the subset as arguments.
+      - name: Select tests
+        id: select
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tests=integration-tests-app/tests/01-connect.mjs integration-tests-app/tests/03-rejection.mjs integration-tests-app/tests/05-deposit-transfer.mjs" >> "$GITHUB_OUTPUT"
+          else
+            echo "tests=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Same path `make integration-tests-app-e2e` uses locally: serves the
+      # app, (re)builds the Freighter profile (needs xvfb — nothing is cached
+      # between runs), runs the tests, tears down.
+      - name: Run app e2e tests
+        env:
+          APPROVE: auto
+          # A cold CI build (circuits + wasm SDK) is slower than a warm local one.
+          E2E_SERVE_TIMEOUT: "1800"
+        run: xvfb-run -a bash integration-tests-app/scripts/serve-and-run.sh ${{ steps.select.outputs.tests }}
+
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: integration-tests-app-results
+          path: integration-tests-app/test-results/
+          retention-days: 30

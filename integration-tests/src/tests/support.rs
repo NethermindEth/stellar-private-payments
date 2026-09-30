@@ -3,8 +3,7 @@
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    Account, CircuitStore, Client, Handle, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    Prover, Signer, Storage,
+    Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
     types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
 };
 
@@ -52,9 +51,21 @@ pub async fn deploy(pools: &[PoolOptions]) -> Result<(ContractConfig, Deployment
         .await
 }
 
-/// Like [`deploy`], but `scope` is folded into the
-/// deploy cache key, guaranteeing a deployment private to this scope instead
-/// of one shared with any other test using the same `pools`.
+/// Like [`deploy`], but with an explicit `max_deposit` cap instead of the
+/// suite-wide default.
+pub async fn deploy_with_max_deposit(
+    max_deposit: u128,
+    pools: &[PoolOptions],
+) -> Result<(ContractConfig, DeploymentIdentity)> {
+    let network = LocalNetwork::start().await?;
+    network
+        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .await
+}
+
+/// Like [`deploy`], but `scope` is folded into the deploy cache key,
+/// guaranteeing a deployment private to this scope instead of one shared
+/// with any other test using the same `pools`.
 pub async fn deploy_scoped(
     pools: &[PoolOptions],
     scope: &str,
@@ -95,11 +106,12 @@ async fn build_session(
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
-    let storage = Handle::from_box(Box::new(LocalStorage::open_encrypted(
+    let storage = LocalStorage::open_encrypted(
         storage_path.to_str().context("storage path is not UTF-8")?,
         stellar_private_payments::state::database_key::DatabaseKey::generate()?,
         stellar_private_payments::state::database_key::OpenPurpose::CreateNew,
-    )?) as Box<dyn Storage>);
+    )?
+    .into();
 
     let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
     store
@@ -118,17 +130,18 @@ async fn build_session(
             circuit_artifacts.push((stem, artifacts));
         }
     }
-    let prover = Handle::from_box(Box::new(
-        LocalProver::from_artifacts(&circuit_artifacts).context("init local prover")?,
-    ) as Box<dyn Prover>);
+    let prover = LocalProver::from_artifacts(&circuit_artifacts)
+        .context("init local prover")?
+        .into();
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
 
-    let signer = Handle::from_box(Box::new(LocalSigner::new(
+    let signer = LocalSigner::new(
         &wallet.secret(),
         NETWORK_PASSPHRASE,
         SignerAddress::new(wallet.address()),
-    )?) as Box<dyn Signer>);
+    )?
+    .into();
     let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
     account
         .derive_privacy_keys()
