@@ -29,7 +29,7 @@ mod tests {
     /// Depth of the ASP membership (allowlist) tree.
     const ASP_LEVELS: usize = 10;
     /// Depth of the ASP non-membership (blocklist) sparse tree.
-    const SMT_LEVELS: usize = 10;
+    const SMT_LEVELS: usize = 32;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
 
@@ -1614,7 +1614,6 @@ mod tests {
                     0xFEED_FACEu64 ^ ((j as u64) << 40) ^ leaves_seed
                 });
 
-                // Keys strictly in 0..(1<<SMT_LEVELS)
                 let keys = default_non_membership_keys(&case);
 
                 run_case(wasm, r1cs, &case, leaves, Scalar::from(0u64), &membership_trees, &keys, asp, None::<fn(&mut Inputs)>).with_context(|| {
