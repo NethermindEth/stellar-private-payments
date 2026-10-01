@@ -7,8 +7,9 @@ use crate::types::{
     UserNoteSummary, UserOperation,
 };
 use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
-use rusqlite_migration::{M, Migrations};
+use turso::{Connection, Error as SqlError, params, params_from_iter};
+
+use super::sql;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, path::Path};
 
@@ -19,13 +20,43 @@ pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[
-    M::up(include_str!("schema.sql")),
-    M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
+/// Keep the SQLite migration version so existing wallets can be opened in
+/// place.
+const MIGRATIONS: &[&str] = &[
+    include_str!("schema.sql"),
+    include_str!("schema_v2_gvk_ciphertext.sql"),
 ];
-const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
+
+async fn apply_migrations(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction().await?;
+    let version: usize = {
+        let mut rows = tx.query("PRAGMA user_version", ()).await?;
+        let row = rows.next().await?.context("missing schema version")?;
+        usize::try_from(row.get::<i64>(0)?)?
+    };
+    anyhow::ensure!(
+        version <= MIGRATIONS.len(),
+        "wallet schema is newer than this SDK"
+    );
+    for migration in &MIGRATIONS[version..] {
+        tx.execute_batch(migration).await?;
+    }
+    tx.pragma_update("user_version", MIGRATIONS.len()).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+fn unix_seconds() -> Result<i64> {
+    Ok(i64::try_from(
+        web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)?
+            .as_secs(),
+    )?)
+}
 
 pub struct Storage {
+    /// Held so the underlying Turso database outlives the connection.
+    _db: turso::Database,
     conn: Connection,
 }
 
@@ -67,48 +98,60 @@ pub(crate) struct DerivedUserNoteRow {
 }
 
 pub(crate) type DeriveNoteFn<'a> =
-    dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
+    dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + Send + 'a;
 
 impl Storage {
-    pub fn connect() -> Result<Self> {
-        Self::connect_file(DB_NAME)
+    pub async fn connect() -> Result<Self> {
+        Self::connect_file(DB_NAME).await
     }
 
-    pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
-        Self::connect_with_connection(Connection::open(path.as_ref())?)
+    pub async fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_string_lossy().into_owned();
+        let db = turso::Builder::new_local(&path).build().await?;
+        Self::connect_with_database(db).await
     }
 
-    pub fn connect_in_memory() -> Result<Self> {
-        Self::connect_with_connection(Connection::open_in_memory()?)
+    pub async fn connect_in_memory() -> Result<Self> {
+        let db = turso::Builder::new_local(":memory:").build().await?;
+        Self::connect_with_database(db).await
     }
 
-    fn connect_with_connection(mut conn: Connection) -> Result<Self> {
-        MIGRATIONS.to_latest(&mut conn)?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        Ok(Self { conn })
+    /// Connect an externally configured database (for example, browser OPFS).
+    pub async fn connect_with_database(db: turso::Database) -> Result<Self> {
+        let mut conn = db.connect()?;
+        apply_migrations(&mut conn).await?;
+        conn.pragma_update("foreign_keys", "ON").await?;
+        Ok(Self { _db: db, conn })
     }
 
-    pub fn save_events_batch(&mut self, data: &crate::types::ContractsEventData) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    pub async fn save_events_batch(
+        &mut self,
+        data: &crate::types::ContractsEventData,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().await?;
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
                  VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(id) DO NOTHING",
-            )?;
+                )
+                .await?;
 
             for event in &data.events {
-                let event_contract_id = Self::get_or_create_contract_id(&tx, &event.contract_id)?;
+                let event_contract_id =
+                    Self::get_or_create_contract_id(&tx, &event.contract_id).await?;
                 stmt.execute(params![
-                    event.id,
+                    event.id.clone(),
                     event.ledger,
                     event_contract_id,
                     event.topics.join(","),
-                    event.value
-                ])?;
+                    event.value.clone()
+                ])
+                .await?;
             }
         }
-        tx.commit()?;
+        tx.commit().await?;
         tracing::debug!(
             "[STORAGE] saved {} events and cursor {} (latest_ledger={})",
             data.events.len(),
@@ -118,85 +161,96 @@ impl Storage {
         Ok(())
     }
 
-    pub fn save_sync_progress(
+    pub async fn save_sync_progress(
         &mut self,
         metadata: &[crate::types::SyncMetadata],
         fully_indexed: bool,
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction().await?;
         for entry in metadata {
-            let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id)?;
+            let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id).await?;
             tx.execute(
                 "INSERT INTO indexing_metadata (contract_id, last_cursor, last_indexed_ledger, last_fully_indexed_ledger)
                  VALUES (?1, ?2, ?3, 0)
                  ON CONFLICT(contract_id) DO NOTHING",
-                params![contract_id, entry.cursor, entry.last_indexed_ledger],
-            )?;
+                params![contract_id, entry.cursor.clone(), entry.last_indexed_ledger],
+            ).await?;
 
             if fully_indexed {
                 tx.execute(
                     "UPDATE indexing_metadata
                      SET last_cursor = ?2, last_indexed_ledger = ?3, last_fully_indexed_ledger = ?3
                      WHERE contract_id = ?1",
-                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
-                )?;
+                    params![contract_id, entry.cursor.clone(), entry.last_indexed_ledger],
+                )
+                .await?;
             } else {
                 tx.execute(
                     "UPDATE indexing_metadata
                      SET last_cursor = ?2, last_indexed_ledger = ?3
                      WHERE contract_id = ?1",
-                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
-                )?;
+                    params![contract_id, entry.cursor.clone(), entry.last_indexed_ledger],
+                )
+                .await?;
             }
         }
 
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
     /// Clears stored RPC cursors so the indexer restarts pagination by ledger.
-    pub fn clear_indexing_cursors(&mut self) -> Result<()> {
+    pub async fn clear_indexing_cursors(&mut self) -> Result<()> {
         self.conn
-            .execute("UPDATE indexing_metadata SET last_cursor = NULL", [])
+            .execute("UPDATE indexing_metadata SET last_cursor = NULL", ())
+            .await
             .context("failed to clear indexing cursors")?;
         Ok(())
     }
 
     /// Lowers `last_fully_indexed_ledger` after bootnode handoff so stale tip
     /// markers do not survive past the retention cutoff.
-    pub fn clamp_last_fully_indexed_ledger(&mut self, max_ledger: u32) -> Result<()> {
+    pub async fn clamp_last_fully_indexed_ledger(&mut self, max_ledger: u32) -> Result<()> {
         self.conn
             .execute(
                 "UPDATE indexing_metadata
                  SET last_fully_indexed_ledger = MIN(last_fully_indexed_ledger, ?1)",
                 params![max_ledger],
             )
+            .await
             .context("failed to clamp last_fully_indexed_ledger")?;
         Ok(())
     }
 
-    pub fn get_sync_metadata(&self) -> Result<Vec<crate::types::SyncMetadata>> {
+    pub async fn get_sync_metadata(&self) -> Result<Vec<crate::types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.address, m.last_indexed_ledger, m.last_fully_indexed_ledger, m.last_cursor
              FROM indexing_metadata m
              JOIN contracts c ON c.contract_id = m.contract_id
              ORDER BY m.contract_id",
-        )?;
+        ).await?;
 
-        let rows = stmt.query_map([], |row| {
-            let contract_id: String = row.get(0)?;
-            let indexed_ledger_i64: i64 = row.get(1)?;
-            let last_indexed_ledger = col_u32(indexed_ledger_i64, 1)?;
-            let fully_indexed_ledger_i64: i64 = row.get(2)?;
-            let last_fully_indexed_ledger = col_u32(fully_indexed_ledger_i64, 2)?;
-            let cursor: Option<String> = row.get(3)?;
-            Ok(crate::types::SyncMetadata {
-                contract_id,
-                last_indexed_ledger,
-                last_fully_indexed_ledger,
-                cursor: cursor.unwrap_or_default(),
-            })
-        })?;
+        let mut __rows = stmt.query(()).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let contract_id: String = sql::get(row, 0)?;
+                let indexed_ledger_i64: i64 = sql::get(row, 1)?;
+                let last_indexed_ledger = col_u32(indexed_ledger_i64, 1)?;
+                let fully_indexed_ledger_i64: i64 = sql::get(row, 2)?;
+                let last_fully_indexed_ledger = col_u32(fully_indexed_ledger_i64, 2)?;
+                let cursor: Option<String> = sql::get(row, 3)?;
+                Ok(crate::types::SyncMetadata {
+                    contract_id,
+                    last_indexed_ledger,
+                    last_fully_indexed_ledger,
+                    cursor: cursor.unwrap_or_default(),
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut metadata = Vec::new();
         for row in rows {
@@ -206,8 +260,8 @@ impl Storage {
         Ok(metadata)
     }
 
-    pub fn network_tip_ledger(&self) -> Result<u32> {
-        let metadata = self.get_sync_metadata()?;
+    pub async fn network_tip_ledger(&self) -> Result<u32> {
+        let metadata = self.get_sync_metadata().await?;
         Ok(metadata
             .into_iter()
             .map(|entry| {
@@ -219,10 +273,12 @@ impl Storage {
             .unwrap_or_default())
     }
 
-    pub fn get_private_keys(&self, address: &str) -> Result<Option<StoredPrivateKeys>> {
-        self.conn
-            .query_row(
-                "SELECT
+    pub async fn get_private_keys(&self, address: &str) -> Result<Option<StoredPrivateKeys>> {
+        Ok::<_, anyhow::Error>({
+            let mut __s = self
+                .conn
+                .prepare(
+                    "SELECT
                 encryption_private_key,
                 encryption_public_key,
                 note_private_key,
@@ -233,32 +289,38 @@ impl Storage {
                 WHERE accounts.address = ?1
                 ORDER BY keypairs.id DESC
                 LIMIT 1",
-                params![address],
-                |row| {
-                    let enc_priv: EncryptionPrivateKey = row.get(0)?;
-                    let enc_pub: EncryptionPublicKey = row.get(1)?;
-                    let note_priv: NotePrivateKey = row.get(2)?;
-                    let note_pub: NotePublicKey = row.get(3)?;
-                    let membership_blinding: Field = row.get(4)?;
+                )
+                .await?;
+            let mut __r = __s.query(params![address]).await?;
+            match __r.next().await? {
+                Some(row) => Some((|row: &turso::Row| -> Result<_, turso::Error> {
+                    {
+                        let enc_priv: EncryptionPrivateKey = sql::get(row, 0)?;
+                        let enc_pub: EncryptionPublicKey = sql::get(row, 1)?;
+                        let note_priv: NotePrivateKey = sql::get(row, 2)?;
+                        let note_pub: NotePublicKey = sql::get(row, 3)?;
+                        let membership_blinding: Field = sql::get(row, 4)?;
 
-                    Ok(StoredPrivateKeys {
-                        note_keypair: NoteKeyPair {
-                            private: note_priv,
-                            public: note_pub,
-                        },
-                        encryption_keypair: EncryptionKeyPair {
-                            private: enc_priv,
-                            public: enc_pub,
-                        },
-                        membership_blinding,
-                    })
-                },
-            )
-            .optional()
-            .context(format!("Failed to fetch keys for account: {}", address))
+                        Ok(StoredPrivateKeys {
+                            note_keypair: NoteKeyPair {
+                                private: note_priv,
+                                public: note_pub,
+                            },
+                            encryption_keypair: EncryptionKeyPair {
+                                private: enc_priv,
+                                public: enc_pub,
+                            },
+                            membership_blinding,
+                        })
+                    }
+                })(&row)?),
+                None => None,
+            }
+        })
+        .context(format!("Failed to fetch keys for account: {}", address))
     }
 
-    pub fn save_encryption_and_note_keypairs(
+    pub async fn save_encryption_and_note_keypairs(
         &mut self,
         account_address: &str,
         note_keypair: &NoteKeyPair,
@@ -268,9 +330,10 @@ impl Storage {
         let tx = self
             .conn
             .transaction()
+            .await
             .context("failed to start transaction")?;
 
-        let account_id = Self::get_or_create_account(&tx, account_address)?;
+        let account_id = Self::get_or_create_account(&tx, account_address).await?;
 
         tx.execute(
             "INSERT INTO keypairs (
@@ -290,8 +353,9 @@ impl Storage {
                 account_id,
             ],
         )
+        .await
         .context("failed to insert keypairs")?;
-        tx.commit().context("failed to commit transaction")?;
+        tx.commit().await.context("failed to commit transaction")?;
         tracing::debug!(
             "[STORAGE] saved new keypairs for the account {}",
             crate::types::Sensitive(&account_address)
@@ -299,26 +363,34 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_disclaimer_state(&mut self, address: &str) -> Result<DisclaimerState> {
+    pub async fn get_disclaimer_state(&mut self, address: &str) -> Result<DisclaimerState> {
         let tx = self
             .conn
             .transaction()
+            .await
             .context("failed to start transaction")?;
-        let account_id = Self::get_or_create_account(&tx, address)?;
+        let account_id = Self::get_or_create_account(&tx, address).await?;
 
-        let accepted: Option<i64> = tx
-            .query_row(
-                "SELECT 1
+        let accepted: Option<i64> = Ok::<_, anyhow::Error>({
+            let mut __s = tx
+                .prepare(
+                    "SELECT 1
                  FROM disclaimer_acceptances
                  WHERE account_id = ?1 AND disclaimer_hash = ?2
                  LIMIT 1",
-                params![account_id, CURRENT_DISCLAIMER_HASH_HEX],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("failed to query disclaimer acceptance")?;
+                )
+                .await?;
+            let mut __r = __s
+                .query(params![account_id, CURRENT_DISCLAIMER_HASH_HEX])
+                .await?;
+            match __r.next().await? {
+                Some(row) => Some(sql::get(&row, 0)?),
+                None => None,
+            }
+        })
+        .context("failed to query disclaimer acceptance")?;
 
-        tx.commit().context("failed to commit transaction")?;
+        tx.commit().await.context("failed to commit transaction")?;
 
         Ok(DisclaimerState {
             disclaimer_text_md: CURRENT_DISCLAIMER_TEXT_MD.to_string(),
@@ -327,7 +399,7 @@ impl Storage {
         })
     }
 
-    pub fn accept_current_disclaimer(
+    pub async fn accept_current_disclaimer(
         &mut self,
         address: &str,
         disclaimer_hash_hex: &str,
@@ -339,36 +411,43 @@ impl Storage {
         let tx = self
             .conn
             .transaction()
+            .await
             .context("failed to start transaction")?;
-        let account_id = Self::get_or_create_account(&tx, address)?;
+        let account_id = Self::get_or_create_account(&tx, address).await?;
 
         tx.execute(
-            "INSERT OR IGNORE INTO disclaimer_acceptances (account_id, disclaimer_hash)
-             VALUES (?1, ?2)",
-            params![account_id, disclaimer_hash_hex],
+            "INSERT OR IGNORE INTO disclaimer_acceptances (account_id, disclaimer_hash, accepted_at)
+             VALUES (?1, ?2, ?3)",
+            params![account_id, disclaimer_hash_hex, unix_seconds()?],
         )
+        .await
         .context("failed to insert disclaimer acceptance")?;
 
-        tx.commit().context("failed to commit transaction")?;
+        tx.commit().await.context("failed to commit transaction")?;
         Ok(())
     }
 
-    pub fn get_setting_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        let raw: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT value FROM app_settings WHERE key = ?1",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("failed to query app setting")?;
+    pub async fn get_setting_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        // The legacy JSON column has NUMERIC affinity: SQLite stores scalar
+        // numbers as INTEGER/REAL, so normalize them back to JSON text.
+        let raw: Option<String> = Ok::<_, anyhow::Error>({
+            let mut __s = self
+                .conn
+                .prepare("SELECT CAST(value AS TEXT) FROM app_settings WHERE key = ?1")
+                .await?;
+            let mut __r = __s.query(params![key]).await?;
+            match __r.next().await? {
+                Some(row) => Some(sql::get(&row, 0)?),
+                None => None,
+            }
+        })
+        .context("failed to query app setting")?;
 
         raw.map(|value| serde_json::from_str(&value).context("failed to decode app setting"))
             .transpose()
     }
 
-    pub fn set_setting_json<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+    pub async fn set_setting_json<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
         let value_json = serde_json::to_string(value).context("failed to encode app setting")?;
         self.conn
             .execute(
@@ -377,20 +456,22 @@ impl Storage {
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 params![key, value_json],
             )
+            .await
             .context("failed to upsert app setting")?;
         Ok(())
     }
 
-    pub fn get_bootnode_setting(&self) -> Result<BootnodeSetting> {
+    pub async fn get_bootnode_setting(&self) -> Result<BootnodeSetting> {
         Ok(self
-            .get_setting_json(APP_SETTING_BOOTNODE_CONFIG)?
+            .get_setting_json(APP_SETTING_BOOTNODE_CONFIG)
+            .await?
             .unwrap_or(BootnodeSetting {
                 enabled: false,
                 url: String::new(),
             }))
     }
 
-    pub fn set_bootnode_setting(&mut self, enabled: bool, url: &str) -> Result<()> {
+    pub async fn set_bootnode_setting(&mut self, enabled: bool, url: &str) -> Result<()> {
         self.set_setting_json(
             APP_SETTING_BOOTNODE_CONFIG,
             &BootnodeSetting {
@@ -398,58 +479,79 @@ impl Storage {
                 url: url.to_string(),
             },
         )
+        .await
     }
 
-    pub fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>> {
-        self.get_setting_json(APP_SETTING_GVK_AUTHORITY)
+    pub async fn get_gvk_authority_setting(&self) -> Result<Option<GvkAuthoritySetting>> {
+        self.get_setting_json(APP_SETTING_GVK_AUTHORITY).await
     }
 
-    pub fn set_gvk_authority_setting(&mut self, setting: &GvkAuthoritySetting) -> Result<()> {
+    pub async fn set_gvk_authority_setting(&mut self, setting: &GvkAuthoritySetting) -> Result<()> {
         setting.validate_consistency()?;
         self.set_setting_json(APP_SETTING_GVK_AUTHORITY, setting)
+            .await
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts
-    fn get_or_create_account(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
+    async fn get_or_create_account(
+        tx: &turso::transaction::Transaction<'_>,
+        address: &str,
+    ) -> Result<i64> {
         tx.execute(
             "INSERT OR IGNORE INTO accounts (address) VALUES (?1)",
             params![address],
         )
+        .await
         .context("failed to insert account")?;
 
-        let id: i64 = tx
-            .query_row(
-                "SELECT id FROM accounts WHERE address = ?1",
-                params![address],
-                |row| row.get(0),
-            )
-            .context("failed to fetch account id")?;
+        let id: i64 = Ok::<_, anyhow::Error>({
+            let mut __s = tx
+                .prepare("SELECT id FROM accounts WHERE address = ?1")
+                .await?;
+            let mut __r = __s.query(params![address]).await?;
+            match __r.next().await? {
+                Some(row) => sql::get(&row, 0)?,
+                None => anyhow::bail!("query returned no rows"),
+            }
+        })
+        .context("failed to fetch account id")?;
 
         Ok(id)
     }
 
-    fn get_or_create_contract_id(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
-        let id: i64 = tx
-            .query_row(
-                "INSERT INTO contracts (address)
+    async fn get_or_create_contract_id(
+        tx: &turso::transaction::Transaction<'_>,
+        address: &str,
+    ) -> Result<i64> {
+        let id: i64 = Ok::<_, anyhow::Error>({
+            let mut __s = tx
+                .prepare(
+                    "INSERT INTO contracts (address)
                  VALUES (?1)
                  ON CONFLICT(address) DO UPDATE SET address = excluded.address
                  RETURNING contract_id",
-                params![address],
-                |row| row.get(0),
-            )
-            .context("failed to get or create contract id")?;
+                )
+                .await?;
+            let mut __r = __s.query(params![address]).await?;
+            match __r.next().await? {
+                Some(row) => sql::get(&row, 0)?,
+                None => anyhow::bail!("query returned no rows"),
+            }
+        })
+        .context("failed to get or create contract id")?;
 
         Ok(id)
     }
 
-    pub fn lookup_public_key_by_address(
+    pub async fn lookup_public_key_by_address(
         &self,
         address: &str,
     ) -> Result<Option<crate::types::PublicKeyEntry>> {
-        self.conn
-            .query_row(
-                "SELECT owner, encryption_key, note_key, ledger
+        Ok::<_, anyhow::Error>({
+            let mut __s = self
+                .conn
+                .prepare(
+                    "SELECT owner, encryption_key, note_key, ledger
                  FROM (
                     SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
                     FROM public_keys p
@@ -457,17 +559,23 @@ impl Storage {
                     WHERE p.owner = ?1
                     GROUP BY p.owner
                  )",
-                params![address],
-                map_public_key_entry,
-            )
-            .optional()
-            .context("lookup_public_key_by_address")
+                )
+                .await?;
+            let mut __r = __s.query(params![address]).await?;
+            match __r.next().await? {
+                Some(row) => Some(map_public_key_entry(&row)?),
+                None => None,
+            }
+        })
+        .context("lookup_public_key_by_address")
     }
 
     /// List notes derived for `address` (newest first).
-    pub fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT
+    pub async fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT
                 n.id,
                 pool.address,
                 n.amount,
@@ -483,29 +591,37 @@ impl Storage {
              WHERE a.address = ?1
              ORDER BY r.ledger DESC
              LIMIT ?2",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![address, limit], |row| {
-            let id: Field = row.get(0)?;
-            let pool_contract_id: String = row.get(1)?;
-            let amount: NoteAmount = row.get(2)?;
-            let leaf_index_i64: i64 = row.get(3)?;
-            let leaf_index = col_u32(leaf_index_i64, 3)?;
-            let created_at_ledger_i64: i64 = row.get(4)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
-            let spent_i64: i64 = row.get(5)?;
-            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 6)?;
+        let mut __rows = stmt.query(params![address, limit]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let id: Field = sql::get(row, 0)?;
+                let pool_contract_id: String = sql::get(row, 1)?;
+                let amount: NoteAmount = sql::get(row, 2)?;
+                let leaf_index_i64: i64 = sql::get(row, 3)?;
+                let leaf_index = col_u32(leaf_index_i64, 3)?;
+                let created_at_ledger_i64: i64 = sql::get(row, 4)?;
+                let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+                let spent_i64: i64 = sql::get(row, 5)?;
+                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 6)?;
 
-            Ok(UserNoteSummary {
-                id,
-                pool_contract_id,
-                amount,
-                leaf_index,
-                created_at_ledger,
-                spent: spent_i64 != 0,
-                gvk_ciphertext,
-            })
-        })?;
+                Ok(UserNoteSummary {
+                    id,
+                    pool_contract_id,
+                    amount,
+                    leaf_index,
+                    created_at_ledger,
+                    spent: spent_i64 != 0,
+                    gvk_ciphertext,
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut out = Vec::new();
         for r in rows {
@@ -516,13 +632,15 @@ impl Storage {
 
     /// All notes for `address` in `pool_contract_id` (newest first), spent and
     /// unspent.
-    pub fn list_pool_user_notes(
+    pub async fn list_pool_user_notes(
         &self,
         pool_contract_id: &str,
         address: &str,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT
                 n.id,
                 n.amount,
                 c.leaf_index,
@@ -536,28 +654,36 @@ impl Storage {
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND pool.address = ?2
              ORDER BY r.ledger DESC",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
-            let id: Field = row.get(0)?;
-            let amount: NoteAmount = row.get(1)?;
-            let leaf_index_i64: i64 = row.get(2)?;
-            let leaf_index = col_u32(leaf_index_i64, 2)?;
-            let created_at_ledger_i64: i64 = row.get(3)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
-            let spent_i64: i64 = row.get(4)?;
-            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
+        let mut __rows = stmt.query(params![address, pool_contract_id]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let id: Field = sql::get(row, 0)?;
+                let amount: NoteAmount = sql::get(row, 1)?;
+                let leaf_index_i64: i64 = sql::get(row, 2)?;
+                let leaf_index = col_u32(leaf_index_i64, 2)?;
+                let created_at_ledger_i64: i64 = sql::get(row, 3)?;
+                let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+                let spent_i64: i64 = sql::get(row, 4)?;
+                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
-            Ok(UserNoteSummary {
-                id,
-                pool_contract_id: pool_contract_id.to_string(),
-                amount,
-                leaf_index,
-                created_at_ledger,
-                spent: spent_i64 != 0,
-                gvk_ciphertext,
-            })
-        })?;
+                Ok(UserNoteSummary {
+                    id,
+                    pool_contract_id: pool_contract_id.to_string(),
+                    amount,
+                    leaf_index,
+                    created_at_ledger,
+                    spent: spent_i64 != 0,
+                    gvk_ciphertext,
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut out = Vec::new();
         for r in rows {
@@ -567,13 +693,15 @@ impl Storage {
     }
 
     /// All unspent notes for `address` in `pool_contract_id` (newest first).
-    pub fn list_unspent_user_notes(
+    pub async fn list_unspent_user_notes(
         &self,
         pool_contract_id: &str,
         address: &str,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT
                 n.id,
                 pool.address,
                 n.amount,
@@ -587,28 +715,36 @@ impl Storage {
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND pool.address = ?2 AND n.nullifier_id IS NULL
              ORDER BY r.ledger DESC",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
-            let id: Field = row.get(0)?;
-            let pool_contract_id: String = row.get(1)?;
-            let amount: NoteAmount = row.get(2)?;
-            let leaf_index_i64: i64 = row.get(3)?;
-            let leaf_index = col_u32(leaf_index_i64, 3)?;
-            let created_at_ledger_i64: i64 = row.get(4)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
-            let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
+        let mut __rows = stmt.query(params![address, pool_contract_id]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let id: Field = sql::get(row, 0)?;
+                let pool_contract_id: String = sql::get(row, 1)?;
+                let amount: NoteAmount = sql::get(row, 2)?;
+                let leaf_index_i64: i64 = sql::get(row, 3)?;
+                let leaf_index = col_u32(leaf_index_i64, 3)?;
+                let created_at_ledger_i64: i64 = sql::get(row, 4)?;
+                let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+                let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
 
-            Ok(UserNoteSummary {
-                id,
-                pool_contract_id,
-                amount,
-                leaf_index,
-                created_at_ledger,
-                spent: false,
-                gvk_ciphertext,
-            })
-        })?;
+                Ok(UserNoteSummary {
+                    id,
+                    pool_contract_id,
+                    amount,
+                    leaf_index,
+                    created_at_ledger,
+                    spent: false,
+                    gvk_ciphertext,
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut out = Vec::new();
         for r in rows {
@@ -617,13 +753,15 @@ impl Storage {
         Ok(out)
     }
 
-    pub fn list_portfolio_balances(
+    pub async fn list_portfolio_balances(
         &self,
         address: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT pool.address, n.amount
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT pool.address, n.amount
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -631,13 +769,21 @@ impl Storage {
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND n.nullifier_id IS NULL
              ORDER BY pool.address",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![address], |row| {
-            let pool_contract_id: String = row.get(0)?;
-            let amount: NoteAmount = row.get(1)?;
-            Ok((pool_contract_id, amount))
-        })?;
+        let mut __rows = stmt.query(params![address]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let pool_contract_id: String = sql::get(row, 0)?;
+                let amount: NoteAmount = sql::get(row, 1)?;
+                Ok((pool_contract_id, amount))
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut aggregated = std::collections::HashMap::new();
         for row in rows {
@@ -669,19 +815,20 @@ impl Storage {
         Ok(balances)
     }
 
-    pub fn recipient_lookup(
+    pub async fn recipient_lookup(
         &self,
         address: &str,
         public_key_registry_contract_id: &str,
     ) -> Result<RecipientLookup> {
-        let entry = self.lookup_public_key_by_address(address)?;
+        let entry = self.lookup_public_key_by_address(address).await?;
         let registry_last_fully_indexed_ledger = self
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == public_key_registry_contract_id)
             .map(|meta| meta.last_fully_indexed_ledger)
             .unwrap_or_default();
-        let network_tip_ledger = self.network_tip_ledger()?;
+        let network_tip_ledger = self.network_tip_ledger().await?;
 
         Ok(RecipientLookup {
             entry,
@@ -692,7 +839,7 @@ impl Storage {
         })
     }
 
-    pub fn get_operational_feed(
+    pub async fn get_operational_feed(
         &self,
         limit: u32,
         asp_membership_contract_id: &str,
@@ -762,26 +909,32 @@ impl Storage {
              )
              ORDER BY ledger DESC
              LIMIT ?3",
-        )?;
+        ).await?;
 
-        let rows = stmt.query_map(
-            params![
+        let mut __rows = stmt
+            .query(params![
                 public_key_registry_contract_id,
                 asp_membership_contract_id,
                 limit
-            ],
-            |row| {
+            ])
+            .await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
                 Ok(OperationalFeedItem {
-                    kind: row.get(0)?,
-                    title: row.get(1)?,
-                    body: row.get(2)?,
-                    ledger: col_u32(row.get::<_, i64>(3)?, 3)?,
-                    contract_id: row.get(4)?,
-                    pool_contract_id: row.get(5)?,
-                    tx_type: row.get(6)?,
+                    kind: sql::get(row, 0)?,
+                    title: sql::get(row, 1)?,
+                    body: sql::get(row, 2)?,
+                    ledger: col_u32(sql::get::<i64>(row, 3)?, 3)?,
+                    contract_id: sql::get(row, 4)?,
+                    pool_contract_id: sql::get(row, 5)?,
+                    tx_type: sql::get(row, 6)?,
                 })
-            },
-        )?;
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut out = Vec::new();
         for row in rows {
@@ -798,22 +951,35 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_pool_commitment_leaves_ordered(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT pc.leaf_index, pc.commitment
+    pub async fn get_pool_commitment_leaves_ordered(
+        &self,
+        pool_contract_id: &str,
+    ) -> Result<Vec<Field>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT pc.leaf_index, pc.commitment
              FROM pool_commitments pc
              JOIN raw_contract_events r ON r.id = pc.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE c.address = ?1
              ORDER BY pc.leaf_index ASC",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![pool_contract_id], |row| {
-            let idx: i64 = row.get(0)?;
-            let idx = col_u32(idx, 0)?;
-            let commitment: Field = row.get(1)?;
-            Ok((idx, commitment))
-        })?;
+        let mut __rows = stmt.query(params![pool_contract_id]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let idx: i64 = sql::get(row, 0)?;
+                let idx = col_u32(idx, 0)?;
+                let commitment: Field = sql::get(row, 1)?;
+                Ok((idx, commitment))
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut leaves: Vec<Field> = Vec::new();
         let mut expected_index: u32 = 0;
@@ -839,14 +1005,16 @@ impl Storage {
     /// Lookup an unspent user note by pool commitment.
     ///
     /// Returns `(amount, blinding, leaf_index)` when found and unspent.
-    pub fn get_unspent_user_note_by_commitment(
+    pub async fn get_unspent_user_note_by_commitment(
         &self,
         pool_contract_id: &str,
         account_address: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT n.amount, n.blinding, pc.leaf_index
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments pc ON pc.id = n.commitment_id
@@ -857,21 +1025,27 @@ impl Storage {
                AND pc.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
-        )?;
-
-        let row = stmt
-            .query_row(
-                params![pool_contract_id, account_address, commitment],
-                |row| {
-                    let amount: NoteAmount = row.get(0)?;
-                    let blinding: Field = row.get(1)?;
-                    let leaf_index_i64: i64 = row.get(2)?;
-                    let leaf_index = col_u32(leaf_index_i64, 2)?;
-                    Ok((amount, blinding, leaf_index))
-                },
             )
-            .optional()
-            .context("Failed to query unspent user note by commitment")?;
+            .await?;
+
+        let row = Ok::<_, anyhow::Error>({
+            let mut __r = stmt
+                .query(params![pool_contract_id, account_address, commitment])
+                .await?;
+            match __r.next().await? {
+                Some(row) => Some((|row: &turso::Row| -> Result<_, turso::Error> {
+                    {
+                        let amount: NoteAmount = sql::get(row, 0)?;
+                        let blinding: Field = sql::get(row, 1)?;
+                        let leaf_index_i64: i64 = sql::get(row, 2)?;
+                        let leaf_index = col_u32(leaf_index_i64, 2)?;
+                        Ok((amount, blinding, leaf_index))
+                    }
+                })(&row)?),
+                None => None,
+            }
+        })
+        .context("Failed to query unspent user note by commitment")?;
 
         Ok(row)
     }
@@ -885,14 +1059,16 @@ impl Storage {
     /// lookup on the disclosure input-building path. The transact path must
     /// keep using [`Self::get_unspent_user_note_by_commitment`], which
     /// excludes spent notes.
-    pub fn get_user_note_by_commitment(
+    pub async fn get_user_note_by_commitment(
         &self,
         pool_contract_id: &str,
         account_address: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT n.amount, n.blinding, pc.leaf_index
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments pc ON pc.id = n.commitment_id
@@ -902,73 +1078,89 @@ impl Storage {
                AND c.address = ?1
                AND pc.commitment = ?3
              LIMIT 1",
-        )?;
-
-        let row = stmt
-            .query_row(
-                params![pool_contract_id, account_address, commitment],
-                |row| {
-                    let amount: NoteAmount = row.get(0)?;
-                    let blinding: Field = row.get(1)?;
-                    let leaf_index_i64: i64 = row.get(2)?;
-                    let leaf_index = col_u32(leaf_index_i64, 2)?;
-                    Ok((amount, blinding, leaf_index))
-                },
             )
-            .optional()
-            .context("Failed to query user note by commitment")?;
+            .await?;
+
+        let row = Ok::<_, anyhow::Error>({
+            let mut __r = stmt
+                .query(params![pool_contract_id, account_address, commitment])
+                .await?;
+            match __r.next().await? {
+                Some(row) => Some((|row: &turso::Row| -> Result<_, turso::Error> {
+                    {
+                        let amount: NoteAmount = sql::get(row, 0)?;
+                        let blinding: Field = sql::get(row, 1)?;
+                        let leaf_index_i64: i64 = sql::get(row, 2)?;
+                        let leaf_index = col_u32(leaf_index_i64, 2)?;
+                        Ok((amount, blinding, leaf_index))
+                    }
+                })(&row)?),
+                None => None,
+            }
+        })
+        .context("Failed to query user note by commitment")?;
 
         Ok(row)
     }
 
     /// Batch upsert for spent nullifiers
-    pub fn save_nullifier_events_batch(&mut self, events: &Vec<NewNullifierEvent>) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    pub async fn save_nullifier_events_batch(
+        &mut self,
+        events: &Vec<NewNullifierEvent>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().await?;
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO pool_nullifiers (nullifier, event_id, gvk_ciphertext)
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO pool_nullifiers (nullifier, event_id, gvk_ciphertext)
                     VALUES (?1, ?2, ?3)
                     ON CONFLICT(nullifier) DO NOTHING",
-            )?;
+                )
+                .await?;
 
             for event in events {
                 stmt.execute(params![
                     event.nullifier,
-                    event.id,
+                    event.id.clone(),
                     encode_optional_gvk_ciphertext(event.gvk_ciphertext.as_ref())?,
-                ])?;
+                ])
+                .await?;
             }
         }
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
     /// Batch upsert for Merkle tree commitments
-    pub fn save_commitment_events_batch(&mut self, events: &Vec<NewCommitmentEvent>) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    pub async fn save_commitment_events_batch(
+        &mut self,
+        events: &Vec<NewCommitmentEvent>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().await?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
                     VALUES (?1, ?2, ?3, ?4, ?5)
                     ON CONFLICT(commitment) DO NOTHING",
-            )?;
+            ).await?;
 
             for event in events {
                 stmt.execute(params![
                     event.commitment,
                     event.index,
-                    event.encrypted_output,
-                    event.id,
+                    event.encrypted_output.clone(),
+                    event.id.clone(),
                     encode_optional_gvk_ciphertext(event.gvk_ciphertext.as_ref())?,
-                ])?;
+                ])
+                .await?;
             }
         }
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
     /// Flat pool GVK events in `(ledger, event_id)` order.
-    pub fn list_pool_gvk_events(
+    pub async fn list_pool_gvk_events(
         &self,
         pool_contract_id: &str,
         after: Option<(u32, String)>,
@@ -996,54 +1188,62 @@ impl Storage {
             None => (None, None),
         };
 
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(
-            params![
+        let mut stmt = self.conn.prepare(sql).await?;
+        let mut __rows = stmt
+            .query(params![
                 pool_contract_id,
                 after_ledger.map(|_| 1i32),
                 after_ledger,
                 after_id,
                 limit,
-            ],
-            |row| {
-                let ledger: u32 = row.get(0)?;
-                let event_id: String = row.get(1)?;
-                let kind: i32 = row.get(2)?;
-                let field: Field = row.get(3)?;
-                let encoded: Option<String> = row.get(4)?;
+            ])
+            .await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let ledger: u32 = sql::get(row, 0)?;
+                let event_id: String = sql::get(row, 1)?;
+                let kind: i32 = sql::get(row, 2)?;
+                let field: Field = sql::get(row, 3)?;
+                let encoded: Option<String> = sql::get(row, 4)?;
                 Ok((ledger, event_id, kind, field, encoded))
-            },
-        )?;
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
-        rows.map(|row| {
-            let (ledger, event_id, kind, field, encoded) = row?;
-            let gvk_ciphertext_opt = encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
-            match kind {
-                0 => {
-                    let gvk_ciphertext = gvk_ciphertext_opt.ok_or_else(|| {
-                        anyhow!("commitment row missing gvk_ciphertext after filter")
-                    })?;
-                    Ok(crate::gvk::GvkEvent::Commitment {
+        rows.into_iter()
+            .map(|row| {
+                let (ledger, event_id, kind, field, encoded) = row?;
+                let gvk_ciphertext_opt =
+                    encoded.as_deref().map(decode_gvk_ciphertext).transpose()?;
+                match kind {
+                    0 => {
+                        let gvk_ciphertext = gvk_ciphertext_opt.ok_or_else(|| {
+                            anyhow!("commitment row missing gvk_ciphertext after filter")
+                        })?;
+                        Ok(crate::gvk::GvkEvent::Commitment {
+                            ledger,
+                            event_id,
+                            commitment: field,
+                            gvk_ciphertext,
+                        })
+                    }
+                    1 => Ok(crate::gvk::GvkEvent::Nullifier {
                         ledger,
                         event_id,
-                        commitment: field,
-                        gvk_ciphertext,
-                    })
+                        nullifier: field,
+                        gvk_ciphertext: gvk_ciphertext_opt,
+                    }),
+                    other => Err(anyhow!("unknown pool GVK event kind: {other}")),
                 }
-                1 => Ok(crate::gvk::GvkEvent::Nullifier {
-                    ledger,
-                    event_id,
-                    nullifier: field,
-                    gvk_ciphertext: gvk_ciphertext_opt,
-                }),
-                other => Err(anyhow!("unknown pool GVK event kind: {other}")),
-            }
-        })
-        .collect()
+            })
+            .collect()
     }
 
     /// Subset of `commitments` that exist in `pool_contract_id`.
-    pub fn pool_has_commitments(
+    pub async fn pool_has_commitments(
         &self,
         pool_contract_id: &str,
         commitments: &[Field],
@@ -1064,53 +1264,79 @@ impl Storage {
              WHERE pool.address = ?1 AND c.commitment IN ({placeholders})"
         );
 
-        let mut stmt = self.conn.prepare(&sql)?;
-        let mut params: Vec<&dyn rusqlite::types::ToSql> =
+        let mut stmt = self.conn.prepare(&sql).await?;
+        let mut params: Vec<turso::Value> =
             Vec::with_capacity(1_usize.saturating_add(commitments.len()));
-        params.push(&pool_contract_id);
-        params.extend(commitments.iter().map(|c| c as &dyn rusqlite::types::ToSql));
-        let rows = stmt.query_map(params_from_iter(params), |row| row.get(0))?;
-        rows.collect::<Result<HashSet<_>, _>>().map_err(Into::into)
+        params.push(turso::Value::from(pool_contract_id));
+        for c in commitments {
+            params.push(turso::Value::try_from(*c)?);
+        }
+        let mut __rows = stmt.query(params_from_iter(params)).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> { sql::get(row, 0) };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
+        rows.into_iter()
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(Into::into)
     }
 
     /// Batch upsert for Public Keys (Address owner and BLOB keys)
-    pub fn save_public_key_events_batch(&mut self, events: &Vec<PublicKeyEvent>) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    pub async fn save_public_key_events_batch(
+        &mut self,
+        events: &Vec<PublicKeyEvent>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().await?;
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
                     VALUES (?1, ?2, ?3, ?4)
                     ON CONFLICT(event_id) DO NOTHING",
-            )?;
+                )
+                .await?;
 
             for event in events {
                 stmt.execute(params![
-                    event.owner,
-                    event.encryption_key,
-                    event.note_key,
-                    event.id
-                ])?;
+                    event.owner.clone(),
+                    event.encryption_key.clone(),
+                    event.note_key.clone(),
+                    event.id.clone()
+                ])
+                .await?;
             }
         }
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
     /// Batch upsert for ASP Membership Leaves
-    pub fn save_leaf_added_events_batch(&mut self, events: &Vec<LeafAddedEvent>) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    pub async fn save_leaf_added_events_batch(
+        &mut self,
+        events: &Vec<LeafAddedEvent>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().await?;
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
                     VALUES (?1, ?2, ?3, ?4)
                     ON CONFLICT(leaf_index) DO NOTHING",
-            )?;
+                )
+                .await?;
 
             for event in events {
-                stmt.execute(params![event.index, event.leaf, event.root, event.id])?;
+                stmt.execute(params![
+                    event.index,
+                    event.leaf,
+                    event.root,
+                    event.id.clone()
+                ])
+                .await?;
             }
         }
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1135,7 +1361,7 @@ impl Storage {
     ///   networks/corruption). Local metadata sitting a few ledgers *ahead* of
     ///   `current_ledger` is normal skew between independent RPC reads and is
     ///   tolerated, not treated as an error.
-    pub fn check_asp_membership_precondition(
+    pub async fn check_asp_membership_precondition(
         &self,
         asp_membership_contract_id: &str,
         user_leaf: &Field,
@@ -1145,7 +1371,8 @@ impl Storage {
         // The indexer sync metadata is authoritative for "how far we've
         // indexed", even if there were no ASP events in recent ledgers.
         let sync_meta = self
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == asp_membership_contract_id);
         let Some(sync_meta) = sync_meta else {
@@ -1174,25 +1401,34 @@ impl Storage {
         //   vs
         // - "partial processing" (raw events ingested to tip but leaves table
         //   lags).
-        let mut stmt = self.conn.prepare(
-            "SELECT l.root, r.ledger
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
              JOIN raw_contract_events r ON r.id = l.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE c.address = ?1
              ORDER BY l.leaf_index DESC
              LIMIT 1",
-        )?;
+            )
+            .await?;
 
-        let last: Option<(Field, u32)> = stmt
-            .query_row(params![asp_membership_contract_id], |row| {
-                let root: Field = row.get(0)?;
-                let ledger_i64: i64 = row.get(1)?;
-                let ledger = col_u32(ledger_i64, 1)?;
-                Ok((root, ledger))
-            })
-            .optional()
-            .context("Failed to query asp_membership_leaves last root/ledger")?;
+        let last: Option<(Field, u32)> = Ok::<_, anyhow::Error>({
+            let mut __r = stmt.query(params![asp_membership_contract_id]).await?;
+            match __r.next().await? {
+                Some(row) => Some((|row: &turso::Row| -> Result<_, turso::Error> {
+                    {
+                        let root: Field = sql::get(row, 0)?;
+                        let ledger_i64: i64 = sql::get(row, 1)?;
+                        let ledger = col_u32(ledger_i64, 1)?;
+                        Ok((root, ledger))
+                    }
+                })(&row)?),
+                None => None,
+            }
+        })
+        .context("Failed to query asp_membership_leaves last root/ledger")?;
 
         let Some((last_root, last_leaf_ledger)) = last else {
             return Ok(AspMembershipSync::RegisterAtASP);
@@ -1212,21 +1448,28 @@ impl Storage {
             anyhow::bail!("asp membership root mismatch at ledger {}", current_ledger);
         }
 
-        let mut stmt = self.conn.prepare(
-            "SELECT l.leaf_index
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT l.leaf_index
              FROM asp_membership_leaves l
              JOIN raw_contract_events r ON r.id = l.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE l.leaf = ?1 AND c.address = ?2
              LIMIT 1",
-        )?;
+            )
+            .await?;
 
-        let user_leaf_index: Option<u32> = stmt
-            .query_row(params![user_leaf, asp_membership_contract_id], |row| {
-                row.get(0)
-            })
-            .optional()
-            .context("Failed to query asp_membership_leaves user leaf existence")?;
+        let user_leaf_index: Option<u32> = Ok::<_, anyhow::Error>({
+            let mut __r = stmt
+                .query(params![user_leaf, asp_membership_contract_id])
+                .await?;
+            match __r.next().await? {
+                Some(row) => Some(sql::get(&row, 0)?),
+                None => None,
+            }
+        })
+        .context("Failed to query asp_membership_leaves user leaf existence")?;
 
         if let Some(user_leaf_index) = user_leaf_index {
             return Ok(AspMembershipSync::UserIndex(user_leaf_index));
@@ -1241,25 +1484,35 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_all_asp_membership_leaves_ordered(
+    pub async fn get_all_asp_membership_leaves_ordered(
         &self,
         asp_membership_contract_id: &str,
     ) -> Result<Vec<Field>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT l.leaf_index, l.leaf
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT l.leaf_index, l.leaf
              FROM asp_membership_leaves l
              JOIN raw_contract_events r ON r.id = l.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE c.address = ?1
              ORDER BY l.leaf_index ASC",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map(params![asp_membership_contract_id], |row| {
-            let idx: i64 = row.get(0)?;
-            let idx = col_u32(idx, 0)?;
-            let leaf: Field = row.get(1)?;
-            Ok((idx, leaf))
-        })?;
+        let mut __rows = stmt.query(params![asp_membership_contract_id]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let idx: i64 = sql::get(row, 0)?;
+                let idx = col_u32(idx, 0)?;
+                let leaf: Field = sql::get(row, 1)?;
+                Ok((idx, leaf))
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut leaves: Vec<Field> = Vec::new();
         let mut expected_index: u32 = 0;
@@ -1283,9 +1536,11 @@ impl Storage {
     }
 
     /// Unprocessed raw events fetch
-    pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT r.id, r.ledger, c.address, r.topics, r.value
+    pub async fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT r.id, r.ledger, c.address, r.topics, r.value
                 FROM raw_contract_events r
                 JOIN contracts c ON c.contract_id = r.contract_id
                 LEFT JOIN pool_commitments pc ON r.id = pc.event_id
@@ -1298,19 +1553,27 @@ impl Storage {
                 AND l.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
-        )?;
+            )
+            .await?;
 
-        let event_iter = stmt.query_map(params![limit], |row| {
-            let topics_str: String = row.get(3)?;
-            Ok(ContractEvent {
-                id: row.get(0)?,
-                ledger: row.get(1)?,
-                contract_id: row.get(2)?,
-                // Split the comma-separated topics back into a Vec
-                topics: topics_str.split(',').map(|s| s.to_string()).collect(),
-                value: row.get(4)?,
-            })
-        })?;
+        let mut __rows = stmt.query(params![limit]).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let topics_str: String = sql::get(row, 3)?;
+                Ok(ContractEvent {
+                    id: sql::get(row, 0)?,
+                    ledger: sql::get(row, 1)?,
+                    contract_id: sql::get(row, 2)?,
+                    // Split the comma-separated topics back into a Vec
+                    topics: topics_str.split(',').map(|s| s.to_string()).collect(),
+                    value: sql::get(row, 4)?,
+                })
+            }
+        };
+        let mut event_iter = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            event_iter.push(mapper(&row));
+        }
 
         let mut events = Vec::new();
         for event in event_iter {
@@ -1320,9 +1583,11 @@ impl Storage {
         Ok(events)
     }
 
-    fn get_accounts_with_latest_keypairs(&self) -> Result<Vec<AccountKeys>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT
+    async fn get_accounts_with_latest_keypairs(&self) -> Result<Vec<AccountKeys>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT
                 a.id,
                 k.encryption_private_key,
                 k.encryption_public_key,
@@ -1338,31 +1603,39 @@ impl Storage {
              ) latest ON latest.account_id = a.id
              JOIN keypairs k ON k.id = latest.max_id
              ORDER BY a.id ASC",
-        )?;
+            )
+            .await?;
 
-        let rows = stmt.query_map([], |row| {
-            let account_id: i64 = row.get(0)?;
-            let enc_priv: EncryptionPrivateKey = row.get(1)?;
-            let enc_pub: EncryptionPublicKey = row.get(2)?;
-            let note_priv: NotePrivateKey = row.get(3)?;
-            let note_pub: NotePublicKey = row.get(4)?;
-            let membership_blinding: Field = row.get(5)?;
+        let mut __rows = stmt.query(()).await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                let account_id: i64 = sql::get(row, 0)?;
+                let enc_priv: EncryptionPrivateKey = sql::get(row, 1)?;
+                let enc_pub: EncryptionPublicKey = sql::get(row, 2)?;
+                let note_priv: NotePrivateKey = sql::get(row, 3)?;
+                let note_pub: NotePublicKey = sql::get(row, 4)?;
+                let membership_blinding: Field = sql::get(row, 5)?;
 
-            Ok(AccountKeys {
-                account_id,
-                keys: StoredPrivateKeys {
-                    note_keypair: NoteKeyPair {
-                        private: note_priv,
-                        public: note_pub,
+                Ok(AccountKeys {
+                    account_id,
+                    keys: StoredPrivateKeys {
+                        note_keypair: NoteKeyPair {
+                            private: note_priv,
+                            public: note_pub,
+                        },
+                        encryption_keypair: EncryptionKeyPair {
+                            private: enc_priv,
+                            public: enc_pub,
+                        },
+                        membership_blinding,
                     },
-                    encryption_keypair: EncryptionKeyPair {
-                        private: enc_priv,
-                        public: enc_pub,
-                    },
-                    membership_blinding,
-                },
-            })
-        })?;
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
 
         let mut out = Vec::new();
         for r in rows {
@@ -1374,28 +1647,32 @@ impl Storage {
     /// Scan pool commitments and insert decryptable notes into `user_notes`.
     ///
     /// Progress is tracked per-account in `account_commitment_scan`.
-    pub(crate) fn scan_commitments_for_user_notes(
+    pub(crate) async fn scan_commitments_for_user_notes(
         &mut self,
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
     ) -> Result<bool> {
         const ACCOUNT_CHUNK: u32 = 4;
 
-        let accounts = self.get_accounts_with_latest_keypairs()?;
+        let accounts = self.get_accounts_with_latest_keypairs().await?;
         if accounts.is_empty() || total_limit == 0 {
             return Ok(false);
         }
 
-        let pool_ids: Vec<i64> = self
+        let mut stmt = self
             .conn
             .prepare(
                 "SELECT DISTINCT r.contract_id
                  FROM pool_commitments c
                  JOIN raw_contract_events r ON r.id = c.event_id
                  ORDER BY r.contract_id",
-            )?
-            .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<i64>, _>>()?;
+            )
+            .await?;
+        let mut rows = stmt.query(()).await?;
+        let mut pool_ids: Vec<i64> = Vec::new();
+        while let Some(row) = rows.next().await? {
+            pool_ids.push(sql::get(&row, 0)?);
+        }
 
         if pool_ids.is_empty() {
             return Ok(false);
@@ -1438,14 +1715,14 @@ impl Storage {
                 continue;
             }
 
-            let tx = self.conn.transaction()?;
+            let tx = self.conn.transaction().await?;
 
             for account in &accounts {
                 tx.execute(
                     "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
                      VALUES (?1, ?2, 0)",
                     params![pool_contract_id, account.account_id],
-                )?;
+                ).await?;
             }
 
             let mut did_progress_in_pool = false;
@@ -1458,13 +1735,22 @@ impl Storage {
                         break;
                     }
 
-                    let last_commitment_id: i64 = tx.query_row(
-                        "SELECT last_commitment_id
+                    let last_commitment_id: i64 = Ok::<_, anyhow::Error>({
+                        let mut __s = tx
+                            .prepare(
+                                "SELECT last_commitment_id
                          FROM account_commitment_scan
                          WHERE pool_contract_id = ?1 AND account_id = ?2",
-                        params![pool_contract_id, account.account_id],
-                        |row| row.get(0),
-                    )?;
+                            )
+                            .await?;
+                        let mut __r = __s
+                            .query(params![pool_contract_id, account.account_id])
+                            .await?;
+                        match __r.next().await? {
+                            Some(row) => sql::get(&row, 0)?,
+                            None => anyhow::bail!("query returned no rows"),
+                        }
+                    })?;
 
                     let quota = pool_quota.min(ACCOUNT_CHUNK);
                     let commitments: Vec<PoolCommitmentRow> = {
@@ -1475,16 +1761,18 @@ impl Storage {
                              WHERE r.contract_id = ?1 AND c.id > ?2
                              ORDER BY c.id ASC
                              LIMIT ?3",
-                        )?;
+                        ).await?;
 
-                        let rows = stmt.query_map(
-                            params![pool_contract_id, last_commitment_id, quota],
-                            |row| {
-                                let commitment_id: i64 = row.get(0)?;
-                                let commitment: Field = row.get(1)?;
-                                let leaf_index_i64: i64 = row.get(2)?;
+                        let mut __rows = stmt
+                            .query(params![pool_contract_id, last_commitment_id, quota])
+                            .await?;
+                        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+                            {
+                                let commitment_id: i64 = sql::get(row, 0)?;
+                                let commitment: Field = sql::get(row, 1)?;
+                                let leaf_index_i64: i64 = sql::get(row, 2)?;
                                 let leaf_index = col_u32(leaf_index_i64, 2)?;
-                                let encrypted_output: Vec<u8> = row.get(3)?;
+                                let encrypted_output: Vec<u8> = sql::get(row, 3)?;
                                 let gvk_ciphertext = optional_gvk_ciphertext_col(row, 4)?;
                                 Ok(PoolCommitmentRow {
                                     commitment_id,
@@ -1493,8 +1781,12 @@ impl Storage {
                                     encrypted_output,
                                     gvk_ciphertext,
                                 })
-                            },
-                        )?;
+                            }
+                        };
+                        let mut rows = Vec::new();
+                        while let Some(row) = __rows.next().await? {
+                            rows.push(mapper(&row));
+                        }
 
                         let mut out = Vec::new();
                         for r in rows {
@@ -1523,17 +1815,24 @@ impl Storage {
                             continue;
                         };
 
-                        let nullifier_id: Option<i64> = tx
-                            .query_row(
-                                "SELECT n.id
+                        let nullifier_id: Option<i64> = Ok::<_, anyhow::Error>({
+                            let mut __s = tx
+                                .prepare(
+                                    "SELECT n.id
                                  FROM pool_nullifiers n
                                  JOIN raw_contract_events r ON r.id = n.event_id
                                  WHERE r.contract_id = ?1 AND n.nullifier = ?2
                                  LIMIT 1",
-                                params![pool_contract_id, derived.expected_nullifier],
-                                |r| r.get(0),
-                            )
-                            .optional()?;
+                                )
+                                .await?;
+                            let mut __r = __s
+                                .query(params![pool_contract_id, derived.expected_nullifier])
+                                .await?;
+                            match __r.next().await? {
+                                Some(row) => Some(sql::get(&row, 0)?),
+                                None => None,
+                            }
+                        })?;
 
                         tx.execute(
                             "INSERT OR IGNORE INTO user_notes (
@@ -1554,7 +1853,8 @@ impl Storage {
                                 derived.blinding,
                                 derived.amount.to_string()
                             ],
-                        )?;
+                        )
+                        .await?;
                     }
 
                     tx.execute(
@@ -1562,7 +1862,8 @@ impl Storage {
                          SET last_commitment_id = ?1
                          WHERE pool_contract_id = ?2 AND account_id = ?3",
                         params![max_scanned_id, pool_contract_id, account.account_id],
-                    )?;
+                    )
+                    .await?;
 
                     pool_quota = pool_quota.saturating_sub(scanned_count);
                 }
@@ -1572,28 +1873,32 @@ impl Storage {
                 }
             }
 
-            tx.commit()?;
+            tx.commit().await?;
             did_any_progress |= did_progress_in_pool;
         }
 
         Ok(did_any_progress)
     }
 
-    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
+    pub async fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
         if limit == 0 {
             return Ok(false);
         }
 
-        let pool_ids: Vec<i64> = self
+        let mut stmt = self
             .conn
             .prepare(
                 "SELECT DISTINCT r.contract_id
                  FROM pool_nullifiers n
                  JOIN raw_contract_events r ON r.id = n.event_id
                  ORDER BY r.contract_id",
-            )?
-            .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<i64>, _>>()?;
+            )
+            .await?;
+        let mut rows = stmt.query(()).await?;
+        let mut pool_ids: Vec<i64> = Vec::new();
+        while let Some(row) = rows.next().await? {
+            pool_ids.push(sql::get(&row, 0)?);
+        }
 
         if pool_ids.is_empty() {
             return Ok(false);
@@ -1602,36 +1907,50 @@ impl Storage {
         let mut did_any = false;
 
         for pool_contract_id in pool_ids {
-            let tx = self.conn.transaction()?;
+            let tx = self.conn.transaction().await?;
 
             tx.execute(
                 "INSERT OR IGNORE INTO nullifier_scan_state (pool_contract_id, last_nullifier_id)
                  VALUES (?1, 0)",
                 params![pool_contract_id],
-            )?;
+            )
+            .await?;
 
-            let last_nullifier_id: i64 = tx.query_row(
-                "SELECT last_nullifier_id FROM nullifier_scan_state WHERE pool_contract_id = ?1",
-                params![pool_contract_id],
-                |row| row.get(0),
-            )?;
+            let last_nullifier_id: i64 = Ok::<_, anyhow::Error>({
+                let mut __s = tx.prepare("SELECT last_nullifier_id FROM nullifier_scan_state WHERE pool_contract_id = ?1").await?;
+                let mut __r = __s.query(params![pool_contract_id]).await?;
+                match __r.next().await? {
+                    Some(row) => sql::get(&row, 0)?,
+                    None => anyhow::bail!("query returned no rows"),
+                }
+            })?;
 
             let nullifiers: Vec<(i64, Field)> = {
-                let mut stmt = tx.prepare(
-                    "SELECT n.id, n.nullifier
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT n.id, n.nullifier
                      FROM pool_nullifiers n
                      JOIN raw_contract_events r ON r.id = n.event_id
                      WHERE r.contract_id = ?1 AND n.id > ?2
                      ORDER BY n.id ASC
                      LIMIT ?3",
-                )?;
+                    )
+                    .await?;
 
-                let rows =
-                    stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
-                        let id: i64 = row.get(0)?;
-                        let nullifier: Field = row.get(1)?;
+                let mut __rows = stmt
+                    .query(params![pool_contract_id, last_nullifier_id, limit])
+                    .await?;
+                let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+                    {
+                        let id: i64 = sql::get(row, 0)?;
+                        let nullifier: Field = sql::get(row, 1)?;
                         Ok((id, nullifier))
-                    })?;
+                    }
+                };
+                let mut rows = Vec::new();
+                while let Some(row) = __rows.next().await? {
+                    rows.push(mapper(&row));
+                }
 
                 let mut out = Vec::new();
                 for r in rows {
@@ -1661,7 +1980,8 @@ impl Storage {
                              AND r.contract_id = ?3
                        )",
                     params![nullifier_id, nullifier, pool_contract_id],
-                )?;
+                )
+                .await?;
             }
 
             if max_id > last_nullifier_id {
@@ -1670,10 +1990,11 @@ impl Storage {
                      SET last_nullifier_id = ?1
                      WHERE pool_contract_id = ?2",
                     params![max_id, pool_contract_id],
-                )?;
+                )
+                .await?;
             }
 
-            tx.commit()?;
+            tx.commit().await?;
         }
 
         Ok(did_any)
@@ -1684,15 +2005,17 @@ impl Storage {
 // Row-mapping helpers
 // ---------------------------------------------------------------------------
 
-/// Converts an `i64` SQLite column to `u32`, returning a rusqlite error on
+/// Converts an `i64` SQLite column to `u32`, returning a SQL error on
 /// overflow.
 fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
-    u32::try_from(val).map_err(|_| SqlError::IntegralValueOutOfRange(col, val))
+    u32::try_from(val).map_err(|_| {
+        SqlError::ConversionFailure(format!("value {val} out of range for u32 (column {col})"))
+    })
 }
 
 impl Storage {
     #[allow(clippy::too_many_arguments)]
-    pub fn insert_operation(
+    pub async fn insert_operation(
         &self,
         address: &str,
         pool_contract_id: &str,
@@ -1702,40 +2025,52 @@ impl Storage {
         counterparty: Option<&str>,
         tx_hash: Option<&str>,
     ) -> Result<()> {
-        // created_at is filled by the DB as UTC epoch seconds, not the client
-        // clock.
+        // Use the browser-compatible clock; Turso SQL datetime("now") uses
+        // std::time, which is unavailable on wasm32-unknown-unknown.
         self.conn.execute(
             "INSERT INTO app_user_operations
                 (address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))",
-            params![address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash],
-        )?;
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, unix_seconds()?],
+        ).await?;
         Ok(())
     }
 
-    pub fn list_operations(
+    pub async fn list_operations(
         &self,
         address: &str,
         pool_contract_id: &str,
         limit: u32,
     ) -> Result<Vec<UserOperation>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT op_type, amount, direction, counterparty, tx_hash, created_at
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT op_type, amount, direction, counterparty, tx_hash, created_at
              FROM app_user_operations
              WHERE address = ?1 AND pool_contract_id = ?2
              ORDER BY created_at DESC, id DESC
              LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(params![address, pool_contract_id, limit], |row| {
-            Ok(UserOperation {
-                op_type: row.get(0)?,
-                amount: row.get(1)?,
-                direction: row.get(2)?,
-                counterparty: row.get(3)?,
-                tx_hash: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })?;
+            )
+            .await?;
+        let mut __rows = stmt
+            .query(params![address, pool_contract_id, limit])
+            .await?;
+        let mapper = |row: &turso::Row| -> Result<_, turso::Error> {
+            {
+                Ok(UserOperation {
+                    op_type: sql::get(row, 0)?,
+                    amount: sql::get(row, 1)?,
+                    direction: sql::get(row, 2)?,
+                    counterparty: sql::get(row, 3)?,
+                    tx_hash: sql::get(row, 4)?,
+                    created_at: sql::get(row, 5)?,
+                })
+            }
+        };
+        let mut rows = Vec::new();
+        while let Some(row) = __rows.next().await? {
+            rows.push(mapper(&row));
+        }
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -1744,12 +2079,12 @@ impl Storage {
     }
 }
 
-fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<crate::types::PublicKeyEntry, SqlError> {
+fn map_public_key_entry(row: &turso::Row) -> Result<crate::types::PublicKeyEntry, SqlError> {
     Ok(crate::types::PublicKeyEntry {
-        address: row.get(0)?,
-        encryption_key: row.get(1)?,
-        note_key: row.get(2)?,
-        ledger: col_u32(row.get::<_, i64>(3)?, 3)?,
+        address: sql::get(row, 0)?,
+        encryption_key: sql::get(row, 1)?,
+        note_key: sql::get(row, 2)?,
+        ledger: col_u32(sql::get::<i64>(row, 3)?, 3)?,
     })
 }
 
@@ -1767,15 +2102,15 @@ fn decode_gvk_ciphertext(encoded: &str) -> Result<GlobalViewKeyCiphertext> {
 }
 
 fn optional_gvk_ciphertext_col(
-    row: &rusqlite::Row<'_>,
+    row: &turso::Row,
     idx: usize,
-) -> rusqlite::Result<Option<GlobalViewKeyCiphertext>> {
+) -> Result<Option<GlobalViewKeyCiphertext>, SqlError> {
     let encoded: Option<String> = row.get(idx)?;
     match encoded {
         None => Ok(None),
-        Some(encoded) => decode_gvk_ciphertext(&encoded).map(Some).map_err(|e| {
-            rusqlite::Error::InvalidParameterName(format!("gvk_ciphertext[{idx}]: {e:#}"))
-        }),
+        Some(encoded) => decode_gvk_ciphertext(&encoded)
+            .map(Some)
+            .map_err(|e| SqlError::ConversionFailure(format!("gvk_ciphertext[{idx}]: {e:#}"))),
     }
 }
 
@@ -1787,6 +2122,125 @@ mod tests {
         zk::{crypto, encryption},
     };
 
+    trait TestQueryRow {
+        async fn test_query_row<
+            T,
+            P: turso::IntoParams,
+            F: FnOnce(&turso::Row) -> turso::Result<T>,
+        >(
+            &self,
+            sql: &str,
+            params: P,
+            map: F,
+        ) -> Result<T>;
+    }
+    impl TestQueryRow for Connection {
+        async fn test_query_row<
+            T,
+            P: turso::IntoParams,
+            F: FnOnce(&turso::Row) -> turso::Result<T>,
+        >(
+            &self,
+            sql: &str,
+            params: P,
+            map: F,
+        ) -> Result<T> {
+            let mut rows = self.query(sql, params).await?;
+            let row = rows
+                .next()
+                .await?
+                .ok_or_else(|| anyhow!("expected one row"))?;
+            Ok(map(&row)?)
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn upgrades_existing_sqlite_wallets_and_reopens() -> Result<()> {
+        for version in 1..=MIGRATIONS.len() {
+            let path = std::env::temp_dir().join(format!(
+                "spp-turso-upgrade-{}-{}-{version}.db",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_nanos(),
+            ));
+            {
+                let conn = rusqlite::Connection::open(&path)?;
+                for migration in &MIGRATIONS[..version] {
+                    conn.execute_batch(migration)?;
+                }
+                conn.pragma_update(None, "user_version", i64::try_from(version)?)?;
+                conn.execute("INSERT INTO accounts (address) VALUES ('preserved')", [])?;
+                conn.execute(
+                    "INSERT INTO app_settings (key, value) VALUES ('scalar', '123')",
+                    [],
+                )?;
+            }
+            for _ in 0..2 {
+                let storage = Storage::connect_file(&path).await?;
+                assert_eq!(storage.get_setting_json::<u32>("scalar").await?, Some(123));
+                let count: i64 = storage
+                    .conn
+                    .test_query_row(
+                        "SELECT COUNT(*) FROM accounts WHERE address = 'preserved'",
+                        (),
+                        |row| row.get(0),
+                    )
+                    .await?;
+                assert_eq!(count, 1);
+                let version: i64 = storage
+                    .conn
+                    .test_query_row("PRAGMA user_version", (), |row| row.get(0))
+                    .await?;
+                assert_eq!(usize::try_from(version)?, MIGRATIONS.len());
+                storage
+                    .conn
+                    .query("SELECT gvk_ciphertext FROM pool_commitments", ())
+                    .await?;
+            }
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn failed_migration_rolls_back_schema_and_version() -> Result<()> {
+        let db = turso::Builder::new_local(":memory:").build().await?;
+        let mut conn = db.connect()?;
+        conn.execute_batch(MIGRATIONS[0]).await?;
+        conn.pragma_update("user_version", 1).await?;
+        // Force the second ALTER to fail after the first ALTER has succeeded.
+        conn.execute_batch("ALTER TABLE pool_nullifiers ADD COLUMN gvk_ciphertext TEXT")
+            .await?;
+        assert!(apply_migrations(&mut conn).await.is_err());
+        let version: i64 = conn
+            .test_query_row("PRAGMA user_version", (), |row| row.get(0))
+            .await?;
+        assert_eq!(version, 1);
+        assert!(
+            conn.query("SELECT gvk_ciphertext FROM pool_commitments", ())
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn rejects_future_schema_without_modifying_it() -> Result<()> {
+        let db = turso::Builder::new_local(":memory:").build().await?;
+        let mut conn = db.connect()?;
+        conn.pragma_update("user_version", 999).await?;
+        assert!(apply_migrations(&mut conn).await.is_err());
+        let version: i64 = conn
+            .test_query_row("PRAGMA user_version", (), |row| row.get(0))
+            .await?;
+        assert_eq!(version, 999);
+        Ok(())
+    }
+
     fn dummy_event(id: &str) -> ContractEvent {
         ContractEvent {
             id: id.to_string(),
@@ -1797,27 +2251,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         // Create an account with keypairs.
         let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(signature.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
-        let account_id: i64 = storage.conn.query_row(
-            "SELECT id FROM accounts WHERE address = ?1",
-            params!["GTESTACCOUNT"],
-            |row| row.get(0),
-        )?;
+        let account_id: i64 = storage
+            .conn
+            .test_query_row(
+                "SELECT id FROM accounts WHERE address = ?1",
+                params!["GTESTACCOUNT"],
+                |row| row.get(0),
+            )
+            .await?;
 
         // Build a commitment + encrypted output addressed to the account.
         let amount = NoteAmount::from(5);
@@ -1840,18 +2300,22 @@ mod tests {
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
         // Insert the raw event + the parsed pool commitment row.
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 3,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         // Scan commitments -> user_notes.
         let mut derive = |account: &AccountKeys,
@@ -1870,19 +2334,26 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
-
-        let note_count: i64 =
+        assert!(
             storage
-                .conn
-                .query_row("SELECT COUNT(*) FROM user_notes", [], |row| row.get(0))?;
+                .scan_commitments_for_user_notes(100, &mut derive)
+                .await?
+        );
+
+        let note_count: i64 = storage
+            .conn
+            .test_query_row("SELECT COUNT(*) FROM user_notes", (), |row| row.get(0))
+            .await?;
         assert_eq!(note_count, 1);
 
-        let scanned: i64 = storage.conn.query_row(
-            "SELECT last_commitment_id FROM account_commitment_scan WHERE account_id = ?1",
-            params![account_id],
-            |row| row.get(0),
-        )?;
+        let scanned: i64 = storage
+            .conn
+            .test_query_row(
+                "SELECT last_commitment_id FROM account_commitment_scan WHERE account_id = ?1",
+                params![account_id],
+                |row| row.get(0),
+            )
+            .await?;
         assert!(scanned > 0);
 
         // Insert a matching nullifier event.
@@ -1901,50 +2372,63 @@ mod tests {
         })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-null")],
-            cursor: "cur2".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-            id: "evt-null".to_string(),
-            nullifier,
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-null")],
+                cursor: "cur2".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_nullifier_events_batch(&vec![NewNullifierEvent {
+                id: "evt-null".to_string(),
+                nullifier,
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
-        assert!(storage.reconcile_nullifiers(100)?);
+        assert!(storage.reconcile_nullifiers(100).await?);
 
-        let nullifier_id: Option<i64> = storage.conn.query_row(
-            "SELECT nullifier_id FROM user_notes WHERE account_id = ?1",
-            params![account_id],
-            |row| row.get(0),
-        )?;
+        let nullifier_id: Option<i64> = storage
+            .conn
+            .test_query_row(
+                "SELECT nullifier_id FROM user_notes WHERE account_id = ?1",
+                params![account_id],
+                |row| row.get(0),
+            )
+            .await?;
         assert!(nullifier_id.is_some());
 
         Ok(())
     }
 
-    #[test]
-    fn sync_metadata_tracks_progress_and_caught_up_tip() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn sync_metadata_tracks_progress_and_caught_up_tip() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "c1".to_string(),
-            latest_ledger: 10,
-            events: vec![dummy_event("evt-1")],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CPOOL".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "c1".to_string(),
-                last_indexed_ledger: 10,
-                last_fully_indexed_ledger: 0,
-            }],
-            false,
-        )?;
+                latest_ledger: 10,
+                events: vec![dummy_event("evt-1")],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CPOOL".to_string(),
+                    cursor: "c1".to_string(),
+                    last_indexed_ledger: 10,
+                    last_fully_indexed_ledger: 0,
+                }],
+                false,
+            )
+            .await?;
 
         let meta = storage
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
@@ -1952,23 +2436,28 @@ mod tests {
         assert_eq!(meta.last_indexed_ledger, 10);
         assert_eq!(meta.last_fully_indexed_ledger, 0);
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "c2".to_string(),
-            latest_ledger: 123,
-            events: vec![],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CPOOL".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "c2".to_string(),
-                last_indexed_ledger: 123,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
+                latest_ledger: 123,
+                events: vec![],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CPOOL".to_string(),
+                    cursor: "c2".to_string(),
+                    last_indexed_ledger: 123,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
 
         let meta = storage
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
@@ -1976,9 +2465,10 @@ mod tests {
         assert_eq!(meta.last_indexed_ledger, 123);
         assert_eq!(meta.last_fully_indexed_ledger, 123);
 
-        storage.clear_indexing_cursors()?;
+        storage.clear_indexing_cursors().await?;
         let meta = storage
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
@@ -1989,40 +2479,48 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn clamp_last_fully_indexed_ledger_after_handoff() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn clamp_last_fully_indexed_ledger_after_handoff() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
         const HANDOFF: u32 = 2_999_000;
         const TIP: u32 = 3_000_000;
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "c1".to_string(),
-            latest_ledger: TIP,
-            events: vec![dummy_event("evt-1")],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CPOOL".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "c1".to_string(),
-                last_indexed_ledger: TIP,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CPOOL".to_string(),
-                cursor: String::new(),
-                last_indexed_ledger: HANDOFF,
-                last_fully_indexed_ledger: 0,
-            }],
-            false,
-        )?;
+                latest_ledger: TIP,
+                events: vec![dummy_event("evt-1")],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CPOOL".to_string(),
+                    cursor: "c1".to_string(),
+                    last_indexed_ledger: TIP,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CPOOL".to_string(),
+                    cursor: String::new(),
+                    last_indexed_ledger: HANDOFF,
+                    last_fully_indexed_ledger: 0,
+                }],
+                false,
+            )
+            .await?;
 
-        storage.clamp_last_fully_indexed_ledger(HANDOFF)?;
+        storage.clamp_last_fully_indexed_ledger(HANDOFF).await?;
 
         let meta = storage
-            .get_sync_metadata()?
+            .get_sync_metadata()
+            .await?
             .into_iter()
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
@@ -2032,9 +2530,10 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn get_private_keys_returns_latest_keypair() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_private_keys_returns_latest_keypair() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
         let signature_2 = KeyDerivationSignature(vec![3u8; 64]);
@@ -2047,21 +2546,26 @@ mod tests {
         let membership_blinding_2 =
             encryption::derive_membership_blinding(&signature_2, "testnet")?;
 
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair_1,
-            &enc_keypair_1,
-            &membership_blinding_1,
-        )?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair_2,
-            &enc_keypair_2,
-            &membership_blinding_2,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair_1,
+                &enc_keypair_1,
+                &membership_blinding_1,
+            )
+            .await?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair_2,
+                &enc_keypair_2,
+                &membership_blinding_2,
+            )
+            .await?;
 
         let keys = storage
-            .get_private_keys("GTESTACCOUNT")?
+            .get_private_keys("GTESTACCOUNT")
+            .await?
             .expect("expected keypairs to exist");
         assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
         assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
@@ -2073,41 +2577,50 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(signature.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
 
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
-        let count: i64 = storage.conn.query_row(
-            "SELECT COUNT(*) FROM accounts WHERE address = ?1",
-            params!["GTESTACCOUNT"],
-            |row| row.get(0),
-        )?;
+        let count: i64 = storage
+            .conn
+            .test_query_row(
+                "SELECT COUNT(*) FROM accounts WHERE address = ?1",
+                params!["GTESTACCOUNT"],
+                |row| row.get(0),
+            )
+            .await?;
         assert_eq!(count, 1);
 
         Ok(())
     }
 
-    #[test]
-    fn asp_membership_precondition_partial_processing_returns_sync_required() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn asp_membership_precondition_partial_processing_returns_sync_required() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let mut root_old_bytes = [0u8; 32];
         root_old_bytes[0] = 1;
@@ -2125,56 +2638,65 @@ mod tests {
         let current_ledger = 12u32;
 
         // Ingest raw events (including a newer ASP event)...
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-raw".to_string(),
-            latest_ledger: 11,
-            events: vec![
-                ContractEvent {
-                    id: "asp-leaf-10".to_string(),
-                    ledger: last_leaf_ledger,
-                    contract_id: "CASP".to_string(),
-                    topics: vec!["leaf_added".to_string()],
-                    value: "dummy".to_string(),
-                },
-                ContractEvent {
-                    id: "asp-leaf-11-unprocessed".to_string(),
-                    ledger: 11,
-                    contract_id: "CASP".to_string(),
-                    topics: vec!["leaf_added".to_string()],
-                    value: "dummy".to_string(),
-                },
-            ],
-        })?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                cursor: "cur-raw".to_string(),
+                latest_ledger: 11,
+                events: vec![
+                    ContractEvent {
+                        id: "asp-leaf-10".to_string(),
+                        ledger: last_leaf_ledger,
+                        contract_id: "CASP".to_string(),
+                        topics: vec!["leaf_added".to_string()],
+                        value: "dummy".to_string(),
+                    },
+                    ContractEvent {
+                        id: "asp-leaf-11-unprocessed".to_string(),
+                        ledger: 11,
+                        contract_id: "CASP".to_string(),
+                        topics: vec!["leaf_added".to_string()],
+                        value: "dummy".to_string(),
+                    },
+                ],
+            })
+            .await?;
 
         // ...but only process the older one into asp_membership_leaves.
-        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
-            id: "asp-leaf-10".to_string(),
-            leaf,
-            index: 0,
-            root: root_old,
-        }])?;
+        storage
+            .save_leaf_added_events_batch(&vec![LeafAddedEvent {
+                id: "asp-leaf-10".to_string(),
+                leaf,
+                index: 0,
+                root: root_old,
+            }])
+            .await?;
 
         // Mark the indexer as fully caught up to the chain tip (even though
         // event processing is behind).
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-tip".to_string(),
-            latest_ledger: current_ledger,
-            events: vec![],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CASP".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "cur-tip".to_string(),
-                last_indexed_ledger: current_ledger,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
+                latest_ledger: current_ledger,
+                events: vec![],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CASP".to_string(),
+                    cursor: "cur-tip".to_string(),
+                    last_indexed_ledger: current_ledger,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
 
         // Root matches the last stored root: this should NOT require syncing
         // even if the last ASP leaf was emitted earlier than the current tip.
-        let status =
-            storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
+        let status = storage
+            .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
+            .await?;
         assert!(matches!(
             status,
             AspMembershipSync::SyncRequired(Some(gap)) if gap == current_ledger - last_leaf_ledger
@@ -2182,9 +2704,10 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn asp_membership_precondition_root_mismatch_at_same_ledger_errors() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn asp_membership_precondition_root_mismatch_at_same_ledger_errors() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let mut root_old_bytes = [0u8; 32];
         root_old_bytes[0] = 1;
@@ -2200,50 +2723,60 @@ mod tests {
 
         let current_ledger = 10u32;
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-raw".to_string(),
-            latest_ledger: current_ledger,
-            events: vec![ContractEvent {
+        storage
+            .save_events_batch(&ContractsEventData {
+                cursor: "cur-raw".to_string(),
+                latest_ledger: current_ledger,
+                events: vec![ContractEvent {
+                    id: "asp-leaf-10".to_string(),
+                    ledger: current_ledger,
+                    contract_id: "CASP".to_string(),
+                    topics: vec!["leaf_added".to_string()],
+                    value: "dummy".to_string(),
+                }],
+            })
+            .await?;
+
+        storage
+            .save_leaf_added_events_batch(&vec![LeafAddedEvent {
                 id: "asp-leaf-10".to_string(),
-                ledger: current_ledger,
-                contract_id: "CASP".to_string(),
-                topics: vec!["leaf_added".to_string()],
-                value: "dummy".to_string(),
-            }],
-        })?;
+                leaf,
+                index: 0,
+                root: root_old,
+            }])
+            .await?;
 
-        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
-            id: "asp-leaf-10".to_string(),
-            leaf,
-            index: 0,
-            root: root_old,
-        }])?;
-
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-tip".to_string(),
-            latest_ledger: current_ledger,
-            events: vec![],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CASP".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "cur-tip".to_string(),
-                last_indexed_ledger: current_ledger,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
+                latest_ledger: current_ledger,
+                events: vec![],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CASP".to_string(),
+                    cursor: "cur-tip".to_string(),
+                    last_indexed_ledger: current_ledger,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
 
         let err = storage
             .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
+            .await
             .expect_err("root mismatch at same ledger should be an error");
         assert!(err.to_string().contains("asp membership root mismatch"));
         Ok(())
     }
 
-    #[test]
-    fn asp_membership_precondition_allows_tip_without_recent_asp_events() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn asp_membership_precondition_allows_tip_without_recent_asp_events() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let mut root_bytes = [0u8; 32];
         root_bytes[0] = 1;
@@ -2256,52 +2789,62 @@ mod tests {
         let last_leaf_ledger = 10u32;
         let current_ledger = 12u32;
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-raw".to_string(),
-            latest_ledger: last_leaf_ledger,
-            events: vec![ContractEvent {
+        storage
+            .save_events_batch(&ContractsEventData {
+                cursor: "cur-raw".to_string(),
+                latest_ledger: last_leaf_ledger,
+                events: vec![ContractEvent {
+                    id: "asp-leaf-10".to_string(),
+                    ledger: last_leaf_ledger,
+                    contract_id: "CASP".to_string(),
+                    topics: vec!["leaf_added".to_string()],
+                    value: "dummy".to_string(),
+                }],
+            })
+            .await?;
+
+        storage
+            .save_leaf_added_events_batch(&vec![LeafAddedEvent {
                 id: "asp-leaf-10".to_string(),
-                ledger: last_leaf_ledger,
-                contract_id: "CASP".to_string(),
-                topics: vec!["leaf_added".to_string()],
-                value: "dummy".to_string(),
-            }],
-        })?;
+                leaf,
+                index: 0,
+                root,
+            }])
+            .await?;
 
-        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
-            id: "asp-leaf-10".to_string(),
-            leaf,
-            index: 0,
-            root,
-        }])?;
-
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-tip".to_string(),
-            latest_ledger: current_ledger,
-            events: vec![],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CASP".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "cur-tip".to_string(),
-                last_indexed_ledger: current_ledger,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
+                latest_ledger: current_ledger,
+                events: vec![],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CASP".to_string(),
+                    cursor: "cur-tip".to_string(),
+                    last_indexed_ledger: current_ledger,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
 
-        let status =
-            storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
+        let status = storage
+            .check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)
+            .await?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }
 
-    #[test]
-    fn asp_membership_precondition_tolerates_metadata_ahead_of_read() -> Result<()> {
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn asp_membership_precondition_tolerates_metadata_ahead_of_read() -> Result<()> {
         // The events indexer can sit a few ledgers ahead of an independent
         // contract-state read (here last_fully_indexed=15 > current_ledger=12).
         // With a matching root this is benign skew and must resolve, not error.
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory().await?;
 
         let mut root_bytes = [0u8; 32];
         root_bytes[0] = 1;
@@ -2315,60 +2858,72 @@ mod tests {
         let current_ledger = 12u32;
         let indexed_tip = 15u32;
 
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-raw".to_string(),
-            latest_ledger: last_leaf_ledger,
-            events: vec![ContractEvent {
+        storage
+            .save_events_batch(&ContractsEventData {
+                cursor: "cur-raw".to_string(),
+                latest_ledger: last_leaf_ledger,
+                events: vec![ContractEvent {
+                    id: "asp-leaf-10".to_string(),
+                    ledger: last_leaf_ledger,
+                    contract_id: "CASP".to_string(),
+                    topics: vec!["leaf_added".to_string()],
+                    value: "dummy".to_string(),
+                }],
+            })
+            .await?;
+
+        storage
+            .save_leaf_added_events_batch(&vec![LeafAddedEvent {
                 id: "asp-leaf-10".to_string(),
-                ledger: last_leaf_ledger,
-                contract_id: "CASP".to_string(),
-                topics: vec!["leaf_added".to_string()],
-                value: "dummy".to_string(),
-            }],
-        })?;
+                leaf,
+                index: 0,
+                root,
+            }])
+            .await?;
 
-        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
-            id: "asp-leaf-10".to_string(),
-            leaf,
-            index: 0,
-            root,
-        }])?;
-
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cur-tip".to_string(),
-            latest_ledger: indexed_tip,
-            events: vec![],
-        })?;
-        storage.save_sync_progress(
-            &[crate::types::SyncMetadata {
-                contract_id: "CASP".to_string(),
+        storage
+            .save_events_batch(&ContractsEventData {
                 cursor: "cur-tip".to_string(),
-                last_indexed_ledger: indexed_tip,
-                last_fully_indexed_ledger: 0,
-            }],
-            true,
-        )?;
+                latest_ledger: indexed_tip,
+                events: vec![],
+            })
+            .await?;
+        storage
+            .save_sync_progress(
+                &[crate::types::SyncMetadata {
+                    contract_id: "CASP".to_string(),
+                    cursor: "cur-tip".to_string(),
+                    last_indexed_ledger: indexed_tip,
+                    last_fully_indexed_ledger: 0,
+                }],
+                true,
+            )
+            .await?;
 
-        let status =
-            storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
+        let status = storage
+            .check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)
+            .await?;
         assert!(matches!(status, AspMembershipSync::UserIndex(0)));
         Ok(())
     }
 
-    #[test]
-    fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(sig.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -2389,18 +2944,22 @@ mod tests {
         let encrypted_output =
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 3,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
@@ -2418,10 +2977,15 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+        assert!(
+            storage
+                .scan_commitments_for_user_notes(100, &mut derive)
+                .await?
+        );
 
-        let result =
-            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage
+            .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)
+            .await?;
         assert!(result.is_some());
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2431,20 +2995,23 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(sig.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -2465,18 +3032,22 @@ mod tests {
         let encrypted_output =
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 3,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
@@ -2494,7 +3065,9 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+        storage
+            .scan_commitments_for_user_notes(100, &mut derive)
+            .await?;
 
         // Spend the note via nullifier.
         let leaf_index: u32 = 3;
@@ -2512,39 +3085,47 @@ mod tests {
         })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-null")],
-            cursor: "cur2".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-            id: "evt-null".to_string(),
-            nullifier,
-            gvk_ciphertext: None,
-        }])?;
-        storage.reconcile_nullifiers(100)?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-null")],
+                cursor: "cur2".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_nullifier_events_batch(&vec![NewNullifierEvent {
+                id: "evt-null".to_string(),
+                nullifier,
+                gvk_ciphertext: None,
+            }])
+            .await?;
+        storage.reconcile_nullifiers(100).await?;
 
-        let result =
-            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage
+            .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)
+            .await?;
         assert!(result.is_none(), "spent note should not be returned");
 
         Ok(())
     }
 
-    #[test]
-    fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(sig.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -2558,18 +3139,22 @@ mod tests {
         commitment_le[0] = 1;
         let commitment = Field::try_from_le_bytes(commitment_le)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 0,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 0,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
@@ -2587,36 +3172,39 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+        storage
+            .scan_commitments_for_user_notes(100, &mut derive)
+            .await?;
 
         let wrong_commitment = Field::try_from_le_bytes([
             2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ])?;
-        let result = storage.get_unspent_user_note_by_commitment(
-            "CPOOL",
-            "GTESTACCOUNT",
-            &wrong_commitment,
-        )?;
+        let result = storage
+            .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &wrong_commitment)
+            .await?;
         assert!(result.is_none(), "wrong commitment should not match");
 
         Ok(())
     }
 
-    #[test]
-    fn get_user_note_by_commitment_finds_unspent_note() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_user_note_by_commitment_finds_unspent_note() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(sig.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -2637,18 +3225,22 @@ mod tests {
         let encrypted_output =
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 3,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
@@ -2666,9 +3258,15 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+        assert!(
+            storage
+                .scan_commitments_for_user_notes(100, &mut derive)
+                .await?
+        );
 
-        let result = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage
+            .get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)
+            .await?;
         assert!(result.is_some());
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2678,20 +3276,23 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn get_user_note_by_commitment_finds_spent_note() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_user_note_by_commitment_finds_spent_note() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(sig.clone())?;
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
+        storage
+            .save_encryption_and_note_keypairs(
+                "GTESTACCOUNT",
+                &note_keypair,
+                &enc_keypair,
+                &membership_blinding,
+            )
+            .await?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -2712,18 +3313,22 @@ mod tests {
         let encrypted_output =
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-commit")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: "evt-commit".to_string(),
+                commitment,
+                index: 3,
+                encrypted_output: encrypted_output.clone(),
+                gvk_ciphertext: None,
+            }])
+            .await?;
 
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
@@ -2741,7 +3346,9 @@ mod tests {
                 expected_nullifier: d.expected_nullifier,
             }))
         };
-        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+        storage
+            .scan_commitments_for_user_notes(100, &mut derive)
+            .await?;
 
         // Spend the note via nullifier.
         let leaf_index: u32 = 3;
@@ -2759,28 +3366,35 @@ mod tests {
         })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-null")],
-            cursor: "cur2".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-            id: "evt-null".to_string(),
-            nullifier,
-            gvk_ciphertext: None,
-        }])?;
-        storage.reconcile_nullifiers(100)?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-null")],
+                cursor: "cur2".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_nullifier_events_batch(&vec![NewNullifierEvent {
+                id: "evt-null".to_string(),
+                nullifier,
+                gvk_ciphertext: None,
+            }])
+            .await?;
+        storage.reconcile_nullifiers(100).await?;
 
         // The unspent-only lookup rejects it, but the spent-tolerant lookup
         // returns it.
         assert!(
             storage
-                .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?
+                .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)
+                .await?
                 .is_none(),
             "sanity: note is spent"
         );
 
-        let result = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage
+            .get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)
+            .await?;
         assert!(result.is_some(), "spent note should still be returned");
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2790,48 +3404,53 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn get_pool_commitment_leaves_ordered_returns_ordered_leaves() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_pool_commitment_leaves_ordered_returns_ordered_leaves() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
         let leaf1 = Field::try_from_le_bytes([1u8; 32])?;
         let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![
-                dummy_event("evt-0"),
-                dummy_event("evt-1"),
-                dummy_event("evt-2"),
-            ],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![
-            NewCommitmentEvent {
-                id: "evt-0".to_string(),
-                commitment: leaf0,
-                index: 0,
-                encrypted_output: vec![],
-                gvk_ciphertext: None,
-            },
-            NewCommitmentEvent {
-                id: "evt-1".to_string(),
-                commitment: leaf1,
-                index: 1,
-                encrypted_output: vec![],
-                gvk_ciphertext: None,
-            },
-            NewCommitmentEvent {
-                id: "evt-2".to_string(),
-                commitment: leaf2,
-                index: 2,
-                encrypted_output: vec![],
-                gvk_ciphertext: None,
-            },
-        ])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![
+                    dummy_event("evt-0"),
+                    dummy_event("evt-1"),
+                    dummy_event("evt-2"),
+                ],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![
+                NewCommitmentEvent {
+                    id: "evt-0".to_string(),
+                    commitment: leaf0,
+                    index: 0,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: None,
+                },
+                NewCommitmentEvent {
+                    id: "evt-1".to_string(),
+                    commitment: leaf1,
+                    index: 1,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: None,
+                },
+                NewCommitmentEvent {
+                    id: "evt-2".to_string(),
+                    commitment: leaf2,
+                    index: 2,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: None,
+                },
+            ])
+            .await?;
 
-        let leaves = storage.get_pool_commitment_leaves_ordered("CPOOL")?;
+        let leaves = storage.get_pool_commitment_leaves_ordered("CPOOL").await?;
         assert_eq!(leaves.len(), 3);
         assert_eq!(leaves[0], leaf0);
         assert_eq!(leaves[1], leaf1);
@@ -2840,37 +3459,43 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn get_pool_commitment_leaves_ordered_detects_gaps() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    async fn get_pool_commitment_leaves_ordered_detects_gaps() -> Result<()> {
+        let mut storage = Storage::connect_in_memory().await?;
 
         let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
         let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
 
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-0"), dummy_event("evt-2")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![
-            NewCommitmentEvent {
-                id: "evt-0".to_string(),
-                commitment: leaf0,
-                index: 0,
-                encrypted_output: vec![],
-                gvk_ciphertext: None,
-            },
-            NewCommitmentEvent {
-                id: "evt-2".to_string(),
-                commitment: leaf2,
-                index: 2,
-                encrypted_output: vec![],
-                gvk_ciphertext: None,
-            },
-        ])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event("evt-0"), dummy_event("evt-2")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![
+                NewCommitmentEvent {
+                    id: "evt-0".to_string(),
+                    commitment: leaf0,
+                    index: 0,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: None,
+                },
+                NewCommitmentEvent {
+                    id: "evt-2".to_string(),
+                    commitment: leaf2,
+                    index: 2,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: None,
+                },
+            ])
+            .await?;
 
         let err = storage
             .get_pool_commitment_leaves_ordered("CPOOL")
+            .await
             .expect_err("gap should error");
         assert!(err.to_string().contains("gap/out-of-order"));
 
@@ -2894,7 +3519,7 @@ mod tests {
                 .expect("clock")
                 .as_nanos()
         ));
-        let mut storage = Storage::connect_file(&path)?;
+        let mut storage = Storage::connect_file(&path).await?;
         let d_priv = Field(crate::types::U256::from(0xAD00));
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
@@ -2918,54 +3543,73 @@ mod tests {
         )?;
 
         let event_id = "0000000000000000004-0000000000";
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event(event_id)],
-            cursor: "cur-gvk".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: event_id.to_string(),
-            commitment,
-            index: 0,
-            encrypted_output: vec![],
-            gvk_ciphertext: Some(ct.clone()),
-        }])?;
+        storage
+            .save_events_batch(&ContractsEventData {
+                events: vec![dummy_event(event_id)],
+                cursor: "cur-gvk".to_string(),
+                latest_ledger: 1,
+            })
+            .await?;
+        storage
+            .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                id: event_id.to_string(),
+                commitment,
+                index: 0,
+                encrypted_output: vec![],
+                gvk_ciphertext: Some(ct.clone()),
+            }])
+            .await?;
 
-        storage.conn.execute(
-            "INSERT INTO accounts (address) VALUES (?1)",
-            params!["GUSER"],
-        )?;
-        let account_id: i64 = storage.conn.query_row(
-            "SELECT id FROM accounts WHERE address = ?1",
-            params!["GUSER"],
-            |row| row.get(0),
-        )?;
-        let commitment_id: i64 = storage.conn.query_row(
-            "SELECT id FROM pool_commitments WHERE commitment = ?1",
-            params![commitment],
-            |row| row.get(0),
-        )?;
-        storage.conn.execute(
-            "INSERT INTO user_notes (
+        storage
+            .conn
+            .execute(
+                "INSERT INTO accounts (address) VALUES (?1)",
+                params!["GUSER"],
+            )
+            .await?;
+        let account_id: i64 = storage
+            .conn
+            .test_query_row(
+                "SELECT id FROM accounts WHERE address = ?1",
+                params!["GUSER"],
+                |row| row.get(0),
+            )
+            .await?;
+        let commitment_id: i64 = storage
+            .conn
+            .test_query_row(
+                "SELECT id FROM pool_commitments WHERE commitment = ?1",
+                params![commitment],
+                |row| row.get(0),
+            )
+            .await?;
+        storage
+            .conn
+            .execute(
+                "INSERT INTO user_notes (
                 id, account_id, commitment_id, nullifier_id,
                 expected_nullifier, blinding, amount
              ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
-            params![
-                commitment,
-                account_id,
-                commitment_id,
-                Field(crate::types::U256::from(1)),
-                Field(crate::types::U256::from(2)),
-                NoteAmount::from(99u128).to_string(),
-            ],
-        )?;
-        let notes = storage.list_pool_user_notes("CPOOL", "GUSER")?;
+                params![
+                    commitment,
+                    account_id,
+                    commitment_id,
+                    Field(crate::types::U256::from(1)),
+                    Field(crate::types::U256::from(2)),
+                    NoteAmount::from(99u128).to_string(),
+                ],
+            )
+            .await?;
+        let notes = storage.list_pool_user_notes("CPOOL", "GUSER").await?;
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].gvk_ciphertext.as_ref(), Some(&ct));
 
         drop(storage);
 
-        let rows = Storage::connect_file(&path)?.list_pool_gvk_events("CPOOL", None, 10)?;
+        let rows = Storage::connect_file(&path)
+            .await?
+            .list_pool_gvk_events("CPOOL", None, 10)
+            .await?;
         assert_eq!(rows.len(), 1);
 
         let local = LocalStorage::open(path.to_str().expect("temp path utf-8"))

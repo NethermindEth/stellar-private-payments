@@ -33,24 +33,26 @@ pub(crate) fn map_build_params(
     }
 }
 
-pub(crate) fn map_private_keys(
+pub(crate) async fn map_private_keys(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<StoredPrivateKeys, Error> {
     storage
-        .get_private_keys(user_address)?
+        .get_private_keys(user_address)
+        .await?
         .ok_or_else(|| Error::PrivacyKeysNotFound {
             user_address: user_address.to_string(),
         })
 }
 
-pub(crate) fn spendable_notes_from_storage(
+pub(crate) async fn spendable_notes_from_storage(
     storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
 ) -> Result<Vec<SpendableNote>, Error> {
     Ok(storage
-        .list_unspent_user_notes(pool_contract_id, user_address)?
+        .list_unspent_user_notes(pool_contract_id, user_address)
+        .await?
         .into_iter()
         .map(|n| SpendableNote {
             commitment: n.id,
@@ -59,44 +61,52 @@ pub(crate) fn spendable_notes_from_storage(
         .collect())
 }
 
-pub(crate) fn pool_notes_from_storage(
+pub(crate) async fn pool_notes_from_storage(
     storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
 ) -> Result<Vec<UserNoteSummary>, Error> {
-    Ok(storage.list_pool_user_notes(pool_contract_id, user_address)?)
+    Ok(storage
+        .list_pool_user_notes(pool_contract_id, user_address)
+        .await?)
 }
 
-pub(crate) fn portfolio_balances_from_storage(
+pub(crate) async fn portfolio_balances_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
     enabled_pools: &[PortfolioPoolEntry],
 ) -> Result<Vec<PortfolioBalance>, Error> {
-    Ok(storage.list_portfolio_balances(user_address, enabled_pools)?)
+    Ok(storage
+        .list_portfolio_balances(user_address, enabled_pools)
+        .await?)
 }
 
-pub(crate) fn user_notes_from_storage(
+pub(crate) async fn user_notes_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
     limit: u32,
 ) -> Result<Vec<UserNoteSummary>, Error> {
-    Ok(storage.list_user_notes(user_address, limit)?)
+    Ok(storage.list_user_notes(user_address, limit).await?)
 }
 
-pub(crate) fn operational_feed_from_storage(
+pub(crate) async fn operational_feed_from_storage(
     storage: &SqliteStorage,
     limit: u32,
     config: &ContractConfig,
 ) -> Result<Vec<OperationalFeedItem>, Error> {
-    Ok(storage.get_operational_feed(limit, &config.asp_membership, &config.public_key_registry)?)
+    Ok(storage
+        .get_operational_feed(limit, &config.asp_membership, &config.public_key_registry)
+        .await?)
 }
 
-pub(crate) fn recipient_lookup_from_storage(
+pub(crate) async fn recipient_lookup_from_storage(
     storage: &SqliteStorage,
     address: &str,
     config: &ContractConfig,
 ) -> Result<RecipientLookup, Error> {
-    Ok(storage.recipient_lookup(address, &config.public_key_registry)?)
+    Ok(storage
+        .recipient_lookup(address, &config.public_key_registry)
+        .await?)
 }
 
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
@@ -238,9 +248,11 @@ mod tests {
     fn missing_privacy_keys_error_redacts_the_address() {
         let _guard = lock_reveal_flag();
         set_reveal_sensitive(false);
-        let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        let storage = futures::executor::block_on(SqliteStorage::connect_in_memory())
+            .expect("in-memory storage");
 
-        let err = map_private_keys(&storage, ADDRESS).expect_err("no keys are stored");
+        let err = futures::executor::block_on(map_private_keys(&storage, ADDRESS))
+            .expect_err("no keys are stored");
         let rendered = err.to_string();
 
         assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");

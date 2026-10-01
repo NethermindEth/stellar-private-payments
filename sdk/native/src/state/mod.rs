@@ -1,6 +1,7 @@
 mod disclaimer;
 pub(crate) mod events_parsers;
 mod processor;
+mod sql;
 mod storage;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;

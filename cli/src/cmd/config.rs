@@ -14,7 +14,7 @@ use crate::{
 pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     let storage = config.open_storage()?;
     let explorer_base = explorer::base_url(&storage)?;
-    let bootnode = storage.get_bootnode_setting()?;
+    let bootnode = futures::executor::block_on(storage.get_bootnode_setting())?;
     // RPC resolution is best-effort (needs the Stellar CLI network config).
     let (rpc_url, network_passphrase) = match config.resolve_network() {
         Ok(net) => (Some(net.rpc_url), Some(net.passphrase)),
@@ -138,11 +138,11 @@ pub fn set_bootnode(
 ) -> Result<()> {
     let mut storage = config.open_storage()?;
     if disable {
-        storage.set_bootnode_setting(false, "")?;
+        futures::executor::block_on(storage.set_bootnode_setting(false, ""))?;
         return report_setting(json, "bootnode", "(disabled)");
     }
     let url = url.ok_or_else(|| anyhow::anyhow!("provide a bootnode URL, or pass --disable"))?;
-    storage.set_bootnode_setting(true, url)?;
+    futures::executor::block_on(storage.set_bootnode_setting(true, url))?;
     report_setting(json, "bootnode", url)
 }
 

@@ -9,6 +9,8 @@ mod client;
 mod correlation;
 mod deployment;
 mod models;
+#[cfg(target_arch = "wasm32")]
+pub mod opfs;
 mod signer;
 mod telemetry;
 pub mod workers;

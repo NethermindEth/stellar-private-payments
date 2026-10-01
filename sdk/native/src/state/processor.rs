@@ -2,8 +2,8 @@ use super::{SqliteStorage, events_parsers::parse_event};
 use crate::types::ProcessedEvent;
 use anyhow::Result;
 
-pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
-    let mut unprocessed = storage.get_unprocessed_events(limit)?;
+pub(crate) async fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
+    let mut unprocessed = storage.get_unprocessed_events(limit).await?;
     if unprocessed.is_empty() {
         return Ok(false);
     }
@@ -30,10 +30,10 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
             _ => tracing::warn!("event won't be saved to the storage: {parsed:?}"),
         }
     }
-    storage.save_nullifier_events_batch(&nullifiers)?;
-    storage.save_commitment_events_batch(&commitments)?;
-    storage.save_public_key_events_batch(&pubkeys)?;
-    storage.save_leaf_added_events_batch(&leaves)?;
+    storage.save_nullifier_events_batch(&nullifiers).await?;
+    storage.save_commitment_events_batch(&commitments).await?;
+    storage.save_public_key_events_batch(&pubkeys).await?;
+    storage.save_leaf_added_events_batch(&leaves).await?;
     Ok(true)
 }
 
@@ -42,13 +42,15 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
 ///
 /// This scans pool commitments for decryptable outputs (per account) and
 /// reconciles pool nullifiers against locally-computed expected nullifiers.
-pub(crate) fn process_notes(
+pub(crate) async fn process_notes(
     storage: &mut SqliteStorage,
     limit: u32,
     derive: &mut super::storage::DeriveNoteFn<'_>,
 ) -> Result<bool> {
     let mut did_work = false;
-    did_work |= storage.scan_commitments_for_user_notes(limit, derive)?;
-    did_work |= storage.reconcile_nullifiers(limit)?;
+    did_work |= storage
+        .scan_commitments_for_user_notes(limit, derive)
+        .await?;
+    did_work |= storage.reconcile_nullifiers(limit).await?;
     Ok(did_work)
 }

@@ -74,7 +74,7 @@ pub enum BuildDisclosureInputs {
     MembershipSync(AspMembershipSync),
 }
 
-pub fn build_disclosure_inputs(
+pub async fn build_disclosure_inputs(
     storage: &SqliteStorage,
     req: &DisclosureInputsRequest,
 ) -> anyhow::Result<BuildDisclosureInputs> {
@@ -89,7 +89,7 @@ pub fn build_disclosure_inputs(
         .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
 
     let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
-        load_user_key_material(storage, &req.user_address)?;
+        load_user_key_material(storage, &req.user_address).await?;
 
     let tree = match build_validated_pool_tree(
         storage,
@@ -97,7 +97,9 @@ pub fn build_disclosure_inputs(
         req.pool_next_index,
         req.tree_depth,
         pool_root,
-    )? {
+    )
+    .await?
+    {
         Ok(tree) => tree,
         Err(status) => return Ok(BuildDisclosureInputs::MembershipSync(status)),
     };
@@ -105,7 +107,8 @@ pub fn build_disclosure_inputs(
     let mut notes = Vec::with_capacity(req.selected_commitments.len());
     for commitment in &req.selected_commitments {
         let (amount, blinding, leaf_index) = storage
-            .get_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+            .get_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)
+            .await?
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "note not found for commitment {commitment} in pool {}",

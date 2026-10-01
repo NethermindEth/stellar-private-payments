@@ -111,11 +111,37 @@ only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
 
 ## Workers
 
-Web Workers are used for the provided storage (SQlite OPFS) and prover implementations.
+Web Workers are used for the provided storage (Turso with OPFS) and prover implementations.
 `Storage.open()` defaults to the bundled storage worker URL via
 `import.meta.url`; override with `workerUrl` on `Storage.open()` or
 `storageWorkerUrl` on `Client.new()`. The prover worker URL defaults the same
 way (`proverWorkerUrl`), loading circuit artifacts from `dist/circuits/`.
+
+## Turso browser persistence experiment
+
+Storage runs in a single-threaded dedicated worker using OPFS synchronous
+access handles for the database and WAL. An exclusive main-file handle prevents
+concurrent opens. Closing or pausing storage releases the handles.
+
+Storage uses `spp-turso-v1` for fresh Turso wallets. Existing SQLite wallets
+are not imported. A flushed marker records successful first initialization;
+an interrupted initialization is retried before accepting application writes.
+
+Run the dedicated-worker integration tests with Chromium/Chrome and its matching
+ChromeDriver installed, plus `wasm-bindgen-test-runner` matching Cargo.lock:
+
+```bash
+CHROMEDRIVER=/path/to/chromedriver bash sdk/web/scripts/test-opfs.sh
+```
+
+Run this command from the repository root. Set
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER` if the runner is not on PATH.
+For a custom browser binary or container flags, set
+`WASM_BINDGEN_TEST_WEBDRIVER_JSON` to a WebDriver capabilities JSON file.
+The tests cover wallet data across reopen, exclusive locks and failed-open
+cleanup, interrupted initialization, committed WAL recovery after worker
+termination, and production worker persistence/pause/reopen. They have passed in Chromium; Firefox/WebKit,
+quota exhaustion, and physical power-loss behavior are not yet verified.
 
 ## Build & publish (maintainers)
 

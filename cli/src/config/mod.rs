@@ -171,7 +171,8 @@ impl CliConfig {
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
         let path = self.db_path();
-        SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
+        futures::executor::block_on(SqliteStorage::connect_file(&path))
+            .with_context(|| format!("open {}", path.display()))
     }
 }
 

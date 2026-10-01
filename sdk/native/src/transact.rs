@@ -125,7 +125,7 @@ pub(crate) fn transact_request_from_step(
     }
 }
 
-pub fn build_transact_params(
+pub async fn build_transact_params(
     storage: &SqliteStorage,
     req: &TransactRequest,
 ) -> Result<BuildTransactParams, Error> {
@@ -136,7 +136,7 @@ pub fn build_transact_params(
     }
 
     let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
-        load_user_key_material(storage, &req.user_address)?;
+        load_user_key_material(storage, &req.user_address).await?;
 
     let membership_proof = if req.policy_flags.requires_membership_proofs() {
         match build_membership_proof(
@@ -147,7 +147,9 @@ pub fn build_transact_params(
             req.aspmem_root,
             req.aspmem_ledger,
             req.asp_depth,
-        )? {
+        )
+        .await?
+        {
             Ok(proof) => Some(proof),
             Err(status) => return Ok(BuildTransactParams::MembershipSync(status)),
         }
@@ -167,7 +169,9 @@ pub fn build_transact_params(
         req.tree_depth,
         pool_root,
         &req.input_commitments,
-    )? {
+    )
+    .await?
+    {
         Ok(inputs) => inputs,
         Err(status) => return Ok(BuildTransactParams::MembershipSync(status)),
     };
@@ -210,7 +214,7 @@ pub fn build_transact_params(
     })))
 }
 
-pub(crate) fn load_user_key_material(
+pub(crate) async fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field), Error> {
@@ -223,12 +227,12 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = crate::storage::map_private_keys(storage, user_address)?;
+    } = crate::storage::map_private_keys(storage, user_address).await?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }
 
-fn build_membership_proof(
+async fn build_membership_proof(
     storage: &SqliteStorage,
     aspmem_contract_id: &str,
     note_pubkey: &NotePublicKey,
@@ -238,18 +242,22 @@ fn build_membership_proof(
     asp_depth: u32,
 ) -> Result<Result<AspMembershipProof, AspMembershipSync>, Error> {
     let user_leaf = asp_membership_leaf(note_pubkey, &membership_blinding)?;
-    let user_leaf_index = match storage.check_asp_membership_precondition(
-        aspmem_contract_id,
-        &user_leaf,
-        &aspmem_root,
-        aspmem_ledger,
-    )? {
+    let user_leaf_index = match storage
+        .check_asp_membership_precondition(
+            aspmem_contract_id,
+            &user_leaf,
+            &aspmem_root,
+            aspmem_ledger,
+        )
+        .await?
+    {
         AspMembershipSync::UserIndex(user_leaf_index) => user_leaf_index,
         status => return Ok(Err(status)),
     };
 
-    let asp_membership_merkle_tree_leaves =
-        storage.get_all_asp_membership_leaves_ordered(aspmem_contract_id)?;
+    let asp_membership_merkle_tree_leaves = storage
+        .get_all_asp_membership_leaves_ordered(aspmem_contract_id)
+        .await?;
     let aspmembership_tree =
         MerklePrefixTree::new(asp_depth, &asp_membership_merkle_tree_leaves)?.into_built();
     let MerkleProof {
@@ -268,7 +276,7 @@ fn build_membership_proof(
     }))
 }
 
-fn build_pool_inputs(
+async fn build_pool_inputs(
     storage: &SqliteStorage,
     user_address: &str,
     pool_address: &str,
@@ -287,15 +295,18 @@ fn build_pool_inputs(
         pool_next_index,
         tree_depth,
         expected_pool_root,
-    )? {
+    )
+    .await?
+    {
         Ok(tree) => tree,
         Err(status) => return Ok(Err(status)),
     };
 
     let mut out = Vec::with_capacity(input_commitments.len());
     for commitment in input_commitments {
-        let Some((amount, blinding, leaf_index)) =
-            storage.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?
+        let Some((amount, blinding, leaf_index)) = storage
+            .get_unspent_user_note_by_commitment(pool_address, user_address, commitment)
+            .await?
         else {
             tracing::info!(
                 commitment = ?crate::types::Sensitive(commitment),
@@ -310,14 +321,16 @@ fn build_pool_inputs(
     Ok(Ok(out))
 }
 
-pub(crate) fn build_validated_pool_tree(
+pub(crate) async fn build_validated_pool_tree(
     storage: &SqliteStorage,
     pool_address: &str,
     pool_next_index: u32,
     tree_depth: u32,
     expected_pool_root: Field,
 ) -> Result<Result<MerklePrefixTreeBuilt, AspMembershipSync>> {
-    let leaves = storage.get_pool_commitment_leaves_ordered(pool_address)?;
+    let leaves = storage
+        .get_pool_commitment_leaves_ordered(pool_address)
+        .await?;
 
     if leaves.len() != pool_next_index as usize {
         tracing::info!(
@@ -371,9 +384,11 @@ mod tests {
     fn missing_user_keys_error_redacts_the_address() {
         let _guard = lock_reveal_flag();
         set_reveal_sensitive(false);
-        let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        let storage = futures::executor::block_on(SqliteStorage::connect_in_memory())
+            .expect("in-memory storage");
 
-        let err = load_user_key_material(&storage, ADDRESS).expect_err("no keys are stored");
+        let err = futures::executor::block_on(load_user_key_material(&storage, ADDRESS))
+            .expect_err("no keys are stored");
         let rendered = format!("{err:#}");
 
         assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");

@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = common::load_contract_config()?;
     let wallet_path = common::env_or("SPP_WALLET_PATH", common::default_wallet_path());
     let storage = common::open_storage()?;
-    let created = storage.get_gvk_authority_setting()?.is_none();
+    let created = futures::executor::block_on(storage.get_gvk_authority_setting())?.is_none();
     let authority = common::load_or_create_gvk_authority(&storage)?;
     let pubkey_json = serde_json::to_string(&authority.public_key)
         .map_err(|e| format!("serialize GVK authority public key: {e}"))?;

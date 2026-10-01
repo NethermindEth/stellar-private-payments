@@ -94,13 +94,15 @@ fn generate(args: GenerateArgs) -> Result<()> {
 
     if let Some(path) = &args.db {
         let storage = open_storage(path)?;
-        if storage.get_gvk_authority_setting()?.is_some() && !args.force {
+        if futures::executor::block_on(storage.get_gvk_authority_setting())?.is_some()
+            && !args.force
+        {
             bail!(
                 "wallet database `{}` already has a saved GVK authority setting; pass --force to overwrite",
                 path.display()
             );
         }
-        storage.set_gvk_authority_setting(&setting)?;
+        futures::executor::block_on(storage.set_gvk_authority_setting(&setting))?;
         eprintln!("saved GVK authority setting to {}", path.display());
     }
 
@@ -123,8 +125,7 @@ fn validate(args: ValidateArgs) -> Result<()> {
 
 fn show(args: ShowArgs) -> Result<()> {
     let storage = open_storage(&args.db)?;
-    let setting = storage
-        .get_gvk_authority_setting()?
+    let setting = futures::executor::block_on(storage.get_gvk_authority_setting())?
         .ok_or_else(|| anyhow!("no GVK authority setting saved in {}", args.db.display()))?;
     setting.validate_consistency()?;
     println!("{}", serde_json::to_string_pretty(&setting.public_key)?);

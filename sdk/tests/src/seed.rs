@@ -35,7 +35,8 @@ pub fn seeded_user_public_keys() -> Result<(
 
 /// Open (or create) `path` with schema migrations applied.
 pub fn ensure_schema(storage_path: &Path) -> Result<()> {
-    let _storage = SqliteStorage::connect_file(storage_path).context("apply storage migrations")?;
+    let _storage = futures::executor::block_on(SqliteStorage::connect_file(storage_path))
+        .context("apply storage migrations")?;
     Ok(())
 }
 
@@ -51,19 +52,20 @@ pub fn seed_prove_wallet(
 ) -> Result<TransactChainContext> {
     ensure_schema(storage_path)?;
 
-    let mut storage = SqliteStorage::connect_file(storage_path).context("open seeded database")?;
+    let mut storage = futures::executor::block_on(SqliteStorage::connect_file(storage_path))
+        .context("open seeded database")?;
 
     let signature = test_derivation_signature();
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
     let membership_blinding = encryption::derive_membership_blinding(&signature, network)?;
 
-    storage.save_encryption_and_note_keypairs(
+    futures::executor::block_on(storage.save_encryption_and_note_keypairs(
         user_address,
         &note_keypair,
         &encryption_keypair,
         &membership_blinding,
-    )?;
+    ))?;
 
     let user_membership_leaf =
         crypto::asp_membership_leaf(&note_keypair.public, &membership_blinding)?;
@@ -94,7 +96,7 @@ pub fn seed_prove_wallet(
             encryption::encrypt_output_note(&encryption_keypair.public, amount, &blinding)?;
 
         let event_id = format!("test-pool-commit-{leaf_index}-{user_address}");
-        storage.save_events_batch(&ContractsEventData {
+        futures::executor::block_on(storage.save_events_batch(&ContractsEventData {
             events: vec![ContractEvent {
                 id: event_id.clone(),
                 ledger: TEST_LEDGER,
@@ -104,15 +106,17 @@ pub fn seed_prove_wallet(
             }],
             cursor: format!("pool-cur-{leaf_index}"),
             latest_ledger: TEST_LEDGER,
-        })?;
+        }))?;
 
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: event_id,
-            commitment,
-            index: u32::try_from(leaf_index).context("leaf index")?,
-            encrypted_output,
-            gvk_ciphertext: None,
-        }])?;
+        futures::executor::block_on(storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: event_id,
+                commitment,
+                index: u32::try_from(leaf_index).context("leaf index")?,
+                encrypted_output,
+                gvk_ciphertext: None,
+            },
+        ]))?;
 
         pool_leaves.push(commitment);
         let expected_nullifier = expected_nullifier_for_note(
@@ -131,7 +135,7 @@ pub fn seed_prove_wallet(
     .root()?;
 
     let asp_event_id = format!("test-asp-leaf-{user_address}");
-    storage.save_events_batch(&ContractsEventData {
+    futures::executor::block_on(storage.save_events_batch(&ContractsEventData {
         events: vec![ContractEvent {
             id: asp_event_id.clone(),
             ledger: TEST_LEDGER,
@@ -141,16 +145,16 @@ pub fn seed_prove_wallet(
         }],
         cursor: "asp-cur".to_string(),
         latest_ledger: TEST_LEDGER,
-    })?;
+    }))?;
 
-    storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
+    futures::executor::block_on(storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
         id: asp_event_id,
         leaf: user_membership_leaf,
         index: 0,
         root: asp_membership_root,
-    }])?;
+    }]))?;
 
-    storage.save_sync_progress(
+    futures::executor::block_on(storage.save_sync_progress(
         &[SyncMetadata {
             contract_id: asp_membership_contract_id.to_string(),
             cursor: "asp-sync".to_string(),
@@ -158,7 +162,7 @@ pub fn seed_prove_wallet(
             last_fully_indexed_ledger: 0,
         }],
         true,
-    )?;
+    ))?;
 
     insert_user_notes(storage_path, user_address, &commitment_rows)?;
 
@@ -187,8 +191,8 @@ pub fn apply_proved_step(
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
 
-    let mut storage =
-        SqliteStorage::connect_file(storage_path).context("open storage for apply step")?;
+    let mut storage = futures::executor::block_on(SqliteStorage::connect_file(storage_path))
+        .context("open storage for apply step")?;
     let mut conn = Connection::open(storage_path).context("open storage connection")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
@@ -243,7 +247,7 @@ pub fn apply_proved_step(
         };
 
         let event_id = format!("test-pool-apply-{leaf_index}-{user_address}");
-        storage.save_events_batch(&ContractsEventData {
+        futures::executor::block_on(storage.save_events_batch(&ContractsEventData {
             events: vec![ContractEvent {
                 id: event_id.clone(),
                 ledger: TEST_LEDGER,
@@ -253,15 +257,17 @@ pub fn apply_proved_step(
             }],
             cursor: format!("pool-apply-cur-{leaf_index}"),
             latest_ledger: TEST_LEDGER,
-        })?;
+        }))?;
 
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: event_id,
-            commitment,
-            index: leaf_index,
-            encrypted_output: encrypted_output.to_vec(),
-            gvk_ciphertext: None,
-        }])?;
+        futures::executor::block_on(storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: event_id,
+                commitment,
+                index: leaf_index,
+                encrypted_output: encrypted_output.to_vec(),
+                gvk_ciphertext: None,
+            },
+        ]))?;
 
         insert_user_notes(
             storage_path,
@@ -293,19 +299,22 @@ fn chain_snapshot_from_storage(
     asp_membership_contract_id: &str,
     _network: &str,
 ) -> Result<TransactChainContext> {
-    let storage =
-        SqliteStorage::connect_file(storage_path).context("open storage for chain snapshot")?;
+    let storage = futures::executor::block_on(SqliteStorage::connect_file(storage_path))
+        .context("open storage for chain snapshot")?;
     let signature = test_derivation_signature();
     let (note_keypair, _) = encryption::derive_encryption_and_note_keypairs(signature)?;
     let note_pubkey_field = Field::try_from_le_bytes(*note_keypair.public.as_ref())?;
 
-    let pool_leaves = storage.get_pool_commitment_leaves_ordered(pool_contract_id)?;
+    let pool_leaves =
+        futures::executor::block_on(storage.get_pool_commitment_leaves_ordered(pool_contract_id))?;
     let pool_root = MerklePrefixTree::new(POOL_MERKLE_LEVELS, &pool_leaves)?
         .into_built()
         .root()?;
     let pool_next_index = u32::try_from(pool_leaves.len()).context("pool leaf count")?;
 
-    let asp_leaves = storage.get_all_asp_membership_leaves_ordered(asp_membership_contract_id)?;
+    let asp_leaves = futures::executor::block_on(
+        storage.get_all_asp_membership_leaves_ordered(asp_membership_contract_id),
+    )?;
     let asp_membership_root = MerklePrefixTree::new(ASP_MEMBERSHIP_LEVELS, &asp_leaves)?
         .into_built()
         .root()?;

@@ -70,12 +70,14 @@ rusqlite = { workspace = true, features = ["bundled"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
+turso = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
 gloo-timers = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+turso = { workspace = true }
 
 [build-dependencies]
 hex = { workspace = true }

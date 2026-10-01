@@ -3,14 +3,14 @@ use crate::{
     workers::{CorrelatedRequest, StorageHandle},
 };
 use anyhow::{Result, anyhow};
-use futures::{FutureExt, channel::mpsc, stream::StreamExt};
+use futures::{FutureExt, channel::mpsc, lock::Mutex, stream::StreamExt};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
     Registrable,
     oneshot::{OneshotBridge, oneshot},
 };
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments::{
     Error, Storage,
     chain::ContractDataStorage,
@@ -36,9 +36,7 @@ use wasm_bindgen_futures::spawn_local;
 #[cfg(target_arch = "wasm32")]
 use gloo_worker::Spawnable;
 
-// TODO for now it is a mix of async (because we want an async bridge for the
-// main thread) and sync (blocking) code in the future we should refactor to use
-// wasm threads?
+// Database access is asynchronous and serialized within this worker.
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
 
@@ -192,53 +190,39 @@ enum InitState {
     Failed(String),
 }
 
-#[cfg(target_arch = "wasm32")]
-fn is_opfs_locked_error(err: &sqlite_wasm_vfs::sahpool::OpfsSAHError) -> bool {
-    // `OpfsSAHError`'s `Display`/`Debug` impls use fixed messages and do not
-    // interpolate the wrapped `JsValue`, so the real DOMException (thrown by
-    // the browser when another tab/worker still holds the OPFS sync access
-    // handles) must be inspected directly rather than via `to_string()`.
-    let sqlite_wasm_vfs::sahpool::OpfsSAHError::CreateSyncAccessHandle(js_err) = err else {
-        return false;
-    };
-    js_err
-        .dyn_ref::<web_sys::DomException>()
-        .is_some_and(|e| e.name() == "NoModificationAllowedError")
-}
-
 thread_local! {
-    static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
+    static STORAGE: Rc<Mutex<Option<SqliteStorage>>> = Rc::new(Mutex::new(None));
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
-    #[cfg(target_arch = "wasm32")]
-    static SAH_POOL: RefCell<Option<sqlite_wasm_vfs::sahpool::OpfsSAHPoolUtil>> = const { RefCell::new(None) };
 }
 
+// Clone the handle before awaiting: no thread-local RefCell borrow may survive
+// a suspension. Requests and the background processor share the same lock.
 macro_rules! with_storage {
     ($storage:ident => $body:expr) => {
-        STORAGE.with(|s| {
-            let borrow = s.borrow();
-            // We must return the Result from the closure
-            let $storage = borrow
+        async {
+            let handle = STORAGE.with(Rc::clone);
+            let guard = handle.lock().await;
+            let $storage = guard
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
-
-            // This ensures the body expression's Result is returned by the closure
             Ok::<_, anyhow::Error>($body)
-        })
+        }
+        .await
     };
 }
 
 macro_rules! with_storage_mut {
     ($storage:ident => $body:expr) => {
-        STORAGE.with(|s| {
-            let mut borrow = s.borrow_mut();
-            let $storage = borrow
+        async {
+            let handle = STORAGE.with(Rc::clone);
+            let mut guard = handle.lock().await;
+            let $storage = guard
                 .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
-
             Ok::<_, anyhow::Error>($body)
-        })
+        }
+        .await
     };
 }
 
@@ -273,57 +257,31 @@ const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 async fn init() -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut attempt = 0;
-        loop {
-            match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(
-                &sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default(),
-                true,
-            )
-            .await
+    let mut attempt = 0;
+    let storage = loop {
+        match crate::opfs::open_wallet("spp-turso-v1").await {
+            Ok(storage) => break storage,
+            Err(error)
+                if error.to_string().contains("NoModificationAllowedError")
+                    && attempt < OPFS_LOCK_RETRY_ATTEMPTS =>
             {
-                Ok(util) => {
-                    SAH_POOL.with(|s| *s.borrow_mut() = Some(util));
-                    break;
-                }
-                Err(e) if is_opfs_locked_error(&e) && attempt < OPFS_LOCK_RETRY_ATTEMPTS => {
-                    attempt = attempt.saturating_add(1);
-                    tracing::debug!(
-                        attempt,
-                        "[{WORKER_NAME}] OPFS SAH pool still locked by a previous worker, retrying"
-                    );
-                    TimeoutFuture::new(OPFS_LOCK_RETRY_DELAY_MS).await;
-                }
-                Err(e) => {
-                    let error_details = format!("{e:?}");
-
-                    let msg = if is_opfs_locked_error(&e) {
-                        "Another tab or window is using this app's local database. Please close other tabs/windows running this app, then reload this page.".to_string()
-                    } else {
-                        "Failed to initialize local database storage.".to_string()
-                    };
-
-                    tracing::error!(details = %error_details, "[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS");
-                    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
-                    return Err(JsError::new(&msg));
-                }
+                attempt = attempt.saturating_add(1);
+                TimeoutFuture::new(OPFS_LOCK_RETRY_DELAY_MS).await;
             }
-        }
-    }
-
-    let storage = match SqliteStorage::connect() {
-        Ok(storage) => storage,
-        Err(e) => {
-            let msg = format!("Failed to open local database: {e}");
-            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
-            return Err(JsError::new(&msg));
+            Err(error) => {
+                let msg = if error.to_string().contains("NoModificationAllowedError") {
+                    "Another tab or window is using this app's local database. Please close other tabs/windows running this app, then reload this page.".to_string()
+                } else {
+                    format!("Failed to open local database: {error}")
+                };
+                INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+                return Err(JsError::new(&msg));
+            }
         }
     };
 
-    STORAGE.with(|s| {
-        *s.borrow_mut() = Some(storage);
-    });
+    let handle = STORAGE.with(Rc::clone);
+    *handle.lock().await = Some(storage);
 
     let (tx, rx) = mpsc::channel::<()>(1);
 
@@ -365,21 +323,16 @@ pub(crate) async fn StorageWorker(
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
         StorageWorkerRequest::Pause => {
-            tracing::debug!("[{WORKER_NAME}] pausing OPFS SAH pool ahead of page unload");
-            // `pause_vfs` refuses to release handles while SQLite still has
-            // files open on this VFS, so the live connection must be closed
-            // first — this worker is about to be torn down by the browser
-            // anyway, and any in-flight request will simply fail from here on.
-            let dropped_storage = STORAGE.with(|s| s.borrow_mut().take());
+            tracing::debug!("[{WORKER_NAME}] closing OPFS storage ahead of page unload");
+            // Wait for active access before closing and releasing the handles.
+            let handle = STORAGE.with(Rc::clone);
+            let dropped_storage = handle.lock().await.take();
             drop(dropped_storage);
-            #[cfg(target_arch = "wasm32")]
-            SAH_POOL.with(|s| {
-                if let Some(pool) = s.borrow().as_ref()
-                    && let Err(e) = pool.pause_vfs()
-                {
-                    tracing::debug!("[{WORKER_NAME}] pause_vfs failed: {e:#}");
-                }
+            INIT_STATE.with(|state| {
+                *state.borrow_mut() =
+                    InitState::Failed("Local database is paused; reopen storage.".into())
             });
+            PROCESSOR_TX.with(|sender| sender.borrow_mut().take());
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Ping => {
@@ -404,7 +357,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::SyncState => {
             tracing::trace!("[{WORKER_NAME}] get current sync");
-            let state = with_storage!(s => s.get_sync_metadata()?)?;
+            let state = with_storage!(s => s.get_sync_metadata().await?)?;
             let resp = StorageWorkerResponse::SyncState(state);
             tracing::trace!("[{WORKER_NAME}] sending current sync");
             resp
@@ -419,7 +372,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving {} raw contract events",
                 events_data.events.len()
             );
-            with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
+            with_storage_mut!(s => s.save_events_batch(&events_data).await?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
@@ -435,17 +388,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving bulk sync progress for {} contracts (fully_indexed={fully_indexed})",
                 metadata.len()
             );
-            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed).await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClearIndexingCursors => {
             tracing::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
-            with_storage_mut!(s => s.clear_indexing_cursors()?)?;
+            with_storage_mut!(s => s.clear_indexing_cursors().await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClampLastFullyIndexedLedger(max_ledger) => {
             tracing::trace!("[{WORKER_NAME}] clamping last_fully_indexed_ledger to {max_ledger}");
-            with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger)?)?;
+            with_storage_mut!(s => s.clamp_last_fully_indexed_ledger(max_ledger).await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::SavePrivateKeys(
@@ -458,7 +411,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving private keys for the account {}",
                 Sensitive(&address)
             );
-            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
+            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding).await?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
                 Sensitive(&address)
@@ -471,7 +424,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] disclaimer state for account {}",
                 Sensitive(&address)
             );
-            let state = with_storage_mut!(s => s.get_disclaimer_state(&address)?)?;
+            let state = with_storage_mut!(s => s.get_disclaimer_state(&address).await?)?;
             StorageWorkerResponse::DisclaimerState(DisclaimerStatePayload {
                 disclaimer_text_md: state.disclaimer_text_md,
                 disclaimer_hash_hex: state.disclaimer_hash_hex,
@@ -483,19 +436,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] accept disclaimer for account {}",
                 Sensitive(&address)
             );
-            with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
+            with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex).await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::GetSetting(key) => {
             tracing::trace!("[{WORKER_NAME}] fetch setting {key}");
-            let value_json = with_storage!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
-                .map(|value| value.to_string());
+            let value_json =
+                with_storage!(s => s.get_setting_json::<serde_json::Value>(&key).await?)?
+                    .map(|value| value.to_string());
             StorageWorkerResponse::Setting(value_json)
         }
         StorageWorkerRequest::SetSetting { key, value_json } => {
             tracing::trace!("[{WORKER_NAME}] set setting {key}");
             let value: serde_json::Value = serde_json::from_str(&value_json)?;
-            with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
+            with_storage_mut!(s => s.set_setting_json(&key, &value).await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::PrivacyKeys(address) => {
@@ -503,7 +457,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch privacy keys for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address).await?)?;
             if opt.is_some() {
                 tracing::trace!(
                     "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
@@ -529,7 +483,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address).await?)?;
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
@@ -539,7 +493,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] list user notes for the account {}",
                 Sensitive(&address)
             );
-            let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
+            let list = with_storage!(s => s.list_user_notes(&address, limit).await?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {}",
                 list.len(),
@@ -555,7 +509,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] list portfolio balances for the account {}",
                 Sensitive(&address)
             );
-            let list = with_storage!(s => s.list_portfolio_balances(&address, &enabled_pools)?)?;
+            let list =
+                with_storage!(s => s.list_portfolio_balances(&address, &enabled_pools).await?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }
         StorageWorkerRequest::RecordOperation {
@@ -575,7 +530,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 &direction,
                 counterparty.as_deref(),
                 tx_hash.as_deref(),
-            )?)?;
+            ).await?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ListOperations {
@@ -583,7 +538,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             pool_contract_id,
             limit,
         } => {
-            let list = with_storage!(s => s.list_operations(&address, &pool_contract_id, limit)?)?;
+            let list =
+                with_storage!(s => s.list_operations(&address, &pool_contract_id, limit).await?)?;
             StorageWorkerResponse::Operations(list)
         }
         StorageWorkerRequest::UnspentUserNotes {
@@ -595,7 +551,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&user_address)
             );
             let list = with_storage!(s =>
-                s.list_unspent_user_notes(&pool_contract_id, &user_address)?
+                s.list_unspent_user_notes(&pool_contract_id, &user_address).await?
             )?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} unspent notes for the account {}",
@@ -613,7 +569,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&user_address)
             );
             let list = with_storage!(s =>
-                s.list_pool_user_notes(&pool_contract_id, &user_address)?
+                s.list_pool_user_notes(&pool_contract_id, &user_address).await?
             )?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {}",
@@ -631,7 +587,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&address)
             );
             let lookup = with_storage!(s =>
-                s.recipient_lookup(&address, &public_key_registry_contract_id)?
+                s.recipient_lookup(&address, &public_key_registry_contract_id).await?
             )?;
             StorageWorkerResponse::RecipientLookup(lookup)
         }
@@ -646,7 +602,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     limit,
                     &asp_membership_contract_id,
                     &public_key_registry_contract_id,
-                )?
+                ).await?
             )?;
             StorageWorkerResponse::OperationalFeed(list)
         }
@@ -656,7 +612,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&req.user_address)
             );
 
-            with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
+            with_storage_mut!(storage => match build_disclosure_inputs(storage, &req).await? {
                 BuildDisclosureInputs::Ready(notes) => {
                     StorageWorkerResponse::DisclosureNotes(notes)
                 }
@@ -684,7 +640,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::Transact(req) => {
             tracing::trace!("[{WORKER_NAME}] transact");
-            with_storage_mut!(storage => match build_transact_params(storage, &req)? {
+            with_storage_mut!(storage => match build_transact_params(storage, &req).await? {
                 BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
                 BuildTransactParams::MembershipSync(status) => {
                     StorageWorkerResponse::AspMembershipSync(status)
@@ -698,7 +654,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         } => {
             tracing::trace!("[{WORKER_NAME}] list pool gvk events for {pool_contract_id}");
             let events =
-                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit)?)?;
+                with_storage!(s => s.list_pool_gvk_events(&pool_contract_id, after, limit).await?)?;
             StorageWorkerResponse::PoolGvkEvents(events)
         }
         StorageWorkerRequest::PoolHasCommitments {
@@ -710,7 +666,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 commitments.len()
             );
             let found = with_storage!(s =>
-                s.pool_has_commitments(&pool_contract_id, &commitments)?
+                s.pool_has_commitments(&pool_contract_id, &commitments).await?
             )?;
             StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
         }
@@ -736,7 +692,7 @@ async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
 
 async fn process_until_empty() -> anyhow::Result<()> {
     loop {
-        let did_work = with_storage_mut!(storage => process_local_state_batch(storage)?)?;
+        let did_work = with_storage_mut!(storage => process_local_state_batch(storage).await?)?;
         if !did_work {
             break;
         }

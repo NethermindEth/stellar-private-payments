@@ -294,20 +294,20 @@ mod tests {
         ))
     }
 
-    fn open_audit_db(label: &str) -> anyhow::Result<(PathBuf, LocalStorage)> {
+    async fn open_audit_db(label: &str) -> anyhow::Result<(PathBuf, LocalStorage)> {
         let path = temp_db_path(label);
-        let db = SqliteStorage::connect_file(&path)?;
+        let db = SqliteStorage::connect_file(&path).await?;
         drop(db);
         let storage = LocalStorage::open(path.to_str().expect("temp path utf-8"))?;
         Ok((path, storage))
     }
 
-    fn seed_db(
+    async fn seed_db(
         path: &PathBuf,
-        f: impl FnOnce(&mut SqliteStorage) -> anyhow::Result<()>,
+        f: impl AsyncFnOnce(&mut SqliteStorage) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        let mut db = SqliteStorage::connect_file(path)?;
-        f(&mut db)
+        let mut db = SqliteStorage::connect_file(path).await?;
+        f(&mut db).await
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_output_note() -> anyhow::Result<()> {
-        let (path, storage) = open_audit_db("output")?;
+        let (path, storage) = open_audit_db("output").await?;
         let d_priv = field(0xA11CE);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = GvkNote::new(
@@ -386,20 +386,25 @@ mod tests {
         let commitment = commitment_for(&note)?;
         let event_id = tx_event_id("0000000000000000001", 0);
 
-        seed_db(&path, |storage| {
-            storage.save_events_batch(&ContractsEventData {
-                events: vec![dummy_event(&event_id)],
-                cursor: "cur".into(),
-                latest_ledger: 1,
-            })?;
-            storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-                id: event_id,
-                commitment,
-                index: 0,
-                encrypted_output: vec![],
-                gvk_ciphertext: Some(ct),
-            }])
-        })?;
+        seed_db(&path, async |storage| {
+            storage
+                .save_events_batch(&ContractsEventData {
+                    events: vec![dummy_event(&event_id)],
+                    cursor: "cur".into(),
+                    latest_ledger: 1,
+                })
+                .await?;
+            storage
+                .save_commitment_events_batch(&vec![NewCommitmentEvent {
+                    id: event_id,
+                    commitment,
+                    index: 0,
+                    encrypted_output: vec![],
+                    gvk_ciphertext: Some(ct),
+                }])
+                .await
+        })
+        .await?;
 
         let mut audit = GvkAudit::new(crate::StorageHandle::from(storage), "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("one tx");
@@ -417,7 +422,7 @@ mod tests {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn cursor_audits_traceable_input() -> anyhow::Result<()> {
-        let (path, storage) = open_audit_db("traceable")?;
+        let (path, storage) = open_audit_db("traceable").await?;
         let d_priv = field(0x510);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
 
@@ -439,38 +444,45 @@ mod tests {
         let commit_id = tx_event_id(toid, 0);
         let null_id = tx_event_id(toid, 1);
 
-        seed_db(&path, |storage| {
-            storage.save_events_batch(&ContractsEventData {
-                events: vec![
-                    dummy_event(&prior_id),
-                    dummy_event(&commit_id),
-                    dummy_event(&null_id),
-                ],
-                cursor: "cur".into(),
-                latest_ledger: 1,
-            })?;
-            storage.save_commitment_events_batch(&vec![
-                NewCommitmentEvent {
-                    id: prior_id,
-                    commitment: spent_commitment,
-                    index: 0,
-                    encrypted_output: vec![],
-                    gvk_ciphertext: None,
-                },
-                NewCommitmentEvent {
-                    id: commit_id.clone(),
-                    commitment: output_commitment,
-                    index: 1,
-                    encrypted_output: vec![],
-                    gvk_ciphertext: Some(output_ct),
-                },
-            ])?;
-            storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-                id: null_id,
-                nullifier: field(0x999),
-                gvk_ciphertext: Some(spent_ct),
-            }])
-        })?;
+        seed_db(&path, async |storage| {
+            storage
+                .save_events_batch(&ContractsEventData {
+                    events: vec![
+                        dummy_event(&prior_id),
+                        dummy_event(&commit_id),
+                        dummy_event(&null_id),
+                    ],
+                    cursor: "cur".into(),
+                    latest_ledger: 1,
+                })
+                .await?;
+            storage
+                .save_commitment_events_batch(&vec![
+                    NewCommitmentEvent {
+                        id: prior_id,
+                        commitment: spent_commitment,
+                        index: 0,
+                        encrypted_output: vec![],
+                        gvk_ciphertext: None,
+                    },
+                    NewCommitmentEvent {
+                        id: commit_id.clone(),
+                        commitment: output_commitment,
+                        index: 1,
+                        encrypted_output: vec![],
+                        gvk_ciphertext: Some(output_ct),
+                    },
+                ])
+                .await?;
+            storage
+                .save_nullifier_events_batch(&vec![NewNullifierEvent {
+                    id: null_id,
+                    nullifier: field(0x999),
+                    gvk_ciphertext: Some(spent_ct),
+                }])
+                .await
+        })
+        .await?;
 
         let mut audit = GvkAudit::new(crate::StorageHandle::from(storage), "CPOOL", d_priv);
         let tx = audit.next_tx().await?.expect("transact tx");

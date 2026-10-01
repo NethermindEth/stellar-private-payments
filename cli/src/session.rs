@@ -37,10 +37,10 @@ impl ClientSession {
         let storage_path = config.db_path().to_string_lossy().into_owned();
         let storage =
             LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
-        let bootnode_setting = storage
-            .storage()
-            .get_bootnode_setting()
-            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+        let bootnode_setting = futures::executor::block_on(async {
+            storage.storage().await.get_bootnode_setting().await
+        })
+        .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
         let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
             .then_some(bootnode_setting.url);
 
@@ -126,10 +126,9 @@ pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result
     let storage =
         LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
     let prover = ProverHandle::from(disclosure_prover(config)?);
-    let bootnode_setting = storage
-        .storage()
-        .get_bootnode_setting()
-        .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
+    let bootnode_setting =
+        futures::executor::block_on(async { storage.storage().await.get_bootnode_setting().await })
+            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
     let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
         .then_some(bootnode_setting.url);
     Client::init(

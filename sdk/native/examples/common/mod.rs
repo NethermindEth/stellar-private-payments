@@ -416,8 +416,7 @@ pub fn select_gvk_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, Stri
 pub fn load_or_create_gvk_authority(storage: &LocalStorage) -> Result<GvkAuthoritySetting, String> {
     let regenerate = env_or("SPP_GVK_REGENERATE", "") == "1";
     if !regenerate
-        && let Some(setting) = storage
-            .get_gvk_authority_setting()
+        && let Some(setting) = futures::executor::block_on(storage.get_gvk_authority_setting())
             .map_err(|e| format!("read GVK authority setting: {e}"))?
     {
         setting
@@ -428,8 +427,7 @@ pub fn load_or_create_gvk_authority(storage: &LocalStorage) -> Result<GvkAuthori
 
     let setting =
         GvkAuthoritySetting::generate().map_err(|e| format!("generate GVK authority key: {e}"))?;
-    storage
-        .set_gvk_authority_setting(&setting)
+    futures::executor::block_on(storage.set_gvk_authority_setting(&setting))
         .map_err(|e| format!("save GVK authority setting: {e}"))?;
     Ok(setting)
 }

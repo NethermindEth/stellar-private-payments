@@ -18,19 +18,20 @@ pub struct ExplorerSetting {
 
 /// Configured explorer base URL, or the default when unset.
 pub fn base_url(storage: &SqliteStorage) -> Result<String> {
-    let setting: Option<ExplorerSetting> = storage.get_setting_json(APP_SETTING_EXPLORER)?;
+    let setting: Option<ExplorerSetting> =
+        futures::executor::block_on(storage.get_setting_json(APP_SETTING_EXPLORER))?;
     Ok(setting
         .map(|s| s.base_url)
         .unwrap_or_else(|| DEFAULT_EXPLORER_BASE_URL.to_string()))
 }
 
 pub fn set_base_url(storage: &mut SqliteStorage, base_url: &str) -> Result<()> {
-    storage.set_setting_json(
+    futures::executor::block_on(storage.set_setting_json(
         APP_SETTING_EXPLORER,
         &ExplorerSetting {
             base_url: base_url.to_string(),
         },
-    )
+    ))
 }
 
 /// Builds explorer URLs from a base like `https://stellar.expert/explorer/testnet`.

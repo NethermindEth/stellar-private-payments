@@ -8,17 +8,17 @@ use super::{
 
 const PROCESS_FETCH_LIMIT: u32 = 50;
 
-pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), Error> {
-    while process_local_state_batch(storage)? {}
+pub(crate) async fn process_local_state(storage: &mut SqliteStorage) -> Result<(), Error> {
+    while process_local_state_batch(storage).await? {}
     Ok(())
 }
 
 /// Process one batch of raw events and note derivation. Returns `true` when
 /// more work may remain.
-pub fn process_local_state_batch(storage: &mut SqliteStorage) -> anyhow::Result<bool> {
-    let did_raw = process_events(storage, PROCESS_FETCH_LIMIT)?;
+pub async fn process_local_state_batch(storage: &mut SqliteStorage) -> anyhow::Result<bool> {
+    let did_raw = process_events(storage, PROCESS_FETCH_LIMIT).await?;
     let mut derive = derive_user_note;
-    let did_notes = process_notes(storage, PROCESS_FETCH_LIMIT, &mut derive)?;
+    let did_notes = process_notes(storage, PROCESS_FETCH_LIMIT, &mut derive).await?;
     Ok(did_raw || did_notes)
 }
 

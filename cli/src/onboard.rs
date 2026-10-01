@@ -56,13 +56,13 @@ pub struct OnboardArgs {
 pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
     stellar_cli::ensure_installed()?;
     let mut storage = config.open_storage()?;
-    if !storage.get_disclaimer_state(&account.address)?.accepted {
+    if !futures::executor::block_on(storage.get_disclaimer_state(&account.address))?.accepted {
         bail!(
             "You must accept the disclaimer first. Run: spp onboard --account {}",
             account.alias
         );
     }
-    if storage.get_private_keys(&account.address)?.is_none() {
+    if futures::executor::block_on(storage.get_private_keys(&account.address))?.is_none() {
         bail!(
             "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
@@ -87,7 +87,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     let mut storage = config.open_storage()?;
 
     // 3. Consent.
-    let state = storage.get_disclaimer_state(&account.address)?;
+    let state = futures::executor::block_on(storage.get_disclaimer_state(&account.address))?;
     if state.accepted {
         say(interactive, "Disclaimer already accepted.");
     } else {
@@ -99,12 +99,14 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
         if !accepted {
             bail!("Disclaimer not accepted; aborting. Pass --accept to accept non-interactively.");
         }
-        storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)?;
+        futures::executor::block_on(
+            storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex),
+        )?;
         say(interactive, "Disclaimer accepted.");
     }
 
     // 4. Derive privacy keys.
-    if storage.get_private_keys(&account.address)?.is_some() {
+    if futures::executor::block_on(storage.get_private_keys(&account.address))?.is_some() {
         say(interactive, "Privacy keys already present.");
     } else {
         if interactive {
@@ -167,14 +169,13 @@ fn save_owner_keys(
         .context("derive privacy keypairs from wallet signature")?;
     let membership_blinding = derive_membership_blinding(&signature, network)?;
 
-    storage
-        .save_encryption_and_note_keypairs(
-            owner_address,
-            &note_keypair,
-            &encryption_keypair,
-            &membership_blinding,
-        )
-        .context("save private keys to local wallet database")
+    futures::executor::block_on(storage.save_encryption_and_note_keypairs(
+        owner_address,
+        &note_keypair,
+        &encryption_keypair,
+        &membership_blinding,
+    ))
+    .context("save private keys to local wallet database")
 }
 
 fn configure_bootnode(
@@ -183,18 +184,18 @@ fn configure_bootnode(
     interactive: bool,
 ) -> Result<()> {
     if args.no_bootnode {
-        storage.set_bootnode_setting(false, "")?;
+        futures::executor::block_on(storage.set_bootnode_setting(false, ""))?;
         return Ok(());
     }
     if let Some(url) = &args.bootnode_url {
-        storage.set_bootnode_setting(true, url)?;
+        futures::executor::block_on(storage.set_bootnode_setting(true, url))?;
         say(interactive, &format!("Bootnode set to {url}."));
         return Ok(());
     }
     if !interactive {
         return Ok(());
     }
-    let current = storage.get_bootnode_setting()?;
+    let current = futures::executor::block_on(storage.get_bootnode_setting())?;
     println!("\nBootnode fallback (optional):\n{BOOTNODE_RISKS}\n{BOOTNODE_TEXT}");
     let hint = if current.enabled && !current.url.is_empty() {
         &current.url
@@ -205,11 +206,11 @@ fn configure_bootnode(
         "Bootnode archive URL [{hint}] (enter to accept, \"none\" to disable): "
     ))?;
     if input.eq_ignore_ascii_case("none") {
-        storage.set_bootnode_setting(false, "")?;
+        futures::executor::block_on(storage.set_bootnode_setting(false, ""))?;
         return Ok(());
     }
     let url = if input.is_empty() { hint } else { &input };
-    storage.set_bootnode_setting(true, url)?;
+    futures::executor::block_on(storage.set_bootnode_setting(true, url))?;
     Ok(())
 }
 
@@ -307,7 +308,8 @@ mod tests {
     #[test]
     fn the_owners_signature_stores_keys() {
         let owner = LocalSigner::from_seed([1; 32]);
-        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        let mut storage = futures::executor::block_on(SqliteStorage::connect_in_memory())
+            .expect("in-memory storage");
 
         save_owner_keys(
             &mut storage,
@@ -318,8 +320,7 @@ mod tests {
         .expect("the owner's own signature must store keys");
 
         assert!(
-            storage
-                .get_private_keys(owner.public_key())
+            futures::executor::block_on(storage.get_private_keys(owner.public_key()))
                 .expect("read keys")
                 .is_some()
         );
@@ -329,7 +330,8 @@ mod tests {
     fn another_accounts_signature_stores_nothing() {
         let owner = LocalSigner::from_seed([1; 32]);
         let other = LocalSigner::from_seed([2; 32]);
-        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        let mut storage = futures::executor::block_on(SqliteStorage::connect_in_memory())
+            .expect("in-memory storage");
 
         let error = save_owner_keys(
             &mut storage,
@@ -344,8 +346,7 @@ mod tests {
             "{error:#}"
         );
         assert!(
-            storage
-                .get_private_keys(owner.public_key())
+            futures::executor::block_on(storage.get_private_keys(owner.public_key()))
                 .expect("read keys")
                 .is_none()
         );

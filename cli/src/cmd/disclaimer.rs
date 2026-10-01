@@ -17,7 +17,10 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
         Some(_) => {
             let account = config.require_account()?;
             let mut storage = config.open_storage()?;
-            Some(storage.get_disclaimer_state(&account.address)?.accepted)
+            Some(
+                futures::executor::block_on(storage.get_disclaimer_state(&account.address))?
+                    .accepted,
+            )
         }
         None => None,
     };
