@@ -18,7 +18,9 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
 
-Persistent databases are fully encrypted with SQLite3MC. Both the CLI and browser app unlock their random database keys with storage passwords. The browser requests password creation and confirmation on first use, then a password on later visits. Only KDF parameters and encrypted key envelopes are persisted. Freighter signatures are used for privacy-key derivation and transactions, not storage unlocking.
+Persistent databases are fully encrypted with SQLite3MC. The browser unwraps a random database key using a Freighter signature; the CLI uses a Stellar CLI identity (`--storage-account`, falling back to `--account`). Storage signatures use a dedicated domain, separate from privacy-key derivation, and do not authorize transactions. Only the public signing context and encrypted key envelope are persisted; storage has no password unlock path. SDK integrations provide a database key or key provider before opening persistent storage.
+
+CLI storage protection depends on the enrolled signing identity. A copy of the database and its key envelope remains protected only while the attacker cannot obtain the identity's private key or its storage-unlock signature. If the identity is stored as a plaintext secret, access to that secret and the database files defeats this protection. Secure-store or hardware-signer controls can protect the identity; database encryption does not replace those controls or protect decrypted data in a compromised process. Opening storage in a new CLI invocation requires another signature and may prompt for signer approval.
 
 ## Browser SDK (`sdk/web`)
 

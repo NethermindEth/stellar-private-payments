@@ -269,23 +269,48 @@ All persistent SDK storage requires a 32-byte database key. Use
 and `connect_existing_plaintext` calls return an error without opening or
 creating a file. In-memory storage remains available for transient computation.
 
-The CLI prompts for a storage password and confirmation on first use. It creates
-a random database key and wraps it with Argon2id (64 MiB, three passes) and
-XSalsa20-Poly1305. Later commands prompt for the same password. The wrapped key
-lives in `spp.db.key`; back it up together with the database. Existing plaintext
-databases are converted before use. Wrong passwords preserve existing files.
+The CLI unlocks storage with a Stellar CLI identity: pass `--storage-account <alias>`
+or set `SPP_STORAGE_ACCOUNT` (also available as `defaults.storage_account` in the
+TOML config). It defaults to `--account`, independently of `--sign-as`. Commands
+without an account, such as `spp config show`, need an explicit storage identity.
+The signing key remains managed by `stellar keys`, including its secure store.
 
-For noninteractive use, pass `--storage-password-file` or set
-`SPP_STORAGE_PASSWORD_FILE` to a private file (mode 600). Passwords are never
-accepted as command-line values. The E2E setup script creates and reuses a random
-password file inside its isolated, ignored data directory.
+On first use, two matching signatures of a dedicated storage message confirm that
+unlocking is reproducible. HKDF-SHA-256 derives a wrapping key from the signature;
+XSalsa20-Poly1305 seals a random database key. Later commands require one signature,
+with the key cached for the command. These messages do not authorize transactions
+and are separate from privacy-key derivation. The public signing context and sealed
+key live in `spp.db.key`; back it up together with `spp.db`. Existing plaintext
+databases are encrypted before use. Wrong identities or signatures preserve files.
 
-The browser app also unlocks storage with a password. Its creation dialog requires
-confirmation; later visits prompt once, with retry on an incorrect password. It
-uses PBKDF2-SHA-256 (600,000 iterations) and AES-256-GCM to wrap a random database
-key, storing only KDF parameters and the encrypted envelope. The storage password
-is never saved. Freighter is used for privacy-key derivation and transactions,
-not for storage unlocking. Earlier browser unlock records are preserved and
-rejected as incompatible rather than overwritten.
+### CLI storage threat model
+
+Storage encryption protects a copied database and its `.key` file when the attacker
+cannot use the enrolled signing identity. There is no independent storage password:
+anyone who obtains that identity's private key, or can make it sign the storage
+unlock message, can unwrap the database key and read the copied database.
+
+If a Stellar CLI identity is stored as a plaintext secret in a configuration file,
+an attacker who can read that file together with `spp.db` and `spp.db.key` can decrypt
+the data. Encrypting the database does not provide a separate security boundary
+against that level of filesystem access. An OS secure store or supported hardware
+signer can protect the signing key, subject to its own access and approval controls.
+Encryption also does not protect decrypted data from a compromised running process.
+
+Each CLI invocation that opens storage invokes the Stellar CLI to sign the unlock
+message. Depending on the identity's setup, this can require a secure-store or
+hardware-wallet approval on each invocation. The unlocked key is cached only for
+that command. This dependence on the wallet's security and availability is the
+intentional tradeoff of wallet-based storage unlocking.
+
+### Existing storage
+
+The CLI encrypts existing plaintext databases before use. Encrypted databases need
+their matching wallet key record; restore `spp.db` and `spp.db.key` together from
+backup. Invalid key records are rejected without replacing existing files.
+
+Browser storage uses a wallet-wrapped random database key through Freighter.
+See the [browser backup and recovery instructions](../web/README.md#encrypted-backups-and-recovery).
+The E2E setup uses the first provisioned Stellar identity to unlock its isolated database.
 
 SDK callers supply a key or key provider; keyless callers fail closed.

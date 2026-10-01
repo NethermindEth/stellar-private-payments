@@ -68,6 +68,8 @@ export interface StorageOpenOptions {
   keyProvider: DatabaseKeyProvider;
   /** Refuse an existing database when true; require an existing one otherwise. */
   createNew?: boolean;
+  /** Isolated encrypted OPFS directory used for validated backup restoration. */
+  directory?: string;
   workerUrl?: string;
 }
 

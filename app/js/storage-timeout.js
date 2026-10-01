@@ -1,27 +1,33 @@
-const AUTO_LOCK_KEY = 'spp.autoLockMinutes';
+const AUTO_LOCK_KEY = 'auto_lock_minutes';
 const DEFAULT_AUTO_LOCK_MINUTES = 5;
 export const AUTO_LOCK_CHOICES = [5, 15, 30, 60, 0];
+let timeoutMinutes = DEFAULT_AUTO_LOCK_MINUTES;
+let unlockedStorage = null;
 
-/** Minutes of inactivity before the app locks; 0 means never. */
-export function autoLockMinutes() {
-    try {
-        const stored = window.localStorage.getItem(AUTO_LOCK_KEY);
-        if (stored !== null && AUTO_LOCK_CHOICES.includes(Number(stored))) {
-            return Number(stored);
-        }
-    } catch {
-        // Storage can be unavailable; fall back to the default.
-    }
-    return DEFAULT_AUTO_LOCK_MINUTES;
+export function autoLockMinutes() { return timeoutMinutes; }
+
+/** Read only the encrypted setting; never migrate an untrusted plaintext timeout. */
+export async function loadAutoLockSetting(storage) {
+    clearAutoLockSetting();
+    const saved = await storage.getSetting(AUTO_LOCK_KEY);
+    const minutes = AUTO_LOCK_CHOICES.includes(saved) ? saved : DEFAULT_AUTO_LOCK_MINUTES;
+    if (saved !== minutes) await storage.setSetting(AUTO_LOCK_KEY, minutes);
+    timeoutMinutes = minutes;
+    unlockedStorage = storage;
+    try { globalThis.localStorage?.removeItem('spp.autoLockMinutes'); } catch { /* Obsolete value is never read. */ }
 }
 
-export function setAutoLockMinutes(minutes) {
+export function clearAutoLockSetting() {
+    unlockedStorage = null;
+    timeoutMinutes = DEFAULT_AUTO_LOCK_MINUTES;
+}
+
+export async function setAutoLockMinutes(minutes) {
+    if (!unlockedStorage) throw new Error('Unlock local data to change the inactivity timeout.');
     if (!AUTO_LOCK_CHOICES.includes(minutes)) throw new Error('Invalid auto-lock timeout.');
-    try {
-        window.localStorage.setItem(AUTO_LOCK_KEY, String(minutes));
-    } catch {
-        // Keeps the default for this page when storage is unavailable.
-    }
+    const storage = unlockedStorage;
+    await storage.setSetting(AUTO_LOCK_KEY, minutes);
+    if (storage === unlockedStorage) timeoutMinutes = minutes;
 }
 
 /**

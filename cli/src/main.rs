@@ -71,9 +71,9 @@ struct Cli {
     #[arg(long, global = true)]
     sign_as: Option<String>,
 
-    /// Read the storage password from a private file instead of prompting.
-    #[arg(long, global = true, env = "SPP_STORAGE_PASSWORD_FILE")]
-    storage_password_file: Option<PathBuf>,
+    /// Stellar CLI identity that unlocks storage (defaults to --account).
+    #[arg(long, global = true, env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: Option<String>,
 
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
@@ -271,7 +271,7 @@ fn main() -> Result<()> {
         config_path,
         file_config,
         CliConfigOverrides {
-            storage_password_file: cli.storage_password_file,
+            storage_account: cli.storage_account,
             deployment_path: cli.deployment,
             network: cli.network,
             data_dir: cli.data_dir,

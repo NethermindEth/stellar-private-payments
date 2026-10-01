@@ -10,7 +10,7 @@ import { chromium } from 'playwright';
 import { CHROMIUM_PATH, requireAppUrl } from './env.mjs';
 
 // App modules are bundled into ui.js, not served as standalone files. Load
-// the production password helper into the isolated page without a server route.
+// the production wallet storage helper into the isolated page without a server route.
 const storageKeyModuleUrl = `data:text/javascript;base64,${readFileSync(
   new URL('../../app/js/storage-key.js', import.meta.url),
 ).toString('base64')}`;
@@ -44,27 +44,35 @@ async function waitForAccountVisible(address) {
 // WalletSigner interface — Freighter is one implementation, this is another.
 // Wrap signatures in a real Buffer before toString('hex'/'base64'): a bare
 // Uint8Array silently ignores the encoding argument.
-async function exposeSigner(page, keypair) {
+export async function exposeSigner(page, keypair) {
   const address = keypair.publicKey();
   const signTxName = `__spp_sign_tx_${address}`;
   const signMsgName = `__spp_sign_msg_${address}`;
+  const verifyMsgName = `__spp_verify_msg_${address}`;
   const signAuthName = `__spp_sign_auth_${address}`;
   await page.exposeFunction(signTxName, (xdr, networkPassphrase) => {
     const tx = TransactionBuilder.fromXDR(xdr, networkPassphrase);
     tx.sign(keypair);
     return { signedTxXdr: tx.toXDR() };
   });
-  await page.exposeFunction(signMsgName, (message) => {
+  await page.exposeFunction(signMsgName, (message, opts) => {
+    if (opts?.address && opts.address !== address) {
+      throw new Error('Storage unlock requested a different account.');
+    }
     // SEP-53: sign SHA-256("Stellar Signed Message:\n" + message), not the
     // raw message — key derivation verifies against this exact scheme.
     const digest = createHash('sha256').update(`Stellar Signed Message:\n${message}`).digest();
-    return { signedMessage: Buffer.from(keypair.sign(digest)).toString('base64') };
+    return { signedMessage: Buffer.from(keypair.sign(digest)).toString('base64'), signerAddress: address };
+  });
+  await page.exposeFunction(verifyMsgName, (signerAddress, message, signature) => {
+    const digest = createHash('sha256').update(`Stellar Signed Message:\n${message}`).digest();
+    return Keypair.fromPublicKey(signerAddress).verify(digest, Buffer.from(signature));
   });
   await page.exposeFunction(signAuthName, (preimageXdrBase64) => {
     const hash = createHash('sha256').update(Buffer.from(preimageXdrBase64, 'base64')).digest();
     return { signedAuthEntry: Buffer.from(keypair.sign(hash)).toString('base64') };
   });
-  return { signTxName, signMsgName, signAuthName };
+  return { signTxName, signMsgName, signAuthName, verifyMsgName };
 }
 
 // A second, fully separate storage partition used only to register passive
@@ -106,7 +114,7 @@ export async function closeIsolatedRegistration() {
 // wizard gates on (disclaimer, retention/bootnode, explorer,
 // storage-persist-prompted), so a driver account skips the wizard.
 async function registerAccount({
-  address, signTxName, signMsgName, signAuthName, rpcUrl, networkPassphrase, useSharedStorage, seedOnboarding, storagePassword, storageKeyModuleUrl,
+  address, signTxName, signMsgName, signAuthName, verifyMsgName, rpcUrl, networkPassphrase, useSharedStorage, seedOnboarding, storageKeyModuleUrl,
 }) {
   const { default: init, Client, Storage } = await import('stellar-private-payments');
   await init();
@@ -115,13 +123,13 @@ async function registerAccount({
     './js/stellar-private-payments/dist/circuits/',
     window.location.href,
   ).href;
-  const { openPasswordStorage } = await import(storageKeyModuleUrl);
-  const openStorage = () => openPasswordStorage({
+  const { openWalletStorage } = await import(storageKeyModuleUrl);
+  const openStorage = () => openWalletStorage({
     storage: Storage,
-    requestPassword: async ({ error }) => {
-      if (error) throw new Error(error);
-      return storagePassword;
-    },
+    getAddress: async () => address,
+    signMessage: (message, opts) => window[signMsgName](message, opts),
+    verifySignature: (signerAddress, message, signature) =>
+      window[verifyMsgName](signerAddress, message, Array.from(signature)),
   });
   const storage = useSharedStorage
     ? (window.__recipientStorage ??= await openStorage()).fork()
@@ -170,16 +178,16 @@ async function registerAccount({
 export async function register(keypair) {
   const address = keypair.publicKey();
   const page = await getIsolatedPage();
-  const { signTxName, signMsgName, signAuthName } = await exposeSigner(page, keypair);
+  const { signTxName, signMsgName, signAuthName, verifyMsgName } = await exposeSigner(page, keypair);
   await page.evaluate(registerAccount, {
     address,
     signTxName,
     signMsgName,
     signAuthName,
+    verifyMsgName,
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK_PASSPHRASE,
     storageKeyModuleUrl,
-    storagePassword: process.env.E2E_STORAGE_PASSWORD || 'spp-e2e-storage-test-password',
     useSharedStorage: true,
     seedOnboarding: false,
   });
@@ -201,16 +209,16 @@ export async function createRegisteredAccount() {
 // "Another tab or window is using this app's local database" — confirmed live.
 export async function seedDriverOnboarding(page, keypair) {
   const address = keypair.publicKey();
-  const { signTxName, signMsgName, signAuthName } = await exposeSigner(page, keypair);
+  const { signTxName, signMsgName, signAuthName, verifyMsgName } = await exposeSigner(page, keypair);
   await page.evaluate(registerAccount, {
     address,
     signTxName,
     signMsgName,
     signAuthName,
+    verifyMsgName,
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK_PASSPHRASE,
     storageKeyModuleUrl,
-    storagePassword: process.env.E2E_STORAGE_PASSWORD || 'spp-e2e-storage-test-password',
     useSharedStorage: false,
     seedOnboarding: true,
   });

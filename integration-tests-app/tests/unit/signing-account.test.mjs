@@ -5,7 +5,6 @@ import {
   activeSuggestion,
   addSigner,
   chosenSigner,
-  rememberSigners,
   rememberedSigners,
   removeSigner,
   signingPrivacyWarning,
@@ -92,9 +91,9 @@ function memoryStorage() {
   };
 }
 
-test('accounts added to sign are remembered per owner', () => {
+test('legacy signing lists can be read per owner for encrypted migration', () => {
   const storage = memoryStorage();
-  rememberSigners(OWNER, [SIGNER, STRANGER], storage);
+  storage.setItem(`poolstellar_signers:${OWNER}`, JSON.stringify([SIGNER, STRANGER]));
   assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER, STRANGER]);
   assert.deepEqual(rememberedSigners(SIGNER, storage), []);
   assert.deepEqual(rememberedSigners(null, storage), []);

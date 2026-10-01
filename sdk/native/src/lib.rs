@@ -54,6 +54,8 @@ pub mod plan;
 pub mod planner;
 pub mod prover;
 pub mod state;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stellar_cli;
 pub mod transact;
 pub mod types;
 pub mod zk;

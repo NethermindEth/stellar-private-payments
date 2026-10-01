@@ -71,3 +71,20 @@ export async function waitForWalletRuntimeReady(page, {
   });
   return result.value;
 }
+
+/** A locked app deliberately hides the dashboard; wait for the initialized shell. */
+export async function waitForAppShell(page, { timeoutMs = 10_000, waitOptions = {} } = {}) {
+  return waitForCondition({
+    operation: 'app:load', timeoutMs, intervalMs: 100, ...waitOptions,
+    observe: async () => {
+      const control = page.getByTestId('storage-lock-btn');
+      return {
+        readyState: await page.evaluate(() => document.readyState),
+        controlVisible: await control.isVisible().catch(() => false),
+        storageState: await control.getAttribute('data-state').catch(() => null),
+      };
+    },
+    isReady: ({ readyState, controlVisible, storageState }) =>
+      readyState === 'complete' && controlVisible && ['locked', 'unlocked'].includes(storageState),
+  });
+}

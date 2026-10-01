@@ -109,7 +109,10 @@ pub(crate) enum StorageWorkerRequest {
     OpenEncrypted {
         key: DatabaseKeyTransport,
         create_new: bool,
+        #[serde(default)]
+        directory: Option<String>,
     },
+    CheckIntegrity,
     Ping,
     Pause,
     SyncState,
@@ -220,6 +223,7 @@ enum OpenRequest {
     Encrypted {
         key: stellar_private_payments::state::database_key::DatabaseKey,
         purpose: stellar_private_payments::state::database_key::OpenPurpose,
+        directory: String,
     },
 }
 
@@ -292,12 +296,22 @@ const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
 const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 
 async fn init(opening: OpenRequest) -> Result<(), JsError> {
+    let OpenRequest::Encrypted { ref directory, .. } = opening;
+    if directory != ".opfs-sahpool-encrypted"
+        && !directory
+            .strip_prefix(".opfs-sahpool-encrypted-")
+            .is_some_and(|suffix| {
+                suffix.len() == 36 && suffix.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+            })
+    {
+        return Err(JsError::new("Invalid encrypted storage directory"));
+    }
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
     #[cfg(target_arch = "wasm32")]
     {
         let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
-            directory: ".opfs-sahpool-encrypted".into(),
+            directory: directory.clone(),
             ..Default::default()
         };
         let mut attempt = 0;
@@ -380,19 +394,91 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 /// Open the database `opening` asks for, once the OPFS pool is installed.
 fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
     match opening {
-        OpenRequest::Encrypted { key, purpose } => {
+        OpenRequest::Encrypted { key, purpose, .. } => {
             #[cfg(target_arch = "wasm32")]
-            {
+            let purpose = {
+                let mut purpose = purpose;
                 let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                    Ok(p.borrow()
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                        .exists("spp.encrypted.db"))
+                    let pool = p.borrow();
+                    let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
+                    let exists = pool.exists("spp.encrypted.db");
+                    if exists && encrypted_database_is_empty()? {
+                        // The pool owns exclusive OPFS handles and no database
+                        // connection is open yet. Only a zero-byte main file
+                        // without recovery sidecars is safe to recreate.
+                        anyhow::ensure!(
+                            !pool.exists("spp.encrypted.db-journal")
+                                && !pool.exists("spp.encrypted.db-wal"),
+                            "empty database has recovery files; existing data has been preserved"
+                        );
+                        pool.delete_db("spp.encrypted.db")?;
+                        purpose =
+                            stellar_private_payments::state::database_key::OpenPurpose::CreateNew;
+                        return Ok(false);
+                    }
+                    Ok(exists)
                 })?;
                 anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
-            }
+                purpose
+            };
             SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
         }
+    }
+}
+
+/// Read the logical main-file size without reading schema or copying its data.
+#[cfg(target_arch = "wasm32")]
+#[allow(unsafe_code)]
+fn encrypted_database_is_empty() -> anyhow::Result<bool> {
+    use sqlite_wasm_rs as ffi;
+    // SAFETY: SQLite owns the connection and file pointers below. The raw OPFS
+    // VFS opens an existing file read-only; no SQL or codec operation is run.
+    // The file pointer remains valid until the connection closes, on every
+    // path.
+    unsafe {
+        let mut db = std::ptr::null_mut();
+        let rc = ffi::sqlite3_open_v2(
+            c"spp.encrypted.db".as_ptr(),
+            &mut db,
+            ffi::SQLITE_OPEN_READONLY | ffi::SQLITE_OPEN_NOMUTEX,
+            c"opfs-sahpool".as_ptr(),
+        );
+        let result = (|| {
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK,
+                "failed to inspect existing database size ({rc})"
+            );
+            let mut file: *mut ffi::sqlite3_file = std::ptr::null_mut();
+            let rc = ffi::sqlite3_file_control(
+                db,
+                c"main".as_ptr(),
+                ffi::SQLITE_FCNTL_FILE_POINTER,
+                (&mut file as *mut *mut ffi::sqlite3_file).cast(),
+            );
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK && !file.is_null(),
+                "failed to inspect existing database file ({rc})"
+            );
+            let methods = (*file).pMethods;
+            anyhow::ensure!(
+                !methods.is_null(),
+                "existing database file has no VFS methods"
+            );
+            let size = (*methods)
+                .xFileSize
+                .ok_or_else(|| anyhow!("VFS cannot inspect database size"))?;
+            let mut bytes = 0;
+            let rc = size(file, &mut bytes);
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK && bytes >= 0,
+                "failed to read existing database size ({rc})"
+            );
+            Ok(bytes == 0)
+        })();
+        if !db.is_null() {
+            ffi::sqlite3_close(db);
+        }
+        result
     }
 }
 
@@ -463,7 +549,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::OpenPlaintext => {
             anyhow::bail!("storage encryption is mandatory; an encryption key is required")
         }
-        StorageWorkerRequest::OpenEncrypted { key, create_new } => {
+        StorageWorkerRequest::OpenEncrypted {
+            key,
+            create_new,
+            directory,
+        } => {
             use stellar_private_payments::state::database_key::{DatabaseKey, OpenPurpose};
             anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
             let mut owned = DatabaseKey::new([0; 32]);
@@ -471,6 +561,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             drop(key);
             return open_requested(OpenRequest::Encrypted {
                 key: owned,
+                directory: directory.unwrap_or_else(|| ".opfs-sahpool-encrypted".into()),
                 purpose: if create_new {
                     OpenPurpose::CreateNew
                 } else {
@@ -486,6 +577,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             // first — this worker is about to be torn down by the browser
             // anyway, and any in-flight request will simply fail from here on.
             close_storage();
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::CheckIntegrity => {
+            with_storage!(storage => storage.check_integrity())??;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::Ping => {
@@ -865,6 +960,7 @@ const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
 #[serde(rename_all = "camelCase")]
 struct OpenOptions {
     worker_url: Option<String>,
+    directory: Option<String>,
     key: Vec<u8>,
     #[serde(default)]
     create_new: bool,
@@ -898,11 +994,16 @@ impl StorageBridge {
     pub async fn open(options: JsValue) -> Result<StorageBridge, JsError> {
         let opts: OpenOptions = serde_wasm_bindgen::from_value(options)
             .map_err(|_| JsError::new("storage encryption is mandatory; supply a 32-byte key"))?;
-        Self::open_encrypted(
+        let key = DatabaseKeyTransport(opts.key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
+        Self::open_internal(
             opts.worker_url
                 .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
-            opts.key,
+            key,
             opts.create_new,
+            opts.directory,
         )
         .await
     }
@@ -917,7 +1018,7 @@ impl StorageBridge {
         if key.0.len() != 32 {
             return Err(JsError::new("database key must contain 32 bytes"));
         }
-        Self::open_internal(worker_url, key, create_new).await
+        Self::open_internal(worker_url, key, create_new, None).await
     }
 
     /// Close encrypted storage and all forks before releasing OPFS handles.
@@ -974,6 +1075,7 @@ impl StorageBridge {
         worker_url: String,
         key: DatabaseKeyTransport,
         create_new: bool,
+        directory: Option<String>,
     ) -> Result<Self, JsError> {
         crate::wasm_start();
 
@@ -986,7 +1088,11 @@ impl StorageBridge {
 
         storage
             .call(
-                StorageWorkerRequest::OpenEncrypted { key, create_new },
+                StorageWorkerRequest::OpenEncrypted {
+                    key,
+                    create_new,
+                    directory,
+                },
                 STORAGE_OPEN_PING_TIMEOUT_MS,
             )
             .await

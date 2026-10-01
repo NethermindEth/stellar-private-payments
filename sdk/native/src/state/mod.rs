@@ -5,6 +5,10 @@ mod storage;
 
 pub mod database_key;
 pub mod encrypted_migration;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native_wallet;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wallet_vault;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;
 pub use storage::{

@@ -82,3 +82,16 @@ spp-example-wallet.sqlite-*
 spp-*-wallet/
 
 deployments/local/
+
+# Local artifacts left by the former E2E layout.
+e2e-freighter/vendor/
+e2e-freighter/node_modules/
+e2e-freighter/.chrome-profile*/
+e2e-freighter/.tmp-profiles/
+e2e-freighter/profile-snapshot/
+e2e-freighter/profile-snapshot*.tar*
+e2e-freighter/test-results/
+e2e-freighter/playwright-report/
+# Legacy test account secrets and encrypted wallets must remain untracked.
+deployments/*/.e2e-accounts.env
+deployments/scripts/.e2e-wallet-*/

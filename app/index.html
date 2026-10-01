@@ -84,6 +84,21 @@
             </div>
         </header>
 
+        <section id="storage-locked-notice" role="status" class="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-slate-200">
+            Local data is locked. Use Unlock to view your private data and make payments. Your wallet can remain connected. Disclosure verification is available while locked.
+        </section>
+
+        <section class="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-slate-200" aria-labelledby="storage-backup-title">
+            <h2 id="storage-backup-title" class="font-semibold">Local storage backup and recovery</h2>
+            <p id="storage-recovery-message" role="status" class="mt-2 text-sm">Backups remain encrypted and require the original unlocking account. Export locks local data. Lock before importing or resetting.</p>
+            <div class="mt-4 flex flex-wrap gap-3">
+                <button id="storage-export" type="button" class="rounded-xl border border-white/10 px-4 py-2 disabled:opacity-40">Export encrypted backup</button>
+                <button id="storage-import" type="button" class="rounded-xl border border-white/10 px-4 py-2 disabled:opacity-40">Import backup</button>
+                <button id="storage-reset" type="button" class="rounded-xl border border-rose-400/25 px-4 py-2 text-rose-100 disabled:opacity-40">Reset local storage</button>
+                <input id="storage-backup-file" type="file" accept=".json,application/json" hidden>
+            </div>
+        </section>
+
         <main id="main-content" class="flex-1">
             <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active" aria-hidden="false">
                 <div class="space-y-6">
@@ -495,14 +510,16 @@
                 </div>
 
                 <label class="mt-6 block text-sm text-slate-200" for="settings-auto-lock">Automatically lock local data after inactivity</label>
-                <select id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                <select disabled id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                    <option value="" disabled>Unlock to change</option>
                     <option value="5">5 minutes</option>
                     <option value="15">15 minutes</option>
                     <option value="30">30 minutes</option>
                     <option value="60">1 hour</option>
                     <option value="0">Never</option>
                 </select>
-                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Enter your storage password to unlock it again.</p>
+                <p id="settings-auto-lock-hint" class="mt-2 text-xs text-slate-400">Unlock to change the inactivity timeout.</p>
+                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                     <button id="settings-save-btn" type="button" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Save settings</button>

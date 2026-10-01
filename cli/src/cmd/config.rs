@@ -35,6 +35,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         data_dir: &'a str,
         database: &'a str,
         account: Option<&'a str>,
+        storage_account: &'a str,
         explorer_base_url: &'a str,
         bootnode_enabled: bool,
         bootnode_url: &'a str,
@@ -53,6 +54,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         data_dir: &data_dir,
         database: &db,
         account: config.account.as_deref(),
+        storage_account: config.storage_alias()?,
         explorer_base_url: &explorer_base,
         bootnode_enabled: bootnode.enabled,
         bootnode_url: &bootnode.url,
@@ -80,6 +82,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     );
     output::print_kv("data_dir", payload.data_dir);
     output::print_kv("database", payload.database);
+    output::print_kv("storage_account", payload.storage_account);
     if let Some(account) = payload.account {
         output::print_kv("account", account);
     }
