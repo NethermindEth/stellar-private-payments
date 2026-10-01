@@ -123,7 +123,69 @@ try {
     await backups.resetStorage({ root });
     if (await backups.hasEncryptedStorage(root) || localStorage.getItem(backups.STORAGE_RECORD_KEY)) throw Error('reset left encrypted storage behind');
   }, text);
-  console.log('PASS: encrypted export, missing-envelope protection, staged import, integrity validation, reload, failed import preservation, reset');
+  await page.evaluate(async text => {
+    const root = await navigator.storage.getDirectory();
+    const backup = backups.parseBackup(text);
+    // SAH pool files reserve a 4096-byte name/flags header before SQLite data.
+    const main = backup.files.find(file => new TextDecoder().decode(file.bytes.subarray(0, 512)).split('\0')[0].endsWith('spp.encrypted.db'));
+    if (!main) throw Error('main database slot not found');
+    const seed = async (pending, mainBytes = main.bytes) => {
+      await backups.resetStorage({ root });
+      const directory = await root.getDirectoryHandle('.opfs-sahpool-encrypted', { create: true });
+      for (const file of backup.files) {
+        const parts = file.path.split('/');
+        const name = parts.pop();
+        let parent = directory;
+        for (const part of parts) parent = await parent.getDirectoryHandle(part, { create: true });
+        const handle = await parent.getFileHandle(name, { create: true });
+        const writer = await handle.createWritable();
+        await writer.write(file === main ? mainBytes : file.bytes);
+        await writer.close();
+      }
+      const record = { ...backup.record, pending };
+      delete record.directory;
+      localStorage.setItem(backups.STORAGE_RECORD_KEY, JSON.stringify(record));
+    };
+    for (const pending of [true, false]) {
+      await seed(pending, main.bytes.slice(0, 4096));
+      const db = await keys.openWalletStorage(options);
+      try {
+        if (await db.call('CheckIntegrity') !== 'Saved') throw Error('recreated database failed integrity check');
+        await db.call({ SetSetting: { key: 'empty-recovery', value_json: 'true' } });
+      } finally { await db.close(); }
+      const reopened = await keys.openWalletStorage(options);
+      try {
+        const value = await reopened.call({ GetSetting: 'empty-recovery' });
+        if (value.Setting !== 'true') throw Error('recreated encrypted database did not reopen');
+      } finally { await reopened.close(); }
+    }
+    const expectPreserved = async (open, label) => {
+      const originalRecord = localStorage.getItem(backups.STORAGE_RECORD_KEY);
+      // Snapshot interrupted enrollment too; production exports require a
+      // completed record, but the preservation check must cover pending ones.
+      const snapshot = () => backups.exportStorageBackup({ root, records: {
+        getItem: () => JSON.stringify({ ...JSON.parse(originalRecord), pending: false }),
+      } });
+      const before = await snapshot();
+      let rejected = false;
+      try { const db = await open(); await db.close(); } catch { rejected = true; }
+      if (!rejected) throw Error(`${label} unexpectedly opened`);
+      if (await snapshot() !== before || localStorage.getItem(backups.STORAGE_RECORD_KEY) !== originalRecord) {
+        throw Error(`${label} modified existing storage`);
+      }
+    };
+    // One corrupt byte is still data: neither create nor reopen may discard it.
+    for (const pending of [true, false]) {
+      await seed(pending, main.bytes.slice(0, 4097));
+      await expectPreserved(() => keys.openWalletStorage(options), 'nonempty corrupt database');
+    }
+    await seed(false);
+    const wrongKey = crypto.getRandomValues(new Uint8Array(32));
+    await expectPreserved(() => sdk.Storage.open({ keyProvider: async () => wrongKey, createNew: false }), 'wrong-key database');
+    await expectPreserved(() => sdk.Storage.open({ keyProvider: async () => wrongKey, createNew: true }), 'existing nonempty database creation');
+    await backups.resetStorage({ root });
+  }, text);
+  console.log('PASS: encrypted backup/recovery, empty database recreation for create and reopen, nonempty and wrong-key preservation');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

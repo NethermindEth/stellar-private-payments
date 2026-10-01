@@ -396,17 +396,89 @@ fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
     match opening {
         OpenRequest::Encrypted { key, purpose, .. } => {
             #[cfg(target_arch = "wasm32")]
-            {
+            let purpose = {
+                let mut purpose = purpose;
                 let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                    Ok(p.borrow()
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                        .exists("spp.encrypted.db"))
+                    let pool = p.borrow();
+                    let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
+                    let exists = pool.exists("spp.encrypted.db");
+                    if exists && encrypted_database_is_empty()? {
+                        // The pool owns exclusive OPFS handles and no database
+                        // connection is open yet. Only a zero-byte main file
+                        // without recovery sidecars is safe to recreate.
+                        anyhow::ensure!(
+                            !pool.exists("spp.encrypted.db-journal")
+                                && !pool.exists("spp.encrypted.db-wal"),
+                            "empty database has recovery files; existing data has been preserved"
+                        );
+                        pool.delete_db("spp.encrypted.db")?;
+                        purpose =
+                            stellar_private_payments::state::database_key::OpenPurpose::CreateNew;
+                        return Ok(false);
+                    }
+                    Ok(exists)
                 })?;
                 anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
-            }
+                purpose
+            };
             SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
         }
+    }
+}
+
+/// Read the logical main-file size without reading schema or copying its data.
+#[cfg(target_arch = "wasm32")]
+#[allow(unsafe_code)]
+fn encrypted_database_is_empty() -> anyhow::Result<bool> {
+    use sqlite_wasm_rs as ffi;
+    // SAFETY: SQLite owns the connection and file pointers below. The raw OPFS
+    // VFS opens an existing file read-only; no SQL or codec operation is run.
+    // The file pointer remains valid until the connection closes, on every
+    // path.
+    unsafe {
+        let mut db = std::ptr::null_mut();
+        let rc = ffi::sqlite3_open_v2(
+            c"spp.encrypted.db".as_ptr(),
+            &mut db,
+            ffi::SQLITE_OPEN_READONLY | ffi::SQLITE_OPEN_NOMUTEX,
+            c"opfs-sahpool".as_ptr(),
+        );
+        let result = (|| {
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK,
+                "failed to inspect existing database size ({rc})"
+            );
+            let mut file: *mut ffi::sqlite3_file = std::ptr::null_mut();
+            let rc = ffi::sqlite3_file_control(
+                db,
+                c"main".as_ptr(),
+                ffi::SQLITE_FCNTL_FILE_POINTER,
+                (&mut file as *mut *mut ffi::sqlite3_file).cast(),
+            );
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK && !file.is_null(),
+                "failed to inspect existing database file ({rc})"
+            );
+            let methods = (*file).pMethods;
+            anyhow::ensure!(
+                !methods.is_null(),
+                "existing database file has no VFS methods"
+            );
+            let size = (*methods)
+                .xFileSize
+                .ok_or_else(|| anyhow!("VFS cannot inspect database size"))?;
+            let mut bytes = 0;
+            let rc = size(file, &mut bytes);
+            anyhow::ensure!(
+                rc == ffi::SQLITE_OK && bytes >= 0,
+                "failed to read existing database size ({rc})"
+            );
+            Ok(bytes == 0)
+        })();
+        if !db.is_null() {
+            ffi::sqlite3_close(db);
+        }
+        result
     }
 }
 
