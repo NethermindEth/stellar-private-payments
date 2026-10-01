@@ -20,6 +20,7 @@ import { gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { expectNoFreighterApproval } from '../src/wallet.mjs';
+import { waitForCondition } from '../src/waits.mjs';
 import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 
 const log = createLogger('11-failure-modes');
@@ -214,7 +215,13 @@ export async function run(helpers) {
   // transaction's source; stopped before the confirmation and before proving.
   await page.getByTestId('signing-account-input').fill(unregisteredAddress);
   await page.getByTestId('signing-account-use').click();
-  assert((await signingSelect.inputValue()) === unregisteredAddress, 'the pasted signing account was not selected');
+  // Selection updates after the signing account is saved to encrypted storage.
+  await waitForCondition({
+    operation: 'signing-account:select-pasted-address',
+    observe: () => signingSelect.inputValue(),
+    isReady: (address) => address === unregisteredAddress,
+    timeoutMs: 5_000,
+  });
   await page.locator('#btn-withdraw').click();
   const unfunded = await waitForToast(page, {
     origin: 'withdraw',
