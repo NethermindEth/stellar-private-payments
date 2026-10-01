@@ -1,7 +1,6 @@
 # Summary
 
 - [Introduction](./introduction.md)
-  - [Install the CLI]()
 - [Contributing](./contributing.md)
 - [Deploy](./deploy.md)
 - [Security](./security.md)
