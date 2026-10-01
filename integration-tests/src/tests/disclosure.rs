@@ -53,6 +53,10 @@ async fn disclose_basic() -> Result<()> {
         "the disclosure context must match the receipt"
     );
     assert!(
+        report.known_root_status,
+        "the disclosed note's root must be known to the pool"
+    );
+    assert!(
         report.nullifiers_unspent,
         "the disclosed note has not been spent yet"
     );
