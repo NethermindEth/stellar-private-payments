@@ -80,16 +80,41 @@ test('migration resumes after a write failure without losing any remaining owner
     assert.equal(saved.size, 3);
 });
 
-test('malformed legacy lists and failed reads are preserved instead of replaced with empty lists', async () => {
-    for (const raw of ['{broken', '{}']) {
+test('malformed legacy lists do not block unlock migration or loading a connecting owner', async () => {
+    for (const raw of ['{broken', '{}', 'null', '"invalid"']) {
         const legacy = records();
         legacy.setItem('poolstellar_signers:owner', raw);
-        await assert.rejects(migratePrivateSigners({
-            getSetting: async () => null,
-            setSetting: () => assert.fail('invalid data must not be written'),
-        }, legacy), /original data has been preserved/);
+        legacy.setItem('poolstellar_signers:another-broken-owner', raw);
+        legacy.setItem('poolstellar_signers:valid-owner', JSON.stringify(['signer']));
+        const saved = new Map();
+        const encrypted = {
+            getSetting: async key => saved.get(key) ?? null,
+            setSetting: async (key, value) => { saved.set(key, value); },
+        };
+        const warnings = [];
+        await migratePrivateSigners(encrypted, legacy, message => warnings.push(message));
+        assert.equal(warnings.length, 1, 'one warning per sweep, even with multiple malformed entries');
+        assert.match(warnings[0], /can still use your wallet/);
+        assert.ok(!warnings[0].includes(raw));
         assert.equal(legacy.getItem('poolstellar_signers:owner'), raw);
+        assert.equal(legacy.getItem('poolstellar_signers:another-broken-owner'), raw);
+        assert.equal(saved.has('poolstellar_signers:owner'), false);
+        assert.deepEqual(saved.get('poolstellar_signers:valid-owner'), ['signer']);
+        assert.equal(legacy.getItem('poolstellar_signers:valid-owner'), null);
+        // Wallet.connect uses this same loader; an entry recreated after unlock
+        // must likewise return an empty in-memory list without rejecting.
+        assert.deepEqual(await loadPrivateSigners(encrypted, 'owner', legacy, message => warnings.push(message)), []);
+        assert.equal(warnings.length, 2);
+        assert.equal(saved.has('poolstellar_signers:owner'), false);
+        assert.equal(legacy.getItem('poolstellar_signers:owner'), raw);
+        // A corrected entry can still migrate on a later unlock.
+        legacy.setItem('poolstellar_signers:owner', JSON.stringify(['recovered-signer']));
+        assert.deepEqual(await loadPrivateSigners(encrypted, 'owner', legacy), ['recovered-signer']);
+        assert.equal(legacy.getItem('poolstellar_signers:owner'), null);
     }
+});
+
+test('failed legacy reads remain explicit and never delete unreadable data', async () => {
     await assert.rejects(loadPrivateSigners({ getSetting: async () => null }, 'owner', {
         getItem: () => { throw new Error('read failed'); },
         removeItem: () => assert.fail('unreadable data must not be deleted'),

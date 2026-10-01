@@ -5,9 +5,16 @@ import { getConnectedAddress } from '../wallet.js';
 import { Wallet } from './navigation.js';
 import { Toast } from './core.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
+import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 
 export const LocalData = {
     init() {
+        let warnedAboutSigners = false;
+        window.addEventListener(SIGNER_MIGRATION_WARNING_EVENT, event => {
+            if (warnedAboutSigners) return;
+            warnedAboutSigners = true;
+            Toast.show(event.detail, 'info', 10000);
+        });
         const button = document.getElementById('storage-lock-btn');
         const select = document.getElementById('settings-auto-lock');
         let savingTimeout = false;
