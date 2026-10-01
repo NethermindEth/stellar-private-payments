@@ -17,8 +17,8 @@ mod tests {
     };
     use anyhow::{Context, Result, ensure};
     use ark_bn254::Fr as Scalar;
-    use ark_ff::Zero;
-    use num_bigint::BigInt;
+    use ark_ff::{BigInteger, PrimeField, Zero};
+    use num_bigint::{BigInt, Sign};
     use std::{
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
@@ -29,7 +29,7 @@ mod tests {
     /// Depth of the ASP membership (allowlist) tree.
     const ASP_LEVELS: usize = 10;
     /// Depth of the ASP non-membership (blocklist) sparse tree.
-    const SMT_LEVELS: usize = 10;
+    const SMT_LEVELS: usize = 32;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
 
@@ -1405,6 +1405,116 @@ mod tests {
         })
     }
 
+    /// Non-membership proof for `key` against a tree holding two blocked keys
+    /// that share its lowest `shared_bits` bits and differ from it at bit
+    /// `shared_bits`, so the path of `key` ends at an empty slot after
+    /// `shared_bits + 1` siblings.
+    fn non_membership_proof_at_depth(key: &BigInt, shared_bits: u64) -> SMTProof {
+        let next_bit = shared_bits.checked_add(1).expect("bit index overflow");
+        let mut a = key.clone();
+        a.set_bit(shared_bits, !key.bit(shared_bits));
+        let mut b = a.clone();
+        b.set_bit(next_bit, !a.bit(next_bit));
+
+        let modulus = BigInt::from_bytes_be(Sign::Plus, &Scalar::MODULUS.to_bytes_be());
+        assert!(
+            a < modulus && b < modulus,
+            "blocked keys must be field elements"
+        );
+
+        let overrides = vec![(a.clone(), a), (b.clone(), b)];
+        let proof = prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS);
+
+        let zero = BigInt::from(0u32);
+        let last_sibling = proof.siblings.iter().rposition(|s| *s != zero);
+        assert_eq!(
+            last_sibling,
+            Some(usize::try_from(shared_bits).expect("bit index fits usize")),
+            "path must end right after the shared prefix"
+        );
+        proof
+    }
+
+    fn run_non_membership_depth_case(
+        asp: PolicyAspWitness,
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        shared_bits: u64,
+    ) -> Result<()> {
+        let case = TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(101u64),
+                    blinding: Scalar::from(201u64),
+                    amount: Scalar::from(0u64),
+                },
+                InputNote {
+                    leaf_index: 7,
+                    priv_key: Scalar::from(102u64),
+                    blinding: Scalar::from(211u64),
+                    amount: Scalar::from(13u64),
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(501u64),
+                    blinding: Scalar::from(601u64),
+                    amount: Scalar::from(13u64),
+                },
+                OutputNote {
+                    pub_key: Scalar::from(502u64),
+                    blinding: Scalar::from(602u64),
+                    amount: Scalar::from(0u64),
+                },
+            ],
+        );
+
+        let leaves = prepopulated_prefix(
+            0xDEAD_BEEFu64,
+            &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+            LEAF_PREFIX,
+        );
+
+        let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
+        let keys = default_non_membership_keys(&case);
+
+        run_case_with_non_membership_builder(
+            wasm,
+            r1cs,
+            &case,
+            leaves,
+            Scalar::from(0u64),
+            &membership_trees,
+            &keys,
+            |key, _pubs| non_membership_proof_at_depth(key, shared_bits),
+            asp,
+            None::<fn(&mut Inputs)>,
+        )
+    }
+
+    #[test]
+    #[ignore]
+    fn test_non_membership_deepest_provable_path() -> Result<()> {
+        // A path of SMT_LEVELS - 1 siblings leaves the last slot zero.
+        let shared_bits = u64::try_from(SMT_LEVELS - 2)?;
+        for_each_policy(PolicyCircuitSet::NonMembership, |asp, wasm, r1cs| {
+            run_non_membership_depth_case(asp, wasm, r1cs, shared_bits)
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn test_non_membership_path_beyond_depth_fails() -> Result<()> {
+        // A path of SMT_LEVELS siblings fills the last slot, which the circuit
+        // requires to be zero.
+        let shared_bits = u64::try_from(SMT_LEVELS - 1)?;
+        for_each_policy(PolicyCircuitSet::NonMembership, |asp, wasm, r1cs| {
+            let res = run_non_membership_depth_case(asp, wasm, r1cs, shared_bits);
+            expect_proof_rejected(res, "path filling every sibling slot must not verify")
+        })
+    }
+
     #[test]
     #[ignore]
     fn test_tx_randomized_stress() -> Result<()> {
@@ -1504,7 +1614,6 @@ mod tests {
                     0xFEED_FACEu64 ^ ((j as u64) << 40) ^ leaves_seed
                 });
 
-                // Keys strictly in 0..(1<<SMT_LEVELS)
                 let keys = default_non_membership_keys(&case);
 
                 run_case(wasm, r1cs, &case, leaves, Scalar::from(0u64), &membership_trees, &keys, asp, None::<fn(&mut Inputs)>).with_context(|| {

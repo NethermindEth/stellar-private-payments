@@ -24,7 +24,7 @@ use soroban_sdk::{
     testutils::Address as _,
 };
 use stellar_private_payments::{
-    types::PolicyFlags,
+    types::{PolicyFlags, SMT_DEPTH},
     zk::{prover::Prover, witness::WitnessCalculator},
 };
 
@@ -46,7 +46,7 @@ pub const N_NON_PROOFS: usize = 1;
 pub const ASP_MEMBERSHIP_LEVELS: usize = 10;
 
 /// Number of levels in the ASP non-membership sparse Merkle tree
-pub const SMT_LEVELS: usize = 10;
+pub const SMT_LEVELS: usize = SMT_DEPTH as usize;
 
 /// Leaves seeded into the pool and ASP membership trees before a case runs.
 ///
