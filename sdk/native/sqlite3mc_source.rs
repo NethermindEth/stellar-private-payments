@@ -6,7 +6,6 @@ use std::{
     env, fs,
     io::Read,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use sha2::{Digest, Sha256};
@@ -53,15 +52,19 @@ fn download_and_extract(cache: &Path, directory: &Path) {
             "offline build needs SQLITE3MC_AMALGAMATION_DIR or cached SQLite3MC sources"
         );
         let partial = cache.join(format!("{name}.partial"));
-        let status = Command::new("curl")
-            .args(["-fsSL", "-o"])
-            .arg(&partial)
-            .arg(&url)
-            .status()
-            .expect(
-                "run curl to download SQLite3MC; install curl or set SQLITE3MC_AMALGAMATION_DIR",
-            );
-        assert!(status.success(), "failed to download {url}");
+        let mut response = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("create SQLite3MC download client")
+            .get(&url)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .unwrap_or_else(|error| panic!("download {url}: {error}"));
+        let mut output = fs::File::create(&partial).expect("create SQLite3MC archive download");
+        response
+            .copy_to(&mut output)
+            .unwrap_or_else(|error| panic!("save SQLite3MC download from {url}: {error}"));
+        drop(output);
         verify(&partial, ARCHIVE_SHA256);
         fs::rename(partial, &archive).expect("publish verified SQLite3MC archive");
     }

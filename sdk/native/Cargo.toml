@@ -91,6 +91,7 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
+reqwest = { workspace = true, features = ["blocking", "rustls"] }
 serde_json = { workspace = true, features = ["std"] }
 cc = "1"
 hex = { workspace = true }

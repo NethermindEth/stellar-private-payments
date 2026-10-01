@@ -13,8 +13,9 @@ cargo test -p stellar-private-payments --lib
 cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-linux-musl
 ```
 
-Cargo needs `curl`, a C compiler and `ar` (plus `musl-gcc` for musl). The build
-script verifies and caches SQLite3MC 2.5.1 sources. WASM builds compile the same
+Cargo needs a C compiler and `ar` (plus `musl-gcc` for musl). The build
+script downloads SQLite3MC 2.5.1 sources with a Rust HTTP client, then verifies
+their checksums and caches them. WASM builds compile the same
 pinned backend automatically with Clang and an LLVM-compatible archiver; plain `cargo build --target wasm32-unknown-unknown`
 requires no generated SQLite configuration.
 
