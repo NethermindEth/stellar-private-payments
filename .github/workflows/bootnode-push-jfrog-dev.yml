@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   push-bootnode:
-    uses: NethermindEth/github-workflows/.github/workflows/docker-build-push-jfrog.yaml@77a6b36410ca0a5e9ae2cb5d387e5b34d6f639ef
+    uses: NethermindEth/github-workflows/.github/workflows/docker-build-push-jfrog.yaml@e0fad16
     with:
       repo_name: research-oci-local-dev
       image_name: bootnode
