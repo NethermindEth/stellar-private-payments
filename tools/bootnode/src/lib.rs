@@ -26,9 +26,25 @@ use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 pub use deployment::{current_deployment_storage_id, deployment_storage_id};
 pub use storage::{InMemory, Postgres};
 
+/// Default upstream RPC from the selected deployment.
+pub fn default_upstream_rpc_url() -> Result<url::Url> {
+    let deployment = deployment::deployment_config()?;
+    let rpc = deployment
+        .rpc_url
+        .ok_or_else(|| anyhow::anyhow!("deployment config is missing rpcUrl"))?;
+    Ok(url::Url::parse(&rpc)?)
+}
+
+/// Verify the upstream identity before opening or changing deployment storage.
+pub async fn validate_upstream_network(url: url::Url) -> Result<()> {
+    let passphrase = UpstreamClient::new(url)?.network_passphrase().await?;
+    deployment::deployment_config()?.validate_network(&passphrase)
+}
+
 /// Contract set + genesis ledger the bootnode indexes and will serve.
 #[derive(Debug, Clone)]
 pub struct DeploymentSpec {
+    pub network_passphrase: String,
     pub contract_ids: Vec<String>,
     pub min_deployment_ledger: u32,
 }
@@ -37,6 +53,7 @@ impl DeploymentSpec {
     pub fn from_compiled() -> Result<Self> {
         let deployment = deployment::deployment_config()?;
         Ok(Self {
+            network_passphrase: deployment.network_passphrase.clone().unwrap_or_default(),
             contract_ids: deployment.all_contract_ids(),
             min_deployment_ledger: deployment.min_deployment_ledger()?,
         })
@@ -80,8 +97,11 @@ impl Bootnode {
         let cfg = Arc::new(cfg);
         let contract_ids = Arc::new(deployment.contract_ids);
         let min_deployment_ledger = deployment.min_deployment_ledger;
-        let deployment_id =
-            deployment::deployment_storage_id(contract_ids.as_ref(), min_deployment_ledger);
+        let deployment_id = deployment::deployment_storage_id(
+            contract_ids.as_ref(),
+            min_deployment_ledger,
+            &deployment.network_passphrase,
+        );
         tracing::info!(
             %deployment_id,
             min_deployment_ledger,
@@ -126,5 +146,30 @@ impl Bootnode {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    #[tokio::test]
+    async fn upstream_passphrase_mismatch_is_rejected() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new().route("/", axum::routing::post(|| async {
+            axum::Json(serde_json::json!({"jsonrpc":"2.0", "id":1, "result":{"passphrase":"wrong network"}}))
+        }));
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let result = validate_upstream_network(format!("http://{addr}/").parse().unwrap()).await;
+        task.abort();
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("network passphrase mismatch")
+        );
     }
 }

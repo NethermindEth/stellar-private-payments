@@ -8,8 +8,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use stellar_private_payments::state::{APP_SETTING_EXPLORER, SqliteStorage};
 
-pub const DEFAULT_EXPLORER_BASE_URL: &str = "https://stellar.expert/explorer/testnet";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplorerSetting {
     #[serde(rename = "baseUrl")]
@@ -17,11 +15,14 @@ pub struct ExplorerSetting {
 }
 
 /// Configured explorer base URL, or the default when unset.
-pub fn base_url(storage: &SqliteStorage) -> Result<String> {
+pub fn base_url(
+    storage: &SqliteStorage,
+    deployment: &stellar_private_payments::types::ContractConfig,
+) -> Result<String> {
     let setting: Option<ExplorerSetting> = storage.get_setting_json(APP_SETTING_EXPLORER)?;
     Ok(setting
         .map(|s| s.base_url)
-        .unwrap_or_else(|| DEFAULT_EXPLORER_BASE_URL.to_string()))
+        .unwrap_or_else(|| deployment.explorer_url.clone().unwrap_or_default()))
 }
 
 pub fn set_base_url(storage: &mut SqliteStorage, base_url: &str) -> Result<()> {

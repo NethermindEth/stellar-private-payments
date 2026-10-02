@@ -19,6 +19,7 @@ path = "bin/bootnode.rs"
 stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
 
 # external
+sha2 = "0.11.0"
 anyhow = { version = "1", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1", "json"] }

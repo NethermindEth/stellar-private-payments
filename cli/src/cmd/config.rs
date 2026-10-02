@@ -13,7 +13,7 @@ use crate::{
 
 pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     let storage = config.open_storage()?;
-    let explorer_base = explorer::base_url(&storage)?;
+    let explorer_base = explorer::base_url(&storage, &config.deployment)?;
     let bootnode = storage.get_bootnode_setting()?;
     // RPC resolution is best-effort (needs the Stellar CLI network config).
     let (rpc_url, network_passphrase) = match config.resolve_network() {

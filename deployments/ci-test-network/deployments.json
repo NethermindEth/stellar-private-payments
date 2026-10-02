@@ -1,5 +1,5 @@
 {
-  "network": "testnet",
+  "network": "ci-test-network",
   "deployer": "GDX6X7DZQGIAGP6MWUK24BRQFDNQCP6E4FCJ4M6K3OCTNQM3EMWLQGPH",
   "admin": "GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG",
   "asp_membership": "CAUPZISOB4GWTH22MVKA6MRWJMQRTLUMIGUSBFNJEF32Z6WEY3RFOKGC",
@@ -40,9 +40,8 @@
       }
     }
   ],
-  "networkPassphrase": "Test SDF Network ; September 2015",
-  "rpcUrl": "https://soroban-testnet.stellar.org",
-  "explorerUrl": "https://stellar.expert/explorer/testnet",
-  "displayName": "Testnet",
-  "isTestnet": true
+  "networkPassphrase": "SPP CI test network - never deploy",
+  "rpcUrl": "http://127.0.0.1:9",
+  "displayName": "CI Test Network",
+  "isTestnet": false
 }

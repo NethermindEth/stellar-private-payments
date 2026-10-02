@@ -5,7 +5,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { friendlyErrorMessage } from '../facade-errors.js';
 
-const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
+import { deploymentDefaults } from '../network-config.js';
 
 export const App = {
     state: {
@@ -46,7 +46,7 @@ export const App = {
             registryLookup: null,
         },
         settings: {
-            explorerBaseUrl: DEFAULT_EXPLORER_BASE_URL,
+            explorerBaseUrl: deploymentDefaults.explorerUrl,
             bootnode: {
                 enabled: false,
                 url: '',
@@ -62,7 +62,7 @@ export const App = {
 };
 
 export const Utils = {
-    defaultExplorerBaseUrl: DEFAULT_EXPLORER_BASE_URL,
+    get defaultExplorerBaseUrl() { return deploymentDefaults.explorerUrl; },
 
     truncateHex(hex, start = 8, end = 8) {
         if (!hex || hex.length <= start + end + 3) return hex;
@@ -107,32 +107,32 @@ export const Utils = {
 
     explorerBaseUrl() {
         const configured = App.state.settings.explorerBaseUrl;
-        if (!configured) return DEFAULT_EXPLORER_BASE_URL;
+        if (!configured) return deploymentDefaults.explorerUrl;
         try {
             const protocol = new URL(configured).protocol;
-            return (protocol === 'http:' || protocol === 'https:') ? configured : DEFAULT_EXPLORER_BASE_URL;
+            return (protocol === 'http:' || protocol === 'https:') ? configured : deploymentDefaults.explorerUrl;
         } catch {
-            return DEFAULT_EXPLORER_BASE_URL;
+            return deploymentDefaults.explorerUrl;
         }
     },
 
     explorerTxUrl(hash) {
-        if (!/^[0-9a-f]{64}$/i.test(hash)) return '#';
+        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash)) return '#';
         return `${this.explorerBaseUrl()}/tx/${hash}`;
     },
 
     explorerLedgerUrl(ledger) {
-        if (!/^\d+$/.test(String(ledger))) return '#';
+        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger))) return '#';
         return `${this.explorerBaseUrl()}/ledger/${ledger}`;
     },
 
     explorerAddressUrl(address) {
-        if (!StrKey.isValidEd25519PublicKey(address)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address)) return '#';
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
     explorerContractUrl(contractId) {
-        if (!StrKey.isValidContract(contractId)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return '#';
         return `${this.explorerBaseUrl()}/contract/${contractId}`;
     },
 

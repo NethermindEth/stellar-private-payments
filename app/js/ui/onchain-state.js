@@ -138,7 +138,7 @@ export const OnchainState = {
             const primaryPool = pools.find(p => p?.enabled) || pools[0] || null;
 
             // Network badge
-            setText('chain-network-badge', 'testnet');
+            setText('chain-network-badge', client().contractConfig().displayName || client().contractConfig().network);
 
             // Pool
             setIndicator('pool-indicator', primaryPool !== null);

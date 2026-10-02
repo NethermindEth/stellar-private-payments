@@ -1,3 +1,5 @@
+import { loadDeploymentConfig } from './wasm-facade.js';
+import { validateNetwork } from './network-config.js';
 /**
  * Wallet adapter boundary for the Freighter browser extension.
  *
@@ -180,7 +182,9 @@ export async function getWalletNetwork() {
     }
 
     const { network, networkUrl, networkPassphrase, sorobanRpcUrl } = details;
-    return { network, networkUrl, networkPassphrase, sorobanRpcUrl };
+    const config = await loadDeploymentConfig();
+    validateNetwork(config, networkPassphrase);
+    return { network, networkUrl, networkPassphrase, sorobanRpcUrl: sorobanRpcUrl || config.rpcUrl };
 }
 
 /**

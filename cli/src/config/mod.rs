@@ -17,12 +17,12 @@ pub use toml::{
     FileConfig, default_config_path, load_file_config, resolve_config_path, write_config_template,
 };
 
-/// Testnet deployment baked into the binary (from
-/// `deployments/testnet/deployments.json`).
+/// Selected deployment baked into the binary (from
+/// `deployments/<SPP_NETWORK>/deployments.json`).
 pub const DEFAULT_DEPLOYMENT_JSON: &str =
-    include_str!("../../../deployments/testnet/deployments.json");
+    include_str!(concat!(env!("OUT_DIR"), "/deployments.json"));
 
-pub const EMBEDDED_DEPLOYMENT_LABEL: &str = "embedded:testnet";
+pub const EMBEDDED_DEPLOYMENT_LABEL: &str = concat!("embedded:", env!("SPP_NETWORK"));
 
 /// Deployment config provisioned into the data dir by `scripts/install.sh`.
 pub const DEPLOYMENT_FILE_NAME: &str = "deployments.json";
@@ -118,7 +118,9 @@ impl CliConfig {
 
     /// Resolve the RPC URL + network passphrase from the Stellar CLI.
     pub fn resolve_network(&self) -> Result<StellarNetwork> {
-        stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())
+        let network = stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())?;
+        self.deployment.validate_network(&network.passphrase)?;
+        Ok(network)
     }
 
     /// Resolve the note owner from its `--account` alias.
@@ -217,8 +219,8 @@ fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, Cont
     if provisioned.is_file() {
         return read_deployment_file(&provisioned);
     }
-    let deployment = serde_json::from_str(DEFAULT_DEPLOYMENT_JSON)
-        .context("parse embedded testnet deployment")?;
+    let deployment =
+        serde_json::from_str(DEFAULT_DEPLOYMENT_JSON).context("parse embedded deployment")?;
     Ok((EMBEDDED_DEPLOYMENT_LABEL.to_string(), deployment))
 }
 
@@ -251,7 +253,7 @@ mod tests {
     /// Shaped like a raw secret key: 56 characters starting with `S`.
     const SECRET_SHAPED: &str = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    /// A config over the embedded testnet deployment. The data dir is a name
+    /// A config over the embedded deployment. The data dir is a name
     /// that holds no provisioned `deployments.json`, so loading stays offline
     /// and independent of the machine's own wallet directory.
     fn config_with(sign_as: Option<&str>) -> CliConfig {
@@ -265,7 +267,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect("the embedded testnet deployment should load")
+        .expect("the embedded deployment should load")
     }
 
     fn owner() -> Account {
@@ -337,5 +339,30 @@ mod tests {
                 .starts_with("--sign-as must be a `stellar keys` alias name, not a raw secret key"),
             "the payer's alias should be reported against --sign-as, got: {error}"
         );
+    }
+}
+
+#[cfg(test)]
+mod network_validation_tests {
+    #[test]
+    fn embedded_deployment_rejects_another_network() {
+        let deployment: stellar_private_payments::types::ContractConfig =
+            serde_json::from_str(super::DEFAULT_DEPLOYMENT_JSON).expect("embedded deployment");
+        assert!(
+            deployment
+                .validate_network("not the deployment network")
+                .is_err()
+        );
+        assert!(
+            deployment
+                .validate_network(
+                    deployment
+                        .network_passphrase
+                        .as_deref()
+                        .expect("network passphrase")
+                )
+                .is_ok()
+        );
+        assert_eq!(deployment.network, env!("SPP_NETWORK"));
     }
 }

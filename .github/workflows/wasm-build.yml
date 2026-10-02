@@ -16,6 +16,11 @@ permissions:
 
 jobs:
   wasm-build:
+    strategy:
+      matrix:
+        network: [testnet, ci-test-network]
+    env:
+      SPP_NETWORK: ${{ matrix.network }}
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:

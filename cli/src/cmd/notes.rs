@@ -141,7 +141,7 @@ pub fn run(
     let (totals, notes) = select(notes, pool, status, limit);
 
     let storage = config.open_storage()?;
-    let explorer = Explorer::new(crate::explorer::base_url(&storage)?);
+    let explorer = Explorer::new(crate::explorer::base_url(&storage, &config.deployment)?);
 
     let rows: Vec<NoteRow> = notes
         .into_iter()

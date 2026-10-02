@@ -21,6 +21,7 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
+import { deploymentDefaults } from './network-config.js';
 import { AppStorage } from './app-storage.js';
 
 export { DisclosureRequest };
@@ -59,7 +60,9 @@ export async function loadDeploymentConfig() {
                         `failed to load deployment config from ${DEPLOYMENT_CONFIG_URL}`,
                     );
                 }
-                return res.json();
+                const config = await res.json();
+                Object.assign(deploymentDefaults, config);
+                return config;
             })
             .catch((err) => {
                 deploymentConfigPromise = null;

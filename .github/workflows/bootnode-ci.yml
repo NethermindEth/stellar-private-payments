@@ -5,11 +5,15 @@ on:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
+      - "deployments/**"
+      - "sdk/native/**"
       - ".github/workflows/bootnode-ci.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
+      - "deployments/**"
+      - "sdk/native/**"
       - ".github/workflows/bootnode-ci.yml"
 
 concurrency:
@@ -26,6 +30,11 @@ env:
 
 jobs:
   bootnode:
+    strategy:
+      matrix:
+        network: [testnet, ci-test-network]
+    env:
+      SPP_NETWORK: ${{ matrix.network }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:

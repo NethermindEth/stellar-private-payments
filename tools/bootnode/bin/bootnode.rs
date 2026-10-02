@@ -19,7 +19,7 @@ struct Cli {
 
     /// Upstream Stellar RPC endpoint used by the background indexer.
     #[arg(long, env = "BOOTNODE_UPSTREAM_RPC_URL")]
-    upstream_rpc_url: Url,
+    upstream_rpc_url: Option<Url>,
 
     /// Postgres connection string.
     #[arg(long, env = "DATABASE_URL")]
@@ -151,7 +151,7 @@ impl Cli {
         Ok(())
     }
 
-    fn into_config(self) -> Config {
+    fn into_config(self, upstream_rpc_url: Url) -> Config {
         let tls = match (self.insecure_http, self.domain, self.acme_email) {
             (true, ..) => None,
             (false, Some(domain), Some(acme_email)) => Some(TlsConfig {
@@ -179,7 +179,7 @@ impl Cli {
 
         Config {
             bind: self.bind,
-            upstream_rpc_url: self.upstream_rpc_url,
+            upstream_rpc_url,
             dev: self.dev,
             tls,
             redirect_days: self.redirect_days,
@@ -214,8 +214,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
 
+    let upstream_rpc_url = match cli.upstream_rpc_url.clone() {
+        Some(url) => url,
+        None => bootnode::default_upstream_rpc_url()?,
+    };
+    bootnode::validate_upstream_network(upstream_rpc_url.clone()).await?;
     let storage = cli.open_storage().await?;
-    let cfg = cli.into_config();
+    let cfg = cli.into_config(upstream_rpc_url);
 
     let _otel = otel::init_telemetry(&cfg)?;
     metrics::init_metrics()?;
