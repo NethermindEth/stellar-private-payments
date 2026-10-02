@@ -949,6 +949,7 @@ fn test_update_admin() {
 
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
@@ -987,6 +988,88 @@ fn test_update_admin_requires_admin() {
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
     client.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.accept_admin();
+}
+
+#[test]
+fn test_accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn test_cancel_admin_transfer_clears_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    client.cancel_admin_transfer();
+
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_admin_transfer();
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -1039,6 +1122,7 @@ fn test_old_admin_cannot_insert_after_update() {
 
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     let key = U256::from_u32(&env, 1u32);
     let value = U256::from_u32(&env, 42u32);

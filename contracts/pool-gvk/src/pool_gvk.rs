@@ -77,6 +77,8 @@ pub enum Error {
     InvalidAdminViewKey = 17,
     /// Deposits are paused
     DepositsPaused = 18,
+    /// No admin transfer is pending
+    NoPendingAdmin = 20,
 }
 
 impl From<MerkleError> for Error {
@@ -96,6 +98,7 @@ impl From<AdminError> for Error {
     fn from(e: AdminError) -> Self {
         match e {
             AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
         }
     }
 }
@@ -109,12 +112,16 @@ impl From<AdminError> for Error {
 /// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], [`DataKey::AdminViewKey`],
 /// [`DataKey::GvkMode`], and [`DataKey::DepositsPaused`], lives in the
 /// contract's instance entry.
-/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
+/// [`DataKey::Admin`], [`DataKey::PendingAdmin`], and [`DataKey::Nullifier`]
+/// are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
     /// Administrator address with permissions to modify contract settings
     Admin,
+    /// Address proposed as the next administrator, present only while a
+    /// transfer is pending
+    PendingAdmin,
     /// Address of the token contract used for deposits/withdrawals
     Token,
     /// Address of the ZK proof verifier contract
@@ -133,13 +140,14 @@ pub(crate) enum DataKey {
     KdfDomain,
     /// Admin's Global View Key public point `D`, set once at construction.
     ///
-    /// Immutable by design (issue #220): there is no setter, and
-    /// `update_admin` rotates only the admin *address*. A rotated-out admin
-    /// therefore keeps the ability to decrypt every future note, and a leaked
-    /// private `d` retroactively deanonymizes the pool's whole history — the
-    /// only recovery is deploying a new pool and migrating. `D` is a circuit
-    /// public input, so forward-only rotation would be circuit-compatible if
-    /// this trade is ever revisited.
+    /// Immutable by design (issue #220): there is no setter, and an admin
+    /// transfer (`update_admin`, then `accept_admin`) moves only the admin
+    /// *address*. A rotated-out admin therefore keeps the ability to decrypt
+    /// every future note, and a leaked private `d` retroactively
+    /// deanonymizes the pool's whole history — the only recovery is
+    /// deploying a new pool and migrating. `D` is a circuit public input,
+    /// so forward-only rotation would be circuit-compatible if this trade
+    /// is ever revisited.
     AdminViewKey,
     /// Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     GvkMode,
@@ -364,15 +372,81 @@ impl PoolGvkContract {
         Ok(env.storage().persistent().has(&key))
     }
 
-    /// Update the contract administrator. Requires authorization from the
-    /// current admin.
+    /// Proposes a new contract administrator.
+    ///
+    /// The proposal only records `new_admin` as pending and replaces any
+    /// earlier one. The current admin keeps every power until `new_admin`
+    /// calls `accept_admin`. Requires authorization from the current
+    /// admin.
+    ///
+    /// A transfer moves governance only: the admin view key stays with whoever
+    /// holds its private key.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call, because `require_auth`
+    /// raises a host error rather than returning.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
+    }
+
+    /// Withdraws the pending admin transfer.
+    ///
+    /// Requires authorization from the current admin.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call, because `require_auth`
+    /// raises a host error rather than returning.
+    pub fn cancel_admin_transfer(env: &Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// Requires authorization from the pending admin. From then on the
+    /// previous admin holds no power over the contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call, because
+    /// `require_auth` raises a host error rather than returning.
+    pub fn accept_admin(env: &Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: &Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: &Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(env, &DataKey::PendingAdmin)
     }
 
     /// Pauses deposits.

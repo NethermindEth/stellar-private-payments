@@ -408,6 +408,7 @@ fn pool_gvk_update_admin_transfers_control() {
 
     let new_admin = Address::generate(&env);
     pool.update_admin(&new_admin);
+    pool.accept_admin();
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
@@ -416,6 +417,88 @@ fn pool_gvk_update_admin_transfers_control() {
             .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
     assert_eq!(stored_admin, new_admin);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+#[test]
+fn accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn cancel_admin_transfer_clears_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    pool.cancel_admin_transfer();
+
+    assert_eq!(pool.get_pending_admin(), None);
+    assert_eq!(pool.get_admin(), setup.admin);
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.cancel_admin_transfer();
 }
 
 #[test]
