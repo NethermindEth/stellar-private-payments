@@ -431,12 +431,12 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_147;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
+    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
+    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_191;
+    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_147;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_147;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_191;
+    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_191;
     "pool get_root" => 2, 0, 0, 0, 0;
     "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_323;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;

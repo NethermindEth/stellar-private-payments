@@ -16,6 +16,7 @@
 use contract_types::Groth16Proof;
 use pool_core::{
     ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
+    events::{DepositPauseChanged, DepositPauseRepeated},
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
@@ -31,6 +32,9 @@ use soroban_utils::{AdminError, constants::bn256_modulus};
 pub use pool_core::{ExtData, hash_ext_data};
 
 /// Contract error types for the privacy pool
+///
+/// Codes 15 to 17 belong to `pool-gvk`'s own variants and stay unassigned here,
+/// so from 18 on both pools report the same condition with the same code.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -63,6 +67,10 @@ pub enum Error {
     NonCanonicalPublicInput = 13,
     /// Unsupported policy flag bits.
     InvalidPolicyFlags = 14,
+    /// Deposits are paused
+    DepositsPaused = 18,
+    /// Deposits are not paused, so there is nothing to unpause
+    DepositsNotPaused = 19,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -119,8 +127,8 @@ pub struct Proof {
 /// The configuration the constructor writes, [`DataKey::Token`],
 /// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
 /// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
-/// [`DataKey::PolicyFlags`], and [`DataKey::KdfDomain`], lives in the
-/// contract's instance entry.
+/// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], and
+/// [`DataKey::DepositsPaused`], lives in the contract's instance entry.
 /// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -143,6 +151,8 @@ pub(crate) enum DataKey {
     PolicyFlags,
     /// Privacy key derivation domain. Immutable.
     KdfDomain,
+    /// Whether `transact` refuses deposits
+    DepositsPaused,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -229,6 +239,7 @@ impl PoolContract {
         instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         instance.set(&DataKey::PolicyFlags, &policy_flags);
         instance.set(&DataKey::KdfDomain, &kdf_domain);
+        instance.set(&DataKey::DepositsPaused, &false);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -438,6 +449,36 @@ impl PoolContract {
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if validation fails
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DepositsPaused`] if `ext_amount > 0` while deposits are
+    /// paused, before the deposit cap is checked and before any token moves.
+    /// Returns [`Error::WrongExtAmount`] if a deposit exceeds the maximum
+    /// deposit amount, if `ext_amount` falls outside the 2^248 bound or the
+    /// `i128` range, or if the proof's public amount does not match
+    /// `ext_amount`.
+    ///
+    /// Returns [`Error::UnknownRoot`] if the proof's root is not in the recent
+    /// root history, [`Error::AlreadySpentNullifier`] if an input nullifier is
+    /// spent, [`Error::WrongExtHash`] if the proof's external data hash does
+    /// not match `ext_data`, [`Error::NonCanonicalPublicInput`] if a public
+    /// input is outside the BN254 scalar field, and [`Error::InvalidProof`] if
+    /// the proof is empty, if the verifier refuses it, or if its association
+    /// set roots do not match the current non-membership root or a known
+    /// membership root.
+    ///
+    /// Returns [`Error::MerkleTreeFull`] if the tree has no room for the two
+    /// output commitments, and [`Error::NotInitialized`] if the pool's
+    /// configuration or tree state is not stored. [`Error::NextIndexNotEven`],
+    /// [`Error::WrongLevels`], and [`Error::Overflow`] mean the stored tree
+    /// state is inconsistent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `sender` does not authorize the call, or if a token transfer
+    /// or an association set call fails, because each raises a host error
+    /// rather than returning.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -454,6 +495,9 @@ impl PoolContract {
 
         // Handle deposit if ext_amount > 0
         if ext_data.ext_amount > zero {
+            if Self::deposits_paused(env)? {
+                return Err(Error::DepositsPaused);
+            }
             let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
             let max = Self::get_maximum_deposit(env)?;
             if deposit_u > max {
@@ -626,6 +670,18 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Reports whether the pool refuses deposits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the deposit flag is not stored.
+    pub fn deposits_paused(env: &Env) -> Result<bool, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DepositsPaused)
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Get the latest root of the Merkle tree that defines the pool
     pub fn get_root(env: &Env) -> Result<U256, Error> {
         Ok(MerkleTreeWithHistory::get_last_root(env)?)
@@ -674,6 +730,70 @@ impl PoolContract {
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
+    }
+
+    /// Pauses deposits.
+    ///
+    /// While deposits are paused, `transact` refuses a call with
+    /// `ext_amount > 0` before any token moves. A pause never refuses a
+    /// transfer, a withdrawal, an admin call, or a getter. The admin must
+    /// authorize the call, and a call that pauses deposits publishes one
+    /// [`DepositPauseChanged`] event.
+    ///
+    /// On a paused pool the call succeeds without a write and publishes one
+    /// [`DepositPauseRepeated`] event, so the host spends the authorization and
+    /// a watcher sees it spent. A refusal would revert the transaction
+    /// and leave the authorization's nonce unused, while the failed
+    /// transaction, authorization included, is public for anyone to replay
+    /// after an unpause.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin or no
+    /// deposit flag stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call, because `require_auth`
+    /// raises a host error rather than returning.
+    pub fn pause_deposits(env: &Env) -> Result<(), Error> {
+        Self::set_deposits_paused(env, true)
+    }
+
+    /// Resumes deposits after a pause.
+    ///
+    /// The admin must authorize the call, and each successful call publishes
+    /// one [`DepositPauseChanged`] event.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DepositsNotPaused`] if deposits are not paused, which
+    /// reverts the transaction carrying the call, and [`Error::NotInitialized`]
+    /// if the contract has no admin or no deposit flag stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call, because `require_auth`
+    /// raises a host error rather than returning.
+    pub fn unpause_deposits(env: &Env) -> Result<(), Error> {
+        Self::set_deposits_paused(env, false)
+    }
+
+    fn set_deposits_paused(env: &Env, paused: bool) -> Result<(), Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        if Self::deposits_paused(env)? == paused {
+            return if paused {
+                DepositPauseRepeated.publish(env);
+                Ok(())
+            } else {
+                Err(Error::DepositsNotPaused)
+            };
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::DepositsPaused, &paused);
+        DepositPauseChanged { paused }.publish(env);
+        Ok(())
     }
 
     // ========== ASP Contract Functions ==========
