@@ -15,7 +15,14 @@ use anyhow::{Result, anyhow};
 /// admin-decryptable ciphertext of the note.
 const GVK_CIPHERTEXT_FIELD: &str = "gvk_ciphertext";
 
-pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
+/// Parses a contract event, or returns `None` for an event name this version
+/// does not read.
+///
+/// # Errors
+///
+/// Returns an error if the event's topics or data do not decode into the
+/// fields its name requires.
+pub fn parse_event(event: ContractEvent) -> Result<Option<ProcessedEvent>> {
     let parsed = parse_event_metadata(event)?;
     let ev = match parsed.name.as_str() {
         // Pool events contracts/pool/src/pool.rs (pool-gvk adds `gvk_ciphertext`)
@@ -32,18 +39,18 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
         // ASP membership events contracts/asp-membership
         "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
         // ASP non-membership events contracts/asp-non-membership
-        // for now they're not collected - check also sdk/native/src/chain/indexer.rs
-        // if they should be collected then
-        // sdk/native/src/state/processor.rs should be extended
-        // (to avoid looping over the unprocessed events)
+        // These are parsed but not stored, and the processor marks them processed.
         "leaf_inserted" | "LeafInserted" => {
             ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?)
         }
         "leaf_updated" | "LeafUpdated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
         "leaf_deleted" | "LeafDeleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
-        _ => return Err(anyhow!("unhandled event {}", parsed.name)),
+        _ => {
+            tracing::debug!(name = %parsed.name, "skipping an event this version does not read");
+            return Ok(None);
+        }
     };
-    Ok(ev)
+    Ok(Some(ev))
 }
 
 // #[contractevent]
@@ -432,12 +439,12 @@ mod gvk_passthrough_tests {
     /// to, with the unknown field ignored rather than breaking the parse.
     #[test]
     fn commitment_event_parses_identically_with_and_without_gvk_ciphertext() {
-        let ProcessedEvent::Commitment(without) =
+        let Some(ProcessedEvent::Commitment(without)) =
             parse_event(commitment_event(false)).expect("parse pool event")
         else {
             panic!("expected a commitment event");
         };
-        let ProcessedEvent::Commitment(with) =
+        let Some(ProcessedEvent::Commitment(with)) =
             parse_event(commitment_event(true)).expect("parse pool-gvk event")
         else {
             panic!("expected a commitment event");
@@ -454,12 +461,12 @@ mod gvk_passthrough_tests {
 
     #[test]
     fn nullifier_event_parses_identically_with_and_without_gvk_ciphertext() {
-        let ProcessedEvent::Nullifier(without) =
+        let Some(ProcessedEvent::Nullifier(without)) =
             parse_event(nullifier_event(false)).expect("parse pool event")
         else {
             panic!("expected a nullifier event");
         };
-        let ProcessedEvent::Nullifier(with) =
+        let Some(ProcessedEvent::Nullifier(with)) =
             parse_event(nullifier_event(true)).expect("parse pool-gvk event")
         else {
             panic!("expected a nullifier event");
