@@ -18,7 +18,7 @@ use contract_types::Groth16Proof;
 use pool_core::{
     ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
-    policy,
+    policy, validation,
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
@@ -83,6 +83,20 @@ impl From<MerkleError> for Error {
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
             MerkleError::NotInitialized => Error::NotInitialized,
             MerkleError::Overflow => Error::Overflow,
+        }
+    }
+}
+
+impl From<validation::Error> for Error {
+    fn from(e: validation::Error) -> Self {
+        match e {
+            validation::Error::WrongExtAmount => Error::WrongExtAmount,
+            validation::Error::InvalidProof => Error::InvalidProof,
+            validation::Error::UnknownRoot => Error::UnknownRoot,
+            validation::Error::AlreadySpentNullifier => Error::AlreadySpentNullifier,
+            validation::Error::WrongExtHash => Error::WrongExtHash,
+            validation::Error::NotInitialized => Error::NotInitialized,
+            validation::Error::NonCanonicalPublicInput => Error::NonCanonicalPublicInput,
         }
     }
 }
@@ -465,13 +479,6 @@ impl PoolGvkContract {
         amounts::i256_to_i128_nonneg(env, v).ok_or(Error::WrongExtAmount)
     }
 
-    /// Calculate the public amount from external amount:
-    /// `public_amount = ext_amount` in the BN256 field, wrapping negative
-    /// values to `FIELD_SIZE - |ext_amount|`.
-    fn calculate_public_amount(env: &Env, ext_amount: I256) -> Result<U256, Error> {
-        amounts::calculate_public_amount(env, ext_amount).ok_or(Error::WrongExtAmount)
-    }
-
     /// Mark a nullifier as spent. Presence of the key is the spent flag.
     fn mark_spent(env: &Env, n: &U256) -> Result<(), Error> {
         let key = DataKey::Nullifier(n.clone());
@@ -481,11 +488,7 @@ impl PoolGvkContract {
 
     /// Reject values outside the canonical BN254 scalar-field range.
     fn validate_bn256_public_input(value: &U256, modulus: &U256) -> Result<(), Error> {
-        if amounts::is_canonical_bn256_public_input(value, modulus) {
-            Ok(())
-        } else {
-            Err(Error::NonCanonicalPublicInput)
-        }
+        Ok(validation::validate_bn256_public_input(value, modulus)?)
     }
 
     /// Validate a ciphertext's `r.x`, `r.y`, `c1`, `c2`, `c3` fields.
@@ -509,19 +512,17 @@ impl PoolGvkContract {
         policy_flags: u32,
         modulus: &U256,
     ) -> Result<(), Error> {
-        Self::validate_bn256_public_input(&proof.root, modulus)?;
-        Self::validate_bn256_public_input(&proof.public_amount, modulus)?;
-        for nullifier in proof.input_nullifiers.iter() {
-            Self::validate_bn256_public_input(&nullifier, modulus)?;
-        }
-        Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
-        Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
-        if policy::requires_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
-        }
-        if policy::requires_non_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
-        }
+        validation::validate_base_bn256_public_inputs(
+            &proof.root,
+            &proof.public_amount,
+            &proof.input_nullifiers,
+            &proof.output_commitment0,
+            &proof.output_commitment1,
+            &proof.asp_membership_root,
+            &proof.asp_non_membership_root,
+            policy_flags,
+            modulus,
+        )?;
         for ct in proof.input_gvk_ciphertexts.iter() {
             Self::validate_gvk_ciphertext(&ct, modulus)?;
         }
@@ -680,91 +681,71 @@ impl PoolGvkContract {
         ext_data: ExtData,
         sender: Address,
     ) -> Result<(), Error> {
+        // 1. Authenticate sender
         sender.require_auth();
         // The tree entry is rewritten below; keep the configuration it
         // reads on the same lifetime.
         pool_core::extend_instance(env);
-        let token = Self::get_token(env)?;
-        let token_client = TokenClient::new(env, &token);
-        let zero = I256::from_i32(env, 0);
 
-        if ext_data.ext_amount > zero {
-            let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
-            let max = Self::get_maximum_deposit(env)?;
-            if deposit_u > max {
-                return Err(Error::WrongExtAmount);
-            }
-            let this = env.current_contract_address();
-            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
-            token_client.transfer(&sender, &this, &amount);
-        }
-
-        Self::internal_transact(env, proof, ext_data)
+        Self::internal_transact(env, proof, ext_data, &sender)
     }
 
     /// Process a private transaction: validates the proof and all public
-    /// inputs, marks nullifiers as spent, processes withdrawals, and inserts
-    /// new commitments into the Merkle tree.
-    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
-        // 1. Merkle root check
-        if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
-            return Err(Error::UnknownRoot);
-        }
-        // 2. Nullifier checks (prevent double-spending)
-        for n in proof.input_nullifiers.iter() {
-            if Self::is_spent(env, &n)? {
-                return Err(Error::AlreadySpentNullifier);
-            }
-        }
-        // 3. External data hash check. This is also the value the circuit's
-        // `nonce` public input is required to equal (see `verify_proof`),
-        // which *binds* the nonce to this transaction's parameters. It does
-        // not make the nonce unique: `hash_ext_data` is a deterministic
-        // function of caller-chosen `ExtData` plus this pool's address and
-        // token, so two transactions with identical `ExtData` on the same
-        // pool share a nonce. `globalViewKey.circom` asks the contract for
-        // uniqueness, and this does not provide it — but the property that
-        // matters is upheld elsewhere: the ciphertext's ephemeral scalar is
-        // derived as `H(pk, amount, blinding, salt, D, nonce, idx)`, and
-        // `blinding` is fresh per output note, so colliding `(R, c)`
-        // additionally requires an identical note *and* salt. Only a prover
-        // can arrange that, and only against their own privacy.
+    /// inputs, processes deposits (only after validation succeeds), marks
+    /// nullifiers as spent, processes withdrawals, and inserts new
+    /// commitments into the Merkle tree.
+    fn internal_transact(
+        env: &Env,
+        proof: Proof,
+        ext_data: ExtData,
+        sender: &Address,
+    ) -> Result<(), Error> {
+        // 1. Validate deposit amount limits
+        let max_deposit = Self::get_maximum_deposit(env)?;
+        let deposit_amount =
+            validation::validate_deposit_amount(env, &ext_data.ext_amount, &max_deposit)?;
+
+        // 2. Merkle root check
+        validation::validate_root(env, &proof.root)?;
+
+        // 3. Nullifier checks (prevent double-spending)
+        validation::validate_nullifiers(&proof.input_nullifiers, |n| Self::is_spent(env, n))?;
+
+        // 4. External data hash check
         let token = Self::get_token(env)?;
-        let ext_hash = hash_ext_data(env, &ext_data, &token);
-        if ext_hash != proof.ext_data_hash {
-            return Err(Error::WrongExtHash);
-        }
+        validation::validate_ext_data_hash(env, &ext_data, &token, &proof.ext_data_hash)?;
 
-        // 4. Public amount check
-        let expected_public_amount =
-            Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
-        if proof.public_amount != expected_public_amount {
-            return Err(Error::WrongExtAmount);
-        }
+        // 5. Public amount check
+        validation::validate_public_amount(env, &ext_data.ext_amount, &proof.public_amount)?;
 
-        // ASP root validation
+        // 6. ASP root validation
         let policy_flags = Self::load_policy_flags(env)?;
-        if policy::requires_non_membership_proofs(policy_flags) {
-            let non_member_root = Self::get_asp_non_membership_root(env)?;
-            if non_member_root != proof.asp_non_membership_root {
-                return Err(Error::InvalidProof);
-            }
-        }
-        if policy::requires_membership_proofs(policy_flags) {
-            let asp_address = Self::get_asp_membership(env)?;
-            let client = ASPMembershipClient::new(env, &asp_address);
-            if !client.is_known_root(&proof.asp_membership_root) {
-                return Err(Error::InvalidProof);
-            }
-        }
+        let asp_membership = Self::get_asp_membership(env)?;
+        let asp_non_membership = Self::get_asp_non_membership(env)?;
+        validation::validate_asp_roots(
+            env,
+            policy_flags,
+            &asp_membership,
+            &asp_non_membership,
+            &proof.asp_membership_root,
+            &proof.asp_non_membership_root,
+        )?;
 
-        // 5. ZK proof verification (includes the GVK ciphertext-count and
+        // 7. ZK proof verification (includes the GVK ciphertext-count and
         // canonical-range checks)
         if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
 
-        // 6. Mark nullifiers as spent. `input_gvk_ciphertexts` is either empty
+        // 8. Only if validation succeeds, perform deposit token transfer
+        if let Some(amount) = deposit_amount {
+            let token_client = TokenClient::new(env, &token);
+            let this = env.current_contract_address();
+            token_client.transfer(sender, &this, &amount);
+        }
+
+        // 9. Complete the state-changing transaction
+        // Mark nullifiers as spent. `input_gvk_ciphertexts` is either empty
         // (view-only) or exactly as long as `input_nullifiers` (traceable) —
         // already enforced by `verify_proof`'s ciphertext-count check above —
         // so a non-empty vec means every nullifier has a matching ciphertext

@@ -95,6 +95,8 @@ pub fn verify(
         &prover,
         &receipt,
         expected_vk_hash,
+        None,
+        None,
     )
     .map_err(|e| anyhow::anyhow!("verify disclosure receipt: {e}"))?;
     print_verification(&report, json)?;

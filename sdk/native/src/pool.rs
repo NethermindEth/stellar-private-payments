@@ -237,9 +237,18 @@ impl PrivatePool {
         &self,
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
+        expected_authority: Option<&str>,
     ) -> Result<DisclosureVerificationReport, Error> {
         tracing::info!(expected_vk_hash = ?Sensitive(expected_vk_hash), "verify_disclosure started");
-        verify_disclosure_receipt(&self.fetcher, &self.prover, receipt, expected_vk_hash).await
+        verify_disclosure_receipt(
+            &self.fetcher,
+            &self.prover,
+            receipt,
+            expected_vk_hash,
+            Some(&self.config.pool_contract_id),
+            expected_authority,
+        )
+        .await
     }
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
