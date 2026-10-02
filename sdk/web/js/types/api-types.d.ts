@@ -43,6 +43,12 @@ export interface PoolConfigInput {
  */
 export interface ContractConfigInput {
   network: string;
+  networkPassphrase?: string;
+  rpcUrl?: string;
+  explorerUrl?: string;
+  displayName?: string;
+  isTestnet?: boolean;
+
   deployer: string;
   admin: string;
   asp_membership: string;

@@ -1,4 +1,5 @@
 import {
+  loadDeploymentConfig,
   DisclosureRequest,
   client,
   isRuntimeReady,
@@ -31,8 +32,7 @@ const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
     '0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f',
 };
 
-// Public testnet endpoint used to verify a receipt when no wallet is connected.
-const DEFAULT_TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
+import { deploymentDefaults } from './network-config.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -997,7 +997,7 @@ export function mountVerify(container) {
   rpcWrap.className = 'mt-2 space-y-1';
   const rpcInput = document.createElement('input');
   rpcInput.type = 'text';
-  rpcInput.value = DEFAULT_TESTNET_RPC_URL;
+  rpcInput.value = deploymentDefaults.rpcUrl;
   rpcInput.className =
     'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
   rpcWrap.appendChild(rpcInput);
@@ -1296,7 +1296,7 @@ export function mountVerify(container) {
       const report = walletClient
         ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
         : await verifySelectiveDisclosure(
-            rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL,
+            rpcInput.value.trim() || deploymentDefaults.rpcUrl,
             JSON.stringify(receipt),
             expectedVkHash
           );
@@ -1426,6 +1426,7 @@ export function mountVerify(container) {
 // ---------------------------------------------------------------------------
 
 export async function initDisclosure() {
+  await loadDeploymentConfig();
   const query = parseQueryParams();
 
   const generateContainer = document.getElementById('disclosure-generate');

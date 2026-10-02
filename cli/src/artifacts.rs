@@ -50,11 +50,13 @@ pub fn load_disclosure_artifacts_for_circuit(
         .unwrap_or_else(default_circuits_dir);
     let r1cs = circuits.join(circuit.artifacts.r1cs);
 
-    Ok(ProverArtifacts {
+    let artifacts = ProverArtifacts {
         proving_key: read_artifact_file(&circuits, circuit.artifacts.proving_key)?,
         circuit_graph: read_artifact_file(&circuits, circuit.artifacts.graph)?,
         circuit_r1cs: std::fs::read(&r1cs).with_context(|| format!("read {}", r1cs.display()))?,
-    })
+    };
+    validate_artifacts(&artifacts, circuit.artifacts.r1cs.trim_end_matches(".r1cs"))?;
+    Ok(artifacts)
 }
 
 pub fn load_transact_artifacts_for_stem(
@@ -66,7 +68,7 @@ pub fn load_transact_artifacts_for_stem(
         .unwrap_or_else(default_circuits_dir);
     let stem_str = stem.to_string();
 
-    Ok(ProverArtifacts {
+    let artifacts = ProverArtifacts {
         proving_key: read_proving_key(&circuits, &stem_str)?,
         circuit_graph: read_circuit_graph(&circuits, &stem_str)?,
         circuit_r1cs: std::fs::read(circuits.join(format!("{stem_str}.r1cs"))).with_context(
@@ -77,7 +79,9 @@ pub fn load_transact_artifacts_for_stem(
                 )
             },
         )?,
-    })
+    };
+    validate_artifacts(&artifacts, &stem_str)?;
+    Ok(artifacts)
 }
 
 /// Read a Groth16 proving key for the given circuit stem.
@@ -85,14 +89,14 @@ pub fn load_transact_artifacts_for_stem(
 /// Installed builds ship the key alongside the r1cs/graph in the data dir
 /// (`<circuits_dir>/{stem}_proving_key.bin`). When it is absent — e.g.
 /// an in-repo `cargo run` before the installer has run — fall back to the
-/// canonical key committed under `deployments/testnet/circuit_keys/`.
+/// canonical key committed under `deployments/<SPP_NETWORK>/circuit_keys/`.
 fn read_proving_key(circuits: &Path, stem: &str) -> Result<Vec<u8>> {
     read_artifact_file(circuits, &format!("{stem}_proving_key.bin"))
 }
 
 /// Read a named circuit artifact, preferring the runtime circuits directory and
 /// falling back to the copy committed under
-/// `deployments/testnet/circuit_keys/`.
+/// `deployments/<SPP_NETWORK>/circuit_keys/`.
 ///
 /// Proving keys and witness graphs both ship committed, so neither requires a
 /// circuit build; only the r1cs is a build output.
@@ -118,7 +122,7 @@ fn read_circuit_graph(circuits: &Path, stem: &str) -> Result<Vec<u8>> {
 }
 
 fn committed_circuit_keys_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deployments/testnet/circuit_keys")
+    PathBuf::from(env!("SPP_CIRCUIT_KEYS"))
 }
 
 fn default_circuits_dir() -> PathBuf {
@@ -127,6 +131,14 @@ fn default_circuits_dir() -> PathBuf {
     } else {
         default_data_dir().join("circuits")
     }
+}
+
+fn validate_artifacts(artifacts: &ProverArtifacts, stem: &str) -> Result<()> {
+    let lock = stellar_private_payments::circuits::circuit_lock()?;
+    lock.verify_artifact(stem, "r1cs", &artifacts.circuit_r1cs)?;
+    lock.verify_artifact(stem, "graph.bin", &artifacts.circuit_graph)?;
+    lock.verify_artifact(stem, "proving_key.bin", &artifacts.proving_key)?;
+    Ok(())
 }
 
 #[cfg(test)]

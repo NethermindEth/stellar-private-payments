@@ -1,7 +1,6 @@
 use stellar_private_payments::types::ContractConfig;
 
-// TODO make it dependent on the network during the compilation
-const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
+const DEPLOYMENT: &str = include_str!(concat!(env!("OUT_DIR"), "/deployments.json"));
 
 /// Returns the statically-embedded contracts deployment configuration.
 ///
@@ -12,61 +11,54 @@ pub(crate) fn deployment_config() -> anyhow::Result<ContractConfig> {
     Ok(serde_json::from_str(DEPLOYMENT)?)
 }
 
-/// Stable storage namespace for a contract set + genesis ledger.
-///
-/// Pages and indexer KV are keyed by this id so redeployments can share one DB
-/// without colliding with older contract history.
-///
-/// Format: `v1:{min_ledger}:{sorted 4-char contract prefixes concatenated}`.
-pub fn deployment_storage_id(contract_ids: &[String], min_deployment_ledger: u32) -> String {
-    let mut prefixes: Vec<String> = contract_ids
+/// Network-isolated v2 namespace. v1 caches are rebuilt, never reused.
+pub fn deployment_storage_id(
+    contract_ids: &[String],
+    min_deployment_ledger: u32,
+    passphrase: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let network_hash = Sha256::digest(passphrase.as_bytes())
         .iter()
-        .map(|id| id.chars().take(4).collect())
-        .collect();
-    prefixes.sort();
-    format!("v1:{min_deployment_ledger}:{}", prefixes.concat())
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut ids = contract_ids.to_vec();
+    ids.sort();
+    let contracts_hash = Sha256::digest(ids.join(":").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("v2:{network_hash}:{min_deployment_ledger}:{contracts_hash}")
 }
 
-/// Storage id for the compiled-in deployment config.
 pub fn current_deployment_storage_id() -> anyhow::Result<String> {
     let deployment = deployment_config()?;
+    let passphrase = deployment.network_passphrase.as_deref().unwrap_or_default();
+    deployment.validate_network(passphrase)?;
     Ok(deployment_storage_id(
         &deployment.all_contract_ids(),
         deployment.min_deployment_ledger()?,
+        passphrase,
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::deployment_storage_id;
-
+    use super::*;
     #[test]
-    fn storage_id_sorts_contract_prefixes() {
-        let a = deployment_storage_id(&["BBBBXXXX".into(), "AAAAYYYY".into()], 10);
-        let b = deployment_storage_id(&["AAAAYYYY".into(), "BBBBXXXX".into()], 10);
-        assert_eq!(a, b);
-        assert_eq!(a, "v1:10:AAAABBBB");
-    }
-
-    #[test]
-    fn storage_id_changes_with_ledger_or_contracts() {
-        let base = deployment_storage_id(&["AAAAYYYY".into()], 10);
-        assert_ne!(base, deployment_storage_id(&["AAAAYYYY".into()], 11));
+    fn namespace_is_order_independent_and_network_isolated() {
+        let ids = vec!["AAAAX".into(), "BBBBY".into()];
+        let base = deployment_storage_id(&ids, 10, "network A");
+        assert!(base.starts_with("v2:"));
+        assert_eq!(
+            base,
+            deployment_storage_id(&[ids[1].clone(), ids[0].clone()], 10, "network A")
+        );
+        assert_ne!(base, deployment_storage_id(&ids, 10, "network B"));
+        assert_ne!(base, deployment_storage_id(&ids, 11, "network A"));
         assert_ne!(
             base,
-            deployment_storage_id(&["AAAAYYYY".into(), "BBBBXXXX".into()], 10)
+            deployment_storage_id(&["AAAAZ".into(), "BBBBY".into()], 10, "network A")
         );
-    }
-
-    #[test]
-    fn storage_id_uses_four_char_prefixes() {
-        let id = deployment_storage_id(
-            &[
-                "CBF4Y4PC72JI23H3VJMO7WNZH5BJRGA2HD2HUQANZPXB4BXRVSKUOS6U".into(),
-                "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ".into(),
-            ],
-            3_742_083,
-        );
-        assert_eq!(id, "v1:3742083:CBF4CBQR");
     }
 }

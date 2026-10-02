@@ -56,7 +56,9 @@ pub struct OnboardArgs {
 pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
     stellar_cli::ensure_installed()?;
     let mut storage = config.open_storage()?;
-    if !storage.get_disclaimer_state(&account.address)?.accepted {
+    if config.deployment.is_testnet == Some(true)
+        && !storage.get_disclaimer_state(&account.address)?.accepted
+    {
         bail!(
             "You must accept the disclaimer first. Run: spp onboard --account {}",
             account.alias
@@ -87,20 +89,24 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     let mut storage = config.open_storage()?;
 
     // 3. Consent.
-    let state = storage.get_disclaimer_state(&account.address)?;
-    if state.accepted {
-        say(interactive, "Disclaimer already accepted.");
-    } else {
-        if interactive {
-            println!("{}\n", state.disclaimer_text_md);
+    if config.deployment.is_testnet == Some(true) {
+        let state = storage.get_disclaimer_state(&account.address)?;
+        if state.accepted {
+            say(interactive, "Disclaimer already accepted.");
+        } else {
+            if interactive {
+                println!("{}\n", state.disclaimer_text_md);
+            }
+            let accepted = args.accept
+                || (interactive && prompt_yes_no("Do you accept the disclaimer above?", false)?);
+            if !accepted {
+                bail!(
+                    "Disclaimer not accepted; aborting. Pass --accept to accept non-interactively."
+                );
+            }
+            storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)?;
+            say(interactive, "Disclaimer accepted.");
         }
-        let accepted = args.accept
-            || (interactive && prompt_yes_no("Do you accept the disclaimer above?", false)?);
-        if !accepted {
-            bail!("Disclaimer not accepted; aborting. Pass --accept to accept non-interactively.");
-        }
-        storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)?;
-        say(interactive, "Disclaimer accepted.");
     }
 
     // 4. Derive privacy keys.
@@ -118,7 +124,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     configure_bootnode(&mut storage, args, interactive)?;
 
     // 6. Explorer.
-    configure_explorer(&mut storage, args, interactive)?;
+    configure_explorer(&mut storage, args, interactive, config)?;
 
     // 7. Optional registration.
     maybe_register(config, &account, args, interactive)?;
@@ -217,6 +223,7 @@ fn configure_explorer(
     storage: &mut SqliteStorage,
     args: &OnboardArgs,
     interactive: bool,
+    config: &CliConfig,
 ) -> Result<()> {
     if let Some(url) = &args.explorer_url {
         explorer::set_base_url(storage, url)?;
@@ -226,7 +233,7 @@ fn configure_explorer(
     if !interactive {
         return Ok(());
     }
-    let current = explorer::base_url(storage)?;
+    let current = explorer::base_url(storage, &config.deployment)?;
     println!("\nExplorer:\n{EXPLORER_TEXT}");
     let input = prompt_line(&format!("Explorer base URL [{current}]: "))?;
     let url = if input.is_empty() { current } else { input };

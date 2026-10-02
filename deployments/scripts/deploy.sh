@@ -378,7 +378,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+need stellar
+need jq
+
 [[ -n "$NETWORK" ]] || usage
+[[ "$NETWORK" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid network folder name"
+case "$NETWORK" in
+  testnet) SPP_DISPLAY_NAME="${SPP_DISPLAY_NAME:-Testnet}"; SPP_IS_TESTNET="${SPP_IS_TESTNET:-true}"; SPP_EXPLORER_URL="${SPP_EXPLORER_URL:-https://stellar.expert/explorer/testnet}" ;;
+  futurenet|local) SPP_IS_TESTNET="${SPP_IS_TESTNET:-true}" ;;
+esac
+case "${SPP_IS_TESTNET:-false}" in true|false) ;; *) die "SPP_IS_TESTNET must be true or false" ;; esac
+NETWORK_METADATA="$(stellar network ls --long | jq -Rs --arg name "$NETWORK" '
+  split("\n\n") | map(split("\n") | map(
+    capture("^\\s*(?<key>Name|RPC url|Network passphrase):\\s*(?<value>.*)$")? ) |
+    map({key: .key, value: .value}) | from_entries) |
+  map(select(.Name == $name)) | first |
+  if .["RPC url"] == null or .["Network passphrase"] == null then error("network metadata missing")
+  else {rpcUrl: .["RPC url"], networkPassphrase: .["Network passphrase"]} end')" || die "failed to resolve network metadata"
+
 need stellar
 need jq
 
@@ -800,6 +817,8 @@ DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"
-DEPLOY_JSON_PRETTY="$(printf '%s\n' "$DEPLOY_JSON" | jq .)"
+DEPLOY_JSON_PRETTY="$(printf '%s\n' "$DEPLOY_JSON" | jq --argjson metadata "$NETWORK_METADATA" --arg displayName "${SPP_DISPLAY_NAME:-$NETWORK}" \
+  --arg explorerUrl "${SPP_EXPLORER_URL:-}" --argjson isTestnet "${SPP_IS_TESTNET:-false}" \
+  '. + $metadata + {displayName: $displayName, isTestnet: $isTestnet} + (if $explorerUrl == "" then {} else {explorerUrl: $explorerUrl} end)')"
 printf '%s\n' "$DEPLOY_JSON_PRETTY" > "$DEPLOYMENTS_DIR/deployments.json"
 printf '%s\n' "$DEPLOY_JSON_PRETTY"

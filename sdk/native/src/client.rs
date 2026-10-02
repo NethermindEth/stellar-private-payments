@@ -205,6 +205,12 @@ mod divergent_session_tests {
                 LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
             ),
             ContractConfig {
+                network_passphrase: None,
+                rpc_url: None,
+                explorer_url: None,
+                display_name: None,
+                is_testnet: None,
+
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),
                 admin: String::new(),

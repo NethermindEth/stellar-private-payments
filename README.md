@@ -116,6 +116,37 @@ CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://
 Deploy a private pool tailored to your own asset, compliance policy, and privacy
 needs. See [DEPLOY.md](DEPLOY.md) for details.
 
+### Selecting a network
+
+Set `SPP_NETWORK` when building from source to select a folder under
+`deployments/`. It defaults to `testnet`. Each folder must contain
+`deployments.json`, `circuits.json`, and matching artifacts in `circuit_keys/`.
+
+```bash
+SPP_NETWORK=testnet trunk build --release
+SPP_NETWORK=testnet cargo build --release -p stellar-private-payments-cli
+SPP_NETWORK=testnet cargo build --release --manifest-path tools/bootnode/Cargo.toml
+```
+
+Replace `testnet` with your deployment folder's name. These commands build the
+website and executables; they do not deploy contracts. Switching the selected
+network requires rebuilding. Downstream deployers provide the contract
+deployments, network configuration, and matching circuit artifacts for their
+chosen network. `ci-test-network` is synthetic CI data, not a live deployment.
+
+The deployment configuration records the network's public identity string
+(`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks
+Freighter's identity, the CLI checks its Stellar CLI network configuration, and
+the bootnode checks the upstream RPC's identity against that passphrase. Display
+names, explorer defaults, and test-network disclaimers also come from the config.
+
+**Bootnode upgrade:** storage identifiers now use `v2`, separating history by
+network and contract IDs. Existing `v1` history must be re-synced; this does not
+change contracts or balances on the blockchain.
+
+See [Network-specific builds](docs/src/multi-network.md) for configuration fields,
+Docker builds, connection overrides, and control over retaining old bootnode data.
+
 ## Limitations
 
 As a work-in-progress, this implementation has several limitations to be resolved in the nearest future:

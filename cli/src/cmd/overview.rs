@@ -221,7 +221,7 @@ fn contract_ref(explorer: &Explorer, contract_id: &str) -> ContractRef {
 
 fn explorer_base(config: &CliConfig) -> Result<String> {
     let storage = config.open_storage()?;
-    crate::explorer::base_url(&storage)
+    crate::explorer::base_url(&storage, &config.deployment)
 }
 
 pub fn asset_symbol(asset: &AssetDescriptor) -> String {

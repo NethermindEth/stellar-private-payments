@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 
-pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits.json"));
+pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/circuits.json"));
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CircuitMeta {

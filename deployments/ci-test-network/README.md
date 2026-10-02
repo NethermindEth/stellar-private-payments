@@ -1,0 +1,1 @@
+Synthetic build/test configuration, not an on-chain deployment. Contract IDs and circuit lock reuse testnet fixtures; the distinct passphrase and unreachable RPC must never be used to submit transactions.

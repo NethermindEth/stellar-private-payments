@@ -38,7 +38,7 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
-    /// Override deployments.json (default: embedded testnet deployment)
+    /// Override deployments.json (default: embedded deployment)
     #[arg(long, global = true)]
     deployment: Option<PathBuf>,
 
