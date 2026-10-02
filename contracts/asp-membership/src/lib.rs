@@ -8,7 +8,7 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{poseidon2_compress, zero_hash};
+use soroban_utils::{AdminError, poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -73,6 +73,14 @@ pub enum Error {
     NotInitialized = 4,
     /// Arithmetic overflow occurred
     Overflow = 5,
+}
+
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
+        }
+    }
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -164,8 +172,7 @@ impl ASPMembership {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     /// Get the current Merkle root
@@ -251,8 +258,7 @@ impl ASPMembership {
     /// [`Error::Overflow`] if the next leaf index would exceed `u64::MAX`.
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
 
         let instance = env.storage().instance();
         let levels: u32 = instance
