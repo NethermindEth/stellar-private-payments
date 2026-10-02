@@ -23,7 +23,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::constants::bn256_modulus;
+use soroban_utils::{AdminError, constants::bn256_modulus};
 
 // Re-exported rather than merely imported so `pool::ExtData` and
 // `pool::hash_ext_data` keep resolving for existing consumers (`e2e-tests`,
@@ -76,6 +76,14 @@ impl From<MerkleError> for Error {
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
             MerkleError::NotInitialized => Error::NotInitialized,
             MerkleError::Overflow => Error::Overflow,
+        }
+    }
+}
+
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
         }
     }
 }
@@ -598,14 +606,6 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Get the admin address
-    fn get_admin(env: &Env) -> Result<Address, Error> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(Error::NotInitialized)
-    }
-
     /// Get the pool's ASP policy flags.
     pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
         Self::load_policy_flags(env)
@@ -673,8 +673,7 @@ impl PoolContract {
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
     }
 
     // ========== ASP Contract Functions ==========
@@ -705,8 +704,7 @@ impl PoolContract {
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
@@ -726,8 +724,7 @@ impl PoolContract {
         env: &Env,
         new_asp_non_membership: Address,
     ) -> Result<(), Error> {
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
