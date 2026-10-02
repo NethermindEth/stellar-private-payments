@@ -9,7 +9,7 @@ description = "Browser end-to-end tests for the web client, against a local Stel
 
 [dependencies]
 # workspace
-stellar-private-payments = { path = "../sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "../sdk/native", version = "0.2.0" }
 stellar-private-payments-web = { path = "../sdk/web", version = "0.1.0" }
 
 # external
