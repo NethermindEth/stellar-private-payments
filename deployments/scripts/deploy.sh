@@ -585,6 +585,24 @@ deploy_contract() {
   echo "$id"
 }
 
+verify_deployed_gvk() {
+  local id="$1" expected_mode key coord hex expected actual mode
+  need bc
+  expected_mode="$(gvk_mode_constructor_arg "$2")"
+  key="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" --send=no -- get_admin_view_key)" \
+    || die "failed to read AdminViewKey from pool $id"
+  # The CLI prints U256 as decimal, the config as hex.
+  for coord in x y; do
+    hex="$(jq -r ".$coord | ltrimstr(\"0x\") | ascii_upcase" <<<"$GVK_AUTHORITY_PUB_KEY_COMPACT")"
+    expected="$(BC_LINE_LENGTH=0 bc <<<"ibase=16; $hex")"
+    actual="$(jq -r ".$coord" <<<"$key" 2>/dev/null)"
+    [[ "$actual" == "$expected" ]] || die "pool $id AdminViewKey.$coord mismatch: chain=$actual expected=$expected"
+  done
+  mode="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" --send=no -- get_gvk_mode)" \
+    || die "failed to read GvkMode from pool $id"
+  [[ "$mode" == "$expected_mode" ]] || die "pool $id GvkMode mismatch: chain=$mode expected=$expected_mode"
+}
+
 fetch_token_symbol() {
   local id="$1" out
   out="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" -- symbol 2>/dev/null || true)"
@@ -716,6 +734,7 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --admin-view-key "$GVK_AUTHORITY_PUB_KEY_COMPACT" \
         --gvk-mode "$(gvk_mode_constructor_arg "$gvk_mode")")"
+      verify_deployed_gvk "$pool_id" "$gvk_mode"
     fi
   else
     if [[ "$gvk_mode" == "off" ]]; then
