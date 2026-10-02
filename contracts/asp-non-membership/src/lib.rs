@@ -434,27 +434,61 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
-    #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
-        let store = env.storage().persistent();
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        Self::insert(&env, key, value)
+    }
 
+    /// Inserts several key-value pairs into the tree, in order.
+    ///
+    /// Each pair follows the rules of [`ASPNonMembership::insert_leaf`] and
+    /// publishes its own `LeafInsertedEvent` carrying the root after that
+    /// insert. One key that is already in the tree fails the whole call and
+    /// reverts every insert before it. An empty list changes nothing.
+    /// Requires admin authorization once for the whole list.
+    ///
+    /// The transaction's write footprint bounds the number of pairs, because
+    /// each insert writes the new leaf, the nodes on its path, and the root.
+    /// Simulate the call before sending it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::KeyAlreadyExists`] if a key is already in the tree,
+    /// including one placed earlier in `entries`, [`Error::KeyNotFound`] if a
+    /// stored node is missing or malformed, and [`Error::NotInitialized`] if
+    /// the contract has no admin address stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call, because `require_auth`
+    /// raises a host error rather than returning.
+    pub fn insert_leaves(env: Env, entries: Vec<(U256, U256)>) -> Result<(), Error> {
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        entries
+            .iter()
+            .try_for_each(|(key, value)| Self::insert(&env, key, value))
+    }
+
+    /// Inserts one key-value pair without checking authorization.
+    #[allow(clippy::cast_possible_truncation)]
+    fn insert(env: &Env, key: U256, value: U256) -> Result<(), Error> {
+        let store = env.storage().persistent();
         let instance = env.storage().instance();
         let root: U256 = instance
             .get(&DataKey::Root)
-            .unwrap_or(U256::from_u32(&env, 0u32));
+            .unwrap_or(U256::from_u32(env, 0u32));
 
         // Compute key bits
-        let key_bits = Self::split_bits(&env, &key);
+        let key_bits = Self::split_bits(env, &key);
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
+        let find_result = Self::find_key_internal(env, &store, &key, &key_bits, &root, 0u32)?;
 
         if find_result.found {
             return Err(Error::KeyAlreadyExists);
         }
 
-        let zero = U256::from_u32(&env, 0u32);
+        let zero = U256::from_u32(env, 0u32);
         let mut siblings = find_result.siblings.clone();
         let mut mixed = false;
         let mut rt_old = zero.clone();
@@ -463,7 +497,7 @@ impl ASPNonMembership {
         // Handle collision case: extend siblings for a common prefix and add
         // old leaf
         if !find_result.is_old0 {
-            let old_key_bits = Self::split_bits(&env, &find_result.not_found_key);
+            let old_key_bits = Self::split_bits(env, &find_result.not_found_key);
             let mut i = siblings.len();
             // Extend siblings with zeros for common prefix bits
             while i < old_key_bits.len()
@@ -475,7 +509,7 @@ impl ASPNonMembership {
                 i = i.checked_add(1).ok_or(Error::Overflow)?;
             }
             rt_old = Self::hash_leaf(
-                &env,
+                env,
                 find_result.not_found_key.clone(),
                 find_result.not_found_value.clone(),
             );
@@ -488,8 +522,8 @@ impl ASPNonMembership {
         }
 
         // Insert the new leaf
-        let mut rt = Self::hash_leaf(&env, key.clone(), value.clone());
-        let leaf_node = vec![&env, U256::from_u32(&env, 1u32), key.clone(), value.clone()];
+        let mut rt = Self::hash_leaf(env, key.clone(), value.clone());
+        let leaf_node = vec![env, U256::from_u32(env, 1u32), key.clone(), value.clone()];
         store.set(&DataKey::Node(rt.clone()), &leaf_node);
 
         // Build up the tree from leaf to root (process siblings in reverse)
@@ -520,9 +554,9 @@ impl ASPNonMembership {
                 };
                 let bit = key_bits.get(i as u32).ok_or(Error::KeyNotFound)?;
                 rt_old = if bit {
-                    Self::hash_internal(&env, old_sibling.clone(), rt_old.clone())
+                    Self::hash_internal(env, old_sibling.clone(), rt_old.clone())
                 } else {
-                    Self::hash_internal(&env, rt_old.clone(), old_sibling.clone())
+                    Self::hash_internal(env, rt_old.clone(), old_sibling.clone())
                 };
                 store.remove(&DataKey::Node(rt_old.clone()));
             }
@@ -535,10 +569,10 @@ impl ASPNonMembership {
                 (rt.clone(), sibling.clone())
             };
 
-            rt = Self::hash_internal(&env, left_hash.clone(), right_hash.clone());
+            rt = Self::hash_internal(env, left_hash.clone(), right_hash.clone());
 
             // Store internal node
-            let internal_node = vec![&env, left_hash, right_hash];
+            let internal_node = vec![env, left_hash, right_hash];
             store.set(&DataKey::Node(rt.clone()), &internal_node);
         }
 
@@ -565,7 +599,7 @@ impl ASPNonMembership {
             value: value.clone(),
             root: rt,
         }
-        .publish(&env);
+        .publish(env);
 
         Ok(())
     }

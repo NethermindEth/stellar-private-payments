@@ -74,6 +74,146 @@ fn test_insert_multiple_keys() {
     assert_ne!(root, U256::from_u32(&env, 0u32));
 }
 
+/// Three key-value pairs. Keys 1 and 3 share their lowest bit, so inserting
+/// key 3 moves leaf 1 one level down.
+fn three_entries(env: &Env) -> [(U256, U256); 3] {
+    [(1, 10), (2, 20), (3, 30)]
+        .map(|(key, value)| (U256::from_u32(env, key), U256::from_u32(env, value)))
+}
+
+#[test]
+fn test_insert_leaves_matches_inserting_one_at_a_time() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let batched =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin.clone(),)));
+    let one_at_a_time =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin,)));
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+
+    batched.insert_leaves(&Vec::from_slice(&env, &entries));
+    for (key, value) in &entries {
+        one_at_a_time.insert_leaf(key, value);
+    }
+
+    assert_eq!(batched.get_root(), one_at_a_time.get_root());
+    for (key, value) in &entries {
+        let found = batched.find_key(key);
+        assert!(found.found);
+        assert_eq!(found.found_value, *value);
+    }
+}
+
+#[test]
+fn test_insert_leaves_publishes_one_leaf_inserted_per_key() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let one_at_a_time =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin,)));
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+    let expected = entries.clone().map(|(key, value)| {
+        one_at_a_time.insert_leaf(&key, &value);
+        LeafInsertedEvent {
+            key,
+            value,
+            root: one_at_a_time.get_root(),
+        }
+        .to_xdr(&env, &contract_id)
+    });
+
+    client.insert_leaves(&Vec::from_array(&env, entries));
+
+    assert_eq!(env.events().all().events(), expected);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_insert_leaves_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let outsider = Address::generate(&env);
+    let entries = Vec::from_array(&env, three_entries(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &outsider,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaves",
+            args: (entries.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaves(&entries);
+}
+
+#[test]
+fn test_insert_leaves_refuses_the_whole_batch_when_a_key_exists() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+    let [(first, _), (second, second_value), _] = &entries;
+    client.insert_leaf(second, second_value);
+    let root = client.get_root();
+
+    assert_eq!(
+        client.try_insert_leaves(&Vec::from_slice(&env, &entries)),
+        Err(Ok(Error::KeyAlreadyExists))
+    );
+    assert_eq!(client.get_root(), root);
+    assert!(!client.find_key(first).found);
+}
+
+#[test]
+fn test_insert_leaves_accepts_an_empty_list() {
+    use soroban_sdk::testutils::Events;
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.insert_leaf(&U256::from_u32(&env, 1), &U256::from_u32(&env, 10));
+    let root = client.get_root();
+
+    assert_eq!(client.try_insert_leaves(&Vec::new(&env)), Ok(Ok(())));
+    assert!(env.events().all().events().is_empty());
+    assert_eq!(client.get_root(), root);
+}
+
+#[test]
+fn test_insert_leaves_refuses_a_key_repeated_in_the_batch() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let key = U256::from_u32(&env, 1);
+    let value = U256::from_u32(&env, 10);
+
+    assert_eq!(
+        client.try_insert_leaves(&Vec::from_array(
+            &env,
+            [(key.clone(), value.clone()), (key.clone(), value)]
+        )),
+        Err(Ok(Error::KeyAlreadyExists))
+    );
+    assert_eq!(client.get_root(), U256::from_u32(&env, 0));
+    assert!(!client.find_key(&key).found);
+}
+
 /// This test is skipped under Miri because the panic formatting path triggers
 /// undefined behavior in the `ethnum` crate's unsafe formatting code.
 /// See: https://github.com/nlordell/ethnum-rs/issues/34

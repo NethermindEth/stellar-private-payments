@@ -364,8 +364,9 @@ fn membership_insert_row() -> Row {
     measure(&env, "asp-membership insert_leaf, first leaf")
 }
 
-/// Inserts eight keys, then measures the ninth insert and one delete.
-fn non_membership_rows() -> [Row; 2] {
+/// Inserts eight keys, then measures the ninth insert, one delete, and, with
+/// the deleted key back, three keys inserted in one call.
+fn non_membership_rows() -> [Row; 3] {
     let env = mainnet_env();
     let admin = Address::generate(&env);
     let id = env.register(ASPNonMembership, (admin,));
@@ -377,7 +378,14 @@ fn non_membership_rows() -> [Row; 2] {
     let insert = measure(&env, "asp-non-membership insert_leaf, ninth key");
     client.delete_leaf(&U256::from_u32(&env, 3));
     let delete = measure(&env, "asp-non-membership delete_leaf, one of nine");
-    [insert, delete]
+    client.insert_leaf(&U256::from_u32(&env, 3), &U256::from_u32(&env, 1));
+    let entries = [10, 11, 12].map(|key| (U256::from_u32(&env, key), U256::from_u32(&env, 1)));
+    client.insert_leaves(&Vec::from_array(&env, entries));
+    let batch = measure(
+        &env,
+        "asp-non-membership insert_leaves, three keys into nine",
+    );
+    [insert, delete, batch]
 }
 
 fn registry_row() -> Row {
@@ -442,6 +450,7 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
+    "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
     "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
 };
 
