@@ -20,10 +20,11 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
+use pool_core::events::{DepositPauseChanged, DepositPauseRepeated};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Events},
+    testutils::{Address as _, Events, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
@@ -2110,6 +2111,7 @@ fn the_configuration_lives_in_the_instance() {
             DataKey::PolicyFlags,
             DataKey::AdminViewKey,
             DataKey::GvkMode,
+            DataKey::DepositsPaused,
         ] {
             assert!(instance.has(&key), "{key:?} should live in the instance");
             assert!(
@@ -2256,4 +2258,336 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// Registers a view-only pool with a deposit cap of 1000, depth 3, and policy
+/// flags 0, so no ASP root is compared.
+fn register_open_pool_gvk(env: &Env, setup: &TestSetup) -> Address {
+    register_pool_gvk(
+        env,
+        setup,
+        U256::from_u32(env, 1000),
+        3,
+        0,
+        mk_point(env, 1, 2),
+        VIEW_ONLY,
+    )
+}
+
+/// A proof moving `ext_amount` that clears every check ahead of the verifier on
+/// a pool with policy flags 0, where no ASP root is compared, so the verifier's
+/// refusal of the mock proof is the first error the pool can raise.
+fn mk_moving_transact_proof(
+    env: &Env,
+    pool: &PoolGvkContractClient,
+    token: &Address,
+    ext_amount: i32,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let zero = U256::from_u32(env, 0);
+    let (mut proof, _) =
+        mk_transact_proof(env, pool, token, zero.clone(), zero, nullifier, VIEW_ONLY);
+    let ext = mk_ext_data(env, Address::generate(env), ext_amount);
+    proof.ext_data_hash = compute_ext_hash(env, &pool.address, token, &ext);
+    proof.public_amount = pool_core::amounts::calculate_public_amount(env, ext.ext_amount.clone())
+        .expect("the amount must fit the field");
+    (proof, ext)
+}
+
+#[test]
+fn deposits_paused_is_false_after_construction() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert!(!PoolGvkContractClient::new(&env, &pool_id).deposits_paused());
+}
+
+#[test]
+fn pause_deposits_sets_the_flag_and_publishes_the_change() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.pause_deposits();
+
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: true }.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// A deposit the pause refuses leaves the balances, the nullifier, and the
+/// event log as they were.
+#[test]
+fn transact_refuses_a_deposit_while_deposits_are_paused() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 10_000i128;
+    setup.token = register_funded_token(&env, &sender, funded);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+    let nullifier = 0xF1;
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, nullifier);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &sender),
+        Err(Ok(Error::DepositsPaused))
+    );
+    assert!(env.events().all().events().is_empty());
+    assert_eq!(token.balance(&sender), funded);
+    assert_eq!(token.balance(&pool_id), 0);
+    assert!(!pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+#[test]
+fn transact_passes_a_transfer_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, transfer) = mk_moving_transact_proof(&env, &pool, &setup.token, 0, 0xF2);
+
+    assert_eq!(
+        pool.try_transact(&proof, &transfer, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_passes_a_withdrawal_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, withdrawal) = mk_moving_transact_proof(&env, &pool, &setup.token, -500, 0xF3);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn unpause_deposits_lets_a_deposit_reach_the_verifier() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    pool.unpause_deposits();
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF4);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// A pause sent to a paused pool succeeds, so a pre-signed authorization
+/// carried by it is spent rather than left open to replay, and its event shows
+/// the spend.
+#[test]
+fn pause_deposits_on_a_paused_pool_changes_nothing() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    assert_eq!(pool.try_pause_deposits(), Ok(Ok(())));
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// The admin's authorization is required on a paused pool too; without it, a
+/// pre-signed pause sent there would not be spent.
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_on_a_paused_pool_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+#[test]
+fn unpause_deposits_refuses_an_open_pool() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(
+        pool.try_unpause_deposits(),
+        Err(Ok(Error::DepositsNotPaused))
+    );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "unpause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.unpause_deposits();
+}
+
+/// The deposit is above the cap, so a cap check ahead of the pause would answer
+/// `WrongExtAmount` instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_the_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 1500, 0xF5);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+/// The sender holds none of the token, so a transfer ahead of the pause would
+/// trap instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_moving_tokens() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    setup.token = register_funded_token(&env, &Address::generate(&env), 10_000);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF6);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+#[test]
+fn transact_errors_when_the_deposit_flag_is_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().instance().remove(&DataKey::DepositsPaused);
+    });
+    env.mock_all_auths();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF7);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::NotInitialized))
+    );
+}
+
+#[test]
+fn pause_deposits_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
 }
