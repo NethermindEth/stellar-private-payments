@@ -557,10 +557,19 @@ impl PoolGvkContract {
     /// # Returns
     ///
     /// The current membership Merkle root as U256
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidProof`] if the call to the ASP Membership
+    /// contract fails, and [`Error::NotInitialized`] if no ASP Membership
+    /// address is stored.
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
-        Ok(client.get_root())
+        match client.try_get_root() {
+            Ok(Ok(root)) => Ok(root),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the current Merkle root from the ASP Non-Membership contract.
@@ -575,10 +584,19 @@ impl PoolGvkContract {
     /// # Returns
     ///
     /// The current non-membership Merkle root as U256
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidProof`] if the call to the ASP Non-Membership
+    /// contract fails, and [`Error::NotInitialized`] if no ASP Non-Membership
+    /// address is stored.
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
-        Ok(client.get_root())
+        match client.try_get_root() {
+            Ok(Ok(root)) => Ok(root),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the token contract address.
@@ -834,8 +852,9 @@ impl PoolGvkContract {
     /// GVK ciphertext counts do not match the pool's GVK mode,
     /// [`Error::NonCanonicalPublicInput`] if a public input or a ciphertext
     /// field is outside the BN254 scalar field, and [`Error::InvalidProof`] if
-    /// the proof is empty, the verifier refuses it, or its non-membership root
-    /// is not current or its membership root unknown.
+    /// the proof is empty, the verifier refuses it, its non-membership root is
+    /// not current or its membership root unknown, or a call to an association
+    /// set fails.
     ///
     /// Returns [`Error::MerkleTreeFull`] if the tree cannot take two more
     /// commitments, and [`Error::NotInitialized`] if configuration or tree
@@ -845,7 +864,7 @@ impl PoolGvkContract {
     /// # Panics
     ///
     /// Panics if `sender` does not authorize the call, or if a token transfer
-    /// or an association set call fails.
+    /// fails.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -928,7 +947,17 @@ impl PoolGvkContract {
         if policy::requires_membership_proofs(policy_flags) {
             let asp_address = Self::get_asp_membership(env)?;
             let client = ASPMembershipClient::new(env, &asp_address);
-            if !client.is_known_root(&proof.asp_membership_root) {
+            // `try_is_known_root`, not `is_known_root`, and `try_get_root` in
+            // the root getters for the same reason. The trees' error enums are
+            // `#[repr(u32)]` like this contract's, and their codes overlap:
+            // `asp-membership`'s `NotInitialized` is 4 and so is `WrongLevels`.
+            // A plain call lets a tree failure trap out of this frame carrying
+            // the tree's code, and the caller reads it as the wrong pool error.
+            // Every failed tree call is reported as `InvalidProof` instead.
+            if !matches!(
+                client.try_is_known_root(&proof.asp_membership_root),
+                Ok(Ok(true))
+            ) {
                 return Err(Error::InvalidProof);
             }
         }

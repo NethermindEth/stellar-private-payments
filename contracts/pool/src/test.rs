@@ -9,7 +9,8 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use pool_core::events::{DepositPauseChanged, DepositPauseRepeated};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec, contract, contracterror,
+    contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
@@ -2226,6 +2227,99 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as the pool's InvalidProof, not as the \
          NotAuthorized that Groth16Error::MalformedPublicInputs shares a code with"
+    );
+}
+
+/// The code `asp-membership` gives `NotInitialized` and the pool gives
+/// `WrongLevels`.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum TreeError {
+    NotInitialized = 4,
+}
+
+/// An association set whose root reads all fail with code 4.
+#[contract]
+struct FailingTree;
+
+#[contractimpl]
+impl FailingTree {
+    pub fn get_root() -> Result<U256, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+
+    pub fn is_known_root(_root: U256) -> Result<bool, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+}
+
+/// Asserts that `transact` reports a failing tree in `field` as
+/// `InvalidProof`.
+///
+/// The output commitment is outside the field, which `transact` checks after
+/// the association sets, so `InvalidProof` can only come from the failing
+/// tree. A failure crossing the pool's frame raw would read as `WrongLevels`.
+fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: u32) {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    let flags = match field {
+        PolicyAspRootField::Membership => {
+            setup.asp_membership_address = env.register(FailingTree, ());
+            policy::ALLOWLIST_BIT
+        }
+        PolicyAspRootField::NonMembership => {
+            setup.asp_non_membership_address = env.register(FailingTree, ());
+            policy::BLOCKLIST_BIT
+        }
+    };
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, flags);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let zero = U256::from_u32(&env, 0);
+    let (mut proof, ext) =
+        mk_transact_proof(&env, &pool, &setup.token, zero.clone(), zero, nullifier);
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    assert_eq!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_reports_a_failing_allowlist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::Membership, 0xE7);
+}
+
+#[test]
+fn transact_reports_a_failing_blocklist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::NonMembership, 0xE8);
+}
+
+#[test]
+fn get_asp_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_membership_address = env.register(FailingTree, ());
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+
+    assert_eq!(
+        PoolContractClient::new(&env, &pool_id).try_get_asp_membership_root(),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn get_asp_non_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_non_membership_address = env.register(FailingTree, ());
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+
+    assert_eq!(
+        PoolContractClient::new(&env, &pool_id).try_get_asp_non_membership_root(),
+        Err(Ok(Error::InvalidProof))
     );
 }
 
