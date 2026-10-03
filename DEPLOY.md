@@ -27,7 +27,7 @@ verifier contract, since the verifying key is baked into the WASM.
 |---|---|
 | `<policy>` | See [ASP policies](#asp-policies) below. |
 | `<gvk-mode>` | Omit for `gvk-off`. See [Global View Key (GVK)](#global-view-key-gvk) below. |
-| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `contract:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>` |
+| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract, and a classic issuer must have `AUTH_IMMUTABLE` set and neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so no issuer can freeze or claw back a pool's balance. |
 
 If neither `--token` nor `--pool` is given, one native XLM pool deploys by
 default.
@@ -48,7 +48,7 @@ default.
 | Option | Meaning |
 |---|---|
 | `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's |
-| `--token <ADDRESS>` | Legacy single-pool token contract (cannot mix with `--pool`) |
+| `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
 | `--skip-init` | Deploy WASM only, no constructors |
@@ -127,10 +127,8 @@ deployments/scripts/deploy.sh testnet \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
-Mixed-policy: a blocklist native pool alongside an allowlist-blocklist EURC
-pool (for testnet EURC, see the [Circle EURC
-docs](https://www.circle.com/eurc#how-to-start-using-eurc) and
-[faucet](https://faucet.circle.com/)):
+Mixed-policy: a blocklist pool alongside an allowlist-blocklist pool, both
+native XLM:
 
 ```sh
 deployments/scripts/deploy.sh testnet \
@@ -140,7 +138,7 @@ deployments/scripts/deploy.sh testnet \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
-  --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+  --pool allowlist-blocklist:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
 Mixing a plain pool with a GVK-traceable one in one deployment:
