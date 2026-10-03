@@ -42,7 +42,7 @@
 
 use super::utils::{
     ASP_MEMBERSHIP_LEVELS, LEVELS, deploy_contracts, prove_transaction, sync_contract_state,
-    test_env,
+    test_env, wasm_hash,
 };
 use anyhow::Result;
 use asp_membership::{ASPMembership, ASPMembershipClient};
@@ -243,6 +243,8 @@ impl PoolFixture {
                 verifier.clone(),
                 asp_membership.clone(),
                 asp_non_membership.clone(),
+                wasm_hash(&asp_membership),
+                wasm_hash(&asp_non_membership),
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,

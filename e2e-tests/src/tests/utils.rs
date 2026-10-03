@@ -19,7 +19,7 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::{ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec as SorobanVec,
+    Address, Bytes, BytesN, Env, Executable, I256, U256, Vec as SorobanVec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
@@ -187,6 +187,19 @@ pub struct DeployedContracts {
     pub asp_non_membership: Address,
 }
 
+/// Returns the hash of the Wasm `contract` runs, which a pool's constructor
+/// takes for each association set.
+///
+/// # Panics
+///
+/// Panics if `contract` is not a deployed Wasm contract.
+pub fn wasm_hash(contract: &Address) -> BytesN<32> {
+    match contract.executable() {
+        Some(Executable::Wasm(hash)) => hash,
+        other => panic!("expected a Wasm contract, found {other:?}"),
+    }
+}
+
 /// Deploy all contracts required for E2E testing
 ///
 /// Deploys and runs constructors for the Pool, ASP Membership, ASP
@@ -226,6 +239,8 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             verifier_address.clone(),
             asp_membership.clone(),
             asp_non_membership.clone(),
+            wasm_hash(&asp_membership),
+            wasm_hash(&asp_non_membership),
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
             (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
