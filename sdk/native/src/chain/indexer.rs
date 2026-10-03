@@ -12,8 +12,8 @@ const MAX_PAGES_PER_ROUND: usize = 10;
 pub(crate) struct Indexer<S: ContractDataStorage> {
     client: Client,
     storage: S,
+    config: ContractConfig,
     contract_ids: Vec<String>,
-    min_pool_ledger: u32,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,22 +31,8 @@ impl<S: ContractDataStorage> Indexer<S> {
         storage: S,
         config: &ContractConfig,
     ) -> Result<Self, IndexerError> {
-        let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
-
-        let existing_sync = storage.get_sync_state().await?;
-        let active_contract_ids: HashSet<&str> = contract_ids.iter().map(String::as_str).collect();
-        let active_sync: Vec<_> = existing_sync
-            .into_iter()
-            .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
-            .collect();
-
-        let probe_ledger = active_sync
-            .iter()
-            .map(|meta| meta.last_indexed_ledger)
-            .filter(|ledger| *ledger > 0)
-            .min()
-            .unwrap_or(min_pool_ledger);
+        let (probe_ledger, _) = pass_start(config, &storage.get_sync_state().await?)?;
 
         match client
             .get_contract_events(&contract_ids, probe_ledger, 1, None)
@@ -66,8 +52,8 @@ impl<S: ContractDataStorage> Indexer<S> {
         Ok(Self {
             client,
             storage,
+            config: config.clone(),
             contract_ids,
-            min_pool_ledger,
         })
     }
 
@@ -82,49 +68,9 @@ impl<S: ContractDataStorage> Indexer<S> {
     /// ledger, because more events may share that ledger.
     pub async fn fetch_contract_events(&self) -> Result<bool, IndexerError> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
-        let existing_sync = self.storage.get_sync_state().await?;
-        let active_contract_ids: HashSet<&str> =
-            self.contract_ids.iter().map(String::as_str).collect();
-        let active_sync: Vec<_> = existing_sync
-            .into_iter()
-            .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
-            .collect();
-
-        let start_ledger = active_sync
-            .iter()
-            .map(|meta| meta.last_indexed_ledger)
-            .min()
-            .unwrap_or(self.min_pool_ledger)
-            .min(network_tip);
-
-        if active_sync
-            .iter()
-            .map(|meta| meta.last_indexed_ledger)
-            .collect::<HashSet<_>>()
-            .len()
-            > 1
-        {
-            tracing::warn!(
-                "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_indexed_ledger={start_ledger}",
-                active_sync.len()
-            );
-        }
-
-        let unique_cursors: HashSet<&str> = active_sync
-            .iter()
-            .filter_map(|meta| (!meta.cursor.is_empty()).then_some(meta.cursor.as_str()))
-            .collect();
-        let mut cursor = if unique_cursors.len() <= 1 {
-            active_sync
-                .first()
-                .and_then(|meta| (!meta.cursor.is_empty()).then(|| meta.cursor.clone()))
-        } else {
-            tracing::warn!(
-                "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
-                active_sync.len()
-            );
-            None
-        };
+        let (start_ledger, mut cursor) =
+            pass_start(&self.config, &self.storage.get_sync_state().await?)?;
+        let start_ledger = start_ledger.min(network_tip);
 
         let mut may_have_more = false;
         let mut progress_ledger = start_ledger;
@@ -205,6 +151,75 @@ impl<S: ContractDataStorage> Indexer<S> {
     }
 }
 
+/// Returns the ledger an indexing pass starts at, and the cursor it resumes
+/// from.
+///
+/// Each contract resumes at its `last_indexed_ledger`. A contract with no sync
+/// metadata, such as an ASP membership contract the manifest names for the
+/// first time, starts at its deployment ledger instead: a pool's or an added
+/// ASP membership contract's own, and the manifest's earliest for
+/// `asp_membership` and the registry. The pass starts at the earliest of these,
+/// so no contract misses an event. A cursor comes back only when every contract
+/// has metadata, because the shared cursor lies past the history a contract
+/// without metadata needs.
+fn pass_start(config: &ContractConfig, sync: &[SyncMetadata]) -> Result<(u32, Option<String>)> {
+    let min_deployment_ledger = config.min_deployment_ledger()?;
+    let resume_points: Vec<(u32, Option<&SyncMetadata>)> = config
+        .indexed_contracts()
+        .map(|(contract_id, deployment_ledger)| {
+            let meta = sync.iter().find(|meta| meta.contract_id == contract_id);
+            (
+                meta.map_or(deployment_ledger.unwrap_or(min_deployment_ledger), |meta| {
+                    meta.last_indexed_ledger
+                }),
+                meta,
+            )
+        })
+        .collect();
+    let start_ledger = resume_points
+        .iter()
+        .map(|(ledger, _)| *ledger)
+        .min()
+        .unwrap_or(min_deployment_ledger);
+    let Some(active_sync) = resume_points
+        .into_iter()
+        .map(|(_, meta)| meta)
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Ok((start_ledger, None));
+    };
+
+    if active_sync
+        .iter()
+        .map(|meta| meta.last_indexed_ledger)
+        .collect::<HashSet<_>>()
+        .len()
+        > 1
+    {
+        tracing::warn!(
+            "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_indexed_ledger={start_ledger}",
+            active_sync.len()
+        );
+    }
+
+    let unique_cursors: HashSet<&str> = active_sync
+        .iter()
+        .filter_map(|meta| (!meta.cursor.is_empty()).then_some(meta.cursor.as_str()))
+        .collect();
+    let cursor = if unique_cursors.len() <= 1 {
+        active_sync
+            .first()
+            .and_then(|meta| (!meta.cursor.is_empty()).then(|| meta.cursor.clone()))
+    } else {
+        tracing::warn!(
+            "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
+            active_sync.len()
+        );
+        None
+    };
+    Ok((start_ledger, cursor))
+}
+
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait ContractDataStorage {
@@ -238,5 +253,86 @@ impl ContractDataStorage for crate::storage::StorageHandle {
         fully_indexed: bool,
     ) -> anyhow::Result<()> {
         (**self).save_sync_progress(metadata, fully_indexed).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Pools deployed at ledgers 200 and 100, and an ASP membership contract
+    /// added at ledger 4,000.
+    fn config() -> Result<ContractConfig> {
+        let pool = |contract_id: &str, deployment_ledger: u32| {
+            json!({
+                "poolContractId": contract_id,
+                "tokenContractId": "CTOKEN",
+                "deploymentLedger": deployment_ledger,
+                "enabled": true,
+                "asset": {"kind": "native"},
+                "policyFlags": ["allowlist"],
+            })
+        };
+        Ok(serde_json::from_value(json!({
+            "network": "test",
+            "kdf_domain": "tests",
+            "deployer": "GDEPLOYER",
+            "admin": "GADMIN",
+            "asp_membership": "CMEMBERSHIP",
+            "added_asp_memberships": [{"contractId": "CADDED", "deploymentLedger": 4_000}],
+            "asp_non_membership": "CNONMEMBERSHIP",
+            "verifiers": {},
+            "public_key_registry": "CREGISTRY",
+            "pools": [pool("CPOOL_A", 200), pool("CPOOL_B", 100)],
+        }))?)
+    }
+
+    fn progress(contract_id: &str, last_indexed_ledger: u32) -> SyncMetadata {
+        SyncMetadata {
+            contract_id: contract_id.to_string(),
+            cursor: "CURSOR".to_string(),
+            last_indexed_ledger,
+            last_fully_indexed_ledger: 0,
+        }
+    }
+
+    #[test]
+    fn a_first_sync_starts_at_the_earliest_pool() -> Result<()> {
+        assert_eq!(pass_start(&config()?, &[])?, (100, None));
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_allowlist_replays_from_its_own_deployment() -> Result<()> {
+        let config = config()?;
+        let mut sync = ["CPOOL_A", "CPOOL_B", "CMEMBERSHIP", "CREGISTRY"]
+            .map(|contract_id| progress(contract_id, 5_000));
+        assert_eq!(pass_start(&config, &sync)?, (4_000, None));
+
+        // A contract further behind than that deployment still sets the start.
+        sync[0].last_indexed_ledger = 3_000;
+        assert_eq!(pass_start(&config, &sync)?, (3_000, None));
+        Ok(())
+    }
+
+    #[test]
+    fn a_tree_without_progress_starts_at_the_manifest_minimum() -> Result<()> {
+        let sync = ["CPOOL_A", "CPOOL_B", "CADDED", "CREGISTRY"]
+            .map(|contract_id| progress(contract_id, 5_000));
+        assert_eq!(pass_start(&config()?, &sync)?, (100, None));
+        Ok(())
+    }
+
+    #[test]
+    fn contracts_with_progress_resume_from_the_slowest() -> Result<()> {
+        let mut sync = ["CPOOL_A", "CPOOL_B", "CMEMBERSHIP", "CADDED", "CREGISTRY"]
+            .map(|contract_id| progress(contract_id, 5_000));
+        sync[3].last_indexed_ledger = 4_500;
+        assert_eq!(
+            pass_start(&config()?, &sync)?,
+            (4_500, Some("CURSOR".to_string()))
+        );
+        Ok(())
     }
 }
