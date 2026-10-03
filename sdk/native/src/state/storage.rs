@@ -24,6 +24,7 @@ const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
     M::up(include_str!("schema_v3_account_kdf_domain.sql")).foreign_key_check(),
     M::up(include_str!("schema_v4_processed_events.sql")),
+    M::up(include_str!("schema_v5_leaves_per_tree.sql")),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -1119,9 +1120,9 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
-                    VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(leaf_index) DO NOTHING",
+                "INSERT INTO asp_membership_leaves (contract_id, leaf_index, leaf, root, event_id)
+                    VALUES ((SELECT contract_id FROM raw_contract_events WHERE id = ?4), ?1, ?2, ?3, ?4)
+                    ON CONFLICT(contract_id, leaf_index) DO NOTHING",
             )?;
 
             for event in events {
@@ -3233,6 +3234,118 @@ mod tests {
         let storage = Storage::connect_with_connection(conn)?;
 
         assert!(table_exists(&storage.conn, "processed_events")?);
+        Ok(())
+    }
+
+    fn two_allowlist_events() -> ContractsEventData {
+        ContractsEventData {
+            events: vec![
+                ContractEvent {
+                    contract_id: "CASP1".to_string(),
+                    ..dummy_event("evt-a")
+                },
+                ContractEvent {
+                    contract_id: "CASP2".to_string(),
+                    ..dummy_event("evt-b")
+                },
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        }
+    }
+
+    #[test]
+    fn two_allowlists_keep_their_own_leaf_zero() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let leaf_a = Field::try_from_le_bytes([1u8; 32])?;
+        let leaf_b = Field::try_from_le_bytes([2u8; 32])?;
+        storage.save_events_batch(&two_allowlist_events())?;
+
+        storage.save_leaf_added_events_batch(&vec![
+            LeafAddedEvent {
+                id: "evt-a".to_string(),
+                leaf: leaf_a,
+                index: 0,
+                root: leaf_a,
+            },
+            LeafAddedEvent {
+                id: "evt-b".to_string(),
+                leaf: leaf_b,
+                index: 0,
+                root: leaf_b,
+            },
+        ])?;
+
+        assert_eq!(
+            storage.get_all_asp_membership_leaves_ordered("CASP1")?,
+            vec![leaf_a]
+        );
+        assert_eq!(
+            storage.get_all_asp_membership_leaves_ordered("CASP2")?,
+            vec![leaf_b]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn opening_a_v4_database_files_leaves_under_their_tree() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 4)?;
+        let mut v4 = Storage { conn };
+        v4.save_events_batch(&two_allowlist_events())?;
+        v4.conn.execute(
+            "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+                VALUES (0, ?1, ?1, 'evt-a'), (1, ?2, ?2, 'evt-b')",
+            params![
+                Field::try_from_le_bytes([1u8; 32])?,
+                Field::try_from_le_bytes([2u8; 32])?
+            ],
+        )?;
+
+        let storage = Storage::connect_with_connection(v4.conn)?;
+
+        let rows = storage
+            .conn
+            .prepare(
+                "SELECT c.address, l.leaf_index
+                 FROM asp_membership_leaves l
+                 JOIN contracts c ON c.contract_id = l.contract_id
+                 ORDER BY l.leaf_index",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, u32)>, _>>()?;
+        assert_eq!(
+            rows,
+            vec![("CASP1".to_string(), 0), ("CASP2".to_string(), 1)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_dropped_before_the_migration_is_replayed() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 4)?;
+        let mut v4 = Storage { conn };
+        v4.save_events_batch(&two_allowlist_events())?;
+        v4.conn.execute(
+            "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+                VALUES (0, ?1, ?1, 'evt-a'), (0, ?2, ?2, 'evt-b')
+                ON CONFLICT(leaf_index) DO NOTHING",
+            params![
+                Field::try_from_le_bytes([1u8; 32])?,
+                Field::try_from_le_bytes([2u8; 32])?
+            ],
+        )?;
+        v4.save_processed_event_ids(&["evt-a".to_string(), "evt-b".to_string()])?;
+
+        let storage = Storage::connect_with_connection(v4.conn)?;
+
+        let ids: Vec<String> = storage
+            .get_unprocessed_events(10)?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, vec!["evt-b".to_string()]);
         Ok(())
     }
 
