@@ -324,6 +324,8 @@ fn gvk_transact_row() -> Row {
             base.verifier.clone(),
             base.asp_membership.clone(),
             base.asp_non_membership.clone(),
+            wasm_hash(&base.asp_membership),
+            wasm_hash(&base.asp_non_membership),
             U256::from_u32(env, 1_000_000),
             POOL_LEVELS,
             policy::BLOCKLIST_BIT,

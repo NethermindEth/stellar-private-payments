@@ -775,6 +775,8 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
       pool_id="$(deploy_contract pool-gvk "$POOL_GVK_WASM" \
         --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
+        --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
+        --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN" \
