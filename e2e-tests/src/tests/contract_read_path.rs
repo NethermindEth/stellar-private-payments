@@ -155,6 +155,7 @@ fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolConfig
         deployer: strkey(&deployment.admin),
         admin: strkey(&deployment.admin),
         asp_membership: strkey(&deployment.asp_membership),
+        added_asp_memberships: Vec::new(),
         asp_non_membership: strkey(&deployment.asp_non_membership),
         verifiers: [("AB".to_string(), strkey(&deployment.verifier))]
             .into_iter()

@@ -130,6 +130,7 @@ mod split_tests {
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),
+                added_asp_memberships: Vec::new(),
                 asp_non_membership: String::new(),
                 verifiers: Default::default(),
                 public_key_registry: String::new(),
