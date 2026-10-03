@@ -8,9 +8,6 @@ pub enum PoolAsset {
         issuer: String,
         token_contract_id: String,
     },
-    Contract {
-        token_contract_id: String,
-    },
 }
 
 impl PoolAsset {
@@ -74,7 +71,6 @@ impl PoolOptions {
                 issuer,
                 token_contract_id,
             } => format!("classic:{code}:{issuer}:{token_contract_id}"),
-            PoolAsset::Contract { token_contract_id } => format!("contract:{token_contract_id}"),
         }
     }
 }
