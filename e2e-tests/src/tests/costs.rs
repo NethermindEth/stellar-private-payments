@@ -321,6 +321,8 @@ fn gvk_transact_row() -> Row {
             base.verifier.clone(),
             base.asp_membership.clone(),
             base.asp_non_membership.clone(),
+            wasm_hash(&base.asp_membership),
+            wasm_hash(&base.asp_non_membership),
             U256::from_u32(env, 1_000_000),
             POOL_LEVELS,
             policy::BLOCKLIST_BIT,
@@ -448,7 +450,7 @@ const EXPECTED: &[Pinned] = expected! {
     "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_359;
     "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_359;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_367;
+    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_535;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
