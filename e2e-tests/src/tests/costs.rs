@@ -41,7 +41,7 @@
 
 use super::utils::{
     ASP_MEMBERSHIP_LEVELS, LEVELS, deploy_contracts, prove_transaction, sync_contract_state,
-    test_env,
+    test_env, wasm_hash,
 };
 use anyhow::Result;
 use asp_membership::{ASPMembership, ASPMembershipClient};
@@ -240,6 +240,8 @@ impl PoolFixture {
                 verifier.clone(),
                 asp_membership.clone(),
                 asp_non_membership.clone(),
+                wasm_hash(&asp_membership),
+                wasm_hash(&asp_non_membership),
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
@@ -439,12 +441,12 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_191;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
+    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_359;
+    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_359;
+    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_359;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_191;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_191;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_359;
+    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_359;
     "pool get_root" => 2, 0, 0, 0, 0;
     "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_367;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
