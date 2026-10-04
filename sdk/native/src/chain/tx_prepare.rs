@@ -1,7 +1,7 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
 use crate::types::{ExtData, NoteOwnerAddress, SignerAddress};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail, ensure};
 use stellar_xdr::{self as xdr};
 
 use super::{
@@ -10,7 +10,7 @@ use super::{
         BASE_FEE, pool_ext_data_to_scval, pool_gvk_proof_to_scval, pool_proof_to_scval,
         register_account_to_scval,
     },
-    tx_assemble::build_invoke_contract_tx_envelope,
+    tx_assemble::{build_invoke_contract_tx_envelope, invoke_contract_args},
 };
 
 /// Prover output needed to prepare a pool `transact` invocation.
@@ -24,6 +24,10 @@ pub(crate) struct PoolTransactInput {
 impl StateFetcher {
     /// Simulates `transact` and returns unsigned XDR + auth entries for the
     /// wallet.
+    ///
+    /// Refuses the simulation unless its authorization is the `transact` built
+    /// here and, for a deposit, the pool token's transfer of `ext_amount` from
+    /// the sender to the pool; see [`check_transact_auth`].
     pub(crate) async fn prepare_pool_transact(
         &self,
         pool_contract_id: &str,
@@ -31,7 +35,11 @@ impl StateFetcher {
         source_account: &SignerAddress,
     ) -> Result<PreparedSorobanTx> {
         let source_account = source_account.as_str();
-        self.enabled_pool_for(pool_contract_id)?;
+        let token: xdr::ScAddress = self
+            .enabled_pool_for(pool_contract_id)?
+            .token_contract_id
+            .parse()
+            .map_err(|e| anyhow!("invalid token contract id: {e}"))?;
         let proof_scval = if let Some(output_gvk_ciphertexts) = &input.public.output_gvk_ciphertexts
         {
             let input_gvk_ciphertexts =
@@ -63,11 +71,11 @@ impl StateFetcher {
             )?
         };
         let ext_scval = pool_ext_data_to_scval(&input.ext_data)?;
-        let sender_scval = xdr::ScVal::Address(
-            source_account
-                .parse()
-                .map_err(|e| anyhow!("invalid source account: {e}"))?,
-        );
+        let sender: xdr::ScAddress = source_account
+            .parse()
+            .map_err(|e| anyhow!("invalid source account: {e}"))?;
+
+        let args = vec![proof_scval, ext_scval, xdr::ScVal::Address(sender.clone())];
 
         let seq = self.account_sequence(source_account).await?;
         let raw = build_invoke_contract_tx_envelope(
@@ -76,12 +84,21 @@ impl StateFetcher {
             BASE_FEE,
             pool_contract_id,
             "transact",
-            vec![proof_scval, ext_scval, sender_scval],
+            args.clone(),
             Vec::new(),
         )?;
 
         let sim = self.client.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim)?;
+        check_transact_auth(
+            &sim.auth_entries()?,
+            &pool_contract_id.parse()?,
+            args,
+            &token,
+            &sender,
+            input.ext_data.ext_amount.into(),
+        )?;
+        Ok(prepared)
     }
 
     /// Simulates `register` on the configured public key registry contract and
@@ -139,6 +156,66 @@ fn next_sequence(current: xdr::SequenceNumber) -> Result<xdr::SequenceNumber> {
         .checked_add(1)
         .ok_or_else(|| anyhow!("account sequence number overflow"))?;
     Ok(xdr::SequenceNumber(next))
+}
+
+/// Refuses simulated authorization for a pool `transact` that reaches beyond
+/// that call and, for a deposit, the token transfer into the pool.
+///
+/// The sender signs whatever tree the simulation returns, so a call that the
+/// RPC server or a contract adds to it would carry the sender's signature too.
+/// The root must be the `transact` call built from `args`, because a signed
+/// entry for another proof or `ExtData` value would let its holder move the
+/// sender's deposit into notes the sender does not own. The check ignores the
+/// credential type: whether the sender signs the entry or the envelope, the
+/// sender authorizes the same tree.
+fn check_transact_auth(
+    entries: &[xdr::SorobanAuthorizationEntry],
+    pool: &xdr::ScAddress,
+    args: Vec<xdr::ScVal>,
+    token: &xdr::ScAddress,
+    sender: &xdr::ScAddress,
+    ext_amount: i128,
+) -> Result<()> {
+    let [entry] = entries else {
+        bail!(
+            "refusing to sign {} authorization entries for transact, which takes one",
+            entries.len()
+        );
+    };
+    let root = &entry.root_invocation;
+    let transact = invoke_contract_args(pool.clone(), "transact", args)?;
+    ensure!(
+        root.function == xdr::SorobanAuthorizedFunction::ContractFn(transact),
+        "refusing to sign a root call other than the transact built for the pool"
+    );
+    if ext_amount <= 0 {
+        ensure!(
+            root.sub_invocations.is_empty(),
+            "refusing to sign a private transfer or withdrawal that authorizes a call under transact"
+        );
+        return Ok(());
+    }
+    let [transfer] = root.sub_invocations.as_slice() else {
+        bail!(
+            "refusing to sign a deposit that authorizes {} calls under transact instead of the token transfer",
+            root.sub_invocations.len()
+        );
+    };
+    let transfer_args = vec![
+        xdr::ScVal::Address(sender.clone()),
+        xdr::ScVal::Address(pool.clone()),
+        xdr::ScVal::from(ext_amount),
+    ];
+    let token_transfer = invoke_contract_args(token.clone(), "transfer", transfer_args)?;
+    ensure!(
+        transfer.function == xdr::SorobanAuthorizedFunction::ContractFn(token_transfer),
+        "refusing to sign a deposit whose authorized call is not the pool token's transfer of {ext_amount} from the sender to the pool"
+    );
+    ensure!(
+        transfer.sub_invocations.is_empty(),
+        "refusing to sign a deposit whose token transfer authorizes a call of its own"
+    );
+    Ok(())
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -408,21 +485,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn prepare_pool_transact_builds_transact_invoke() {
-        let pk = ed25519::PublicKey([8u8; 32]);
-        let source = pk.to_string();
-        let pool_id = test_pool_contract_id();
-        let mock = MockRpc::new(3, fixture_sim("100"));
-
-        let proof_uncompressed = vec![0u8; 256];
-        let ext = ExtData {
-            recipient: source.to_string(),
+    /// A private transfer's external data, paying nothing out to `recipient`.
+    fn ext_data_to(recipient: &str) -> ExtData {
+        ExtData {
+            recipient: recipient.to_string(),
             ext_amount: crate::types::ExtAmount::from(0),
             encrypted_output0: vec![],
             encrypted_output1: vec![],
-        };
-        let public = OnchainProofPublicInputs {
+        }
+    }
+
+    fn public_inputs() -> OnchainProofPublicInputs {
+        OnchainProofPublicInputs {
             root: crate::types::Field(crate::types::U256::from(1)),
             input_nullifiers: [
                 crate::types::Field(crate::types::U256::from(2)),
@@ -436,7 +510,106 @@ mod tests {
             asp_non_membership_root: crate::types::Field(crate::types::U256::from(8)),
             output_gvk_ciphertexts: None,
             input_gvk_ciphertexts: None,
+        }
+    }
+
+    /// Drives the real `prepare_pool_transact` for a private transfer against
+    /// an RPC whose `simulateTransaction` returns `simulation`.
+    async fn prepare_pool_transact_with(
+        simulation: serde_json::Value,
+    ) -> Result<PreparedSorobanTx> {
+        let source = ed25519::PublicKey([8u8; 32]).to_string();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getLedgerEntries"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "entries": [{
+                        "key": ledger_key_xdr(&source),
+                        "xdr": account_entry_xdr(&source, 3),
+                        "lastModifiedLedgerSeq": 1,
+                    }],
+                    "latestLedger": 1,
+                },
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("simulateTransaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": simulation,
+            })))
+            .mount(&server)
+            .await;
+
+        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let fetcher = StateFetcher::new(RpcClient::new(&server.uri()).expect("rpc client"), config)
+            .expect("state fetcher");
+        let input = PoolTransactInput {
+            proof_uncompressed: vec![0u8; 256],
+            ext_data: ext_data_to(&source),
+            public: public_inputs(),
         };
+        fetcher
+            .prepare_pool_transact(
+                &test_pool_contract_id(),
+                &input,
+                &SignerAddress::new(source.as_str()),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn prepare_pool_transact_refuses_a_second_authorization_entry() {
+        let entry = xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::SourceAccount,
+            root_invocation: transact_on(&POOL, vec![]),
+        }
+        .to_xdr_base64(Limits::none())
+        .expect("auth entry xdr");
+        let mut sim = fixture_sim("100");
+        sim.results[0].auth = vec![entry.clone(), entry];
+
+        let refused = prepare_pool_transact_with(json!(sim))
+            .await
+            .expect_err("the second entry must be refused");
+        assert_eq!(
+            refused.to_string(),
+            "refusing to sign 2 authorization entries for transact, which takes one"
+        );
+    }
+
+    /// A simulation the contract refused returns no authorization entries, so
+    /// its error must reach the caller before the entries are checked. The app
+    /// names a refusal by the contract's error code.
+    #[tokio::test]
+    async fn prepare_pool_transact_reports_the_simulation_error_before_the_auth_check() {
+        let failed = prepare_pool_transact_with(json!({
+            "latestLedger": 1,
+            "error": "HostError: Error(Contract, #18)",
+        }))
+        .await
+        .expect_err("a failed simulation must fail the preparation");
+        assert_eq!(
+            failed.to_string(),
+            "transaction simulation failed: HostError: Error(Contract, #18)"
+        );
+    }
+
+    #[test]
+    fn prepare_pool_transact_builds_transact_invoke() {
+        let pk = ed25519::PublicKey([8u8; 32]);
+        let source = pk.to_string();
+        let pool_id = test_pool_contract_id();
+        let mock = MockRpc::new(3, fixture_sim("100"));
+
+        let proof_uncompressed = vec![0u8; 256];
+        let ext = ext_data_to(&source);
+        let public = public_inputs();
 
         let proof_scval = pool_proof_to_scval(
             &proof_uncompressed,
@@ -501,5 +674,239 @@ mod tests {
     #[test]
     fn next_sequence_rejects_overflow() {
         assert!(next_sequence(xdr::SequenceNumber(i64::MAX)).is_err());
+    }
+
+    const POOL: xdr::ScAddress = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([1; 32])));
+    const TOKEN: xdr::ScAddress = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([2; 32])));
+    const OTHER: xdr::ScAddress = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([3; 32])));
+    const SENDER: xdr::ScAddress = xdr::ScAddress::Account(xdr::AccountId(
+        xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([4; 32])),
+    ));
+    const DEPOSIT: i128 = 5;
+
+    fn call(
+        contract: &xdr::ScAddress,
+        function: &str,
+        args: Vec<xdr::ScVal>,
+        sub_invocations: Vec<xdr::SorobanAuthorizedInvocation>,
+    ) -> xdr::SorobanAuthorizedInvocation {
+        xdr::SorobanAuthorizedInvocation {
+            function: xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                contract_address: contract.clone(),
+                function_name: function.try_into().expect("symbol"),
+                args: args.try_into().expect("args"),
+            }),
+            sub_invocations: sub_invocations.try_into().expect("sub-invocations"),
+        }
+    }
+
+    /// The proof, `ExtData`, and sender arguments the check expects.
+    fn transact_args() -> Vec<xdr::ScVal> {
+        vec![
+            xdr::ScVal::Void,
+            xdr::ScVal::Void,
+            xdr::ScVal::Address(SENDER),
+        ]
+    }
+
+    fn transact_on(
+        contract: &xdr::ScAddress,
+        sub_invocations: Vec<xdr::SorobanAuthorizedInvocation>,
+    ) -> xdr::SorobanAuthorizedInvocation {
+        call(contract, "transact", transact_args(), sub_invocations)
+    }
+
+    fn token_transfer(
+        token: &xdr::ScAddress,
+        to: &xdr::ScAddress,
+        sub_invocations: Vec<xdr::SorobanAuthorizedInvocation>,
+    ) -> xdr::SorobanAuthorizedInvocation {
+        let args = vec![
+            xdr::ScVal::Address(SENDER),
+            xdr::ScVal::Address(to.clone()),
+            xdr::ScVal::from(DEPOSIT),
+        ];
+        call(token, "transfer", args, sub_invocations)
+    }
+
+    /// Runs the check on one source-account entry for each root.
+    fn check(ext_amount: i128, roots: Vec<xdr::SorobanAuthorizedInvocation>) -> Result<()> {
+        let entries: Vec<_> = roots
+            .into_iter()
+            .map(|root_invocation| xdr::SorobanAuthorizationEntry {
+                credentials: xdr::SorobanCredentials::SourceAccount,
+                root_invocation,
+            })
+            .collect();
+        check_transact_auth(
+            &entries,
+            &POOL,
+            transact_args(),
+            &TOKEN,
+            &SENDER,
+            ext_amount,
+        )
+    }
+
+    fn refusal(ext_amount: i128, roots: Vec<xdr::SorobanAuthorizedInvocation>) -> String {
+        check(ext_amount, roots)
+            .expect_err("the authorization must be refused")
+            .to_string()
+    }
+
+    #[test]
+    fn a_transfer_with_no_sub_invocation_is_accepted() {
+        check(0, vec![transact_on(&POOL, vec![])]).expect("accepted");
+    }
+
+    #[test]
+    fn a_deposit_with_its_token_transfer_is_accepted() {
+        let deposit = transact_on(&POOL, vec![token_transfer(&TOKEN, &POOL, vec![])]);
+        check(DEPOSIT, vec![deposit]).expect("accepted");
+    }
+
+    #[test]
+    fn a_withdrawal_with_no_sub_invocation_is_accepted() {
+        check(-DEPOSIT, vec![transact_on(&POOL, vec![])]).expect("accepted");
+    }
+
+    #[test]
+    fn a_withdrawal_that_authorizes_a_transfer_is_refused() {
+        let withdrawal = transact_on(&POOL, vec![token_transfer(&TOKEN, &POOL, vec![])]);
+        assert_eq!(
+            refusal(-DEPOSIT, vec![withdrawal]),
+            "refusing to sign a private transfer or withdrawal that authorizes a call under \
+             transact"
+        );
+    }
+
+    #[test]
+    fn a_second_entry_is_refused() {
+        let roots = vec![transact_on(&POOL, vec![]), transact_on(&POOL, vec![])];
+        assert_eq!(
+            refusal(0, roots),
+            "refusing to sign 2 authorization entries for transact, which takes one"
+        );
+    }
+
+    #[test]
+    fn a_sub_invocation_on_a_transfer_is_refused() {
+        let transfer = transact_on(&POOL, vec![token_transfer(&TOKEN, &POOL, vec![])]);
+        assert_eq!(
+            refusal(0, vec![transfer]),
+            "refusing to sign a private transfer or withdrawal that authorizes a call under \
+             transact"
+        );
+    }
+
+    #[test]
+    fn a_deposit_transfer_to_another_recipient_is_refused() {
+        let deposit = transact_on(&POOL, vec![token_transfer(&TOKEN, &OTHER, vec![])]);
+        assert_eq!(
+            refusal(DEPOSIT, vec![deposit]),
+            "refusing to sign a deposit whose authorized call is not the pool token's transfer \
+             of 5 from the sender to the pool"
+        );
+    }
+
+    #[test]
+    fn a_deposit_transfer_on_another_token_is_refused() {
+        let deposit = transact_on(&POOL, vec![token_transfer(&OTHER, &POOL, vec![])]);
+        assert_eq!(
+            refusal(DEPOSIT, vec![deposit]),
+            "refusing to sign a deposit whose authorized call is not the pool token's transfer \
+             of 5 from the sender to the pool"
+        );
+    }
+
+    #[test]
+    fn a_call_nested_under_the_token_transfer_is_refused() {
+        let nested = token_transfer(&TOKEN, &OTHER, vec![]);
+        let deposit = transact_on(&POOL, vec![token_transfer(&TOKEN, &POOL, vec![nested])]);
+        assert_eq!(
+            refusal(DEPOSIT, vec![deposit]),
+            "refusing to sign a deposit whose token transfer authorizes a call of its own"
+        );
+    }
+
+    #[test]
+    fn a_root_on_another_contract_is_refused() {
+        assert_eq!(
+            refusal(0, vec![transact_on(&OTHER, vec![])]),
+            "refusing to sign a root call other than the transact built for the pool"
+        );
+    }
+
+    #[test]
+    fn a_root_with_other_transact_arguments_is_refused() {
+        let args = vec![
+            xdr::ScVal::U32(1),
+            xdr::ScVal::Void,
+            xdr::ScVal::Address(SENDER),
+        ];
+        assert_eq!(
+            refusal(0, vec![call(&POOL, "transact", args, vec![])]),
+            "refusing to sign a root call other than the transact built for the pool"
+        );
+    }
+
+    #[test]
+    fn a_root_calling_another_pool_function_is_refused() {
+        assert_eq!(
+            refusal(0, vec![call(&POOL, "withdraw", transact_args(), vec![])]),
+            "refusing to sign a root call other than the transact built for the pool"
+        );
+    }
+
+    #[test]
+    fn a_transact_naming_another_sender_is_refused() {
+        let args = vec![
+            xdr::ScVal::Void,
+            xdr::ScVal::Void,
+            xdr::ScVal::Address(OTHER),
+        ];
+        assert_eq!(
+            refusal(0, vec![call(&POOL, "transact", args, vec![])]),
+            "refusing to sign a root call other than the transact built for the pool"
+        );
+    }
+
+    #[test]
+    fn a_deposit_without_its_token_transfer_is_refused() {
+        assert_eq!(
+            refusal(DEPOSIT, vec![transact_on(&POOL, vec![])]),
+            "refusing to sign a deposit that authorizes 0 calls under transact instead of the \
+             token transfer"
+        );
+    }
+
+    #[test]
+    fn a_deposit_transfer_from_another_address_is_refused() {
+        let args = vec![
+            xdr::ScVal::Address(OTHER),
+            xdr::ScVal::Address(POOL),
+            xdr::ScVal::from(DEPOSIT),
+        ];
+        let deposit = transact_on(&POOL, vec![call(&TOKEN, "transfer", args, vec![])]);
+        assert_eq!(
+            refusal(DEPOSIT, vec![deposit]),
+            "refusing to sign a deposit whose authorized call is not the pool token's transfer \
+             of 5 from the sender to the pool"
+        );
+    }
+
+    #[test]
+    fn a_deposit_transfer_of_another_amount_is_refused() {
+        let args = vec![
+            xdr::ScVal::Address(SENDER),
+            xdr::ScVal::Address(POOL),
+            xdr::ScVal::from(6_i128),
+        ];
+        let deposit = transact_on(&POOL, vec![call(&TOKEN, "transfer", args, vec![])]);
+        assert_eq!(
+            refusal(DEPOSIT, vec![deposit]),
+            "refusing to sign a deposit whose authorized call is not the pool token's transfer \
+             of 5 from the sender to the pool"
+        );
     }
 }
