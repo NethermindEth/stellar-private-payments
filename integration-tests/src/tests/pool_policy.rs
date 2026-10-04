@@ -1,13 +1,21 @@
 use anyhow::Result;
-use stellar_private_payments::types::{NoteAmount, PolicyFlags};
+use stellar_private_payments::{
+    CircuitStore, Client, LocalProver, LocalSigner,
+    types::{
+        NoteAmount, NoteOwnerAddress, NotePublicKey, PolicyFlags, SignerAddress, TreeConfigEntry,
+    },
+};
 
-use super::support::{deploy, session};
+use super::support::{deploy, deploy_scoped, session};
 use crate::{
-    network::{LocalNetwork, lock_asp_tree},
+    network::{LocalNetwork, NETWORK_PASSPHRASE, lock_asp_tree, repo_root},
     pool::{PoolAsset, PoolOptions},
 };
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
+
+/// Membership tree depth the suite deploys with.
+const ASP_LEVELS: u32 = 10;
 
 #[tokio::test]
 async fn blocklist_block() -> Result<()> {
@@ -149,6 +157,152 @@ async fn allowlist() -> Result<()> {
     pool.deposit(deposit_amount).await?;
     let balance = pool.balance().await?;
     assert_eq!(balance, deposit_amount);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn allowlist_repoint() -> Result<()> {
+    let options = PoolOptions {
+        policy_flags: PolicyFlags::ALLOWLIST,
+        asset: PoolAsset::Native,
+        ..PoolOptions::NONE
+    };
+    // Scoped, because re-pointing a shared pool would break the tests that use
+    // the manifest's allowlist.
+    let (config, identity) =
+        deploy_scoped(std::slice::from_ref(&options), "allowlist-repoint").await?;
+    let session = session((config.clone(), identity)).await?;
+    let pool = session.pool()?;
+    let pool_contract_id = &pool.config().pool_contract_id;
+    let admin_secret = &session.identity.admin_secret;
+    let network = LocalNetwork::start().await?;
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+
+    let leaf = session.account.derive_asp_user_leaf().await?;
+    network
+        .insert_asp_membership_leaf(&config.asp_membership, admin_secret, leaf)
+        .await?;
+    pool.deposit(deposit_amount).await?;
+
+    let (allowlist, deployment_ledger) = network
+        .deploy_asp_membership(admin_secret, ASP_LEVELS)
+        .await?;
+    network
+        .insert_asp_membership_leaf(&allowlist, admin_secret, leaf)
+        .await?;
+    network
+        .update_asp_membership(pool_contract_id, admin_secret, &allowlist)
+        .await?;
+
+    let unnamed = pool
+        .withdraw(deposit_amount, session.wallet.address())
+        .await;
+    assert!(
+        unnamed
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains("add it to added_asp_memberships")),
+        "a manifest without the pool's allowlist must be refused: {unnamed:?}"
+    );
+
+    let stem = config.pool(pool_contract_id)?.circuit_stem();
+    let mut named = config;
+    named.added_asp_memberships.push(TreeConfigEntry {
+        contract_id: allowlist,
+        deployment_ledger,
+    });
+    let lock = stellar_private_payments::circuit_lock(&std::fs::read_to_string(
+        repo_root().join("deployments/testnet/circuits.json"),
+    )?)?;
+    let artifacts = CircuitStore::open(repo_root().join("target/circuits-artifacts"), lock)
+        .artifacts(&stem.to_string())?;
+    let client = Client::init(
+        network.rpc_url(),
+        session.account.storage().fork()?,
+        LocalProver::from_artifacts(&[(stem, artifacts)])?.into(),
+        named,
+        None,
+    )?;
+    let signer = LocalSigner::new(
+        &session.wallet.secret(),
+        NETWORK_PASSPHRASE,
+        SignerAddress::new(session.wallet.address()),
+    )?;
+    let named_pool = client
+        .account(
+            NoteOwnerAddress::new(session.wallet.address()),
+            signer.into(),
+        )?
+        .pool(pool_contract_id)?;
+    named_pool
+        .withdraw(deposit_amount, session.wallet.address())
+        .await?;
+    assert_eq!(named_pool.balance().await?, 0.into());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn blocklist_repoint() -> Result<()> {
+    let options = PoolOptions {
+        policy_flags: PolicyFlags::BLOCKLIST,
+        asset: PoolAsset::Native,
+        ..PoolOptions::NONE
+    };
+    // Scoped, because re-pointing a shared pool would break the tests that use
+    // the manifest's blocklist.
+    let (config, identity) =
+        deploy_scoped(std::slice::from_ref(&options), "blocklist-repoint").await?;
+    let session = session((config.clone(), identity)).await?;
+    let pool = session.pool()?;
+    let pool_contract_id = &pool.config().pool_contract_id;
+    let admin_secret = &session.identity.admin_secret;
+    let network = LocalNetwork::start().await?;
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+
+    let (note_public_key, _) = session.account.privacy_keys().await?;
+    network
+        .insert_asp_non_membership_leaf(
+            &config.asp_non_membership,
+            admin_secret,
+            note_public_key.clone(),
+        )
+        .await?;
+    let blocklist = network.deploy_asp_non_membership(admin_secret).await?;
+    // Another key gives the new blocklist a nonzero root, so the client has to
+    // query the tree rather than prove against an empty one.
+    network
+        .insert_asp_non_membership_leaf(&blocklist, admin_secret, NotePublicKey([1; 32]))
+        .await?;
+    network
+        .update_asp_non_membership(pool_contract_id, admin_secret, &blocklist)
+        .await?;
+    // A blocklist pool proves nothing against its allowlist, so an allowlist
+    // the manifest does not name must not stop the client.
+    let (allowlist, _) = network
+        .deploy_asp_membership(admin_secret, ASP_LEVELS)
+        .await?;
+    network
+        .update_asp_membership(pool_contract_id, admin_secret, &allowlist)
+        .await?;
+
+    // The manifest still names the blocklist that lists the user, but the pool
+    // reads the new one, which does not.
+    pool.withdraw(deposit_amount, session.wallet.address())
+        .await?;
+    assert_eq!(pool.balance().await?, 0.into());
+
+    network
+        .insert_asp_non_membership_leaf(&blocklist, admin_secret, note_public_key)
+        .await?;
+    let blocked = pool.deposit(deposit_amount).await;
+    assert!(
+        blocked
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains("user is blocklisted")),
+        "a key in the pool's new blocklist must be refused: {blocked:?}"
+    );
 
     Ok(())
 }
