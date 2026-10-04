@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use stellar_private_payments::chain::MAX_CONTRACT_IDS_PER_FILTER;
 
 pub type SegmentFilter = String;
 pub type TopicFilter = Vec<SegmentFilter>;
@@ -132,29 +133,19 @@ impl GetEventsParams {
     }
 
     pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
-        if self.filters.is_empty()
-            || self.filters.iter().any(|filter| {
-                filter.filter_type != "contract"
-                    || filter.topics != [vec!["**".to_string()]]
-                    || filter.contract_ids.is_empty()
+        // RPC filters are OR-ed, so every filter is checked. A client built
+        // from an older manifest asks for a subset of the archived
+        // contracts.
+        !self.filters.is_empty()
+            && self.filters.iter().all(|filter| {
+                filter.filter_type == "contract"
+                    && filter.topics == [vec!["**".to_string()]]
+                    && !filter.contract_ids.is_empty()
+                    && filter
+                        .contract_ids
+                        .iter()
+                        .all(|id| allowed_contract_ids.contains(id))
             })
-        {
-            return false;
-        }
-
-        // RPC filters are OR-ed. Validate the complete set, not just the first
-        // group (the SDK splits IDs into groups of five).
-        let mut got: Vec<&str> = self
-            .filters
-            .iter()
-            .flat_map(|filter| filter.contract_ids.iter().map(String::as_str))
-            .collect();
-        got.sort_unstable();
-        got.dedup();
-        let mut want: Vec<&str> = allowed_contract_ids.iter().map(String::as_str).collect();
-        want.sort_unstable();
-        want.dedup();
-        got == want
     }
 
     pub fn for_contracts(
@@ -165,11 +156,11 @@ impl GetEventsParams {
     ) -> Self {
         Self {
             filters: contract_ids
-                .chunks(5)
-                .map(|ids| ContractEventFilter {
+                .chunks(MAX_CONTRACT_IDS_PER_FILTER)
+                .map(|chunk| ContractEventFilter {
                     filter_type: "contract".to_string(),
                     topics: vec![vec!["**".to_string()]],
-                    contract_ids: ids.to_vec(),
+                    contract_ids: chunk.to_vec(),
                 })
                 .collect(),
             pagination: PaginationParams {
@@ -255,6 +246,10 @@ mod tests {
         .expect("filters should deserialize")
     }
 
+    fn six_contract_ids() -> Vec<String> {
+        (0..6).map(|i| format!("C{i}")).collect()
+    }
+
     #[test]
     fn is_allowed_filters_match_exact_contract_set() {
         let allowed = vec!["CB".to_string(), "CA".to_string()];
@@ -274,21 +269,18 @@ mod tests {
     }
 
     #[test]
-    fn grouped_filters_cover_exactly_the_archived_contracts() {
-        let ids: Vec<String> = (0..6).map(|i| format!("C{i}")).collect();
+    fn grouped_filters_cover_only_the_archived_contracts() {
+        let ids = six_contract_ids();
         let params = GetEventsParams::for_contracts(&ids, Some(1), None, Some(10));
         assert_eq!(params.filters.len(), 2);
         assert_eq!(params.filters[0].contract_ids.len(), 5);
         assert!(params.is_allowed_filters(&ids));
-        for change in 0..4 {
+        for change in 0..3 {
             let mut invalid = params.clone();
             match change {
                 0 => invalid.filters[1].topics = vec![vec!["deposit".into()]],
                 1 => invalid.filters[1].filter_type = "system".into(),
-                2 => invalid.filters[1].contract_ids = vec!["UNARCHIVED".into()],
-                _ => {
-                    invalid.filters.pop();
-                }
+                _ => invalid.filters[1].contract_ids = vec!["UNARCHIVED".into()],
             }
             assert!(!invalid.is_allowed_filters(&ids));
         }
@@ -298,6 +290,29 @@ mod tests {
         forbidden.contract_ids = vec!["UNARCHIVED".into()];
         extra.filters.push(forbidden);
         assert!(!extra.is_allowed_filters(&ids));
+    }
+
+    #[test]
+    fn a_subset_of_the_contract_set_is_allowed() {
+        let ids = six_contract_ids();
+        let params = GetEventsParams::for_contracts(&ids[1..], Some(1), None, None);
+        assert!(params.is_allowed_filters(&ids));
+    }
+
+    #[test]
+    fn an_id_outside_the_contract_set_is_refused() {
+        let ids = six_contract_ids();
+        let mut params = GetEventsParams::for_contracts(&ids, Some(1), None, None);
+        params.filters[1].contract_ids.push("CX".to_string());
+        assert!(!params.is_allowed_filters(&ids));
+
+        // The RPC reads a filter with no contract IDs as every contract.
+        params.filters[1].contract_ids.clear();
+        assert!(!params.is_allowed_filters(&ids));
+
+        // It reads a request with no filters as every contract's events too.
+        params.filters.clear();
+        assert!(!params.is_allowed_filters(&ids));
     }
 
     #[test]
