@@ -83,6 +83,9 @@ pub struct DeploymentSpec {
     pub network_passphrase: String,
     pub contract_ids: Vec<String>,
     pub min_deployment_ledger: u32,
+    /// Storage namespace of the archive, which can leave out some of
+    /// `contract_ids`.
+    pub deployment_id: String,
 }
 
 impl DeploymentSpec {
@@ -101,6 +104,7 @@ impl DeploymentSpec {
             network_passphrase: deployment.network_passphrase.clone().unwrap_or_default(),
             contract_ids: deployment.all_contract_ids(),
             min_deployment_ledger: deployment.min_deployment_ledger()?,
+            deployment_id: deployment::current_deployment_storage_id(deployment)?,
         })
     }
 }
@@ -145,13 +149,8 @@ impl Bootnode {
         let cfg = Arc::new(cfg);
         let contract_ids = Arc::new(deployment.contract_ids);
         let min_deployment_ledger = deployment.min_deployment_ledger;
-        let deployment_id = deployment::deployment_storage_id(
-            contract_ids.as_ref(),
-            min_deployment_ledger,
-            &deployment.network_passphrase,
-        );
         tracing::info!(
-            %deployment_id,
+            deployment_id = %deployment.deployment_id,
             min_deployment_ledger,
             contracts = contract_ids.len(),
             "bootnode deployment namespace"

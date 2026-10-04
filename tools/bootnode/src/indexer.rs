@@ -13,8 +13,11 @@ impl Indexer {
     }
 
     pub(crate) async fn run(self) {
+        let mut rescan_from = self.state.cfg.rescan_from;
         loop {
-            match self.run_round().await {
+            let round = self.run_round(rescan_from).await;
+            rescan_from = rescan_after(rescan_from, &round);
+            match round {
                 Ok(may_have_more) => {
                     if !may_have_more {
                         sleep(Duration::from_millis(self.state.cfg.indexer_sleep_ms)).await;
@@ -29,7 +32,7 @@ impl Indexer {
         }
     }
 
-    async fn run_round(&self) -> anyhow::Result<bool> {
+    async fn run_round(&self, rescan_from: Option<u32>) -> anyhow::Result<bool> {
         let t0 = Instant::now();
 
         let latest = self.state.upstream.get_latest_ledger().await?;
@@ -39,8 +42,11 @@ impl Indexer {
         self.state.storage.set_ledger_tip(tip_sequence).await?;
 
         let indexer = self.state.storage.load_indexer_state().await?;
-        let mut cursor = indexer.last_upstream_cursor;
-        let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
+        let (mut cursor, mut start_ledger) = round_start(
+            indexer.last_upstream_cursor,
+            rescan_from,
+            self.state.min_deployment_ledger,
+        );
         let page_size = self.state.cfg.page_size;
         let mut may_have_more = false;
         let cutoff = tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers());
@@ -117,5 +123,72 @@ impl Indexer {
         self.state.archive_ready.store(true, Ordering::Relaxed);
         tracing::info!("archive ready: ingestion crossed retention cutoff");
         Ok(())
+    }
+}
+
+/// Returns the cursor and start ledger a round's first request uses.
+///
+/// A rescan ledger replaces the stored cursor, so the round replays events
+/// from that ledger. Without a stored cursor, the round starts at the
+/// deployment's minimum ledger, or at the rescan ledger when that is earlier,
+/// so an empty archive still fills from the deployment's start.
+fn round_start(
+    stored_cursor: Option<String>,
+    rescan_from: Option<u32>,
+    min_deployment_ledger: u32,
+) -> (Option<String>, Option<u32>) {
+    match (rescan_from, stored_cursor) {
+        (Some(ledger), Some(_)) => (None, Some(ledger)),
+        (Some(ledger), None) => (None, Some(ledger.min(min_deployment_ledger))),
+        (None, Some(cursor)) => (Some(cursor), None),
+        (None, None) => (None, Some(min_deployment_ledger)),
+    }
+}
+
+/// Returns the rescan ledger for the round after `round`.
+///
+/// A round that succeeds has replayed from the rescan ledger, so later rounds
+/// resume from the cursor it stored. A failed round keeps the rescan for its
+/// retry.
+fn rescan_after(rescan_from: Option<u32>, round: &anyhow::Result<bool>) -> Option<u32> {
+    rescan_from.filter(|_| round.is_err())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rescan_after, round_start};
+
+    #[test]
+    fn a_rescan_starts_the_first_round_at_its_ledger() {
+        assert_eq!(
+            round_start(Some("cursor".into()), Some(500), 100),
+            (None, Some(500))
+        );
+    }
+
+    #[test]
+    fn without_a_rescan_the_stored_cursor_wins() {
+        assert_eq!(
+            round_start(Some("cursor".into()), None, 100),
+            (Some("cursor".into()), None)
+        );
+    }
+
+    #[test]
+    fn a_rescan_ends_with_the_first_round_that_succeeds() {
+        let failed: anyhow::Result<bool> = Err(anyhow::anyhow!("upstream unavailable"));
+        assert_eq!(rescan_after(Some(500), &failed), Some(500));
+
+        let next = rescan_after(Some(500), &Ok(true));
+        assert_eq!(
+            round_start(Some("cursor".into()), next, 100),
+            (Some("cursor".into()), None)
+        );
+    }
+
+    #[test]
+    fn an_empty_archive_starts_at_the_deployment() {
+        assert_eq!(round_start(None, None, 100), (None, Some(100)));
+        assert_eq!(round_start(None, Some(500), 100), (None, Some(100)));
     }
 }

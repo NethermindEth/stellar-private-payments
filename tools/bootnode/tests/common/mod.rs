@@ -56,6 +56,7 @@ pub fn fixture_deployment(start_ledger: u32) -> DeploymentSpec {
         network_passphrase: "fixture".into(),
         contract_ids: contract_ids(),
         min_deployment_ledger: start_ledger,
+        deployment_id: deployment_storage_id(&contract_ids(), start_ledger, "fixture"),
     }
 }
 
@@ -83,6 +84,7 @@ pub fn test_config(port: u16, initial_ledger_tip: u32) -> Config {
         otel: None,
         initial_ledger_tip,
         delete_other_deployments: false,
+        rescan_from: None,
     }
 }
 
