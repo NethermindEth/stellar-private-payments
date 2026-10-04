@@ -15,6 +15,8 @@ const CONTRACT_ERRORS = {
         7: 'Proof verification failed. The ZK proof is invalid.',
         8: 'Invalid merkle root. The pool state may have changed.',
         9: 'Note already spent. This is a double-spend attempt.',
+        18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
+        19: 'Deposits into this pool are not paused.',
     },
     // Groth16 verifier errors 
     verifier: {
@@ -65,6 +67,20 @@ const ERROR_PATTERNS = [
         // Invalid merkle root (#8)
         test: (msg) => msg.toLowerCase().includes('#8') && msg.toLowerCase().includes('contract'),
         message: 'Pool state has changed. Please wait for sync to complete and try again.',
+    },
+    {
+        // Deposits paused: the pool's #18, or the SDK's refusal before proving
+        test: (msg) => {
+            const lower = msg.toLowerCase();
+            return (lower.includes('#18') && lower.includes('contract')) ||
+                   (lower.includes('deposits into pool') && lower.includes('are paused'));
+        },
+        message: CONTRACT_ERRORS.pool[18],
+    },
+    {
+        // Deposits not paused (#19)
+        test: (msg) => msg.toLowerCase().includes('#19') && msg.toLowerCase().includes('contract'),
+        message: CONTRACT_ERRORS.pool[19],
     },
     {
         // The pool reads an allowlist the manifest does not name. Must precede
