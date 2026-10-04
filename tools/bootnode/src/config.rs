@@ -36,6 +36,7 @@ pub struct Config {
     pub otel: Option<OtelConfig>,
     pub initial_ledger_tip: u32,
     pub delete_other_deployments: bool,
+    pub rescan_from: Option<u32>,
 }
 
 impl Config {

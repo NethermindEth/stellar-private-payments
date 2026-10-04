@@ -38,9 +38,18 @@ pub fn deployment_storage_id(
     format!("v2:{network_hash}:{min_deployment_ledger}:{contracts_hash}")
 }
 
+/// Storage id for `deployment`, leaving out `added_asp_memberships`.
+///
+/// Adding an allowlist to the manifest keeps the archive. A new archive would
+/// refill from the oldest pool's ledger, which an upstream with limited
+/// retention may no longer hold.
 pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Result<String> {
     let passphrase = deployment.network_passphrase.as_deref().unwrap_or_default();
     deployment.validate_network(passphrase)?;
+    let deployment = ContractConfig {
+        added_asp_memberships: Vec::new(),
+        ..deployment.clone()
+    };
     Ok(deployment_storage_id(
         &deployment.all_contract_ids(),
         deployment.min_deployment_ledger()?,
@@ -51,6 +60,21 @@ pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stellar_private_payments::types::TreeConfigEntry;
+
+    #[test]
+    fn adding_an_allowlist_keeps_the_storage_id() -> anyhow::Result<()> {
+        let mut deployment = read_deployment(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments/testnet"),
+        )?;
+        let before = current_deployment_storage_id(&deployment)?;
+        deployment.added_asp_memberships.push(TreeConfigEntry {
+            contract_id: "CADDEDALLOWLIST".into(),
+            deployment_ledger: 1,
+        });
+        assert_eq!(current_deployment_storage_id(&deployment)?, before);
+        Ok(())
+    }
 
     #[test]
     fn directory_and_file_load_the_same_deployment() -> anyhow::Result<()> {
