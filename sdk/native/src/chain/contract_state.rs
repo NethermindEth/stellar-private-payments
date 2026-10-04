@@ -117,6 +117,18 @@ impl StateFetcher {
         Ok((admin_view_key, gvk_mode))
     }
 
+    /// Reads a pool's deposit flag out of its fetched state.
+    ///
+    /// A pool deployed before the flag existed has none and cannot be paused,
+    /// so an absent key reads as `false`.
+    fn deposits_paused_from_state(pool_state: &HashMap<String, xdr::ScVal>) -> Result<bool> {
+        Ok(pool_state
+            .get("DepositsPaused")
+            .map(scval_to_bool)
+            .transpose()?
+            .unwrap_or(false))
+    }
+
     /// Cross-checks a pool's configured GVK settings against what the chain
     /// actually stores.
     ///
@@ -421,6 +433,7 @@ impl StateFetcher {
             merkle_current_root_index: Some(merkle_current_root_index),
             merkle_next_index: merkle_next_index.to_string(),
             maximum_deposit_amount,
+            deposits_paused: Self::deposits_paused_from_state(pool_state)?,
             merkle_root,
             merkle_capacity,
             total_commitments: merkle_next_index.to_string(),
@@ -896,6 +909,36 @@ mod tests {
             })
         );
         assert_eq!(gvk_mode, Some(2));
+    }
+
+    #[test]
+    fn deposits_paused_is_false_for_a_pool_deployed_before_the_flag() {
+        let pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let paused = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect("no DepositsPaused key present");
+
+        assert!(!paused);
+    }
+
+    #[test]
+    fn deposits_paused_is_read_from_a_pool_that_stores_it() {
+        let pool_state = HashMap::from([("DepositsPaused".to_string(), xdr::ScVal::Bool(true))]);
+
+        let paused = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect("DepositsPaused key present");
+
+        assert!(paused);
+    }
+
+    #[test]
+    fn a_deposits_paused_entry_that_is_not_a_bool_is_rejected() {
+        let pool_state = HashMap::from([("DepositsPaused".to_string(), xdr::ScVal::U32(1))]);
+
+        let err = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect_err("DepositsPaused must be a bool");
+
+        assert!(err.to_string().contains("Unexpected ScVal"), "{err}");
     }
 
     fn pool_entry(

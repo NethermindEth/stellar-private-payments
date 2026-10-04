@@ -66,6 +66,11 @@ pub enum Error {
     #[error("event history is unavailable: {0}")]
     RetentionGap(#[from] RetentionGap),
 
+    /// A deposit into a pool whose admin has paused deposits, refused before
+    /// proving.
+    #[error("deposits into pool {pool} are paused")]
+    DepositsPaused { pool: String },
+
     /// An untyped failure.
     ///
     /// The message holds the whole `anyhow` cause chain, so the variant has no

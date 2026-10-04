@@ -352,6 +352,22 @@ impl LocalNetwork {
         .await
     }
 
+    /// Pauses or unpauses deposits into a pool, as its admin.
+    pub async fn set_deposits_paused(
+        &self,
+        pool_contract_id: &str,
+        admin_secret: &str,
+        paused: bool,
+    ) -> Result<()> {
+        let function = if paused {
+            "pause_deposits"
+        } else {
+            "unpause_deposits"
+        };
+        self.invoke_contract(pool_contract_id, admin_secret, &[function])
+            .await
+    }
+
     pub async fn insert_asp_membership_leaf(
         &self,
         contract_id: &str,

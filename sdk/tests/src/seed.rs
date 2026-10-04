@@ -332,6 +332,7 @@ fn chain_snapshot_from_storage(
         policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
         gvk_mode: GvkMode::Off,
         admin_view_key: None,
+        deposits_paused: false,
     })
 }
 
