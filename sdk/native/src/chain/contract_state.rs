@@ -202,45 +202,72 @@ impl StateFetcher {
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
         let enabled_pools: Vec<&crate::types::PoolConfigEntry> =
             self.config.pools.iter().filter(|p| p.enabled).collect();
-        self.contracts_data(&enabled_pools).await
+        self.contracts_data(
+            &enabled_pools,
+            &self.config.asp_membership,
+            &self.config.asp_non_membership,
+        )
+        .await
     }
 
+    /// Returns the state of an enabled pool and of the two trees the pool
+    /// names.
+    ///
+    /// The trees come from the pool's instance rather than the deployment
+    /// manifest, because the pool's admin can re-point it to another tree. The
+    /// pool's state and the IDs of its trees come from one read of the pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pool is not an enabled deployment, an RPC read
+    /// fails, or a stored value does not decode.
     pub async fn contracts_data_for_pool(
         &self,
         pool_contract_id: &str,
     ) -> Result<ContractsStateData> {
         let enabled_pool = self.enabled_pool_for(pool_contract_id)?;
-        self.contracts_data(&[enabled_pool]).await
+        let (bulk_state, ledger) = self
+            .client
+            .get_contract_data_bulk(&[Self::pool_request(enabled_pool)])
+            .await?;
+        let pool_state = bulk_state
+            .get(pool_contract_id)
+            .ok_or_else(|| anyhow!("missing pool state for {pool_contract_id}"))?;
+        let pool = Self::pool_info(enabled_pool, pool_state, ledger)?;
+        let mut data = self
+            .contracts_data(&[], &pool.asp_membership, &pool.asp_non_membership)
+            .await?;
+        data.pools.push(pool);
+        Ok(data)
     }
 
     pub async fn asp_state(&self) -> Result<ContractsStateData> {
-        self.contracts_data(&[]).await
+        self.contracts_data(
+            &[],
+            &self.config.asp_membership,
+            &self.config.asp_non_membership,
+        )
+        .await
     }
 
     async fn contracts_data(
         &self,
         enabled_pools: &[&crate::types::PoolConfigEntry],
+        asp_membership_id: &str,
+        asp_non_membership_id: &str,
     ) -> Result<ContractsStateData> {
         let mut requests = Vec::with_capacity(enabled_pools.len().wrapping_add(2));
         for pool in enabled_pools.iter() {
-            requests.push(ContractDataBulkRequest {
-                contract_id: &pool.pool_contract_id,
-                // The administrator and the tree state are the only entries
-                // a pool keeps under their own ledger keys. Everything else,
-                // including the `AdminViewKey` and `GvkMode` that only
-                // `contracts/pool-gvk` writes, rides the instance entry and
-                // arrives with it.
-                enum_keys: vec!["Admin", "State"],
-            });
+            requests.push(Self::pool_request(pool));
         }
 
         requests.push(ContractDataBulkRequest {
-            contract_id: self.config.asp_membership.as_str(),
+            contract_id: asp_membership_id,
             enum_keys: vec!["Admin", "NextIndex"],
         });
 
         requests.push(ContractDataBulkRequest {
-            contract_id: self.config.asp_non_membership.as_str(),
+            contract_id: asp_non_membership_id,
             enum_keys: vec!["Admin"],
         });
 
@@ -252,84 +279,9 @@ impl StateFetcher {
             let pool_state = bulk_state
                 .get(&pool.pool_contract_id)
                 .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
-
-            // The counter and the ring share one entry, so the root read here
-            // is the one the counter names.
-            let tree =
-                scval_to_tree_state(get_state!(pool_state, "State", pool.pool_contract_id)?)?;
-            let merkle_current_root_index = root_slot(tree.next_index, tree.roots.len())?;
-            let merkle_root = tree
-                .roots
-                .get(usize::try_from(merkle_current_root_index)?)
-                .cloned()
-                .map(Field::try_from_u256)
-                .transpose()?;
-
-            let merkle_levels =
-                scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
-            let merkle_capacity = 2u64.pow(merkle_levels);
-            let merkle_next_index = tree.next_index;
-            let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
-                pool_state,
-                "MaximumDepositAmount",
-                pool.pool_contract_id
-            )?)?;
-            let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
-                maximum_deposit_amount_u256,
-                "maximum_deposit_amount",
-            )?);
-            let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
-            Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
-
-            let pool_info = PoolInfo {
-                ledger: base_latest_ledger,
-                contract_id: pool.pool_contract_id.clone(),
-                contract_type: "Privacy Pool".to_string(),
-                admin: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Admin",
-                    pool.pool_contract_id
-                )?)?,
-                token: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Token",
-                    pool.pool_contract_id
-                )?)?,
-                verifier: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Verifier",
-                    pool.pool_contract_id
-                )?)?,
-                asp_membership: scval_to_address_string(get_state!(
-                    pool_state,
-                    "ASPMembership",
-                    pool.pool_contract_id
-                )?)?,
-                asp_non_membership: scval_to_address_string(get_state!(
-                    pool_state,
-                    "ASPNonMembership",
-                    pool.pool_contract_id
-                )?)?,
-                merkle_levels,
-                merkle_current_root_index: Some(merkle_current_root_index),
-                merkle_next_index: merkle_next_index.to_string(),
-                maximum_deposit_amount,
-                merkle_root,
-                merkle_capacity,
-                total_commitments: merkle_next_index.to_string(),
-                policy_flags: scval_to_policy_flags(get_state!(
-                    pool_state,
-                    "PolicyFlags",
-                    pool.pool_contract_id
-                )?)?,
-                admin_view_key: gvk_admin_view_key,
-                gvk_mode,
-            };
-
-            out.push(pool_info);
+            out.push(Self::pool_info(pool, pool_state, base_latest_ledger)?);
         }
 
-        let asp_membership_id = &self.config.asp_membership;
         let asp_membership_state = bulk_state
             .get(asp_membership_id)
             .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
@@ -362,7 +314,6 @@ impl StateFetcher {
             used_slots: asp_mem_next_index.to_string(),
         };
 
-        let asp_non_membership_id = &self.config.asp_non_membership;
         let asp_non_membership_state = bulk_state.get(asp_non_membership_id).ok_or_else(|| {
             anyhow!("missing asp non-membership state for {asp_non_membership_id}")
         })?;
@@ -392,16 +343,118 @@ impl StateFetcher {
         })
     }
 
+    /// Returns the request for the entries of `pool` that
+    /// [`Self::pool_info`] decodes.
+    fn pool_request(pool: &crate::types::PoolConfigEntry) -> ContractDataBulkRequest<'_> {
+        ContractDataBulkRequest {
+            contract_id: &pool.pool_contract_id,
+            // The administrator and the tree state are the only entries a pool
+            // keeps under their own ledger keys. Everything else, including the
+            // `AdminViewKey` and `GvkMode` that only `contracts/pool-gvk`
+            // writes, rides the instance entry and arrives with it.
+            enum_keys: vec!["Admin", "State"],
+        }
+    }
+
+    /// Decodes the state of `pool` from its entries, read at `ledger`.
+    fn pool_info(
+        pool: &crate::types::PoolConfigEntry,
+        pool_state: &HashMap<String, xdr::ScVal>,
+        ledger: u32,
+    ) -> Result<PoolInfo> {
+        // The counter and the ring share one entry, so the root read here
+        // is the one the counter names.
+        let tree = scval_to_tree_state(get_state!(pool_state, "State", pool.pool_contract_id)?)?;
+        let merkle_current_root_index = root_slot(tree.next_index, tree.roots.len())?;
+        let merkle_root = tree
+            .roots
+            .get(usize::try_from(merkle_current_root_index)?)
+            .cloned()
+            .map(Field::try_from_u256)
+            .transpose()?;
+
+        let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
+        let merkle_capacity = 2u64.pow(merkle_levels);
+        let merkle_next_index = tree.next_index;
+        let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
+            pool_state,
+            "MaximumDepositAmount",
+            pool.pool_contract_id
+        )?)?;
+        let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
+            maximum_deposit_amount_u256,
+            "maximum_deposit_amount",
+        )?);
+        let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
+        Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
+
+        Ok(PoolInfo {
+            ledger,
+            contract_id: pool.pool_contract_id.clone(),
+            contract_type: "Privacy Pool".to_string(),
+            admin: scval_to_address_string(get_state!(
+                pool_state,
+                "Admin",
+                pool.pool_contract_id
+            )?)?,
+            token: scval_to_address_string(get_state!(
+                pool_state,
+                "Token",
+                pool.pool_contract_id
+            )?)?,
+            verifier: scval_to_address_string(get_state!(
+                pool_state,
+                "Verifier",
+                pool.pool_contract_id
+            )?)?,
+            asp_membership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPMembership",
+                pool.pool_contract_id
+            )?)?,
+            asp_non_membership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPNonMembership",
+                pool.pool_contract_id
+            )?)?,
+            merkle_levels,
+            merkle_current_root_index: Some(merkle_current_root_index),
+            merkle_next_index: merkle_next_index.to_string(),
+            maximum_deposit_amount,
+            merkle_root,
+            merkle_capacity,
+            total_commitments: merkle_next_index.to_string(),
+            policy_flags: scval_to_policy_flags(get_state!(
+                pool_state,
+                "PolicyFlags",
+                pool.pool_contract_id
+            )?)?,
+            admin_view_key: gvk_admin_view_key,
+            gvk_mode,
+        })
+    }
+
     /// Builds ASP SMT non-membership proof data by querying the on-chain SMT
     /// via `simulateTransaction`.
+    ///
+    /// `asp_non_membership` is the blocklist the pool reads, as
+    /// [`PoolInfo::asp_non_membership`] reports it.
     ///
     /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof
     ///   padded to `smt_depth`
     /// - otherwise calls `asp_non_membership.find_key(key)`, pads shorter
     ///   sibling paths to `smt_depth`, and rejects paths of `smt_depth` or more
     ///   siblings, which the circuit cannot prove
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `smt_depth` is 0, the note key is not a field
+    /// element, the `find_key` simulation fails or returns a result that does
+    /// not decode, the note key is in the tree, or the returned path has
+    /// `smt_depth` or more siblings.
     pub async fn get_nonmembership_proof(
         &self,
+        asp_non_membership: &str,
         note_pubkey: &NotePublicKey,
         non_membership_root: Field,
         smt_depth: usize,
@@ -427,11 +480,7 @@ impl StateFetcher {
             });
         }
 
-        let tx = Self::build_find_key_simulation_tx(
-            &self.config.asp_non_membership,
-            source_account,
-            key,
-        )?;
+        let tx = Self::build_find_key_simulation_tx(asp_non_membership, source_account, key)?;
         let retval = self.simulate_single_retval(&tx).await?;
         Self::nonmembership_proof_from_find_result(&retval, key, non_membership_root, smt_depth)
     }
@@ -475,6 +524,14 @@ impl StateFetcher {
     }
 
     /// Pool + ASP chain anchors for a single `transact` prove step.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if [`Self::contracts_data_for_pool`] fails, if the pool
+    /// requires membership proofs and its allowlist is not among the contracts
+    /// that [`ContractConfig::all_contract_ids`] returns, if the blocklist
+    /// simulation fails or finds the note key, or if the pool's state has no
+    /// Merkle root or an unknown GVK mode.
     pub async fn transact_chain_context(
         &self,
         pool_contract_id: &str,
@@ -487,9 +544,21 @@ impl StateFetcher {
             .first()
             .map(|pool| pool.policy_flags)
             .ok_or_else(|| anyhow!("pool data not fetched for {pool_contract_id}"))?;
+        let asp_membership = &data.asp_membership.contract_id;
+        if policy_flags.requires_membership_proofs()
+            && !self
+                .config
+                .indexed_contracts()
+                .any(|(contract_id, _)| contract_id == asp_membership)
+        {
+            return Err(anyhow!(
+                "pool {pool_contract_id} reads the allowlist {asp_membership}, which the deployment manifest does not name: add it to added_asp_memberships with its deployment ledger"
+            ));
+        }
         let non_membership_proof = if policy_flags.requires_non_membership_proofs() {
             Some(
                 self.get_nonmembership_proof(
+                    &data.asp_non_membership.contract_id,
                     note_pubkey,
                     data.asp_non_membership.root,
                     SMT_DEPTH as usize,
