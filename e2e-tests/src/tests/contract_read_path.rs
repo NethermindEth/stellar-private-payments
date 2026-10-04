@@ -233,3 +233,25 @@ async fn the_reader_derives_the_root_the_contract_reports() -> Result<()> {
     assert_eq!(root.to_be_bytes(), expected);
     Ok(())
 }
+
+/// A pool whose admin paused deposits must read as paused.
+#[tokio::test]
+async fn the_reader_sees_a_paused_pool() -> Result<()> {
+    let deployment = deploy();
+    pool::PoolContractClient::new(&deployment.env, &deployment.pool).pause_deposits();
+
+    let server = rpc_serving(ledger_entries_as_rpc_results(&deployment.env)).await;
+    let (config, pool) = config_for(&deployment, &server.uri());
+    let fetcher = StateFetcher::new(Client::new(&server.uri())?, config)?;
+
+    let data = fetcher
+        .contracts_data_for_pool(&pool.pool_contract_id)
+        .await?;
+    let info = data
+        .pools
+        .first()
+        .unwrap_or_else(|| panic!("expected the pool to be reported"));
+
+    assert!(info.deposits_paused);
+    Ok(())
+}

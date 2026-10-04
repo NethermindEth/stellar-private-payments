@@ -29,8 +29,8 @@ use crate::{
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
-        Estimate, Field, GvkMode, PrivatePoolConfig, SignedTransaction, TransactChainContext,
-        TransactionResult, TransferRecipient,
+        Estimate, ExtAmount, Field, GvkMode, PrivatePoolConfig, SignedTransaction,
+        TransactChainContext, TransactionResult, TransferRecipient,
     },
 };
 
@@ -410,6 +410,11 @@ impl PrivatePool {
         } else {
             transact_step_for_plan(plan)?
         };
+        if chain.deposits_paused && step.ext_amount > ExtAmount::ZERO {
+            return Err(Error::DepositsPaused {
+                pool: self.config.pool_contract_id.clone(),
+            });
+        }
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
