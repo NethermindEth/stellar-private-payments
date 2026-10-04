@@ -25,6 +25,10 @@ Deploys and runs constructors for the ASP membership, ASP non-membership,
 one Circom Groth16 verifier per (policy, GVK mode) combination used, and one
 or more Pool / pool-gvk contracts.
 
+After writing the manifest, runs verify-deployment.sh against it (skipped with
+--skip-init) and exits with its status. On mainnet a failed custody check fails
+the deploy.
+
 Arguments:
   network               Network name from Stellar CLI config (e.g. testnet, futurenet)
 
@@ -882,3 +886,9 @@ mkdir -p "$DEPLOYMENTS_DIR"
 DEPLOY_JSON_PRETTY="$(printf '%s\n' "$DEPLOY_JSON" | jq --argjson metadata "$NETWORK_METADATA" '. + $metadata')"
 printf '%s\n' "$DEPLOY_JSON_PRETTY" > "$DEPLOYMENTS_DIR/deployments.json"
 printf '%s\n' "$DEPLOY_JSON_PRETTY"
+
+# A --skip-init deployment runs no constructors, so it stores no admin and every check would fail.
+if [[ "$SKIP_INIT" != "true" ]]; then
+  step "verify the deployment against its manifest"
+  "$SCRIPT_DIR/verify-deployment.sh" "$NETWORK" --manifest "$DEPLOYMENTS_DIR/deployments.json" >&2
+fi
