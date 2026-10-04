@@ -11,7 +11,7 @@ mod tx_prepare;
 
 pub use contract_state::{PreparedSorobanTx, StateFetcher};
 pub use indexer::ContractDataStorage;
-pub use rpc::{Client, Client as RpcClient};
+pub use rpc::{Client, Client as RpcClient, MAX_CONTRACT_IDS_PER_FILTER, MAX_FILTER_CONTRACT_IDS};
 pub use signer::{LocalSigner, Signature, auth_sign_steps, unsigned_tx_for_signing};
 pub use stellar_xdr::{Limits, ReadXdr, TransactionEnvelope, WriteXdr};
 

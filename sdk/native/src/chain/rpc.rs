@@ -18,9 +18,13 @@ use stellar_xdr::{
 use super::{soroban_encode::BASE_FEE, tx_assemble::build_invoke_contract_tx_envelope};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
-const MAX_CONTRACT_IDS_PER_FILTER: usize = 5;
+/// Maximum number of contract IDs the RPC's `getEvents` method accepts in one
+/// filter.
+pub const MAX_CONTRACT_IDS_PER_FILTER: usize = 5;
 const MAX_FILTERS_PER_REQUEST: usize = 5;
-const MAX_FILTER_CONTRACT_IDS: usize = MAX_CONTRACT_IDS_PER_FILTER * MAX_FILTERS_PER_REQUEST;
+/// Maximum number of contract IDs one `getEvents` request can filter, across
+/// all of its filters.
+pub const MAX_FILTER_CONTRACT_IDS: usize = MAX_CONTRACT_IDS_PER_FILTER * MAX_FILTERS_PER_REQUEST;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
