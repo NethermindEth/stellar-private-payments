@@ -196,7 +196,7 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 Keys are derived deterministically from Freighter wallet signatures:
 
-1. The app calls `account.derivePrivacyKeys()` explicitly (during onboarding); the wallet signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`) using SEP-53.
+1. The app calls `account.derivePrivacyKeys()` explicitly (during onboarding); the wallet signs `key_derivation_message(kdf_domain)` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v2] (<kdf_domain>)"`, with `kdf_domain` from `deployments.json`) using SEP-53.
 2. `Account::derive_privacy_keys` calls `verify_owner_signature` to strictly verify the 64-byte Ed25519 signature against the note owner's Stellar `G...` public key before trusting it. The signed digest is `SHA256("Stellar Signed Message:\n" + message)`, using UTF-8 bytes and a newline after the colon. Verification refuses signatures from another key, signatures over another message, invalid lengths or addresses, and small-order owner keys or signature `R` points.
 3. It then derives the BN254 note identity keypair and the X25519 encryption keypair from the verified signature using domain-separated hashes, plus the ASP membership blinding using the network context (main thread on web, not inside the storage worker).
 4. Derived keys are sent to storage and persisted in SQLite; the signature is not persisted. Verification failure stops derivation before any privacy keys are derived or saved.

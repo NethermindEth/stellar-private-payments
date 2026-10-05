@@ -80,6 +80,7 @@ fn deploy() -> Deployment {
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+            soroban_sdk::String::from_str(&env, "tests"),
         ),
     );
     Deployment {
@@ -146,6 +147,7 @@ fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolConfig
     };
     let config = ContractConfig {
         network: uri.to_string(),
+        kdf_domain: "tests".to_string(),
         deployer: strkey(&deployment.admin),
         admin: strkey(&deployment.admin),
         asp_membership: strkey(&deployment.asp_membership),

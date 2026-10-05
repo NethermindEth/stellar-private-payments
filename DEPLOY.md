@@ -37,6 +37,7 @@ default.
 | `--asp-levels <N>` | Merkle tree levels for asp-membership |
 | `--pool-levels <N>` | Merkle tree levels for pool |
 | `--max-deposit <N>` | Maximum deposit amount |
+| `--kdf-domain <STRING>` | Privacy key derivation domain. Any chosen string. Shows in the message signed by users for key derivation |
 | `--policy-flags <SPEC>` | Default `<policy>` for `--pool` specs that omit one; required unless every spec includes its own |
 
 ## Other options
@@ -101,6 +102,7 @@ deployments/scripts/deploy.sh <network> \
   --asp-levels <n> \
   --pool-levels <n> \
   --max-deposit <n> \
+  --kdf-domain <string> \
   --pool <policy>:<gvk-mode>:<asset-spec> \
   --gvk-authority-pubkey-file <path>   # only if any pool uses gvk-viewonly/gvk-traceable
 ```
@@ -118,6 +120,7 @@ deployments/scripts/deploy.sh testnet \
   --asp-levels 10 \
   --pool-levels 20 \
   --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
@@ -132,6 +135,7 @@ deployments/scripts/deploy.sh testnet \
   --asp-levels 10 \
   --pool-levels 20 \
   --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
 ```
@@ -145,6 +149,7 @@ deployments/scripts/deploy.sh testnet \
   --asp-levels 10 \
   --pool-levels 20 \
   --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```

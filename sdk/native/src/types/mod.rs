@@ -33,6 +33,8 @@ pub const SMT_DEPTH: u32 = 32;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConfig {
     pub network: String,
+    /// Privacy key derivation domain.
+    pub kdf_domain: String,
     pub deployer: String,
     pub admin: String,
     /// Address of ASP membership deployed contract

@@ -235,7 +235,10 @@ mod tests {
     /// Registers a trivial contract just to obtain a registered contract
     /// `Address` to stand in for a pool or token.
     fn register_dummy_contract(env: &Env) -> Address {
-        env.register(PublicKeyRegistry, ())
+        env.register(
+            PublicKeyRegistry,
+            (soroban_sdk::String::from_str(env, "tests"),),
+        )
     }
 
     /// Converts a Soroban `Address` to the strkey string form

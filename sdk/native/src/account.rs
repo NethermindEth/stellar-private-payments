@@ -148,17 +148,16 @@ impl Account {
         }
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
-        let signature = self
-            .signer
-            .sign_message(crate::zk::encryption::KEY_DERIVATION_MESSAGE)
-            .await?;
+        let message =
+            crate::zk::encryption::key_derivation_message(&self.contract_config.kdf_domain);
+        let signature = self.signer.sign_message(&message).await?;
         // The signer only promises to sign *as* `signer_address`; a wallet
         // implementation can still return a signature made with a different
         // key. Verify it against the owner before it is trusted to derive
         // and persist keys under `user_address`.
         crate::zk::encryption::verify_owner_signature(
             self.user_address.as_str(),
-            crate::zk::encryption::KEY_DERIVATION_MESSAGE,
+            &message,
             &signature,
         )?;
         let (note_keypair, encryption_keypair) =
@@ -404,6 +403,7 @@ mod derive_privacy_keys_tests {
             ),
             ContractConfig {
                 network: PASSPHRASE.to_string(),
+                kdf_domain: String::new(),
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),

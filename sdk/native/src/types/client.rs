@@ -123,6 +123,7 @@ mod split_tests {
             // before it looks the pool up, so these tests never reach it.
             contract_config: ContractConfig {
                 network: String::new(),
+                kdf_domain: String::new(),
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),

@@ -169,6 +169,11 @@ impl ContractConfig {
         self.inner.network.clone()
     }
 
+    #[wasm_bindgen(getter, js_name = kdf_domain)]
+    pub fn kdf_domain(&self) -> String {
+        self.inner.kdf_domain.clone()
+    }
+
     #[wasm_bindgen(getter)]
     pub fn deployer(&self) -> String {
         self.inner.deployer.clone()
