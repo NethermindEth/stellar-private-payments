@@ -34,7 +34,7 @@ fn config_template() -> String {
 # deployment = "/path/to/deployment" # directory or deployments.json; required unless provisioned in data_dir
 # network = "testnet" # optional Stellar CLI name; defaults to deployment.network
 # data_dir = "{DEFAULT_DATA_DIR_TEMPLATE}"
-# circuits_dir = "/path/to/artifacts" # optional; defaults to deployment's circuit_keys/ or circuits/
+# circuits_dir = "/path/to/artifacts" # optional; packaged circuits/ or repo target/circuits-artifacts, with circuit_keys/ fallback
 # stellar_config_dir = "~/.config/stellar"
 "#
     )

@@ -155,15 +155,31 @@ impl CliConfig {
         self.data_dir.join("spp.db")
     }
 
+    /// Prefer packaged artifacts, then repository R1CS output for a checkout.
+    /// Per-file fallback to this deployment's circuit_keys is handled by the
+    /// loader.
     pub fn circuits_dir_path(&self) -> PathBuf {
         self.circuits_dir.clone().unwrap_or_else(|| {
             let dir = self.deployment_dir();
-            if dir.join("circuit_keys").is_dir() {
-                dir.join("circuit_keys")
-            } else {
-                dir.join("circuits")
+            if dir.join("circuits").is_dir() {
+                return dir.join("circuits");
             }
+            if let Some(deployments) = dir.parent()
+                && deployments
+                    .file_name()
+                    .is_some_and(|name| name == "deployments")
+                && let Some(root) = deployments.parent()
+                && root.join("Cargo.toml").is_file()
+                && root.join("circuits/Cargo.toml").is_file()
+            {
+                return root.join("target/circuits-artifacts");
+            }
+            dir.join("circuit_keys")
         })
+    }
+
+    pub fn circuit_keys_dir_path(&self) -> PathBuf {
+        self.deployment_dir().join("circuit_keys")
     }
 
     pub fn deployment_dir(&self) -> PathBuf {

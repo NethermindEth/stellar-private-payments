@@ -58,7 +58,8 @@ struct Cli {
 
     /// Directory with policy_tx_2_2[_{A,B,AB}].{graph.bin,r1cs}
     /// and selectiveDisclosure_{1,2,3,4}.{graph.bin,r1cs}
-    /// (default: circuit_keys/ or circuits/ alongside deployments.json)
+    /// Defaults to packaged circuits/ or repository target/circuits-artifacts;
+    /// missing files fall back to the selected deployment's circuit_keys/.
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,
 

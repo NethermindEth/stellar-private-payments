@@ -21,13 +21,19 @@ a template without requiring a deployment first. A deployment provisioned as
 there is no embedded testnet fallback.
 
 The directory contains `deployments.json` and `circuits.json`. Proof operations
-read artifacts from `circuit_keys/` (or `circuits/` for installed bundles).
-`--circuits-dir` selects an alternative complete artifact directory. It must
-contain matching `.r1cs`, `.graph.bin`, and `_proving_key.bin` files. For repository
-development, assemble these files from `target/circuits-artifacts` and the
-selected deployment's `circuit_keys` into that directory. All artifacts are
-checked against the runtime `circuits.json`; changing directories never bypasses
-fingerprint validation. Commands that do not prove need no circuit artifacts.
+prefer an adjacent `circuits/` bundle. For a repository deployment under
+`deployments/<network>/`, the default instead reads `target/circuits-artifacts/`
+for R1CS output. Run `make circuits` to generate those files. Missing artifacts
+fall back per file to the selected deployment's `circuit_keys/`, which supplies
+the committed witness graphs and proving keys. No manual merging is required.
+For other layouts without `circuits/`, the primary directory is `circuit_keys/`.
+
+`--circuits-dir` overrides the primary directory and retains the same per-file
+fallback. A complete bundle works on its own. Every artifact is checked against
+the selected deployment's runtime `circuits.json`. An existing file with a wrong
+fingerprint is rejected, never silently replaced by a fallback. Missing-file
+errors list the searched paths and explain `make circuits` and `--circuits-dir`.
+Commands that do not prove need no circuit artifacts.
 
 The CLI resolves RPC and passphrase through the named Stellar CLI network and
 rejects a passphrase different from the deployment configuration.
