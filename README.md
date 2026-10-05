@@ -51,12 +51,16 @@ The demo app demonstrates integration of the Stellar Private Payments [JS/TS SDK
 
 #### ASP Admin Page
 
-This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
+This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the pools and the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
-2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
+2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree, several in one call
+3. **Pause and unpause deposits** on the Pools tab, which also checks a tree before a pool is re-pointed to it and builds pause authorizations the signers sign ahead of time
+4. **Transfer a contract's admin** in two steps on the Admins tab
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
+
+Every admin call is a transaction whose source is the contract's admin. The page loads it into its Admin transaction card, where each signer of that account reads the call and signs it in turn. A pre-signed pause differs: the signers sign its authorization ahead of time, and a holder sends it from their own account. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
 
 #### Zero-Knowledge Circuits
 
