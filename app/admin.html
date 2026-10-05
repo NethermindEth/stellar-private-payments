@@ -350,6 +350,39 @@
                         </button>
                     </div>
                 </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-white">Pause authorizations</h3>
+                        <p class="mt-1 text-sm text-slate-400">The admin account's signers sign a pause of one pool's deposits ahead of time. A holder keeps the file and submits it from their own account when deposits must stop. Each file pauses once, and a file submitted to a paused pool is held back.</p>
+                    </div>
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
+                            <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthHolder">Holder</label>
+                            <input id="pauseAuthHolder" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="Who keeps the file" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthFiles">Authorization files: one to sign, or one per pool to submit</label>
+                            <input id="pauseAuthFiles" class="mt-2 block w-full text-sm text-slate-300" type="file" accept=".json,application/json" multiple />
+                        </div>
+                    </div>
+                    <ul id="pauseAuthResults" class="space-y-1 break-all font-mono text-xs text-slate-300"></ul>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="buildPauseAuthBtn" type="button" disabled title="Please connect your wallet first">
+                            Build
+                        </button>
+                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="signPauseAuthBtn" type="button" disabled title="Please connect your wallet first">
+                            Sign with Freighter
+                        </button>
+                        <button class="flex-1 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed" id="submitPauseAuthBtn" type="button" disabled title="Please connect your wallet first">
+                            Submit
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <!-- 6. Admins Tab -->
