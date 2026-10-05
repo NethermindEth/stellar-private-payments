@@ -55,3 +55,16 @@ production HTTPS on `:443`.
 ## Production (HTTPS + ACME)
 
 Set `--domain` / `--acme-email` / `--acme-cache-dir`, and bind to `:443`.
+
+### systemd deployment configuration
+
+The [service unit](systemd/stellar-bootnode.service) loads
+`/etc/stellar-bootnode/bootnode.env`. Copy the
+[environment template](systemd/bootnode.env.example) there and edit it for your
+installation. Before starting the service, copy your deployment's
+`deployments.json` to `/etc/stellar-bootnode/deployments.json`, readable by the
+`bootnode` service user, or set `BOOTNODE_DEPLOYMENT` to another absolute path.
+Keep the file outside home directories because the unit uses `ProtectHome=true`.
+
+The deployment file supplies the default RPC URL. Set
+`BOOTNODE_UPSTREAM_RPC_URL` only to override it with an RPC for the same network.
