@@ -82,6 +82,3 @@ spp-example-wallet.sqlite-*
 spp-*-wallet/
 
 deployments/local/
-
-# Local deployment wizard plans
-.deployment-plans/

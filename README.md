@@ -116,18 +116,6 @@ CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://
 Deploy a private pool tailored to your own asset, compliance policy, and privacy
 needs. See [DEPLOY.md](DEPLOY.md) for details.
 
-For guided setup, run the deployment wizard from the repository root:
-
-```bash
-bash deployments/scripts/deploy-wizard.sh
-```
-
-It asks for the network, account alias, assets, policies, and deposit limit,
-saves a reusable plan, and shows a summary before offering to deploy. Use
-`--save-only` to prepare a plan without deploying. The wizard uses Bash and jq
-with Stellar CLI; see [guided deployment](DEPLOY.md#guided-deployment) for
-prerequisites and how to reopen a saved plan.
-
 ### Selecting a network
 
 The CLI and bootnode use runtime deployment configuration, so the same binary
