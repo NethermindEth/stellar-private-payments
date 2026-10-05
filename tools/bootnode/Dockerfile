@@ -1,8 +1,5 @@
 FROM rust:1.97.1-bookworm AS builder
 
-ARG SPP_NETWORK=testnet
-ENV SPP_NETWORK=${SPP_NETWORK}
-
 WORKDIR /workspace
 COPY . .
 

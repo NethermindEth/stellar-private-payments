@@ -76,6 +76,12 @@ export function circuitsBaseUrl() {
     return CIRCUITS_BASE_URL;
 }
 
+async function loadCircuitLock() {
+    const response = await fetch(new URL('circuits.json', circuitsBaseUrl()));
+    if (!response.ok) throw new Error(`Cannot load circuit fingerprints: HTTP ${response.status}`);
+    return response.json();
+}
+
 function bindAppStorage(sdkStorage) {
     appStorageInstance = new AppStorage(sdkStorage);
 }
@@ -153,6 +159,7 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
         bootnodeUrl: bootnodeUrl ?? undefined,
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock: await loadCircuitLock(),
     });
     return wrapSdkClient(sdk);
 }
@@ -294,6 +301,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
     return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock: await loadCircuitLock(),
     });
 }
 

@@ -12,14 +12,31 @@ const CIRCUITS_BASE_GLOBAL: &str = "__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__";
 const CACHE_NAME: &str = "stellar-circuits-v1";
 
 thread_local! {
+    static CIRCUIT_LOCK: RefCell<Option<stellar_private_payments::CircuitLockfile>> = const { RefCell::new(None) };
     static CIRCUITS_BASE_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Override the circuits artifact base URL for this worker isolate.
-pub(crate) fn set_circuits_base_url(base: String) {
-    CIRCUITS_BASE_OVERRIDE.with(|cell| {
-        *cell.borrow_mut() = Some(base);
-    });
+/// Bind one worker to the caller's deployment bundle. Spawn another worker to
+/// switch.
+pub(crate) fn configure_circuits(base: String, json: &str) -> anyhow::Result<()> {
+    let lock = stellar_private_payments::circuit_lock(json)?;
+    CIRCUIT_LOCK.with(|cell| {
+        let mut current = cell.borrow_mut();
+        anyhow::ensure!(
+            current.is_none(),
+            "prover already configured; create a new prover for another deployment"
+        );
+        *current = Some(lock);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    CIRCUITS_BASE_OVERRIDE.with(|cell| *cell.borrow_mut() = Some(base));
+    Ok(())
+}
+
+pub(crate) fn circuit_lock() -> Result<stellar_private_payments::CircuitLockfile, JsError> {
+    CIRCUIT_LOCK
+        .with(|cell| cell.borrow().clone())
+        .ok_or_else(|| JsError::new("circuitLock is required before proving"))
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -61,7 +78,7 @@ fn map_circuit_err(err: stellar_private_payments::Error) -> JsError {
 }
 
 pub(crate) async fn fetch_circuit_artifact(stem: &str, kind: &str) -> Result<Vec<u8>, JsError> {
-    let lock = stellar_private_payments::circuit_lock().map_err(map_circuit_err)?;
+    let lock = circuit_lock()?;
     let filename = stellar_private_payments::CircuitLockfile::artifact_file_name(stem, kind);
     let bytes = fetch_circuit_file(&filename).await?;
     if let Err(err) = lock.verify_artifact(stem, kind, &bytes) {

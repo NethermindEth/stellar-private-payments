@@ -1,14 +1,14 @@
 use stellar_private_payments::types::ContractConfig;
 
-const DEPLOYMENT: &str = include_str!(concat!(env!("OUT_DIR"), "/deployments.json"));
-
-/// Returns the statically-embedded contracts deployment configuration.
-///
-/// This is intentionally compiled-in (via `include_str!`) to prevent runtime
-/// misconfiguration of critical identifiers like contract IDs and the
-/// deployment ledger.
-pub(crate) fn deployment_config() -> anyhow::Result<ContractConfig> {
-    Ok(serde_json::from_str(DEPLOYMENT)?)
+/// Read and validate a runtime deployment before accessing upstream or storage.
+pub fn read_deployment(path: &std::path::Path) -> anyhow::Result<ContractConfig> {
+    use anyhow::Context;
+    let deployment: ContractConfig = serde_json::from_str(
+        &std::fs::read_to_string(path)
+            .with_context(|| format!("read deployment {}", path.display()))?,
+    )?;
+    deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
+    Ok(deployment)
 }
 
 /// Network-isolated v2 namespace. v1 caches are rebuilt, never reused.
@@ -31,8 +31,7 @@ pub fn deployment_storage_id(
     format!("v2:{network_hash}:{min_deployment_ledger}:{contracts_hash}")
 }
 
-pub fn current_deployment_storage_id() -> anyhow::Result<String> {
-    let deployment = deployment_config()?;
+pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Result<String> {
     let passphrase = deployment.network_passphrase.as_deref().unwrap_or_default();
     deployment.validate_network(passphrase)?;
     Ok(deployment_storage_id(

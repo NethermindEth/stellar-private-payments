@@ -127,6 +127,7 @@ function wrapClient(wasmClient, telemetrySinks) {
  */
 async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
+  const lockJson = options.prover ? undefined : JSON.stringify(requireField(options.circuitLock, 'circuitLock'));
 
   const storage =
     options.storage ??
@@ -142,8 +143,13 @@ async function newClient(options) {
       throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
     }
     prover = ProverBridge.spawn(resolvedProverWorkerUrl);
-    await prover.configureCircuitsBase(circuitsBaseUrl);
-    await prover.ping();
+    try {
+      await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
+      await prover.ping();
+    } catch (error) {
+      prover.free();
+      throw error;
+    }
   }
   const proverHandle = prover.toHandle();
   const storageHandle = await storage.toHandle();
@@ -171,11 +177,12 @@ async function newClient(options) {
 async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options) {
   const contractConfig = requireField(options?.contractConfig, 'contractConfig');
   const circuitsBaseUrl = requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
+  const lockJson = JSON.stringify(requireField(options?.circuitLock, 'circuitLock'));
   const resolvedProverWorkerUrl = options?.proverWorkerUrl ?? proverWorkerUrl;
 
   const prover = ProverBridge.spawn(resolvedProverWorkerUrl);
   try {
-    await prover.configureCircuitsBase(circuitsBaseUrl);
+    await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
     await prover.ping();
     const proverHandle = prover.toHandle();
     try {

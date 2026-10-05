@@ -111,7 +111,8 @@ async function registerAccount({
   const storage = useSharedStorage
     ? (window.__recipientStorage ??= await Storage.open()).fork()
     : await Storage.open();
-  const client = await Client.new({ rpcUrl, contractConfig, circuitsBaseUrl, storage });
+  const circuitLock = await fetch(new URL('circuits.json', circuitsBaseUrl)).then((r) => r.json());
+  const client = await Client.new({ rpcUrl, contractConfig, circuitsBaseUrl, circuitLock, storage });
   const signer = {
     getPublicKey: async () => address,
     signTransaction: async (xdr, opts) => window[signTxName](xdr, opts.networkPassphrase),

@@ -13,6 +13,10 @@ use url::Url;
 #[derive(Debug, Parser)]
 #[command(name = "bootnode", version, about)]
 struct Cli {
+    /// Required deployments.json file for this instance.
+    #[arg(long, env = "BOOTNODE_DEPLOYMENT")]
+    deployment: PathBuf,
+
     /// Bind address for the main HTTPS listener.
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
     bind: SocketAddr,
@@ -195,8 +199,7 @@ impl Cli {
         }
     }
 
-    async fn open_storage(&self) -> Result<Arc<dyn Storage>> {
-        let deployment_id = current_deployment_storage_id()?;
+    async fn open_storage(&self, deployment_id: String) -> Result<Arc<dyn Storage>> {
         let backend = Postgres::connect(
             &self.database_url,
             self.db_max_connections as usize,
@@ -214,19 +217,23 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
 
+    let deployment = bootnode::read_deployment(&cli.deployment)?;
+    let spec = bootnode::DeploymentSpec::from_config(&deployment)?;
     let upstream_rpc_url = match cli.upstream_rpc_url.clone() {
         Some(url) => url,
-        None => bootnode::default_upstream_rpc_url()?,
+        None => bootnode::default_upstream_rpc_url(&deployment)?,
     };
-    bootnode::validate_upstream_network(upstream_rpc_url.clone()).await?;
-    let storage = cli.open_storage().await?;
+    bootnode::validate_upstream_network(upstream_rpc_url.clone(), &deployment).await?;
+    let storage = cli
+        .open_storage(current_deployment_storage_id(&deployment)?)
+        .await?;
     let cfg = cli.into_config(upstream_rpc_url);
 
     let _otel = otel::init_telemetry(&cfg)?;
     metrics::init_metrics()?;
     let prom_handle = metrics::install_prometheus_recorder()?;
 
-    Bootnode::setup(cfg, storage, prom_handle)
+    Bootnode::setup_with_deployment(cfg, storage, prom_handle, spec)
         .await?
         .serve()
         .await

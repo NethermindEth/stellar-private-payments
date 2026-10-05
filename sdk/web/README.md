@@ -21,6 +21,8 @@ const networkPassphrase = 'Test SDF Network ; September 2015';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
 const contractConfig = await fetch('/deployments.json').then((r) => r.json());
 const circuitsBaseUrl = new URL('./circuits/', import.meta.url).href;
+// Load fingerprints from your application's trusted deployment bundle.
+const circuitLock = await fetch(new URL('circuits.json', circuitsBaseUrl)).then((r) => r.json());
 const signer = new FreighterSigner();
 
 await init();
@@ -31,7 +33,7 @@ if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
 }
 
-const client = await Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl });
+const client = await Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl, circuitLock });
 await client.backgroundSync();
 
 const account = await client.account({ networkPassphrase }, signer);
@@ -54,8 +56,14 @@ import { verifySelectiveDisclosure } from 'stellar-private-payments';
 const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
   contractConfig,
   circuitsBaseUrl,
+  circuitLock,
 });
 ```
+
+The same package supports any compatible deployment. Supply its configuration,
+artifact base URL, and expected fingerprints at runtime; no network-specific
+package build is required. Each prover worker uses one bundle. To change bundles,
+create a new client/prover instead of reconfiguring an active worker.
 
 ## API reference
 

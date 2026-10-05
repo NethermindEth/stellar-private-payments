@@ -13,7 +13,7 @@ use gloo_worker::{
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments::{
-    CircuitLockfile, Error, Prover, circuit_lock, disclosure,
+    CircuitLockfile, Error, Prover, disclosure,
     prover::ProverEngine,
     transact::PreparedProverTx,
     types::{
@@ -43,7 +43,7 @@ pub(crate) enum ProverWorkerRequest {
     Transact(TransactParams),
     Disclosure(disclosure::DisclosureProveParams),
     VerifyDisclosureProof(DisclosureReceipt, String),
-    ConfigureCircuitsBase(String),
+    ConfigureCircuitsBase(String, String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
 }
@@ -185,7 +185,7 @@ async fn build_transact_from_compressed(
 }
 
 async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
-    let lock = circuit_lock().map_err(circuit_err)?;
+    let lock = crate::circuits::circuit_lock()?;
     let pk_name = CircuitLockfile::artifact_file_name(stem, "proving_key.bin");
     let pk_sha256 = lock
         .artifact_sha256(stem, "proving_key.bin")
@@ -301,8 +301,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             tracing::trace!("[{WORKER_NAME}] ping/pong");
             ProverWorkerResponse::Pong
         }
-        ProverWorkerRequest::ConfigureCircuitsBase(base_url) => {
-            crate::circuits::set_circuits_base_url(base_url);
+        ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json) => {
+            crate::circuits::configure_circuits(base_url, &lock_json)?;
             ProverWorkerResponse::Saved
         }
         ProverWorkerRequest::Transact(params) => {
@@ -502,9 +502,13 @@ impl ProverBridge {
     }
 
     #[wasm_bindgen(js_name = configureCircuitsBase)]
-    pub async fn configure_circuits_base_js(&self, base_url: String) -> Result<(), JsError> {
+    pub async fn configure_circuits_base_js(
+        &self,
+        base_url: String,
+        lock_json: String,
+    ) -> Result<(), JsError> {
         let base_url = crate::deployment::require_circuits_base_url(base_url)?;
-        self.configure_circuits_base(base_url)
+        self.configure_circuits_base(base_url, lock_json)
             .await
             .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -569,9 +573,16 @@ impl ProverBridge {
         }
     }
 
-    pub(crate) async fn configure_circuits_base(&self, base_url: String) -> anyhow::Result<()> {
+    pub(crate) async fn configure_circuits_base(
+        &self,
+        base_url: String,
+        lock_json: String,
+    ) -> anyhow::Result<()> {
         match self
-            .call(ProverWorkerRequest::ConfigureCircuitsBase(base_url), 5_000)
+            .call(
+                ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json),
+                5_000,
+            )
             .await?
         {
             ProverWorkerResponse::Saved => Ok(()),

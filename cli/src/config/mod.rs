@@ -17,13 +17,6 @@ pub use toml::{
     FileConfig, default_config_path, load_file_config, resolve_config_path, write_config_template,
 };
 
-/// Selected deployment baked into the binary (from
-/// `deployments/<SPP_NETWORK>/deployments.json`).
-pub const DEFAULT_DEPLOYMENT_JSON: &str =
-    include_str!(concat!(env!("OUT_DIR"), "/deployments.json"));
-
-pub const EMBEDDED_DEPLOYMENT_LABEL: &str = concat!("embedded:", env!("SPP_NETWORK"));
-
 /// Deployment config provisioned into the data dir by `scripts/install.sh`.
 pub const DEPLOYMENT_FILE_NAME: &str = "deployments.json";
 
@@ -54,7 +47,7 @@ pub struct CliConfigOverrides {
 pub struct CliConfig {
     /// TOML config file when loaded; otherwise None.
     pub config_file: Option<PathBuf>,
-    /// File path when overridden; otherwise [`EMBEDDED_DEPLOYMENT_LABEL`].
+    /// Runtime deployment JSON file path.
     pub deployment_source: String,
     pub deployment: ContractConfig,
     /// Stellar CLI network name (built-in like `testnet`, or a custom one).
@@ -163,9 +156,29 @@ impl CliConfig {
     }
 
     pub fn circuits_dir_path(&self) -> PathBuf {
-        self.circuits_dir
-            .clone()
-            .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
+        self.circuits_dir.clone().unwrap_or_else(|| {
+            let dir = self.deployment_dir();
+            if dir.join("circuit_keys").is_dir() {
+                dir.join("circuit_keys")
+            } else {
+                dir.join("circuits")
+            }
+        })
+    }
+
+    pub fn deployment_dir(&self) -> PathBuf {
+        Path::new(&self.deployment_source)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_owned()
+    }
+
+    pub fn circuit_lock(&self) -> Result<stellar_private_payments::CircuitLockfile> {
+        let path = self.deployment_dir().join("circuits.json");
+        stellar_private_payments::circuit_lock(
+            &std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?,
+        )
+        .map_err(Into::into)
     }
 
     /// Open (creating if needed) the local sqlite database (`spp.db`).
@@ -201,27 +214,23 @@ pub fn default_data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".stellar-pp"))
 }
 
-pub fn default_circuits_dir(data_dir: &Path) -> PathBuf {
-    if cfg!(debug_assertions) {
-        PathBuf::from("target/circuits-artifacts")
-    } else {
-        data_dir.join("circuits")
-    }
-}
-
 /// Resolve the deployment config: `--deployment` > the copy provisioned into
-/// the data dir by `scripts/install.sh` > [`DEFAULT_DEPLOYMENT_JSON`].
+/// the data dir by `scripts/install.sh`. No embedded fallback.
 fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, ContractConfig)> {
     if let Some(path) = path {
-        return read_deployment_file(path);
+        return read_deployment_file(&if path.is_dir() {
+            path.join(DEPLOYMENT_FILE_NAME)
+        } else {
+            path.to_owned()
+        });
     }
     let provisioned = data_dir.join(DEPLOYMENT_FILE_NAME);
     if provisioned.is_file() {
         return read_deployment_file(&provisioned);
     }
-    let deployment =
-        serde_json::from_str(DEFAULT_DEPLOYMENT_JSON).context("parse embedded deployment")?;
-    Ok((EMBEDDED_DEPLOYMENT_LABEL.to_string(), deployment))
+    bail!(
+        "deployment configuration required: use --deployment <directory-or-deployments.json> or set defaults.deployment in your config"
+    )
 }
 
 fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
@@ -229,8 +238,9 @@ fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
         .with_context(|| format!("read deployment file {}", path.display()))?;
 
     // A schema mismatch here usually means the file is newer than this binary
-    let deployment = serde_json::from_str(&raw)
+    let deployment: ContractConfig = serde_json::from_str(&raw)
         .with_context(|| format!("parse deployment file {}", path.display()))?;
+    deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
     Ok((path.display().to_string(), deployment))
 }
 
@@ -247,13 +257,14 @@ pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {
 mod tests {
     use super::{CliConfig, CliConfigOverrides};
     use crate::account::Account;
+    use std::path::PathBuf;
 
     const OWNER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const PAYER_ADDRESS: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
     /// Shaped like a raw secret key: 56 characters starting with `S`.
     const SECRET_SHAPED: &str = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    /// A config over the embedded deployment. The data dir is a name
+    /// A config over an explicit test deployment. The data dir is a name
     /// that holds no provisioned `deployments.json`, so loading stays offline
     /// and independent of the machine's own wallet directory.
     fn config_with(sign_as: Option<&str>) -> CliConfig {
@@ -261,13 +272,16 @@ mod tests {
             None,
             None,
             CliConfigOverrides {
+                deployment_path: Some(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deployments/testnet"),
+                ),
                 data_dir: Some(std::env::temp_dir().join("spp-require-signer-tests")),
                 account: Some("owner".to_string()),
                 sign_as: sign_as.map(str::to_string),
                 ..Default::default()
             },
         )
-        .expect("the embedded deployment should load")
+        .expect("the test deployment should load")
     }
 
     fn owner() -> Account {
@@ -344,25 +358,45 @@ mod tests {
 
 #[cfg(test)]
 mod network_validation_tests {
+    use super::*;
+
     #[test]
-    fn embedded_deployment_rejects_another_network() {
-        let deployment: stellar_private_payments::types::ContractConfig =
-            serde_json::from_str(super::DEFAULT_DEPLOYMENT_JSON).expect("embedded deployment");
+    fn same_binary_loads_two_networks_and_rejects_mismatches() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deployments");
+        let mut identities = Vec::new();
+        for name in ["testnet", "ci-test-network"] {
+            let config = CliConfig::load(
+                None,
+                None,
+                CliConfigOverrides {
+                    deployment_path: Some(root.join(name)),
+                    ..Default::default()
+                },
+            )
+            .expect("runtime deployment");
+            assert_eq!(config.network, name);
+            let passphrase = config
+                .deployment
+                .network_passphrase
+                .as_deref()
+                .expect("network identity");
+            assert!(config.deployment.validate_network(passphrase).is_ok());
+            assert!(config.deployment.validate_network("wrong network").is_err());
+            identities.push(passphrase.to_owned());
+            config.circuit_lock().expect("runtime circuit lock");
+        }
+        assert_ne!(identities[0], identities[1]);
+    }
+
+    #[test]
+    fn missing_deployment_has_no_embedded_fallback() {
+        let dir =
+            std::env::temp_dir().join(format!("spp-missing-deployment-{}", std::process::id()));
         assert!(
-            deployment
-                .validate_network("not the deployment network")
-                .is_err()
+            load_deployment(None, &dir)
+                .expect_err("missing configuration must fail")
+                .to_string()
+                .contains("deployment configuration required")
         );
-        assert!(
-            deployment
-                .validate_network(
-                    deployment
-                        .network_passphrase
-                        .as_deref()
-                        .expect("network passphrase")
-                )
-                .is_ok()
-        );
-        assert_eq!(deployment.network, env!("SPP_NETWORK"));
     }
 }

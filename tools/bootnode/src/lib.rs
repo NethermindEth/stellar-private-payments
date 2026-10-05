@@ -23,22 +23,23 @@ use storage::Storage;
 
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
-pub use deployment::{current_deployment_storage_id, deployment_storage_id};
+pub use deployment::{current_deployment_storage_id, deployment_storage_id, read_deployment};
+use stellar_private_payments::types::ContractConfig;
 pub use storage::{InMemory, Postgres};
 
 /// Default upstream RPC from the selected deployment.
-pub fn default_upstream_rpc_url() -> Result<url::Url> {
-    let deployment = deployment::deployment_config()?;
+pub fn default_upstream_rpc_url(deployment: &ContractConfig) -> Result<url::Url> {
     let rpc = deployment
         .rpc_url
+        .as_deref()
         .ok_or_else(|| anyhow::anyhow!("deployment config is missing rpcUrl"))?;
-    Ok(url::Url::parse(&rpc)?)
+    Ok(url::Url::parse(rpc)?)
 }
 
 /// Verify the upstream identity before opening or changing deployment storage.
-pub async fn validate_upstream_network(url: url::Url) -> Result<()> {
+pub async fn validate_upstream_network(url: url::Url, deployment: &ContractConfig) -> Result<()> {
     let passphrase = UpstreamClient::new(url)?.network_passphrase().await?;
-    deployment::deployment_config()?.validate_network(&passphrase)
+    deployment.validate_network(&passphrase)
 }
 
 /// Contract set + genesis ledger the bootnode indexes and will serve.
@@ -50,8 +51,9 @@ pub struct DeploymentSpec {
 }
 
 impl DeploymentSpec {
-    pub fn from_compiled() -> Result<Self> {
-        let deployment = deployment::deployment_config()?;
+    pub fn from_config(deployment: &ContractConfig) -> Result<Self> {
+        deployment
+            .validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
         Ok(Self {
             network_passphrase: deployment.network_passphrase.clone().unwrap_or_default(),
             contract_ids: deployment.all_contract_ids(),
@@ -79,15 +81,6 @@ pub(crate) struct AppState {
 }
 
 impl Bootnode {
-    pub async fn setup(
-        cfg: Config,
-        storage: Arc<dyn Storage>,
-        prom_handle: metrics_exporter_prometheus::PrometheusHandle,
-    ) -> Result<Self> {
-        Self::setup_with_deployment(cfg, storage, prom_handle, DeploymentSpec::from_compiled()?)
-            .await
-    }
-
     pub async fn setup_with_deployment(
         cfg: Config,
         storage: Arc<dyn Storage>,
@@ -163,7 +156,14 @@ mod network_tests {
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let result = validate_upstream_network(format!("http://{addr}/").parse().unwrap()).await;
+        let deployment = read_deployment(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../deployments/testnet/deployments.json"),
+        )
+        .unwrap();
+        let result =
+            validate_upstream_network(format!("http://{addr}/").parse().unwrap(), &deployment)
+                .await;
         task.abort();
         assert!(
             result
@@ -171,5 +171,19 @@ mod network_tests {
                 .to_string()
                 .contains("network passphrase mismatch")
         );
+    }
+    #[test]
+    fn same_binary_loads_two_deployments_with_separate_namespaces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments");
+        let mut ids = Vec::new();
+        for name in ["testnet", "ci-test-network"] {
+            let config = read_deployment(&root.join(name).join("deployments.json")).unwrap();
+            let spec = DeploymentSpec::from_config(&config).unwrap();
+            assert!(!spec.network_passphrase.is_empty());
+            default_upstream_rpc_url(&config).unwrap();
+            ids.push(current_deployment_storage_id(&config).unwrap());
+        }
+        assert_ne!(ids[0], ids[1]);
+        assert!(read_deployment(&root.join("missing-config.json")).is_err());
     }
 }

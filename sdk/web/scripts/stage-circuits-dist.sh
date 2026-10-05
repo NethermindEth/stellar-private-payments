@@ -63,6 +63,7 @@ sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 # old cache sidecars or renamed circuits) cannot leak into the npm package.
 rm -rf "$DIST/circuits"
 mkdir -p "$DIST/circuits" "$DIST/licenses"
+cp "$ROOT/deployments/${SPP_NETWORK:-testnet}/circuits.json" "$DIST/circuits/circuits.json"
 
 for name in "${CIRCUIT_ARTIFACTS[@]}"; do
   if [[ "$name" == *.graph.bin ]]; then

@@ -107,7 +107,10 @@ async fn build_session(
     let storage =
         LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?.into();
 
-    let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"));
+    let lock = stellar_private_payments::circuit_lock(&std::fs::read_to_string(
+        network::repo_root().join("deployments/testnet/circuits.json"),
+    )?)?;
+    let store = CircuitStore::open(network::repo_root().join("target/circuits-artifacts"), lock);
     store
         .ensure()
         .await

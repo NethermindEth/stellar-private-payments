@@ -384,7 +384,7 @@ need jq
 [[ -n "$NETWORK" ]] || usage
 [[ "$NETWORK" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid network folder name"
 case "$NETWORK" in
-  testnet) SPP_DISPLAY_NAME="${SPP_DISPLAY_NAME:-Testnet}"; SPP_IS_TESTNET="${SPP_IS_TESTNET:-true}"; SPP_EXPLORER_URL="${SPP_EXPLORER_URL:-https://stellar.expert/explorer/testnet}" ;;
+  testnet) SPP_DISPLAY_NAME="${SPP_DISPLAY_NAME:-Testnet}"; SPP_IS_TESTNET="${SPP_IS_TESTNET:-true}"; SPP_EXPLORER_URL="${SPP_EXPLORER_URL-https://stellar.expert/explorer/testnet}" ;;
   futurenet|local) SPP_IS_TESTNET="${SPP_IS_TESTNET:-true}" ;;
 esac
 case "${SPP_IS_TESTNET:-false}" in true|false) ;; *) die "SPP_IS_TESTNET must be true or false" ;; esac

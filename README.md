@@ -116,23 +116,41 @@ CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://
 Deploy a private pool tailored to your own asset, compliance policy, and privacy
 needs. See [DEPLOY.md](DEPLOY.md) for details.
 
-### Selecting a network
-
-Set `SPP_NETWORK` when building from source to select a folder under
-`deployments/`. It defaults to `testnet`. Each folder must contain
-`deployments.json`, `circuits.json`, and matching artifacts in `circuit_keys/`.
+For guided setup, run the deployment wizard from the repository root:
 
 ```bash
-SPP_NETWORK=testnet trunk build --release
-SPP_NETWORK=testnet cargo build --release -p stellar-private-payments-cli
-SPP_NETWORK=testnet cargo build --release --manifest-path tools/bootnode/Cargo.toml
+bash deployments/scripts/deploy-wizard.sh
 ```
 
-Replace `testnet` with your deployment folder's name. These commands build the
-website and executables; they do not deploy contracts. Switching the selected
-network requires rebuilding. Downstream deployers provide the contract
-deployments, network configuration, and matching circuit artifacts for their
-chosen network. `ci-test-network` is synthetic CI data, not a live deployment.
+It asks for the network, account alias, assets, policies, and deposit limit,
+saves a reusable plan, and shows a summary before offering to deploy. Use
+`--save-only` to prepare a plan without deploying. The wizard uses Bash and jq
+with Stellar CLI; see [guided deployment](DEPLOY.md#guided-deployment) for
+prerequisites and how to reopen a saved plan.
+
+### Selecting a network
+
+The CLI and bootnode use runtime deployment configuration, so the same binary
+can serve different networks without rebuilding:
+
+```bash
+cargo build --release -p stellar-private-payments-cli
+./target/release/spp --deployment deployments/testnet config show
+
+cargo build --release --manifest-path tools/bootnode/Cargo.toml
+# Required when starting the bootnode, alongside database and HTTP/TLS settings:
+export BOOTNODE_DEPLOYMENT=/absolute/path/to/deployments.json
+```
+
+The CLI accepts a deployment directory or JSON file through `--deployment`, a
+saved config setting, or a file provisioned in its data directory. There is no
+embedded deployment fallback. Proof operations additionally need the deployment's
+`circuits.json` and matching circuit artifacts. The Rust SDK and NPM package also
+accept deployment configuration and circuit fingerprints at runtime.
+
+For the website, `SPP_NETWORK=testnet trunk build --release` selects the deployment
+to bundle. Downstream deployers supply their configuration, contracts, and matching
+circuit artifacts. `ci-test-network` is synthetic test data, not a live deployment.
 
 The deployment configuration records the network's public identity string
 (`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks
@@ -144,7 +162,7 @@ names, explorer defaults, and test-network disclaimers also come from the config
 network and contract IDs. Existing `v1` history must be re-synced; this does not
 change contracts or balances on the blockchain.
 
-See [Network-specific builds](docs/src/multi-network.md) for configuration fields,
+See [Deployment configuration and networks](docs/src/multi-network.md) for configuration fields,
 Docker builds, connection overrides, and control over retaining old bootnode data.
 
 ## Limitations

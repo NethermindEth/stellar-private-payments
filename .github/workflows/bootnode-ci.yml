@@ -30,11 +30,6 @@ env:
 
 jobs:
   bootnode:
-    strategy:
-      matrix:
-        network: [testnet, ci-test-network]
-    env:
-      SPP_NETWORK: ${{ matrix.network }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
