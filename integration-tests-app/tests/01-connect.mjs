@@ -33,18 +33,27 @@ export async function run({ page }) {
   const addressVisible = /^G[A-Z2-7]{7}\.{3}[A-Z2-7]{6}$/.test(walletTextContent);
   assert(addressVisible, `no truncated account address (e.g. "GCDVNXYD...6SE75S") is visible; got "${walletTextContent}"`);
 
-  // Freighter reports the network's passphrase-matched canonical name here
-  // (`network`), not the custom label given when adding it ("Local
-  // Quickstart") — our standalone passphrase matches Freighter's own
-  // STANDALONE preset, so that's what it reports regardless of the label.
+  // The badge uses the deployment's display name (or network folder name),
+  // independently of Freighter's canonical network name.
+  const deployment = await page.evaluate(async () => {
+    const response = await fetch(new URL('./deployments.json', document.baseURI));
+    if (!response.ok) {
+      throw new Error(`Cannot load deployment config: HTTP ${response.status}`);
+    }
+    return response.json();
+  });
+  const configuredName = deployment.displayName || deployment.network;
+  assert(typeof configuredName === 'string' && configuredName.trim(),
+    'deployment config has no network label');
+  const expectedNetworkName = configuredName.toUpperCase().trim();
   const networkName = await page
     .locator('#network-name')
     .textContent()
     .catch(() => '');
   assert(
-    (networkName || '').trim() === 'STANDALONE',
-    'network indicator does not show "STANDALONE"',
+    (networkName || '').trim() === expectedNetworkName,
+    `network indicator should show "${expectedNetworkName}"; got "${(networkName || '').trim()}"`,
   );
 
-  log.info('OK: connected, address shown, network is STANDALONE');
+  log.info(`OK: connected, address shown, network is ${expectedNetworkName}`);
 }
