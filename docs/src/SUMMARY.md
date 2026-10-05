@@ -3,6 +3,7 @@
 - [Introduction](./introduction.md)
 - [Contributing](./contributing.md)
 - [Deploy](./deploy.md)
+- [Governance](./governance.md)
 - [Security](./security.md)
   - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
 
