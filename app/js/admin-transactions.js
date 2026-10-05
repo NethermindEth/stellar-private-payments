@@ -257,6 +257,7 @@ const NETWORK_REFUSALS = [
   [/tx_?too_?late/i, 'The transaction\'s time bound has passed. Build the call again.'],
   [/TRY_AGAIN_LATER|NOT_FOUND|DUPLICATE/, 'The network has not confirmed the transaction yet. Check the contract before building the call again.'],
   [/Error\(Auth, InvalidAction\)/, 'The transaction\'s source is not the contract\'s admin.'],
+  [/Error\(Budget, ExceededLimit\)/, 'The call needs more resources than one transaction allows. For a blocklist insert, add fewer keys at a time.'],
 ];
 
 /**
