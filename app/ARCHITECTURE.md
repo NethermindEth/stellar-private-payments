@@ -50,7 +50,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 **Main thread (WASM)**
 
 - Entry: `init()` from `stellar-private-payments` (wasm-bindgen module init).
-- `Client::new` forks a `Storage` handle and holds RPC URL + optional bootnode; wallet binding happens at `account`.
+- `Client::new` forks a `Storage` handle and holds the deployment configuration, RPC URL, optional bootnode, and prover bridge. The JS constructor configures that prover with the artifact base URL and circuit lock; each prover worker is bound to one lock. Wallet binding happens at `account`.
 - `Client::backgroundSync` spawns the native SDK `BackgroundSync` loop (`wasm_bindgen_futures::spawn_local`).
 
 **Indexer (client SDK + web SDK)**
@@ -66,10 +66,10 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 
-**`Client` (WASM, wasm-bindgen API)**
+**`Client` (JS facade over the WASM API)**
 
-- Constructed by `Client.new({ rpcUrl, storage, proverWorkerUrl?, bootnodeUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
-- Spawns the prover worker at `Client.new`. Routes storage through `StorageBridge`.
+- Constructed by `Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl, circuitLock })` — wraps native SDK `Client` plus worker bridges; no wallet yet. `contractConfig` is required. `circuitLock` is the parsed, trusted `circuits.json` containing expected artifact hashes; `circuitsBaseUrl` locates those artifacts. Optional settings include `proverWorkerUrl` and `bootnodeUrl`.
+- Spawns and configures the prover worker at `Client.new`, unless a pre-configured `prover` is supplied. With that prover, `circuitsBaseUrl` and `circuitLock` may be omitted. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `backgroundSync`.
   - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
@@ -189,6 +189,8 @@ Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freigh
 **Build (Trunk)**
 
 `Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/freighter.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/freighter` as external packages via import maps in `index.html`.
+
+`SPP_NETWORK` (default `testnet`) selects `deployments/<network>/deployments.json` for staging. The esbuild alias `--alias:app-circuit-lock=./deployments/${SPP_NETWORK:-testnet}/circuits.json` also embeds that deployment's circuit lock in the app bundles. `wasm-facade.js` imports `app-circuit-lock` and passes it, together with the deployment configuration and artifact base URL, to the SDK for client creation and walletless disclosure verification. The app does not fetch `circuits.json` at runtime. Expected hashes are pinned to the app build, so this still requires trusting the app and its delivery.
 
 Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
 

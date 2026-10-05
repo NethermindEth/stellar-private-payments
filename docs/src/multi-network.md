@@ -1,8 +1,10 @@
 # Deployment configuration and networks
 
 The Rust SDK, NPM package, CLI, and bootnode are network-independent. Choose the
-network by supplying a deployment configuration at runtime; native binaries do
-not embed a deployment or circuit fingerprint file.
+network by supplying a deployment configuration at runtime. The CLI and bootnode
+binaries do not embed a deployment or circuit fingerprint file. The native SDK
+examples still embed `sdk/native/circuits.json`, the testnet circuit lock, for
+their example proving setup; they do not demonstrate runtime lock selection.
 
 ## CLI
 
