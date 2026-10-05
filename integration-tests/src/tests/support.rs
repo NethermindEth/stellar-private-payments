@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
     types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
+    zk::disclosure::find_circuit,
 };
 
 use crate::{
@@ -45,10 +46,7 @@ pub async fn deploy_default() -> Result<(ContractConfig, DeploymentIdentity)> {
 /// Deploy every entry of `pools` together (one `deploy.sh` invocation, so
 /// they share ASP membership/non-membership contracts).
 pub async fn deploy(pools: &[PoolOptions]) -> Result<(ContractConfig, DeploymentIdentity)> {
-    let network = LocalNetwork::start().await?;
-    network
-        .deploy(MAX_DEPOSIT_STROOPS, ASP_LEVELS, POOL_LEVELS, pools, None)
-        .await
+    deploy_with_max_deposit(MAX_DEPOSIT_STROOPS, pools).await
 }
 
 /// Like [`deploy`], but with an explicit `max_deposit` cap instead of the
@@ -126,7 +124,17 @@ async fn build_session(
             circuit_artifacts.push((stem, artifacts));
         }
     }
-    let prover = LocalProver::from_artifacts(&circuit_artifacts)
+    let disclosure_artifacts = store
+        .disclosure_artifacts()
+        .context("load disclosure circuit artifacts")?
+        .into_iter()
+        .map(|(name, artifacts)| {
+            find_circuit(name)
+                .map(|circuit| (circuit, artifacts))
+                .with_context(|| format!("unregistered disclosure circuit: {name}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let prover = LocalProver::from_all_artifacts(&circuit_artifacts, &disclosure_artifacts)
         .context("init local prover")?
         .into();
 

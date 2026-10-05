@@ -136,7 +136,7 @@ pub async fn spawn_bootnode(
 
 fn random_event_id(ledger: u32) -> String {
     let mut bytes = [0u8; 8];
-    getrandom::getrandom(&mut bytes).expect("random event id");
+    getrandom::fill(&mut bytes).expect("random event id");
     let suffix = u64::from_le_bytes(bytes);
     format!("event-{ledger:010}-{suffix:016x}")
 }

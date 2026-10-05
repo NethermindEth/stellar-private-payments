@@ -25,7 +25,7 @@ reqwest = { workspace = true, features = ["rustls"] }
 serde.workspace = true
 serde_json.workspace = true
 stellar-private-payments = { workspace = true, features = ["parallel"] }
-toml = "0.8"
+toml = "1.1"
 tracing = { workspace = true, features = ["attributes"] }
 tracing-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "json", "env-filter"] }

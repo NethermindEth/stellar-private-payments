@@ -11,7 +11,7 @@ pub struct TestKeypair {
 impl TestKeypair {
     pub fn generate() -> Self {
         Self {
-            signing_key: SigningKey::generate(&mut rand::thread_rng()),
+            signing_key: SigningKey::generate(&mut rand::rng()),
         }
     }
 

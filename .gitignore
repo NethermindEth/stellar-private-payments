@@ -36,6 +36,7 @@ contracts/**/test_snapshots
 
 # Tests artefacts
 e2e-tests/test_snapshots/*
+sdk/native/test_snapshots/*
 
 # App
 app/node_modules
