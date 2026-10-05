@@ -55,14 +55,17 @@ pub struct OnboardArgs {
 /// derived. Bails with a pointer to `spp onboard` when not ready.
 pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
     stellar_cli::ensure_installed()?;
-    let mut storage = config.open_storage()?;
+    let storage = config.open_storage()?;
     if !storage.get_disclaimer_state(&account.address)?.accepted {
         bail!(
             "You must accept the disclaimer first. Run: spp onboard --account {}",
             account.alias
         );
     }
-    if storage.get_private_keys(&account.address)?.is_none() {
+    if storage
+        .get_private_keys(&account.address, &config.deployment.kdf_domain)?
+        .is_none()
+    {
         bail!(
             "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
@@ -104,7 +107,10 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     }
 
     // 4. Derive privacy keys.
-    if storage.get_private_keys(&account.address)?.is_some() {
+    if storage
+        .get_private_keys(&account.address, &config.deployment.kdf_domain)?
+        .is_some()
+    {
         say(interactive, "Privacy keys already present.");
     } else {
         if interactive {
@@ -147,6 +153,7 @@ fn derive_and_save_keys(
     save_owner_keys(
         storage,
         &account.address,
+        &config.deployment.kdf_domain,
         &config.deployment.network,
         &message,
         signature,
@@ -159,6 +166,7 @@ fn derive_and_save_keys(
 fn save_owner_keys(
     storage: &mut SqliteStorage,
     owner_address: &str,
+    kdf_domain: &str,
     network: &str,
     message: &str,
     signature: KeyDerivationSignature,
@@ -173,6 +181,7 @@ fn save_owner_keys(
     storage
         .save_encryption_and_note_keypairs(
             owner_address,
+            kdf_domain,
             &note_keypair,
             &encryption_keypair,
             &membership_blinding,
@@ -317,6 +326,7 @@ mod tests {
         save_owner_keys(
             &mut storage,
             owner.public_key(),
+            KDF_DOMAIN,
             "testnet",
             &key_derivation_message(KDF_DOMAIN),
             derivation_signature(&owner),
@@ -325,7 +335,7 @@ mod tests {
 
         assert!(
             storage
-                .get_private_keys(owner.public_key())
+                .get_private_keys(owner.public_key(), KDF_DOMAIN)
                 .expect("read keys")
                 .is_some()
         );
@@ -340,6 +350,7 @@ mod tests {
         let error = save_owner_keys(
             &mut storage,
             owner.public_key(),
+            KDF_DOMAIN,
             "testnet",
             &key_derivation_message(KDF_DOMAIN),
             derivation_signature(&other),
@@ -352,7 +363,7 @@ mod tests {
         );
         assert!(
             storage
-                .get_private_keys(owner.public_key())
+                .get_private_keys(owner.public_key(), KDF_DOMAIN)
                 .expect("read keys")
                 .is_none()
         );

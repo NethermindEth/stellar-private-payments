@@ -43,6 +43,7 @@ pub struct DisclosureRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureInputsRequest {
     pub user_address: String,
+    pub kdf_domain: String,
     pub pool_address: String,
     pub selected_commitments: Vec<Field>,
     pub pool_root: Option<Field>,
@@ -89,7 +90,7 @@ pub fn build_disclosure_inputs(
         .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
 
     let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
-        load_user_key_material(storage, &req.user_address)?;
+        load_user_key_material(storage, &req.user_address, &req.kdf_domain)?;
 
     let tree = match build_validated_pool_tree(
         storage,
@@ -105,7 +106,12 @@ pub fn build_disclosure_inputs(
     let mut notes = Vec::with_capacity(req.selected_commitments.len());
     for commitment in &req.selected_commitments {
         let (amount, blinding, leaf_index) = storage
-            .get_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+            .get_user_note_by_commitment(
+                &req.pool_address,
+                &req.user_address,
+                &req.kdf_domain,
+                commitment,
+            )?
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "note not found for commitment {commitment} in pool {}",

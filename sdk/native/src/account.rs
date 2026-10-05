@@ -89,6 +89,7 @@ impl Account {
         self.storage
             .list_portfolio_balances(
                 self.user_address.as_str(),
+                &self.contract_config.kdf_domain,
                 &self.contract_config.portfolio_pools(),
             )
             .await
@@ -129,7 +130,9 @@ impl Account {
 
     /// Locally derived note and encryption public keys for this account.
     pub async fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        self.storage.privacy_keys(self.user_address.as_str()).await
+        self.storage
+            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .await
     }
 
     /// Derive this account's privacy keys from the owner's wallet signature
@@ -141,7 +144,7 @@ impl Account {
     pub async fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         if self
             .storage
-            .privacy_keys_exist(self.user_address.as_str())
+            .privacy_keys_exist(self.user_address.as_str(), &self.contract_config.kdf_domain)
             .await?
         {
             return self.privacy_keys().await;
@@ -172,6 +175,7 @@ impl Account {
         self.storage
             .save_private_keys(
                 self.user_address.as_str(),
+                &self.contract_config.kdf_domain,
                 &note_keypair,
                 &encryption_keypair,
                 &membership_blinding,
@@ -183,17 +187,22 @@ impl Account {
 
     /// Locally derived ASP membership blinding for this account.
     pub async fn asp_secret(&self) -> Result<Field, Error> {
-        self.storage.asp_secret(self.user_address.as_str()).await
+        self.storage
+            .asp_secret(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .await
     }
 
     /// Derive the ASP membership tree leaf for this account's note public key.
     pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
         let note = self
             .storage
-            .privacy_keys(self.user_address.as_str())
+            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
             .await?
             .0;
-        let blinding = self.storage.asp_secret(self.user_address.as_str()).await?;
+        let blinding = self
+            .storage
+            .asp_secret(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .await?;
         crate::crypto::derive_asp_user_leaf(&note, &blinding)
     }
 
@@ -203,7 +212,11 @@ impl Account {
     pub async fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {
         self.ensure_synced().await?;
         self.storage
-            .list_user_notes(self.user_address.as_str(), limit)
+            .list_user_notes(
+                self.user_address.as_str(),
+                &self.contract_config.kdf_domain,
+                limit,
+            )
             .await
     }
 
@@ -233,7 +246,7 @@ impl Account {
 
         let (note_pk, enc_pk) = self
             .storage()
-            .privacy_keys(self.user_address.as_str())
+            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
             .await?;
 
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())

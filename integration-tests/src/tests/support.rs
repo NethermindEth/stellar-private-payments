@@ -1,6 +1,8 @@
 //! Shared setup for tests: each test deploys the one pool it needs on the
 //! shared network, then opens its own wallet session against it.
 
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use stellar_private_payments::{
     Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
@@ -23,6 +25,7 @@ pub struct TestSession {
     pub wallet: TestKeypair,
     pub identity: DeploymentIdentity,
     pool_contract_ids: Vec<String>,
+    storage_path: PathBuf,
 }
 
 impl TestSession {
@@ -36,6 +39,20 @@ impl TestSession {
             .get(index)
             .with_context(|| format!("no deployed pool at index {index}"))?;
         Ok(self.account.pool(pool_contract_id)?)
+    }
+
+    /// Another session for the same wallet on the same wallet database, under
+    /// `config` (e.g. another `kdf_domain`).
+    pub async fn fork(&self, config: ContractConfig) -> Result<TestSession> {
+        let network = LocalNetwork::start().await?;
+        build_session(
+            &network,
+            config,
+            self.identity.clone(),
+            self.wallet.clone(),
+            self.storage_path.clone(),
+        )
+        .await
     }
 }
 
@@ -85,16 +102,6 @@ pub async fn session(
     (config, identity): (ContractConfig, DeploymentIdentity),
 ) -> Result<TestSession> {
     let network = LocalNetwork::start().await?;
-    let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
-    build_session(&network, config, identity, pool_entries).await
-}
-
-async fn build_session(
-    network: &LocalNetwork,
-    config: ContractConfig,
-    identity: DeploymentIdentity,
-    pool_entries: Vec<PoolConfigEntry>,
-) -> Result<TestSession> {
     let wallet = TestKeypair::generate();
     network.fund(&wallet.address()).await?;
 
@@ -104,6 +111,17 @@ async fn build_session(
         wallet.address()
     ));
     let _ = std::fs::remove_file(&storage_path);
+    build_session(&network, config, identity, wallet, storage_path).await
+}
+
+async fn build_session(
+    network: &LocalNetwork,
+    config: ContractConfig,
+    identity: DeploymentIdentity,
+    wallet: TestKeypair,
+    storage_path: PathBuf,
+) -> Result<TestSession> {
+    let pool_entries: Vec<PoolConfigEntry> = config.enabled_pools().cloned().collect();
     let storage =
         LocalStorage::open(storage_path.to_str().context("storage path is not UTF-8")?)?.into();
 
@@ -160,5 +178,6 @@ async fn build_session(
             .into_iter()
             .map(|e| e.pool_contract_id)
             .collect(),
+        storage_path,
     })
 }
