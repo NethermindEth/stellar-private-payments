@@ -295,6 +295,13 @@ test('explainFailure names a blocklist key that is already listed', () => {
   );
 });
 
+test('explainFailure names a call too large for one transaction', () => {
+  assert.equal(
+    explainFailure(new Error('HostError: Error(Budget, ExceededLimit)'), 'asp-non-membership'),
+    'The call needs more resources than one transaction allows. For a blocklist insert, add fewer keys at a time.',
+  );
+});
+
 test('explainFailure passes an error it does not know through unchanged', () => {
   assert.equal(explainFailure(new Error('HostError: Error(Contract, #1)'), 'pool'), 'HostError: Error(Contract, #1)');
 });

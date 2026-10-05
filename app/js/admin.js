@@ -1,5 +1,5 @@
 import { deploymentDefaults } from './network-config.js';
-import { scValToNative, xdr } from '@stellar/stellar-sdk';
+import { contract, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
@@ -7,6 +7,7 @@ import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { buildAdminCall, describeAdminCall, explainFailure, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -132,13 +133,6 @@ function parseBigIntInput(value, label) {
     throw new Error(`${label} must be a hex or decimal integer`);
   }
 }
-
-const reverseHexWithPrefix = (hex) => {
-  const hasPrefix = hex.startsWith("0x");
-  const pureHex = hasPrefix ? hex.slice(2) : hex;
-  const reversed = pureHex.match(/.{1,2}/g).reverse().join("");
-  return hasPrefix ? "0x" + reversed : reversed;
-};
 
 // -----------------------------
 // Wallet & signer helpers
@@ -302,6 +296,9 @@ function kindOf(contractId) {
 }
 
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
+  // Every number a blocklist call takes is a key or its value, which signers
+  // compare with the note public keys they were asked to list or release.
+  const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
   return [
     `Source: ${source}`,
     `Sequence: ${sequence}`,
@@ -309,7 +306,7 @@ function formatAdminCall({ source, sequence, fee, validUntil, contract, method, 
     `Valid until: ${new Date(validUntil * 1000).toISOString()}`,
     `Contract: ${contract}${kind === 'unknown' ? ' (not a contract this page lists)' : ''}`,
     `Function: ${method}`,
-    `Arguments: ${JSON.stringify(args, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}`,
+    `Arguments: ${JSON.stringify(args, (_, value) => (typeof value === 'bigint' ? number(value) : value))}`,
   ].join('\n');
 }
 
@@ -415,6 +412,16 @@ async function storedAdmin(contractId) {
   return scValToNative(val.contractData.val);
 }
 
+// Returns a client that reads a contract by simulation, with no account to sign.
+function readClient(contractId) {
+  return contract.Client.from({
+    rpcUrl: state.rpcUrl,
+    networkPassphrase: state.networkPassphrase,
+    contractId,
+    server: rpcServer(state.rpcUrl),
+  });
+}
+
 async function insertMembershipLeaf() {
   const originalText = addToAllowlistBtn.textContent;
   try {
@@ -466,21 +473,15 @@ async function insertNonMembershipLeaf() {
     const contractId = nonMembershipContractInput.value.trim();
     if (!contractId) throw new Error('Non-membership contract ID is required');
 
-    const keyValue = parseBigIntInput(reverseHexWithPrefix(blocklistPublicKeyInput.value), 'Key');
-    if (keyValue === null) throw new Error('User note public key is required');
-
-    const valueValue = keyValue;
+    const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
+    if (keys.length === 0) throw new Error('User note public key is required');
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Building the blocklist insert...', 'info');
-    await prepareAdminCall('asp-non-membership', {
-      source: await storedAdmin(contractId),
-      contractId,
-      method: 'insert_leaf',
-      args: { key: keyValue, value: valueValue },
-    });
+    const call = blocklistInsertCall(keys, Boolean((await readClient(contractId)).insert_leaves));
+    await prepareAdminCall('asp-non-membership', { source: await storedAdmin(contractId), contractId, ...call });
 
     blocklistPublicKeyInput.value = '';
   } catch (err) {
@@ -499,8 +500,9 @@ async function removeNonMembershipLeaf() {
     const contractId = nonMembershipContractInput.value.trim();
     if (!contractId) throw new Error('Non-membership contract ID is required');
 
-    const keyValue = parseBigIntInput(reverseHexWithPrefix(blocklistPublicKeyInput.value), 'Key');
-    if (keyValue === null) throw new Error('User note public key is required');
+    const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
+    if (keyValue === undefined) throw new Error('User note public key is required');
+    if (others.length > 0) throw new Error('Remove takes one note public key at a time');
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
