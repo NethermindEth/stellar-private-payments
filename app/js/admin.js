@@ -1,6 +1,6 @@
 import { deploymentDefaults } from './network-config.js';
 import { contract, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -50,12 +50,19 @@ const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
 // The buttons that need a connected wallet.
 const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn];
 
+// Pools tab
+const poolRowsEl = document.getElementById('poolRows');
+const poolsNoticeEl = document.getElementById('poolsNotice');
+const poolRowTemplate = document.getElementById('tpl-pool-row');
+
 const state = {
   address: null,
   networkPassphrase: null,
   rpcUrl: null,
   contracts: null,
   adminTxKind: null,
+  // The manifest's pools, which a pasted call's kind is read against.
+  pools: [],
   cryptoReady: false,
 };
 
@@ -211,9 +218,11 @@ async function connect() {
       btn.removeAttribute('title');
     });
 
-    renderAdminTx();
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
+    await refreshPools();
+    // The card reads a pasted call's kind against the contracts the tables load.
+    renderAdminTx();
 
   } catch (err) {
     if (err.code === 'USER_REJECTED') {
@@ -245,6 +254,7 @@ function disconnect() {
     btn.title = "Please connect your wallet first";
   });
 
+  refreshPools();
   setStatus('Wallet disconnected', 'info');
   showToast('Wallet disconnected', 'info');
 }
@@ -281,6 +291,7 @@ async function refreshState() {
   } catch (err) {
     setStatus('State load error', 'error');
   }
+  await refreshPools();
 }
 
 // -----------------------------
@@ -292,6 +303,7 @@ async function refreshState() {
 function kindOf(contractId) {
   if (contractId === membershipContractInput.value.trim()) return 'asp-membership';
   if (contractId === nonMembershipContractInput.value.trim()) return 'asp-non-membership';
+  if (state.pools.includes(contractId)) return 'pool';
   return 'unknown';
 }
 
@@ -522,6 +534,79 @@ async function removeNonMembershipLeaf() {
   } finally {
     if (state.address) removeFromBlocklistBtn.disabled = false;
     removeFromBlocklistBtn.textContent = originalText;
+  }
+}
+
+// -----------------------------
+// Pools
+// -----------------------------
+// Fills a table with the rows `rowsFor` builds from the deployment manifest.
+// The rows read their contracts by simulation, which needs the connected
+// wallet's network.
+async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
+  rowsEl.replaceChildren();
+  if (!state.rpcUrl) {
+    noticeEl.textContent = `Connect your wallet to read the ${noun}.`;
+    return;
+  }
+  try {
+    rowsEl.replaceChildren(...(await Promise.all(rowsFor(await loadDeploymentConfig()))));
+    noticeEl.textContent = '';
+  } catch (err) {
+    noticeEl.textContent = `The ${noun} could not be read: ${err.message}`;
+  }
+}
+
+// Lists each pool the manifest names with its deposit flag, a disabled pool
+// too, since it still takes deposits on chain.
+function refreshPools() {
+  return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
+    state.pools = pools.map(({ poolContractId }) => poolContractId);
+    return state.pools.map((contractId) => poolRow(contractId));
+  });
+}
+
+// A pool deployed before the deposit flag existed has no `deposits_paused`
+// entry point and cannot be paused, so its row offers no buttons. Neither does
+// a pool the page cannot read, whose row says why instead of hiding the others.
+async function poolRow(contractId) {
+  const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
+  row.querySelector('.pool-id').textContent = contractId;
+  const depositsEl = row.querySelector('.pool-deposits');
+  try {
+    const pool = await readClient(contractId);
+    if (!pool.deposits_paused) {
+      depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
+      row.querySelector('.pool-actions').remove();
+      return row;
+    }
+    const [{ result }, admin] = await Promise.all([pool.deposits_paused(), storedAdmin(contractId)]);
+    const paused = result.unwrap();
+    depositsEl.textContent = paused ? 'paused' : 'open';
+    // A pause on a paused pool changes nothing, yet the signers would still sign and pay for it.
+    const pause = row.querySelector('.pause-deposits-btn');
+    const unpause = row.querySelector('.unpause-deposits-btn');
+    pause.disabled = paused;
+    unpause.disabled = !paused;
+    pause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'pause_deposits' }));
+    unpause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'unpause_deposits' }));
+  } catch (err) {
+    depositsEl.textContent = `could not be read: ${err.message}`;
+    row.querySelector('.pool-actions').remove();
+  }
+  return row;
+}
+
+// Builds a call from a table row into the card. `kind` is the kind of contract
+// the call targets, which decides how its error codes read.
+async function buildRowCall(kind, call) {
+  try {
+    ensureWalletConnected();
+    setStatus(`Building ${call.method}...`, 'info');
+    await prepareAdminCall(kind, call);
+  } catch (err) {
+    setStatus(`Building ${call.method} failed`, 'error');
+    showToast(`Building ${call.method} failed: ${explainFailure(err, kind)}`, 'error');
   }
 }
 
