@@ -1,12 +1,19 @@
 use stellar_private_payments::types::ContractConfig;
 
-/// Read and validate a runtime deployment before accessing upstream or storage.
+/// Read a JSON file or a directory containing deployments.json, then validate
+/// the deployment before accessing upstream or storage.
 pub fn read_deployment(path: &std::path::Path) -> anyhow::Result<ContractConfig> {
     use anyhow::Context;
+    let path = if path.is_dir() {
+        path.join("deployments.json")
+    } else {
+        path.to_owned()
+    };
     let deployment: ContractConfig = serde_json::from_str(
-        &std::fs::read_to_string(path)
+        &std::fs::read_to_string(&path)
             .with_context(|| format!("read deployment {}", path.display()))?,
-    )?;
+    )
+    .with_context(|| format!("parse deployment {}", path.display()))?;
     deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
     Ok(deployment)
 }
@@ -44,6 +51,33 @@ pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_and_file_load_the_same_deployment() -> anyhow::Result<()> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments");
+        for name in ["testnet", "ci-test-network"] {
+            let directory = root.join(name);
+            let from_directory = read_deployment(&directory)?;
+            let from_file = read_deployment(&directory.join("deployments.json"))?;
+            assert_eq!(
+                serde_json::to_value(from_directory)?,
+                serde_json::to_value(from_file)?
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_without_manifest_reports_the_resolved_file() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let error = read_deployment(&directory).expect_err("no manifest in source directory");
+        assert!(
+            error
+                .to_string()
+                .contains(&directory.join("deployments.json").display().to_string())
+        );
+    }
+
     #[test]
     fn namespace_is_order_independent_and_network_isolated() {
         let ids = vec!["AAAAX".into(), "BBBBY".into()];

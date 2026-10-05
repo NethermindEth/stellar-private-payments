@@ -25,7 +25,8 @@ export DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/bootnode'
 ./tools/bootnode/target/debug/bootnode --deployment deployments/testnet/deployments.json --dev --insecure-http --bind 127.0.0.1:8080 --upstream-rpc-url https://soroban-testnet.stellar.org --database-url "$DATABASE_URL"
 ```
 
-The deployment file is required through `--deployment` or `BOOTNODE_DEPLOYMENT`.
+Supply a deployment directory containing `deployments.json`, or the JSON file
+itself, through `--deployment` or `BOOTNODE_DEPLOYMENT`, matching the CLI.
 The default RPC comes from that file; an override must report the same network
 passphrase. No deployment or circuit keys are embedded in the binary.
 

@@ -13,7 +13,8 @@ use url::Url;
 #[derive(Debug, Parser)]
 #[command(name = "bootnode", version, about)]
 struct Cli {
-    /// Required deployments.json file for this instance.
+    /// Required deployment directory (containing deployments.json) or JSON
+    /// file.
     #[arg(long, env = "BOOTNODE_DEPLOYMENT")]
     deployment: PathBuf,
 

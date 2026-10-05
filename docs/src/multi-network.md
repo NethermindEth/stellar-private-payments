@@ -40,8 +40,9 @@ rejects a passphrase different from the deployment configuration.
 
 ## Bootnode
 
-The bootnode requires `--deployment /path/to/deployments.json` or
-`BOOTNODE_DEPLOYMENT`. It reads the default RPC from that file; an explicit RPC
+The bootnode requires `--deployment` or `BOOTNODE_DEPLOYMENT`. Both accept a
+directory containing `deployments.json` or a JSON file, just like the CLI.
+It reads the default RPC from that file; an explicit RPC
 override must still report the same network passphrase. It validates the upstream
 before opening its database. It does not need proving artifacts.
 
