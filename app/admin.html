@@ -57,6 +57,7 @@
                         <button type="button" data-target="allowlist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Allowlist</button>
                         <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
                         <button type="button" data-target="global-view" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Global View</button>
+                        <button type="button" data-target="pools" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Pools</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -279,6 +280,29 @@
                 <div id="gvkAuditResults" class="hidden space-y-3"></div>
             </section>
 
+            <!-- 5. Pools Tab -->
+            <section id="pools" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="pools-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Deposits</p>
+                    <h2 id="pools-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Pools</h2>
+                    <p class="mt-2 text-sm text-slate-400">A paused pool refuses deposits. Transfers and withdrawals still work.</p>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
+                    <table class="w-full min-w-[720px] text-left text-sm">
+                        <thead>
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                                <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
+                                <th class="pb-3 font-medium" scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="poolRows" class="divide-y divide-white/5"></tbody>
+                    </table>
+                    <p id="poolsNotice" class="mt-4 text-xs text-slate-400"></p>
+                </div>
+            </section>
+
             <!-- Admin Transaction Card -->
             <section id="admin-transaction" class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admin-transaction-heading">
                 <div>
@@ -342,6 +366,20 @@
                 <button type="button" class="toast-close mt-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition underline underline-offset-4">Dismiss</button>
             </div>
         </div>
+    </template>
+
+    <!-- Pool Row Template -->
+    <template id="tpl-pool-row">
+        <tr>
+            <td class="pool-id py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="pool-deposits py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="py-3">
+                <div class="pool-actions flex flex-wrap items-center gap-2">
+                    <button type="button" class="pause-deposits-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed">Pause deposits</button>
+                    <button type="button" class="unpause-deposits-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed">Unpause deposits</button>
+                </div>
+            </td>
+        </tr>
     </template>
 
     <script type="module" src="js/admin.js"></script>
