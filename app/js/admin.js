@@ -1,7 +1,7 @@
 import { deploymentDefaults } from './network-config.js';
 import { contract, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, signWalletTransaction } from './wallet.js';
+import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
@@ -9,6 +9,7 @@ import { initGvkAuditPanel } from './admin-gvk.js';
 import { buildAdminCall, describeAdminCall, explainFailure, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeysFromEvents, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
+import { addSignature, authorizationPreimage, buildPauseAuthorization, decodeAuthorization, encodeAuthorization, pauseTransaction, walletSignature } from './pause-authorization.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -66,13 +67,22 @@ const repointConfirmTextEl = document.getElementById('repointConfirmText');
 const checkRepointBtn = document.getElementById('checkRepointBtn');
 const buildRepointBtn = document.getElementById('buildRepointBtn');
 
+// Pause authorizations panel
+const pauseAuthPoolSelect = document.getElementById('pauseAuthPool');
+const pauseAuthHolderInput = document.getElementById('pauseAuthHolder');
+const pauseAuthFilesInput = document.getElementById('pauseAuthFiles');
+const pauseAuthResultsEl = document.getElementById('pauseAuthResults');
+const buildPauseAuthBtn = document.getElementById('buildPauseAuthBtn');
+const signPauseAuthBtn = document.getElementById('signPauseAuthBtn');
+const submitPauseAuthBtn = document.getElementById('submitPauseAuthBtn');
+
 // Admins tab
 const adminRowsEl = document.getElementById('adminRows');
 const adminsNoticeEl = document.getElementById('adminsNotice');
 const adminRowTemplate = document.getElementById('tpl-admin-row');
 
 // The buttons that need a connected wallet.
-const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn, checkRepointBtn];
+const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn, checkRepointBtn, buildPauseAuthBtn, signPauseAuthBtn, submitPauseAuthBtn];
 
 const state = {
   address: null,
@@ -602,7 +612,7 @@ function refreshPools() {
   state.poolBlocklists = new Map();
   return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
     state.pools = pools.map(({ poolContractId }) => poolContractId);
-    repointPoolSelect.replaceChildren(...state.pools.map((contractId) => new Option(contractId)));
+    [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => select.replaceChildren(...state.pools.map((contractId) => new Option(contractId))));
     return state.pools.map((contractId) => poolRow(contractId));
   });
 }
@@ -772,6 +782,124 @@ async function checkRepoint() {
 }
 
 // -----------------------------
+// Pause authorizations
+// -----------------------------
+// Offers `text` to the browser as a file to save under `name`.
+function offerFile(name, text) {
+  Object.assign(document.createElement('a'), {
+    href: `data:application/json;charset=utf-8,${encodeURIComponent(text)}`,
+    download: name,
+  }).click();
+}
+
+function reportPause(text) {
+  pauseAuthResultsEl.append(Object.assign(document.createElement('li'), { textContent: text }));
+}
+
+// Builds an unsigned pause authorization for the chosen pool's admin, under a
+// fresh random nonce, and offers it as the file its holder will keep.
+async function buildPauseAuthorizationFile() {
+  try {
+    ensureWalletConnected();
+    const pool = pauseAuthPoolSelect.value;
+    const holder = pauseAuthHolderInput.value.trim();
+    if (!pool || !holder) throw new Error('Choose a pool and name the holder');
+    buildPauseAuthBtn.disabled = true;
+    const [admin, { sequence }] = await Promise.all([storedAdmin(pool), rpcServer(state.rpcUrl).getLatestLedger()]);
+    const [nonce] = crypto.getRandomValues(new BigInt64Array(1));
+    const entry = buildPauseAuthorization({ admin, pool, nonce, latestLedger: sequence });
+    offerFile(`pause-${holder}-${pool}.json`, encodeAuthorization({ holder, entry }));
+    setStatus('Pause authorization built. Each signer signs the file, then the holder keeps it.', 'ok');
+  } catch (err) {
+    showToast(`Building the pause authorization failed: ${err.message}`, 'error');
+  } finally {
+    if (state.address) buildPauseAuthBtn.disabled = false;
+  }
+}
+
+// Adds the connected signer's signature to one chosen file and offers it again.
+async function signPauseAuthorization() {
+  try {
+    ensureWalletConnected();
+    const [file, ...others] = pauseAuthFilesInput.files;
+    if (!file || others.length > 0) throw new Error('Choose one authorization file to sign');
+    signPauseAuthBtn.disabled = true;
+    const { pool, admin, holder, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
+    // A file can come from anyone, so the panel shows what it authorizes
+    // before Freighter asks the signer to sign it.
+    pauseAuthResultsEl.replaceChildren();
+    Object.entries({
+      Pool: pool,
+      Admin: admin,
+      Holder: holder,
+      Nonce: nonce,
+      'Expiration ledger': expirationLedger,
+      Signers: signers.join(', ') || 'none',
+    }).forEach(([label, value]) => reportPause(`${label}: ${value}`));
+    // A signature by a key that does not sign for the admin fails the pause,
+    // and the page cannot take one out of the file again.
+    const { threshold, weights } = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(admin));
+    if (!(weights.get(state.address) > 0)) {
+      throw new Error(`The connected account does not sign for ${admin}`);
+    }
+    const { signedAuthEntry } = await signWalletAuthEntry(authorizationPreimage(entry, state.networkPassphrase), {
+      networkPassphrase: state.networkPassphrase,
+      address: state.address,
+    });
+    offerFile(file.name, encodeAuthorization({ holder, entry: addSignature(entry, state.address, walletSignature(signedAuthEntry), state.networkPassphrase) }));
+    showToast(`Signed: ${signers.length + 1} of ${threshold} signatures. Pass the file to the next signer, or to its holder.`, 'success');
+  } catch (err) {
+    showToast(`Signing failed: ${err.message}`, 'error');
+  } finally {
+    if (state.address) signPauseAuthBtn.disabled = false;
+  }
+}
+
+// Sends each chosen file's pause from the connected account, one file after
+// another, and reports each on its own line, so a file that fails stops no
+// other. A holder submits every file at once when every pool must stop taking
+// deposits. A second file for a pool that an earlier one paused reads the pool
+// as paused, so it is held back unspent.
+async function submitPauseAuthorizations() {
+  pauseAuthResultsEl.replaceChildren();
+  try {
+    ensureWalletConnected();
+    const files = [...pauseAuthFilesInput.files];
+    if (files.length === 0) throw new Error('Choose the authorization files to submit');
+    submitPauseAuthBtn.disabled = true;
+    setStatus('Submitting the pauses...', 'info');
+    const network = { rpcUrl: state.rpcUrl, networkPassphrase: state.networkPassphrase };
+    let failed = 0;
+    for (const file of files) {
+      // A line names the file until the file names its pool.
+      let label = file.name;
+      try {
+        const authorization = decodeAuthorization(await file.text());
+        label = authorization.pool;
+        const built = await pauseTransaction({ ...network, source: state.address, authorization });
+        if (built.paused) {
+          reportPause(`${label}: already paused, so the file was not sent and its nonce is unspent`);
+          continue;
+        }
+        const { signedTxXdr } = await signWalletTransaction(built.xdr, { networkPassphrase: state.networkPassphrase, address: state.address });
+        await submitAdminCall({ ...network, xdr: signedTxXdr });
+        reportPause(`${label}: paused`);
+      } catch (err) {
+        failed += 1;
+        reportPause(`${label}: failed: ${explainFailure(err, 'pool')}`);
+      }
+    }
+    setStatus(failed > 0 ? `${failed} of ${files.length} pauses failed` : 'Pauses submitted', failed > 0 ? 'error' : 'ok');
+  } catch (err) {
+    setStatus('Pause submission failed', 'error');
+    showToast(`Pause submission failed: ${err.message}`, 'error');
+  } finally {
+    if (state.address) submitPauseAuthBtn.disabled = false;
+  }
+  await refreshPools();
+}
+
+// -----------------------------
 // Admins
 // -----------------------------
 // Lists each contract the manifest names, a disabled pool too, with its admin
@@ -870,6 +998,10 @@ copyAdminTxBtn.addEventListener('click', copyAdminTx);
 repointConfirmBox.addEventListener('change', renderRepoint);
 checkRepointBtn.addEventListener('click', checkRepoint);
 buildRepointBtn.addEventListener('click', () => buildRowCall('pool', state.repoint.call));
+
+buildPauseAuthBtn.addEventListener('click', buildPauseAuthorizationFile);
+signPauseAuthBtn.addEventListener('click', signPauseAuthorization);
+submitPauseAuthBtn.addEventListener('click', submitPauseAuthorizations);
 
 membershipContractInput?.addEventListener('input', () => {
   updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
