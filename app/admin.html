@@ -58,6 +58,7 @@
                         <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
                         <button type="button" data-target="global-view" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Global View</button>
                         <button type="button" data-target="pools" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Pools</button>
+                        <button type="button" data-target="admins" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Admins</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -303,6 +304,30 @@
                 </div>
             </section>
 
+            <!-- 6. Admins Tab -->
+            <section id="admins" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admins-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Admin Transfer</p>
+                    <h2 id="admins-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Admins</h2>
+                    <p class="mt-2 text-sm text-slate-400">The admin proposes a new admin and keeps every power until the new admin accepts. Until then, the admin can cancel the proposal.</p>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
+                    <table class="w-full min-w-[960px] text-left text-sm">
+                        <thead>
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                                <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Admin</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Pending admin</th>
+                                <th class="pb-3 font-medium" scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminRows" class="divide-y divide-white/5"></tbody>
+                    </table>
+                    <p id="adminsNotice" class="mt-4 text-xs text-slate-400"></p>
+                </div>
+            </section>
+
             <!-- Admin Transaction Card -->
             <section id="admin-transaction" class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admin-transaction-heading">
                 <div>
@@ -377,6 +402,28 @@
                 <div class="pool-actions flex flex-wrap items-center gap-2">
                     <button type="button" class="pause-deposits-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed">Pause deposits</button>
                     <button type="button" class="unpause-deposits-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed">Unpause deposits</button>
+                </div>
+            </td>
+        </tr>
+    </template>
+
+    <!-- Admin Row Template -->
+    <template id="tpl-admin-row">
+        <tr class="align-top">
+            <td class="py-3 pr-4">
+                <div class="admin-label text-[10px] uppercase tracking-wide text-slate-500"></div>
+                <div class="admin-contract mt-1 break-all font-mono text-xs text-slate-200"></div>
+            </td>
+            <td class="admin-current py-3 pr-4 break-all font-mono text-xs text-slate-300"></td>
+            <td class="admin-pending py-3 pr-4 break-all font-mono text-xs text-slate-300"></td>
+            <td class="py-3">
+                <div class="admin-actions flex flex-col gap-2">
+                    <input type="text" class="new-admin-input w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="New admin G..." aria-label="New admin address" autocomplete="off" spellcheck="false" />
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" class="propose-admin-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/20">Propose</button>
+                        <button type="button" class="cancel-admin-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20">Cancel</button>
+                        <button type="button" class="accept-admin-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Accept</button>
+                    </div>
                 </div>
             </td>
         </tr>

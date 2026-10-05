@@ -55,6 +55,11 @@ const poolRowsEl = document.getElementById('poolRows');
 const poolsNoticeEl = document.getElementById('poolsNotice');
 const poolRowTemplate = document.getElementById('tpl-pool-row');
 
+// Admins tab
+const adminRowsEl = document.getElementById('adminRows');
+const adminsNoticeEl = document.getElementById('adminsNotice');
+const adminRowTemplate = document.getElementById('tpl-admin-row');
+
 const state = {
   address: null,
   networkPassphrase: null,
@@ -63,6 +68,8 @@ const state = {
   adminTxKind: null,
   // The manifest's pools, which a pasted call's kind is read against.
   pools: [],
+  // The manifest's added allowlists, which a pasted call's kind is read against.
+  addedAllowlists: [],
   cryptoReady: false,
 };
 
@@ -221,6 +228,7 @@ async function connect() {
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
     await refreshPools();
+    await refreshAdmins();
     // The card reads a pasted call's kind against the contracts the tables load.
     renderAdminTx();
 
@@ -255,6 +263,7 @@ function disconnect() {
   });
 
   refreshPools();
+  refreshAdmins();
   setStatus('Wallet disconnected', 'info');
   showToast('Wallet disconnected', 'info');
 }
@@ -292,6 +301,7 @@ async function refreshState() {
     setStatus('State load error', 'error');
   }
   await refreshPools();
+  await refreshAdmins();
 }
 
 // -----------------------------
@@ -304,6 +314,7 @@ function kindOf(contractId) {
   if (contractId === membershipContractInput.value.trim()) return 'asp-membership';
   if (contractId === nonMembershipContractInput.value.trim()) return 'asp-non-membership';
   if (state.pools.includes(contractId)) return 'pool';
+  if (state.addedAllowlists.includes(contractId)) return 'asp-membership';
   return 'unknown';
 }
 
@@ -608,6 +619,59 @@ async function buildRowCall(kind, call) {
     setStatus(`Building ${call.method} failed`, 'error');
     showToast(`Building ${call.method} failed: ${explainFailure(err, kind)}`, 'error');
   }
+}
+
+// -----------------------------
+// Admins
+// -----------------------------
+// Lists each contract the manifest names, a disabled pool too, with its admin
+// and its pending admin.
+function refreshAdmins() {
+  return fillTable(adminRowsEl, adminsNoticeEl, 'admins', ({ pools, asp_membership, added_asp_memberships: added = [], asp_non_membership }) => {
+    state.addedAllowlists = added.map(({ contractId }) => contractId);
+    return [
+      ...pools.map(({ poolContractId }) => ({ label: 'Pool', kind: 'pool', contractId: poolContractId })),
+      { label: 'Allowlist', kind: 'asp-membership', contractId: asp_membership },
+      ...added.map(({ contractId }) => ({ label: 'Added allowlist', kind: 'asp-membership', contractId })),
+      { label: 'Blocklist', kind: 'asp-non-membership', contractId: asp_non_membership },
+    ].map(adminRow);
+  });
+}
+
+// A contract deployed before the two-step transfer has no `get_pending_admin`
+// entry point, and its `update_admin` hands over control at once, so its row
+// offers no buttons. Neither does a contract the page cannot read, whose row
+// says why instead of hiding the others.
+async function adminRow({ label, kind, contractId }) {
+  const row = adminRowTemplate.content.cloneNode(true).firstElementChild;
+  row.querySelector('.admin-label').textContent = label;
+  row.querySelector('.admin-contract').textContent = contractId;
+  const adminEl = row.querySelector('.admin-current');
+  const pendingEl = row.querySelector('.admin-pending');
+  try {
+    const [admin, target] = await Promise.all([storedAdmin(contractId), readClient(contractId)]);
+    adminEl.textContent = admin;
+    if (!target.get_pending_admin) {
+      pendingEl.textContent = 'not available';
+      row.querySelector('.admin-actions').remove();
+      return row;
+    }
+    const { result: pending } = await target.get_pending_admin();
+    pendingEl.textContent = pending ?? 'none';
+    const newAdminInput = row.querySelector('.new-admin-input');
+    row.querySelector('.propose-admin-btn').addEventListener('click', () => buildRowCall(kind, {
+      source: admin,
+      contractId,
+      method: 'update_admin',
+      args: { new_admin: newAdminInput.value.trim() },
+    }));
+    row.querySelector('.cancel-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
+    row.querySelector('.accept-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: pending, contractId, method: 'accept_admin' }));
+  } catch (err) {
+    adminEl.textContent = `could not be read: ${err.message}`;
+    row.querySelector('.admin-actions').remove();
+  }
+  return row;
 }
 
 // -----------------------------
