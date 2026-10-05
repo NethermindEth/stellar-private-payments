@@ -21,8 +21,10 @@ const networkPassphrase = 'Test SDF Network ; September 2015';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
 const contractConfig = await fetch('/deployments.json').then((r) => r.json());
 const circuitsBaseUrl = new URL('./circuits/', import.meta.url).href;
-// Load fingerprints from your application's trusted deployment bundle.
-const circuitLock = await fetch(new URL('circuits.json', circuitsBaseUrl)).then((r) => r.json());
+// Bundle trusted fingerprints with your application using your bundler's JSON loader.
+import circuitLock from './trusted-deployment/circuits.json';
+// Fetching the lock beside the artifacts only detects corruption or mismatches;
+// it cannot authenticate artifacts if that server can replace both.
 const signer = new FreighterSigner();
 
 await init();

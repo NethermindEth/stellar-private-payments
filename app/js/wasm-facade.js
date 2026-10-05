@@ -23,6 +23,8 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { deploymentDefaults } from './network-config.js';
 import { AppStorage } from './app-storage.js';
+// Trunk bundles the selected deployment's trusted fingerprints into the app.
+import circuitLock from 'app-circuit-lock';
 
 export { DisclosureRequest };
 
@@ -74,12 +76,6 @@ export async function loadDeploymentConfig() {
 
 export function circuitsBaseUrl() {
     return CIRCUITS_BASE_URL;
-}
-
-async function loadCircuitLock() {
-    const response = await fetch(new URL('circuits.json', circuitsBaseUrl()));
-    if (!response.ok) throw new Error(`Cannot load circuit fingerprints: HTTP ${response.status}`);
-    return response.json();
 }
 
 function bindAppStorage(sdkStorage) {
@@ -159,7 +155,7 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
         bootnodeUrl: bootnodeUrl ?? undefined,
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
-        circuitLock: await loadCircuitLock(),
+        circuitLock,
     });
     return wrapSdkClient(sdk);
 }
@@ -301,7 +297,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
     return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
-        circuitLock: await loadCircuitLock(),
+        circuitLock,
     });
 }
 

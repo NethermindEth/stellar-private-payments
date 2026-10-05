@@ -102,15 +102,21 @@ variables.
 The examples require the local SQLite wallet to contain derived privacy keys.
 Use the `spp` CLI to onboard each account. From the repository root:
 
+The CLI requires a runtime deployment configuration. The commands below select
+the checked-in testnet deployment explicitly with
+`--deployment deployments/testnet`; the CLI has no embedded deployment fallback.
+
 ```bash
 # Onboard Alice's wallet. The default data dir writes the SQLite wallet to
 # ~/.local/share/stellar-private-payments/spp.db.
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account alice --accept --register
 
 # Onboard Bob's wallet into a separate database so the examples can use it as a
 # recipient without overwriting Alice's wallet.
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account bob --accept --register \
   --data-dir ./spp-bob-wallet
 ```
@@ -140,7 +146,8 @@ For unattended or CI setups, pass the bootnode and explorer URLs explicitly so
 `spp onboard` does not prompt:
 
 ```bash
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account alice --accept --register \
   --bootnode-url http://127.0.0.1:8080 \
   --explorer-url https://stellar.expert/explorer/testnet
@@ -171,11 +178,14 @@ curl http://127.0.0.1:8080/healthz
 
 ### Cargo
 
+Run from the repository root:
+
 ```bash
 cargo build --manifest-path tools/bootnode/Cargo.toml
 export DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/bootnode'
 # Start Postgres first, then:
 ./tools/bootnode/target/debug/bootnode \
+  --deployment deployments/testnet \
   --dev --insecure-http --bind 127.0.0.1:8080 \
   --upstream-rpc-url https://soroban-testnet.stellar.org \
   --database-url "$DATABASE_URL"
@@ -368,7 +378,9 @@ Skipping: wallet at ./spp-example-wallet.sqlite does not contain privacy keys ..
 Onboard the wallet first (e.g. with the `spp` CLI) and re-run.
 ```
 
-Run `spp onboard --account <alias> --accept` for the account you are using.
+From the repository root, run
+`spp --deployment deployments/testnet onboard --account <alias> --accept`
+for the account you are using.
 
 ### Missing circuit artifacts
 

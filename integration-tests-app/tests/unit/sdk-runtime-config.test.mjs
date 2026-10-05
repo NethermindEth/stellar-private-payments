@@ -59,3 +59,62 @@ test('missing fingerprints fail before spawning a prover', async () => {
   await assert.rejects(sdk.verifySelectiveDisclosure('rpc', '{}', 'hash', {contractConfig: {}, circuitsBaseUrl: 'https://example.test/'}), /circuitLock is required/);
   assert.equal(mock.configured.length, before);
 });
+
+test('app reopens clients and verifies receipts without fetching circuit fingerprints', async () => {
+  const facadeUrl = new URL('../../../app/js/wasm-facade.js', import.meta.url);
+  const lock = JSON.parse(await readFile(new URL('../../../deployments/testnet/circuits.json', import.meta.url), 'utf8'));
+  const appSdkUrl = url(`
+    export const opens = [];
+    export const verifications = [];
+    export const Client = { async new(options) {
+      opens.push(options);
+      return { stopBackgroundSync() {}, contractConfig() { return options.contractConfig; } };
+    }};
+    export const Storage = { async open() { return {}; } };
+    export class DisclosureRequest {};
+    export function bootnodeRequired() {};
+    export function deriveAspUserLeaf() {};
+    export async function verifySelectiveDisclosure(rpc, receipt, hash, options) { verifications.push(options); }
+    export function configureTelemetry() {};
+    export function dump_recent_logs() {};
+    export function debugLogsEnabled() {};
+    export default async function init() {};
+  `);
+  let facadeSource = await readFile(facadeUrl, 'utf8');
+  facadeSource = facadeSource
+    .replace("'stellar-private-payments'", JSON.stringify(appSdkUrl))
+    .replace("'stellar-private-payments/freighter'", JSON.stringify(url('export class FreighterSigner {}')))
+    .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)));
+  for (const name of ['network-config', 'app-storage']) {
+    facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8'))));
+  }
+  const previous = { fetch: globalThis.fetch, window: globalThis.window, document: globalThis.document };
+  const requests = [];
+  globalThis.window = { location: { href: 'https://app.example/' }, addEventListener() {} };
+  globalThis.document = { baseURI: 'https://app.example/' };
+  globalThis.fetch = async (input) => {
+    requests.push(String(input));
+    if (String(input) !== 'https://app.example/deployments.json') {
+      throw new Error('artifact server unavailable');
+    }
+    return { ok: true, async json() { return { network: 'testnet' }; } };
+  };
+  try {
+    const facade = await import(url(facadeSource));
+    const appSdk = await import(appSdkUrl);
+    await facade.initializeRuntime('https://rpc.example/', { bootnodeUrl: null });
+    facade.disposeClient();
+    await facade.initializeRuntime('https://rpc.example/', { bootnodeUrl: null });
+    await facade.verifySelectiveDisclosure('https://rpc.example/', '{}', 'hash');
+    assert.equal(appSdk.opens.length, 2);
+    for (const options of [...appSdk.opens, ...appSdk.verifications]) {
+      assert.deepEqual(options.circuitLock, lock);
+    }
+    assert.deepEqual(requests, ['https://app.example/deployments.json']);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});

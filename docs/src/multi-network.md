@@ -90,8 +90,11 @@ SPP_NETWORK=local trunk build
 ```
 
 Each folder needs `deployments.json`, `circuits.json`, and matching `circuit_keys/`.
-The website supplies the staged circuit lock to the network-independent SDK at
-runtime. This remains one deployment per hosted build, without a live switcher.
+Trunk embeds the selected circuit lock in the website JavaScript and supplies it
+to the network-independent SDK at runtime. Opening a client does not fetch a
+lock from the artifact server. Artifact hashes are pinned to that app build;
+this still requires trusting the app itself and its delivery. This remains one
+deployment per hosted build, without a live switcher.
 `ci-test-network` is synthetic test data, not a live deployment.
 
 Deployment JSON requires `networkPassphrase` and `rpcUrl` for new deployments.
