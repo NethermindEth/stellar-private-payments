@@ -7,7 +7,8 @@ import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
+import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
+import { adminLine, allowlistLeavesFromEvents, blocklistKeysFromEvents, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -50,19 +51,32 @@ const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
 const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
 const copyAdminTxLinkBtn = document.getElementById('copyAdminTxLinkBtn');
 
-// The buttons that need a connected wallet.
-const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, submitAdminTxBtn];
-
 // Pools tab
 const poolRowsEl = document.getElementById('poolRows');
 const poolsNoticeEl = document.getElementById('poolsNotice');
 const poolRowTemplate = document.getElementById('tpl-pool-row');
+
+// Re-point panel
+const repointPoolSelect = document.getElementById('repointPool');
+const repointKindSelect = document.getElementById('repointKind');
+const repointTreeInput = document.getElementById('repointTree');
+const repointLedgerInput = document.getElementById('repointLedger');
+const repointRecordsInput = document.getElementById('repointRecords');
+const repointChecksEl = document.getElementById('repointChecks');
+const repointConfirmEl = document.getElementById('repointConfirm');
+const repointConfirmBox = document.getElementById('repointConfirmBox');
+const repointConfirmTextEl = document.getElementById('repointConfirmText');
+const checkRepointBtn = document.getElementById('checkRepointBtn');
+const buildRepointBtn = document.getElementById('buildRepointBtn');
 
 // Admins tab
 const adminRowsEl = document.getElementById('adminRows');
 const adminsNoticeEl = document.getElementById('adminsNotice');
 const adminRowTemplate = document.getElementById('tpl-admin-row');
 const signerTemplate = document.getElementById('tpl-signer');
+
+// The buttons that need a connected wallet.
+const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, submitAdminTxBtn, checkRepointBtn];
 
 const state = {
   address: null,
@@ -73,6 +87,11 @@ const state = {
   // The manifest's pools and added allowlists; `kindOf` reads a pasted call against them.
   pools: [],
   addedAllowlists: [],
+  // The last re-point check: its lines, and the call they allow once each passes.
+  repoint: null,
+  // The blocklist each pool on the Pools tab reads, by pool, which a re-point
+  // changes while the manifest stays as it was.
+  poolBlocklists: new Map(),
   // Set while an admin call is built, signed, or sent; change it through `setBusy`.
   busy: false,
   cryptoReady: false,
@@ -283,10 +302,12 @@ async function refreshState() {
     const membershipState = appState.aspMembership;
     const nonMembershipState = appState.aspNonMembership;
 
-    if (membershipContractInput) membershipContractInput.value = membershipState.contractId;
-    if (nonMembershipContractInput) nonMembershipContractInput.value = nonMembershipState.contractId;
-    updateContractLink(membershipContractLinkEl, membershipState.contractId);
-    updateContractLink(nonMembershipContractLinkEl, nonMembershipState.contractId);
+    // A tree the operator entered, such as the blocklist a pool was re-pointed
+    // to, stays through a refresh. An empty field takes the manifest's.
+    membershipContractInput.value ||= membershipState.contractId;
+    nonMembershipContractInput.value ||= nonMembershipState.contractId;
+    updateContractLink(membershipContractLinkEl, membershipContractInput.value);
+    updateContractLink(nonMembershipContractLinkEl, nonMembershipContractInput.value);
 
     const membershipStorageUrl = membershipState.contractId
       ? Utils.explorerContractStorageUrl(membershipState.contractId)
@@ -610,6 +631,13 @@ async function insertMembershipLeaf() {
   }
 }
 
+// Reports whether a write to `blocklist` goes ahead: at once when a pool on the
+// Pools tab reads it, and otherwise only once the operator accepts the warning.
+function confirmBlocklistWrite(blocklist) {
+  const warning = unreadBlocklistWarning(blocklist, [...state.poolBlocklists.values()]);
+  return !warning || window.confirm(warning);
+}
+
 async function insertNonMembershipLeaf() {
   if (refuseWhileBusy()) return;
   const originalText = addToBlocklistBtn.textContent;
@@ -620,6 +648,7 @@ async function insertNonMembershipLeaf() {
 
     const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keys.length === 0) throw new Error('User note public key is required');
+    if (!confirmBlocklistWrite(contractId)) return;
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.textContent = 'Processing...';
@@ -649,6 +678,7 @@ async function removeNonMembershipLeaf() {
     const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keyValue === undefined) throw new Error('User note public key is required');
     if (others.length > 0) throw new Error('Remove takes one note public key at a time');
+    if (!confirmBlocklistWrite(contractId)) return;
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
@@ -690,11 +720,14 @@ async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
   }
 }
 
-// Lists each pool the manifest names with its deposit flag, a disabled pool
-// too, since it still takes deposits on chain.
+// Lists each pool the manifest names with the trees it reads and its deposit
+// flag, a disabled pool too, since it still takes deposits on chain.
 function refreshPools() {
+  resetRepoint();
+  state.poolBlocklists = new Map();
   return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
     state.pools = pools.map(({ poolContractId }) => poolContractId);
+    repointPoolSelect.replaceChildren(...state.pools.map((contractId) => new Option(contractId)));
     return state.pools.map((contractId) => poolRow(contractId));
   });
 }
@@ -706,7 +739,9 @@ async function poolRow(contractId) {
   showAddress(row.querySelector('.pool-id'), contractId);
   const depositsEl = row.querySelector('.pool-deposits');
   try {
-    const pool = await readClient(contractId);
+    const [pool, { stored }] = await Promise.all([readClient(contractId), readInstance(rpcServer(state.rpcUrl), contractId)]);
+    state.poolBlocklists.set(contractId, stored.get('ASPNonMembership'));
+    row.querySelector('.pool-trees').textContent = `Allowlist ${stored.get('ASPMembership')}\nBlocklist ${stored.get('ASPNonMembership')}`;
     if (!pool.deposits_paused) {
       depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
       row.querySelector('.pool-actions').remove();
@@ -746,6 +781,125 @@ async function buildRowCall(button, kind, call) {
   } finally {
     Object.assign(button, { disabled, textContent });
     button.style.minWidth = '';
+  }
+}
+
+// -----------------------------
+// Re-point
+// -----------------------------
+// Draws the last re-point check. A line that names another party as the
+// tree's admin passes once the operator confirms that party, and "Build
+// re-point" waits for every line to pass.
+function renderRepoint() {
+  const lines = state.repoint?.lines ?? [];
+  const passes = ({ ok, confirm }) => ok || (Boolean(confirm) && repointConfirmBox.checked);
+  repointChecksEl.replaceChildren(...lines.map((line) => Object.assign(document.createElement('li'), {
+    className: passes(line) ? 'text-emerald-300' : 'text-rose-300',
+    textContent: `${passes(line) ? 'ok' : 'FAIL'} ${line.label}: ${line.text}`,
+  })));
+  const confirm = lines.find((line) => line.confirm)?.confirm;
+  repointConfirmEl.classList.toggle('hidden', !confirm);
+  repointConfirmTextEl.textContent = confirm ? `Let the pool read a tree that ${confirm} runs, not the pool's admin` : '';
+  buildRepointBtn.disabled = lines.length === 0 || !lines.every(passes);
+}
+
+function resetRepoint() {
+  state.repoint = null;
+  repointConfirmBox.checked = false;
+  renderRepoint();
+}
+
+// Checks a tree before a pool is re-pointed to it, one line per check. The
+// pool refuses a tree of other code itself; the other checks cover what the
+// code cannot show: the tree's depth, who runs it, whether clients index it,
+// and what it holds.
+async function checkRepoint() {
+  resetRepoint();
+  // A field that changes while the check runs resets it, and its result is dropped.
+  const check = {};
+  state.repoint = check;
+  const originalText = checkRepointBtn.textContent;
+  try {
+    ensureWalletConnected();
+    const pool = repointPoolSelect.value;
+    const tree = repointTreeInput.value.trim();
+    if (!pool || !tree) throw new Error('Choose a pool and enter the new tree address');
+    const allowlist = repointKindSelect.value === 'asp-membership';
+
+    checkRepointBtn.disabled = true;
+    checkRepointBtn.textContent = 'Checking...';
+    setStatus('Checking the tree...', 'info');
+    const server = rpcServer(state.rpcUrl);
+    const [manifest, admin, poolInstance, treeInstance] = await Promise.all([
+      loadDeploymentConfig(),
+      storedAdmin(pool),
+      readInstance(server, pool),
+      readInstance(server, tree),
+    ]);
+    const checks = [
+      ['Code', async () => {
+        const client = await readClient(pool);
+        if (!client.get_asp_wasm_hashes) {
+          throw new Error('the pool has no get_asp_wasm_hashes entry point, so it accepts a tree of any code');
+        }
+        return codeLine((await client.get_asp_wasm_hashes()).result.unwrap(), treeInstance.wasmHash, allowlist);
+      }],
+      allowlist && ['Levels', async () => {
+        const current = poolInstance.stored.get('ASPMembership');
+        const levels = (await readInstance(server, current)).stored.get('Levels');
+        return levelsLine(current, levels, treeInstance.stored.get('Levels'));
+      }],
+      ['Admin', async () => {
+        const client = await readClient(tree);
+        if (!client.get_admin) throw new Error('the tree has no get_admin entry point');
+        return adminLine((await client.get_admin()).result.unwrap(), admin);
+      }],
+      allowlist && ['Manifest', async () => manifestLine(manifest, tree)],
+      ['Entries', async () => {
+        const [file] = repointRecordsInput.files;
+        if (!file) throw new Error('choose the records file');
+        const ledger = historyStart({ allowlist, tree, manifest, blocklistLedger: Number(repointLedgerInput.value) });
+        // A blocklist's records, and the keys this line reports, are note
+        // public keys as the Blocklist tab takes them, so a key loaded in the
+        // other byte order fails the check.
+        const [events, records] = await Promise.all([
+          eventsSince(server, tree, ledger),
+          file.text().then(allowlist ? parseRecords : parseBlocklistKeys),
+        ]);
+        const onChain = allowlist ? allowlistLeavesFromEvents(events) : blocklistKeysFromEvents(events);
+        const { missing, unexpected } = compareEntries(onChain, records);
+        const shown = allowlist ? (value) => `0x${value.toString(16)}` : blocklistKeyToNoteKey;
+        const listed = (values) => values.map(shown).join(', ');
+        const problems = [
+          missing.length > 0 && `missing from the tree: ${listed(missing)}`,
+          unexpected.length > 0 && `not in the records: ${listed(unexpected)}`,
+        ].filter(Boolean);
+        if (problems.length > 0) throw new Error(problems.join('; '));
+        return `${onChain.length} on chain, as in the records`;
+      }],
+    ].filter(Boolean);
+    const lines = await Promise.all(checks.map(([label, run]) => run().then(
+      (text) => ({ label, ok: true, text }),
+      (err) => ({ label, ok: false, text: err.message, confirm: err.confirm }),
+    )));
+    if (state.repoint !== check) return;
+    setStatus('Tree checked', 'info');
+    Object.assign(check, {
+      lines,
+      call: {
+        source: admin,
+        contractId: pool,
+        method: allowlist ? 'update_asp_membership' : 'update_asp_non_membership',
+        args: allowlist ? { new_asp_membership: tree } : { new_asp_non_membership: tree },
+      },
+    });
+    renderRepoint();
+  } catch (err) {
+    setStatus('Tree check failed', 'error');
+    showToast(`Tree check failed: ${err.message}`, 'error');
+  } finally {
+    if (state.address) checkRepointBtn.disabled = false;
+    checkRepointBtn.textContent = originalText;
   }
 }
 
@@ -893,6 +1047,13 @@ if (sharedTx) {
   // A reload would otherwise bring back an envelope that was since submitted.
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 }
+
+// A changed field makes the last re-point check stale.
+[repointPoolSelect, repointKindSelect, repointTreeInput, repointLedgerInput, repointRecordsInput]
+  .forEach((field) => field.addEventListener('input', resetRepoint));
+repointConfirmBox.addEventListener('change', renderRepoint);
+checkRepointBtn.addEventListener('click', checkRepoint);
+buildRepointBtn.addEventListener('click', () => buildRowCall(buildRepointBtn, 'pool', state.repoint.call));
 
 membershipContractInput?.addEventListener('input', () => {
   updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());

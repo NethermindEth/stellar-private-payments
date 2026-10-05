@@ -1,7 +1,7 @@
 /**
  * Converts the note public keys an admin enters into blocklist keys, and back,
- * and builds the call that adds them. Kept out of `admin.js` so Node unit tests
- * can import it.
+ * builds the call that adds them, and warns of a write to a blocklist no pool
+ * reads. Kept out of `admin.js` so Node unit tests can import it.
  */
 
 // The form the app shows a note public key in: `0x` and 32 bytes of hex.
@@ -47,4 +47,20 @@ export function blocklistInsertCall(keys, batched) {
   if (batched) return { method: 'insert_leaves', args: { entries: keys.map((key) => [key, key]) } };
   if (keys.length > 1) throw new Error('This blocklist predates batched inserts. Add one key at a time.');
   return { method: 'insert_leaf', args: { key: keys[0], value: keys[0] } };
+}
+
+/**
+ * Returns the warning a blocklist write needs when no pool reads the blocklist
+ * it targets, or `null` when a pool does.
+ *
+ * A pool re-pointed to another blocklist leaves the manifest's in place, and a
+ * key written to a blocklist no pool reads blocks or releases no one.
+ *
+ * @param {string} blocklist - The blocklist the write targets.
+ * @param {string[]} readBlocklists - The blocklist each pool reads.
+ * @returns {string|null}
+ */
+export function unreadBlocklistWarning(blocklist, readBlocklists) {
+  if (readBlocklists.includes(blocklist)) return null;
+  return `No pool on the Pools tab reads ${blocklist}, so a key written there blocks or releases no one. Build the call anyway?`;
 }
