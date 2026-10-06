@@ -88,3 +88,6 @@ pub use sync::{BackgroundSync, BackgroundSyncStop, SyncMode, bootnode_required};
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).
 pub type PreparedTransaction = transact::PreparedProverTx;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stellar_cli;

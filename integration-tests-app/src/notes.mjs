@@ -64,7 +64,16 @@ export async function waitForNotes(page, {
  * establishes that the indexer moved; the subsequent table predicate proves
  * the user-visible note state is ready.
  */
-export async function waitForNotesAfterIndexer(page, {
+export function waitForNotesAfterIndexer(page, options = {}) {
+  const pending = notesAfterIndexer(page, options);
+  // Callers start this wait before the operation it observes and await it
+  // afterwards. Marking it handled keeps a rejection during that operation
+  // from crashing Node; the caller's await still receives it.
+  pending.catch(() => {});
+  return pending;
+}
+
+async function notesAfterIndexer(page, {
   afterLedger,
   indexer = {},
   notes = {},

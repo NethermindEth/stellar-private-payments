@@ -111,6 +111,84 @@ impl Storage {
         Self::connect_with_database(db).await
     }
 
+    /// Open an encrypted Turso file. The caller owns exclusive access to its
+    /// directory while deciding creation policy and using the database.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn connect_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+        purpose: super::database_key::OpenPurpose,
+    ) -> Result<Self> {
+        use super::database_key::{OpenPurpose, encrypted_builder};
+        let path = std::path::absolute(path)?;
+        let existing = match std::fs::symlink_metadata(&path) {
+            Ok(meta) => {
+                anyhow::ensure!(meta.is_file(), "database must be a regular file");
+                meta.len() > 0
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        anyhow::ensure!(
+            existing == matches!(purpose, OpenPurpose::OpenExisting),
+            "database create/open purpose does not match existing file"
+        );
+        if existing {
+            use std::io::Read;
+            let mut header = [0; 5];
+            std::fs::File::open(&path)?.read_exact(&mut header)?;
+            anyhow::ensure!(
+                &header == b"Turso",
+                "unencrypted or unsupported database; existing data has been preserved"
+            );
+        }
+        if !existing {
+            for suffix in ["-wal", "-journal"] {
+                anyhow::ensure!(
+                    !std::fs::exists(format!("{}{suffix}", path.display()))?,
+                    "empty database has recovery files; existing data has been preserved"
+                );
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(false);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            drop(options.open(&path)?);
+        }
+        let db = encrypted_builder(path.to_str().context("database path is not UTF-8")?, key)
+            .build()
+            .await
+            .map_err(|_| anyhow!("encrypted database could not be opened"))?;
+        Self::connect_with_database(db)
+            .await
+            .map_err(|_| anyhow!("encrypted database could not be authenticated or initialized"))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn reopen_encrypted(
+        path: impl AsRef<Path>,
+        key: &super::database_key::DatabaseKey,
+    ) -> Result<Self> {
+        Self::connect_encrypted(path, key, super::database_key::OpenPurpose::OpenExisting).await
+    }
+
+    pub async fn check_integrity(&self) -> Result<()> {
+        let mut rows = self.conn.query("PRAGMA integrity_check", ()).await?;
+        let mut ok = false;
+        while let Some(row) = rows.next().await? {
+            anyhow::ensure!(
+                row.get::<String>(0)? == "ok",
+                "database integrity check failed"
+            );
+            ok = true;
+        }
+        anyhow::ensure!(ok, "database integrity check returned no result");
+        Ok(())
+    }
+
     pub async fn connect_in_memory() -> Result<Self> {
         let db = turso::Builder::new_local(":memory:").build().await?;
         Self::connect_with_database(db).await

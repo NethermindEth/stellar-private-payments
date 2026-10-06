@@ -34,6 +34,7 @@ const SIGN_AS_FLAG: &str = "--sign-as";
 /// CLI flag overrides used to build a [`CliConfig`].
 #[derive(Debug, Default)]
 pub struct CliConfigOverrides {
+    pub storage_account: Option<String>,
     pub deployment_path: Option<PathBuf>,
     pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
@@ -52,6 +53,11 @@ pub struct CliConfigOverrides {
 /// need them.
 #[derive(Debug, Clone)]
 pub struct CliConfig {
+    pub storage_account: Option<String>,
+    database_key: std::sync::Arc<
+        std::sync::OnceLock<stellar_private_payments::state::database_key::DatabaseKey>,
+    >,
+    storage_owner: std::sync::Arc<std::sync::OnceLock<std::fs::File>>,
     /// TOML config file when loaded; otherwise None.
     pub config_file: Option<PathBuf>,
     /// File path when overridden; otherwise [`EMBEDDED_DEPLOYMENT_LABEL`].
@@ -78,6 +84,7 @@ impl CliConfig {
     ) -> Result<Self> {
         let file = file.unwrap_or_default();
         let CliConfigOverrides {
+            storage_account,
             deployment_path,
             network,
             data_dir,
@@ -104,6 +111,9 @@ impl CliConfig {
             .unwrap_or_else(|| deployment.network.clone());
 
         Ok(Self {
+            storage_account: storage_account.or(file.defaults.storage_account),
+            database_key: Default::default(),
+            storage_owner: Default::default(),
             config_file,
             deployment_source,
             deployment,
@@ -166,13 +176,60 @@ impl CliConfig {
             .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
     }
 
-    /// Open (creating if needed) the local sqlite database (`spp.db`).
-    pub fn open_storage(&self) -> Result<SqliteStorage> {
+    /// Storage ownership is independent of the transaction payer.
+    pub fn storage_alias(&self) -> Result<&str> {
+        let alias = self
+            .storage_account
+            .as_deref()
+            .or(self.account.as_deref())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage requires --storage-account <stellar keys alias> or --account"
+                )
+            })?;
+        stellar_cli::validate_alias("--storage-account", alias)?;
+        Ok(alias)
+    }
+
+    /// Unlock with the storage identity, retaining the key for this command.
+    pub fn database_key(
+        &self,
+    ) -> Result<&stellar_private_payments::state::database_key::DatabaseKey> {
+        if let Some(key) = self.database_key.get() {
+            return Ok(key);
+        }
+        let alias = self.storage_alias()?;
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
-        let path = self.db_path();
-        futures::executor::block_on(SqliteStorage::connect_file(&path))
-            .with_context(|| format!("open {}", path.display()))
+        if self.storage_owner.get().is_none() {
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true).write(true).create(true).truncate(false);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let owner = options.open(self.data_dir.join("spp.db.owner"))?;
+            owner
+                .try_lock()
+                .context("storage database is in use by another process")?;
+            let _ = self.storage_owner.set(owner);
+        }
+        let key = stellar_private_payments::state::native_wallet::unlock_with_stellar(
+            &self.db_path(),
+            alias,
+            self.stellar_config_dir.as_deref(),
+        )?;
+        Ok(self.database_key.get_or_init(|| key))
+    }
+
+    /// Open the encrypted database, creating/unlocking its key automatically.
+    pub fn open_storage(&self) -> Result<SqliteStorage> {
+        futures::executor::block_on(SqliteStorage::reopen_encrypted(
+            self.db_path(),
+            self.database_key()?,
+        ))
+        .with_context(|| format!("open {}", self.db_path().display()))
     }
 }
 
@@ -285,6 +342,35 @@ mod tests {
 
         assert_eq!(signer.alias, owner.alias);
         assert_eq!(signer.address, owner.address);
+    }
+
+    #[test]
+    fn storage_identity_defaults_to_owner_and_never_to_payer() {
+        let mut config = config_with(Some("payer"));
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "owner"
+        );
+        config.storage_account = Some("vault-owner".into());
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "vault-owner"
+        );
+        config.account = None;
+        assert_eq!(
+            config.storage_alias().expect("valid storage alias"),
+            "vault-owner"
+        );
+        config.storage_account = None;
+        assert!(config.storage_alias().is_err());
+        config.storage_account = Some(SECRET_SHAPED.into());
+        assert!(
+            config
+                .storage_alias()
+                .expect_err("raw secret keys must not be accepted as aliases")
+                .to_string()
+                .contains("not a raw secret key")
+        );
     }
 
     #[test]

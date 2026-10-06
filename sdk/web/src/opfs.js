@@ -1,13 +1,28 @@
 // Called only from a dedicated worker. The exclusive main-file handle is the
-// lock for the entire database (including its WAL and initialization marker).
-export async function openFiles(directory) {
+// lock for the entire database (including its WAL).
+export async function openFiles(directory, createNew) {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle(directory, { create: true });
+    const dir = await root.getDirectoryHandle(directory, { create: createNew });
     const files = [];
     try {
-        for (const name of ['spp.db', 'spp.db-wal', 'initialized']) {
-            const file = await dir.getFileHandle(name, { create: true });
-            files.push(await file.createSyncAccessHandle());
+        const main = await dir.getFileHandle('spp.db', { create: createNew });
+        files.push(await main.createSyncAccessHandle());
+        const exists = files[0].getSize() > 0;
+        if (exists && createNew) {
+            throw new Error('database create/open purpose does not match existing file');
+        }
+        // Reject plaintext here; Turso authenticates encrypted pages when opening.
+        if (exists) {
+            const header = new Uint8Array(5);
+            files[0].read(header, { at: 0 });
+            if (new TextDecoder().decode(header) !== 'Turso') {
+                throw new Error('unencrypted or unsupported database; existing data has been preserved');
+            }
+        }
+        const wal = await dir.getFileHandle('spp.db-wal', { create: true });
+        files.push(await wal.createSyncAccessHandle());
+        if (!exists && files[1].getSize() > 0) {
+            throw new Error('empty database has recovery files; existing data has been preserved');
         }
         return files;
     } catch (error) {
@@ -17,32 +32,9 @@ export async function openFiles(directory) {
 }
 
 export function closeFiles(files) {
-    // Release the main-file lock last.
     for (const file of [...files].reverse()) {
         try { file.close(); } catch { /* Already closed during teardown. */ }
     }
-}
-
-export function isInitialized(files) {
-    const marker = new Uint8Array(1);
-    return files[2].getSize() === 1 && files[2].read(marker, { at: 0 }) === 1 && marker[0] === 1;
-}
-
-export function initializeFiles(files) {
-    // No writes are accepted until initialization is marked complete.
-    // Retry an interrupted first initialization from an empty database.
-    files[0].truncate(0);
-    files[1].truncate(0);
-    files[0].flush();
-    files[1].flush();
-}
-
-export function markReady(files) {
-    files[0].flush();
-    files[1].flush();
-    if (files[2].write(new Uint8Array([1]), { at: 0 }) !== 1) throw new Error('ShortWrite');
-    files[2].truncate(1);
-    files[2].flush();
 }
 
 export function readFile(files, slot, buffer, offset) {

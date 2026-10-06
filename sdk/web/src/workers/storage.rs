@@ -40,6 +40,24 @@ use gloo_worker::Spawnable;
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
 
+/// Owned worker-message copy. Debug never exposes key bytes; this Rust copy is
+/// zeroized on drop. Browser message serialization can still create other
+/// copies.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct DatabaseKeyTransport(pub Vec<u8>);
+
+impl std::fmt::Debug for DatabaseKeyTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DatabaseKey([REDACTED])")
+    }
+}
+
+impl Drop for DatabaseKeyTransport {
+    fn drop(&mut self) {
+        stellar_private_payments::state::database_key::clear_transport(&mut self.0);
+    }
+}
+
 type Address = String;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,6 +103,12 @@ pub(crate) struct AdminASPRequest {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum StorageWorkerRequest {
+    OpenEncrypted {
+        key: DatabaseKeyTransport,
+        create_new: bool,
+        directory: Option<String>,
+    },
+    CheckIntegrity,
     Ping,
     Pause,
     SyncState,
@@ -185,6 +209,7 @@ pub(crate) enum StorageWorkerResponse {
 
 #[derive(Clone, Debug)]
 enum InitState {
+    Locked,
     Pending,
     Ready,
     Failed(String),
@@ -193,7 +218,7 @@ enum InitState {
 thread_local! {
     static STORAGE: Rc<Mutex<Option<SqliteStorage>>> = Rc::new(Mutex::new(None));
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
-    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Locked) };
 }
 
 // Clone the handle before awaiting: no thread-local RefCell borrow may survive
@@ -235,14 +260,6 @@ pub fn worker_main() {
         tracing::debug!("[{WORKER_NAME}] starting...");
     }
     StorageWorker::registrar().register();
-    spawn_local(
-        async move {
-            if let Err(e) = init().await {
-                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
-            }
-        }
-        .instrument(worker_span),
-    );
 }
 
 // A prior page's worker still releases its OPFS sync access handles
@@ -254,12 +271,16 @@ const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
 #[cfg(target_arch = "wasm32")]
 const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 
-async fn init() -> Result<(), JsError> {
+async fn init(
+    key: stellar_private_payments::state::database_key::DatabaseKey,
+    create_new: bool,
+    directory: String,
+) -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
     let mut attempt = 0;
     let storage = loop {
-        match crate::opfs::open_wallet("spp-turso-v1").await {
+        match crate::opfs::open_wallet(&directory, &key, create_new).await {
             Ok(storage) => break storage,
             Err(error)
                 if error.to_string().contains("NoModificationAllowedError")
@@ -281,7 +302,12 @@ async fn init() -> Result<(), JsError> {
     };
 
     let handle = STORAGE.with(Rc::clone);
-    *handle.lock().await = Some(storage);
+    let mut guard = handle.lock().await;
+    if !INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Pending)) {
+        return Err(JsError::new("storage was closed while opening"));
+    }
+    *guard = Some(storage);
+    drop(guard);
 
     let (tx, rx) = mpsc::channel::<()>(1);
 
@@ -322,6 +348,43 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
+        StorageWorkerRequest::OpenEncrypted {
+            key,
+            create_new,
+            directory,
+        } => {
+            use stellar_private_payments::state::database_key::DatabaseKey;
+            anyhow::ensure!(key.0.len() == 32, "database key must contain 32 bytes");
+            anyhow::ensure!(
+                INIT_STATE.with(|s| matches!(*s.borrow(), InitState::Locked)),
+                "worker is already opening, open or closed"
+            );
+            let directory = directory.unwrap_or_else(|| "spp-turso-encrypted-v1".into());
+            anyhow::ensure!(
+                directory == "spp-turso-encrypted-v1"
+                    || (directory.starts_with("spp-turso-encrypted-v1-")
+                        && directory.len() == 59
+                        && directory[23..]
+                            .bytes()
+                            .all(|b| b.is_ascii_hexdigit() || b == b'-')),
+                "invalid encrypted storage directory"
+            );
+            let mut owned = DatabaseKey::new([0; 32]);
+            owned.copy_from_slice(&key.0);
+            drop(key);
+            if init(owned, create_new, directory).await.is_err() {
+                let reason = INIT_STATE.with(|s| match &*s.borrow() {
+                    InitState::Failed(message) => message.clone(),
+                    _ => "storage could not be opened".into(),
+                });
+                anyhow::bail!(reason);
+            }
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::CheckIntegrity => {
+            with_storage!(s => s.check_integrity().await?)?;
+            StorageWorkerResponse::Saved
+        }
         StorageWorkerRequest::Pause => {
             tracing::debug!("[{WORKER_NAME}] closing OPFS storage ahead of page unload");
             // Wait for active access before closing and releasing the handles.
@@ -349,6 +412,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                         tracing::debug!("[{WORKER_NAME}] ping -> init failed");
                         return Ok(StorageWorkerResponse::Error(msg));
                     }
+                    InitState::Locked => return Err(anyhow!("storage has not been unlocked")),
                     InitState::Pending => {}
                 }
 
@@ -714,6 +778,10 @@ const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
 #[serde(rename_all = "camelCase")]
 struct OpenOptions {
     worker_url: Option<String>,
+    directory: Option<String>,
+    key: Vec<u8>,
+    #[serde(default)]
+    create_new: bool,
 }
 
 /// Storage worker bridge — main-thread ↔ worker I/O for local persistence.
@@ -736,21 +804,48 @@ impl Clone for StorageBridge {
 #[wasm_bindgen(js_class = Storage)]
 #[cfg(target_arch = "wasm32")]
 impl StorageBridge {
+    /// Open the separate encrypted OPFS database. The caller supplies a random
+    /// 32-byte key; existing plaintext storage is neither opened nor converted.
+    #[wasm_bindgen(js_name = openEncrypted)]
+    pub async fn open_encrypted(
+        worker_url: String,
+        key: Vec<u8>,
+        create_new: bool,
+    ) -> Result<StorageBridge, JsError> {
+        let key = DatabaseKeyTransport(key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
+        Self::open_internal(worker_url, key, create_new, None).await
+    }
+
+    /// Close the database and release OPFS handles for this storage and all its
+    /// forks. Create a new Storage to reopen; this handle cannot be reused.
+    pub async fn close(&self) -> Result<(), JsError> {
+        self.call(StorageWorkerRequest::Pause, STORAGE_OPEN_PING_TIMEOUT_MS)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(())
+    }
+
     /// Spawn the storage worker and verify it is ready.
     ///
     /// Call once per page session. Use [`StorageBridge::fork`] for additional
     /// handles (e.g. app code alongside [`crate::Client`]).
     #[wasm_bindgen(js_name = open)]
     pub async fn open(options: JsValue) -> Result<StorageBridge, JsError> {
-        let opts: OpenOptions = if options.is_null() || options.is_undefined() {
-            OpenOptions { worker_url: None }
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-
+        let opts: OpenOptions = serde_wasm_bindgen::from_value(options)
+            .map_err(|_| JsError::new("storage encryption is mandatory; supply a 32-byte key"))?;
+        let key = DatabaseKeyTransport(opts.key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
         Self::open_internal(
             opts.worker_url
                 .unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+            key,
+            opts.create_new,
+            opts.directory,
         )
         .await
     }
@@ -797,7 +892,12 @@ impl StorageBridge {
         Self { bridge }
     }
 
-    async fn open_internal(worker_url: String) -> Result<Self, JsError> {
+    async fn open_internal(
+        worker_url: String,
+        key: DatabaseKeyTransport,
+        create_new: bool,
+        directory: Option<String>,
+    ) -> Result<Self, JsError> {
         crate::wasm_start();
 
         let storage = Self::new(
@@ -806,6 +906,18 @@ impl StorageBridge {
                 .as_module(true)
                 .spawn(&worker_url),
         );
+
+        storage
+            .call(
+                StorageWorkerRequest::OpenEncrypted {
+                    key,
+                    create_new,
+                    directory,
+                },
+                STORAGE_OPEN_PING_TIMEOUT_MS,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         storage
             .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)

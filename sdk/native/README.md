@@ -78,8 +78,31 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 ## Custom implementations
 
 `LocalStorage`, `LocalProver`, and `LocalSigner` are the built-in
-implementations for storage (SQLite), proving, and signing. Bring your own for
+implementations for storage (Turso), proving, and signing. Bring your own for
 any of the three by implementing the corresponding trait.
+
+## Encrypted wallet storage experiment
+
+The CLI unlocks Turso storage with a Stellar CLI identity: `--storage-account`
+(or `SPP_STORAGE_ACCOUNT`), falling back to `--account`. This identity is
+independent of the transaction payer selected with `--sign-as`. First enrollment
+verifies two matching signatures, wraps a fresh random database key, and writes
+its envelope atomically to `spp.db.key`. Later commands verify one signature to
+unwrap the same key. Keep the `.key` file with the database and WAL when backing
+up a closed wallet; the same signing identity is required to restore it.
+
+The SDK exposes `LocalStorage::open_encrypted(path, key, purpose)` and
+`LocalStorage::open_with_key(path, &key)`. The CLI uses these keyed paths;
+`LocalStorage::open` remains an explicitly unencrypted low-level API. Encrypted
+storage forks retain the key. CLI processes hold an exclusive owner-file lock
+through their storage session.
+
+This uses Turso 0.8.1's typed encryption API with `aes256gcm`, covering database
+and WAL pages. Turso labels this feature experimental and not production ready:
+[version-pinned encryption manual](https://github.com/tursodatabase/turso/blob/v0.8.1/docs/manual.md#encryption).
+The old plaintext database is not migrated: use a fresh data directory for this
+experiment. Missing envelopes, wrong keys, and unsupported populated databases
+are rejected without resetting the data.
 
 ## Examples
 

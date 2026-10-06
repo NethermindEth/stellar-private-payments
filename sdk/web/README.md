@@ -25,7 +25,13 @@ const signer = new FreighterSigner();
 
 await init();
 
-const storage = await Storage.open();
+// Supply a recoverable random 32-byte key, unlocked by your application.
+// Persist its wrapped envelope before the first creation; never generate a
+// different key on each open. See app/js/storage-key.js for wallet signing.
+const storage = await Storage.open({
+  keyProvider: async (databaseId, purpose) => unlockDatabaseKey(databaseId, purpose),
+  createNew: false, // true only for first enrollment
+});
 
 if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
   // load or prompt for a bootnode URL, then pass it to Client.new
@@ -123,9 +129,26 @@ Storage runs in a single-threaded dedicated worker using OPFS synchronous
 access handles for the database and WAL. An exclusive main-file handle prevents
 concurrent opens. Closing or pausing storage releases the handles.
 
-Storage uses `spp-turso-v1` for fresh Turso wallets. Existing SQLite wallets
-are not imported. A flushed marker records successful first initialization;
-an interrupted initialization is retried before accepting application writes.
+The app uses `spp-turso-encrypted-v1` for new encrypted wallets, separate from
+previous plaintext experiments. No existing wallet migration is performed.
+Storage requires a 32-byte key and uses Turso 0.8.1's native `aes256gcm` page
+encryption for the database and WAL. Turso marks encryption experimental and
+not production ready; see its [version-pinned manual](https://github.com/tursodatabase/turso/blob/v0.8.1/docs/manual.md#encryption).
+The database header includes public metadata; encryption does not hide file sizes.
+
+The app confirms the storage wallet, verifies its domain-separated signature,
+and wraps a random database key with signature-derived material. Enrollment
+requires two matching signatures; reopening requires one. Only the wrapped key
+and its public context persist outside the encrypted database. Keep the same
+wallet available to unlock or restore a backup. Manual and inactivity locking
+close storage and reload the page. Closing a storage worker invalidates its
+forks; reopening requires a new key provider call.
+
+Encrypted backup import authenticates an isolated database and checks integrity
+before changing the active directory. Wrong keys, rejected signatures, missing
+key envelopes, and nonempty corrupt databases are refused without replacement.
+A zero-byte file can resume initialization with its existing envelope only when
+there is no nonempty WAL to recover.
 
 Run the dedicated-worker integration tests with Chromium/Chrome and its matching
 ChromeDriver installed, plus `wasm-bindgen-test-runner` matching Cargo.lock:
@@ -139,9 +162,19 @@ Run this command from the repository root. Set
 For a custom browser binary or container flags, set
 `WASM_BINDGEN_TEST_WEBDRIVER_JSON` to a WebDriver capabilities JSON file.
 The tests cover wallet data across reopen, exclusive locks and failed-open
-cleanup, interrupted initialization, committed WAL recovery after worker
+cleanup, wrong-key preservation, committed encrypted WAL recovery after worker
 termination, and production worker persistence/pause/reopen. They have passed in Chromium; Firefox/WebKit,
 quota exhaustion, and physical power-loss behavior are not yet verified.
+
+The packaged SDK and wallet backup flow also have an integration test with
+an ephemeral Stellar signing key (no funds or external RPC required):
+
+```bash
+npm ci --prefix integration-tests-app
+E2E_CHROMIUM_PATH=/path/to/chromium npm run test:storage --prefix integration-tests-app
+```
+
+Build the SDK first and run these commands from the repository root.
 
 ## Build & publish (maintainers)
 

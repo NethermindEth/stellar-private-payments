@@ -1,3 +1,4 @@
+pub mod database_key;
 mod disclaimer;
 pub(crate) mod events_parsers;
 mod processor;
@@ -13,3 +14,8 @@ pub use storage::{
 mod process_local;
 pub(crate) use process_local::process_local_state;
 pub use process_local::process_local_state_batch;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native_wallet;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wallet_vault;

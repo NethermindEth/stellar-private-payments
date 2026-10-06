@@ -5,7 +5,7 @@
 //! building this backend with shared-memory WASM requires a different I/O
 //! design.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -27,15 +27,10 @@ compile_error!("The OPFS backend requires single-threaded WASM workers");
 #[wasm_bindgen(module = "/src/opfs.js")]
 extern "C" {
     #[wasm_bindgen(catch, js_name = openFiles)]
-    async fn open_files(directory: &str) -> std::result::Result<JsValue, JsValue>;
+    async fn open_files(directory: &str, create_new: bool)
+    -> std::result::Result<JsValue, JsValue>;
     #[wasm_bindgen(js_name = closeFiles)]
     fn close_files(files: &JsValue);
-    #[wasm_bindgen(catch, js_name = isInitialized)]
-    fn is_initialized(files: &JsValue) -> std::result::Result<bool, JsValue>;
-    #[wasm_bindgen(catch, js_name = initializeFiles)]
-    fn initialize_files(files: &JsValue) -> std::result::Result<(), JsValue>;
-    #[wasm_bindgen(catch, js_name = markReady)]
-    fn mark_ready(files: &JsValue) -> std::result::Result<(), JsValue>;
     #[wasm_bindgen(catch, js_name = readFile)]
     fn read_file(
         files: &JsValue,
@@ -245,10 +240,22 @@ impl File for OpfsFile {
 
 /// Open a fresh or existing Turso wallet in a dedicated worker.
 /// `directory` is relative to OPFS. Legacy SQLite wallets are not imported.
-pub async fn open_wallet(directory: &str) -> Result<SqliteStorage> {
-    let files = open_files(directory)
-        .await
-        .map_err(|error| anyhow::anyhow!("OPFS open: {}", js_error_name(&error)))?;
+pub async fn open_wallet(
+    directory: &str,
+    key: &stellar_private_payments::state::database_key::DatabaseKey,
+    create_new: bool,
+) -> Result<SqliteStorage> {
+    let files = open_files(directory, create_new).await.map_err(|error| {
+        let message = js_sys::Reflect::get(&error, &JsValue::from_str("message"))
+            .ok()
+            .and_then(|value| value.as_string())
+            .unwrap_or_default();
+        if message == "database create/open purpose does not match existing file" {
+            anyhow::anyhow!("{message}")
+        } else {
+            anyhow::anyhow!("OPFS open: {}", js_error_name(&error))
+        }
+    })?;
     let id = NEXT_SESSION.with(|next| {
         let id = next.get();
         next.set(id.checked_add(1).expect("OPFS session counter exhausted"));
@@ -256,24 +263,14 @@ pub async fn open_wallet(directory: &str) -> Result<SqliteStorage> {
     });
     HANDLES.with(|handles| handles.borrow_mut().insert(id, files));
     let session = Arc::new(Session(id));
-    let initialized = session.with(is_initialized)?;
-    if !initialized {
-        session
-            .with(initialize_files)
-            .context("initialize OPFS database")?;
-    }
     let io = Arc::new(OpfsIo {
         session: session.clone(),
     });
-    let db = turso::Builder::new_local("spp.db")
+    let db = stellar_private_payments::state::database_key::encrypted_builder("spp.db", key)
         .with_io_impl(io)
         .build()
         .await?;
-    let storage = SqliteStorage::connect_with_database(db).await?;
-    if !initialized {
-        session
-            .with(mark_ready)
-            .context("commit OPFS initialization")?;
-    }
-    Ok(storage)
+    SqliteStorage::connect_with_database(db).await.map_err(|_| {
+        anyhow::anyhow!("encrypted database could not be authenticated or initialized")
+    })
 }

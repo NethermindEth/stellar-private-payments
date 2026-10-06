@@ -1,3 +1,4 @@
+import { LocalData } from './ui/local-data.js';
 import { Templates } from './ui/templates.js';
 import { Shell, Wallet } from './ui/navigation.js';
 import { Transactions } from './ui/transactions.js';
@@ -12,6 +13,7 @@ import { rememberedNoteOwner } from './account-session.js';
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
     Shell.init();
+    LocalData.init();
     Wallet.init();
     Transactions.init();
     SigningAccount.init();

@@ -108,19 +108,3 @@ export function rememberedSigners(owner, storage = globalThis.localStorage) {
         return [];
     }
 }
-
-/**
- * Remember the accounts added to sign for `owner`.
- *
- * @param {string | null} owner - The note owner.
- * @param {string[]} signers
- * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
- */
-export function rememberSigners(owner, signers, storage = globalThis.localStorage) {
-    if (!owner) return;
-    try {
-        storage?.setItem(SIGNERS_KEY_PREFIX + owner, JSON.stringify(signers));
-    } catch (e) {
-        console.error('[SigningAccount] rememberSigners failed:', e);
-    }
-}

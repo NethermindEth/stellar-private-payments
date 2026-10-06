@@ -1,3 +1,5 @@
+import { closeAndReload } from './storage-lock.js';
+import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting } from './storage-timeout.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
@@ -22,6 +24,13 @@ import init, {
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
+import { openWalletStorage } from './storage-key.js';
+import { confirmStorageAccount } from './storage-account-dialog.js';
+import { verifyStorageSignature } from './storage-signature.js';
+import { migratePrivateSigners } from './private-signers.js';
+import { STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage, acquireStorageLease } from './storage-backup.js';
+import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
+import { StrKey } from '@stellar/stellar-sdk';
 
 export { DisclosureRequest };
 
@@ -32,6 +41,39 @@ const CIRCUITS_BASE_URL = new URL(
 ).href;
 
 let storageHandle = null;
+let stopAutoLock = null;
+let storageLocking = false;
+export const STORAGE_STATE_EVENT = 'spp:storage-state';
+const LOCKED_SESSION_KEY = 'spp.storageLocked';
+export function storageWasLocked() {
+    return sessionStorage.getItem(LOCKED_SESSION_KEY) === 'true';
+}
+export function isStorageUnlocked() { return !!storageHandle && !storageLocking; }
+function setStorageState(state) {
+    document.body.dataset.storageState = state;
+    window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
+}
+
+/** Close the worker, then reload to discard all decrypted UI and WASM state. */
+export async function lockStorage() {
+    if (storageLocking) return;
+    storageLocking = true;
+    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    stopAutoLock?.();
+    stopAutoLock = null;
+    clearAutoLockSetting();
+    disposeClient();
+    setStorageState('locking');
+    // Cover decrypted content immediately, including dialogs and settings.
+    document.body.inert = true;
+    document.body.style.visibility = 'hidden';
+    const handle = storageHandle;
+    storageHandle = null;
+    appStorageInstance = null;
+    await closeAndReload(handle);
+}
+
+let storageOpening = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
@@ -71,10 +113,6 @@ export async function loadDeploymentConfig() {
 
 export function circuitsBaseUrl() {
     return CIRCUITS_BASE_URL;
-}
-
-function bindAppStorage(sdkStorage) {
-    appStorageInstance = new AppStorage(sdkStorage);
 }
 
 function wrapSdkClient(sdk) {
@@ -171,14 +209,106 @@ export function disposeClient() {
  * Open local persistence (and app storage helpers) without building a Client.
  * @returns {Promise<import('./app-storage.js').AppStorage>}
  */
-export async function ensureStorage() {
+export async function ensureStorage({ unlock = false } = {}) {
+    if (storageWasLocked() && !unlock) throw new Error('Local data is locked. Use Unlock to continue.');
+    if (storageLocking) throw new Error('Storage is locking.');
     await ensureWasmInit();
     if (!storageHandle) {
-        storageHandle = await Storage.open();
-        bindAppStorage(storageHandle);
-        installStoragePauseOnUnload();
+        if (!storageOpening) {
+            setStorageState('unlocking');
+            storageOpening = openWalletStorage({
+                ...walletStorageOptions(),
+                hasExistingStorage: async () => hasEncryptedStorage(await navigator.storage.getDirectory()),
+            }).then(async handle => {
+                const settings = new AppStorage(handle);
+                try {
+                    await loadAutoLockSetting(settings);
+                    await migratePrivateSigners(settings);
+                } catch (error) {
+                    await handle.close().catch(() => {});
+                    clearAutoLockSetting();
+                    throw error;
+                }
+                appStorageInstance = settings;
+                storageHandle = handle;
+                sessionStorage.removeItem(LOCKED_SESSION_KEY);
+                stopAutoLock = startAutoLock(() => void lockStorage());
+                setStorageState('ready');
+                installStoragePauseOnUnload();
+            }).catch(error => {
+                if (error?.code === 'storage-recovery-required') document.body.dataset.storageRecovery = 'required';
+                setStorageState('locked');
+                throw error;
+            }).finally(() => { storageOpening = null; });
+        }
+        await storageOpening;
     }
     return appStorageInstance;
+}
+
+function walletStorageOptions() {
+    return {
+        storage: Storage,
+        confirmAccount: details => confirmStorageAccount({ ...details, watchAccount: startWalletWatcher }),
+        getAddress: getWalletAddress,
+        signMessage: signWalletMessage,
+        verifySignature: (address, message, signature) =>
+            verifyStorageSignature(StrKey.decodeEd25519PublicKey(address), message, signature),
+    };
+}
+
+export async function manageStorageBackup(action, text) {
+    if (storageOpening || storageLocking) throw new Error('Wait for the current storage operation to finish.');
+    if (action === 'export' ? !isStorageUnlocked() : isStorageUnlocked()) {
+        throw new Error(action === 'export' ? 'Unlock local storage to export a backup.' : 'Lock local storage before importing or resetting it.');
+    }
+    const backup = action === 'import' ? parseBackup(text) : null;
+    if (!['export', 'import', 'reset'].includes(action)) throw new Error('Unknown storage action.');
+    storageLocking = true;
+    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    setStorageState('locking');
+    try {
+        await ensureWasmInit();
+        return await navigator.locks.request(STORAGE_RECORD_KEY, { mode: 'exclusive' }, async () => {
+            const root = await navigator.storage.getDirectory();
+            if (action === 'export') {
+                stopAutoLock?.();
+                stopAutoLock = null;
+                clearAutoLockSetting();
+                disposeClient();
+                const handle = storageHandle;
+                storageHandle = null;
+                appStorageInstance = null;
+                await handle.close();
+                const release = await acquireStorageLease(root);
+                try { return await exportStorageBackup({ root }); }
+                finally { await release(); }
+            }
+            const release = await acquireStorageLease(root);
+            if (action === 'reset') {
+                // Release the handles so deletion is possible. The Web Lock
+                // still prevents app tabs from starting an open during reset.
+                await release();
+                return resetStorage({ root });
+            }
+            try { await importStorageBackup({ backup, root, validate: async record => {
+                let value = JSON.stringify(record);
+                const handle = await openWalletStorage({
+                    ...walletStorageOptions(),
+                    // This operation already owns the cross-tab storage lock.
+                    locks: { request: async (_name, _options, callback) => callback() },
+                    records: { getItem: () => value, setItem: (_key, next) => { value = next; } },
+                });
+                try {
+                    const response = await handle.call('CheckIntegrity', 120_000);
+                    if (response !== 'Saved') throw new Error('Backup integrity check failed. Existing data has been preserved.');
+                } finally { await handle.close(); }
+            } }); } finally { await release(); }
+        });
+    } finally {
+        storageLocking = false;
+        setStorageState('locked');
+    }
 }
 
 let pauseOnUnloadInstalled = false;
@@ -297,7 +427,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
 /** SDK deployment client + cached account session. */
 export function client() {
     if (!wrappedClient) {
-        throw new Error('Runtime not initialized. Call initializeRuntime first.');
+        throw new Error(storageWasLocked() ? 'Local data is locked. Use Unlock to continue.' : 'Runtime not initialized. Call initializeRuntime first.');
     }
     return wrappedClient;
 }
@@ -321,5 +451,5 @@ export async function dumpTelemetryLogs() {
 
 /** Whether the WASM build supports debug/trace logging and sensitive reveal. */
 export function debugLogsEnabled() {
-    return sdkDebugLogsEnabled();
+    return wasmReady && sdkDebugLogsEnabled();
 }

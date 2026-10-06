@@ -6,6 +6,7 @@
   "scripts": {
     "demo": "HEADFUL=1 APPROVE=human bash scripts/serve-and-run.sh",
     "ci": "APPROVE=auto bash scripts/serve-and-run.sh",
+    "test:storage": "node scripts/test-storage-backup.mjs",
     "test:unit": "node --test tests/unit/*.test.mjs"
   },
   "devDependencies": {

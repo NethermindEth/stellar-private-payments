@@ -21,6 +21,7 @@ pub struct DefaultsSection {
     /// Stellar CLI network name (default: the deployment's network).
     pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
+    pub storage_account: Option<String>,
     pub circuits_dir: Option<PathBuf>,
     pub stellar_config_dir: Option<PathBuf>,
 }
@@ -47,6 +48,7 @@ fn config_template(debug_build: bool) -> String {
 # deployment = "/path/to/deployments.json"  # omit for embedded testnet
 # network = "testnet"                        # a `stellar network` name
 # data_dir = "{DEFAULT_DATA_DIR_TEMPLATE}"
+# storage_account = "alice"                # identity that unlocks this database
 # circuits_dir = "{circuits_dir}"
 # stellar_config_dir = "~/.config/stellar"   # passed to the `stellar` CLI (--config-dir)
 "#

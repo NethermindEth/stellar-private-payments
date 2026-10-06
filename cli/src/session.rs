@@ -35,8 +35,8 @@ impl ClientSession {
         readonly: bool,
     ) -> Result<Self> {
         let storage_path = config.db_path().to_string_lossy().into_owned();
-        let storage =
-            LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+        let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
+            .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
         let bootnode_setting = futures::executor::block_on(async {
             storage.storage().await.get_bootnode_setting().await
         })
@@ -123,8 +123,8 @@ impl ClientSession {
 /// A disclosure only client.
 pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
     let storage_path = config.db_path().to_string_lossy().into_owned();
-    let storage =
-        LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
+    let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
+        .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
     let prover = ProverHandle::from(disclosure_prover(config)?);
     let bootnode_setting =
         futures::executor::block_on(async { storage.storage().await.get_bootnode_setting().await })

@@ -1,13 +1,33 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, loadDeploymentConfig } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked, loadDeploymentConfig } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
-import { rememberedSigners } from '../signing-account.js';
+import { loadPrivateSigners } from '../private-signers.js';
+import { explorerPreference, saveExplorerPreference } from '../public-settings.js';
+import { lookupPublicIdentity } from '../public-identity.js';
+let publicIdentity = { status: 'not-checked' };
+let publicLookupGeneration = 0;
+async function refreshPublicIdentity() {
+    const generation = ++publicLookupGeneration;
+    const { address, sorobanRpcUrl: rpcUrl } = App.state.wallet;
+    if (!address || !rpcUrl) return;
+    publicIdentity = { status: 'loading' };
+    renderSettingsDrawer();
+    let result;
+    try {
+        const config = await loadDeploymentConfig();
+        result = await lookupPublicIdentity({ address, rpcUrl, registry: config.public_key_registry });
+    } catch { result = { status: 'unavailable' }; }
+    if (generation !== publicLookupGeneration || App.state.wallet.address !== address) return;
+    publicIdentity = result;
+    renderSettingsDrawer();
+}
+
 import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
 
 // Public, well-known Stellar network passphrases, keyed by the network name
@@ -170,7 +190,7 @@ async function loadRuntimeState() {
 
     const storage = client().storage();
     const explorerSetting = await storage.getExplorerSetting();
-    App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
+    App.state.settings.explorerBaseUrl = explorerPreference() || explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
     const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
@@ -214,6 +234,11 @@ function renderSyncStatus() {
         dot.className = 'h-2 w-2 rounded-full bg-slate-500';
         return;
     }
+    if (!isStorageUnlocked()) {
+        text.textContent = 'Locked';
+        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        return;
+    }
     const synced = !!App.state.profile?.registryLookup?.registryFullySynced;
     text.textContent = synced ? 'Synced' : 'Syncing';
     dot.className = synced
@@ -222,9 +247,10 @@ function renderSyncStatus() {
 }
 
 function renderSettingsDrawer() {
-    document.getElementById('settings-note-key').textContent = App.state.keys.notePublicKey || '—';
-    document.getElementById('settings-enc-key').textContent = App.state.keys.encryptionPublicKey || '—';
-    const hasKeys = !!App.state.keys.notePublicKey;
+    const unlocked = isStorageUnlocked();
+    document.getElementById('settings-note-key').textContent = (unlocked ? App.state.keys.notePublicKey : publicIdentity.notePublicKey) || '—';
+    document.getElementById('settings-enc-key').textContent = (unlocked ? App.state.keys.encryptionPublicKey : publicIdentity.encryptionPublicKey) || '—';
+    const hasKeys = unlocked && !!App.state.keys.notePublicKey;
     const aspMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
     const aspValue = document.getElementById('settings-asp-secret');
     const revealBtn = document.getElementById('settings-reveal-secret');
@@ -234,11 +260,12 @@ function renderSettingsDrawer() {
     revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
     revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
     if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
-    document.getElementById('settings-registration-status').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
+    const registered = publicIdentity.status === 'registered' || (unlocked && App.state.profile.registered);
+    document.getElementById('settings-registration-status').textContent = registered ? 'Registered' : ({ 'not-checked': 'Not checked', loading: 'Checking…', 'not-found': 'No active registration found', unavailable: 'Unavailable' }[publicIdentity.status] || 'Not checked');
     const registerBtn = document.getElementById('settings-register-btn');
     if (registerBtn) {
-        registerBtn.disabled = App.state.profile.registered;
-        registerBtn.textContent = App.state.profile.registered ? 'Registered' : 'Register now';
+        registerBtn.disabled = !unlocked || registered;
+        registerBtn.textContent = registered ? 'Registered' : unlocked ? 'Register now' : 'Unlock to register';
     }
     document.getElementById('settings-explorer-input').value = App.state.settings.explorerBaseUrl || Utils.defaultExplorerBaseUrl;
     document.getElementById('settings-bootnode-enabled').checked = !!App.state.settings.bootnode?.enabled;
@@ -259,6 +286,11 @@ function renderSettingsDrawer() {
         revealSensitiveInput.disabled = !debugSupported;
         revealSensitiveInput.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
     }
+    for (const id of ['settings-bootnode-enabled', 'settings-bootnode-url', 'settings-log-level', 'settings-reveal-sensitive']) {
+        const input = document.getElementById(id);
+        if (input && !unlocked) { input.disabled = true; input.title = 'Unlock local data to edit this setting.'; }
+        else if (input) { input.disabled = id === 'settings-reveal-sensitive' && !debugSupported; input.title = input.disabled ? 'Requires a debug build' : ''; }
+    }
     renderOwnerSwitch();
 }
 
@@ -275,6 +307,7 @@ function renderOwnerSwitch() {
 
 export const Shell = {
     init() {
+        App.state.settings.explorerBaseUrl = explorerPreference() || Utils.defaultExplorerBaseUrl;
         document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => setActiveView(btn.dataset.view)));
         document.getElementById('home-link')?.addEventListener('click', () => setActiveView('dashboard'));
         document.querySelectorAll('[data-move-flow]').forEach(btn => btn.addEventListener('click', () => setMoveFlow(btn.dataset.moveFlow)));
@@ -452,6 +485,7 @@ export const Wallet = {
             // flips as soon as Freighter supplies an address, while runtime
             // and pool initialization still make transaction controls unusable.
             document.body.dataset.walletState = 'connecting';
+            delete document.body.dataset.walletError;
             const signer = new FreighterSigner();
 
             try {
@@ -472,15 +506,26 @@ export const Wallet = {
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;
                 App.state.wallet.signingAddress = address;
-                App.state.wallet.signers = rememberedSigners(address);
+                App.state.wallet.signers = [];
                 App.state.wallet.activeAddress = null;
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
+                void refreshPublicIdentity();
+
+                // Restore only the public wallet session after locking. Opening
+                // the database requires the separate, explicit Unlock action.
+                if (storageWasLocked() && !isStorageUnlocked()) {
+                    rememberNoteOwner(address);
+                    document.body.dataset.walletState = 'locked';
+                    this.startWatcher();
+                    return;
+                }
 
                 const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
                 await initializeRuntime(rpcUrl);
+                App.state.wallet.signers = await loadPrivateSigners(client().storage(), address);
                 await client().backgroundSync();
 
                 await runOnboardingWizard({
@@ -506,6 +551,7 @@ export const Wallet = {
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
+                document.body.dataset.walletError = message || 'Failed to connect wallet';
                 // Freighter no longer holds the remembered owner, so it could
                 // not sign as it; let the next connection take another.
                 const ownerNotInWallet = /not the requested|signed with a different account/i.test(message);
@@ -571,6 +617,8 @@ export const Wallet = {
      *   failed connection keeps the remembered one.
      */
     disconnect({ forgetOwner = false } = {}) {
+        ++publicLookupGeneration;
+        publicIdentity = { status: 'not-checked' };
         if (forgetOwner) forgetNoteOwner();
         this._stopWatcher?.();
         this._stopWatcher = null;
@@ -596,6 +644,7 @@ export const Wallet = {
     },
 
     openSettings() {
+        if (['not-checked', 'unavailable'].includes(publicIdentity.status)) void refreshPublicIdentity();
         App.state.ui.settingsOpen = true;
         document.getElementById('settings-drawer')?.classList.remove('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.remove('hidden');
@@ -611,10 +660,14 @@ export const Wallet = {
 
     async saveSettings() {
         try {
-            if (!isRuntimeReady()) {
-                throw new Error('Still connecting. Please wait a moment and try again.');
-            }
             const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
+            saveExplorerPreference(explorerBaseUrl);
+            App.state.settings.explorerBaseUrl = explorerBaseUrl;
+            if (!isStorageUnlocked() || !isRuntimeReady()) {
+                Toast.show('Explorer preference saved', 'success');
+                App.events.dispatchEvent(new CustomEvent('settings:updated'));
+                return;
+            }
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
             const debugSupported = debugLogsEnabled();
@@ -622,7 +675,6 @@ export const Wallet = {
             const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
-            await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
             await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
@@ -667,6 +719,7 @@ export const Wallet = {
             });
             const hash = await client().account().registerPublicKeys();
             App.state.profile.registered = true;
+            void refreshPublicIdentity();
             renderSettingsDrawer();
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {
                 linkUrl: Utils.explorerTxUrl(hash),

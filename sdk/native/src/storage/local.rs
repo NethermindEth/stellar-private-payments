@@ -33,6 +33,7 @@ use crate::{
 pub struct LocalStorage {
     path: PathBuf,
     db: Mutex<SqliteStorage>,
+    database_key: Option<std::sync::Arc<crate::state::database_key::DatabaseKey>>,
 }
 
 impl LocalStorage {
@@ -43,7 +44,36 @@ impl LocalStorage {
         Ok(Self {
             path,
             db: Mutex::new(db),
+            database_key: None,
         })
+    }
+
+    /// Open persistent Turso storage with a key and explicit creation policy.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_encrypted(
+        path: &str,
+        key: crate::state::database_key::DatabaseKey,
+        purpose: crate::state::database_key::OpenPurpose,
+    ) -> Result<Self, Error> {
+        let db =
+            futures::executor::block_on(SqliteStorage::connect_encrypted(path, &key, purpose))?;
+        Ok(Self {
+            path: path.into(),
+            db: Mutex::new(db),
+            database_key: Some(std::sync::Arc::new(key)),
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_with_key(
+        path: &str,
+        key: &crate::state::database_key::DatabaseKey,
+    ) -> Result<Self, Error> {
+        Self::open_encrypted(
+            path,
+            crate::state::database_key::DatabaseKey::new(**key),
+            crate::state::database_key::OpenPurpose::OpenExisting,
+        )
     }
 
     pub async fn storage(&self) -> MutexGuard<'_, SqliteStorage> {
@@ -101,10 +131,17 @@ impl ContractDataStorage for LocalStorage {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<crate::storage::StorageHandle, Error> {
-        let db = futures::executor::block_on(SqliteStorage::connect_file(self.path.as_path()))
-            .context("fork storage")?;
+        let db = futures::executor::block_on(async {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(key) = &self.database_key {
+                return SqliteStorage::reopen_encrypted(&self.path, key).await;
+            }
+            SqliteStorage::connect_file(&self.path).await
+        })
+        .context("fork storage")?;
         let forked = Self {
             path: self.path.clone(),
+            database_key: self.database_key.clone(),
             db: Mutex::new(db),
         };
         Ok(crate::storage::StorageHandle::from(forked))

@@ -35,13 +35,29 @@ function requireField(value, name) {
 }
 
 /**
- * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
+ * Open encrypted worker-backed persistence with a required key provider.
  * then pass the instance (or a fork) to {@link Client.new}.
  */
-async function openStorage(options = {}) {
-  return WasmStorage.open({
-    workerUrl: options.workerUrl ?? storageWorkerUrl,
-  });
+async function openStorage(options) {
+  return openEncryptedStorage(options);
+}
+
+/** Open encrypted storage using a caller-owned key provider. */
+async function openEncryptedStorage(options) {
+  const provider = requireField(options?.keyProvider, 'keyProvider');
+  if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
+  const createNew = options.createNew === true;
+  const supplied = await provider(options.directory ?? 'spp-turso-encrypted-v1', createNew ? 'create' : 'open');
+  if (!ArrayBuffer.isView(supplied) || Object.prototype.toString.call(supplied) !== '[object Uint8Array]' || supplied.byteLength !== 32) {
+    throw new TypeError('keyProvider must return a 32-byte Uint8Array');
+  }
+  // Leave the provider's own buffer intact; clear the copy owned by this call.
+  const transport = new Uint8Array(supplied);
+  try {
+    return await WasmStorage.open({ workerUrl: options.workerUrl ?? storageWorkerUrl, key: transport, createNew, directory: options.directory });
+  } finally {
+    transport.fill(0);
+  }
 }
 
 /**
@@ -132,6 +148,8 @@ async function newClient(options) {
     options.storage ??
     (await openStorage({
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
+      keyProvider: options.keyProvider,
+      createNew: options.createNew,
     }));
 
   let prover = options.prover;
@@ -190,7 +208,7 @@ async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, op
   }
 }
 
-export const Storage = { open: openStorage };
+export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage };
 export const Client = {
   new: newClient,
 };

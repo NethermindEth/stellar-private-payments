@@ -5,7 +5,6 @@ import {
   activeSuggestion,
   addSigner,
   chosenSigner,
-  rememberSigners,
   rememberedSigners,
   removeSigner,
   signingPrivacyWarning,
@@ -76,6 +75,14 @@ test('a signature from another account says the chosen account is not in Freight
   }
 });
 
+test('an unfunded signer is named, not reported as a connection failure', () => {
+  const unfunded = "GABC…WXYZ isn't funded on this network. Fund it or pick another account to sign and pay with.";
+  assert.equal(getTransactionErrorMessage(new Error(unfunded), 'Withdraw'), `Withdraw failed: ${unfunded}`);
+  for (const message of ['network error: connection reset', 'Failed to fetch', 'NetworkError when attempting to fetch resource.']) {
+    assert.match(getTransactionErrorMessage(new Error(message), 'Withdraw'), /^Network error\./);
+  }
+});
+
 function memoryStorage() {
   const items = new Map();
   return {
@@ -84,9 +91,9 @@ function memoryStorage() {
   };
 }
 
-test('accounts added to sign are remembered per owner', () => {
+test('legacy signing lists can be read per owner for encrypted migration', () => {
   const storage = memoryStorage();
-  rememberSigners(OWNER, [SIGNER, STRANGER], storage);
+  storage.setItem(`poolstellar_signers:${OWNER}`, JSON.stringify([SIGNER, STRANGER]));
   assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER, STRANGER]);
   assert.deepEqual(rememberedSigners(SIGNER, storage), []);
   assert.deepEqual(rememberedSigners(null, storage), []);

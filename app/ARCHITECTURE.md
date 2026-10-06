@@ -25,7 +25,7 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.open() → bootnodeRequired() → Client.new() → backgroundSync() → client.account(options, signer) → account.pool() → PrivatePool ops
+init() → wallet signature → Storage.open({ keyProvider, createNew }) → bootnodeRequired() → Client.new() → backgroundSync() → client.account(options, signer) → account.pool() → PrivatePool ops
 ```
 
 The app wraps this in `wasm-facade.js` and `ui/pool.js`: `bootnodeRequired` → `initializeRuntime` → `client().backgroundSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.
@@ -62,7 +62,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Storage` (WASM, wasm-bindgen API)**
 
-- Spawns the storage worker once per page (`Storage.open({ workerUrl? })`).
+- Spawns the storage worker once per page (`Storage.open({ keyProvider, createNew, workerUrl? })`).
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 

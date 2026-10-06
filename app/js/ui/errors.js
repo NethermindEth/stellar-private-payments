@@ -92,10 +92,12 @@ const ERROR_PATTERNS = [
         message: 'Insufficient balance or resources. Ensure you have enough XLM to cover the transaction fee.',
     },
     {
-        // Network/RPC errors
+        // Network/RPC errors. Matching a bare "network" would also swallow our
+        // own messages that name the Stellar network, e.g. an unfunded signer.
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return lower.includes('network') || 
+            return lower.includes('network error') ||
+                   lower.includes('networkerror') ||
                    lower.includes('timeout') ||
                    lower.includes('fetch') ||
                    lower.includes('connection');

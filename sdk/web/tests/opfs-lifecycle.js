@@ -41,15 +41,6 @@ export async function runWorker(directory, write) {
     }
 }
 
-export async function leaveInterruptedInitialization(directory) {
-    const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle(directory, {create: true});
-    const file = await dir.getFileHandle('spp.db', {create: true});
-    const handle = await file.createSyncAccessHandle();
-    try { handle.write(new Uint8Array([1, 2, 3]), {at: 0}); handle.flush(); }
-    finally { handle.close(); }
-}
-
 export function storageWorkerUrl() {
     const moduleUrl = new URL('/wasm-bindgen-test.js', self.location.href).href;
     return URL.createObjectURL(new Blob([
@@ -65,3 +56,24 @@ export async function holdWal(directory) {
     return file.createSyncAccessHandle();
 }
 export function releaseWal(handle) { handle.close(); }
+
+export async function storedBytes(directory) {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(directory);
+    const chunks = [];
+    for (const name of ['spp.db', 'spp.db-wal']) {
+        const file = await dir.getFileHandle(name);
+        chunks.push(new Uint8Array(await (await file.getFile()).arrayBuffer()));
+    }
+    const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    return bytes;
+}
+
+export async function walBytes(directory) {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(directory);
+    const file = await dir.getFileHandle('spp.db-wal');
+    return new Uint8Array(await (await file.getFile()).arrayBuffer());
+}
