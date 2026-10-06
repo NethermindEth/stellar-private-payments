@@ -45,7 +45,7 @@ async fn disclose_basic() -> Result<()> {
         .expect("depositor is already registered with the ASP, disclosure should proceed");
 
     let report = pool
-        .verify_disclosure(&receipt, &receipt.circuit.vk_hash)
+        .verify_disclosure(&receipt, &receipt.circuit.vk_hash, None)
         .await?;
     assert!(report.proof_verified, "the disclosure proof must verify");
     assert!(
@@ -82,6 +82,7 @@ async fn verify_wrong_vk_hash() -> Result<()> {
         .verify_disclosure(
             &receipt,
             "0000000000000000000000000000000000000000000000000000000000000000",
+            None,
         )
         .await;
     assert!(
@@ -108,7 +109,7 @@ async fn verify_tampered_receipt() -> Result<()> {
     receipt.public_inputs.amounts[0] -= Field::ONE;
 
     let report = pool
-        .verify_disclosure(&receipt, &receipt.circuit.vk_hash)
+        .verify_disclosure(&receipt, &receipt.circuit.vk_hash, None)
         .await?;
     assert!(!report.proof_verified, "a tampered receipt must not verify");
 
