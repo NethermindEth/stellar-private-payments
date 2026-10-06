@@ -91,7 +91,7 @@ pub fn withdraw(
     print_tx_results(config, "Withdraw submitted", &results, json)
 }
 
-fn map_pool_err(config: &CliConfig, error: Error, json: bool) -> anyhow::Error {
+pub(super) fn map_pool_err(config: &CliConfig, error: Error, json: bool) -> anyhow::Error {
     if let Error::PlanExecution(plan) = &error {
         if !plan.completed.is_empty() {
             if json {
@@ -107,7 +107,7 @@ fn map_pool_err(config: &CliConfig, error: Error, json: bool) -> anyhow::Error {
     }
 }
 
-fn print_tx_results(
+pub(super) fn print_tx_results(
     config: &CliConfig,
     title: &str,
     results: &[TransactionResult],

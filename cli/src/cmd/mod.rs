@@ -8,4 +8,5 @@ pub mod notes;
 pub mod overview;
 pub mod pool;
 pub mod register;
+pub mod transact;
 pub mod version;

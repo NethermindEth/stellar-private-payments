@@ -183,6 +183,8 @@ enum Commands {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Compose one explicit 2-input / 2-output pool transaction
+    Transact(cmd::transact::TransactArgs),
     /// Generate or verify selective-disclosure receipts
     Disclosure {
         #[command(subcommand)]
@@ -345,6 +347,7 @@ fn main() -> Result<()> {
         Commands::Withdraw { pool, amount, to } => {
             cmd::pool::withdraw(&config, &pool, &amount, to.as_deref(), json)
         }
+        Commands::Transact(args) => cmd::transact::run(&config, args, json),
         Commands::Disclosure {
             command: disclosure,
         } => match disclosure {
