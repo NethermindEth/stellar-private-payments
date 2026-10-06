@@ -5,6 +5,6 @@ include "./policyTransactionBoth.circom";
 // PolicyTransactionBoth(
 //   nIns, nOuts,
 //   nMembershipProofs, nNonMembershipProofs,
-//   levels, smtLevels
+//   levels, aspLevels, smtLevels
 // )
-component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = PolicyTransactionBoth(2, 2, 1, 1, 20, 10, 10);
+component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = PolicyTransactionBoth(2, 2, 1, 1, 20, 10, 32);

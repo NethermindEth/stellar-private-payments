@@ -44,7 +44,7 @@ parser = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 regex = "1"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
-wast = "248.0.0"
+wast = "259.0.0"
 
 # optional
 circom-witness-rs = { workspace = true, optional = true, features = ["build-witness"] }

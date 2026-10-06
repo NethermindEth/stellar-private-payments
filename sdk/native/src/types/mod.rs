@@ -25,7 +25,9 @@ pub use policy_tx::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const SMT_DEPTH: u32 = 10;
+/// Sibling count of the ASP non-membership circuit. The last sibling must be
+/// zero, so paths of at most `SMT_DEPTH - 1` levels are provable.
+pub const SMT_DEPTH: u32 = 32;
 
 // deployments/<network>/deployments.json
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -224,10 +224,16 @@ impl Client {
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
         let fetcher = self.state_fetcher()?;
-        let report =
-            verify_disclosure_receipt(&fetcher, self.inner.prover(), &receipt, &expected_vk_hash)
-                .await
-                .map_err(pool_err)?;
+        let report = verify_disclosure_receipt(
+            &fetcher,
+            self.inner.prover(),
+            &receipt,
+            &expected_vk_hash,
+            None,
+            None,
+        )
+        .await
+        .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     }
 }
@@ -278,10 +284,16 @@ pub async fn verify_selective_disclosure_standalone(
         let fetcher =
             StateFetcher::new(rpc, contract_config).map_err(|e| JsError::new(&e.to_string()))?;
 
-        let report =
-            verify_disclosure_receipt(&fetcher, &prover.inner(), &receipt, &expected_vk_hash)
-                .await
-                .map_err(pool_err)?;
+        let report = verify_disclosure_receipt(
+            &fetcher,
+            &prover.inner(),
+            &receipt,
+            &expected_vk_hash,
+            None,
+            None,
+        )
+        .await
+        .map_err(pool_err)?;
         Ok(DisclosureVerificationReport::from(report))
     })
     .await

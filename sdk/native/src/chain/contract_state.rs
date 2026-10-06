@@ -398,8 +398,8 @@ impl StateFetcher {
     /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof
     ///   padded to `smt_depth`
     /// - otherwise calls `asp_non_membership.find_key(key)`, pads shorter
-    ///   sibling paths to `smt_depth`, and rejects paths deeper than the
-    ///   configured policy SMT depth
+    ///   sibling paths to `smt_depth`, and rejects paths of `smt_depth` or more
+    ///   siblings, which the circuit cannot prove
     pub async fn get_nonmembership_proof(
         &self,
         note_pubkey: &NotePublicKey,
@@ -450,12 +450,14 @@ impl StateFetcher {
             ));
         }
 
+        // The circuit requires the last sibling slot to be zero.
         let mut siblings = parsed.siblings;
-        if siblings.len() > smt_depth {
+        if siblings.len() >= smt_depth {
             return Err(anyhow!(
-                "ASP non-membership proof has {} sibling(s), but the configured policy SMT depth is {}",
+                "ASP non-membership proof has {} sibling(s), but the policy SMT depth {} proves at most {}",
                 siblings.len(),
-                smt_depth
+                smt_depth,
+                smt_depth.saturating_sub(1)
             ));
         }
 
@@ -760,9 +762,24 @@ mod tests {
                 .expect_err("over-depth parsed FindResult must be rejected");
 
         assert!(
-            err.to_string().contains("ASP non-membership proof has 3 sibling(s), but the configured policy SMT depth is 2"),
+            err.to_string().contains(
+                "ASP non-membership proof has 3 sibling(s), but the policy SMT depth 2 proves at most 1"
+            ),
             "{err:#}"
         );
+    }
+
+    #[test]
+    fn non_membership_proof_requires_empty_last_sibling_slot() {
+        let full = find_result_scval(false, vec![field(1), field(2), field(3)]);
+        StateFetcher::nonmembership_proof_from_find_result(&full, field(9), field(10), 3)
+            .expect_err("a path filling every sibling slot must be rejected");
+
+        let deepest = find_result_scval(false, vec![field(1), field(2)]);
+        let proof =
+            StateFetcher::nonmembership_proof_from_find_result(&deepest, field(9), field(10), 3)
+                .expect("a path one level short of the depth must be accepted");
+        assert_eq!(proof.siblings, vec![field(1), field(2), Field::ZERO]);
     }
 
     fn baby_jub_jub_point_scval(x: Field, y: Field) -> xdr::ScVal {

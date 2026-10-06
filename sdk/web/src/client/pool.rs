@@ -179,7 +179,7 @@ impl PrivatePool {
         with_correlation_id(new_correlation_id(), async {
             let report = self
                 .inner()
-                .verify_disclosure(receipt.native(), expected_vk_hash)
+                .verify_disclosure(receipt.native(), expected_vk_hash, None)
                 .await
                 .map_err(pool_err)?;
             Ok(DisclosureVerificationReport::from(report))
