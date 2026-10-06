@@ -60,6 +60,9 @@ pub enum Error {
     )]
     PrivacyKeysNotFound { user_address: String },
 
+    #[error("disclosure verification failed: {0}")]
+    DisclosureVerification(String),
+
     #[error("event history is unavailable: {0}")]
     RetentionGap(#[from] RetentionGap),
 
