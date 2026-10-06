@@ -49,8 +49,10 @@ use x25519_dalek::{PublicKey, StaticSecret};
 // These MUST remain constant for backwards compatibility.
 
 /// Message signed to derive both privacy keypairs.
+///
+/// `kdf_domain` is trimmed, so stray whitespace does not derive other keys.
 pub fn key_derivation_message(kdf_domain: &str) -> String {
-    format!("Privacy Pool Key Derivation [v2] ({kdf_domain})")
+    format!("Privacy Pool Key Derivation [v2] ({})", kdf_domain.trim())
 }
 
 /// Prefix a SEP-53 wallet puts in front of a message before hashing it.
@@ -481,6 +483,14 @@ mod owner_signature_tests {
         assert_eq!(
             key_derivation_message("tests"),
             "Privacy Pool Key Derivation [v2] (tests)"
+        );
+    }
+
+    #[test]
+    fn key_derivation_message_trims_domain() {
+        assert_eq!(
+            key_derivation_message(" tests\n"),
+            key_derivation_message("tests")
         );
     }
 

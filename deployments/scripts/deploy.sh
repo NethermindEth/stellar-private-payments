@@ -312,6 +312,13 @@ strip_surrounding_quotes() {
   printf '%s' "$s"
 }
 
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 VERIFIER_KEY_LIST=()
 VERIFIER_ID_LIST=()
 
@@ -371,7 +378,7 @@ while [[ $# -gt 0 ]]; do
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
     --max-deposit) MAX_DEPOSIT="$2"; shift 2 ;;
-    --kdf-domain) KDF_DOMAIN="$2"; shift 2 ;;
+    --kdf-domain) KDF_DOMAIN="$(trim "$2")"; shift 2 ;;
     --policy-flags) POLICY_FLAGS_SUFFIX="$(parse_policy_flags_spec "$2")"; POLICY_FLAGS_EXPLICIT=true; shift 2 ;;
     --gvk-authority-pubkey) GVK_AUTHORITY_PUB_KEY_JSON="$2"; shift 2 ;;
     --gvk-authority-pubkey-file) GVK_AUTHORITY_PUB_KEY_FILE="$2"; shift 2 ;;
