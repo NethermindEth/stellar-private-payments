@@ -143,6 +143,47 @@ pub(crate) fn map_build_disclosure_inputs(
     }
 }
 
+fn validate_receipt_context(
+    receipt: &DisclosureReceipt,
+    expected_network: &str,
+    expected_pool: Option<&str>,
+    expected_authority: Option<&str>,
+) -> Result<(), Error> {
+    if receipt.context.network.trim() != expected_network.trim() {
+        return Err(Error::DisclosureVerification(format!(
+            "network mismatch: expected {}, got {}",
+            expected_network.trim(),
+            receipt.context.network.trim(),
+        )));
+    }
+
+    if let Some(expected_pool) = expected_pool
+        && receipt.context.pool_address.trim() != expected_pool.trim()
+    {
+        return Err(Error::DisclosureVerification(format!(
+            "pool mismatch: expected {}, got {}",
+            expected_pool.trim(),
+            receipt.context.pool_address.trim(),
+        )));
+    }
+
+    if let Some(expected_authority) = expected_authority
+        && !receipt
+            .context
+            .authority_identity_payload_hex
+            .trim()
+            .eq_ignore_ascii_case(expected_authority.trim())
+    {
+        return Err(Error::DisclosureVerification(format!(
+            "authority mismatch: expected {}, got {}",
+            expected_authority.trim(),
+            receipt.context.authority_identity_payload_hex.trim(),
+        )));
+    }
+
+    Ok(())
+}
+
 /// Verify a selective-disclosure receipt: Groth16 proof, context hash, root
 /// freshness, and spent-nullifier status.
 pub async fn verify_disclosure_receipt(
@@ -150,12 +191,22 @@ pub async fn verify_disclosure_receipt(
     prover: &ProverHandle,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
+    expected_pool: Option<&str>,
+    expected_authority: Option<&str>,
 ) -> Result<DisclosureVerificationReport, Error> {
+    validate_receipt_context(
+        receipt,
+        &fetcher.contract_config().network,
+        expected_pool,
+        expected_authority,
+    )?;
+
+    let context_verified = crate::zk::disclosure::verify_receipt_context(receipt)
+        .context("context verification failed")?;
+
     let proof_verified = prover
         .verify_disclosure_proof(receipt, expected_vk_hash)
         .await?;
-    let context_verified = crate::zk::disclosure::verify_receipt_context(receipt)
-        .context("context verification failed")?;
 
     let pool_contract_id = receipt.context.pool_address.clone();
     let mut known_root_status = true;
@@ -191,4 +242,116 @@ pub async fn verify_disclosure_receipt(
         nullifiers_unspent,
         spent_nullifier_indices,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        DisclosureCircuitMetadata, DisclosureContext, DisclosurePublicInputs, Field,
+    };
+
+    fn test_receipt() -> DisclosureReceipt {
+        DisclosureReceipt {
+            version: 1,
+            circuit: DisclosureCircuitMetadata {
+                name: "selectiveDisclosure_1".to_string(),
+                levels: 20,
+                n_notes: 1,
+                vk_hash: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            },
+            context: DisclosureContext {
+                network: "testnet".to_string(),
+                pool_address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .to_string(),
+                authority_label: "Authority XYZ".to_string(),
+                authority_identity_payload_hex: "0x617574686f72697479".to_string(),
+                purpose: "kyc-review".to_string(),
+                context_nonce: Field::ZERO,
+            },
+            public_inputs: DisclosurePublicInputs {
+                roots: vec![],
+                note_commitments: vec![],
+                ext_context_hash: Field::ZERO,
+                nullifiers: vec![],
+                amounts: vec![],
+            },
+            proof_compressed_hex: "0x".to_string(),
+            issued_at: "2026-10-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn validate_receipt_context_pool_match() {
+        let receipt = test_receipt();
+        assert!(
+            validate_receipt_context(
+                &receipt,
+                "testnet",
+                Some("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+                None,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_receipt_context_pool_mismatch() {
+        let receipt = test_receipt();
+        let result = validate_receipt_context(
+            &receipt,
+            "testnet",
+            Some("CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"),
+            None,
+        );
+        assert!(
+            matches!(result, Err(Error::DisclosureVerification(msg)) if msg.contains("pool mismatch"))
+        );
+    }
+
+    #[test]
+    fn validate_receipt_context_pool_none() {
+        let receipt = test_receipt();
+        assert!(validate_receipt_context(&receipt, "testnet", None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_receipt_context_network_match() {
+        let receipt = test_receipt();
+        assert!(validate_receipt_context(&receipt, "testnet", None, None).is_ok());
+    }
+
+    #[test]
+    fn validate_receipt_context_network_mismatch() {
+        let receipt = test_receipt();
+        let result = validate_receipt_context(&receipt, "mainnet", None, None);
+        assert!(
+            matches!(result, Err(Error::DisclosureVerification(msg)) if msg.contains("network mismatch"))
+        );
+    }
+
+    #[test]
+    fn validate_receipt_context_authority_match() {
+        let receipt = test_receipt();
+        assert!(
+            validate_receipt_context(&receipt, "testnet", None, Some("0x617574686f72697479"),)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_receipt_context_authority_mismatch() {
+        let receipt = test_receipt();
+        let result = validate_receipt_context(&receipt, "testnet", None, Some("0xdeadbeef"));
+        assert!(
+            matches!(result, Err(Error::DisclosureVerification(msg)) if msg.contains("authority mismatch"))
+        );
+    }
+
+    #[test]
+    fn validate_receipt_context_authority_none() {
+        let receipt = test_receipt();
+        assert!(validate_receipt_context(&receipt, "testnet", None, None).is_ok());
+    }
 }
