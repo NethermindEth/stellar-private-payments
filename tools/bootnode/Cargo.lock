@@ -891,6 +891,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "stellar-private-payments",
+ "stellar-xdr",
  "tokio",
  "tokio-postgres",
  "tower",

@@ -379,13 +379,47 @@ mod network_validation_tests {
     #[test]
     fn same_binary_loads_two_networks_and_rejects_mismatches() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deployments");
+        // Keep alternate deployment data local to this test, not in
+        // deployments/.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let local =
+            std::env::temp_dir().join(format!("spp-network-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&local).expect("temporary deployment");
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(local.clone());
+        let mut deployment: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("testnet/deployments.json"))
+                .expect("testnet config"),
+        )
+        .expect("JSON");
+        deployment["network"] = "local".into();
+        deployment["networkPassphrase"] = "Standalone Network ; February 2017".into();
+        deployment["rpcUrl"] = "http://localhost:8000/rpc".into();
+        std::fs::write(
+            local.join("deployments.json"),
+            serde_json::to_vec(&deployment).expect("JSON"),
+        )
+        .expect("write deployment");
+        std::fs::copy(
+            root.join("testnet/circuits.json"),
+            local.join("circuits.json"),
+        )
+        .expect("copy lock");
         let mut identities = Vec::new();
-        for name in ["testnet", "ci-test-network"] {
+        for (name, path) in [("testnet", root.join("testnet")), ("local", local)] {
             let config = CliConfig::load(
                 None,
                 None,
                 CliConfigOverrides {
-                    deployment_path: Some(root.join(name)),
+                    deployment_path: Some(path),
                     ..Default::default()
                 },
             )

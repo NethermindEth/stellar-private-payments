@@ -41,8 +41,5 @@
     }
   ],
   "networkPassphrase": "Test SDF Network ; September 2015",
-  "rpcUrl": "https://soroban-testnet.stellar.org",
-  "explorerUrl": "https://stellar.expert/explorer/testnet",
-  "displayName": "Testnet",
-  "isTestnet": true
+  "rpcUrl": "https://soroban-testnet.stellar.org"
 }

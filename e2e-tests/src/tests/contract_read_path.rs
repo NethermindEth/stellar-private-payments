@@ -147,9 +147,6 @@ fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolConfig
     let config = ContractConfig {
         network_passphrase: None,
         rpc_url: None,
-        explorer_url: None,
-        display_name: None,
-        is_testnet: None,
         network: uri.to_string(),
         deployer: strkey(&deployment.admin),
         admin: strkey(&deployment.admin),

@@ -138,7 +138,8 @@ accept deployment configuration and circuit fingerprints at runtime.
 
 For the website, `SPP_NETWORK=testnet trunk build --release` selects the deployment
 to bundle. Downstream deployers supply their configuration, contracts, and matching
-circuit artifacts. `ci-test-network` is synthetic test data, not a live deployment.
+circuit artifacts. CI generates a temporary local-network configuration to test
+build selection without deploying contracts or starting localnet.
 
 The deployment configuration records the network's public identity string
 (`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks

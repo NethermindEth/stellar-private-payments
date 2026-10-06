@@ -20,9 +20,13 @@ pub fn base_url(
     deployment: &stellar_private_payments::types::ContractConfig,
 ) -> Result<String> {
     let setting: Option<ExplorerSetting> = storage.get_setting_json(APP_SETTING_EXPLORER)?;
-    Ok(setting
-        .map(|s| s.base_url)
-        .unwrap_or_else(|| deployment.explorer_url.clone().unwrap_or_default()))
+    Ok(setting.map(|s| s.base_url).unwrap_or_else(|| {
+        stellar_private_payments::network_defaults::for_passphrase(
+            deployment.network_passphrase.as_deref().unwrap_or_default(),
+        )
+        .map(|defaults| defaults.explorer_url.clone())
+        .unwrap_or_default()
+    }))
 }
 
 pub fn set_base_url(storage: &mut SqliteStorage, base_url: &str) -> Result<()> {
@@ -61,5 +65,33 @@ impl Explorer {
 
     pub fn ledger(&self, ledger: u32) -> String {
         format!("{}/ledger/{ledger}", self.base)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stellar_private_payments::types::ContractConfig;
+
+    #[test]
+    fn explorer_defaults_follow_identity_and_preserve_user_overrides() {
+        let mut deployment: ContractConfig =
+            serde_json::from_str(include_str!("../../deployments/testnet/deployments.json"))
+                .expect("deployment");
+        let mut storage = SqliteStorage::connect_in_memory().expect("storage");
+        assert_eq!(
+            base_url(&storage, &deployment).expect("default"),
+            "https://stellar.expert/explorer/testnet"
+        );
+        deployment.network_passphrase = Some("custom network".into());
+        assert_eq!(base_url(&storage, &deployment).expect("no default"), "");
+        set_base_url(&mut storage, "https://explorer.example").expect("save override");
+        assert_eq!(
+            base_url(&storage, &deployment).expect("override"),
+            "https://explorer.example"
+        );
+        set_base_url(&mut storage, "").expect("disable explorer");
+        deployment.network_passphrase = Some("Test SDF Network ; September 2015".into());
+        assert_eq!(base_url(&storage, &deployment).expect("disabled"), "");
     }
 }

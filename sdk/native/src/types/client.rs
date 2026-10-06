@@ -124,9 +124,6 @@ mod split_tests {
             contract_config: ContractConfig {
                 network_passphrase: None,
                 rpc_url: None,
-                explorer_url: None,
-                display_name: None,
-                is_testnet: None,
 
                 network: String::new(),
                 deployer: String::new(),

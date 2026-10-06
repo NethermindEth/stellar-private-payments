@@ -56,9 +56,11 @@ pub struct OnboardArgs {
 pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
     stellar_cli::ensure_installed()?;
     let mut storage = config.open_storage()?;
-    if config.deployment.is_testnet == Some(true)
-        && !storage.get_disclaimer_state(&account.address)?.accepted
-    {
+    ensure_account_ready(&mut storage, account)
+}
+
+fn ensure_account_ready(storage: &mut SqliteStorage, account: &Account) -> Result<()> {
+    if !storage.get_disclaimer_state(&account.address)?.accepted {
         bail!(
             "You must accept the disclaimer first. Run: spp onboard --account {}",
             account.alias
@@ -89,24 +91,20 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     let mut storage = config.open_storage()?;
 
     // 3. Consent.
-    if config.deployment.is_testnet == Some(true) {
-        let state = storage.get_disclaimer_state(&account.address)?;
-        if state.accepted {
-            say(interactive, "Disclaimer already accepted.");
-        } else {
-            if interactive {
-                println!("{}\n", state.disclaimer_text_md);
-            }
-            let accepted = args.accept
-                || (interactive && prompt_yes_no("Do you accept the disclaimer above?", false)?);
-            if !accepted {
-                bail!(
-                    "Disclaimer not accepted; aborting. Pass --accept to accept non-interactively."
-                );
-            }
-            storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)?;
-            say(interactive, "Disclaimer accepted.");
+    let state = storage.get_disclaimer_state(&account.address)?;
+    if state.accepted {
+        say(interactive, "Disclaimer already accepted.");
+    } else {
+        if interactive {
+            println!("{}\n", state.disclaimer_text_md);
         }
+        let accepted = args.accept
+            || (interactive && prompt_yes_no("Do you accept the disclaimer above?", false)?);
+        if !accepted {
+            bail!("Disclaimer not accepted; aborting. Pass --accept to accept non-interactively.");
+        }
+        storage.accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)?;
+        say(interactive, "Disclaimer accepted.");
     }
 
     // 4. Derive privacy keys.
@@ -299,7 +297,34 @@ mod tests {
         zk::encryption::{KEY_DERIVATION_MESSAGE, sep53_payload},
     };
 
-    use super::save_owner_keys;
+    use super::{ensure_account_ready, save_owner_keys};
+    use crate::account::Account;
+
+    #[test]
+    fn existing_keys_do_not_bypass_consent() {
+        let owner = LocalSigner::from_seed([1; 32]);
+        let account = Account {
+            alias: "owner".into(),
+            address: owner.public_key().to_string(),
+        };
+        let mut storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
+        save_owner_keys(
+            &mut storage,
+            &account.address,
+            "custom-network",
+            derivation_signature(&owner),
+        )
+        .expect("store keys");
+        let error = ensure_account_ready(&mut storage, &account).expect_err("consent required");
+        assert!(error.to_string().contains("accept the disclaimer"));
+        let state = storage
+            .get_disclaimer_state(&account.address)
+            .expect("disclaimer");
+        storage
+            .accept_current_disclaimer(&account.address, &state.disclaimer_hash_hex)
+            .expect("accept");
+        ensure_account_ready(&mut storage, &account).expect("ready after consent");
+    }
 
     /// What `stellar message sign` returns for `signer`.
     fn derivation_signature(signer: &LocalSigner) -> KeyDerivationSignature {

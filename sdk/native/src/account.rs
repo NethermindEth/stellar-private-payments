@@ -405,9 +405,6 @@ mod derive_privacy_keys_tests {
             ContractConfig {
                 network_passphrase: None,
                 rpc_url: None,
-                explorer_url: None,
-                display_name: None,
-                is_testnet: None,
 
                 network: PASSPHRASE.to_string(),
                 deployer: String::new(),

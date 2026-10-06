@@ -7,9 +7,12 @@
 // just to assert the connected end state is what it actually looks like in
 // the app, proving the whole launch -> unlock -> connect pipeline works.
 
+import { readFile } from 'node:fs/promises';
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
 import { gotoDashboard } from '../src/navigation.mjs';
+
+const knownNetworks = JSON.parse(await readFile(new URL('../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8'));
 
 const log = createLogger('01-connect');
 
@@ -33,8 +36,8 @@ export async function run({ page }) {
   const addressVisible = /^G[A-Z2-7]{7}\.{3}[A-Z2-7]{6}$/.test(walletTextContent);
   assert(addressVisible, `no truncated account address (e.g. "GCDVNXYD...6SE75S") is visible; got "${walletTextContent}"`);
 
-  // The badge uses the deployment's display name (or network folder name),
-  // independently of Freighter's canonical network name.
+  // The badge derives a known network's label from its passphrase,
+  // falling back to the deployment folder name for custom networks.
   const deployment = await page.evaluate(async () => {
     const response = await fetch(new URL('./deployments.json', document.baseURI));
     if (!response.ok) {
@@ -42,7 +45,8 @@ export async function run({ page }) {
     }
     return response.json();
   });
-  const configuredName = deployment.displayName || deployment.network;
+  const configuredName = (Object.hasOwn(knownNetworks, deployment.networkPassphrase)
+    ? knownNetworks[deployment.networkPassphrase].displayName : deployment.network);
   assert(typeof configuredName === 'string' && configuredName.trim(),
     'deployment config has no network label');
   const expectedNetworkName = configuredName.toUpperCase().trim();

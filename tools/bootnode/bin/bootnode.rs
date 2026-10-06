@@ -156,14 +156,18 @@ impl Cli {
         Ok(())
     }
 
-    fn into_config(self, upstream_rpc_url: Url) -> Config {
-        let tls = match (self.insecure_http, self.domain, self.acme_email) {
+    fn config(&self, upstream_rpc_url: Url) -> Config {
+        let tls = match (
+            self.insecure_http,
+            self.domain.clone(),
+            self.acme_email.clone(),
+        ) {
             (true, ..) => None,
             (false, Some(domain), Some(acme_email)) => Some(TlsConfig {
                 domain,
                 acme_email,
-                acme_cache_dir: self.acme_cache_dir,
-                acme_directory_url: self.acme_directory_url,
+                acme_cache_dir: self.acme_cache_dir.clone(),
+                acme_directory_url: self.acme_directory_url.clone(),
             }),
             (false, ..) => {
                 unreachable!(
@@ -174,8 +178,8 @@ impl Cli {
 
         let otel = if self.otel_enabled {
             Some(OtelConfig {
-                otlp_endpoint: self.otel_otlp_endpoint,
-                service_name: self.otel_service_name,
+                otlp_endpoint: self.otel_otlp_endpoint.clone(),
+                service_name: self.otel_service_name.clone(),
                 sample_ratio: self.otel_sample_ratio,
             })
         } else {
@@ -224,13 +228,19 @@ async fn main() -> Result<()> {
         Some(url) => url,
         None => bootnode::default_upstream_rpc_url(&deployment)?,
     };
-    bootnode::validate_upstream_network(upstream_rpc_url.clone(), &deployment).await?;
+    let cfg = cli.config(upstream_rpc_url.clone());
+    let _otel = otel::init_telemetry(&cfg)?;
+    tokio::select! {
+        result = bootnode::wait_for_upstream_network(upstream_rpc_url, &deployment) => result?,
+        result = tokio::signal::ctrl_c() => {
+            result?;
+            tracing::info!("received ctrl-c while waiting for upstream, shutting down");
+            return Ok(());
+        }
+    }
     let storage = cli
         .open_storage(current_deployment_storage_id(&deployment)?)
         .await?;
-    let cfg = cli.into_config(upstream_rpc_url);
-
-    let _otel = otel::init_telemetry(&cfg)?;
     metrics::init_metrics()?;
     let prom_handle = metrics::install_prometheus_recorder()?;
 

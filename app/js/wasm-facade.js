@@ -21,7 +21,7 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
-import { deploymentDefaults } from './network-config.js';
+import { deploymentDefaults, networkPresentation } from './network-config.js';
 import { AppStorage } from './app-storage.js';
 // Trunk bundles the selected deployment's trusted fingerprints into the app.
 import circuitLock from 'app-circuit-lock';
@@ -63,7 +63,11 @@ export async function loadDeploymentConfig() {
                     );
                 }
                 const config = await res.json();
-                Object.assign(deploymentDefaults, config);
+                Object.assign(deploymentDefaults, {
+                    network: config.network,
+                    rpcUrl: config.rpcUrl,
+                    ...networkPresentation(config),
+                });
                 return config;
             })
             .catch((err) => {

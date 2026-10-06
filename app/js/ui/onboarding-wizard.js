@@ -290,7 +290,7 @@ export async function runOnboardingWizard({
         bootnodeRequired && !(bootnodeSetting?.enabled && bootnodeSetting?.url);
 
     const steps = [
-        ...(deploymentDefaults.isTestnet && !disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeUnresolved ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),

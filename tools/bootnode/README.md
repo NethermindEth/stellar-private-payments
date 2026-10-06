@@ -68,3 +68,12 @@ Keep the file outside home directories because the unit uses `ProtectHome=true`.
 
 The deployment file supplies the default RPC URL. Set
 `BOOTNODE_UPSTREAM_RPC_URL` only to override it with an RPC for the same network.
+
+### Upstream unavailable during startup
+
+Before opening the database or serving requests, the bootnode checks the upstream
+network passphrase against its deployment. Failed requests retry automatically,
+with a delay increasing from one second to a maximum of 30 seconds. Each request
+has a 30-second timeout. Startup continues when the RPC recovers; a confirmed
+passphrase mismatch stops startup immediately. Retry failures are logged, and
+Ctrl-C cancels the wait. Cached history is not served during this initial check.

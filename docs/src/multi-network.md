@@ -46,7 +46,11 @@ The bootnode requires `--deployment` or `BOOTNODE_DEPLOYMENT`. Both accept a
 directory containing `deployments.json` or a JSON file, just like the CLI.
 It reads the default RPC from that file; an explicit RPC
 override must still report the same network passphrase. It validates the upstream
-before opening its database. It does not need proving artifacts.
+before opening its database. If the RPC is unavailable, startup retries with
+exponential backoff from one second up to 30 seconds between attempts. A confirmed
+passphrase mismatch still stops startup immediately. The HTTP service starts only
+after validation succeeds, so cached history is not served during this initial
+wait. It does not need proving artifacts.
 
 ```sh
 cargo build --release --manifest-path tools/bootnode/Cargo.toml
@@ -97,16 +101,22 @@ to the network-independent SDK at runtime. Opening a client does not fetch a
 lock from the artifact server. Artifact hashes are pinned to that app build;
 this still requires trusting the app itself and its delivery. This remains one
 deployment per hosted build, without a live switcher.
-`ci-test-network` is synthetic test data, not a live deployment.
+
+CI builds the SDK and full testnet app once, then runs the shared deployment
+staging and JS bundling script against a temporary `local` configuration using
+the standalone network passphrase and testnet circuit artifacts. This checks deployment selection
+without starting a network or deploying contracts; no synthetic deployment is
+committed. Runtime integration tests continue to use the existing localnet setup.
 
 Deployment JSON requires `networkPassphrase` and `rpcUrl` for new deployments.
-Optional presentation fields are `displayName`, `explorerUrl`, and `isTestnet`.
+Network labels and explorer defaults come from a shared mapping keyed by
+passphrase, not deployment JSON. Unknown networks use their folder name as a
+label and have no default explorer; users can configure an explorer separately.
+Disclaimer acceptance is required on every network.
 Old files still deserialize, but network validation rejects missing passphrases.
 The website compares Freighter's passphrase with the configuration; wallet RPC
 overrides remain supported.
 
-`deploy.sh` resolves identity and RPC with `stellar network ls --long`. Override
-presentation using `SPP_DISPLAY_NAME`, `SPP_EXPLORER_URL`, and
-`SPP_IS_TESTNET=true|false`. Downstream operators provide contract deployments
-and matching circuit artifacts. Mainnet deployments and ceremonies remain out
+`deploy.sh` resolves identity and RPC with `stellar network ls --long`. Downstream
+operators provide contract deployments and matching circuit artifacts. Mainnet deployments and ceremonies remain out
 of scope.

@@ -86,7 +86,12 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     .replace("'stellar-private-payments/freighter'", JSON.stringify(url('export class FreighterSigner {}')))
     .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)));
   for (const name of ['network-config', 'app-storage']) {
-    facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8'))));
+    let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
+    if (name === 'network-config') {
+      const defaults = await readFile(new URL('../../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8');
+      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json';", `const knownNetworks = ${defaults};`);
+    }
+    facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(moduleSource)));
   }
   const previous = { fetch: globalThis.fetch, window: globalThis.window, document: globalThis.document };
   const requests = [];

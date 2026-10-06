@@ -42,6 +42,40 @@ pub async fn validate_upstream_network(url: url::Url, deployment: &ContractConfi
     deployment.validate_network(&passphrase)
 }
 
+/// Wait for upstream identity to become available before accessing storage.
+/// Request failures retry indefinitely; a confirmed mismatch fails immediately.
+pub async fn wait_for_upstream_network(url: url::Url, deployment: &ContractConfig) -> Result<()> {
+    wait_for_upstream_network_with_backoff(
+        url,
+        deployment,
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+}
+
+async fn wait_for_upstream_network_with_backoff(
+    url: url::Url,
+    deployment: &ContractConfig,
+    mut delay: std::time::Duration,
+    max_delay: std::time::Duration,
+) -> Result<()> {
+    // Invalid local configuration cannot be repaired by retrying the RPC.
+    deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
+    let upstream = UpstreamClient::new(url)?;
+    loop {
+        match upstream.network_passphrase().await {
+            Ok(passphrase) => return deployment.validate_network(&passphrase),
+            Err(error) => {
+                tracing::warn!(error = %error, retry_in_seconds = delay.as_secs_f64(),
+                    "upstream network check unavailable; waiting before startup");
+                tokio::time::sleep(delay).await;
+                delay = delay.saturating_mul(2).min(max_delay);
+            }
+        }
+    }
+}
+
 /// Contract set + genesis ledger the bootnode indexes and will serve.
 #[derive(Debug, Clone)]
 pub struct DeploymentSpec {
@@ -147,6 +181,67 @@ mod network_tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     #[tokio::test]
+    async fn startup_retries_unavailable_rpc_but_never_retries_a_mismatch() {
+        use std::{sync::atomic::AtomicUsize, time::Duration};
+        for passphrase in ["Test SDF Network ; September 2015", "wrong network"] {
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let requests = attempts.clone();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let app = axum::Router::new().route(
+                "/",
+                axum::routing::post(move || {
+                    let requests = requests.clone();
+                    async move {
+                        if requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+                            return (
+                                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                                axum::Json(serde_json::json!({"error": "temporarily unavailable"})),
+                            );
+                        }
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(serde_json::json!({
+                                "jsonrpc":"2.0", "id":1, "result":{"passphrase":passphrase}
+                            })),
+                        )
+                    }
+                }),
+            );
+            let task = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let deployment = read_deployment(
+                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments/testnet"),
+            )
+            .unwrap();
+            let result = tokio::time::timeout(
+                Duration::from_secs(2),
+                wait_for_upstream_network_with_backoff(
+                    format!("http://{addr}/").parse().unwrap(),
+                    &deployment,
+                    Duration::from_millis(1),
+                    Duration::from_millis(2),
+                ),
+            )
+            .await;
+            task.abort();
+            let result = result.expect("startup must finish after RPC recovery");
+            if passphrase == "wrong network" {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("network passphrase mismatch")
+                );
+            } else {
+                result.expect("matching network resumes startup");
+            }
+            assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
+        }
+    }
+
+    #[tokio::test]
     async fn upstream_passphrase_mismatch_is_rejected() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -176,8 +271,12 @@ mod network_tests {
     fn same_binary_loads_two_deployments_with_separate_namespaces() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments");
         let mut ids = Vec::new();
-        for name in ["testnet", "ci-test-network"] {
-            let config = read_deployment(&root.join(name).join("deployments.json")).unwrap();
+        let testnet = read_deployment(&root.join("testnet/deployments.json")).unwrap();
+        let mut local = testnet.clone();
+        local.network = "local".into();
+        local.network_passphrase = Some("Standalone Network ; February 2017".into());
+        local.rpc_url = Some("http://localhost:8000/rpc".into());
+        for config in [testnet, local] {
             let spec = DeploymentSpec::from_config(&config).unwrap();
             assert!(!spec.network_passphrase.is_empty());
             default_upstream_rpc_url(&config).unwrap();

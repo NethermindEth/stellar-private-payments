@@ -174,21 +174,6 @@ impl ContractConfig {
         self.inner.rpc_url.clone()
     }
 
-    #[wasm_bindgen(getter, js_name = explorerUrl)]
-    pub fn explorer_url(&self) -> Option<String> {
-        self.inner.explorer_url.clone()
-    }
-
-    #[wasm_bindgen(getter, js_name = displayName)]
-    pub fn display_name(&self) -> Option<String> {
-        self.inner.display_name.clone()
-    }
-
-    #[wasm_bindgen(getter, js_name = isTestnet)]
-    pub fn is_testnet(&self) -> Option<bool> {
-        self.inner.is_testnet
-    }
-
     #[wasm_bindgen(getter)]
     pub fn network(&self) -> String {
         self.inner.network.clone()

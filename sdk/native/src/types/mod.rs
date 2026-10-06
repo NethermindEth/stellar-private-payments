@@ -39,20 +39,6 @@ pub struct ContractConfig {
     pub network_passphrase: Option<String>,
     #[serde(default, rename = "rpcUrl", skip_serializing_if = "Option::is_none")]
     pub rpc_url: Option<String>,
-    #[serde(
-        default,
-        rename = "explorerUrl",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub explorer_url: Option<String>,
-    #[serde(
-        default,
-        rename = "displayName",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub display_name: Option<String>,
-    #[serde(default, rename = "isTestnet", skip_serializing_if = "Option::is_none")]
-    pub is_testnet: Option<bool>,
 
     pub deployer: String,
     pub admin: String,
@@ -719,13 +705,11 @@ mod network_config_tests {
         let mut config = legacy();
         config.network_passphrase = Some("custom passphrase".into());
         config.rpc_url = Some("http://localhost:8000/rpc".into());
-        config.is_testnet = Some(false);
         assert!(config.validate_network("custom passphrase").is_ok());
         assert!(config.validate_network("different").is_err());
         let value = serde_json::to_value(&config).expect("valid config fixture");
         assert_eq!(value["networkPassphrase"], "custom passphrase");
         let parsed: ContractConfig = serde_json::from_value(value).expect("valid config fixture");
         assert_eq!(parsed.rpc_url, config.rpc_url);
-        assert_eq!(parsed.is_testnet, Some(false));
     }
 }

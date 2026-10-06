@@ -54,16 +54,14 @@ mod tests {
 
     #[test]
     fn directory_and_file_load_the_same_deployment() -> anyhow::Result<()> {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments");
-        for name in ["testnet", "ci-test-network"] {
-            let directory = root.join(name);
-            let from_directory = read_deployment(&directory)?;
-            let from_file = read_deployment(&directory.join("deployments.json"))?;
-            assert_eq!(
-                serde_json::to_value(from_directory)?,
-                serde_json::to_value(from_file)?
-            );
-        }
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments/testnet");
+        let from_directory = read_deployment(&directory)?;
+        let from_file = read_deployment(&directory.join("deployments.json"))?;
+        assert_eq!(
+            serde_json::to_value(from_directory)?,
+            serde_json::to_value(from_file)?
+        );
         Ok(())
     }
 

@@ -51,6 +51,7 @@ pub mod chain;
 pub mod circuits;
 pub mod disclosure;
 pub mod gvk;
+pub mod network_defaults;
 pub mod plan;
 pub mod planner;
 pub mod prover;
