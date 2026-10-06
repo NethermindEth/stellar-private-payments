@@ -136,3 +136,18 @@ See the CLI's `logging` module for a full example (human vs. JSON output) config
 ## Browser / WASM SDK
 
 See [`../web/README.md`](../web/README.md).
+
+### Token amounts
+
+Transaction methods accept integer base units. Convert human input with the
+pool token's precision:
+
+```rust
+let decimals = pool.token_decimals().await?;
+let amount = NoteAmount::from_decimal("1.25", decimals)?;
+pool.deposit(amount).await?;
+```
+
+`from_decimal` rejects excess precision and overflow without rounding.
+`FromStr` continues to parse base units. `ExtAmount::from_decimal` supports signed
+public amounts.

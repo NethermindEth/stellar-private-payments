@@ -27,6 +27,10 @@ impl PrivatePool {
         Self { inner }
     }
 
+    pub fn token_decimals(&self) -> Result<u32, Error> {
+        block_on(self.inner.token_decimals())
+    }
+
     pub fn config(&self) -> &PrivatePoolConfig {
         self.inner.config()
     }

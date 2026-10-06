@@ -4,14 +4,14 @@
 use anyhow::Result;
 use stellar_private_payments::{
     Error,
-    types::{Sensitive, TransactionResult, correlation_id_or_new},
+    types::{NoteAmount, Sensitive, TransactionResult, correlation_id_or_new},
 };
 
 use crate::{
     config::{CliConfig, validate_pool},
     explorer::Explorer,
     onboard, output,
-    session::{ClientSession, parse_amount, parse_transfer_recipient},
+    session::{ClientSession, parse_transfer_recipient},
 };
 
 fn open_pool(
@@ -32,7 +32,7 @@ fn open_pool(
 )]
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
     let pool = open_pool(config, pool)?;
-    let amount = parse_amount(amount)?;
+    let amount = NoteAmount::from_decimal(amount, pool.token_decimals()?)?;
     let result = pool
         .deposit(amount)
         .map_err(|e| map_pool_err(config, e, json))?;
@@ -60,7 +60,7 @@ pub fn transfer(
 ) -> Result<()> {
     let pool = open_pool(config, pool)?;
     let recipient = parse_transfer_recipient(to, note_key, encryption_key)?;
-    let amount = parse_amount(amount)?;
+    let amount = NoteAmount::from_decimal(amount, pool.token_decimals()?)?;
     let results = pool
         .transfer(recipient, amount)
         .map_err(|e| map_pool_err(config, e, json))?;
@@ -84,7 +84,7 @@ pub fn withdraw(
         None => config.require_account()?.address,
     };
     let pool = open_pool(config, pool)?;
-    let amount = parse_amount(amount)?;
+    let amount = NoteAmount::from_decimal(amount, pool.token_decimals()?)?;
     let results = pool
         .withdraw(amount, recipient)
         .map_err(|e| map_pool_err(config, e, json))?;

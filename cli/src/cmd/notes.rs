@@ -16,8 +16,6 @@ use crate::{
 /// Symbol used when a note's pool is absent from the deployment config
 const UNKNOWN_ASSET: &str = "tokens";
 
-const DECIMALS: u32 = 7;
-
 /// Which notes to show, from the `--spent` / `--unspent` flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotesStatus {
@@ -59,6 +57,8 @@ struct NoteRow {
     pool_link: String,
     asset: String,
     amount: String,
+    amount_base_units: String,
+    decimals: Option<u32>,
     spent: bool,
     leaf_index: u32,
     created_at_ledger: u32,
@@ -143,32 +143,13 @@ pub fn run(
     let storage = config.open_storage()?;
     let explorer = Explorer::new(crate::explorer::base_url(&storage)?);
 
-    let rows: Vec<NoteRow> = notes
-        .into_iter()
-        .map(|note| {
-            let symbol = config
-                .deployment
-                .pool(&note.pool_contract_id)
-                .map_or(UNKNOWN_ASSET.to_string(), |e| {
-                    overview::asset_symbol(&e.asset)
-                });
-            NoteRow {
-                commitment: note.id.to_string(),
-                pool_link: explorer.contract(&note.pool_contract_id),
-                asset: symbol.to_string(),
-                amount: output::format_token_amount(
-                    u128::from(note.amount),
-                    symbol.as_str(),
-                    DECIMALS,
-                ),
-                pool_contract_id: note.pool_contract_id,
-                spent: note.spent,
-                leaf_index: note.leaf_index,
-                created_at_ledger: note.created_at_ledger,
-                ledger_link: explorer.ledger(note.created_at_ledger),
-            }
-        })
-        .collect();
+    let decimals = session.token_decimals(
+        notes
+            .iter()
+            .filter(|note| config.deployment.pool(&note.pool_contract_id).is_ok())
+            .map(|note| note.pool_contract_id.as_str()),
+    );
+    let rows = note_rows(notes, &config.deployment, &explorer, &decimals);
 
     let report = NotesReport {
         account: account.address.clone(),
@@ -221,5 +202,81 @@ fn print(report: &NotesReport, status: NotesStatus) {
     );
     if report.shown != report.total {
         output::print_kv("shown", report.shown);
+    }
+}
+
+fn note_rows(
+    notes: Vec<UserNoteSummary>,
+    deployment: &stellar_private_payments::types::ContractConfig,
+    explorer: &Explorer,
+    decimals: &std::collections::HashMap<String, Result<u32>>,
+) -> Vec<NoteRow> {
+    for (pool, result) in decimals {
+        if let Err(error) = result {
+            log::warn!("Token precision unavailable for {pool}; displaying base units: {error:#}");
+        }
+    }
+    notes
+        .into_iter()
+        .map(|note| {
+            let symbol = deployment
+                .pool(&note.pool_contract_id)
+                .map_or(UNKNOWN_ASSET.to_string(), |e| {
+                    overview::asset_symbol(&e.asset)
+                });
+            let precision = decimals
+                .get(&note.pool_contract_id)
+                .and_then(|value| value.as_ref().ok())
+                .copied();
+            NoteRow {
+                commitment: note.id.to_string(),
+                pool_link: explorer.contract(&note.pool_contract_id),
+                asset: symbol.to_string(),
+                amount: output::format_token_amount(
+                    u128::from(note.amount),
+                    symbol.as_str(),
+                    precision,
+                ),
+                amount_base_units: note.amount.to_string(),
+                decimals: precision,
+                pool_contract_id: note.pool_contract_id,
+                spent: note.spent,
+                leaf_index: note.leaf_index,
+                created_at_ledger: note.created_at_ledger,
+                ledger_link: explorer.ledger(note.created_at_ledger),
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stellar_private_payments::types::{Field, NoteAmount};
+
+    #[test]
+    fn metadata_failure_preserves_note_and_exact_json_amount() {
+        let deployment = serde_json::from_value(serde_json::json!({
+            "network": "testnet", "deployer": "", "admin": "", "pools": [], "asp_membership": "", "asp_non_membership": "", "public_key_registry": "", "verifiers": {}
+        })).expect("deployment");
+        let rows = note_rows(
+            vec![UserNoteSummary {
+                id: Field::ZERO,
+                pool_contract_id: "pool".into(),
+                amount: NoteAmount::from(9_007_199_254_740_993u128),
+                leaf_index: 1,
+                created_at_ledger: 2,
+                spent: false,
+                gvk_ciphertext: None,
+            }],
+            &deployment,
+            &Explorer::new("https://example.test"),
+            &[("pool".into(), Err(anyhow::anyhow!("offline")))].into(),
+        );
+        let row = serde_json::to_value(&rows[0]).expect("JSON");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(row["amount"], "9007199254740993 base units");
+        assert_eq!(row["amount_base_units"], "9007199254740993");
+        assert!(row["decimals"].is_null());
     }
 }

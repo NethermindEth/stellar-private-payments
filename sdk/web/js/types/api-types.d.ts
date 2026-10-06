@@ -218,3 +218,5 @@ export interface GvkTxAudit {
   outputs: GvkOutputSlot[];
   inputs: GvkSpentInput[];
 }
+
+export declare function readTokenDecimals(rpcUrl: string, tokenContract: string): Promise<number>;

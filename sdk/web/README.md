@@ -162,3 +162,17 @@ Compiled `.graph.bin` / `.r1cs` files incorporate [iden3/circomlib](https://gith
 | `dist/LICENSE.txt` | Apache-2.0 (this SDK) |
 
 The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scripts/stage-dist-legal.sh`). If you redistribute the compiled circuits, comply with LGPL-3.0 (see NOTICE).
+
+### Token amounts
+
+Transaction methods accept `bigint` base units. After SDK initialization, use
+`parseTokenAmount` with the pool token's precision:
+
+```js
+import { parseTokenAmount } from 'stellar-private-payments';
+const decimals = await pool.tokenDecimals();
+await pool.deposit(parseTokenAmount('1.25', decimals));
+```
+
+The parser rejects invalid input, excess precision, negative nonzero values, and
+`u128` overflow. It never rounds or converts through JavaScript `Number`.

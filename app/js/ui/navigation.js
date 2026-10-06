@@ -1,3 +1,4 @@
+import { refreshTokenDecimals } from '../token-metadata.js';
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
@@ -155,6 +156,13 @@ async function bootnodeCheck(rpcUrl) {
 async function loadRuntimeState() {
     const config = client().contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
+    const pools = App.state.pools;
+    const sdk = client();
+    const account = sdk.account();
+    void refreshTokenDecimals(pools, account,
+        () => App.state.wallet.connected && isRuntimeReady() && client() === sdk && App.state.pools === pools,
+        () => App.events.dispatchEvent(new CustomEvent('pool:config')),
+    );
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
     poolSelects.forEach(select => {
