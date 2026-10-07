@@ -37,15 +37,13 @@ The web platform orchestrator treats `-32002` as an archive handoff and resumes 
 
 ## Add an allowlist
 
-The bootnode keeps its archive under a namespace built from the earliest pool deployment ledger and the IDs of the manifest's enabled pools, `asp_membership`, and `public_key_registry`. The namespace leaves out the allowlists in `added_asp_memberships`, so adding one to the manifest keeps the archive. A bootnode rebuilt with that manifest ingests and serves the allowlist's events, but its indexer resumes from the stored cursor, so the archive lacks the allowlist's events from before that cursor.
-
-To fill in those events:
+The bootnode names its archive after the earliest pool deployment ledger and the IDs of the enabled pools, `asp_membership`, and `public_key_registry`. Allowlists in `added_asp_memberships` are left out, so adding one keeps the archive. The rebuilt bootnode serves the allowlist's events, but its indexer resumes from the stored cursor and misses the earlier ones. To fill them in:
 
 1. Rebuild the bootnode with the manifest that names the allowlist.
-2. Start it with `--rescan-from`, or the `BOOTNODE_RESCAN_FROM` environment variable, set to the allowlist's deployment ledger. Indexing replays from that ledger instead of the stored cursor until one round succeeds, and later rounds continue from the cursor that round stored. Events already in the archive are skipped, so the replay costs only time. The ledger must not be later than the last ledger the bootnode ingested before it stopped: the rescan drops the stored cursor, so the archive never receives the events between that cursor and the rescan ledger. A bootnode that was in sync with its upstream when it stopped meets this condition.
-3. Remove the option before the next restart. Left set, every restart replays from that ledger again.
+2. Start it with `--rescan-from` (or `BOOTNODE_RESCAN_FROM`) set to the allowlist's deployment ledger. Indexing replays from that ledger until one round succeeds, then continues from the cursor that round stored, skipping events already archived. The ledger must be no later than the last one ingested before the stop, or the events in between are never archived. A bootnode that was in sync when it stopped meets this.
+3. Remove the option before the next restart, or every restart replays again.
 
-Run the rescan while the upstream RPC still holds the allowlist's deployment ledger. Once that ledger falls outside the upstream's retention window, the rescan's requests fail and the indexer stops advancing until you restart without the option.
+Run the rescan while the upstream RPC still holds the deployment ledger. Past that, the rescan's requests fail and the indexer stalls until you restart without the option.
 
 ## Trust assumptions
 

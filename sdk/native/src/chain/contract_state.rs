@@ -117,10 +117,10 @@ impl StateFetcher {
         Ok((admin_view_key, gvk_mode))
     }
 
-    /// Reads a pool's deposit flag out of its fetched state.
+    /// Reads a pool's deposit flag from its fetched state.
     ///
-    /// A pool deployed before the flag existed has none and cannot be paused,
-    /// so an absent key reads as `false`.
+    /// Pools deployed before the flag cannot be paused, so a missing key reads
+    /// as `false`.
     fn deposits_paused_from_state(pool_state: &HashMap<String, xdr::ScVal>) -> Result<bool> {
         Ok(pool_state
             .get("DepositsPaused")
@@ -222,12 +222,10 @@ impl StateFetcher {
         .await
     }
 
-    /// Returns the state of an enabled pool and of the two trees the pool
-    /// names.
+    /// Returns the state of an enabled pool and of the two trees it reads.
     ///
-    /// The trees come from the pool's instance rather than the deployment
-    /// manifest, because the pool's admin can re-point it to another tree. The
-    /// pool's state and the IDs of its trees come from one read of the pool.
+    /// Reads the tree IDs from the pool, not the manifest, since the admin can
+    /// re-point it.
     ///
     /// # Errors
     ///
@@ -540,11 +538,10 @@ impl StateFetcher {
     ///
     /// # Errors
     ///
-    /// Returns an error if [`Self::contracts_data_for_pool`] fails, if the pool
-    /// requires membership proofs and its allowlist is not among the contracts
-    /// that [`ContractConfig::all_contract_ids`] returns, if the blocklist
-    /// simulation fails or finds the note key, or if the pool's state has no
-    /// Merkle root or an unknown GVK mode.
+    /// Returns an error if [`Self::contracts_data_for_pool`] fails, the pool
+    /// needs membership proofs and the manifest does not name its allowlist,
+    /// the blocklist simulation fails or finds the note key, or the pool's
+    /// state has no Merkle root or an unknown GVK mode.
     pub async fn transact_chain_context(
         &self,
         pool_contract_id: &str,

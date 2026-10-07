@@ -168,8 +168,8 @@ async fn allowlist_repoint() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    // Scoped, because re-pointing a shared pool would break the tests that use
-    // the manifest's allowlist.
+    // Scoped: re-pointing a shared pool would break tests that use the
+    // manifest's allowlist.
     let (config, identity) =
         deploy_scoped(std::slice::from_ref(&options), "allowlist-repoint").await?;
     let session = session((config.clone(), identity)).await?;
@@ -249,8 +249,8 @@ async fn blocklist_repoint() -> Result<()> {
         asset: PoolAsset::Native,
         ..PoolOptions::NONE
     };
-    // Scoped, because re-pointing a shared pool would break the tests that use
-    // the manifest's blocklist.
+    // Scoped: re-pointing a shared pool would break tests that use the
+    // manifest's blocklist.
     let (config, identity) =
         deploy_scoped(std::slice::from_ref(&options), "blocklist-repoint").await?;
     let session = session((config.clone(), identity)).await?;
@@ -270,16 +270,15 @@ async fn blocklist_repoint() -> Result<()> {
         )
         .await?;
     let blocklist = network.deploy_asp_non_membership(admin_secret).await?;
-    // Another key gives the new blocklist a nonzero root, so the client has to
-    // query the tree rather than prove against an empty one.
+    // A nonzero root makes the client query the tree, not assume it empty.
     network
         .insert_asp_non_membership_leaf(&blocklist, admin_secret, NotePublicKey([1; 32]))
         .await?;
     network
         .update_asp_non_membership(pool_contract_id, admin_secret, &blocklist)
         .await?;
-    // A blocklist pool proves nothing against its allowlist, so an allowlist
-    // the manifest does not name must not stop the client.
+    // A blocklist pool never proves against its allowlist, so an unnamed
+    // allowlist must not stop the client.
     let (allowlist, _) = network
         .deploy_asp_membership(admin_secret, ASP_LEVELS)
         .await?;

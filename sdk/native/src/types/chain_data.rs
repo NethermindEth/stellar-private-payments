@@ -146,8 +146,7 @@ pub struct TransactChainContext {
     pub policy_flags: PolicyFlags,
     pub gvk_mode: GvkMode,
     pub admin_view_key: Option<BabyJubJubPoint>,
-    /// Whether the pool refuses deposits, as [`PoolInfo::deposits_paused`]
-    /// reports it.
+    /// Whether the pool refuses deposits; see [`PoolInfo::deposits_paused`].
     pub deposits_paused: bool,
 }
 
