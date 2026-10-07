@@ -939,6 +939,8 @@ fn transact_rejects_bad_public_amount() {
     ));
 }
 
+/// The spent check keys on the raw value, so this is the only refusal of a
+/// spent `n` resent as `n + r`.
 #[test]
 fn transact_rejects_non_canonical_nullifier() {
     let env = test_env();
@@ -2109,6 +2111,96 @@ fn transact_rejects_replayed_nullifier() {
         "expected replaying the same nullifier to be rejected, got {second:?}"
     );
 }
+
+/// Marks a nullifier as spent directly in pool storage, the key a settled
+/// `transact` writes.
+fn mark_nullifier_spent(env: &Env, pool_id: &Address, nullifier: &U256) {
+    env.as_contract(pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Nullifier(nullifier.clone()), &());
+    });
+}
+
+/// The spent nullifier comes second, so a check of the first element alone
+/// would let the call reach the verifier.
+#[test]
+fn transact_rejects_a_batch_with_one_spent_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let spent = U256::from_u32(&env, 0xC2);
+    mark_nullifier_spent(&env, &pool_id, &spent);
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC3,
+        VIEW_ONLY,
+    );
+    proof.input_nullifiers.push_back(spent);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a batch holding a spent nullifier must be refused");
+    assert_eq!(err, Ok(Error::AlreadySpentNullifier));
+}
+
+/// The spent check reads stored state only, so a nullifier repeated in one call
+/// reaches the verifier and is left to the circuit. Policy flags 0 keep the ASP
+/// root checks from answering `InvalidProof` first.
+#[test]
+fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xDEAD;
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+        VIEW_ONLY,
+    );
+    proof
+        .input_nullifiers
+        .push_back(U256::from_u32(&env, nullifier));
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
 #[test]
 fn the_configuration_lives_in_the_instance() {
     let env = test_env();
@@ -2281,4 +2373,61 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// Pool B shares pool A's verifier, ASP contracts, and depth, but not its
+/// address or token, so pool A's `(proof, ExtData)` must stop at pool B's
+/// `ext_data_hash` check.
+#[test]
+fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    let pool_a_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let token_a = setup.token.clone();
+    setup.token = env.register(MockToken, ());
+    let pool_b_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool_a = PoolGvkContractClient::new(&env, &pool_a_id);
+    let pool_b = PoolGvkContractClient::new(&env, &pool_b_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool_a,
+        &token_a,
+        member_root,
+        non_member_root,
+        0xF00D,
+        VIEW_ONLY,
+    );
+
+    let err_a = pool_a
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(
+        err_a,
+        Ok(Error::InvalidProof),
+        "pool A must reach the verifier, not an earlier check"
+    );
+
+    let err_b = pool_b
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("pool A's proof must be refused on pool B");
+    assert_eq!(err_b, Ok(Error::WrongExtHash));
 }

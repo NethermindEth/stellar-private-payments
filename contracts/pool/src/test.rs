@@ -1013,6 +1013,8 @@ fn transact_rejects_bad_public_amount() {
     ));
 }
 
+/// The spent check keys on the raw value, so this is the only refusal of a
+/// spent `n` resent as `n + r`.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_nullifier() {
@@ -1570,6 +1572,36 @@ fn transact_rejects_replay_of_spent_nullifier() {
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("spent nullifier must be refused");
+    assert_eq!(err, Ok(Error::AlreadySpentNullifier));
+}
+
+/// The spent nullifier comes second, so a check of the first element alone
+/// would let the call reach the verifier.
+#[test]
+fn transact_rejects_a_batch_with_one_spent_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let spent = U256::from_u32(&env, 0xC2);
+    mark_nullifier_spent(&env, &pool_id, &spent);
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC3,
+    );
+    proof.input_nullifiers.push_back(spent);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a batch holding a spent nullifier must be refused");
     assert_eq!(err, Ok(Error::AlreadySpentNullifier));
 }
 
