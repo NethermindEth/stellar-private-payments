@@ -1,7 +1,6 @@
 /**
- * Converts between the note public keys an admin enters for the blocklist and
- * the keys the blocklist stores, builds the call that adds them, and warns of
- * a write to a blocklist no pool reads.
+ * Converts note public keys to blocklist keys and back, builds the insert
+ * call, and warns of writes to a blocklist no pool reads.
  *
  * Separate from `admin.js` so Node can import it in unit tests.
  */
@@ -62,8 +61,8 @@ export function blocklistInsertCall(keys, batched) {
  * Returns the warning a blocklist write needs when no pool reads the blocklist
  * it targets, or `null` when a pool does.
  *
- * A pool re-pointed to another blocklist leaves the manifest's in place, and a
- * key written to a blocklist no pool reads blocks or releases no one.
+ * After a re-point the manifest's blocklist may go unread, and a write there
+ * blocks or releases no one.
  *
  * @param {string} blocklist - The blocklist the write targets.
  * @param {string[]} readBlocklists - The blocklist each pool reads.

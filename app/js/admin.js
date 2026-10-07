@@ -96,8 +96,8 @@ const state = {
   addedAllowlists: [],
   // The last re-point check: its lines, and the call they allow once each passes.
   repoint: null,
-  // The blocklist each pool on the Pools tab reads, by pool, which a re-point
-  // changes while the manifest stays as it was.
+  // Pool to the blocklist it reads, which a re-point changes without the
+  // manifest.
   poolBlocklists: new Map(),
   cryptoReady: false,
 };
@@ -304,8 +304,8 @@ async function refreshState() {
     const membershipState = appState.aspMembership;
     const nonMembershipState = appState.aspNonMembership;
 
-    // A tree the operator entered, such as the blocklist a pool was re-pointed
-    // to, stays through a refresh. An empty field takes the manifest's.
+    // Keep a tree the operator entered, such as a re-pointed blocklist; fill an
+    // empty field from the manifest.
     membershipContractInput.value ||= membershipState.contractId;
     nonMembershipContractInput.value ||= nonMembershipState.contractId;
     updateContractLink(membershipContractLinkEl, membershipContractInput.value);
@@ -518,8 +518,8 @@ async function insertMembershipLeaf() {
   }
 }
 
-// Reports whether a write to `blocklist` goes ahead: at once when a pool on the
-// Pools tab reads it, and otherwise only once the operator accepts the warning.
+// Reports whether to write to `blocklist`: yes if a listed pool reads it,
+// otherwise only if the operator accepts the warning.
 function confirmBlocklistWrite(blocklist) {
   const warning = unreadBlocklistWarning(blocklist, [...state.poolBlocklists.values()]);
   return !warning || window.confirm(warning);
@@ -605,8 +605,8 @@ async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
   }
 }
 
-// Lists each pool the manifest names with the trees it reads and its deposit
-// flag, a disabled pool too, since it still takes deposits on chain.
+// Lists every pool the manifest names, disabled ones too since they still take
+// deposits, with its trees and deposit flag.
 function refreshPools() {
   resetRepoint();
   state.poolBlocklists = new Map();
@@ -665,9 +665,8 @@ async function buildRowCall(kind, call) {
 // -----------------------------
 // Re-point
 // -----------------------------
-// Draws the last re-point check. A line that names another party as the
-// tree's admin passes once the operator confirms that party, and "Build
-// re-point" waits for every line to pass.
+// Draws the last re-point check. An outside admin's line passes once the
+// operator confirms it; Build re-point waits for every line.
 function renderRepoint() {
   const lines = state.repoint?.lines ?? [];
   const passes = ({ ok, confirm }) => ok || (Boolean(confirm) && repointConfirmBox.checked);
@@ -687,10 +686,9 @@ function resetRepoint() {
   renderRepoint();
 }
 
-// Checks a tree before a pool is re-pointed to it, one line per check. The
-// pool refuses a tree of other code itself; the other checks cover what the
-// code cannot show: the tree's depth, who runs it, whether clients index it,
-// and what it holds.
+// Checks a tree before a re-point, one line per check. The pool already
+// refuses other code; the rest covers depth, admin, client indexing, and
+// entries.
 async function checkRepoint() {
   resetRepoint();
   // A field that changes while the check runs resets it, and its result is dropped.
@@ -737,9 +735,8 @@ async function checkRepoint() {
         const [file] = repointRecordsInput.files;
         if (!file) throw new Error('choose the records file');
         const ledger = historyStart({ allowlist, tree, manifest, blocklistLedger: Number(repointLedgerInput.value) });
-        // A blocklist's records, and the keys this line reports, are note
-        // public keys as the Blocklist tab takes them, so a key loaded in the
-        // other byte order fails the check.
+        // Blocklist records and reported keys are note public keys in Blocklist
+        // tab form, so a key loaded in the wrong byte order fails.
         const [events, records] = await Promise.all([
           eventsSince(server, tree, ledger),
           file.text().then(allowlist ? parseRecords : parseBlocklistKeys),
@@ -796,8 +793,8 @@ function reportPause(text) {
   pauseAuthResultsEl.append(Object.assign(document.createElement('li'), { textContent: text }));
 }
 
-// Builds an unsigned pause authorization for the chosen pool's admin, under a
-// fresh random nonce, and offers it as the file its holder will keep.
+// Builds an unsigned pause authorization with a random nonce and offers it as
+// the holder's file.
 async function buildPauseAuthorizationFile() {
   try {
     ensureWalletConnected();
@@ -825,8 +822,8 @@ async function signPauseAuthorization() {
     if (!file || others.length > 0) throw new Error('Choose one authorization file to sign');
     signPauseAuthBtn.disabled = true;
     const { pool, admin, holder, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
-    // A file can come from anyone, so the panel shows what it authorizes
-    // before Freighter asks the signer to sign it.
+    // Files can come from anyone: show what this one authorizes before
+    // Freighter asks.
     pauseAuthResultsEl.replaceChildren();
     Object.entries({
       Pool: pool,
@@ -836,8 +833,7 @@ async function signPauseAuthorization() {
       'Expiration ledger': expirationLedger,
       Signers: signers.join(', ') || 'none',
     }).forEach(([label, value]) => reportPause(`${label}: ${value}`));
-    // A signature by a key that does not sign for the admin fails the pause,
-    // and the page cannot take one out of the file again.
+    // A non-signer's signature would fail the pause and cannot be removed.
     const { threshold, weights } = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(admin));
     if (!(weights.get(state.address) > 0)) {
       throw new Error(`The connected account does not sign for ${admin}`);
@@ -855,11 +851,9 @@ async function signPauseAuthorization() {
   }
 }
 
-// Sends each chosen file's pause from the connected account, one file after
-// another, and reports each on its own line, so a file that fails stops no
-// other. A holder submits every file at once when every pool must stop taking
-// deposits. A second file for a pool that an earlier one paused reads the pool
-// as paused, so it is held back unspent.
+// Sends each chosen file's pause from the connected account in turn and
+// reports each on its own line, so one failure stops no other file. A second
+// file for a pool an earlier one paused is held back unspent.
 async function submitPauseAuthorizations() {
   pauseAuthResultsEl.replaceChildren();
   try {
