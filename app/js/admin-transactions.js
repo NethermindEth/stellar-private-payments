@@ -1,9 +1,8 @@
 /**
- * Admin calls sent from the admin account, a multisig account whose signers
- * each sign the same transaction envelope on their own device.
+ * Admin calls from the multisig admin account, whose signers each sign the
+ * same envelope.
  *
- * Kept apart from `admin.js`, which wires the page, so Node can import it for
- * unit testing.
+ * Separate from `admin.js` so Node can import it in unit tests.
  */
 import {
   Address,
@@ -20,9 +19,8 @@ import {
 import { CONTRACT_ERRORS } from './ui/errors.js';
 
 /**
- * Seconds an admin transaction stays valid after it is built. Collecting
- * several signatures takes longer than the five minutes `contract.Client`
- * allows by default.
+ * Seconds an admin transaction stays valid. Collecting signatures outlasts
+ * `contract.Client`'s five-minute default.
  */
 const ADMIN_TX_TIMEOUT_SECONDS = 86_400;
 
@@ -37,11 +35,9 @@ export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.
 /**
  * Builds an unsigned contract call whose source is the admin account.
  *
- * Returns `{ xdr }`, the simulated envelope for the signers to sign. When the
- * call reads archived entries, such as a contract's persistent `Admin` entry
- * once nothing has extended it for a while, the simulation marks them and the
- * call restores them itself. The admin account pays for that inside the fee
- * that `describeAdminCall` shows.
+ * Returns `{ xdr }`, the simulated envelope to sign. A call that reads
+ * archived entries restores them, at the admin account's cost, within the fee
+ * `describeAdminCall` shows.
  *
  * @param {Object} call
  * @param {string} call.rpcUrl - The RPC that simulates the call.
@@ -49,8 +45,7 @@ export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.
  * @param {string} call.source - The contract's admin, the transaction's source.
  * @param {string} call.contractId - The contract to call.
  * @param {string} call.method - The entry point to call.
- * @param {Object} [call.args] - The method's arguments by name. Omit them for a
- *   method that takes none.
+ * @param {Object} [call.args] - Arguments by name; omit for none.
  * @returns {Promise<{xdr: string}>}
  * @throws {Error} when the contract has no `method` entry point, with the
  *   simulation's error when the contract refuses the call, and when `source`
@@ -68,8 +63,8 @@ export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contra
     throw new Error(simulation.error);
   }
   const xdr = tx.toXdr();
-  // A source that is not the contract's admin leaves an authorization the
-  // signers cannot give, so the envelope is refused here rather than signed.
+  // Throws when `source` is not the contract's admin, before anyone signs an
+  // authorization the signers cannot give.
   describeAdminCall(xdr, networkPassphrase);
   return { xdr };
 }
@@ -88,28 +83,26 @@ export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contra
  */
 export function describeAdminCall(xdr, networkPassphrase) {
   const tx = TransactionBuilder.fromXdr(xdr, networkPassphrase);
-  // A fee bump's signatures pay for its inner transaction, whose source can be
-  // any account, and authorize no admin call.
+  // A fee bump's signatures pay for an inner transaction from any account and
+  // authorize no admin call.
   if (!(tx instanceof Transaction)) {
     throw new Error('the envelope is a fee bump, not an admin call');
   }
-  // The card shows only the time bound. A minimum sequence keeps a signed
-  // envelope valid past later admin transactions, and when it lands it sets
-  // the source's sequence to the envelope's own. An envelope whose time bound
-  // has no end stays valid until someone sends it.
+  // The card shows only the time bound. A minimum-sequence condition would
+  // keep a signed envelope valid past later admin transactions, and a bound
+  // with no end never expires.
   if (tx.toEnvelope().value.tx.cond.type !== 'precondTime' || Number(tx.timeBounds.maxTime) === 0) {
     throw new Error('the envelope carries conditions other than a time bound');
   }
   const [operation, ...others] = tx.operations;
   const call = operation?.func?.invokeContract;
-  // An envelope may come from another signer, and a second operation would
-  // be signed without being described.
+  // A pasted envelope could hide a second, undescribed operation.
   if (others.length > 0 || !call) {
     throw new Error('the envelope holds something other than one contract call');
   }
-  // The transaction's signatures stand for every source-account entry, so an
-  // entry for another call would act without being described, and an entry
-  // that needs another account's signature leaves the call unable to succeed.
+  // The signatures cover every source-account entry, so an entry for another
+  // call would act undescribed; one needing another account's signature would
+  // make the call fail.
   const describedCall = ({ credentials, rootInvocation }) =>
     credentials.type === 'sorobanCredentialsSourceAccount'
     && rootInvocation.function.contractFn?.equals(call)
@@ -154,14 +147,13 @@ export function signedBy(xdr, networkPassphrase, publicKey) {
 }
 
 /**
- * Reads who signs for an account, and how much signature weight a contract
- * call from it needs, from its ledger entry.
+ * Reads an account's signer weights and contract-call threshold from its
+ * ledger entry.
  *
  * @param {xdr.AccountEntry} account
  * @returns {{threshold: number, weights: Map<string, number>}} `threshold` is
- *   the account's medium threshold, the one a contract call meets, and at
- *   least 1, since a threshold of 0 still takes one signature. `weights` maps
- *   each key that signs for the account, its own key included, to its weight.
+ *   the medium threshold, at least 1 since 0 still takes one signature.
+ *   `weights` maps each signing key, the account's own included, to its weight.
  */
 export function signingRule(account) {
   const [master, , medium] = account.thresholds.value;
@@ -174,9 +166,8 @@ export function signingRule(account) {
  * Returns why `address` must not sign an admin call, or `null` when its
  * signature counts toward the threshold.
  *
- * A signature the transaction does not use fails it, and nothing takes one
- * back out of an envelope: one by a key that does not sign for the source, one
- * past the threshold, or a second one by the same signer.
+ * An unused signature fails the transaction and cannot be removed: a
+ * non-signer's, one past the threshold, or a signer's second.
  *
  * @param {{threshold: number, weights: Map<string, number>}} rule - The
  *   source's `signingRule`.
@@ -199,11 +190,9 @@ export function signRefusal({ threshold, weights }, xdr, networkPassphrase, addr
 }
 
 /**
- * Words the error of a `host_fn_failed` diagnostic event the way a failed
- * simulation reports its host error, for example `Error(Contract, #20)`.
- *
- * A sent transaction that fails reports its error only in these events, so
- * this lets `explainFailure` read both.
+ * Formats a `host_fn_failed` diagnostic event's error as a failed simulation
+ * does, for example `Error(Contract, #20)`. A failed sent transaction reports
+ * its error only in these events, so `explainFailure` can read both.
  *
  * @param {Array} [events] - The transaction's diagnostic events.
  * @returns {string} The error, or an empty string when no event reports one.
@@ -221,10 +210,9 @@ export function hostError(events = []) {
 /**
  * Sends a signed transaction and polls it to a final status.
  *
- * Signatures are not part of a transaction's hash, so when another signer has
- * already sent the same transaction, the network refuses this copy and the
- * copy that landed stands in its place: returned when it succeeded, and its
- * failure thrown when it failed.
+ * Signatures are not part of a transaction's hash, so if another signer
+ * already sent it, the network refuses this copy and the result is the copy
+ * that landed: returned on success, its failure thrown otherwise.
  *
  * @param {Object} submission
  * @param {string} submission.rpcUrl - The RPC to send the transaction to.
@@ -274,8 +262,8 @@ export function explainFailure(error, kind) {
   if (refusal) return refusal[1];
   const code = Number(/Error\(Contract, #(\d+)\)/.exec(message)?.[1]);
   if (kind === 'pool' && code >= 18 && CONTRACT_ERRORS.pool[code]) return CONTRACT_ERRORS.pool[code];
-  // The contracts number their errors apart: #6 is `NoPendingAdmin` on an
-  // allowlist but `Overflow` on a blocklist, whose `NoPendingAdmin` is #7, the
-  // pools' `InvalidProof`.
+  // Codes differ by contract: #6 is an allowlist's `NoPendingAdmin` but a
+  // blocklist's `Overflow`; a blocklist's `NoPendingAdmin` is #7, the pools'
+  // `InvalidProof`.
   return ({ 'asp-membership': CONTRACT_ERRORS.aspMembership, 'asp-non-membership': CONTRACT_ERRORS.aspNonMembership })[kind]?.[code] ?? message;
 }

@@ -307,9 +307,9 @@ async function refreshState() {
 // -----------------------------
 // Admin transaction card
 // -----------------------------
-// The kind of contract a pasted admin call targets, which decides how its
-// error codes read. A contract the page does not list is `unknown`, and the
-// card marks it, since signers would otherwise read it as a pool.
+// Returns the kind of contract a pasted call targets, which decides how its
+// error codes read. An unlisted contract is `unknown`, and the card flags it so
+// signers don't take it for a pool.
 function kindOf(contractId) {
   if (contractId === membershipContractInput.value.trim()) return 'asp-membership';
   if (contractId === nonMembershipContractInput.value.trim()) return 'asp-non-membership';
@@ -319,8 +319,8 @@ function kindOf(contractId) {
 }
 
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
-  // Every number a blocklist call takes is a key or its value, which signers
-  // compare with the note public keys they were asked to list or release.
+  // Show a blocklist call's numbers as the note public keys signers were asked
+  // to list or release.
   const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
   return [
     `Source: ${source}`,
@@ -333,8 +333,8 @@ function formatAdminCall({ source, sequence, fee, validUntil, contract, method, 
   ].join('\n');
 }
 
-// Describes the envelope in the card. `kind` is the kind of contract the call
-// targets when the page built it, and is read from the contract otherwise.
+// Describes the envelope in the card. `kind` comes from the page when it built
+// the call, and from the contract otherwise.
 function renderAdminTx(kind) {
   const xdr = adminTxXdrInput.value.trim();
   state.adminTxKind = null;
@@ -351,8 +351,8 @@ function renderAdminTx(kind) {
     state.adminTxKind = kind ?? kindOf(call.contract);
     adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
     adminTxSignaturesEl.textContent = count;
-    // The threshold is read from the network after the card is drawn. "Sign"
-    // reads it again, so a failed read leaves only the count.
+    // Fetch the threshold after drawing; Sign reads it again, so a failed read
+    // just leaves the bare count.
     rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
       if (adminTxXdrInput.value.trim() === xdr) adminTxSignaturesEl.textContent = `${count} of ${signingRule(account).threshold}`;
     }, () => {});
@@ -426,10 +426,8 @@ async function copyAdminTx() {
 // -----------------------------
 // Admin calls
 // -----------------------------
-// Reads a contract's admin from its `Admin` entry, which every contract
-// stores, while contracts deployed before the two-step admin transfer have no
-// `get_admin` entry point. The admin is the source of every call the page
-// builds for that contract.
+// Reads a contract's admin from its `Admin` entry, which also works for
+// contracts without `get_admin`. Every call the page builds uses it as source.
 async function storedAdmin(contractId) {
   const { val } = await rpcServer(state.rpcUrl).getContractData(contractId, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('Admin')]));
   return scValToNative(val.contractData.val);
@@ -551,9 +549,8 @@ async function removeNonMembershipLeaf() {
 // -----------------------------
 // Pools
 // -----------------------------
-// Fills a table with the rows `rowsFor` builds from the deployment manifest.
-// The rows read their contracts by simulation, which needs the connected
-// wallet's network.
+// Fills a table with the rows `rowsFor` builds from the manifest. Rows read
+// contracts by simulation, so they need the connected wallet's network.
 async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
   rowsEl.replaceChildren();
   if (!state.rpcUrl) {
@@ -577,9 +574,8 @@ function refreshPools() {
   });
 }
 
-// A pool deployed before the deposit flag existed has no `deposits_paused`
-// entry point and cannot be paused, so its row offers no buttons. Neither does
-// a pool the page cannot read, whose row says why instead of hiding the others.
+// A pool without `deposits_paused` cannot be paused, and an unreadable pool
+// shows its error; neither row gets buttons.
 async function poolRow(contractId) {
   const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
   row.querySelector('.pool-id').textContent = contractId;
@@ -608,8 +604,8 @@ async function poolRow(contractId) {
   return row;
 }
 
-// Builds a call from a table row into the card. `kind` is the kind of contract
-// the call targets, which decides how its error codes read.
+// Builds a table row's call into the card. `kind` decides how error codes
+// read.
 async function buildRowCall(kind, call) {
   try {
     ensureWalletConnected();
@@ -638,10 +634,9 @@ function refreshAdmins() {
   });
 }
 
-// A contract deployed before the two-step transfer has no `get_pending_admin`
-// entry point, and its `update_admin` hands over control at once, so its row
-// offers no buttons. Neither does a contract the page cannot read, whose row
-// says why instead of hiding the others.
+// A contract without `get_pending_admin` hands over control at once on
+// `update_admin`, and an unreadable contract shows its error; neither row gets
+// buttons.
 async function adminRow({ label, kind, contractId }) {
   const row = adminRowTemplate.content.cloneNode(true).firstElementChild;
   row.querySelector('.admin-label').textContent = label;
