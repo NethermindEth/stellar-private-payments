@@ -8,7 +8,8 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, InvokeError, String, Symbol, U256, Val, Vec,
+    contracttype,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
@@ -1881,6 +1882,89 @@ fn transact_rejects_zeroed_proof() {
         Ok(Error::InvalidProof),
         "a proof the verifier refuses must be reported as InvalidProof"
     );
+}
+
+/// `Groth16Proof` with its points as `Bytes`, so a test can send any length.
+#[contracttype]
+struct RawGroth16Proof {
+    a: Bytes,
+    b: Bytes,
+    c: Bytes,
+}
+
+/// `Proof` carrying a [`RawGroth16Proof`].
+#[contracttype]
+struct RawProof {
+    proof: RawGroth16Proof,
+    root: U256,
+    input_nullifiers: Vec<U256>,
+    output_commitment0: U256,
+    output_commitment1: U256,
+    public_amount: U256,
+    ext_data_hash: BytesN<32>,
+    asp_membership_root: U256,
+    asp_non_membership_root: U256,
+}
+
+/// Empty points do not decode as `Groth16Proof`, so the call aborts before
+/// `transact` runs. The control differs only in the point lengths.
+#[test]
+fn transact_refuses_a_proof_with_empty_points_before_the_pool_runs() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xE7;
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+    );
+    let mut raw = RawProof {
+        proof: RawGroth16Proof {
+            a: Bytes::new(&env),
+            b: Bytes::new(&env),
+            c: Bytes::new(&env),
+        },
+        root: proof.root,
+        input_nullifiers: proof.input_nullifiers,
+        output_commitment0: proof.output_commitment0,
+        output_commitment1: proof.output_commitment1,
+        public_amount: proof.public_amount,
+        ext_data_hash: proof.ext_data_hash,
+        asp_membership_root: proof.asp_membership_root,
+        asp_non_membership_root: proof.asp_non_membership_root,
+    };
+    let sender = Address::generate(&env);
+    let transact = |raw: &RawProof| {
+        env.try_invoke_contract::<(), Error>(
+            &pool_id,
+            &Symbol::new(&env, "transact"),
+            soroban_sdk::vec![
+                &env,
+                raw.into_val(&env),
+                ext.into_val(&env),
+                sender.into_val(&env)
+            ],
+        )
+    };
+
+    let err = transact(&raw).expect_err("empty points must not decode");
+    assert_eq!(err, Err(InvokeError::Abort));
+
+    raw.proof = RawGroth16Proof {
+        a: Bytes::from_array(&env, &[0u8; 64]),
+        b: Bytes::from_array(&env, &[0u8; 128]),
+        c: Bytes::from_array(&env, &[0u8; 64]),
+    };
+    let err = transact(&raw).expect_err("zeroed points must fail verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
 }
 
 /// The spent check reads stored state only, so a repeated nullifier reaches

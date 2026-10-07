@@ -21,7 +21,8 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, IntoVal, InvokeError, String, Symbol, U256, Vec, contract,
+    contractimpl, contracttype,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events},
     token::{Client as TokenClient, StellarAssetClient},
@@ -2554,6 +2555,78 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as pool-gvk's InvalidProof"
     );
+}
+
+/// `Groth16Proof` with its points as `Bytes`, so a test can send any length.
+#[contracttype]
+struct RawGroth16Proof {
+    a: Bytes,
+    b: Bytes,
+    c: Bytes,
+}
+
+/// `Proof` carrying a [`RawGroth16Proof`].
+#[contracttype]
+struct RawProof {
+    proof: RawGroth16Proof,
+    root: U256,
+    input_nullifiers: Vec<U256>,
+    output_commitment0: U256,
+    output_commitment1: U256,
+    public_amount: U256,
+    ext_data_hash: BytesN<32>,
+    asp_membership_root: U256,
+    asp_non_membership_root: U256,
+    output_gvk_ciphertexts: Vec<GvkCiphertext>,
+    input_gvk_ciphertexts: Vec<GvkCiphertext>,
+}
+
+/// Empty points do not decode as `Groth16Proof`, so the call aborts before
+/// `transact` runs. The control differs only in the point lengths.
+#[test]
+fn transact_refuses_a_proof_with_empty_points_before_the_pool_runs() {
+    let nullifier = 0xE7;
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, nullifier, 0, 1000);
+    let mut raw = RawProof {
+        proof: RawGroth16Proof {
+            a: Bytes::new(&env),
+            b: Bytes::new(&env),
+            c: Bytes::new(&env),
+        },
+        root: proof.root,
+        input_nullifiers: proof.input_nullifiers,
+        output_commitment0: proof.output_commitment0,
+        output_commitment1: proof.output_commitment1,
+        public_amount: proof.public_amount,
+        ext_data_hash: proof.ext_data_hash,
+        asp_membership_root: proof.asp_membership_root,
+        asp_non_membership_root: proof.asp_non_membership_root,
+        output_gvk_ciphertexts: proof.output_gvk_ciphertexts,
+        input_gvk_ciphertexts: proof.input_gvk_ciphertexts,
+    };
+    let transact = |raw: &RawProof| {
+        env.try_invoke_contract::<(), Error>(
+            &pool.address,
+            &Symbol::new(&env, "transact"),
+            soroban_sdk::vec![
+                &env,
+                raw.into_val(&env),
+                ext.into_val(&env),
+                sender.into_val(&env)
+            ],
+        )
+    };
+
+    let err = transact(&raw).expect_err("empty points must not decode");
+    assert_eq!(err, Err(InvokeError::Abort));
+
+    raw.proof = RawGroth16Proof {
+        a: Bytes::from_array(&env, &[0u8; 64]),
+        b: Bytes::from_array(&env, &[0u8; 128]),
+        c: Bytes::from_array(&env, &[0u8; 64]),
+    };
+    let err = transact(&raw).expect_err("zeroed points must fail verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
 }
 
 /// A verifier rejection must roll back the deposit transfer.
