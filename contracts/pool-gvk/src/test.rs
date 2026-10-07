@@ -2541,11 +2541,6 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         VIEW_ONLY,
     );
 
-    assert!(
-        !proof.proof.is_empty(),
-        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
-    );
-
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("a proof the verifier refuses must be refused by pool-gvk");
@@ -2675,11 +2670,6 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
 
     proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
     proof.public_amount = U256::from_u32(&env, deposit_amount);
-
-    assert!(
-        !proof.proof.is_empty(),
-        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
-    );
 
     assert_eq!(token.balance(&sender), funded);
     assert_eq!(token.balance(&pool_id), 0);

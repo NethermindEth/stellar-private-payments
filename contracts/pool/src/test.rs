@@ -1841,9 +1841,7 @@ fn transact_rejects_a_deposit_past_i128_under_a_larger_cap() {
 
 /// An all-zero proof must be refused with a clean error rather than panicking.
 ///
-/// The points are all-zero but not empty, so the `is_empty` guard does not
-/// catch them and the proof reaches the verifier, which refuses it. The caller
-/// sees `InvalidProof`, the pool's own error, rather than whichever
+/// The caller sees `InvalidProof`, the pool's own error, rather than whichever
 /// `Groth16Error` the verifier happened to raise.
 #[test]
 fn transact_rejects_zeroed_proof() {
@@ -2196,10 +2194,6 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         member_root,
         non_member_root,
         0xE5,
-    );
-    assert!(
-        !proof.proof.is_empty(),
-        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
     );
 
     let err = pool

@@ -50,7 +50,7 @@ pub enum Error {
     NextIndexNotEven = 5,
     /// External amount is invalid (negative or exceeds 2^248)
     WrongExtAmount = 6,
-    /// Zero-knowledge proof verification failed or proof is empty
+    /// Zero-knowledge proof verification failed
     InvalidProof = 7,
     /// Provided Merkle root is not in the recent history
     UnknownRoot = 8,
@@ -577,9 +577,6 @@ impl PoolGvkContract {
     /// `AdminViewKey`, never from caller-supplied data — there is no `D`
     /// field on `Proof` at all, so a caller cannot influence it.
     fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
-        if proof.proof.is_empty() {
-            return Err(Error::InvalidProof);
-        }
         let policy_flags = Self::load_policy_flags(env)?;
         let gvk_mode = Self::load_gvk_mode(env)?;
         let admin_view_key = Self::get_admin_view_key(env)?;
