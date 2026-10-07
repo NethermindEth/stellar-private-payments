@@ -26,7 +26,10 @@ use soroban_sdk::{
     testutils::{Address as _, Events},
     token::{Client as TokenClient, StellarAssetClient},
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    constants::bn256_modulus,
+    utils::{AcceptingVerifier, MockToken},
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -748,9 +751,13 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     );
 }
 
+/// Sends a non-canonical root in the ASP field `flags` ignores. The call
+/// settles, where excluding only `NonCanonicalPublicInput` let any refusal
+/// through. `AcceptingVerifier` skips the pairing check, which is not covered.
 fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifier: u32) {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
+    let mut setup = setup_test_contracts(&env);
+    setup.verifier = env.register(AcceptingVerifier, ());
     let pool_id = register_pool_gvk(
         &env,
         &setup,
@@ -786,14 +793,13 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     );
 
     assert!(
-        !matches!(
-            pool.try_transact(&proof, &ext, &sender),
-            Err(Ok(Error::NonCanonicalPublicInput))
-        ),
+        matches!(pool.try_transact(&proof, &ext, &sender), Ok(Ok(()))),
         "expected ASP root field to be skipped for flags={flags}"
     );
 }
 
+/// The ext hash is wrong too, and answers `WrongExtHash` if the root check
+/// moves after it, so the test pins `UnknownRoot`, not just an error.
 #[test]
 fn transact_rejects_unknown_root() {
     let env = test_env();
@@ -832,9 +838,14 @@ fn transact_rejects_unknown_root() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::UnknownRoot))
+    ));
 }
 
+/// With the hash check removed the call still fails at the verifier, so the
+/// test pins `WrongExtHash`, not just an error.
 #[test]
 fn transact_rejects_bad_ext_hash() {
     let env = test_env();
@@ -874,9 +885,14 @@ fn transact_rejects_bad_ext_hash() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtHash))
+    ));
 }
 
+/// With the public amount check removed the call still fails at the verifier,
+/// so the test pins `WrongExtAmount`, not just an error.
 #[test]
 fn transact_rejects_bad_public_amount() {
     let env = test_env();
@@ -917,7 +933,10 @@ fn transact_rejects_bad_public_amount() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtAmount))
+    ));
 }
 
 #[test]
@@ -1012,6 +1031,9 @@ fn transact_rejects_non_canonical_output_commitment() {
     ));
 }
 
+/// The modulus minus one is canonical, so the call reaches the verifier, where
+/// excluding only `NonCanonicalPublicInput` passed on any refusal. Policy
+/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
 #[test]
 fn transact_does_not_reject_boundary_canonical_public_input() {
     let env = test_env();
@@ -1021,7 +1043,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         &setup,
         U256::from_u32(&env, 1000),
         3,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        0,
         mk_point(&env, 1, 2),
         VIEW_ONLY,
     );
@@ -1053,9 +1075,9 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(!matches!(
+    assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
+        Err(Ok(Error::InvalidProof))
     ));
 }
 
@@ -1374,6 +1396,9 @@ fn transact_rejects_non_canonical_gvk_ciphertext_field() {
     }
 }
 
+/// A ciphertext field of the modulus minus one is canonical, so the call
+/// reaches the verifier. Excluding only `NonCanonicalPublicInput` would pass on
+/// an earlier refusal too.
 #[test]
 fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
     let env = test_env();
@@ -1406,9 +1431,9 @@ fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
     boundary_output.c1 = bn256_modulus(&env).sub(&one);
     proof.output_gvk_ciphertexts.set(0, boundary_output);
 
-    assert!(!matches!(
+    assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
+        Err(Ok(Error::InvalidProof))
     ));
 }
 

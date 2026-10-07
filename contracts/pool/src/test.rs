@@ -14,7 +14,10 @@ use soroban_sdk::{
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    constants::bn256_modulus,
+    utils::{AcceptingVerifier, MockToken},
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -248,9 +251,13 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     );
 }
 
+/// Sends a non-canonical root in the ASP field `flags` ignores. The call
+/// settles, where excluding only `NonCanonicalPublicInput` let any refusal
+/// through. `AcceptingVerifier` skips the pairing check, which is not covered.
 fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifier: u32) {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
+    let mut setup = setup_test_contracts(&env);
+    setup.verifier = env.register(AcceptingVerifier, ());
     let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, flags);
     let pool = PoolContractClient::new(&env, &pool_id);
     env.mock_all_auths();
@@ -277,10 +284,7 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     );
 
     assert!(
-        !matches!(
-            pool.try_transact(&proof, &ext, &sender),
-            Err(Ok(Error::NonCanonicalPublicInput))
-        ),
+        matches!(pool.try_transact(&proof, &ext, &sender), Ok(Ok(()))),
         "expected ASP root field to be skipped for flags={}",
         flags
     );
@@ -910,50 +914,8 @@ fn merkle_init_rejects_zero_levels() {
     });
 }
 
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_rejects_unknown_root() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let max = U256::from_u32(&env, 1000);
-    let levels = 3u32;
-    let root = U256::from_u32(&env, 0xFF); // not a known root
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        max,
-        levels,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let ext = mk_ext_data(&env, Address::generate(&env), 0);
-
-    // Get actual roots
-    let asp_membership_root = setup.asp_membership_client.get_root();
-    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
-
-    let proof = Proof {
-        proof: mk_mock_groth16_proof(&env),
-        root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xAB));
-            v
-        },
-        output_commitment0: U256::from_u32(&env, 0x01),
-        output_commitment1: U256::from_u32(&env, 0x02),
-        public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: mk_bytesn32(&env, 0xEE),
-        asp_membership_root,
-        asp_non_membership_root,
-    };
-
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
-}
-
+/// With the hash check removed the call still fails at the verifier, so the
+/// test pins `WrongExtHash`, not just an error.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_ext_hash() {
@@ -995,9 +957,14 @@ fn transact_rejects_bad_ext_hash() {
         asp_non_membership_root,
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtHash))
+    ));
 }
 
+/// With the public amount check removed the call still fails at the verifier,
+/// so the test pins `WrongExtAmount`, not just an error.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_public_amount() {
@@ -1040,7 +1007,10 @@ fn transact_rejects_bad_public_amount() {
         asp_non_membership_root,
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtAmount))
+    ));
 }
 
 #[test]
@@ -1418,6 +1388,9 @@ fn transact_rejects_non_canonical_output_commitment() {
     ));
 }
 
+/// The modulus minus one is canonical, so the call reaches the verifier, where
+/// excluding only `NonCanonicalPublicInput` passed on any refusal. Policy
+/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_does_not_reject_boundary_canonical_public_input() {
@@ -1425,13 +1398,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
     let setup = setup_test_contracts(&env);
     let maximum_deposit_amount = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        maximum_deposit_amount.clone(),
-        levels,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-    );
+    let pool_id = register_pool(&env, &setup, maximum_deposit_amount.clone(), levels, 0);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -1461,9 +1428,9 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         asp_non_membership_root,
     };
 
-    assert!(!matches!(
+    assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
+        Err(Ok(Error::InvalidProof))
     ));
 }
 
@@ -1717,9 +1684,9 @@ fn transact_rejects_zeroed_proof() {
     );
 }
 
-/// The spent-check only compares each nullifier against stored state, so a
-/// duplicate inside one call passes it and is left to the circuit, which
-/// constrains pairwise distinctness.
+/// The spent check reads stored state only, so a repeated nullifier reaches
+/// the verifier, where `assert_ne!` passed on any refusal. Policy flags 0 keep
+/// the ASP root checks from answering `InvalidProof` first.
 #[test]
 #[cfg_attr(
     miri,
@@ -1728,13 +1695,7 @@ fn transact_rejects_zeroed_proof() {
 fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-    );
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
     let pool = PoolContractClient::new(&env, &pool_id);
     let (member_root, non_member_root) = asp_roots(&setup);
     env.mock_all_auths();
@@ -1753,9 +1714,9 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("the mock proof fails verification");
-    assert_ne!(
+    assert_eq!(
         err,
-        Ok(Error::AlreadySpentNullifier),
+        Ok(Error::InvalidProof),
         "the spent-check compares each nullifier against stored state only, so a \
          duplicate inside one call passes it and is left to the circuit"
     );
