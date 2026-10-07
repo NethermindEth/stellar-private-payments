@@ -83,23 +83,22 @@ check() {
   fi
 }
 
-# Prints a persistent entry's value as JSON, or `null` when there is no entry. The status is kept
-# so a caller can tell an unreadable entry from an absent one.
+# Prints an entry's value as JSON, or `null` if absent. A failed read exits non-zero, so callers
+# can tell it from an absent entry.
 read_entry() {
   stellar ledger entry fetch contract-data --contract "$1" --network "$NETWORK" --key-xdr "$2" \
     | jq -c '.entries[0].val.contract_data.val'
 }
 
-# `Admin` and `PendingAdmin` are unit variants, which the SDK encodes as a one-symbol ScVec, so the
-# key is built as XDR. Prints `none` when there is no entry.
+# Prints the address under a unit-variant key (a one-symbol ScVec, built as XDR), or `none`.
 read_address() {
   local key
   key="$(printf '{"vec":[{"symbol":"%s"}]}' "$2" | stellar xdr encode --type ScVal)"
   read_entry "$1" "$key" | jq -r '.address // "none"'
 }
 
-# Prints the address an instance entry, as `read_entry` prints it, stores under a unit-variant key,
-# or nothing.
+# Prints the address that an instance entry from `read_entry` stores under a unit-variant key, or
+# nothing.
 stored() {
   jq -r --arg key "$2" '.contract_instance.storage[]? | select(.key.vec[0].symbol == $key)
     | .val.address' <<<"$1"
@@ -107,13 +106,12 @@ stored() {
 
 ADMIN="$(jq -r '.admin' "$MANIFEST")"
 DEPLOYER="$(jq -r '.deployer' "$MANIFEST")"
-# `enabled` only tells clients which pools to show. A disabled pool still holds funds and takes
-# deposits on chain, so it is checked like the others.
+# Disabled pools too: `enabled` only hides a pool from clients; on chain it still takes deposits.
 POOLS="$(jq -r '.pools[].poolContractId' "$MANIFEST")"
 ALLOWLISTS="$(jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId' "$MANIFEST")"
 
-# Each contract and the admin it should have. A pool may read an allowlist another party runs
-# under its own admin, which that allowlist's manifest entry names.
+# Each contract and its expected admin. An allowlist another party runs names its own admin in
+# its manifest entry.
 TARGETS="$(jq -r --arg admin "$ADMIN" '(.pools[].poolContractId, .asp_membership
   | "\(.) \($admin)"), ((.added_asp_memberships // [])[] | "\(.contractId) \(.admin // $admin)"),
   (.asp_non_membership | "\(.) \($admin)")' "$MANIFEST")"
@@ -126,8 +124,8 @@ while read -r target want <&3; do
 done 3<<<"$TARGETS"
 
 step "counting the contracts clients index"
-# The SDK reads the events of every enabled pool, every allowlist the manifest names, and the public
-# key registry in one request of at most five filters of five contracts, and refuses a larger set.
+# The SDK reads enabled pools, every named allowlist, and the registry in one request of at most
+# five filters of five contracts.
 INDEXED="$(jq '([.pools[] | select(.enabled)] | length) + 2
   + ((.added_asp_memberships // []) | length)' "$MANIFEST")"
 ((INDEXED <= 25)) && GOT="at most 25" || GOT="$INDEXED"
@@ -136,8 +134,7 @@ check manifest "indexed contracts" "at most 25" "$GOT"
 HASHES="$(jq -c 'select(has("asp_membership_wasm_hash") or has("asp_non_membership_wasm_hash"))
   | [.asp_membership_wasm_hash, .asp_non_membership_wasm_hash]' "$MANIFEST")"
 [[ -n "$HASHES" ]] || step "no tree code hashes in $MANIFEST, skipping the tree code checks"
-# The trees the admin checks above cover. A re-point changes nothing in the manifest, so a tree a
-# pool reads beyond these is checked below, once.
+# Trees the admin checks above cover. A re-pointed pool can read others, checked once below.
 CHECKED="$(jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId,
   .asp_non_membership' "$MANIFEST")"
 
@@ -146,8 +143,7 @@ for pool in $POOLS; do
   # AAAAFA== is the key of the contract's instance entry, which holds the pool's token and trees.
   instance="$(read_entry "$pool" AAAAFA==)" \
     || { check "$pool" instance readable unreadable; instance=null; }
-  # The token rule deploy.sh applies before it deploys anything, checked here against the token
-  # the pool stores.
+  # deploy.sh's token rule, checked against the token the pool stores.
   asset="$(jq -r --arg pool "$pool" 'first(.pools[] | select(.poolContractId == $pool)).asset
     | if .kind == "classic" then "\(.code):\(.issuer)" else .kind end' "$MANIFEST")"
   case "$asset" in

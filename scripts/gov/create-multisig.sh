@@ -70,8 +70,8 @@ if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
   die "mainnet requires --yes"
 fi
 
-# The CLI turns an alias into its address, so an alias beside its own address would pass the
-# checks below as two signers and leave the account short of its threshold.
+# Addresses only: the CLI resolves aliases, so an alias plus its address would count as two signers
+# and leave the account short of its threshold.
 for signer in "${SIGNERS[@]}"; do
   [[ "$signer" =~ ^G[A-Z2-7]{55}$ ]] || die "--signer takes an account address (G...), got $signer"
 done
@@ -90,15 +90,13 @@ if [[ "$FUND" == "true" ]]; then
   stellar keys fund "$ACCOUNT" --network "$NETWORK"
 fi
 
-# A signer already on the account keeps its weight beside the new set, so one of weight at least
-# the threshold would still control the account alone.
+# An existing signer would keep its weight beside the new set, possibly enough to act alone.
 EXISTING="$(stellar ledger entry fetch account --account "$ACCOUNT" --network "$NETWORK" \
   --output json | jq '.entries[0].val.account.signers | length')"
 [[ "$EXISTING" -eq 0 ]] || die "$ACCOUNT_ADDR already has $EXISTING signers; start from a fresh account"
 
-# The master weight drops to zero in the same transaction that adds the signers, and the
-# network checks the signature against the account as it was before the transaction, so the
-# account's own key is enough to authorize the change.
+# The network checks signatures against the account as it was before the transaction, so the
+# account's own key can authorize the change that sets its weight to zero.
 step "building the signer set for $ACCOUNT_ADDR"
 # One operation per signer plus the one that sets the thresholds, each charged the 100-stroop
 # base fee. See https://developers.stellar.org/docs/learn/fundamentals/fees-resource-limits-metering.

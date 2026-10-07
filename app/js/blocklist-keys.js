@@ -2,8 +2,7 @@
  * Converts between the note public keys an admin enters for the blocklist and
  * the keys the blocklist stores, and builds the call that adds them.
  *
- * Kept apart from `admin.js`, which wires the page, so Node can import it for
- * unit testing.
+ * Separate from `admin.js` so Node can import it in unit tests.
  */
 
 // The form the app shows a note public key in: `0x` and 32 bytes of hex.
@@ -12,8 +11,8 @@ const NOTE_PUBLIC_KEY = /^0x[0-9a-fA-F]{64}$/;
 /**
  * Parses note public keys, one per line, into the blocklist keys they stand for.
  *
- * Skips blank lines and repeated keys, which would fail a batched insert
- * whole, and returns the keys in the order of their first lines.
+ * Skips blank lines and repeats, which would fail a batched insert, and keeps
+ * first-seen order.
  *
  * @param {string} text
  * @returns {bigint[]}
@@ -47,8 +46,7 @@ export function blocklistKeyToNoteKey(key) {
  * value.
  *
  * @param {bigint[]} keys
- * @param {boolean} batched - Whether the blocklist has `insert_leaves`, which
- *   a blocklist deployed before batched inserts lacks.
+ * @param {boolean} batched - Whether the blocklist has `insert_leaves`.
  * @returns {{method: string, args: Object}}
  * @throws {Error} when the blocklist has no `insert_leaves` and more than one
  *   key is given.
