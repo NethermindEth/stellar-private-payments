@@ -1244,6 +1244,38 @@ fn transact_rejects_an_evicted_asp_membership_root() {
     ));
 }
 
+/// The pool compares the blocklist root with the current one only, so a root
+/// one insert old is refused. The output commitment `r` would stop a call that
+/// passed that check with `NonCanonicalPublicInput`.
+#[test]
+fn transact_rejects_a_blocklist_root_one_insert_old() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (member_root, stale_root) = asp_roots(&setup);
+    setup
+        .asp_non_membership_client
+        .insert_leaf(&U256::from_u32(&env, 1), &U256::from_u32(&env, 1));
+
+    let (mut proof, ext) =
+        mk_transact_proof(&env, &pool, &setup.token, member_root, stale_root, 0xBA);
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a stale blocklist root must be refused");
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_skips_asp_root_canonical_validation_when_flags_ignore_field() {
