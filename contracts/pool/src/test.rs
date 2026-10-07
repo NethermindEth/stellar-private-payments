@@ -1774,20 +1774,25 @@ fn transact_rejects_deposit_above_maximum() {
     assert_eq!(err, Ok(Error::WrongExtAmount));
 }
 
-/// A deposit exactly at the maximum is not rejected by the bound itself. It
-/// still fails later on the mock proof, which is what pins the boundary as
-/// inclusive rather than off by one.
+/// A deposit equal to the cap settles and moves the cap. Excluding only
+/// `WrongExtAmount` would pass on any other refusal too. `AcceptingVerifier`
+/// stands in for the pairing check, which this test does not cover.
 #[test]
 fn transact_accepts_deposit_at_maximum_bound() {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let max = 1000u32;
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, max), 3, 0);
-    let pool = PoolContractClient::new(&env, &pool_id);
-    let (member_root, non_member_root) = asp_roots(&setup);
+    let mut setup = setup_test_contracts(&env);
     env.mock_all_auths();
 
-    let (proof, _) = mk_transact_proof(
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let (mut proof, _) = mk_transact_proof(
         &env,
         &pool,
         &setup.token,
@@ -1795,17 +1800,42 @@ fn transact_accepts_deposit_at_maximum_bound() {
         non_member_root,
         0xD2,
     );
-    let at_max = i32::try_from(max).expect("max must fit i32");
-    let at = mk_ext_data(&env, Address::generate(&env), at_max);
+    let at = mk_ext_data(&env, Address::generate(&env), 1000);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &at);
+    proof.public_amount = U256::from_u32(&env, 1000);
+
+    pool.transact(&proof, &at, &sender);
+    assert_eq!(token.balance(&sender), 9_000);
+    assert_eq!(token.balance(&pool_id), 1000);
+}
+
+/// The 2^200 cap and the matching public amount pass 2^127, so only the
+/// `i128` conversion before the transfer refuses it.
+#[test]
+fn transact_rejects_a_deposit_past_i128_under_a_larger_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_parts(&env, 0x100, 0, 0, 0), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, mut ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD3,
+    );
+    ext.ext_amount = I256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+    proof.public_amount = U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
 
     let err = pool
-        .try_transact(&proof, &at, &Address::generate(&env))
-        .expect_err("the mock proof still fails verification");
-    assert_ne!(
-        err,
-        Ok(Error::WrongExtAmount),
-        "a deposit equal to the maximum must not be rejected by the bound"
-    );
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a deposit past i128 must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
 }
 
 /// An all-zero proof must be refused with a clean error rather than panicking.

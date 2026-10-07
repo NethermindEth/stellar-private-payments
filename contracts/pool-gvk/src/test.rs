@@ -2237,6 +2237,122 @@ fn transact_rejects_deposit_over_maximum() {
     ));
 }
 
+/// A deposit equal to the cap settles and moves the cap. `AcceptingVerifier`
+/// stands in for the pairing check, which this test does not cover.
+#[test]
+fn transact_accepts_deposit_at_maximum_bound() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD2,
+        VIEW_ONLY,
+    );
+    let at = mk_ext_data(&env, Address::generate(&env), 1000);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &at);
+    proof.public_amount = U256::from_u32(&env, 1000);
+
+    pool.transact(&proof, &at, &sender);
+    assert_eq!(token.balance(&sender), 9_000);
+    assert_eq!(token.balance(&pool_id), 1000);
+}
+
+/// The 2^200 cap and the matching public amount pass 2^127, so only the
+/// `i128` conversion before the transfer refuses it.
+#[test]
+fn transact_rejects_a_deposit_past_i128_under_a_larger_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_parts(&env, 0x100, 0, 0, 0),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, mut ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD3,
+        VIEW_ONLY,
+    );
+    ext.ext_amount = I256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+    proof.public_amount = U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a deposit past i128 must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
+}
+
+/// A zero cap does not refuse a zero `ext_amount`, so only the verifier
+/// refuses the mock proof.
+#[test]
+fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 0),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE4,
+        VIEW_ONLY,
+    );
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
 /// Replaying the same nullifier must be rejected
 #[test]
 fn transact_rejects_replayed_nullifier() {
