@@ -1,6 +1,6 @@
 use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data,
-    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState},
+    merkle_with_history::{Error as MerkleError, MerkleDataKey, MerkleTreeWithHistory, TreeState},
     policy,
     pool::DataKey,
 };
@@ -371,6 +371,8 @@ fn pool_constructor_sets_state() {
     let _root = pool.get_root();
 }
 
+/// The tree already exists, so the second init must answer
+/// `AlreadyInitialized`. Asserting only an error passed on any other failure.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn merkle_init_only_once() {
@@ -391,9 +393,8 @@ fn merkle_init_only_once() {
     );
 
     env.as_contract(&pool_id, || {
-        // Second init should return AlreadyInitialized error
         let result = MerkleTreeWithHistory::init(&env, levels);
-        assert!(result.is_err());
+        assert!(matches!(result, Err(MerkleError::AlreadyInitialized)));
     });
 }
 
@@ -864,6 +865,8 @@ fn pool_is_known_root_returns_false_for_evicted_root() {
     assert!(!pool.is_known_root(&evicted_root));
 }
 
+/// A depth-1 tree takes one pair. Asserting only an error would also pass on
+/// `NextIndexNotEven` or `NotInitialized`, so the test pins `MerkleTreeFull`.
 #[test]
 fn merkle_insert_fails_when_full() {
     let env = test_env();
@@ -888,10 +891,12 @@ fn merkle_insert_fails_when_full() {
 
         // Second insert should fail with MerkleTreeFull error
         let result2 = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1, leaf2);
-        assert!(result2.is_err());
+        assert!(matches!(result2, Err(MerkleError::MerkleTreeFull)));
     });
 }
 
+/// The tree already exists, so asserting only an error would pass on
+/// `AlreadyInitialized` with the depth check removed.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn merkle_init_rejects_zero_levels() {
@@ -910,7 +915,23 @@ fn merkle_init_rejects_zero_levels() {
 
     env.as_contract(&pool_id, || {
         let result = MerkleTreeWithHistory::init(&env, levels);
-        assert!(result.is_err());
+        assert!(matches!(result, Err(MerkleError::WrongLevels)));
+    });
+}
+
+/// A pool of 32 levels constructs, and 33 levels is refused before the
+/// existing tree could answer `AlreadyInitialized`.
+#[test]
+fn merkle_init_bounds_the_depth_at_32() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 32, 0);
+
+    env.as_contract(&pool_id, || {
+        assert!(matches!(
+            MerkleTreeWithHistory::init(&env, 33),
+            Err(MerkleError::WrongLevels)
+        ));
     });
 }
 
@@ -2137,6 +2158,50 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// A depth-1 tree holds one pair, so the first deposit settles and the second
+/// is refused after verification. `AcceptingVerifier` stands in for the
+/// pairing check, which this test does not cover.
+#[test]
+fn transact_refuses_an_insertion_into_a_full_tree() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 1, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let deposit = |nullifier| {
+        let (mut proof, _) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root.clone(),
+            non_member_root.clone(),
+            nullifier,
+        );
+        let ext = mk_ext_data(&env, Address::generate(&env), 100);
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+        proof.public_amount = U256::from_u32(&env, 100);
+        (proof, ext)
+    };
+
+    let (proof, ext) = deposit(1);
+    pool.transact(&proof, &ext, &sender);
+
+    let (proof, ext) = deposit(2);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a full tree must refuse the next insertion");
+    assert_eq!(err, Ok(Error::MerkleTreeFull));
+    assert_eq!(token.balance(&sender), 9_900);
+    assert_eq!(token.balance(&pool_id), 100);
 }
 
 /// Cross-pool regression test for proof-domain binding.

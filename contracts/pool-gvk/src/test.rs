@@ -2518,6 +2518,59 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
     );
 }
 
+/// A depth-1 tree holds one pair, so the first deposit settles and the second
+/// is refused after verification. `AcceptingVerifier` stands in for the
+/// pairing check, which this test does not cover.
+#[test]
+fn transact_refuses_an_insertion_into_a_full_tree() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        1,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let deposit = |nullifier| {
+        let (mut proof, _) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root.clone(),
+            non_member_root.clone(),
+            nullifier,
+            VIEW_ONLY,
+        );
+        let ext = mk_ext_data(&env, Address::generate(&env), 100);
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+        proof.public_amount = U256::from_u32(&env, 100);
+        (proof, ext)
+    };
+
+    let (proof, ext) = deposit(1);
+    pool.transact(&proof, &ext, &sender);
+
+    let (proof, ext) = deposit(2);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a full tree must refuse the next insertion");
+    assert_eq!(err, Ok(Error::MerkleTreeFull));
+    assert_eq!(token.balance(&sender), 9_900);
+    assert_eq!(token.balance(&pool_id), 100);
+}
+
 /// Pool B shares pool A's verifier, ASP contracts, and depth, but not its
 /// address or token, so pool A's `(proof, ExtData)` must stop at pool B's
 /// `ext_data_hash` check.
