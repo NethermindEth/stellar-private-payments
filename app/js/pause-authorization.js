@@ -1,9 +1,8 @@
 /**
- * Deposit pauses that the admin account's signers authorize ahead of time, for
- * a holder to send from the holder's own account when deposits must stop.
+ * Deposit pauses the admin's signers authorize ahead of time, which a holder
+ * sends from their own account.
  *
- * Kept apart from `admin.js`, which wires the page, so Node can import it for
- * unit testing.
+ * Separate from `admin.js` so Node can import it in unit tests.
  */
 import {
   Account,
@@ -36,9 +35,8 @@ const MAX_ENTRY_TTL = 3_110_400;
  * Builds an unsigned authorization, by a pool's admin, of one
  * `pause_deposits()` call on the pool.
  *
- * The authorization expires `MAX_ENTRY_TTL - 1` ledgers after `latestLedger`,
- * the furthest ahead the host accepts. Any later ledger that uses it lies
- * closer to that expiration, so the host accepts it until it expires.
+ * Expires `MAX_ENTRY_TTL - 1` ledgers after `latestLedger`, the latest the
+ * host accepts.
  *
  * @param {Object} pause
  * @param {string} pause.admin - The pool's admin, whose signers sign the authorization.
@@ -145,9 +143,8 @@ export function walletSignature(signedAuthEntry) {
   return Uint8Array.from(atob(signedAuthEntry), (char) => char.charCodeAt(0));
 }
 
-// Reads what an authorization pauses, who authorizes it, and who has signed.
-// A file can come from anyone, so an entry for any other call is refused
-// before a signer signs it.
+// Reads a pause authorization's pool, admin, nonce, expiry, and signers. Files
+// can come from anyone, so an entry for any other call is refused.
 function describePause(entry) {
   const call = entry.rootInvocation.function.contractFn;
   if (
@@ -216,11 +213,10 @@ export function decodeAuthorization(text) {
  * account.
  *
  * Returns `{ xdr }`, the simulated, unsigned envelope for the holder to sign,
- * or `{ paused: true }`, building nothing, when the pool is already paused:
- * a pause sent there would succeed, change nothing, and spend the
- * authorization. The simulation enforces the entry, so a signature that is
- * missing or wrong fails here rather than on chain. When the pool's `Admin`
- * entry is archived, the pause restores it, and the holder pays for that.
+ * or `{ paused: true }` when the pool is already paused, where a pause would
+ * only spend the authorization. The simulation checks the signatures, so a
+ * missing or wrong one fails here rather than on chain. If the pool's `Admin`
+ * entry is archived, the pause restores it at the holder's cost.
  *
  * @param {Object} pause
  * @param {string} pause.rpcUrl - The RPC that simulates the pause.
@@ -251,9 +247,8 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
   };
   const read = await simulate(build(new Account(contract.NULL_ACCOUNT, '0'), new Contract(pool).call('deposits_paused')));
   if (scValToNative(read.result.retval)) return { paused: true };
-  // A pause is sent when deposits must stop now, so it bids the 99th
-  // percentile of the inclusion fees recent Soroban transactions paid, and
-  // never less than the minimum, to land while fees surge.
+  // A pause must land now, so it bids the 99th percentile of recent Soroban
+  // inclusion fees, never below the minimum, to land during a fee surge.
   const [account, { sorobanInclusionFee }] = await Promise.all([server.getAccount(source), server.getFeeStats()]);
   const tx = build(
     account,
@@ -270,11 +265,9 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
     if (!/Error\(Auth, InvalidAction\)/.test(err.message)) throw err;
     throw new Error('The file does not authorize the pause: it carries too few signatures, a removed signer\'s, or a previous admin\'s. The signers sign a new file.');
   });
-  // A pause on a paused pool publishes `deposit_pause_repeated` and no
-  // `DepositPauseChanged` event, which `#[contractevent]` names
-  // `deposit_pause_changed`. Its footprint leaves the pool's instance
-  // unwritten, so an unpause that lands first would make it fail on chain and
-  // publish the authorization unspent.
+  // Without a `deposit_pause_changed` event, the simulation saw a paused pool.
+  // Its footprint leaves the instance unwritten, so an unpause landing first
+  // would fail it on chain and publish the authorization unspent.
   if (!simulation.events.some(({ event }) => scValToNative(event.body.v0.topics[0]) === 'deposit_pause_changed')) {
     return { paused: true };
   }

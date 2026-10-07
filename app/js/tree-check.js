@@ -1,10 +1,8 @@
 /**
- * Reads a tree's code, settings, and entries from the network, and checks
- * them against the pool, the manifest, and the records an operator keeps,
- * before a pool is re-pointed to the tree.
+ * Re-point checks: reads a tree's code, settings, and entries and compares
+ * them with the pool, the manifest, and the operator's records.
  *
- * Kept apart from `admin.js`, which wires the page, so Node can import it for
- * unit testing.
+ * Separate from `admin.js` so Node can import it in unit tests.
  */
 import { scValToNative, xdr } from '@stellar/stellar-sdk';
 
@@ -12,9 +10,7 @@ import { scValToNative, xdr } from '@stellar/stellar-sdk';
  * Reads a contract's instance entry: the hash of the Wasm it runs, and its
  * instance storage by key.
  *
- * The contracts' instance keys are `DataKey` variants, which encode as a
- * vector holding the variant's name, so `stored` maps each variant's name to
- * its value.
+ * `stored` maps each `DataKey` variant's name to its value.
  *
  * @param {rpc.Server} server - The RPC client.
  * @param {string} contractId
@@ -62,11 +58,10 @@ export async function eventsSince(server, contractId, startLedger) {
 /**
  * Returns the ledger from which the re-point check reads a tree's events.
  *
- * An added allowlist's history starts at the ledger its manifest entry names.
- * The deployment's own allowlist's is read from the earliest pool's, which
- * comes after the allowlist's own deployment, so a leaf added in between
- * fails the read rather than going unseen. A blocklist's is the ledger the
- * operator enters.
+ * An added allowlist starts at its manifest entry's ledger, and a blocklist at
+ * the ledger the operator enters. The manifest's own allowlist starts at the
+ * earliest pool's ledger, after its own deployment, so a leaf added in between
+ * fails the read rather than going unseen.
  *
  * @param {Object} options
  * @param {boolean} options.allowlist - Whether the tree is an allowlist.
@@ -161,9 +156,7 @@ export function manifestLine(manifest, tree) {
   throw new Error('names the allowlist in neither asp_membership nor added_asp_memberships, so clients cannot prove against it');
 }
 
-// Returns the name and fields of a tree event, given as the RPC's `getEvents`
-// returns it. A tree event carries its name in its first topic and its fields
-// in a map.
+// Returns a `getEvents` tree event's name (its first topic) and fields (a map).
 const decode = ({ topic: [name], value }) => ({ name: scValToNative(name), ...scValToNative(value) });
 
 /**

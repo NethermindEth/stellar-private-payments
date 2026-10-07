@@ -1,15 +1,18 @@
 /**
- * Converts the note public keys an admin enters into blocklist keys, and back,
- * builds the call that adds them, and warns of a write to a blocklist no pool
- * reads. Kept out of `admin.js` so Node unit tests can import it.
+ * Converts note public keys to blocklist keys and back, builds the insert
+ * call, and warns of writes to a blocklist no pool reads.
+ *
+ * Separate from `admin.js` so Node can import it in unit tests.
  */
 
 // The form the app shows a note public key in: `0x` and 32 bytes of hex.
 const NOTE_PUBLIC_KEY = /^0x[0-9a-fA-F]{64}$/;
 
 /**
- * Parses note public keys, one per line, into blocklist keys in first-seen order.
- * Skips blank lines and repeats, since a repeat fails a batched insert.
+ * Parses note public keys, one per line, into the blocklist keys they stand for.
+ *
+ * Skips blank lines and repeats, which would fail a batched insert, and keeps
+ * first-seen order.
  *
  * @param {string} text
  * @returns {bigint[]}
@@ -28,20 +31,25 @@ export function parseBlocklistKeys(text) {
 }
 
 /**
- * Returns the note public key a blocklist key stands for: `0x` and the key's 32
- * bytes in reverse order.
+ * Returns the note public key a blocklist key stands for, in the form the
+ * Blocklist tab takes it: `0x` and the key's 32 bytes in reverse order.
+ *
+ * @param {bigint} key - A key as the blocklist stores it.
+ * @returns {string}
  */
 export function blocklistKeyToNoteKey(key) {
   return `0x${key.toString(16).padStart(64, '0').match(/../g).reverse().join('')}`;
 }
 
 /**
- * Returns the call that adds `keys`, each with itself as its value.
+ * Returns the blocklist call that adds `keys`, each listed with itself as its
+ * value.
  *
  * @param {bigint[]} keys
- * @param {boolean} batched Whether the blocklist has `insert_leaves`.
+ * @param {boolean} batched - Whether the blocklist has `insert_leaves`.
  * @returns {{method: string, args: Object}}
- * @throws {Error} for more than one key without `insert_leaves`.
+ * @throws {Error} when the blocklist has no `insert_leaves` and more than one
+ *   key is given.
  */
 export function blocklistInsertCall(keys, batched) {
   if (batched) return { method: 'insert_leaves', args: { entries: keys.map((key) => [key, key]) } };
@@ -53,8 +61,8 @@ export function blocklistInsertCall(keys, batched) {
  * Returns the warning a blocklist write needs when no pool reads the blocklist
  * it targets, or `null` when a pool does.
  *
- * A pool re-pointed to another blocklist leaves the manifest's in place, and a
- * key written to a blocklist no pool reads blocks or releases no one.
+ * After a re-point the manifest's blocklist may go unread, and a write there
+ * blocks or releases no one.
  *
  * @param {string} blocklist - The blocklist the write targets.
  * @param {string[]} readBlocklists - The blocklist each pool reads.
