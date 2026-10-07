@@ -66,10 +66,10 @@ pub enum Error {
     #[error("event history is unavailable: {0}")]
     RetentionGap(#[from] RetentionGap),
 
-    /// An untyped failure and its `anyhow` cause chain.
+    /// An untyped failure.
     ///
-    /// The message holds the whole chain, so the variant reports no `source`:
-    /// a reporter that walks sources would print every cause twice.
+    /// The message holds the whole `anyhow` cause chain, so the variant has no
+    /// `source`, which would print every cause twice.
     #[error("{0:#}")]
     Other(anyhow::Error),
 }
