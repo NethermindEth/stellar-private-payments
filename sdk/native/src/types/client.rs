@@ -126,6 +126,7 @@ mod split_tests {
                 rpc_url: None,
 
                 network: String::new(),
+                kdf_domain: String::new(),
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),

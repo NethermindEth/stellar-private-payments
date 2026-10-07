@@ -1,6 +1,6 @@
 use super::*;
 use soroban_sdk::{
-    Address, Bytes, Env,
+    Address, Bytes, Env, String,
     testutils::{Address as _, Events as _},
 };
 
@@ -18,6 +18,12 @@ fn test_env() -> Env {
     }
 }
 
+const KDF_DOMAIN: &str = "tests";
+
+fn register(env: &Env) -> Address {
+    env.register(PublicKeyRegistry, (String::from_str(env, KDF_DOMAIN),))
+}
+
 fn account(env: &Env, owner: Address, enc_fill: u8, note_fill: u8) -> Account {
     Account {
         owner,
@@ -29,7 +35,7 @@ fn account(env: &Env, owner: Address, enc_fill: u8, note_fill: u8) -> Account {
 #[test]
 fn register_saves_registration() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = account(&env, owner.clone(), 0x11, 0x22);
@@ -50,7 +56,7 @@ fn register_saves_registration() {
 #[test]
 fn duplicate_registration_is_noop() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = account(&env, owner.clone(), 0x11, 0x22);
@@ -76,7 +82,7 @@ fn duplicate_registration_is_noop() {
 #[test]
 fn key_rotation_overwrites_registration() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let initial = account(&env, owner.clone(), 0x11, 0x22);
@@ -104,7 +110,7 @@ fn key_rotation_overwrites_registration() {
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn register_requires_owner_auth() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = account(&env, owner, 0x11, 0x22);
@@ -116,7 +122,7 @@ fn register_requires_owner_auth() {
 #[should_panic]
 fn register_rejects_short_encryption_key() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = Account {
@@ -133,7 +139,7 @@ fn register_rejects_short_encryption_key() {
 #[should_panic]
 fn register_rejects_short_note_key() {
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = Account {
@@ -150,7 +156,7 @@ fn register_rejects_short_note_key() {
 fn test_public_key_event_exact_shape() {
     use soroban_sdk::events::Event;
     let env = test_env();
-    let contract_id = env.register(PublicKeyRegistry, ());
+    let contract_id = register(&env);
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
     let account = account(&env, owner.clone(), 0x11, 0x22);
@@ -168,4 +174,11 @@ fn test_public_key_event_exact_shape() {
     }
     .to_xdr(&env, &contract_id);
     assert_eq!(events.events()[0], expected);
+}
+
+#[test]
+fn get_kdf_domain_returns_constructor_value() {
+    let env = test_env();
+    let client = PublicKeyRegistryClient::new(&env, &register(&env));
+    assert_eq!(client.get_kdf_domain(), String::from_str(&env, KDF_DOMAIN));
 }

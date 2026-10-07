@@ -45,7 +45,7 @@ export interface ContractConfigInput {
   network: string;
   networkPassphrase?: string;
   rpcUrl?: string;
-
+  kdf_domain: string;
   deployer: string;
   admin: string;
   asp_membership: string;

@@ -41,7 +41,8 @@ pub struct ContractConfig {
     pub network_passphrase: Option<String>,
     #[serde(default, rename = "rpcUrl", skip_serializing_if = "Option::is_none")]
     pub rpc_url: Option<String>,
-
+    /// Privacy key derivation domain.
+    pub kdf_domain: String,
     pub deployer: String,
     pub admin: String,
     /// Address of ASP membership deployed contract

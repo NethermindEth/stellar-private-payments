@@ -48,6 +48,7 @@ Options:
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
+  --kdf-domain STRING   Privacy key derivation domain (required)
   --policy-flags SPEC   Default pool ASP policy when a --pool spec omits the prefix:
                         none, allowlist, blocklist, or allowlist-blocklist (required when
                         running constructors unless every --pool spec includes a policy prefix)
@@ -68,7 +69,8 @@ Examples:
     --pool allowlist-blocklist:contract:CC... \
     --asp-levels 10 \
     --pool-levels 20 \
-    --max-deposit 1000000000
+    --max-deposit 1000000000 \
+    --kdf-domain Nethermind
 
   # GVK traceable blocklist pool
   deployments/scripts/deploy.sh futurenet \
@@ -77,7 +79,8 @@ Examples:
     --pool blocklist:gvk-traceable:native:CB... \
     --asp-levels 10 \
     --pool-levels 20 \
-    --max-deposit 1000000000
+    --max-deposit 1000000000 \
+    --kdf-domain Nethermind
 
   # Mixed plain + GVK in one deployment
   deployments/scripts/deploy.sh futurenet \
@@ -87,7 +90,8 @@ Examples:
     --pool blocklist:gvk-traceable:contract:CC... \
     --asp-levels 10 \
     --pool-levels 20 \
-    --max-deposit 1000000000
+    --max-deposit 1000000000 \
+    --kdf-domain Nethermind
 
 Notes:
   - Each (policy, GVK mode) pair needs its own verifier contract (VK is baked into the WASM).
@@ -113,6 +117,7 @@ POOL_SPECS=()
 ASP_LEVELS=""
 POOL_LEVELS=""
 MAX_DEPOSIT=""
+KDF_DOMAIN=""
 VK_JSON=""
 VK_FILE=""
 POLICY_FLAGS_SUFFIX=""
@@ -307,6 +312,13 @@ strip_surrounding_quotes() {
   printf '%s' "$s"
 }
 
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 VERIFIER_KEY_LIST=()
 VERIFIER_ID_LIST=()
 
@@ -366,6 +378,7 @@ while [[ $# -gt 0 ]]; do
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
     --max-deposit) MAX_DEPOSIT="$2"; shift 2 ;;
+    --kdf-domain) KDF_DOMAIN="$(trim "$2")"; shift 2 ;;
     --policy-flags) POLICY_FLAGS_SUFFIX="$(parse_policy_flags_spec "$2")"; POLICY_FLAGS_EXPLICIT=true; shift 2 ;;
     --gvk-authority-pubkey) GVK_AUTHORITY_PUB_KEY_JSON="$2"; shift 2 ;;
     --gvk-authority-pubkey-file) GVK_AUTHORITY_PUB_KEY_FILE="$2"; shift 2 ;;
@@ -398,6 +411,7 @@ need jq
 [[ -n "$ASP_LEVELS" ]] || die "--asp-levels is required"
 [[ -n "$POOL_LEVELS" ]] || die "--pool-levels is required"
 [[ -n "$MAX_DEPOSIT" ]] || die "--max-deposit is required"
+[[ -n "$KDF_DOMAIN" ]] || die "--kdf-domain is required"
 
 if [[ -n "$VK_JSON" && -n "$VK_FILE" ]]; then
   die "use only one of --vk-json or --vk-file"
@@ -708,7 +722,11 @@ else
 fi
 
 step "deploy public-key-registry"
-PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM")"
+if [[ "$SKIP_INIT" != "true" ]]; then
+  PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM" --kdf-domain "$KDF_DOMAIN")"
+else
+  PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM")"
+fi
 
 POOL_IDS=()
 POOL_TOKEN_IDS=()
@@ -737,13 +755,15 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
-        --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")")"
+        --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
+        --kdf-domain "$KDF_DOMAIN")"
     else
       pool_id="$(deploy_contract pool-gvk "$POOL_GVK_WASM" \
         --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
+        --kdf-domain "$KDF_DOMAIN" \
         --admin-view-key "$GVK_AUTHORITY_PUB_KEY_COMPACT" \
         --gvk-mode "$(gvk_mode_constructor_arg "$gvk_mode")")"
       verify_deployed_gvk "$pool_id" "$gvk_mode"
@@ -774,6 +794,7 @@ Deployment complete
   Network:             $NETWORK
   Deployer:            $DEPLOYER_ADDR
   Admin:               $ADMIN_ADDR
+  KDF domain:          $KDF_DOMAIN
   ASP membership:      $ASP_MEMBERSHIP_ID
   ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
   Public key registry: $PUBLIC_KEY_REGISTRY_ID
@@ -827,7 +848,7 @@ while [[ "$_pi" -lt "$_plen" ]]; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"

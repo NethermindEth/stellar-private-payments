@@ -101,6 +101,7 @@ impl PrivatePool {
             .notes(
                 &self.config.pool_contract_id,
                 self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
             )
             .await
     }
@@ -193,6 +194,7 @@ impl PrivatePool {
 
             let inputs_req = DisclosureInputsRequest {
                 user_address: self.config.user_address.as_str().to_string(),
+                kdf_domain: self.config.contract_config.kdf_domain.clone(),
                 pool_address: self.config.pool_contract_id.clone(),
                 selected_commitments: selected_commitments.clone(),
                 pool_root: Some(pool_root),
@@ -301,6 +303,7 @@ impl PrivatePool {
             .spendable_notes(
                 &self.config.pool_contract_id,
                 self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
             )
             .await
     }
@@ -410,6 +413,7 @@ impl PrivatePool {
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
+            &self.config.contract_config.kdf_domain,
             &self.config.pool_contract_id,
             &chain,
         );
@@ -424,7 +428,10 @@ impl PrivatePool {
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {
         let (note_pub, _) = self
             .storage
-            .privacy_keys(self.config.user_address.as_str())
+            .privacy_keys(
+                self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
+            )
             .await?;
         self.fetcher
             .transact_chain_context(
@@ -496,7 +503,10 @@ impl PrivatePool {
     async fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, Error> {
         let (note_pub, enc_pub) = self
             .storage
-            .privacy_keys(self.config.user_address.as_str())
+            .privacy_keys(
+                self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
+            )
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }

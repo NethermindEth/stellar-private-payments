@@ -209,6 +209,7 @@ mod divergent_session_tests {
                 rpc_url: None,
 
                 network: PASSPHRASE.to_string(),
+                kdf_domain: String::new(),
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),

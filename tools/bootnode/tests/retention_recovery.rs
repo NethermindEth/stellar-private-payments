@@ -160,7 +160,13 @@ async fn recover_deposit(extra_pools: bool, port: u16) {
         let storage = LocalStorage::open(path.to_str().expect("path")).expect("storage");
         if !reopen {
             storage
-                .save_private_keys("GTESTACCOUNT", &note_keys, &enc_keys, &membership)
+                .save_private_keys(
+                    "GTESTACCOUNT",
+                    &config.kdf_domain,
+                    &note_keys,
+                    &enc_keys,
+                    &membership,
+                )
                 .await
                 .expect("save keys");
         }
@@ -181,13 +187,21 @@ async fn recover_deposit(extra_pools: bool, port: u16) {
             .expect("recover from retention gap");
         let notes = client
             .storage()
-            .notes(&config.pools[0].pool_contract_id, "GTESTACCOUNT")
+            .notes(
+                &config.pools[0].pool_contract_id,
+                "GTESTACCOUNT",
+                &config.kdf_domain,
+            )
             .await
             .expect("notes");
         assert_eq!(notes.len(), 1, "one recovered note, including after reopen");
         let balances = client
             .storage()
-            .list_portfolio_balances("GTESTACCOUNT", &config.portfolio_pools())
+            .list_portfolio_balances(
+                "GTESTACCOUNT",
+                &config.kdf_domain,
+                &config.portfolio_pools(),
+            )
             .await
             .expect("balances");
         assert_eq!(balances.len(), config.portfolio_pools().len());

@@ -271,7 +271,9 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getPrivacyKeys(address).catch(() => null);
+    const storedPublicKeys = await storage
+        .getPrivacyKeys(address, client().contractConfig().kdf_domain)
+        .catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();

@@ -243,6 +243,7 @@ impl PoolFixture {
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
+                soroban_sdk::String::from_str(&env, "tests"),
             ),
         );
         let mint = StellarAssetClient::new(&env, &token);
@@ -321,6 +322,7 @@ fn gvk_transact_row() -> Row {
             U256::from_u32(env, 1_000_000),
             POOL_LEVELS,
             policy::BLOCKLIST_BIT,
+            soroban_sdk::String::from_str(env, "tests"),
             view_key,
             gvk::VIEW_ONLY,
         ),
@@ -380,7 +382,10 @@ fn non_membership_rows() -> [Row; 2] {
 
 fn registry_row() -> Row {
     let env = mainnet_env();
-    let id = env.register(PublicKeyRegistry, ());
+    let id = env.register(
+        PublicKeyRegistry,
+        (soroban_sdk::String::from_str(&env, "tests"),),
+    );
     let owner = Address::generate(&env);
     PublicKeyRegistryClient::new(&env, &id).register(&Account {
         owner,
@@ -426,14 +431,14 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_099;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_099;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_099;
+    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
+    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_147;
+    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_099;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_099;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_147;
+    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_147;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_275;
+    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_323;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
