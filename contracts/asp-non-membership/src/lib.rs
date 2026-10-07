@@ -441,27 +441,21 @@ impl ASPNonMembership {
 
     /// Inserts several key-value pairs into the tree, in order.
     ///
-    /// Each pair follows the rules of [`ASPNonMembership::insert_leaf`] and
-    /// publishes its own `LeafInsertedEvent` carrying the root after that
-    /// insert. One key that is already in the tree fails the whole call and
-    /// reverts every insert before it. An empty list changes nothing.
-    /// Requires admin authorization once for the whole list.
-    ///
-    /// The transaction's write footprint bounds the number of pairs, because
-    /// each insert writes the new leaf, the nodes on its path, and the root.
-    /// Simulate the call before sending it.
+    /// Each pair follows [`ASPNonMembership::insert_leaf`] and publishes its
+    /// own `LeafInsertedEvent` with the root after that insert. The admin
+    /// authorizes once. Any existing key fails the whole call; an empty list
+    /// does nothing. Each insert writes the leaf, its path, and the root, so
+    /// the write footprint caps the list: simulate first.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::KeyAlreadyExists`] if a key is already in the tree,
-    /// including one placed earlier in `entries`, [`Error::KeyNotFound`] if a
-    /// stored node is missing or malformed, and [`Error::NotInitialized`] if
-    /// the contract has no admin address stored.
+    /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated
+    /// in `entries`, [`Error::KeyNotFound`] if a stored node is missing or
+    /// malformed, and [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn insert_leaves(env: Env, entries: Vec<(U256, U256)>) -> Result<(), Error> {
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
         entries

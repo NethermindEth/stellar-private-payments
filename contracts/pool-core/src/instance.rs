@@ -5,9 +5,8 @@
 //! policy flags, the deposit flag and the tree depth — in the contract
 //! instance, and its tree in one persistent entry. Every insertion rewrites the
 //! tree entry, so the host bumps that entry's lifetime to the network's floor
-//! each time. After the constructor, only the admin calls `pause_deposits`,
-//! `unpause_deposits`, `update_asp_membership`, and `update_asp_non_membership`
-//! rewrite the instance, so between those calls its lifetime only decays.
+//! each time. After the constructor, only the admin's pause and re-point calls
+//! rewrite the instance, so between them its lifetime only decays.
 //!
 //! That asymmetry ends with the contract archived while its tree is still live,
 //! and an archived instance takes every entry point with it rather than one

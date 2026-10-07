@@ -158,9 +158,8 @@ fn wasm_hash(contract: &Address) -> BytesN<32> {
 
 /// Deploys a contract that runs the code `contract` runs.
 ///
-/// Each natively registered contract runs code of its own, so a tree that
-/// passes the pool's code check is deployed from the hash of one that does.
-/// The deployer must authorize the deploy, so mock auths first.
+/// A natively registered contract runs its own code and fails the pool's code
+/// check. Mock auths first: the deployer authorizes the deploy.
 fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
     env.deployer()
         .with_address(Address::generate(env), [0u8; 32])
@@ -473,8 +472,8 @@ fn the_filled_subtrees_are_one_entry() {
 #[test]
 fn the_tree_is_one_persistent_entry() {
     let env = test_env();
-    // `MockToken` stores nothing persistent, and the pool takes the hash of
-    // its code for both trees, so it passes the pool's code check for both.
+    // `MockToken` stores nothing persistent and, with its own hash passed for
+    // both trees, passes the code check as either.
     let tree = env.register(MockToken, ());
     let pool_id = env.register(
         PoolContract,
@@ -904,8 +903,7 @@ fn update_asp_non_membership_publishes_the_old_and_new_tree() {
     );
 }
 
-/// Both trees run the code the pool was built with, and the blocklist's stored
-/// hash is replaced with one no tree runs. Only the blocklist re-point may then
+/// Corrupts only the stored blocklist hash, so only the blocklist re-point may
 /// refuse.
 #[test]
 fn update_asp_membership_checks_only_the_membership_hash() {
@@ -937,8 +935,7 @@ fn update_asp_membership_checks_only_the_membership_hash() {
     );
 }
 
-/// Both trees run the code the pool was built with, and the allowlist's stored
-/// hash is replaced with one no tree runs. Only the allowlist re-point may then
+/// Corrupts only the stored allowlist hash, so only the allowlist re-point may
 /// refuse.
 #[test]
 fn update_asp_non_membership_checks_only_the_non_membership_hash() {
@@ -970,8 +967,8 @@ fn update_asp_non_membership_checks_only_the_non_membership_hash() {
     );
 }
 
-/// Two distinct hashes are written directly, so the order shows whatever hashes
-/// the test host gives the trees.
+/// Writes two distinct hashes, so the order is visible whichever hashes the
+/// test host gives the trees.
 #[test]
 fn get_asp_wasm_hashes_returns_the_membership_hash_first() {
     let env = test_env();
@@ -2507,8 +2504,7 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
     );
 }
 
-/// The code `asp-membership` gives `NotInitialized` and the pool gives
-/// `WrongLevels`.
+/// Code 4: `asp-membership`'s `NotInitialized`, the pool's `WrongLevels`.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -2534,9 +2530,9 @@ impl FailingTree {
 /// Asserts that `transact` reports a failing tree in `field` as
 /// `InvalidProof`.
 ///
-/// The output commitment is outside the field, which `transact` checks after
-/// the association sets, so `InvalidProof` can only come from the failing
-/// tree. A failure crossing the pool's frame raw would read as `WrongLevels`.
+/// The output commitment is outside the field, which `transact` checks only
+/// after the trees, so `InvalidProof` must come from the failing tree. A raw
+/// tree failure would read as `WrongLevels`.
 fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: u32) {
     let env = test_env();
     let mut setup = setup_test_contracts(&env);

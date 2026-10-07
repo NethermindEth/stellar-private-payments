@@ -1,5 +1,4 @@
-//! Client traits for the contracts a pool calls into, and the check of which
-//! code such a contract runs.
+//! Client traits for the contracts a pool calls, and a check of their code.
 //!
 //! `#[contractclient]` generates a caller-side struct and exports nothing, so
 //! these are safe to share (see the crate docs for what is not).
@@ -11,8 +10,7 @@ use soroban_sdk::{
 
 /// Reports whether `contract` runs the Wasm whose hash is `wasm_hash`.
 ///
-/// The association set crates have no upgrade entry point, so a tree that
-/// passes this check keeps running the code it was checked against.
+/// Trees cannot be upgraded, so a tree that passes keeps running that code.
 pub fn runs_wasm(contract: &Address, wasm_hash: &BytesN<32>) -> bool {
     matches!(contract.executable(), Some(Executable::Wasm(hash)) if &hash == wasm_hash)
 }

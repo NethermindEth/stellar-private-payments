@@ -604,13 +604,10 @@ impl PoolContract {
         if policy::requires_membership_proofs(policy_flags) {
             let asp_address = Self::get_asp_membership(env)?;
             let client = ASPMembershipClient::new(env, &asp_address);
-            // `try_is_known_root`, not `is_known_root`, and `try_get_root` in
-            // the root getters for the same reason. The trees' error enums are
-            // `#[repr(u32)]` like this contract's, and their codes overlap:
-            // `asp-membership`'s `NotInitialized` is 4 and so is `WrongLevels`.
-            // A plain call lets a tree failure trap out of this frame carrying
-            // the tree's code, and the caller reads it as the wrong pool error.
-            // Every failed tree call is reported as `InvalidProof` instead.
+            // `try_`, here and in the root getters: tree error codes overlap
+            // the pool's (`asp-membership`'s `NotInitialized` and the pool's
+            // `WrongLevels` are both 4), so a trapped tree error would read as
+            // a pool error. Every failed tree call is `InvalidProof`.
             if !matches!(
                 client.try_is_known_root(&proof.asp_membership_root),
                 Ok(Ok(true))
@@ -898,8 +895,8 @@ impl PoolContract {
 
     /// Update the ASP Membership contract address
     ///
-    /// Changes the ASP Membership contract address and publishes one
-    /// [`AspMembershipUpdated`] event. Requires admin authorization.
+    /// Changes the ASP Membership contract address and publishes
+    /// [`AspMembershipUpdated`].
     ///
     /// # Arguments
     ///
@@ -914,8 +911,7 @@ impl PoolContract {
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
         let (wasm_hash, _) = Self::get_asp_wasm_hashes(env)?;
@@ -936,8 +932,8 @@ impl PoolContract {
 
     /// Update the ASP Non-Membership contract address
     ///
-    /// Changes the ASP Non-Membership contract address and publishes one
-    /// [`AspNonMembershipUpdated`] event. Requires admin authorization.
+    /// Changes the ASP Non-Membership contract address and publishes
+    /// [`AspNonMembershipUpdated`].
     ///
     /// # Arguments
     ///
@@ -952,8 +948,7 @@ impl PoolContract {
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn update_asp_non_membership(
         env: &Env,
         new_asp_non_membership: Address,

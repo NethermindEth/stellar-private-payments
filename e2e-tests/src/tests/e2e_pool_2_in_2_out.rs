@@ -174,9 +174,8 @@ fn a_real_transfer_lands_while_deposits_are_paused() -> Result<()> {
     Ok(())
 }
 
-/// The pool checks the membership root against the allowlist it points to,
-/// so after a re-point to an allowlist that never held the proof's root, the
-/// proof is refused.
+/// After a re-point to an allowlist that never held the proof's root, the pool
+/// refuses the proof.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_re_point_to_an_allowlist_without_the_leaf_refuses_a_real_proof() -> Result<()> {
@@ -190,8 +189,8 @@ fn a_re_point_to_an_allowlist_without_the_leaf_refuses_a_real_proof() -> Result<
     Ok(())
 }
 
-/// A second allowlist that holds the same leaves in the same order has the
-/// same root, so a proof made against the first lands after a re-point.
+/// An allowlist with the same leaves in the same order has the same root, so
+/// the proof still lands after a re-point.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_re_point_to_an_allowlist_with_the_same_leaves_keeps_a_real_proof_valid() -> Result<()> {
@@ -219,9 +218,8 @@ fn a_re_point_to_an_allowlist_with_the_same_leaves_keeps_a_real_proof_valid() ->
     }
     let pool = PoolContractClient::new(&env, &contracts.pool);
     pool.update_asp_membership(&second);
-    // One more leaf moves the second allowlist's root away from the first's, so
-    // the roots match only if the pool reads the second. The proof's root stays
-    // in the second allowlist's history.
+    // One more leaf makes the roots differ, so this matches only if the pool
+    // reads the second allowlist. The proof's root stays in its history.
     second_client.insert_leaf(&U256::from_u32(&env, 1));
     assert_eq!(pool.get_asp_membership_root(), second_client.get_root());
 
@@ -231,8 +229,8 @@ fn a_re_point_to_an_allowlist_with_the_same_leaves_keeps_a_real_proof_valid() ->
     Ok(())
 }
 
-/// The pool accepts only the blocklist's current root, so any blocklist write
-/// voids every proof made before it, even one whose keys the write leaves out.
+/// Pools accept only the blocklist's current root, so any blocklist write
+/// voids every earlier proof, even one whose keys it does not touch.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_blocklist_write_voids_a_real_proof_built_before_it() -> Result<()> {
