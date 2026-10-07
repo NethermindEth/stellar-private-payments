@@ -62,3 +62,73 @@ pub fn calculate_public_amount(env: &Env, ext_amount: I256) -> Option<U256> {
 pub fn is_canonical_bn256_public_input(value: &U256, modulus: &U256) -> bool {
     value < modulus
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn calculate_public_amount_accepts_values_inside_the_bound() {
+        let env = Env::default();
+        let r = bn256_modulus(&env);
+        let largest = U256::from_parts(&env, 0x00FF_FFFF_FFFF_FFFF, u64::MAX, u64::MAX, u64::MAX);
+
+        assert_eq!(
+            calculate_public_amount(
+                &env,
+                I256::from_parts(&env, 0x00FF_FFFF_FFFF_FFFF, u64::MAX, u64::MAX, u64::MAX)
+            ),
+            Some(largest.clone())
+        );
+        assert_eq!(
+            calculate_public_amount(
+                &env,
+                I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 1)
+            ),
+            Some(r.sub(&largest))
+        );
+        assert_eq!(
+            calculate_public_amount(&env, I256::from_i32(&env, 0)),
+            Some(U256::from_u32(&env, 0))
+        );
+        assert_eq!(
+            calculate_public_amount(&env, I256::from_i32(&env, -1)),
+            Some(r.sub(&U256::from_u32(&env, 1)))
+        );
+    }
+
+    #[test]
+    fn calculate_public_amount_refuses_the_bound_in_either_sign() {
+        let env = Env::default();
+        assert_eq!(
+            calculate_public_amount(&env, I256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
+            None
+        );
+        assert_eq!(
+            calculate_public_amount(
+                &env,
+                I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0)
+            ),
+            None
+        );
+        assert_eq!(
+            calculate_public_amount(
+                &env,
+                I256::from_parts(&env, i64::MAX, u64::MAX, u64::MAX, u64::MAX)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn i256_to_i128_nonneg_refuses_negative_and_oversized_values() {
+        let env = Env::default();
+        let max = I256::from_i128(&env, i128::MAX);
+        assert_eq!(i256_to_i128_nonneg(&env, &I256::from_i32(&env, -1)), None);
+        assert_eq!(
+            i256_to_i128_nonneg(&env, &max.add(&I256::from_i32(&env, 1))),
+            None
+        );
+        assert_eq!(i256_to_i128_nonneg(&env, &max), Some(i128::MAX));
+    }
+}
