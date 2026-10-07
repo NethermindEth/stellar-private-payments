@@ -13,11 +13,6 @@ pub fn u256_to_bytes(env: &Env, v: &U256) -> BytesN<32> {
     BytesN::from_array(env, &buf)
 }
 
-/// Maximum absolute external amount allowed (2^248).
-pub fn max_ext_amount(env: &Env) -> U256 {
-    U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
-}
-
 /// Convert a non-negative I256 to i128 with bounds checking.
 pub fn i256_to_i128_nonneg(env: &Env, v: &I256) -> Option<i128> {
     if *v < I256::from_i32(env, 0) {
@@ -26,24 +21,16 @@ pub fn i256_to_i128_nonneg(env: &Env, v: &I256) -> Option<i128> {
     v.to_i128()
 }
 
-/// Convert I256 to its absolute value as U256.
-pub fn i256_abs_to_u256(env: &Env, v: &I256) -> U256 {
-    let zero = I256::from_i32(env, 0);
-    let abs = if *v >= zero { v.clone() } else { zero.sub(v) };
-    U256::from_be_bytes(env, &abs.to_be_bytes())
-}
-
 /// Calculate the public amount from external amount:
 /// `public_amount = ext_amount` in the BN256 field, wrapping negative values
-/// to `FIELD_SIZE - |ext_amount|`. Returns `None` if `|ext_amount|` exceeds
-/// the 2^248 bound.
+/// to `FIELD_SIZE - |ext_amount|`. Returns `None` unless
+/// `-2^248 < ext_amount < 2^248`.
 pub fn calculate_public_amount(env: &Env, ext_amount: I256) -> Option<U256> {
-    let abs_ext = i256_abs_to_u256(env, &ext_amount);
-    if abs_ext >= max_ext_amount(env) {
+    let zero = I256::from_i32(env, 0);
+    let max = I256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0);
+    if ext_amount >= max || ext_amount <= zero.sub(&max) {
         return None;
     }
-
-    let zero = I256::from_i32(env, 0);
 
     if ext_amount >= zero {
         let pa_bytes = ext_amount.to_be_bytes();
@@ -116,6 +103,15 @@ mod test {
                 &env,
                 I256::from_parts(&env, i64::MAX, u64::MAX, u64::MAX, u64::MAX)
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn calculate_public_amount_refuses_i256_min() {
+        let env = Env::default();
+        assert_eq!(
+            calculate_public_amount(&env, I256::from_parts(&env, i64::MIN, 0, 0, 0)),
             None
         );
     }
