@@ -69,8 +69,7 @@ async fn deposit_insufficient_balance() -> Result<()> {
 
 #[tokio::test]
 async fn deposit_refused_while_paused() -> Result<()> {
-    // Scoped, because pausing a shared pool would refuse the other tests'
-    // deposits.
+    // Scoped: pausing a shared pool would refuse other tests' deposits.
     let session = session(deploy_scoped(&[PoolOptions::NONE], "deposits-paused").await?).await?;
     let pool = session.pool()?;
     let pool_contract_id = &pool.config().pool_contract_id;

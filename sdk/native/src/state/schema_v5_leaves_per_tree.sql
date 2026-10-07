@@ -1,6 +1,5 @@
--- Keys allowlist leaves by tree and index, so each allowlist keeps its own leaf 0. SQLite
--- cannot change a primary key in place, so this rebuilds the table and takes each row's tree
--- from the raw event that added it.
+-- Keys allowlist leaves by tree and index, so each allowlist has its own leaf 0. SQLite cannot
+-- alter a primary key, so rebuild the table, taking each row's tree from its raw event.
 CREATE TABLE new_asp_membership_leaves (
     contract_id INTEGER NOT NULL REFERENCES contracts(contract_id),
     leaf_index INTEGER NOT NULL,
@@ -18,8 +17,7 @@ DROP TABLE asp_membership_leaves;
 ALTER TABLE new_asp_membership_leaves RENAME TO asp_membership_leaves;
 CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
--- Keyed by index alone, the table dropped a leaf whose index another allowlist already held,
--- and the processor still marked its event. Clearing the marks reads those events again.
--- get_unprocessed_events still skips every event with a row in a derived table, so the
--- replay covers the dropped leaves and the events no table records.
+-- Keyed by index alone, the table dropped a leaf whose index another allowlist held, yet the
+-- processor marked its event. Clearing the marks replays every event without a row in a
+-- derived table: the dropped leaves and the events no table records.
 DELETE FROM processed_events;

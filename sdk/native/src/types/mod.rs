@@ -47,8 +47,8 @@ pub struct ContractConfig {
     pub admin: String,
     /// Address of ASP membership deployed contract
     pub asp_membership: String,
-    /// ASP membership contracts deployed after `asp_membership`, each with the
-    /// ledger it was deployed at.
+    /// ASP membership contracts added after `asp_membership`, with their
+    /// deployment ledgers.
     #[serde(default)]
     pub added_asp_memberships: Vec<TreeConfigEntry>,
     /// Address of ASP nonmembership deployed contract
@@ -92,8 +92,8 @@ pub struct PoolConfigEntry {
 pub struct TreeConfigEntry {
     /// Address of the deployed tree contract.
     pub contract_id: String,
-    /// Ledger sequence at (or immediately before) the tree's deployment, where
-    /// the indexer replays its events from.
+    /// Ledger at or just before the tree's deployment; the indexer replays from
+    /// here.
     pub deployment_ledger: u32,
 }
 
@@ -395,11 +395,9 @@ impl ContractConfig {
         self.enabled_pools().map(PortfolioPoolEntry::from).collect()
     }
 
-    /// Returns the contracts the indexer reads, each with the ledger it was
-    /// deployed at when the manifest records one.
-    ///
-    /// Enabled pools and added ASP membership contracts carry their deployment
-    /// ledger. `asp_membership` and the public key registry carry none.
+    /// Returns the contracts the indexer reads, with the deployment ledger of
+    /// enabled pools and added allowlists, and `None` for `asp_membership` and
+    /// the public key registry.
     pub(crate) fn indexed_contracts(&self) -> impl Iterator<Item = (&str, Option<u32>)> {
         self.enabled_pools()
             .map(|p| (p.pool_contract_id.as_str(), Some(p.deployment_ledger)))

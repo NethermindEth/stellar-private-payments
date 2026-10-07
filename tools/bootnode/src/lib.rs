@@ -109,9 +109,8 @@ impl DeploymentSpec {
     }
 }
 
-/// Refuses a manifest that names more contracts than one `getEvents` request
-/// can filter, since neither the bootnode's ingest nor a client could follow
-/// them all.
+/// Refuses a manifest naming more contracts than one `getEvents` request can
+/// filter; neither the bootnode nor a client could follow them all.
 fn check_filter_ceiling(deployment: &ContractConfig) -> Result<()> {
     let count = deployment.all_contract_ids().len();
     anyhow::ensure!(

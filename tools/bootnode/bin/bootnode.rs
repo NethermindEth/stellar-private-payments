@@ -115,9 +115,9 @@ struct Cli {
     )]
     delete_other_deployments: bool,
 
-    /// Ledger to replay events from in place of the stored cursor, until one
-    /// indexing round succeeds. An empty archive starts at the earlier of this
-    /// ledger and the deployment's earliest ledger.
+    /// Replays events from this ledger instead of the stored cursor until one
+    /// round succeeds. An empty archive starts at the earlier of this and the
+    /// deployment's first ledger.
     #[arg(long, env = "BOOTNODE_RESCAN_FROM")]
     rescan_from: Option<u32>,
 }

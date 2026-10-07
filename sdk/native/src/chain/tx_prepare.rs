@@ -25,9 +25,8 @@ impl StateFetcher {
     /// Simulates `transact` and returns unsigned XDR + auth entries for the
     /// wallet.
     ///
-    /// Refuses the simulation unless its authorization is the `transact` built
-    /// here and, for a deposit, the pool token's transfer of `ext_amount` from
-    /// the sender to the pool; see [`check_transact_auth`].
+    /// Refuses any authorization beyond this `transact` and, for a deposit, its
+    /// token transfer; see [`check_transact_auth`].
     pub(crate) async fn prepare_pool_transact(
         &self,
         pool_contract_id: &str,
@@ -161,13 +160,11 @@ fn next_sequence(current: xdr::SequenceNumber) -> Result<xdr::SequenceNumber> {
 /// Refuses simulated authorization for a pool `transact` that reaches beyond
 /// that call and, for a deposit, the token transfer into the pool.
 ///
-/// The sender signs whatever tree the simulation returns, so a call that the
-/// RPC server or a contract adds to it would carry the sender's signature too.
-/// The root must be the `transact` call built from `args`, because a signed
-/// entry for another proof or `ExtData` value would let its holder move the
-/// sender's deposit into notes the sender does not own. The check ignores the
-/// credential type: whether the sender signs the entry or the envelope, the
-/// sender authorizes the same tree.
+/// The sender signs whatever tree the simulation returns, including calls the
+/// RPC server or a contract adds. The root must be the exact `transact` built
+/// from `args`, or an entry signed for another proof or `ExtData` could move
+/// the deposit into someone else's notes. Entry and envelope signatures
+/// authorize the same tree, so the credential type is not checked.
 fn check_transact_auth(
     entries: &[xdr::SorobanAuthorizationEntry],
     pool: &xdr::ScAddress,
@@ -583,9 +580,8 @@ mod tests {
         );
     }
 
-    /// A simulation the contract refused returns no authorization entries, so
-    /// its error must reach the caller before the entries are checked. The app
-    /// names a refusal by the contract's error code.
+    /// A refused simulation has no auth entries, so its contract error must
+    /// surface before the auth check: the app keys its messages on that code.
     #[tokio::test]
     async fn prepare_pool_transact_reports_the_simulation_error_before_the_auth_check() {
         let failed = prepare_pool_transact_with(json!({

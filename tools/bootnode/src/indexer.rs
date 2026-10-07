@@ -128,10 +128,9 @@ impl Indexer {
 
 /// Returns the cursor and start ledger a round's first request uses.
 ///
-/// A rescan ledger replaces the stored cursor, so the round replays events
-/// from that ledger. Without a stored cursor, the round starts at the
-/// deployment's minimum ledger, or at the rescan ledger when that is earlier,
-/// so an empty archive still fills from the deployment's start.
+/// A rescan ledger replaces the stored cursor. With no stored cursor, the
+/// round starts at the earlier of the rescan ledger and the deployment's
+/// minimum, so an empty archive still fills from the start.
 fn round_start(
     stored_cursor: Option<String>,
     rescan_from: Option<u32>,
@@ -147,9 +146,8 @@ fn round_start(
 
 /// Returns the rescan ledger for the round after `round`.
 ///
-/// A round that succeeds has replayed from the rescan ledger, so later rounds
-/// resume from the cursor it stored. A failed round keeps the rescan for its
-/// retry.
+/// The rescan ends after the first successful round; a failed round keeps it
+/// for the retry.
 fn rescan_after(rescan_from: Option<u32>, round: &anyhow::Result<bool>) -> Option<u32> {
     rescan_from.filter(|_| round.is_err())
 }
