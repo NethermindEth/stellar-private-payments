@@ -40,9 +40,8 @@ Options:
                         native:<TOKEN_CONTRACT_ID>
                         classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>
                         <TOKEN_CONTRACT_ID> must be the asset's own Stellar asset contract.
-                        A classic issuer must have AUTH_IMMUTABLE set and neither
-                        AUTH_REVOCABLE nor AUTH_CLAWBACK_ENABLED, so it can never
-                        freeze or claw back a pool's balance.
+                        A classic issuer needs AUTH_IMMUTABLE and neither
+                        AUTH_REVOCABLE nor AUTH_CLAWBACK_ENABLED.
   --gvk-authority-pubkey JSON
                         Admin Baby JubJub public key {"x":"0x..","y":"0x.."} for
                         every pool with gvk-viewonly or gvk-traceable
@@ -525,8 +524,7 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
   if ! is_asset_spec_prefix "$asset_kind"; then
     die "invalid pool spec '$spec': expected asset spec native:|classic: after optional policy:/gvk-mode: prefixes"
   fi
-  # Refuses a token before anything is deployed. Under `set -e`, a refusal in the substitution
-  # stops the script.
+  # Checks every token before deploying anything; `set -e` stops the script on a refusal.
   token_and_asset="$(parse_pool_spec "$body")"
 
   verifier_key="$(verifier_key_for "$policy_suffix" "$gvk_mode")"

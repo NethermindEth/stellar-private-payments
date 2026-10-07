@@ -203,8 +203,8 @@ pub fn wasm_hash(contract: &Address) -> BytesN<32> {
 
 /// Deploys a contract that runs the code `contract` runs.
 ///
-/// Each natively registered contract runs code of its own, so a tree that
-/// passes a pool's code check is deployed from the hash of one that does.
+/// A natively registered contract runs its own code and fails a pool's code
+/// check.
 ///
 /// # Panics
 ///
