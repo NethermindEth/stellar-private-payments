@@ -1013,6 +1013,90 @@ fn transact_rejects_bad_public_amount() {
     ));
 }
 
+/// A withdrawal of 5 must carry `r − 5`, not the 5 a deposit carries. An
+/// absolute value taken where the sign matters would let this call reach the
+/// verifier.
+#[test]
+fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, mut ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xA1,
+    );
+    ext.ext_amount = I256::from_i32(&env, -5);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+    proof.public_amount = U256::from_u32(&env, 5);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a withdrawal with a deposit's public amount must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
+}
+
+/// This is the only bound on the public amount: the circuit's balance equation
+/// holds in the field, and only the outputs are range-checked. Policy flags 0
+/// keep the ASP root checks from answering `InvalidProof` first.
+#[test]
+fn transact_bounds_withdrawals_below_two_to_the_248() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let r = bn256_modulus(&env);
+    let cases = [
+        // −2^248, with the public amount it would map to without the bound.
+        (
+            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0),
+            r.sub(&U256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
+            Error::WrongExtAmount,
+        ),
+        // −(2^248 − 1), which reaches the verifier.
+        (
+            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 1),
+            r.sub(&U256::from_parts(
+                &env,
+                0x00FF_FFFF_FFFF_FFFF,
+                u64::MAX,
+                u64::MAX,
+                u64::MAX,
+            )),
+            Error::InvalidProof,
+        ),
+    ];
+
+    for (ext_amount, public_amount, expected) in cases {
+        let (mut proof, mut ext) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root.clone(),
+            non_member_root.clone(),
+            0xA2,
+        );
+        ext.ext_amount = ext_amount;
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+        proof.public_amount = public_amount;
+
+        let err = pool
+            .try_transact(&proof, &ext, &Address::generate(&env))
+            .expect_err("a mock proof must never settle");
+        assert_eq!(err, Ok(expected));
+    }
+}
+
 /// The spent check keys on the raw value, so this is the only refusal of a
 /// spent `n` resent as `n + r`.
 #[test]
