@@ -119,8 +119,7 @@ impl From<AdminError> for Error {
 pub(crate) enum DataKey {
     /// Administrator address with permissions to modify contract settings
     Admin,
-    /// Address proposed as the next administrator, present only while a
-    /// transfer is pending
+    /// Proposed next administrator, present only during a transfer
     PendingAdmin,
     /// Address of the token contract used for deposits/withdrawals
     Token,
@@ -374,13 +373,11 @@ impl PoolGvkContract {
 
     /// Proposes a new contract administrator.
     ///
-    /// The proposal only records `new_admin` as pending and replaces any
-    /// earlier one. The current admin keeps every power until `new_admin`
-    /// calls `accept_admin`. Requires authorization from the current
-    /// admin.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
-    /// A transfer moves governance only: the admin view key stays with whoever
-    /// holds its private key.
+    /// The admin view key does not move: it stays with whoever holds its
+    /// private key.
     ///
     /// # Errors
     ///
@@ -389,8 +386,7 @@ impl PoolGvkContract {
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
             .map_err(Error::from)
@@ -398,17 +394,14 @@ impl PoolGvkContract {
 
     /// Withdraws the pending admin transfer.
     ///
-    /// Requires authorization from the current admin.
-    ///
     /// # Errors
     ///
     /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
-    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    /// [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn cancel_admin_transfer(env: &Env) -> Result<(), Error> {
         soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)
             .map_err(Error::from)
@@ -416,18 +409,16 @@ impl PoolGvkContract {
 
     /// Installs the pending admin as the contract administrator.
     ///
-    /// Requires authorization from the pending admin. From then on the
-    /// previous admin holds no power over the contract.
+    /// The previous admin loses every power over the contract.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
-    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    /// [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
-    /// Panics if the pending admin does not authorize the call, because
-    /// `require_auth` raises a host error rather than returning.
+    /// Panics if the pending admin does not authorize the call.
     pub fn accept_admin(env: &Env) -> Result<(), Error> {
         soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)
             .map_err(Error::from)

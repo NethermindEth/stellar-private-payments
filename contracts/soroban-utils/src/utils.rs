@@ -72,11 +72,10 @@ where
 
 /// Proposes `new_admin` as the next administrator.
 ///
-/// The address stored under `admin_key` must authorize the call. The proposal
-/// is stored under `pending_key` and replaces any earlier one. The admin keeps
-/// every power until `new_admin` calls [`accept_admin`]. Each contract passes
-/// its own storage keys, so contracts sharing this helper keep separate
-/// entries. A successful call publishes one [`AdminTransferProposed`] event.
+/// Stores the proposal under `pending_key`, replacing any earlier one, and
+/// publishes [`AdminTransferProposed`]. The admin keeps every power until
+/// `new_admin` calls [`accept_admin`]. Each contract passes its own keys, so
+/// contracts sharing this helper keep separate entries.
 ///
 /// # Errors
 ///
@@ -85,8 +84,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if the address stored under `admin_key` does not authorize the call,
-/// because `require_auth` raises a host error rather than returning.
+/// Panics if the address stored under `admin_key` does not authorize the call.
 pub fn update_admin<K>(
     env: &Env,
     admin_key: &K,
@@ -110,8 +108,7 @@ where
 
 /// Withdraws the proposal stored under `pending_key`.
 ///
-/// The address stored under `admin_key` must authorize the call. A successful
-/// call publishes one [`AdminTransferCancelled`] event.
+/// Publishes [`AdminTransferCancelled`].
 ///
 /// # Errors
 ///
@@ -121,8 +118,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if the address stored under `admin_key` does not authorize the call,
-/// because `require_auth` raises a host error rather than returning.
+/// Panics if the address stored under `admin_key` does not authorize the call.
 pub fn cancel_admin_transfer<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
 where
     K: IntoVal<Env, Val>,
@@ -142,9 +138,8 @@ where
 
 /// Installs the address proposed under `pending_key` as the administrator.
 ///
-/// The proposed address must authorize the call. It replaces the address
-/// stored under `admin_key`, and the proposal is removed. A successful call
-/// publishes one [`AdminTransferAccepted`] event.
+/// Replaces the address under `admin_key`, removes the proposal, and publishes
+/// [`AdminTransferAccepted`].
 ///
 /// # Errors
 ///
@@ -154,8 +149,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if the proposed address does not authorize the call, because
-/// `require_auth` raises a host error rather than returning.
+/// Panics if the proposed address does not authorize the call.
 pub fn accept_admin<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
 where
     K: IntoVal<Env, Val>,

@@ -129,10 +129,8 @@ impl ASPNonMembership {
 
     /// Proposes a new contract administrator.
     ///
-    /// The proposal only records `new_admin` as pending and replaces any
-    /// earlier one. The current admin keeps every power until `new_admin`
-    /// calls `accept_admin`. Requires authorization from the current
-    /// admin.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
     /// # Arguments
     ///
@@ -146,8 +144,7 @@ impl ASPNonMembership {
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
             .map_err(Error::from)
@@ -155,17 +152,14 @@ impl ASPNonMembership {
 
     /// Withdraws the pending admin transfer.
     ///
-    /// Requires authorization from the current admin.
-    ///
     /// # Errors
     ///
     /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
-    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    /// [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn cancel_admin_transfer(env: Env) -> Result<(), Error> {
         soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)
             .map_err(Error::from)
@@ -173,18 +167,16 @@ impl ASPNonMembership {
 
     /// Installs the pending admin as the contract administrator.
     ///
-    /// Requires authorization from the pending admin. From then on the
-    /// previous admin holds no power over the tree.
+    /// The previous admin loses every power over the tree.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
-    /// [`Error::NotInitialized`] if the contract has no admin address stored.
+    /// [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
-    /// Panics if the pending admin does not authorize the call, because
-    /// `require_auth` raises a host error rather than returning.
+    /// Panics if the pending admin does not authorize the call.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
         soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)
             .map_err(Error::from)
