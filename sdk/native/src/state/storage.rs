@@ -1300,8 +1300,7 @@ impl Storage {
         Ok(leaves)
     }
 
-    /// Marks events as processed, so [`Self::get_unprocessed_events`] stops
-    /// returning them.
+    /// Marks events so [`Self::get_unprocessed_events`] skips them.
     ///
     /// # Errors
     ///

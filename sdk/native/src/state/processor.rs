@@ -14,8 +14,8 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
     let mut processed_ids = vec![];
     for event in unprocessed {
         processed_ids.push(event.id.clone());
-        // The raw event stays in `raw_contract_events`, so a version that
-        // learns to read it replays it by deleting its `processed_events` row.
+        // The raw event stays in `raw_contract_events`; a later version replays
+        // it by deleting its `processed_events` row.
         let parsed = match parse_event(event) {
             Ok(Some(parsed)) => parsed,
             Ok(None) => continue,
@@ -36,8 +36,8 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
     storage.save_commitment_events_batch(&commitments)?;
     storage.save_public_key_events_batch(&pubkeys)?;
     storage.save_leaf_added_events_batch(&leaves)?;
-    // The marks follow the rows, so a crash between the two leaves an event
-    // unmarked, never marked with its row missing.
+    // Mark after saving the rows: a crash in between leaves an event unmarked,
+    // never marked without its row.
     storage.save_processed_event_ids(&processed_ids)?;
     Ok(true)
 }
@@ -144,8 +144,8 @@ mod tests {
         Ok(())
     }
 
-    /// The second insert of a commitment conflicts with the first and leaves
-    /// no row, so only its mark keeps it from being read on every pass.
+    /// A repeated commitment leaves no row, so only its mark stops it being
+    /// read on every pass.
     #[test]
     fn a_repeated_commitment_does_not_stall_processing() -> Result<()> {
         let entries = |index| {

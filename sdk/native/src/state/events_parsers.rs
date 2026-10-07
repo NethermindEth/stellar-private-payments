@@ -39,7 +39,7 @@ pub fn parse_event(event: ContractEvent) -> Result<Option<ProcessedEvent>> {
         // ASP membership events contracts/asp-membership
         "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
         // ASP non-membership events contracts/asp-non-membership
-        // These are parsed but not stored, and the processor marks them processed.
+        // Parsed but not stored; the processor marks them processed.
         "leaf_inserted" | "LeafInserted" => {
             ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?)
         }

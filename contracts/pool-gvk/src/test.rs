@@ -2274,9 +2274,8 @@ fn register_open_pool_gvk(env: &Env, setup: &TestSetup) -> Address {
     )
 }
 
-/// A proof moving `ext_amount` that clears every check ahead of the verifier on
-/// a pool with policy flags 0, where no ASP root is compared, so the verifier's
-/// refusal of the mock proof is the first error the pool can raise.
+/// A proof moving `ext_amount` that passes every check before the verifier on
+/// a pool with policy flags 0, so `InvalidProof` is the first error it can hit.
 fn mk_moving_transact_proof(
     env: &Env,
     pool: &PoolGvkContractClient,
@@ -2321,8 +2320,7 @@ fn pause_deposits_sets_the_flag_and_publishes_the_change() {
     assert!(pool.deposits_paused());
 }
 
-/// A deposit the pause refuses leaves the balances, the nullifier, and the
-/// event log as they were.
+/// A refused deposit changes no balance, nullifier, or event.
 #[test]
 fn transact_refuses_a_deposit_while_deposits_are_paused() {
     let env = test_env();
@@ -2407,9 +2405,8 @@ fn unpause_deposits_lets_a_deposit_reach_the_verifier() {
     );
 }
 
-/// A pause sent to a paused pool succeeds, so a pre-signed authorization
-/// carried by it is spent rather than left open to replay, and its event shows
-/// the spend.
+/// A pause on a paused pool succeeds, so it spends a pre-signed authorization
+/// instead of leaving it open to replay.
 #[test]
 fn pause_deposits_on_a_paused_pool_changes_nothing() {
     use soroban_sdk::events::Event;
@@ -2428,8 +2425,8 @@ fn pause_deposits_on_a_paused_pool_changes_nothing() {
     assert!(pool.deposits_paused());
 }
 
-/// The admin's authorization is required on a paused pool too; without it, a
-/// pre-signed pause sent there would not be spent.
+/// A paused pool still requires the admin's authorization, so a pre-signed
+/// pause sent there is spent.
 ///
 /// This test is skipped under Miri because the panic formatting path triggers
 /// undefined behavior in the `ethnum` crate's unsafe formatting code.

@@ -34,9 +34,8 @@ pub use pool_core::{ExtData, hash_ext_data};
 
 /// Contract error types for the GVK privacy pool.
 ///
-/// Duplicated 1:1 from `pool::Error` plus the GVK-specific codes 15 to 17,
-/// which `pool` leaves unassigned so that from 18 on both pools report the
-/// same condition with the same code.
+/// Duplicated 1:1 from `pool::Error` plus the GVK-specific codes 15 to 17.
+/// `pool` leaves those unassigned, so both pools share every code from 18 on.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -77,7 +76,7 @@ pub enum Error {
     InvalidAdminViewKey = 17,
     /// Deposits are paused
     DepositsPaused = 18,
-    /// Deposits are not paused, so there is nothing to unpause
+    /// Deposits are not paused
     DepositsNotPaused = 19,
 }
 
@@ -379,47 +378,38 @@ impl PoolGvkContract {
 
     /// Pauses deposits.
     ///
-    /// While deposits are paused, `transact` refuses a call with
-    /// `ext_amount > 0` before any token moves. A pause never refuses a
-    /// transfer, a withdrawal, an admin call, or a getter. The admin must
-    /// authorize the call, and a call that pauses deposits publishes one
-    /// [`DepositPauseChanged`] event.
+    /// While paused, `transact` refuses `ext_amount > 0` before any token
+    /// moves. Transfers and withdrawals still go through. Publishes
+    /// [`DepositPauseChanged`].
     ///
-    /// On a paused pool the call succeeds without a write and publishes one
-    /// [`DepositPauseRepeated`] event, so the host spends the authorization and
-    /// a watcher sees it spent. A refusal would revert the transaction
-    /// and leave the authorization's nonce unused, while the failed
-    /// transaction, authorization included, is public for anyone to replay
-    /// after an unpause.
+    /// On a paused pool, writes nothing and publishes [`DepositPauseRepeated`].
+    /// Succeeding spends the authorization's nonce; a refusal would leave the
+    /// signed authorization in a public failed transaction, replayable after
+    /// the next unpause.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotInitialized`] if the contract has no admin or no
-    /// deposit flag stored.
+    /// Returns [`Error::NotInitialized`] if the admin or the deposit flag is
+    /// not stored.
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn pause_deposits(env: &Env) -> Result<(), Error> {
         Self::set_deposits_paused(env, true)
     }
 
-    /// Resumes deposits after a pause.
-    ///
-    /// The admin must authorize the call, and each successful call publishes
-    /// one [`DepositPauseChanged`] event.
+    /// Resumes deposits and publishes [`DepositPauseChanged`].
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DepositsNotPaused`] if deposits are not paused, which
-    /// reverts the transaction carrying the call, and [`Error::NotInitialized`]
-    /// if the contract has no admin or no deposit flag stored.
+    /// Returns [`Error::DepositsNotPaused`] if deposits are not paused, and
+    /// [`Error::NotInitialized`] if the admin or the deposit flag is not
+    /// stored.
     ///
     /// # Panics
     ///
-    /// Panics if the admin does not authorize the call, because `require_auth`
-    /// raises a host error rather than returning.
+    /// Panics if the admin does not authorize the call.
     pub fn unpause_deposits(env: &Env) -> Result<(), Error> {
         Self::set_deposits_paused(env, false)
     }
@@ -773,12 +763,10 @@ impl PoolGvkContract {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DepositsPaused`] if `ext_amount > 0` while deposits are
-    /// paused, before the deposit cap is checked and before any token moves.
-    /// Returns [`Error::WrongExtAmount`] if a deposit exceeds the maximum
-    /// deposit amount, if `ext_amount` falls outside the 2^248 bound or the
-    /// `i128` range, or if the proof's public amount does not match
-    /// `ext_amount`.
+    /// Returns [`Error::DepositsPaused`] for a deposit while deposits are
+    /// paused, before the cap check and any token transfer, and
+    /// [`Error::WrongExtAmount`] if a deposit exceeds the cap, `ext_amount` is
+    /// outside the 2^248 bound or `i128`, or the proof's public amount differs.
     ///
     /// Returns [`Error::UnknownRoot`] if the proof's root is not in the recent
     /// root history, [`Error::AlreadySpentNullifier`] if an input nullifier is
@@ -787,21 +775,18 @@ impl PoolGvkContract {
     /// GVK ciphertext counts do not match the pool's GVK mode,
     /// [`Error::NonCanonicalPublicInput`] if a public input or a ciphertext
     /// field is outside the BN254 scalar field, and [`Error::InvalidProof`] if
-    /// the proof is empty, if the verifier refuses it, or if its association
-    /// set roots do not match the current non-membership root or a known
-    /// membership root.
+    /// the proof is empty, the verifier refuses it, or its non-membership root
+    /// is not current or its membership root unknown.
     ///
-    /// Returns [`Error::MerkleTreeFull`] if the tree has no room for the two
-    /// output commitments, and [`Error::NotInitialized`] if the pool's
-    /// configuration or tree state is not stored. [`Error::NextIndexNotEven`],
-    /// [`Error::WrongLevels`], and [`Error::Overflow`] mean the stored tree
-    /// state is inconsistent.
+    /// Returns [`Error::MerkleTreeFull`] if the tree cannot take two more
+    /// commitments, and [`Error::NotInitialized`] if configuration or tree
+    /// state is missing. [`Error::NextIndexNotEven`], [`Error::WrongLevels`],
+    /// and [`Error::Overflow`] mean corrupt tree state.
     ///
     /// # Panics
     ///
     /// Panics if `sender` does not authorize the call, or if a token transfer
-    /// or an association set call fails, because each raises a host error
-    /// rather than returning.
+    /// or an association set call fails.
     pub fn transact(
         env: &Env,
         proof: Proof,
