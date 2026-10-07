@@ -512,6 +512,32 @@ fn test_verify_non_membership_single_leaf_collision() {
     );
 }
 
+/// A leaf whose value is 0 still hashes as a leaf, so a key that collides with
+/// it is absent and verifies.
+#[test]
+fn verify_non_membership_accepts_a_key_beside_a_zero_valued_leaf() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let zero = U256::from_u32(&env, 0u32);
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &zero);
+
+    let key = U256::from_u32(&env, 99u32);
+    let find_result = client.find_key(&key);
+    assert!(!find_result.is_old0);
+    assert_eq!(find_result.not_found_key, U256::from_u32(&env, 1u32));
+    assert_eq!(find_result.not_found_value, zero);
+
+    assert!(client.verify_non_membership(
+        &key,
+        &find_result.siblings,
+        &find_result.not_found_key,
+        &find_result.not_found_value,
+    ));
+}
+
 /// Test verify_non_membership returns false when the key actually exists
 #[test]
 fn test_verify_non_membership_key_exists_returns_false() {
