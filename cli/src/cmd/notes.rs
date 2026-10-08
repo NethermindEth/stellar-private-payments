@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn metadata_failure_preserves_note_and_exact_json_amount() {
         let deployment = serde_json::from_value(serde_json::json!({
-            "network": "testnet", "deployer": "", "admin": "", "pools": [], "asp_membership": "", "asp_non_membership": "", "public_key_registry": "", "verifiers": {}
+            "network": "testnet", "kdf_domain": "tests", "deployer": "", "admin": "", "pools": [], "asp_membership": "", "asp_non_membership": "", "public_key_registry": "", "verifiers": {}
         })).expect("deployment");
         let rows = note_rows(
             vec![UserNoteSummary {
