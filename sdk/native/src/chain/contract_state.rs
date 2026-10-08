@@ -532,7 +532,7 @@ impl StateFetcher {
     /// `simulateTransaction` endpoint. Unlike scanning `NewNullifierEvent`
     /// contract events, this reads current contract state, so it is bounded
     /// neither by the RPC's event retention window nor by per-request ledger
-    /// scan limits.
+    /// scan limits. Archived nullifier entries still read as spent.
     ///
     /// # Arguments
     /// * `pool_contract_id` - Contract id of the enabled pool to query.

@@ -1386,7 +1386,7 @@ export function mountVerify(container) {
           'unspent',
           unspentOk,
           unspentFailText,
-          ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers appear in the pool\'s spent-nullifier event history.'],
+          ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers are marked spent in the pool\'s contract state.'],
           'info'
         )
       );
