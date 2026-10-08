@@ -14,7 +14,7 @@
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
-//! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
+//! | `SPP_AMOUNT_STROOPS` | `10000000` token base units | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
 //! Four prerequisite classes print a skip message and exit with code 0: a
@@ -294,7 +294,8 @@ pub fn skip_on_retention_gap(e: &Error) -> ! {
     std::process::exit(0);
 }
 
-/// Parse `SPP_AMOUNT_STROOPS` as a [`NoteAmount`] (default: 1 XLM).
+/// Parse `SPP_AMOUNT_STROOPS` as a [`NoteAmount`] (default: 10000000 token base
+/// units).
 pub fn amount() -> Result<NoteAmount, String> {
     let raw = env_or("SPP_AMOUNT_STROOPS", "10000000");
     let stroops: u128 = raw

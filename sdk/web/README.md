@@ -42,8 +42,8 @@ const account = await client.account({ networkPassphrase }, signer);
 await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
-await pool.deposit(10_000_000n); // stroops (1 XLM)
-const balance = await pool.balance(); // bigint stroops
+await pool.deposit(10_000_000n); // token base units (1 token if its decimals are 7)
+const balance = await pool.balance(); // bigint token base units
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n); // defaults to connected wallet
 ```
