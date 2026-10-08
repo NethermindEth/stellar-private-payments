@@ -22,7 +22,7 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
     let items = session.operational_feed(limit)?;
 
     let storage = config.open_storage()?;
-    let explorer = Explorer::new(crate::explorer::base_url(&storage)?);
+    let explorer = Explorer::new(crate::explorer::base_url(&storage, &config.deployment)?);
 
     #[derive(Serialize)]
     struct FeedRow {

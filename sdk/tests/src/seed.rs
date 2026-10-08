@@ -17,6 +17,7 @@ use stellar_private_payments::{
 pub const POOL_MERKLE_LEVELS: u32 = 20;
 pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 pub const TEST_NETWORK: &str = "test";
+pub const TEST_KDF_DOMAIN: &str = "tests";
 const TEST_LEDGER: u32 = 1;
 
 fn test_derivation_signature() -> KeyDerivationSignature {
@@ -60,6 +61,7 @@ pub fn seed_prove_wallet(
 
     storage.save_encryption_and_note_keypairs(
         user_address,
+        TEST_KDF_DOMAIN,
         &note_keypair,
         &encryption_keypair,
         &membership_blinding,

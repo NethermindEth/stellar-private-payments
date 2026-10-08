@@ -116,6 +116,44 @@ CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://
 Deploy a private pool tailored to your own asset, compliance policy, and privacy
 needs. See [DEPLOY.md](DEPLOY.md) for details.
 
+### Selecting a network
+
+The CLI and bootnode use runtime deployment configuration, so the same binary
+can serve different networks without rebuilding:
+
+```bash
+cargo build --release -p stellar-private-payments-cli
+./target/release/spp --deployment deployments/testnet config show
+
+cargo build --release --manifest-path tools/bootnode/Cargo.toml
+# Required when starting the bootnode, alongside database and HTTP/TLS settings:
+export BOOTNODE_DEPLOYMENT=/absolute/path/to/deployments.json
+```
+
+The CLI accepts a deployment directory or JSON file through `--deployment`, a
+saved config setting, or a file provisioned in its data directory. There is no
+embedded deployment fallback. Proof operations additionally need the deployment's
+`circuits.json` and matching circuit artifacts. The Rust SDK and NPM package also
+accept deployment configuration and circuit fingerprints at runtime.
+
+For the website, `SPP_NETWORK=testnet trunk build --release` selects the deployment
+to bundle. Downstream deployers supply their configuration, contracts, and matching
+circuit artifacts. CI generates a temporary local-network configuration to test
+build selection without deploying contracts or starting localnet.
+
+The deployment configuration records the network's public identity string
+(`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks
+Freighter's identity, the CLI checks its Stellar CLI network configuration, and
+the bootnode checks the upstream RPC's identity against that passphrase. Display
+names, explorer defaults, and test-network disclaimers also come from the config.
+
+**Bootnode upgrade:** storage identifiers now use `v2`, separating history by
+network and contract IDs. Existing `v1` history must be re-synced; this does not
+change contracts or balances on the blockchain.
+
+See [Deployment configuration and networks](docs/src/multi-network.md) for configuration fields,
+Docker builds, connection overrides, and control over retaining old bootnode data.
+
 ## Limitations
 
 As a work-in-progress, this implementation has several limitations to be resolved in the nearest future:

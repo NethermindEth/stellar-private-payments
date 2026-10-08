@@ -21,7 +21,7 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events},
     token::{Client as TokenClient, StellarAssetClient},
@@ -89,6 +89,8 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     }
 }
 
+const KDF_DOMAIN: &str = "tests";
+
 fn register_pool_gvk(
     env: &Env,
     setup: &TestSetup,
@@ -109,6 +111,7 @@ fn register_pool_gvk(
             maximum_deposit_amount,
             levels,
             policy_flags,
+            String::from_str(env, KDF_DOMAIN),
             admin_view_key,
             gvk_mode,
         ),
@@ -155,6 +158,7 @@ fn pool_gvk_constructor_sets_state() {
     assert_eq!(root_index, 0);
     assert_eq!(pool.get_admin_view_key(), admin_view_key);
     assert_eq!(pool.get_gvk_mode(), TRACEABLE);
+    assert_eq!(pool.get_kdf_domain(), String::from_str(&env, KDF_DOMAIN));
     assert_eq!(
         pool.get_policy_flags(),
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT
@@ -1884,6 +1888,7 @@ fn build_gvk_transact(
             U256::from_u32(&env, maximum_deposit_amount),
             levels,
             0u32,
+            String::from_str(&env, KDF_DOMAIN),
             admin_view_key,
             gvk_mode,
         ),

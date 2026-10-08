@@ -162,4 +162,6 @@ bash "$WEB/scripts/stage-circuits-dist.sh"
 echo "==> Staging wasm-bindgen TypeScript declarations..."
 bash "$WEB/scripts/stage-wasm-types.sh"
 
+printf '%s:%s\n' "$PROFILE" "${SPP_NETWORK:-testnet}" > "$WEB/.trunk-wasm-profile"
+
 echo "==> Built sdk/web/dist/"

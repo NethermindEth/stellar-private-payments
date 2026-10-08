@@ -104,7 +104,7 @@ elif server_responds; then
     || die "something is serving $LOCAL_URL, but the local network isn't up — start it first (bash deployments/scripts/localnet.sh start && bash deployments/scripts/deploy-local.sh), or stop the existing server so this script can start both together."
   # A plain `make serve` bakes in testnet's deployments.json by default.
   curl -fsS "$LOCAL_URL/deployments.json" 2>/dev/null | grep -q '"network"[[:space:]]*:[[:space:]]*"local"' \
-    || die "something is serving $LOCAL_URL, but it wasn't built with SPP_DEPLOY_NETWORK=local — rebuild via this script, or stop the existing server so it can."
+    || die "something is serving $LOCAL_URL, but it wasn't built with SPP_NETWORK=local — rebuild via this script, or stop the existing server so it can."
   step "something is already serving $LOCAL_URL — reusing it, and leaving it running"
   export APP_URL="$LOCAL_URL"
 else
@@ -112,7 +112,7 @@ else
   LOCAL_NETWORK_STARTED=1
   bash "$REPO_ROOT/deployments/scripts/localnet.sh" start || die "failed to start localnet"
   bash "$REPO_ROOT/deployments/scripts/deploy-local.sh" || die "failed to deploy to localnet"
-  export SPP_DEPLOY_NETWORK=local
+  export SPP_NETWORK=local
 
   mkdir -p "$(dirname "$SERVE_LOG")"
   step "starting the app server: make serve (log: $SERVE_LOG)"

@@ -25,7 +25,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/bootnode
-      BOOTNODE_UPSTREAM_RPC_URL: https://soroban-testnet.stellar.org
+      BOOTNODE_DEPLOYMENT: /deployment/deployments.json
       BOOTNODE_BIND: 0.0.0.0:443
       BOOTNODE_DOMAIN: example.com
       BOOTNODE_ACME_EMAIL: you@example.com
@@ -35,6 +35,7 @@ services:
       - "443:443"
     volumes:
       - bootnode_acme:/acme-cache
+      - ${SPP_DEPLOYMENT_FILE:-../../deployments/testnet/deployments.json}:/deployment/deployments.json:ro
 
 volumes:
   bootnode_pg:

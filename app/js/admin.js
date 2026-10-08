@@ -1,3 +1,4 @@
+import { deploymentDefaults } from './network-config.js';
 import { contract } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
@@ -238,11 +239,11 @@ async function connect() {
     const net = await getWalletNetwork();
     state.address = address;
     state.networkPassphrase = net.networkPassphrase;
-    state.rpcUrl = net.sorobanRpcUrl || 'https://soroban-testnet.stellar.org';
+    state.rpcUrl = net.sorobanRpcUrl || deploymentDefaults.rpcUrl;
 
     walletChip.textContent = shortAddress(address);
     connectBtn.title = "Click to disconnect";
-    networkChip.textContent = net.network || 'Testnet';
+    networkChip.textContent = deploymentDefaults.displayName || deploymentDefaults.network;
 
     // UI states reflecting connection
     syncDot.classList.remove('bg-emerald-500', 'animate-pulse', 'shadow-emerald-500');

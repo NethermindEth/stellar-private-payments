@@ -118,7 +118,7 @@ fn print_tx_results(
     }
     let explorer = config
         .open_storage()
-        .and_then(|s| crate::explorer::base_url(&s))
+        .and_then(|s| crate::explorer::base_url(&s, &config.deployment))
         .map(Explorer::new)
         .ok();
     output::print_section(title);

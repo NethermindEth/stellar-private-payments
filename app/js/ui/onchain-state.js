@@ -7,6 +7,7 @@
  * @module ui/onchain-state
  */
 
+import { networkPresentation } from '../network-config.js';
 import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 
@@ -138,7 +139,7 @@ export const OnchainState = {
             const primaryPool = pools.find(p => p?.enabled) || pools[0] || null;
 
             // Network badge
-            setText('chain-network-badge', 'testnet');
+            setText('chain-network-badge', networkPresentation(client().contractConfig()).displayName);
 
             // Pool
             setIndicator('pool-indicator', primaryPool !== null);

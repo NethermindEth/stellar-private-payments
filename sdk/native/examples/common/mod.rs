@@ -162,7 +162,9 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 /// Downloads the hashed GitHub release there when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let stem = pool.circuit_stem();
-    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"));
+    let lock = stellar_private_payments::circuit_lock(include_str!("../../circuits.json"))
+        .map_err(|e| e.to_string())?;
+    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"), lock);
     store
         .ensure_blocking()
         .map_err(|e| format!("circuit artifacts: {e}"))?;

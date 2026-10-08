@@ -53,6 +53,7 @@ pub fn contract_ids() -> Vec<String> {
 
 pub fn fixture_deployment(start_ledger: u32) -> DeploymentSpec {
     DeploymentSpec {
+        network_passphrase: "fixture".into(),
         contract_ids: contract_ids(),
         min_deployment_ledger: start_ledger,
     }
@@ -62,6 +63,7 @@ pub fn test_storage(start_ledger: u32) -> Arc<InMemory> {
     Arc::new(InMemory::with_deployment_id(deployment_storage_id(
         &contract_ids(),
         start_ledger,
+        "fixture",
     )))
 }
 

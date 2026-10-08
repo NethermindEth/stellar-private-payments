@@ -25,7 +25,8 @@ use stellar_private_payments::{
 let deployment: ContractConfig = /* load from deployments/ */;
 let storage = LocalStorage::open("wallet.sqlite")?;
 
-let store = CircuitStore::open("./circuits");
+let lock = stellar_private_payments::circuit_lock(&std::fs::read_to_string("./circuits.json")?)?;
+let store = CircuitStore::open("./circuits", lock);
 store.ensure_blocking()?;
 let artifacts = store.transact_artifacts()?;
 let prover = LocalProver::from_artifacts(&artifacts)?;
@@ -88,9 +89,11 @@ See more ways to use the SDK in the [examples/](examples/) directory.
 ## Circuit artifacts
 
 Transacting in the private pool means producing ZK proofs, which requires the
-circuit artifacts the proofs are built against. The SDK ships an embedded
-circuit lockfile and downloads the matching GitHub release with
-`CircuitStore`.
+circuit artifacts the proofs are built against. Supply the deployment's trusted
+`circuits.json` to `circuit_lock(&json)` and pass the result to
+`CircuitStore::open(directory, lock)`. The same SDK supports different bundles
+without rebuilding. `artifacts()` reads and checks local files; `ensure()` can
+download the release specified by that lock when files are missing.
 
 ## Bootnode
 

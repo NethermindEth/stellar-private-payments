@@ -20,7 +20,7 @@ use pool_core::{
     policy,
 };
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
+    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
 use soroban_utils::constants::bn256_modulus;
@@ -110,8 +110,9 @@ pub struct Proof {
 ///
 /// The configuration the constructor writes, [`DataKey::Token`],
 /// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
-/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`], and
-/// [`DataKey::PolicyFlags`], lives in the contract's instance entry.
+/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
+/// [`DataKey::PolicyFlags`], and [`DataKey::KdfDomain`], lives in the
+/// contract's instance entry.
 /// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -132,6 +133,8 @@ pub(crate) enum DataKey {
     ASPNonMembership,
     /// Pool ASP policy flags (bitset; see `crate::policy`).
     PolicyFlags,
+    /// Privacy key derivation domain. Immutable.
+    KdfDomain,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -188,6 +191,7 @@ impl PoolContract {
     /// * `levels` - Number of levels in the commitment Merkle tree (1-32)
     /// * `policy_flags` - ASP policy flag bitset enforced by the transact
     ///   circuit
+    /// * `kdf_domain` - Privacy key derivation domain
     ///
     /// # Returns
     ///
@@ -203,6 +207,7 @@ impl PoolContract {
         maximum_deposit_amount: U256,
         levels: u32,
         policy_flags: u32,
+        kdf_domain: String,
     ) -> Result<(), Error> {
         if !policy::is_valid(policy_flags) {
             return Err(Error::InvalidPolicyFlags);
@@ -215,6 +220,7 @@ impl PoolContract {
         instance.set(&DataKey::ASPNonMembership, &asp_non_membership);
         instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         instance.set(&DataKey::PolicyFlags, &policy_flags);
+        instance.set(&DataKey::KdfDomain, &kdf_domain);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -603,6 +609,14 @@ impl PoolContract {
     /// Get the pool's ASP policy flags.
     pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
         Self::load_policy_flags(env)
+    }
+
+    /// Get the deployment's privacy key derivation domain.
+    pub fn get_kdf_domain(env: &Env) -> Result<String, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::KdfDomain)
+            .ok_or(Error::NotInitialized)
     }
 
     fn load_policy_flags(env: &Env) -> Result<u32, Error> {

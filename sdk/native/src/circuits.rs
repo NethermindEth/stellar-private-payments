@@ -1,4 +1,4 @@
-//! Embedded circuit lockfile and optional GitHub-release download.
+//! Caller-supplied circuit fingerprints and optional GitHub-release download.
 
 use std::collections::BTreeMap;
 
@@ -7,8 +7,6 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::error::Error;
-
-pub const CIRCUITS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits.json"));
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CircuitMeta {
@@ -88,7 +86,7 @@ impl CircuitLockfile {
     fn entry(&self, stem: &str) -> Result<&CircuitHashes, Error> {
         self.circuits.get(stem).ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
-                "stem {stem} is not in embedded circuits.json"
+                "stem {stem} is not in supplied circuits.json"
             ))
         })
     }
@@ -109,10 +107,21 @@ impl CircuitLockfile {
     }
 }
 
-pub fn circuit_lock() -> Result<CircuitLockfile, Error> {
-    serde_json::from_str(CIRCUITS_JSON)
-        .context("parse embedded circuits.json")
-        .map_err(Into::into)
+pub fn circuit_lock(json: &str) -> Result<CircuitLockfile, Error> {
+    let lock: CircuitLockfile =
+        serde_json::from_str(json).context("parse supplied circuits.json")?;
+    if lock.version.is_empty() || lock.circuits.is_empty() {
+        return Err(anyhow::anyhow!("circuit lock must have a version and circuit entries").into());
+    }
+    for stem in lock.circuits.keys() {
+        if stem.is_empty() || !stem.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_') {
+            return Err(anyhow::anyhow!("invalid circuit stem: {stem}").into());
+        }
+        for kind in CircuitLockfile::ARTIFACT_KINDS {
+            lock.artifact_sha256(stem, kind)?;
+        }
+    }
+    Ok(lock)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -128,7 +137,7 @@ mod store {
     use flate2::read::GzDecoder;
     use tar::Archive;
 
-    use super::{CircuitLockfile, Error, circuit_lock};
+    use super::{CircuitLockfile, Error};
     use crate::types::{
         CircuitStem, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
@@ -144,11 +153,15 @@ mod store {
 
     pub struct CircuitStore {
         dir: PathBuf,
+        lock: CircuitLockfile,
     }
 
     impl CircuitStore {
-        pub fn open(dir: impl Into<PathBuf>) -> Self {
-            Self { dir: dir.into() }
+        pub fn open(dir: impl Into<PathBuf>, lock: CircuitLockfile) -> Self {
+            Self {
+                dir: dir.into(),
+                lock,
+            }
         }
 
         pub fn dir(&self) -> &Path {
@@ -156,9 +169,9 @@ mod store {
         }
 
         pub async fn ensure(&self) -> Result<(), Error> {
-            let lock = circuit_lock()?;
+            let lock = &self.lock;
             fs::create_dir_all(&self.dir).context("create circuits dir")?;
-            if self.ready(&lock) {
+            if self.ready(lock) {
                 return Ok(());
             }
 
@@ -173,12 +186,12 @@ mod store {
                 .await
                 .with_context(|| format!("download {url}"))?;
 
-            unpack_tar_gz(&bytes, &self.dir, &allowed_names(&lock))?;
-            if self.ready(&lock) {
+            unpack_tar_gz(&bytes, &self.dir, &allowed_names(lock))?;
+            if self.ready(lock) {
                 Ok(())
             } else {
                 Err(Error::Other(anyhow::anyhow!(
-                    "downloaded circuit artifacts do not match embedded circuits.json"
+                    "downloaded circuit artifacts do not match supplied circuits.json"
                 )))
             }
         }
@@ -188,9 +201,9 @@ mod store {
         }
 
         pub fn artifacts(&self, stem: &str) -> Result<ProverArtifacts, Error> {
-            let lock = circuit_lock()?;
+            let lock = &self.lock;
             let _ = lock.entry(stem)?;
-            read_artifacts(&self.dir, stem, &lock)
+            read_artifacts(&self.dir, stem, lock)
         }
 
         pub fn transact_artifacts(&self) -> Result<Vec<(CircuitStem, ProverArtifacts)>, Error> {
@@ -312,7 +325,7 @@ mod tests {
 
     #[test]
     fn lockfile_covers_transact_and_disclosure() {
-        let lock = circuit_lock().expect("parse embedded circuits.json");
+        let lock = circuit_lock(include_str!("../circuits.json")).expect("parse test lock");
         assert!(!lock.version.is_empty());
         for stem in CircuitStem::all_transact_stems() {
             let stem_str = stem.to_string();
@@ -321,5 +334,27 @@ mod tests {
         for stem in DISCLOSURE_STEMS {
             assert!(lock.circuits.contains_key(stem), "missing {stem}");
         }
+    }
+    #[test]
+    fn one_sdk_accepts_distinct_runtime_locks_without_weakening_hash_checks() {
+        let source = include_str!("../circuits.json");
+        let mut json: serde_json::Value = serde_json::from_str(source).expect("test circuit JSON");
+        let stem = "policy_tx_2_2";
+        for payload in [b"deployment A".as_slice(), b"deployment B".as_slice()] {
+            let hash = hex::encode(Sha256::digest(payload));
+            for kind in CircuitLockfile::ARTIFACT_KINDS {
+                json[stem][kind] = hash.clone().into();
+            }
+            let lock = circuit_lock(&json.to_string()).expect("runtime circuit lock");
+            for kind in CircuitLockfile::ARTIFACT_KINDS {
+                assert!(lock.verify_artifact(stem, kind, payload).is_ok());
+                assert!(
+                    lock.verify_artifact(stem, kind, b"other deployment")
+                        .is_err()
+                );
+            }
+        }
+        json["../escape"] = json[stem].clone();
+        assert!(circuit_lock(&json.to_string()).is_err());
     }
 }

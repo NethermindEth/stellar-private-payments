@@ -269,9 +269,13 @@ async fn build_test_client(storage: &StorageBridge) -> Client {
     let prover_url = blob_worker_url("prover-worker.js").await;
     let prover = ProverBridge::spawn_js(prover_url);
     prover
-        .configure_circuits_base_js(test_circuits_base_url())
+        .configure_circuits_base_js(
+            test_circuits_base_url(),
+            // deploy-local.sh uses the canonical testnet keys for the local network.
+            include_str!("../../deployments/testnet/circuits.json").to_owned(),
+        )
         .await
-        .expect("prover worker must accept circuits base url");
+        .expect("prover worker must accept circuits base url and fingerprint lock");
     prover
         .ping_js()
         .await

@@ -26,29 +26,16 @@ pub struct DefaultsSection {
 }
 
 const DEFAULT_DATA_DIR_TEMPLATE: &str = "~/.local/share/stellar-private-payments";
-const DEBUG_CIRCUITS_DIR_TEMPLATE: &str = "target/circuits-artifacts";
-
-fn config_template(debug_build: bool) -> String {
-    let circuits_dir = if debug_build {
-        DEBUG_CIRCUITS_DIR_TEMPLATE.to_string()
-    } else {
-        format!("{DEFAULT_DATA_DIR_TEMPLATE}/circuits")
-    };
-
+fn config_template() -> String {
     format!(
         r#"# Stellar Private Payments CLI configuration
-#
-# Accounts are managed by the Stellar CLI (`stellar keys`) and passed per-command
-# with --account <alias>. The network (RPC URL + passphrase) is resolved
-# from the Stellar CLI (`stellar network`). Explorer and bootnode settings live in
-# the local database (edit via `spp config set-explorer` / `set-bootnode`).
-
+# Accounts and named networks are managed by Stellar CLI.
 [defaults]
-# deployment = "/path/to/deployments.json"  # omit for embedded testnet
-# network = "testnet"                        # a `stellar network` name
+# deployment = "/path/to/deployment" # directory or deployments.json; required unless provisioned in data_dir
+# network = "testnet" # optional Stellar CLI name; defaults to deployment.network
 # data_dir = "{DEFAULT_DATA_DIR_TEMPLATE}"
-# circuits_dir = "{circuits_dir}"
-# stellar_config_dir = "~/.config/stellar"   # passed to the `stellar` CLI (--config-dir)
+# circuits_dir = "/path/to/artifacts" # optional; packaged circuits/ or repo target/circuits-artifacts, with circuit_keys/ fallback
+# stellar_config_dir = "~/.config/stellar"
 "#
     )
 }
@@ -100,28 +87,15 @@ pub fn write_config_template(path: &Path) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create config directory {}", parent.display()))?;
     }
-    std::fs::write(path, config_template(cfg!(debug_assertions)))
+    std::fs::write(path, config_template())
         .with_context(|| format!("write config template {}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::config_template;
-
     #[test]
-    fn debug_template_keeps_repo_circuits_dir() {
-        let template = config_template(true);
-        assert!(template.contains(r#"# circuits_dir = "target/circuits-artifacts""#));
-    }
-
-    #[test]
-    fn release_template_uses_data_dir_based_circuits_dir() {
-        let template = config_template(false);
-        assert!(template.contains(r#"# data_dir = "~/.local/share/stellar-private-payments""#));
-        assert!(
-            template
-                .contains(r#"# circuits_dir = "~/.local/share/stellar-private-payments/circuits""#)
-        );
-        assert!(!template.contains(r#"target/circuits-artifacts"#));
+    fn template_explains_required_deployment() {
+        assert!(super::config_template().contains("required unless provisioned"));
+        assert!(!super::config_template().contains("embedded"));
     }
 }

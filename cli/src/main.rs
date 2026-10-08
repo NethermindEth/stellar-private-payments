@@ -38,7 +38,8 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
-    /// Override deployments.json (default: embedded testnet deployment)
+    /// Deployment directory or deployments.json (required unless
+    /// configured/provisioned)
     #[arg(long, global = true)]
     deployment: Option<PathBuf>,
 
@@ -57,8 +58,8 @@ struct Cli {
 
     /// Directory with policy_tx_2_2[_{A,B,AB}].{graph.bin,r1cs}
     /// and selectiveDisclosure_{1,2,3,4}.{graph.bin,r1cs}
-    /// (default: target/circuits-artifacts in debug builds,
-    /// data_dir/circuits otherwise)
+    /// Defaults to packaged circuits/ or repository target/circuits-artifacts;
+    /// missing files fall back to the selected deployment's circuit_keys/.
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,
 
@@ -258,6 +259,12 @@ fn main() -> Result<()> {
     let json = cli.json;
     let config_flag = cli.config;
 
+    if let Commands::Config {
+        command: ConfigCommands::Init,
+    } = &cli.command
+    {
+        return cmd::config::init(&config_flag.unwrap_or_else(default_config_path), json);
+    }
     let config_path = resolve_config_path(config_flag.clone());
     let file_config = match config_path.as_deref() {
         Some(path) => Some(load_file_config(path)?),

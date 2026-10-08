@@ -37,11 +37,12 @@ else
 fi
 
 PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
+WASM_PROFILE_KEY="$WASM_PROFILE:${SPP_NETWORK:-testnet}"
 LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
-if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ]; then
+if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE_KEY" ]; then
     echo "trunk: building stellar-private-payments-web (WASM_PROFILE=$WASM_PROFILE)..."
     npm run build --prefix sdk/web
-    echo "$WASM_PROFILE" > "$PROFILE_MARKER"
+    echo "$WASM_PROFILE_KEY" > "$PROFILE_MARKER"
 fi
 
 if [ ! -f "sdk/web/dist/circuits/source-bundle.tar.gz" ]; then
@@ -74,7 +75,6 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 cp app/404.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
-cp "deployments/${SPP_DEPLOY_NETWORK:-testnet}/deployments.json" "$TRUNK_STAGING_DIR/deployments.json"
 
 # Top-level legal files (NOTICE, LICENSE, circuits/NOTICE for footer links).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
@@ -83,15 +83,8 @@ sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
 cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/source-bundle.tar.gz"
 """]
 
-# Bundle JS with esbuild
+# Stage the selected deployment and bundle JS (also exercised directly in CI).
 [[hooks]]
 stage = "build"
 command = "sh"
-command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --minify --external:stellar-private-payments --external:stellar-private-payments/freighter --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
-
-# Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
-cp app/js/sw.js "$TRUNK_STAGING_DIR/sw.js"
-"""]
+command_arguments = ["deployments/scripts/bundle-app.sh"]

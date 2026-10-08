@@ -23,7 +23,10 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
+import { deploymentDefaults, networkPresentation } from './network-config.js';
 import { AppStorage } from './app-storage.js';
+// Trunk bundles the selected deployment's trusted fingerprints into the app.
+import circuitLock from 'app-circuit-lock';
 
 export { DisclosureRequest, parseTokenAmount };
 
@@ -61,7 +64,13 @@ export async function loadDeploymentConfig() {
                         `failed to load deployment config from ${DEPLOYMENT_CONFIG_URL}`,
                     );
                 }
-                return res.json();
+                const config = await res.json();
+                Object.assign(deploymentDefaults, {
+                    network: config.network,
+                    rpcUrl: config.rpcUrl,
+                    ...networkPresentation(config),
+                });
+                return config;
             })
             .catch((err) => {
                 deploymentConfigPromise = null;
@@ -152,6 +161,7 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
         bootnodeUrl: bootnodeUrl ?? undefined,
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock,
     });
     return wrapSdkClient(sdk);
 }
@@ -293,6 +303,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
     return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock,
     });
 }
 

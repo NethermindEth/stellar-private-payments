@@ -219,6 +219,12 @@ fn deserialize_amounts<'de, D: Deserializer<'de>>(
         .collect()
 }
 
+/// Returns the first value that appears more than once, if any.
+fn first_duplicate(values: &[Field]) -> Option<Field> {
+    let mut seen = std::collections::HashSet::with_capacity(values.len());
+    values.iter().copied().find(|value| !seen.insert(*value))
+}
+
 impl DisclosurePublicInputs {
     /// Validates public-input shape against the circuit's note count.
     pub fn validate(&self, n_notes: u32) -> Result<()> {
@@ -235,6 +241,19 @@ impl DisclosurePublicInputs {
         if self.amounts.len() != n_notes {
             return Err(anyhow!("amounts length does not match n_notes"));
         }
+
+        // Reject duplicate commitments in the disclosed note slots.
+        if let Some(duplicate) = first_duplicate(&self.note_commitments) {
+            return Err(anyhow!(
+                "duplicate note commitment in disclosure: {duplicate}"
+            ));
+        }
+        // Distinct notes have distinct nullifiers, even when commitments
+        // repeat.
+        if let Some(duplicate) = first_duplicate(&self.nullifiers) {
+            return Err(anyhow!("duplicate nullifier in disclosure: {duplicate}"));
+        }
+
         Ok(())
     }
 }
@@ -451,5 +470,49 @@ mod tests {
         receipt.public_inputs.note_commitments.push(field(4));
 
         assert!(receipt.validate().is_err());
+    }
+
+    fn multi_note_public_inputs(
+        note_commitments: Vec<Field>,
+        nullifiers: Vec<Field>,
+    ) -> DisclosurePublicInputs {
+        let note_count = note_commitments.len();
+        DisclosurePublicInputs {
+            // Notes legitimately share a Merkle root, so roots are not required
+            // to be unique; only commitments and nullifiers are.
+            roots: vec![field(1); note_commitments.len()],
+            note_commitments,
+            ext_context_hash: field(3),
+            nullifiers,
+            amounts: vec![field(5); note_count],
+        }
+    }
+
+    #[test]
+    fn validate_accepts_distinct_multi_note() -> Result<()> {
+        let public_inputs =
+            multi_note_public_inputs(vec![field(2), field(3)], vec![field(4), field(5)]);
+
+        public_inputs.validate(2)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_note_commitments() {
+        // Repeating the same note across slots would double-count its amount
+        // and inflate the disclosed balance (#647).
+        let public_inputs =
+            multi_note_public_inputs(vec![field(2), field(2)], vec![field(4), field(5)]);
+
+        assert!(public_inputs.validate(2).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_nullifiers() {
+        let public_inputs =
+            multi_note_public_inputs(vec![field(2), field(3)], vec![field(4), field(4)]);
+
+        assert!(public_inputs.validate(2).is_err());
     }
 }

@@ -21,9 +21,6 @@ permissions:
 jobs:
   integration-tests-app:
     name: App e2e (via Freighter)
-    # Fork PRs must not run this job: untrusted code must not drive a real
-    # browser/Docker session on our runners. Same guard as integration-tests-web.yml.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:

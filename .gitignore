@@ -36,7 +36,9 @@ contracts/**/test_snapshots
 
 # Tests artefacts
 e2e-tests/test_snapshots/*
-sdk/native/test_snapshots/*
+sdk/native/test_snapshots/
+deployments/scripts/.e2e-wallet-*/
+deployments/*/.e2e-accounts.env
 
 # App
 app/node_modules

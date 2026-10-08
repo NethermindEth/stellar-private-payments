@@ -19,6 +19,7 @@ path = "bin/bootnode.rs"
 stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
 
 # external
+sha2 = "0.11.0"
 anyhow = { version = "1", default-features = false }
 async-trait = { version = "0.1.92", default-features = false }
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1", "json"] }
@@ -47,6 +48,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 url = "2.5.8"
 
 [dev-dependencies]
+stellar-xdr = { version = "28.0.0", default-features = false, features = ["base64", "std"] }
 # workspace
 stellar-private-payments = { path = "../../sdk/native", version = "0.1.0" }
 

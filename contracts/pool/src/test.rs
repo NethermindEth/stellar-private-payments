@@ -8,7 +8,7 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
@@ -139,6 +139,8 @@ fn setup_with_token(env: &Env, base: &TestSetup, token: Address) -> TestSetup {
     }
 }
 
+const KDF_DOMAIN: &str = "tests";
+
 fn register_pool(
     env: &Env,
     setup: &TestSetup,
@@ -157,6 +159,7 @@ fn register_pool(
             maximum_deposit_amount,
             levels,
             policy_flags,
+            String::from_str(env, KDF_DOMAIN),
         ),
     )
 }
@@ -453,6 +456,7 @@ fn the_tree_is_one_persistent_entry() {
             U256::from_u32(&env, 1000),
             8u32,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+            String::from_str(&env, KDF_DOMAIN),
         ),
     );
     let keys_after_init = persistent_keys(&env, &pool_id);
@@ -1214,6 +1218,15 @@ fn get_policy_flags_returns_registered_value() {
         let pool = PoolContractClient::new(&env, &pool_id);
         assert_eq!(pool.get_policy_flags(), flags);
     }
+}
+
+#[test]
+fn get_kdf_domain_returns_registered_value() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    assert_eq!(pool.get_kdf_domain(), String::from_str(&env, KDF_DOMAIN));
 }
 
 #[test]
