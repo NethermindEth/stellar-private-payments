@@ -93,7 +93,7 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
     if (name === 'network-config') {
       const defaults = await readFile(new URL('../../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8');
-      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json';", `const knownNetworks = ${defaults};`);
+      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json' with { type: 'json' };", `const knownNetworks = ${defaults};`);
     }
     facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(moduleSource)));
   }

@@ -1,5 +1,4 @@
 import {
-  loadDeploymentConfig,
   DisclosureRequest,
   client,
   isRuntimeReady,
