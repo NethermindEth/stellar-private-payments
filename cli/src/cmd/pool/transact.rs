@@ -13,13 +13,11 @@ use stellar_private_payments::{
     },
 };
 
+use super::{map_pool_err, open_session, print_tx_results};
 use crate::{
-    config::{CliConfig, validate_pool},
-    onboard,
+    config::CliConfig,
     session::{ClientSession, parse_amount},
 };
-
-use super::pool::{map_pool_err, print_tx_results};
 
 /// Arguments for pool transaction.
 #[derive(Debug, Args)]
@@ -117,11 +115,7 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     let withdraw = parse_optional_amount(args.withdraw.as_deref(), "withdraw")?;
     validate_activity(&input, deposit)?;
 
-    let account = config.require_account()?;
-    onboard::ensure_ready(config, &account)?;
-    validate_pool(&args.pool, &config.deployment)?;
-    let network = config.resolve_network()?;
-    let session = ClientSession::new(config, &account, &network, false)?;
+    let (account, session) = open_session(config, &args.pool)?;
     let pool = session.pool(&args.pool)?;
 
     let notes = pool
