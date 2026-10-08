@@ -1,8 +1,8 @@
 # Governance runbook
 
-One key administers every pool and tree a deployment runs: the admin account, a Stellar account
-that needs M of its N signers on every change. This runbook is for those signers and for whoever
-keeps the account's pre-signed pause files.
+One admin account administers every pool and tree a deployment runs: a Stellar account that needs
+M of its N signers on every change. This runbook is for those signers and for whoever keeps the
+account's pause files.
 
 The admin can pause deposits, switch the trees a pool reads, edit the lists, and hand its role to
 another account. It cannot move funds: only `transact` moves tokens, against a verifier fixed at
@@ -64,7 +64,7 @@ from every pool and tree the manifest names and every tree those pools read:
 | `LeafInserted`, `LeafDeleted` | blocklists | A key is listed or released |
 
 The pool and admin transfer events use their name in lowercase with underscores as their topic,
-for example `deposit_pause_changed`. A pre-signed pause can come from any account, so only the
+for example `deposit_pause_changed`. A pause file can be sent from any account, so only the
 pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the nonce from its
 transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find which file was
 spent, and sign a replacement for whoever kept it.
@@ -284,8 +284,8 @@ that does not exist, the current admin, and the pending admin, and asks for conf
 new admin lacks the shape in [Set up the admin account](#set-up-the-admin-account).
 
 Replacing a signer needs no transfer. Transfer the admin only when the contracts move to another
-account, such as another institution's. A transfer moves no view key: a `pool-gvk` pool's view key
-is fixed at construction and stays with whoever holds its private key.
+account, such as another organization's. A transfer moves no GVK: a `pool-gvk` pool's GVK is fixed
+at construction and stays with whoever holds its private key.
 
 Once the transfer completes, update `admin` in the manifest and sign pause files for the new admin.
 
@@ -306,7 +306,7 @@ event retention, about seven days on the public testnet RPC:
 
 1. For an allowlist, read the latest ledger with `stellar ledger latest --network testnet` and
    keep it as the tree's deployment ledger. Read the tree code the pool accepts and deploy the tree
-   from that code, with the deployer as its admin so the deployer can load it without the quorum:
+   from that code, with the deployer as its admin so the deployer can load it without the signers:
 
    ```bash
    stellar contract invoke --id POOL --source-account DEPLOYER --network testnet --send=no \
