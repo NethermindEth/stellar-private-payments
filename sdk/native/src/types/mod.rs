@@ -695,7 +695,7 @@ mod pool_config_gvk_tests {
 mod network_config_tests {
     use super::ContractConfig;
     fn legacy() -> ContractConfig {
-        serde_json::from_str(r#"{"network":"custom","deployer":"","admin":"","asp_membership":"","asp_non_membership":"","verifiers":{},"public_key_registry":"","pools":[]}"#).expect("valid config fixture")
+        serde_json::from_str(r#"{"network":"custom","kdf_domain":"tests","deployer":"","admin":"","asp_membership":"","asp_non_membership":"","verifiers":{},"public_key_registry":"","pools":[]}"#).expect("valid config fixture")
     }
     #[test]
     fn old_schema_loads_but_cannot_skip_network_validation() {
