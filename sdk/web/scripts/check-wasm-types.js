@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Verify wasm-bindgen artifacts exist before `tsc` (CI / prepublish).
+ * Verify required SDK artifacts exist before `tsc` (CI / prepublish).
  */
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -14,6 +14,7 @@ const required = [
   'dist/stellar_private_payments_web.d.ts',
   'dist/workers/storage-worker.js',
   'dist/workers/prover-worker.js',
+  'dist/circuits/circuits.json',
   'dist/circuits/policy_tx_2_2.graph.bin',
   'dist/circuits/policy_tx_2_2.r1cs',
   'dist/circuits/policy_tx_2_2_proving_key.bin',

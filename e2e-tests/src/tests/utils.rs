@@ -229,6 +229,7 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
             (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
+            soroban_sdk::String::from_str(env, "tests"),
         ),
     );
 

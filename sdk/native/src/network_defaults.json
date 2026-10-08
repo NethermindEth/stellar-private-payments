@@ -1,0 +1,18 @@
+{
+  "Public Global Stellar Network ; September 2015": {
+    "displayName": "Mainnet",
+    "explorerUrl": "https://stellar.expert/explorer/public"
+  },
+  "Test SDF Network ; September 2015": {
+    "displayName": "Testnet",
+    "explorerUrl": "https://stellar.expert/explorer/testnet"
+  },
+  "Test SDF Future Network ; October 2022": {
+    "displayName": "Futurenet",
+    "explorerUrl": ""
+  },
+  "Standalone Network ; February 2017": {
+    "displayName": "Local network",
+    "explorerUrl": ""
+  }
+}

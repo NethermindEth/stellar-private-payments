@@ -27,13 +27,6 @@ pub struct InMemory {
 }
 
 impl InMemory {
-    /// Storage scoped to the compiled-in deployment.
-    pub fn new() -> Self {
-        let deployment_id = crate::current_deployment_storage_id()
-            .expect("compiled-in deployment config must be valid");
-        Self::with_deployment_id(deployment_id)
-    }
-
     pub fn with_deployment_id(deployment_id: impl Into<String>) -> Self {
         Self {
             shared: Arc::new(Mutex::new(Shared::default())),
@@ -75,12 +68,6 @@ impl InMemory {
             .entry(self.deployment_id.clone())
             .or_default();
         f(state)
-    }
-}
-
-impl Default for InMemory {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

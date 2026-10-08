@@ -23,6 +23,8 @@ const RPC_PORT: u16 = 8000;
 /// `http://localhost:8000`, matching the port `make integration-tests` maps.
 const STELLAR_CLI_NETWORK: &str = "local";
 
+const KDF_DOMAIN: &str = "tests";
+
 /// A `stellar/quickstart` local network, already running externally.
 pub struct LocalNetwork {
     rpc_url: String,
@@ -176,6 +178,7 @@ impl LocalNetwork {
             .args(["--asp-levels", &asp_levels.to_string()])
             .args(["--pool-levels", &pool_levels.to_string()])
             .args(["--max-deposit", &max_deposit.to_string()])
+            .args(["--kdf-domain", KDF_DOMAIN])
             .current_dir(&root);
         for spec in &pool_specs {
             command.args(["--pool", spec]);

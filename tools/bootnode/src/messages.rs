@@ -132,22 +132,28 @@ impl GetEventsParams {
     }
 
     pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
-        let Some(first) = self.filters.first() else {
-            return false;
-        };
-
-        if first.filter_type != "contract" {
-            return false;
-        }
-
-        if first.topics != [vec!["**".to_string()]] {
+        if self.filters.is_empty()
+            || self.filters.iter().any(|filter| {
+                filter.filter_type != "contract"
+                    || filter.topics != [vec!["**".to_string()]]
+                    || filter.contract_ids.is_empty()
+            })
+        {
             return false;
         }
 
-        let mut got: Vec<&str> = first.contract_ids.iter().map(String::as_str).collect();
+        // RPC filters are OR-ed. Validate the complete set, not just the first
+        // group (the SDK splits IDs into groups of five).
+        let mut got: Vec<&str> = self
+            .filters
+            .iter()
+            .flat_map(|filter| filter.contract_ids.iter().map(String::as_str))
+            .collect();
         got.sort_unstable();
+        got.dedup();
         let mut want: Vec<&str> = allowed_contract_ids.iter().map(String::as_str).collect();
         want.sort_unstable();
+        want.dedup();
         got == want
     }
 
@@ -158,11 +164,14 @@ impl GetEventsParams {
         limit: Option<u32>,
     ) -> Self {
         Self {
-            filters: vec![ContractEventFilter {
-                filter_type: "contract".to_string(),
-                topics: vec![vec!["**".to_string()]],
-                contract_ids: contract_ids.to_vec(),
-            }],
+            filters: contract_ids
+                .chunks(5)
+                .map(|ids| ContractEventFilter {
+                    filter_type: "contract".to_string(),
+                    topics: vec![vec!["**".to_string()]],
+                    contract_ids: ids.to_vec(),
+                })
+                .collect(),
             pagination: PaginationParams {
                 limit,
                 cursor: cursor.map(str::to_owned),
@@ -262,6 +271,33 @@ mod tests {
         }))
         .expect("params should deserialize");
         assert!(!params.is_allowed_filters(&allowed));
+    }
+
+    #[test]
+    fn grouped_filters_cover_exactly_the_archived_contracts() {
+        let ids: Vec<String> = (0..6).map(|i| format!("C{i}")).collect();
+        let params = GetEventsParams::for_contracts(&ids, Some(1), None, Some(10));
+        assert_eq!(params.filters.len(), 2);
+        assert_eq!(params.filters[0].contract_ids.len(), 5);
+        assert!(params.is_allowed_filters(&ids));
+        for change in 0..4 {
+            let mut invalid = params.clone();
+            match change {
+                0 => invalid.filters[1].topics = vec![vec!["deposit".into()]],
+                1 => invalid.filters[1].filter_type = "system".into(),
+                2 => invalid.filters[1].contract_ids = vec!["UNARCHIVED".into()],
+                _ => {
+                    invalid.filters.pop();
+                }
+            }
+            assert!(!invalid.is_allowed_filters(&ids));
+        }
+        // An otherwise valid first filter must not hide additional filters.
+        let mut extra = params.clone();
+        let mut forbidden = params.filters[1].clone();
+        forbidden.contract_ids = vec!["UNARCHIVED".into()];
+        extra.filters.push(forbidden);
+        assert!(!extra.is_allowed_filters(&ids));
     }
 
     #[test]

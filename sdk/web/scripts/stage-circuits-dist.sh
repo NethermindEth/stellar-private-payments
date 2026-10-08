@@ -2,10 +2,14 @@
 # Stage compiled circuits + LGPL corresponding source into sdk/web/dist/.
 set -euo pipefail
 
+case "${SPP_NETWORK:-testnet}" in
+  *[!a-zA-Z0-9_-]*) echo "invalid SPP_NETWORK" >&2; exit 1 ;;
+esac
+
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
 CIRCUITS_OUT="$ROOT/target/circuits-artifacts"
-KEYS_DIR="$ROOT/deployments/testnet/circuit_keys"
+KEYS_DIR="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuit_keys"
 DIST="$WEB/dist"
 
 CIRCUIT_ARTIFACTS=(
@@ -59,6 +63,7 @@ sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 # old cache sidecars or renamed circuits) cannot leak into the npm package.
 rm -rf "$DIST/circuits"
 mkdir -p "$DIST/circuits" "$DIST/licenses"
+cp "$ROOT/deployments/${SPP_NETWORK:-testnet}/circuits.json" "$DIST/circuits/circuits.json"
 
 for name in "${CIRCUIT_ARTIFACTS[@]}"; do
   if [[ "$name" == *.graph.bin ]]; then

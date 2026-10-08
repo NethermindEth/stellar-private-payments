@@ -12,4 +12,5 @@
 - [App](./app.md)
   - [Architecture](./architecture.md)
   - [Bootnode](./bootnode.md)
+  - [Deployment configuration and networks](./multi-network.md)
 - [API Reference](./api.md)

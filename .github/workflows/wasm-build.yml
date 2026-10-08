@@ -16,6 +16,8 @@ permissions:
 
 jobs:
   wasm-build:
+    env:
+      SPP_NETWORK: testnet
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +50,10 @@ jobs:
           cache: npm
           cache-dependency-path: sdk/web/package-lock.json
 
+      # Rust network validation tests already run in cargo test --workspace.
+      - name: Test app network and runtime configuration
+        run: node --test integration-tests-app/tests/unit/network-config.test.mjs integration-tests-app/tests/unit/sdk-runtime-config.test.mjs
+
       - name: Install SDK npm dependencies
         run: npm ci --prefix sdk/web
 
@@ -76,6 +82,21 @@ jobs:
 
       - name: Smoke-test Trunk app build
         run: trunk build --release --dist /tmp/app-dist
+
+      # Reuse the built SDK; only deployment selection and JS bundling vary.
+      - name: Smoke-test alternate network selection
+        env:
+          SPP_NETWORK: local
+          TRUNK_STAGING_DIR: /tmp/app-local-dist
+        run: |
+          mkdir -p deployments/local
+          jq '.network = "local" | .networkPassphrase = "Standalone Network ; February 2017" | .rpcUrl = "http://localhost:8000/rpc"' \
+            deployments/testnet/deployments.json > deployments/local/deployments.json
+          ln -s ../testnet/circuit_keys deployments/local/circuit_keys
+          ln -s ../testnet/circuits.json deployments/local/circuits.json
+          sh deployments/scripts/circuit-artifacts.sh verify
+          sh deployments/scripts/bundle-app.sh
+          cmp deployments/local/deployments.json "$TRUNK_STAGING_DIR/deployments.json"
 
   wasm-test:
     timeout-minutes: 30

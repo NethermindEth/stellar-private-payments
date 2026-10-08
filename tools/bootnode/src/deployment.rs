@@ -1,72 +1,95 @@
 use stellar_private_payments::types::ContractConfig;
 
-// TODO make it dependent on the network during the compilation
-const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
-
-/// Returns the statically-embedded contracts deployment configuration.
-///
-/// This is intentionally compiled-in (via `include_str!`) to prevent runtime
-/// misconfiguration of critical identifiers like contract IDs and the
-/// deployment ledger.
-pub(crate) fn deployment_config() -> anyhow::Result<ContractConfig> {
-    Ok(serde_json::from_str(DEPLOYMENT)?)
+/// Read a JSON file or a directory containing deployments.json, then validate
+/// the deployment before accessing upstream or storage.
+pub fn read_deployment(path: &std::path::Path) -> anyhow::Result<ContractConfig> {
+    use anyhow::Context;
+    let path = if path.is_dir() {
+        path.join("deployments.json")
+    } else {
+        path.to_owned()
+    };
+    let deployment: ContractConfig = serde_json::from_str(
+        &std::fs::read_to_string(&path)
+            .with_context(|| format!("read deployment {}", path.display()))?,
+    )
+    .with_context(|| format!("parse deployment {}", path.display()))?;
+    deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
+    Ok(deployment)
 }
 
-/// Stable storage namespace for a contract set + genesis ledger.
-///
-/// Pages and indexer KV are keyed by this id so redeployments can share one DB
-/// without colliding with older contract history.
-///
-/// Format: `v1:{min_ledger}:{sorted 4-char contract prefixes concatenated}`.
-pub fn deployment_storage_id(contract_ids: &[String], min_deployment_ledger: u32) -> String {
-    let mut prefixes: Vec<String> = contract_ids
+/// Network-isolated v2 namespace. v1 caches are rebuilt, never reused.
+pub fn deployment_storage_id(
+    contract_ids: &[String],
+    min_deployment_ledger: u32,
+    passphrase: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let network_hash = Sha256::digest(passphrase.as_bytes())
         .iter()
-        .map(|id| id.chars().take(4).collect())
-        .collect();
-    prefixes.sort();
-    format!("v1:{min_deployment_ledger}:{}", prefixes.concat())
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut ids = contract_ids.to_vec();
+    ids.sort();
+    let contracts_hash = Sha256::digest(ids.join(":").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("v2:{network_hash}:{min_deployment_ledger}:{contracts_hash}")
 }
 
-/// Storage id for the compiled-in deployment config.
-pub fn current_deployment_storage_id() -> anyhow::Result<String> {
-    let deployment = deployment_config()?;
+pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Result<String> {
+    let passphrase = deployment.network_passphrase.as_deref().unwrap_or_default();
+    deployment.validate_network(passphrase)?;
     Ok(deployment_storage_id(
         &deployment.all_contract_ids(),
         deployment.min_deployment_ledger()?,
+        passphrase,
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::deployment_storage_id;
+    use super::*;
 
     #[test]
-    fn storage_id_sorts_contract_prefixes() {
-        let a = deployment_storage_id(&["BBBBXXXX".into(), "AAAAYYYY".into()], 10);
-        let b = deployment_storage_id(&["AAAAYYYY".into(), "BBBBXXXX".into()], 10);
-        assert_eq!(a, b);
-        assert_eq!(a, "v1:10:AAAABBBB");
+    fn directory_and_file_load_the_same_deployment() -> anyhow::Result<()> {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments/testnet");
+        let from_directory = read_deployment(&directory)?;
+        let from_file = read_deployment(&directory.join("deployments.json"))?;
+        assert_eq!(
+            serde_json::to_value(from_directory)?,
+            serde_json::to_value(from_file)?
+        );
+        Ok(())
     }
 
     #[test]
-    fn storage_id_changes_with_ledger_or_contracts() {
-        let base = deployment_storage_id(&["AAAAYYYY".into()], 10);
-        assert_ne!(base, deployment_storage_id(&["AAAAYYYY".into()], 11));
+    fn directory_without_manifest_reports_the_resolved_file() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let error = read_deployment(&directory).expect_err("no manifest in source directory");
+        assert!(
+            error
+                .to_string()
+                .contains(&directory.join("deployments.json").display().to_string())
+        );
+    }
+
+    #[test]
+    fn namespace_is_order_independent_and_network_isolated() {
+        let ids = vec!["AAAAX".into(), "BBBBY".into()];
+        let base = deployment_storage_id(&ids, 10, "network A");
+        assert!(base.starts_with("v2:"));
+        assert_eq!(
+            base,
+            deployment_storage_id(&[ids[1].clone(), ids[0].clone()], 10, "network A")
+        );
+        assert_ne!(base, deployment_storage_id(&ids, 10, "network B"));
+        assert_ne!(base, deployment_storage_id(&ids, 11, "network A"));
         assert_ne!(
             base,
-            deployment_storage_id(&["AAAAYYYY".into(), "BBBBXXXX".into()], 10)
+            deployment_storage_id(&["AAAAZ".into(), "BBBBY".into()], 10, "network A")
         );
-    }
-
-    #[test]
-    fn storage_id_uses_four_char_prefixes() {
-        let id = deployment_storage_id(
-            &[
-                "CBF4Y4PC72JI23H3VJMO7WNZH5BJRGA2HD2HUQANZPXB4BXRVSKUOS6U".into(),
-                "CBQRNDBA7P7XUABULIZEMUP7NLKDZUECGLSOJPMX6LB5NOUCGXCJSXQQ".into(),
-            ],
-            3_742_083,
-        );
-        assert_eq!(id, "v1:3742083:CBF4CBQR");
     }
 }

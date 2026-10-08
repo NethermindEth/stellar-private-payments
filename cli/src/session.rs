@@ -53,7 +53,11 @@ impl ClientSession {
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
-            let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
+            let artifacts = load_transact_artifacts(
+                &config.circuits_dir_path(),
+                &config.circuit_keys_dir_path(),
+                &config.circuit_lock()?,
+            )?;
             let prover = ProverHandle::from(
                 LocalProver::from_artifacts(&artifacts)
                     .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
@@ -153,7 +157,11 @@ pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result
 
 /// A native prover with all registered selective-disclosure circuits.
 pub fn disclosure_prover(config: &CliConfig) -> Result<LocalProver> {
-    let artifacts = load_disclosure_artifacts(Some(config.circuits_dir_path().as_path()))?;
+    let artifacts = load_disclosure_artifacts(
+        &config.circuits_dir_path(),
+        &config.circuit_keys_dir_path(),
+        &config.circuit_lock()?,
+    )?;
     LocalProver::from_disclosure_artifacts(&artifacts)
         .map_err(|e| anyhow::anyhow!("init disclosure prover: {e}"))
 }

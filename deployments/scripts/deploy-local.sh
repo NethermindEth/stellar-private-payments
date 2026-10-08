@@ -24,6 +24,8 @@ if [ ! -e "$REPO_ROOT/deployments/local/circuit_keys" ]; then
   ln -s "$REPO_ROOT/deployments/testnet/circuit_keys" "$REPO_ROOT/deployments/local/circuit_keys"
 fi
 
+ln -sf ../testnet/circuits.json "$REPO_ROOT/deployments/local/circuits.json"
+
 step "deploying to localnet"
 deployer_alias="spp-e2e-local-deployer"
 stellar keys generate "$deployer_alias" --network local --overwrite
@@ -42,4 +44,5 @@ bash "$REPO_ROOT/deployments/scripts/deploy.sh" local \
   --policy-flags blocklist \
   --asp-levels 10 \
   --pool-levels 20 \
-  --max-deposit 1000000000
+  --max-deposit 1000000000 \
+  --kdf-domain tests

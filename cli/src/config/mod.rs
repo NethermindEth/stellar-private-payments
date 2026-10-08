@@ -17,13 +17,6 @@ pub use toml::{
     FileConfig, default_config_path, load_file_config, resolve_config_path, write_config_template,
 };
 
-/// Testnet deployment baked into the binary (from
-/// `deployments/testnet/deployments.json`).
-pub const DEFAULT_DEPLOYMENT_JSON: &str =
-    include_str!("../../../deployments/testnet/deployments.json");
-
-pub const EMBEDDED_DEPLOYMENT_LABEL: &str = "embedded:testnet";
-
 /// Deployment config provisioned into the data dir by `scripts/install.sh`.
 pub const DEPLOYMENT_FILE_NAME: &str = "deployments.json";
 
@@ -54,7 +47,7 @@ pub struct CliConfigOverrides {
 pub struct CliConfig {
     /// TOML config file when loaded; otherwise None.
     pub config_file: Option<PathBuf>,
-    /// File path when overridden; otherwise [`EMBEDDED_DEPLOYMENT_LABEL`].
+    /// Runtime deployment JSON file path.
     pub deployment_source: String,
     pub deployment: ContractConfig,
     /// Stellar CLI network name (built-in like `testnet`, or a custom one).
@@ -118,7 +111,9 @@ impl CliConfig {
 
     /// Resolve the RPC URL + network passphrase from the Stellar CLI.
     pub fn resolve_network(&self) -> Result<StellarNetwork> {
-        stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())
+        let network = stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())?;
+        self.deployment.validate_network(&network.passphrase)?;
+        Ok(network)
     }
 
     /// Resolve the note owner from its `--account` alias.
@@ -160,10 +155,46 @@ impl CliConfig {
         self.data_dir.join("spp.db")
     }
 
+    /// Prefer packaged artifacts, then repository R1CS output for a checkout.
+    /// Per-file fallback to this deployment's circuit_keys is handled by the
+    /// loader.
     pub fn circuits_dir_path(&self) -> PathBuf {
-        self.circuits_dir
-            .clone()
-            .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
+        self.circuits_dir.clone().unwrap_or_else(|| {
+            let dir = self.deployment_dir();
+            if dir.join("circuits").is_dir() {
+                return dir.join("circuits");
+            }
+            if let Some(deployments) = dir.parent()
+                && deployments
+                    .file_name()
+                    .is_some_and(|name| name == "deployments")
+                && let Some(root) = deployments.parent()
+                && root.join("Cargo.toml").is_file()
+                && root.join("circuits/Cargo.toml").is_file()
+            {
+                return root.join("target/circuits-artifacts");
+            }
+            dir.join("circuit_keys")
+        })
+    }
+
+    pub fn circuit_keys_dir_path(&self) -> PathBuf {
+        self.deployment_dir().join("circuit_keys")
+    }
+
+    pub fn deployment_dir(&self) -> PathBuf {
+        Path::new(&self.deployment_source)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_owned()
+    }
+
+    pub fn circuit_lock(&self) -> Result<stellar_private_payments::CircuitLockfile> {
+        let path = self.deployment_dir().join("circuits.json");
+        stellar_private_payments::circuit_lock(
+            &std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?,
+        )
+        .map_err(Into::into)
     }
 
     /// Open (creating if needed) the local sqlite database (`spp.db`).
@@ -199,27 +230,23 @@ pub fn default_data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".stellar-pp"))
 }
 
-pub fn default_circuits_dir(data_dir: &Path) -> PathBuf {
-    if cfg!(debug_assertions) {
-        PathBuf::from("target/circuits-artifacts")
-    } else {
-        data_dir.join("circuits")
-    }
-}
-
 /// Resolve the deployment config: `--deployment` > the copy provisioned into
-/// the data dir by `scripts/install.sh` > [`DEFAULT_DEPLOYMENT_JSON`].
+/// the data dir by `scripts/install.sh`. No embedded fallback.
 fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, ContractConfig)> {
     if let Some(path) = path {
-        return read_deployment_file(path);
+        return read_deployment_file(&if path.is_dir() {
+            path.join(DEPLOYMENT_FILE_NAME)
+        } else {
+            path.to_owned()
+        });
     }
     let provisioned = data_dir.join(DEPLOYMENT_FILE_NAME);
     if provisioned.is_file() {
         return read_deployment_file(&provisioned);
     }
-    let deployment = serde_json::from_str(DEFAULT_DEPLOYMENT_JSON)
-        .context("parse embedded testnet deployment")?;
-    Ok((EMBEDDED_DEPLOYMENT_LABEL.to_string(), deployment))
+    bail!(
+        "deployment configuration required: use --deployment <directory-or-deployments.json> or set defaults.deployment in your config"
+    )
 }
 
 fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
@@ -227,8 +254,9 @@ fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
         .with_context(|| format!("read deployment file {}", path.display()))?;
 
     // A schema mismatch here usually means the file is newer than this binary
-    let deployment = serde_json::from_str(&raw)
+    let deployment: ContractConfig = serde_json::from_str(&raw)
         .with_context(|| format!("parse deployment file {}", path.display()))?;
+    deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
     Ok((path.display().to_string(), deployment))
 }
 
@@ -245,13 +273,14 @@ pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {
 mod tests {
     use super::{CliConfig, CliConfigOverrides};
     use crate::account::Account;
+    use std::path::PathBuf;
 
     const OWNER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const PAYER_ADDRESS: &str = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB6BQ";
     /// Shaped like a raw secret key: 56 characters starting with `S`.
     const SECRET_SHAPED: &str = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    /// A config over the embedded testnet deployment. The data dir is a name
+    /// A config over an explicit test deployment. The data dir is a name
     /// that holds no provisioned `deployments.json`, so loading stays offline
     /// and independent of the machine's own wallet directory.
     fn config_with(sign_as: Option<&str>) -> CliConfig {
@@ -259,13 +288,16 @@ mod tests {
             None,
             None,
             CliConfigOverrides {
+                deployment_path: Some(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deployments/testnet"),
+                ),
                 data_dir: Some(std::env::temp_dir().join("spp-require-signer-tests")),
                 account: Some("owner".to_string()),
                 sign_as: sign_as.map(str::to_string),
                 ..Default::default()
             },
         )
-        .expect("the embedded testnet deployment should load")
+        .expect("the test deployment should load")
     }
 
     fn owner() -> Account {
@@ -336,6 +368,85 @@ mod tests {
                 .to_string()
                 .starts_with("--sign-as must be a `stellar keys` alias name, not a raw secret key"),
             "the payer's alias should be reported against --sign-as, got: {error}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod network_validation_tests {
+    use super::*;
+
+    #[test]
+    fn same_binary_loads_two_networks_and_rejects_mismatches() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deployments");
+        // Keep alternate deployment data local to this test, not in
+        // deployments/.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let local =
+            std::env::temp_dir().join(format!("spp-network-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&local).expect("temporary deployment");
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(local.clone());
+        let mut deployment: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("testnet/deployments.json"))
+                .expect("testnet config"),
+        )
+        .expect("JSON");
+        deployment["network"] = "local".into();
+        deployment["networkPassphrase"] = "Standalone Network ; February 2017".into();
+        deployment["rpcUrl"] = "http://localhost:8000/rpc".into();
+        std::fs::write(
+            local.join("deployments.json"),
+            serde_json::to_vec(&deployment).expect("JSON"),
+        )
+        .expect("write deployment");
+        std::fs::copy(
+            root.join("testnet/circuits.json"),
+            local.join("circuits.json"),
+        )
+        .expect("copy lock");
+        let mut identities = Vec::new();
+        for (name, path) in [("testnet", root.join("testnet")), ("local", local)] {
+            let config = CliConfig::load(
+                None,
+                None,
+                CliConfigOverrides {
+                    deployment_path: Some(path),
+                    ..Default::default()
+                },
+            )
+            .expect("runtime deployment");
+            assert_eq!(config.network, name);
+            let passphrase = config
+                .deployment
+                .network_passphrase
+                .as_deref()
+                .expect("network identity");
+            assert!(config.deployment.validate_network(passphrase).is_ok());
+            assert!(config.deployment.validate_network("wrong network").is_err());
+            identities.push(passphrase.to_owned());
+            config.circuit_lock().expect("runtime circuit lock");
+        }
+        assert_ne!(identities[0], identities[1]);
+    }
+
+    #[test]
+    fn missing_deployment_has_no_embedded_fallback() {
+        let dir =
+            std::env::temp_dir().join(format!("spp-missing-deployment-{}", std::process::id()));
+        assert!(
+            load_deployment(None, &dir)
+                .expect_err("missing configuration must fail")
+                .to_string()
+                .contains("deployment configuration required")
         );
     }
 }

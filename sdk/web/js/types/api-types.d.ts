@@ -43,6 +43,9 @@ export interface PoolConfigInput {
  */
 export interface ContractConfigInput {
   network: string;
+  networkPassphrase?: string;
+  rpcUrl?: string;
+  kdf_domain: string;
   deployer: string;
   admin: string;
   asp_membership: string;
@@ -91,6 +94,8 @@ export interface ClientNewOptions {
   contractConfig: ContractConfig | ContractConfigInput;
   /** Required unless `prover` is supplied (an already-configured prover skips this). */
   circuitsBaseUrl?: string;
+  /** Expected circuit fingerprints from the selected deployment; required unless prover is supplied. */
+  circuitLock?: CircuitLockInput;
   storage?: Storage;
   storageWorkerUrl?: string;
   prover?: ProverBridge;
@@ -118,6 +123,7 @@ export interface PoolOptions {
 export interface VerifyDisclosureOptions {
   contractConfig: ContractConfig | ContractConfigInput;
   circuitsBaseUrl: string;
+  circuitLock: CircuitLockInput;
   proverWorkerUrl?: string;
 }
 
@@ -217,4 +223,17 @@ export interface GvkTxAudit {
   ledger: number;
   outputs: GvkOutputSlot[];
   inputs: GvkSpentInput[];
+}
+
+/** Contents of the deployment's circuits.json; supplied by the application. */
+export interface CircuitLockInput {
+  version: string;
+  meta: {
+    repository: string;
+    commit: string;
+    circom: string;
+    circomlib: string;
+    'circom-witness-rs': string;
+  };
+  [key: string]: unknown;
 }

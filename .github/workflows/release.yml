@@ -228,8 +228,8 @@ jobs:
           # Compiled circuit artifacts + proving keys / witness graphs the CLI loads.
           CIRCUITS="target/circuits-artifacts"
           KEYS="deployments/testnet/circuit_keys"
-          for stem in policy_tx_2_2 policy_tx_2_2_A policy_tx_2_2_B policy_tx_2_2_AB \
-                      selectiveDisclosure_1; do
+          cp deployments/testnet/circuits.json "$STAGING/circuits.json"
+          for stem in $(jq -r 'keys[] | select(. != "meta" and . != "version")' deployments/testnet/circuits.json); do
             cp "$CIRCUITS/${stem}.r1cs" "$STAGING/circuits/"
             cp "$KEYS/${stem}.graph.bin" "$STAGING/circuits/"
             cp "$KEYS/${stem}_proving_key.bin" "$STAGING/circuits/"

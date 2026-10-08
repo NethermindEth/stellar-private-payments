@@ -13,7 +13,8 @@
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = LocalStorage::open("wallet.sqlite")?.into();
 //!
-//! let store = CircuitStore::open("./circuits");
+//! let lock = stellar_private_payments::circuit_lock(&std::fs::read_to_string("./circuits.json")?)?;
+//! let store = CircuitStore::open("./circuits", lock);
 //! store.ensure_blocking()?;
 //! let artifacts = store.transact_artifacts()?;
 //! let prover = LocalProver::from_artifacts(&artifacts)?.into();
@@ -50,6 +51,7 @@ pub mod chain;
 pub mod circuits;
 pub mod disclosure;
 pub mod gvk;
+pub mod network_defaults;
 pub mod plan;
 pub mod planner;
 pub mod prover;
@@ -76,7 +78,7 @@ mod sync;
 pub use account::Account;
 #[cfg(not(target_arch = "wasm32"))]
 pub use circuits::CircuitStore;
-pub use circuits::{CIRCUITS_JSON, CircuitLockfile, circuit_lock};
+pub use circuits::{CircuitLockfile, circuit_lock};
 pub use client::Client;
 pub use error::{Error, PlanExecutionError, RetentionGap};
 pub use handle::Handle;

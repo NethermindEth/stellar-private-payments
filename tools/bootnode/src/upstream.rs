@@ -20,6 +20,15 @@ impl UpstreamClient {
         })
     }
 
+    pub(crate) async fn network_passphrase(&self) -> Result<String> {
+        #[derive(serde::Deserialize)]
+        struct Network {
+            passphrase: String,
+        }
+        let network: Network = self.rpc_call("getNetwork", json!({})).await?;
+        Ok(network.passphrase)
+    }
+
     pub(crate) async fn get_latest_ledger(&self) -> Result<GetLatestLedgerResponse> {
         self.rpc_call("getLatestLedger", json!({})).await
     }

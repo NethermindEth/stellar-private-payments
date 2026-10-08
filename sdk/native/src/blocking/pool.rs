@@ -138,7 +138,11 @@ impl PrivatePool {
         &self,
         receipt: &crate::types::DisclosureReceipt,
         expected_vk_hash: &str,
+        expected_authority: Option<&str>,
     ) -> Result<crate::types::DisclosureVerificationReport, Error> {
-        block_on(self.inner.verify_disclosure(receipt, expected_vk_hash))
+        block_on(
+            self.inner
+                .verify_disclosure(receipt, expected_vk_hash, expected_authority),
+        )
     }
 }

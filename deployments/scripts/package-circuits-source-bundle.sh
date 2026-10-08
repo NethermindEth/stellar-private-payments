@@ -84,7 +84,7 @@ make circuits GRAPHS=1
 \`\`\`
 
 R1CS and \`*.graph.bin\` land under \`target/circuits-artifacts/\`. Copy graphs
-into \`deployments/testnet/circuit_keys/\` before restaging. The web SDK
+into \`deployments/${SPP_NETWORK:-testnet}/circuit_keys/\` before restaging. The web SDK
 staging script copies R1CS from artifacts and graphs/keys from
 \`circuit_keys/\` into \`dist/circuits/\`.
 EOF

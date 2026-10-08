@@ -109,32 +109,36 @@ impl Storage for LocalStorage {
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<SpendableNote>, Error> {
-        spendable_notes_from_storage(&self.storage(), pool_contract_id, user_address)
+        spendable_notes_from_storage(&self.storage(), pool_contract_id, user_address, kdf_domain)
     }
 
     async fn notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>, Error> {
-        pool_notes_from_storage(&self.storage(), pool_contract_id, user_address)
+        pool_notes_from_storage(&self.storage(), pool_contract_id, user_address, kdf_domain)
     }
 
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error> {
-        portfolio_balances_from_storage(&self.storage(), user_address, enabled_pools)
+        portfolio_balances_from_storage(&self.storage(), user_address, kdf_domain, enabled_pools)
     }
 
     async fn list_user_notes(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         limit: u32,
     ) -> Result<Vec<UserNoteSummary>, Error> {
-        user_notes_from_storage(&self.storage(), user_address, limit)
+        user_notes_from_storage(&self.storage(), user_address, kdf_domain, limit)
     }
 
     async fn operational_feed(
@@ -167,10 +171,14 @@ impl Storage for LocalStorage {
         ))
     }
 
-    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+    async fn privacy_keys_exist(
+        &self,
+        user_address: &str,
+        kdf_domain: &str,
+    ) -> Result<bool, Error> {
         Ok(self
             .storage()
-            .get_private_keys(user_address)
+            .get_private_keys(user_address, kdf_domain)
             .context("check stored private keys")?
             .is_some())
     }
@@ -178,6 +186,7 @@ impl Storage for LocalStorage {
     async fn save_private_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
         membership_blinding: &Field,
@@ -186,6 +195,7 @@ impl Storage for LocalStorage {
             .storage_mut()
             .save_encryption_and_note_keypairs(
                 user_address,
+                kdf_domain,
                 note_keypair,
                 encryption_keypair,
                 membership_blinding,
@@ -193,15 +203,16 @@ impl Storage for LocalStorage {
             .context("save private keys")?)
     }
 
-    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
-        Ok(map_private_keys(&self.storage(), user_address)?.membership_blinding)
+    async fn asp_secret(&self, user_address: &str, kdf_domain: &str) -> Result<Field, Error> {
+        Ok(map_private_keys(&self.storage(), user_address, kdf_domain)?.membership_blinding)
     }
 
     async fn privacy_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        let keys = map_private_keys(&self.storage(), user_address)?;
+        let keys = map_private_keys(&self.storage(), user_address, kdf_domain)?;
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 

@@ -33,6 +33,16 @@ pub const SMT_DEPTH: u32 = 32;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConfig {
     pub network: String,
+    #[serde(
+        default,
+        rename = "networkPassphrase",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub network_passphrase: Option<String>,
+    #[serde(default, rename = "rpcUrl", skip_serializing_if = "Option::is_none")]
+    pub rpc_url: Option<String>,
+    /// Privacy key derivation domain.
+    pub kdf_domain: String,
     pub deployer: String,
     pub admin: String,
     /// Address of ASP membership deployed contract
@@ -348,6 +358,19 @@ impl From<&PoolConfigEntry> for PortfolioPoolEntry {
 }
 
 impl ContractConfig {
+    /// Reject missing identity metadata and connections to another network.
+    pub fn validate_network(&self, passphrase: &str) -> Result<()> {
+        let expected = self
+            .network_passphrase
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("deployment config is missing networkPassphrase"))?;
+        if expected != passphrase {
+            return Err(anyhow!("network passphrase mismatch for {}", self.network));
+        }
+        Ok(())
+    }
+
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
         self.pools.iter().filter(|p| p.enabled)
     }
@@ -665,5 +688,31 @@ mod pool_config_gvk_tests {
         assert_eq!(parsed.gvk_authority_pub_key, pool.gvk_authority_pub_key);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod network_config_tests {
+    use super::ContractConfig;
+    fn legacy() -> ContractConfig {
+        serde_json::from_str(r#"{"network":"custom","kdf_domain":"tests","deployer":"","admin":"","asp_membership":"","asp_non_membership":"","verifiers":{},"public_key_registry":"","pools":[]}"#).expect("valid config fixture")
+    }
+    #[test]
+    fn old_schema_loads_but_cannot_skip_network_validation() {
+        let config = legacy();
+        assert!(config.network_passphrase.is_none());
+        assert!(config.validate_network("anything").is_err());
+    }
+    #[test]
+    fn network_identity_uses_passphrase_not_name() {
+        let mut config = legacy();
+        config.network_passphrase = Some("custom passphrase".into());
+        config.rpc_url = Some("http://localhost:8000/rpc".into());
+        assert!(config.validate_network("custom passphrase").is_ok());
+        assert!(config.validate_network("different").is_err());
+        let value = serde_json::to_value(&config).expect("valid config fixture");
+        assert_eq!(value["networkPassphrase"], "custom passphrase");
+        let parsed: ContractConfig = serde_json::from_value(value).expect("valid config fixture");
+        assert_eq!(parsed.rpc_url, config.rpc_url);
     }
 }
