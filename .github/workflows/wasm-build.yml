@@ -74,8 +74,16 @@ jobs:
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
 
+      - name: Test SDK amount bindings
+        run: npm run test:amounts --prefix sdk/web
+
       - name: Install app npm dependencies
         run: npm ci --prefix app
+
+      - name: Test app units
+        run: |
+          npm ci --prefix integration-tests-app
+          npm run test:unit --prefix integration-tests-app
 
       - name: Install Trunk
         run: cargo install trunk --locked

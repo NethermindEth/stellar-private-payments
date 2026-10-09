@@ -84,6 +84,18 @@ impl PrivatePool {
 impl PrivatePool {
     // high level methods
 
+    /// Read the configured pool token's SEP-41 precision.
+    pub async fn token_decimals(&self) -> Result<u32, Error> {
+        let pool = self
+            .config
+            .contract_config
+            .pool(&self.config.pool_contract_id)?;
+        Ok(self
+            .rpc
+            .get_token_decimals(&pool.token_contract_id, self.config.user_address.as_str())
+            .await?)
+    }
+
     pub async fn balance(&self) -> Result<NoteAmount, Error> {
         let wallet = self.spendable_notes().await?;
         wallet

@@ -1,8 +1,10 @@
 import {
-  loadDeploymentConfig,
   DisclosureRequest,
   client,
   isRuntimeReady,
+  getCurrentRpcUrl,
+  loadDeploymentConfig,
+  readTokenDecimals,
   verifySelectiveDisclosure,
 } from './wasm-facade.js';
 import {
@@ -12,9 +14,11 @@ import {
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
-import { filterNotes, createNoteRow } from './ui/notes-view.js';
+import { filterNotes, createNoteRow, formatAmount } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
 import { onEnter } from './ui/keys.js';
+import { createDisclosureMetadata } from './disclosure-metadata.js';
+import { refreshTokenDecimals } from './token-metadata.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -148,6 +152,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
+    const pools = state.pools;
     const list = await client().account().userNotes(LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
@@ -159,6 +164,11 @@ async function loadNotes() {
       leafIndex: n.leafIndex ?? 0,
       createdAtLedger: n.createdAtLedger ?? 0,
     }));
+
+    const notePools = new Set(state.notes.map(note => note.poolContractId));
+    void refreshTokenDecimals(pools.filter(pool => notePools.has(pool.poolContractId)),
+      client().account(), () => state.pools === pools,
+      () => App.events.dispatchEvent(new CustomEvent('disclosure:metadata')));
 
     // Apply query-param preselection if present
     const query = parseQueryParams();
@@ -204,19 +214,8 @@ function parseQueryParams() {
 // Mount: Generate (wallet-gated)
 // ---------------------------------------------------------------------------
 
-function formatAmount(stroops, symbol = 'XLM') {
-  try {
-    let v = BigInt(stroops);
-    const negative = v < 0n;
-    if (negative) v = -v;
-    const abs = v.toString().padStart(8, '0');
-    const intPart = abs.slice(0, -7);
-    const frac = abs.slice(-7).replace(/0+$/, '');
-    const out = frac ? `${intPart}.${frac}` : intPart;
-    return `${negative ? '-' : ''}${out} ${symbol}`;
-  } catch {
-    return String(stroops);
-  }
+function poolDecimals(poolContractId) {
+  return state.pools.find(pool => pool.poolContractId === poolContractId)?.decimals;
 }
 
 // Token symbol for a pool, derived from the deployment config's asset descriptor.
@@ -375,6 +374,7 @@ export function mountGenerate(container) {
       const selected = isSelected(note);
       const row = createNoteRow(note, {
         symbol: tokenLabelForPool(note.poolContractId),
+        decimals: poolDecimals(note.poolContractId),
         selectable: true,
         selected,
         disabled: !selected && atMaxSelection(),
@@ -606,7 +606,7 @@ export function mountGenerate(container) {
     for (let i = 0; i < n; i += 1) {
       const symbol = selectedNotesForSymbol[i]?.symbol || 'Token';
       const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
-      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol, selectedNotesForSymbol[i]?.decimals) : publicInputs.amounts[i];
 
       const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
       card.dataset.testid = 'disclosure-disclosed-note';
@@ -647,6 +647,7 @@ export function mountGenerate(container) {
 
     const selectedNotesForSymbol = state.selectedNotes.map((n) => ({
       symbol: tokenLabelForPool(n.poolContractId),
+      decimals: poolDecimals(n.poolContractId),
     }));
 
     const box = el('div', 'space-y-3');
@@ -871,6 +872,8 @@ export function mountVerify(container) {
   let receipt = null;
   let receiptError = null;
   let receiptPoolSymbol = 'Token';
+  let verifiedSpentIndices = [];
+  let updateSpentMessage = () => {};
 
   // -------------------------------------------------------------------------
   // Import area
@@ -1014,7 +1017,7 @@ export function mountVerify(container) {
     rpcInput.disabled = walletActive;
     rpcHintEl.textContent = walletActive
       ? "Using the connected wallet's Soroban RPC network. No separate connection is needed to verify."
-      : 'No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint is only used to confirm the Merkle root is still recognized on-chain and the nullifiers are unspent.';
+      : 'No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint confirms the Merkle root is recognized on-chain, checks whether nullifiers are spent, and reads token precision.';
   };
   updateRpcFieldState();
   App.events.addEventListener('wallet:ready', updateRpcFieldState);
@@ -1136,7 +1139,7 @@ export function mountVerify(container) {
     for (let i = 0; i < n; i += 1) {
       const isSpent = spentIndices.includes(i);
       const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
-      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol, metadata.value.decimals) : publicInputs.amounts[i];
 
       const card = el('div', `p-3 border rounded-lg space-y-1.5 ${
         isSpent
@@ -1178,13 +1181,13 @@ export function mountVerify(container) {
       vkInput.value = defaultVkHash;
     }
 
-    const poolSymbol = tokenLabelForPool(r.context.poolAddress);
+    const poolSymbol = metadata.value.symbol;
     receiptPoolSymbol = poolSymbol;
     const totalAmount = r.publicInputs?.amounts?.reduce((sum, value) => {
       const v = parseReceiptAmount(value);
       return v != null ? sum + v : sum;
     }, 0n);
-    const amountSummary = totalAmount != null ? formatAmount(totalAmount, poolSymbol) : '—';
+    const amountSummary = totalAmount != null ? formatAmount(totalAmount, poolSymbol, metadata.value.decimals) : '—';
     const nullifierCount = r.publicInputs?.nullifiers?.length ?? 0;
 
     const items = [
@@ -1209,9 +1212,31 @@ export function mountVerify(container) {
     });
 
     if (r.publicInputs) {
-      renderDisclosedNotesVerify(r.publicInputs, poolSymbol, []);
+      renderDisclosedNotesVerify(r.publicInputs, poolSymbol, verifiedSpentIndices);
     }
   };
+
+  const metadata = createDisclosureMetadata(loadDeploymentConfig, readTokenDecimals, () => {
+    if (!receipt) return;
+    renderSummary(receipt);
+    updateSpentMessage();
+  });
+  const verificationRpcUrl = () => isRuntimeReady() && App.state.wallet.connected
+    ? getCurrentRpcUrl()
+    : rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL;
+  const refreshMetadata = () => {
+    if (receipt) void metadata.refresh(verificationRpcUrl(), receipt.context.poolAddress, receipt.context.network);
+  };
+  const refreshVerificationNetwork = () => {
+    verifiedSpentIndices = [];
+    updateSpentMessage = () => {};
+    resultsWrap.classList.add('hidden');
+    resultsWrap.dataset.state = 'idle';
+    refreshMetadata();
+  };
+  rpcInput.addEventListener('change', refreshVerificationNetwork);
+  App.events.addEventListener('wallet:ready', refreshVerificationNetwork);
+  App.events.addEventListener('wallet:disconnected', refreshVerificationNetwork);
 
   const loadReceipt = (raw) => {
     clearImportError();
@@ -1231,7 +1256,9 @@ export function mountVerify(container) {
 
     receipt = parsed;
     receiptError = null;
-    renderSummary(receipt);
+    verifiedSpentIndices = [];
+    updateSpentMessage = () => {};
+    refreshMetadata();
     summaryWrap.classList.remove('hidden');
     summaryWrap.dataset.state = 'ready';
     resultsWrap.classList.add('hidden');
@@ -1277,6 +1304,9 @@ export function mountVerify(container) {
     }
     vkErrorEl.classList.add('hidden');
 
+    const verifyingReceipt = receipt;
+    const verifyingRpc = verificationRpcUrl();
+    updateSpentMessage = () => {};
     verifyBtn.disabled = true;
     verifyBtn.textContent = 'Verifying…';
     resultsWrap.classList.remove('hidden');
@@ -1286,12 +1316,7 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      let walletClient;
-      try {
-        walletClient = client();
-      } catch {
-        walletClient = null;
-      }
+      const walletClient = isRuntimeReady() && App.state.wallet.connected ? client() : null;
 
       const report = walletClient
         ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
@@ -1301,6 +1326,7 @@ export function mountVerify(container) {
             expectedVkHash
           );
 
+      if (receipt !== verifyingReceipt || verificationRpcUrl() !== verifyingRpc) return;
       const proofOk = !!report.proofVerified;
       const contextOk = !!report.contextVerified;
       const rootOk = !!report.knownRootStatus;
@@ -1308,6 +1334,7 @@ export function mountVerify(container) {
       const spentIndices = Array.isArray(report.spentNullifierIndices)
         ? report.spentNullifierIndices.map((i) => Number(i))
         : [];
+      verifiedSpentIndices = spentIndices;
       const fullyVerified = proofOk && contextOk && rootOk && unspentOk;
 
       resultsWrap.replaceChildren();
@@ -1369,27 +1396,29 @@ export function mountVerify(container) {
           ['Root fresh', 'Root stale or unknown', 'Every root in the receipt is still in the pool\'s on-chain root history.']
         )
       );
-      const unspentFailText = (() => {
+      const unspentFailText = () => {
         if (spentIndices.length === 0) {
           return 'At least one disclosed nullifier has already been spent on-chain. The note(s) are no longer unspent.';
         }
         const spentAmounts = spentIndices.map((idx) => {
           const v = parseReceiptAmount(receipt.publicInputs.amounts[idx]);
-          return v != null ? formatAmount(v, receiptPoolSymbol) : receipt.publicInputs.amounts[idx];
+          return v != null ? formatAmount(v, receiptPoolSymbol, metadata.value.decimals) : receipt.publicInputs.amounts[idx];
         });
         const noteLabels = spentIndices.map((idx) => `Note ${idx + 1}`);
         return `Disclosed ${noteLabels.join(', ')} ${spentIndices.length === 1 ? 'has' : 'have'} already been spent on-chain (${spentAmounts.join(', ')}).`;
-      })();
+      };
 
-      list.appendChild(
-        makeCheck(
-          'unspent',
-          unspentOk,
-          unspentFailText,
-          ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers are marked spent in the pool\'s contract state.'],
-          'info'
-        )
+      const unspentCheck = makeCheck(
+        'unspent',
+        unspentOk,
+        unspentFailText(),
+        ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers are marked spent in the pool\'s contract state.'],
+        'info'
       );
+      list.appendChild(unspentCheck);
+      updateSpentMessage = () => {
+        if (!unspentOk) unspentCheck.lastElementChild.lastElementChild.textContent = unspentFailText();
+      };
 
       resultsWrap.appendChild(list);
 
@@ -1405,6 +1434,7 @@ export function mountVerify(container) {
       }
       resultsWrap.dataset.state = 'complete';
     } catch (err) {
+      if (receipt !== verifyingReceipt || verificationRpcUrl() !== verifyingRpc) return;
       console.error('Verification failed:', err);
       if (isDbLockedError(err?.message)) {
         showDbLockedModal(err.message);
@@ -1439,12 +1469,22 @@ export async function initDisclosure() {
     verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  App.events.addEventListener('disclosure:metadata', () => {
+    generateContainer?.querySelectorAll('[data-note-id]').forEach(row => {
+      const note = state.notes.find(note => note.id === row.dataset.noteId);
+      const label = row.querySelector('[data-note-amount]');
+      if (note && label) {
+        label.textContent = formatAmount(note.amount, tokenLabelForPool(note.poolContractId), poolDecimals(note.poolContractId));
+      }
+    });
+  });
   App.events.addEventListener('wallet:ready', () => {
     loadNotes();
   });
   
   App.events.addEventListener('wallet:disconnected', () => {
     state.notes = [];
+    state.pools = [];
     state.selectedNotes = [];
     if (generateContainer) mountGenerate(generateContainer);
   });

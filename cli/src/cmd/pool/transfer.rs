@@ -1,11 +1,8 @@
 use anyhow::Result;
-use stellar_private_payments::types::{Sensitive, correlation_id_or_new};
+use stellar_private_payments::types::{NoteAmount, Sensitive, correlation_id_or_new};
 
 use super::{map_pool_err, open_pool, print_tx_results};
-use crate::{
-    config::CliConfig,
-    session::{parse_amount, parse_transfer_recipient},
-};
+use crate::{config::CliConfig, session::parse_transfer_recipient};
 
 #[tracing::instrument(
     name = "cmd_transfer",
@@ -23,7 +20,7 @@ pub fn transfer(
 ) -> Result<()> {
     let pool = open_pool(config, pool)?;
     let recipient = parse_transfer_recipient(to, note_key, encryption_key)?;
-    let amount = parse_amount(amount)?;
+    let amount = NoteAmount::from_decimal(amount, pool.token_decimals()?)?;
     let results = pool
         .transfer(recipient, amount)
         .map_err(|e| map_pool_err(config, e, json))?;

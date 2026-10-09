@@ -42,19 +42,22 @@ export function elc(tag, className, children) {
 // ---------------------------------------------------------------------------
 
 // Format a token amount in base units (stroops) to a decimal string with symbol.
-// Mirrors both Utils.formatTokenAmount (core.js) and disclosure.js formatAmount.
-export function formatAmount(amount, symbol = 'XLM', decimals = 7) {
+// Shared by wallet and audit displays.
+export function formatAmount(amount, symbol, decimals) {
+  if (decimals == null) return `${amount} base units`;
   try {
     let value = typeof amount === 'bigint' ? amount : BigInt(amount ?? 0);
     const negative = value < 0n;
     if (negative) value = -value;
+    if (decimals > 255) return `${negative ? '-' : ''}${value}e-${decimals} ${symbol}`;
+    if (decimals === 0) return `${negative ? '-' : ''}${value} ${symbol}`;
     const abs = value.toString().padStart(decimals + 1, '0');
     const intPart = abs.slice(0, -decimals);
     const frac = abs.slice(-decimals).replace(/0+$/, '');
     const out = frac ? `${intPart}.${frac}` : intPart;
     return `${negative ? '-' : ''}${out} ${symbol}`;
   } catch {
-    return `0 ${symbol}`;
+    return `${amount} base units`;
   }
 }
 
@@ -139,6 +142,7 @@ export function createStatusBadge(spent) {
 export function createNoteRow(note, opts = {}) {
   const {
     symbol: symbolOpt,
+    decimals,
     selectable = false,
     selected = false,
     disabled = false,
@@ -192,13 +196,13 @@ export function createNoteRow(note, opts = {}) {
   // Right cluster: status badge + amount + any caller actions.
   const rightItems = [];
   if (showBadge) rightItems.push(createStatusBadge(note.spent));
-  rightItems.push(
-    el(
-      'div',
-      `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`,
-      formatAmount(note.amount, symbol),
-    ),
+  const amountLabel = el(
+    'div',
+    `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`,
+    formatAmount(note.amount, symbol, decimals),
   );
+  amountLabel.dataset.noteAmount = '';
+  rightItems.push(amountLabel);
   for (const action of actions) if (action) rightItems.push(action);
   const right = elc('div', 'flex items-center gap-3 whitespace-nowrap', rightItems);
 

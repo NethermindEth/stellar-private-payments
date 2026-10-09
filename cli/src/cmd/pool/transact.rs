@@ -14,10 +14,7 @@ use stellar_private_payments::{
 };
 
 use super::{map_pool_err, open_session, print_tx_results};
-use crate::{
-    config::CliConfig,
-    session::{ClientSession, parse_amount},
-};
+use crate::{config::CliConfig, session::ClientSession};
 
 /// Arguments for pool transaction.
 #[derive(Debug, Args)]
@@ -52,7 +49,9 @@ pub struct TransactArgs {
 
 #[derive(Debug, Clone)]
 pub struct OutputArg {
-    amount: NoteAmount,
+    /// Raw decimal amount; parsed against the pool token's decimals once the
+    /// pool is open.
+    amount: String,
     recipient: OutputRecipient,
 }
 
@@ -74,7 +73,6 @@ impl FromStr for OutputArg {
             Some((amount, recipient)) => (amount, Some(recipient)),
             None => (raw, None),
         };
-        let amount = parse_amount(amount).context("invalid output amount")?;
 
         let recipient = match recipient {
             None => OutputRecipient::SelfAddressed,
@@ -95,11 +93,10 @@ impl FromStr for OutputArg {
             },
         };
 
-        if amount.is_zero() && !matches!(recipient, OutputRecipient::SelfAddressed) {
-            bail!("a zero-value output cannot specify a recipient");
-        }
-
-        Ok(Self { amount, recipient })
+        Ok(Self {
+            amount: amount.to_string(),
+            recipient,
+        })
     }
 }
 
@@ -111,21 +108,23 @@ impl FromStr for OutputArg {
 pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     validate_shape(&args)?;
     let input = parse_inputs(&args.inputs)?;
-    let deposit = parse_optional_amount(args.deposit.as_deref(), "deposit")?;
-    let withdraw = parse_optional_amount(args.withdraw.as_deref(), "withdraw")?;
-    validate_activity(&input, deposit)?;
 
     let (account, session) = open_session(config, &args.pool)?;
     let pool = session.pool(&args.pool)?;
+    let decimals = pool.token_decimals()?;
+    let deposit = parse_optional_amount(args.deposit.as_deref(), "deposit", decimals)?;
+    let withdraw = parse_optional_amount(args.withdraw.as_deref(), "withdraw", decimals)?;
+    let output_values = parse_output_amounts(&args.outputs, decimals)?;
+    validate_activity(&input, deposit)?;
 
     let notes = pool
         .notes()
         .map_err(|e| anyhow::anyhow!("list pool notes: {e}"))?;
     let input_total = selected_input_total(&input, &notes)?;
-    validate_balance(input_total, &args.outputs, deposit, withdraw)?;
+    validate_balance(input_total, &output_values, deposit, withdraw)?;
 
     let (output_amounts, output_note_keys, output_encryption_keys) =
-        resolve_outputs(&session, &args.outputs)?;
+        resolve_outputs(&session, &args.outputs, &output_values)?;
     let ext_amount = external_amount(deposit, withdraw)?;
     let ext_recipient = if withdraw.is_zero() {
         args.pool.clone()
@@ -172,11 +171,25 @@ fn parse_inputs(raw: &[String]) -> Result<Vec<Field>> {
     Ok(parsed)
 }
 
-fn parse_optional_amount(raw: Option<&str>, label: &str) -> Result<NoteAmount> {
-    raw.map(parse_amount)
+fn parse_optional_amount(raw: Option<&str>, label: &str, decimals: u32) -> Result<NoteAmount> {
+    raw.map(|raw| NoteAmount::from_decimal(raw, decimals))
         .transpose()
         .with_context(|| format!("invalid {label} amount"))
         .map(|amount| amount.unwrap_or(NoteAmount::ZERO))
+}
+
+fn parse_output_amounts(outputs: &[OutputArg], decimals: u32) -> Result<Vec<NoteAmount>> {
+    outputs
+        .iter()
+        .map(|output| {
+            let amount = NoteAmount::from_decimal(&output.amount, decimals)
+                .context("invalid output amount")?;
+            if amount.is_zero() && !matches!(output.recipient, OutputRecipient::SelfAddressed) {
+                bail!("a zero-value output cannot specify a recipient");
+            }
+            Ok(amount)
+        })
+        .collect()
 }
 
 fn validate_activity(inputs: &[Field], deposit: NoteAmount) -> Result<()> {
@@ -205,13 +218,13 @@ fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<N
 
 fn validate_balance(
     input_total: NoteAmount,
-    outputs: &[OutputArg],
+    outputs: &[NoteAmount],
     deposit: NoteAmount,
     withdraw: NoteAmount,
 ) -> Result<()> {
     let output_total = outputs.iter().try_fold(NoteAmount::ZERO, |total, output| {
         total
-            .checked_add(output.amount)
+            .checked_add(*output)
             .ok_or_else(|| anyhow::anyhow!("output amount total overflow"))
     })?;
     let incoming = input_total
@@ -234,7 +247,11 @@ type ResolvedOutputs = (
     [Option<EncryptionPublicKey>; 2],
 );
 
-fn resolve_outputs(session: &ClientSession, outputs: &[OutputArg]) -> Result<ResolvedOutputs> {
+fn resolve_outputs(
+    session: &ClientSession,
+    outputs: &[OutputArg],
+    output_amounts: &[NoteAmount],
+) -> Result<ResolvedOutputs> {
     let mut amounts = [NoteAmount::ZERO; 2];
     let mut note_keys = [None, None];
     let mut encryption_keys = [None, None];
@@ -243,7 +260,7 @@ fn resolve_outputs(session: &ClientSession, outputs: &[OutputArg]) -> Result<Res
         let slot = index
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("output slot overflow"))?;
-        amounts[index] = output.amount;
+        amounts[index] = output_amounts[index];
         let keys = match &output.recipient {
             OutputRecipient::SelfAddressed => None,
             OutputRecipient::Keys { note, encryption } => Some((note.clone(), encryption.clone())),

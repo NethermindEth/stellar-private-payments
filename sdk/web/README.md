@@ -42,8 +42,8 @@ const account = await client.account({ networkPassphrase }, signer);
 await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
-await pool.deposit(10_000_000n); // stroops (1 XLM)
-const balance = await pool.balance(); // bigint stroops
+await pool.deposit(10_000_000n); // token base units (1 token if its decimals are 7)
+const balance = await pool.balance(); // bigint token base units
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n); // defaults to connected wallet
 ```
@@ -172,3 +172,17 @@ Compiled `.graph.bin` / `.r1cs` files incorporate [iden3/circomlib](https://gith
 | `dist/LICENSE.txt` | Apache-2.0 (this SDK) |
 
 The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scripts/stage-dist-legal.sh`). If you redistribute the compiled circuits, comply with LGPL-3.0 (see NOTICE).
+
+### Token amounts
+
+Transaction methods accept `bigint` base units. After SDK initialization, use
+`parseTokenAmount` with the pool token's precision:
+
+```js
+import { parseTokenAmount } from 'stellar-private-payments';
+const decimals = await pool.tokenDecimals();
+await pool.deposit(parseTokenAmount('1.25', decimals));
+```
+
+The parser rejects invalid input, excess precision, negative nonzero values, and
+`u128` overflow. It never rounds or converts through JavaScript `Number`.

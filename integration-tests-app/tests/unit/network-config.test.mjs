@@ -1,10 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-const defaults = await readFile(new URL('../../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8');
-const source = (await readFile(new URL('../../../app/js/network-config.js', import.meta.url), 'utf8'))
-  .replace("import knownNetworks from '../../sdk/native/src/network_defaults.json';", `const knownNetworks = ${defaults};`);
-const { validateNetwork, networkPresentation } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+import { validateNetwork, networkPresentation } from '../../../app/js/network-config.js';
 const config = { network: 'custom', networkPassphrase: 'identity', rpcUrl: 'https://testnet.example' };
 test('compares passphrase, independently of URL and network name', () => {
   assert.doesNotThrow(() => validateNetwork(config, 'identity'));

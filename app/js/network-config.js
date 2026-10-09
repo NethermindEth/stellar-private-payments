@@ -1,4 +1,4 @@
-import knownNetworks from '../../sdk/native/src/network_defaults.json';
+import knownNetworks from '../../sdk/native/src/network_defaults.json' with { type: 'json' };
 
 export const deploymentDefaults = { explorerUrl: '', rpcUrl: '', displayName: '', network: '' };
 

@@ -225,6 +225,8 @@ export interface GvkTxAudit {
   inputs: GvkSpentInput[];
 }
 
+export declare function readTokenDecimals(rpcUrl: string, tokenContract: string): Promise<number>;
+
 /** Contents of the deployment's circuits.json; supplied by the application. */
 export interface CircuitLockInput {
   version: string;

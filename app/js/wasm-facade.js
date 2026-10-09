@@ -10,6 +10,8 @@
 
 import init, {
   Client,
+  parseTokenAmount,
+  readTokenDecimals as sdkReadTokenDecimals,
   DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
@@ -26,7 +28,7 @@ import { AppStorage } from './app-storage.js';
 // Trunk bundles the selected deployment's trusted fingerprints into the app.
 import circuitLock from 'app-circuit-lock';
 
-export { DisclosureRequest };
+export { DisclosureRequest, parseTokenAmount };
 
 const DEPLOYMENT_CONFIG_URL = new URL('./deployments.json', document.baseURI).href;
 const CIRCUITS_BASE_URL = new URL(
@@ -333,4 +335,9 @@ export async function dumpTelemetryLogs() {
 /** Whether the WASM build supports debug/trace logging and sensitive reveal. */
 export function debugLogsEnabled() {
     return sdkDebugLogsEnabled();
+}
+
+export async function readTokenDecimals(rpcUrl, tokenContract) {
+    await ensureWasmInit();
+    return sdkReadTokenDecimals(rpcUrl, tokenContract);
 }

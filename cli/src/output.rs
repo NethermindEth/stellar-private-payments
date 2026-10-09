@@ -10,7 +10,13 @@ pub fn emit<T: Serialize + ?Sized>(value: &T, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn format_token_amount(amount: u128, symbol: &str, decimals: u32) -> String {
+pub fn format_token_amount(amount: u128, symbol: &str, decimals: Option<u32>) -> String {
+    let Some(decimals) = decimals else {
+        return format!("{amount} base units");
+    };
+    if decimals > 255 {
+        return format!("{amount}e-{decimals} {symbol}");
+    }
     let decimals = decimals as usize;
     if decimals == 0 {
         return format!("{amount} {symbol}");
@@ -68,4 +74,20 @@ pub fn print_kv(key: &str, value: impl std::fmt::Display) {
 
 pub fn print_section(title: &str) {
     println!("{title}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_token_amount;
+
+    #[test]
+    fn token_amount_display_preserves_unknown_and_extreme_precision() {
+        assert_eq!(format_token_amount(123, "T", Some(0)), "123 T");
+        assert_eq!(format_token_amount(1250000, "T", Some(6)), "1.25 T");
+        assert_eq!(format_token_amount(123, "T", None), "123 base units");
+        assert_eq!(
+            format_token_amount(1, "T", Some(u32::MAX)),
+            "1e-4294967295 T"
+        );
+    }
 }

@@ -19,6 +19,8 @@ export const Client = {async new(rpc, storage, prover, config) {
 }};
 export function registerTelemetrySinks() { return {free() {}}; }
 export async function verifySelectiveDisclosure(rpc, prover, receipt, hash, options) { return options.contractConfig; }
+export function readTokenDecimals() {};
+export function parseTokenAmount() {};
 export class DisclosureRequest {};
 export class WalletSigner {};
 export function bootnodeRequired() {};
@@ -71,6 +73,8 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
       return { stopBackgroundSync() {}, contractConfig() { return options.contractConfig; } };
     }};
     export const Storage = { async open() { return {}; } };
+    export function readTokenDecimals() {};
+    export function parseTokenAmount() {};
     export class DisclosureRequest {};
     export function bootnodeRequired() {};
     export function deriveAspUserLeaf() {};
@@ -89,7 +93,7 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
     if (name === 'network-config') {
       const defaults = await readFile(new URL('../../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8');
-      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json';", `const knownNetworks = ${defaults};`);
+      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json' with { type: 'json' };", `const knownNetworks = ${defaults};`);
     }
     facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(moduleSource)));
   }
