@@ -7,14 +7,18 @@ use crate::{
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
+use pool_core::events::{DepositPauseChanged, DepositPauseRepeated};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, storage::Persistent as _},
+    testutils::{Address as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    AdminTransferAccepted, AdminTransferCancelled, AdminTransferProposed, constants::bn256_modulus,
+    utils::MockToken,
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -644,6 +648,7 @@ fn the_configuration_lives_in_the_instance() {
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,
             DataKey::PolicyFlags,
+            DataKey::DepositsPaused,
         ] {
             assert!(instance.has(&key), "{key:?} should live in the instance");
             assert!(
@@ -1314,23 +1319,278 @@ fn update_asp_non_membership_requires_admin() {
 }
 
 #[test]
-fn update_admin_transfers_control() {
+fn update_admin_records_a_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
     let pool = PoolContractClient::new(&env, &pool_id);
     let new_admin = Address::generate(&env);
+    env.mock_all_auths();
 
+    pool.update_admin(&new_admin);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferProposed {
+            admin: setup.admin.clone(),
+            pending_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_admin(), setup.admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn accept_admin_installs_the_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
     env.mock_all_auths();
     pool.update_admin(&new_admin);
 
-    let stored_admin: Address = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .get(&crate::pool::DataKey::Admin)
-            .expect("Admin set in constructor")
-    });
-    assert_eq!(stored_admin, new_admin);
+    pool.accept_admin();
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferAccepted {
+            old_admin: setup.admin.clone(),
+            new_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_admin(), new_admin);
+    assert_eq!(pool.get_pending_admin(), None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_old_admin_loses_control_on_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+    pool.accept_admin();
+
+    let new_tree = Address::generate(&env);
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "update_asp_membership",
+            args: (new_tree.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.update_asp_membership(&new_tree);
+}
+
+#[test]
+fn the_old_admin_keeps_control_until_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+
+    assert!(pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_new_admin_has_no_control_before_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn a_replaced_proposal_cannot_be_accepted() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let replaced = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&replaced);
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &replaced,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+#[test]
+fn cancel_admin_transfer_clears_the_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    pool.cancel_admin_transfer();
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferCancelled {
+            admin: setup.admin.clone(),
+            pending_admin: new_admin,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_pending_admin(), None);
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.cancel_admin_transfer();
+}
+
+#[test]
+fn cancel_admin_transfer_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(
+        pool.try_cancel_admin_transfer(),
+        Err(Ok(Error::NoPendingAdmin))
+    );
+}
+
+#[test]
+fn accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn accepting_the_admin_leaves_deposits_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    pool.update_admin(&Address::generate(&env));
+    pool.accept_admin();
+
+    assert!(pool.deposits_paused());
 }
 
 #[test]
@@ -2103,4 +2363,364 @@ fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
         ),
         other => panic!("unexpected result reaching a check this test does not isolate: {other:?}"),
     }
+}
+
+/// A proof moving `ext_amount` that passes every check before the verifier on
+/// a pool with policy flags 0, so `InvalidProof` is the first error it can hit.
+fn mk_moving_transact_proof(
+    env: &Env,
+    pool: &PoolContractClient,
+    token: &Address,
+    ext_amount: i32,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let zero = U256::from_u32(env, 0);
+    let (mut proof, _) = mk_transact_proof(env, pool, token, zero.clone(), zero, nullifier);
+    let ext = mk_ext_data(env, Address::generate(env), ext_amount);
+    proof.ext_data_hash = compute_ext_hash(env, &pool.address, token, &ext);
+    proof.public_amount = pool_core::amounts::calculate_public_amount(env, ext.ext_amount.clone())
+        .expect("the amount must fit the field");
+    (proof, ext)
+}
+
+#[test]
+fn deposits_paused_is_false_after_construction() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+
+    assert!(!PoolContractClient::new(&env, &pool_id).deposits_paused());
+}
+
+#[test]
+fn pause_deposits_sets_the_flag_and_publishes_the_change() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.pause_deposits();
+
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: true }.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// A refused deposit changes no balance, nullifier, or event.
+#[test]
+fn transact_refuses_a_deposit_while_deposits_are_paused() {
+    use soroban_sdk::testutils::Events;
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 10_000i128;
+    setup.token = register_funded_token(&env, &sender, funded);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+    let nullifier = 0xF1;
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, nullifier);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &sender),
+        Err(Ok(Error::DepositsPaused))
+    );
+    assert!(env.events().all().events().is_empty());
+    assert_eq!(token.balance(&sender), funded);
+    assert_eq!(token.balance(&pool_id), 0);
+    assert!(!pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+#[test]
+fn transact_passes_a_transfer_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, transfer) = mk_moving_transact_proof(&env, &pool, &setup.token, 0, 0xF2);
+
+    assert_eq!(
+        pool.try_transact(&proof, &transfer, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_passes_a_withdrawal_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, withdrawal) = mk_moving_transact_proof(&env, &pool, &setup.token, -500, 0xF3);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn unpause_deposits_lets_a_deposit_reach_the_verifier() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    pool.unpause_deposits();
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF4);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// A pause on a paused pool succeeds, so it spends a pre-signed authorization
+/// instead of leaving it open to replay.
+#[test]
+fn pause_deposits_on_a_paused_pool_changes_nothing() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation, Events},
+    };
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
+
+    assert_eq!(pool.try_pause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
+    assert_eq!(
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "pause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated { paused: true }.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// A paused pool still requires the admin's authorization, so a pre-signed
+/// pause sent there is spent.
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_on_a_paused_pool_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+#[test]
+fn unpause_deposits_on_an_open_pool_changes_nothing() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation, Events},
+    };
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+    pool.unpause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
+
+    assert_eq!(pool.try_unpause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
+    assert_eq!(
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "unpause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    assert!(!pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "unpause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.unpause_deposits();
+}
+
+/// The deposit is above the cap, so a cap check ahead of the pause would answer
+/// `WrongExtAmount` instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_the_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 1500, 0xF5);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+/// The sender holds none of the token, so a transfer ahead of the pause would
+/// trap instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_moving_tokens() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    setup.token = register_funded_token(&env, &Address::generate(&env), 10_000);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF6);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+#[test]
+fn transact_errors_when_the_deposit_flag_is_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().instance().remove(&DataKey::DepositsPaused);
+    });
+    env.mock_all_auths();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF7);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::NotInitialized))
+    );
+}
+
+#[test]
+fn pause_deposits_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
 }

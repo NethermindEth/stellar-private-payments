@@ -17,6 +17,7 @@ use crate::gvk::{self, BabyJubJubPoint, GvkCiphertext};
 use contract_types::Groth16Proof;
 use pool_core::{
     ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
+    events::{DepositPauseChanged, DepositPauseRepeated},
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
@@ -24,7 +25,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::constants::bn256_modulus;
+use soroban_utils::{AdminError, constants::bn256_modulus};
 
 // Re-exported rather than merely imported so `pool_gvk::ExtData` and
 // `pool_gvk::hash_ext_data` stay part of this crate's surface, mirroring
@@ -33,7 +34,9 @@ pub use pool_core::{ExtData, hash_ext_data};
 
 /// Contract error types for the GVK privacy pool.
 ///
-/// Duplicated 1:1 from `pool::Error` plus the two GVK-specific variants.
+/// Duplicated 1:1 from `pool::Error` plus the GVK-specific codes 15 to 17.
+/// `pool` leaves those unassigned, so both pools share every code from 18 on.
+/// Code 19 is unassigned.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -72,6 +75,10 @@ pub enum Error {
     WrongGvkCiphertextCount = 16,
     /// Admin view key `D` is unusable as a circuit public input.
     InvalidAdminViewKey = 17,
+    /// Deposits are paused
+    DepositsPaused = 18,
+    /// No admin transfer is pending
+    NoPendingAdmin = 20,
 }
 
 impl From<MerkleError> for Error {
@@ -87,6 +94,15 @@ impl From<MerkleError> for Error {
     }
 }
 
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
+        }
+    }
+}
+
 /// Storage keys for contract data.
 ///
 /// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
@@ -94,13 +110,17 @@ impl From<MerkleError> for Error {
 /// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
 /// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
 /// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], [`DataKey::AdminViewKey`],
-/// and [`DataKey::GvkMode`], lives in the contract's instance entry.
-/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
+/// [`DataKey::GvkMode`], and [`DataKey::DepositsPaused`], lives in the
+/// contract's instance entry.
+/// [`DataKey::Admin`], [`DataKey::PendingAdmin`], and [`DataKey::Nullifier`]
+/// are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
     /// Administrator address with permissions to modify contract settings
     Admin,
+    /// Proposed next administrator, present only during a transfer
+    PendingAdmin,
     /// Address of the token contract used for deposits/withdrawals
     Token,
     /// Address of the ZK proof verifier contract
@@ -119,16 +139,19 @@ pub(crate) enum DataKey {
     KdfDomain,
     /// Admin's Global View Key public point `D`, set once at construction.
     ///
-    /// Immutable by design (issue #220): there is no setter, and
-    /// `update_admin` rotates only the admin *address*. A rotated-out admin
-    /// therefore keeps the ability to decrypt every future note, and a leaked
-    /// private `d` retroactively deanonymizes the pool's whole history — the
-    /// only recovery is deploying a new pool and migrating. `D` is a circuit
-    /// public input, so forward-only rotation would be circuit-compatible if
-    /// this trade is ever revisited.
+    /// Immutable by design (issue #220): there is no setter, and an admin
+    /// transfer (`update_admin`, then `accept_admin`) moves only the admin
+    /// *address*. A rotated-out admin therefore keeps the ability to decrypt
+    /// every future note, and a leaked private `d` retroactively
+    /// deanonymizes the pool's whole history — the only recovery is
+    /// deploying a new pool and migrating. `D` is a circuit public input,
+    /// so forward-only rotation would be circuit-compatible if this trade
+    /// is ever revisited.
     AdminViewKey,
     /// Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     GvkMode,
+    /// Whether `transact` refuses deposits
+    DepositsPaused,
 }
 
 /// Zero-knowledge proof data for a GVK transaction.
@@ -245,6 +268,7 @@ impl PoolGvkContract {
         instance.set(&DataKey::KdfDomain, &kdf_domain);
         instance.set(&DataKey::AdminViewKey, &admin_view_key);
         instance.set(&DataKey::GvkMode, &gvk_mode);
+        instance.set(&DataKey::DepositsPaused, &false);
 
         MerkleTreeWithHistory::init(&env, levels)?;
 
@@ -317,6 +341,18 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Reports whether the pool refuses deposits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the deposit flag is not stored.
+    pub fn deposits_paused(env: &Env) -> Result<bool, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DepositsPaused)
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Get the latest root of the Merkle tree that defines the pool.
     pub fn get_root(env: &Env) -> Result<U256, Error> {
         Ok(MerkleTreeWithHistory::get_last_root(env)?)
@@ -335,24 +371,123 @@ impl PoolGvkContract {
         Ok(env.storage().persistent().has(&key))
     }
 
-    /// Update the contract administrator. Requires authorization from the
-    /// current admin.
+    /// Proposes a new contract administrator.
+    ///
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
+    ///
+    /// The admin view key does not move: it stays with whoever holds its
+    /// private key.
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
     }
 
-    /// Get the admin address.
-    fn get_admin(env: &Env) -> Result<Address, Error> {
+    /// Withdraws the pending admin transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn cancel_admin_transfer(env: &Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// The previous admin loses every power over the contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call.
+    pub fn accept_admin(env: &Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: &Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: &Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(env, &DataKey::PendingAdmin)
+    }
+
+    /// Pauses deposits.
+    ///
+    /// While paused, `transact` refuses `ext_amount > 0` before any token
+    /// moves. Transfers and withdrawals still go through. Publishes
+    /// [`DepositPauseChanged`], or [`DepositPauseRepeated`] on a paused pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the admin or the deposit flag is
+    /// not stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn pause_deposits(env: &Env) -> Result<(), Error> {
+        Self::set_deposits_paused(env, true)
+    }
+
+    /// Resumes deposits. Publishes [`DepositPauseChanged`], or
+    /// [`DepositPauseRepeated`] on an open pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the admin or the deposit flag is
+    /// not stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn unpause_deposits(env: &Env) -> Result<(), Error> {
+        Self::set_deposits_paused(env, false)
+    }
+
+    fn set_deposits_paused(env: &Env, paused: bool) -> Result<(), Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        // A failed call publishes the signed authorization unspent, for anyone
+        // to replay. So a no-op succeeds, and still writes: simulated as a
+        // no-op, the call keeps write access if the opposite call lands first.
+        let changed = Self::deposits_paused(env)? != paused;
         env.storage()
-            .persistent()
-            .get(&DataKey::Admin)
-            .ok_or(Error::NotInitialized)
+            .instance()
+            .set(&DataKey::DepositsPaused, &paused);
+        if changed {
+            DepositPauseChanged { paused }.publish(env);
+        } else {
+            DepositPauseRepeated { paused }.publish(env);
+        }
+        Ok(())
     }
 
     // ========== ASP Contract Functions ==========
@@ -383,8 +518,7 @@ impl PoolGvkContract {
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
@@ -404,8 +538,7 @@ impl PoolGvkContract {
         env: &Env,
         new_asp_non_membership: Address,
     ) -> Result<(), Error> {
-        let admin = Self::get_admin(env)?;
-        admin.require_auth();
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
         env.storage()
             .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
@@ -686,6 +819,33 @@ impl PoolGvkContract {
     ///
     /// If `ext_amount > 0`, tokens are transferred from the sender to the
     /// pool before processing the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DepositsPaused`] for a deposit while deposits are
+    /// paused, before the cap check and any token transfer, and
+    /// [`Error::WrongExtAmount`] if a deposit exceeds the cap, `ext_amount` is
+    /// outside the 2^248 bound or `i128`, or the proof's public amount differs.
+    ///
+    /// Returns [`Error::UnknownRoot`] if the proof's root is not in the recent
+    /// root history, [`Error::AlreadySpentNullifier`] if an input nullifier is
+    /// spent, [`Error::WrongExtHash`] if the proof's external data hash does
+    /// not match `ext_data`, [`Error::WrongGvkCiphertextCount`] if the proof's
+    /// GVK ciphertext counts do not match the pool's GVK mode,
+    /// [`Error::NonCanonicalPublicInput`] if a public input or a ciphertext
+    /// field is outside the BN254 scalar field, and [`Error::InvalidProof`] if
+    /// the proof is empty, the verifier refuses it, or its non-membership root
+    /// is not current or its membership root unknown.
+    ///
+    /// Returns [`Error::MerkleTreeFull`] if the tree cannot take two more
+    /// commitments, and [`Error::NotInitialized`] if configuration or tree
+    /// state is missing. [`Error::NextIndexNotEven`], [`Error::WrongLevels`],
+    /// and [`Error::Overflow`] mean corrupt tree state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `sender` does not authorize the call, or if a token transfer
+    /// or an association set call fails.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -701,6 +861,9 @@ impl PoolGvkContract {
         let zero = I256::from_i32(env, 0);
 
         if ext_data.ext_amount > zero {
+            if Self::deposits_paused(env)? {
+                return Err(Error::DepositsPaused);
+            }
             let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
             let max = Self::get_maximum_deposit(env)?;
             if deposit_u > max {

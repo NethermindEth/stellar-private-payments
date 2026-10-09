@@ -8,7 +8,7 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{poseidon2_compress, zero_hash};
+use soroban_utils::{AdminError, poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -39,13 +39,16 @@ fn root_index_for(next_index: u64) -> Result<u32, Error> {
 /// Storage keys for contract data
 ///
 /// [`DataKey::Levels`] and [`DataKey::Root`] are instance keys.
-/// [`DataKey::Admin`], [`DataKey::NextIndex`], and [`DataKey::State`] are
-/// persistent keys. Every key has a fixed name and a fixed value size.
+/// [`DataKey::Admin`], [`DataKey::PendingAdmin`], [`DataKey::NextIndex`], and
+/// [`DataKey::State`] are persistent keys. Every key has a fixed name and a
+/// fixed value size.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     /// Administrator address with permissions to modify the tree
     Admin,
+    /// Proposed next administrator, present only during a transfer
+    PendingAdmin,
     /// Number of levels in the Merkle tree
     Levels,
     /// Next available index for leaf insertion, kept outside [`TreeState`]
@@ -73,6 +76,17 @@ pub enum Error {
     NotInitialized = 4,
     /// Arithmetic overflow occurred
     Overflow = 5,
+    /// No admin transfer is pending
+    NoPendingAdmin = 6,
+}
+
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
+        }
+    }
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -150,22 +164,74 @@ impl ASPMembership {
         Ok(())
     }
 
-    /// Update the contract administrator
+    /// Proposes a new contract administrator.
     ///
-    /// Changes the admin address to a new address. Only the current admin
-    /// can call this function.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
-    /// * `new_admin` - Address of the new administrator
+    /// * `new_admin` - Address proposed as the next administrator
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
+    }
+
+    /// Withdraws the pending admin transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn cancel_admin_transfer(env: Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// The previous admin loses every power over the tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(&env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(&env, &DataKey::PendingAdmin)
     }
 
     /// Get the current Merkle root
@@ -251,8 +317,7 @@ impl ASPMembership {
     /// [`Error::Overflow`] if the next leaf index would exceed `u64::MAX`.
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
 
         let instance = env.storage().instance();
         let levels: u32 = instance

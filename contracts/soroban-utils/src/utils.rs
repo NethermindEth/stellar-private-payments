@@ -1,7 +1,7 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
-use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, Val, Vec, contractevent};
 #[cfg(any(test, feature = "testutils"))]
 use soroban_sdk::{contract, contractimpl};
 
@@ -10,13 +10,72 @@ use soroban_sdk::{contract, contractimpl};
 pub enum AdminError {
     /// No admin address is stored under the given key.
     NotInitialized,
+    /// No admin transfer is pending under the given key.
+    NoPendingAdmin,
 }
 
-/// Replaces the administrator stored under `admin_key` with `new_admin`.
+/// The event [`update_admin`] publishes when the admin proposes a successor.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferProposed {
+    /// The admin that made the proposal.
+    pub admin: Address,
+    /// The address that becomes admin if it accepts.
+    pub pending_admin: Address,
+}
+
+/// The event [`cancel_admin_transfer`] publishes when the admin withdraws a
+/// proposal.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferCancelled {
+    /// The admin that withdrew the proposal.
+    pub admin: Address,
+    /// The address that was proposed.
+    pub pending_admin: Address,
+}
+
+/// The event [`accept_admin`] publishes when the proposed address takes over.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferAccepted {
+    /// The admin replaced by the transfer.
+    pub old_admin: Address,
+    /// The admin installed by the transfer.
+    pub new_admin: Address,
+}
+
+/// Returns the administrator stored under `admin_key` in persistent storage.
 ///
-/// The address already stored under `admin_key` must authorize the call. Each
-/// contract passes its own storage key, so contracts sharing this helper keep
-/// separate admin entries.
+/// # Errors
+///
+/// Returns [`AdminError::NotInitialized`] if no address is stored under
+/// `admin_key`.
+pub fn get_admin<K>(env: &Env, admin_key: &K) -> Result<Address, AdminError>
+where
+    K: IntoVal<Env, Val>,
+{
+    env.storage()
+        .persistent()
+        .get(admin_key)
+        .ok_or(AdminError::NotInitialized)
+}
+
+/// Returns the administrator proposed under `pending_key`, or `None` when no
+/// transfer is pending.
+pub fn get_pending_admin<K>(env: &Env, pending_key: &K) -> Option<Address>
+where
+    K: IntoVal<Env, Val>,
+{
+    env.storage().persistent().get(pending_key)
+}
+
+/// Proposes `new_admin` as the next administrator.
+///
+/// Stores the proposal under `pending_key`, replacing any earlier one, and
+/// publishes [`AdminTransferProposed`]. The admin keeps every power until
+/// `new_admin` calls [`accept_admin`]. Each contract passes its own keys, so
+/// contracts sharing this helper keep separate entries.
 ///
 /// # Errors
 ///
@@ -25,17 +84,88 @@ pub enum AdminError {
 ///
 /// # Panics
 ///
-/// Panics if the address stored under `admin_key` does not authorize the call,
-/// because `require_auth` raises a host error rather than returning.
-pub fn update_admin<K>(env: &Env, admin_key: &K, new_admin: &Address) -> Result<(), AdminError>
+/// Panics if the address stored under `admin_key` does not authorize the call.
+pub fn update_admin<K>(
+    env: &Env,
+    admin_key: &K,
+    pending_key: &K,
+    new_admin: &Address,
+) -> Result<(), AdminError>
 where
-    K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
+    K: IntoVal<Env, Val>,
 {
-    let store = env.storage().persistent();
-    let admin: Address = store.get(admin_key).ok_or(AdminError::NotInitialized)?;
+    let admin = get_admin(env, admin_key)?;
     admin.require_auth();
 
-    store.set(admin_key, new_admin);
+    env.storage().persistent().set(pending_key, new_admin);
+    AdminTransferProposed {
+        admin,
+        pending_admin: new_admin.clone(),
+    }
+    .publish(env);
+    Ok(())
+}
+
+/// Withdraws the proposal stored under `pending_key`.
+///
+/// Publishes [`AdminTransferCancelled`].
+///
+/// # Errors
+///
+/// Returns [`AdminError::NotInitialized`] if no address is stored under
+/// `admin_key`, and [`AdminError::NoPendingAdmin`] if no proposal is stored
+/// under `pending_key`.
+///
+/// # Panics
+///
+/// Panics if the address stored under `admin_key` does not authorize the call.
+pub fn cancel_admin_transfer<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
+where
+    K: IntoVal<Env, Val>,
+{
+    let admin = get_admin(env, admin_key)?;
+    admin.require_auth();
+    let pending_admin = get_pending_admin(env, pending_key).ok_or(AdminError::NoPendingAdmin)?;
+
+    env.storage().persistent().remove(pending_key);
+    AdminTransferCancelled {
+        admin,
+        pending_admin,
+    }
+    .publish(env);
+    Ok(())
+}
+
+/// Installs the address proposed under `pending_key` as the administrator.
+///
+/// Replaces the address under `admin_key`, removes the proposal, and publishes
+/// [`AdminTransferAccepted`].
+///
+/// # Errors
+///
+/// Returns [`AdminError::NoPendingAdmin`] if no proposal is stored under
+/// `pending_key`, and [`AdminError::NotInitialized`] if no address is stored
+/// under `admin_key`.
+///
+/// # Panics
+///
+/// Panics if the proposed address does not authorize the call.
+pub fn accept_admin<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
+where
+    K: IntoVal<Env, Val>,
+{
+    let new_admin = get_pending_admin(env, pending_key).ok_or(AdminError::NoPendingAdmin)?;
+    new_admin.require_auth();
+    let old_admin = get_admin(env, admin_key)?;
+
+    let storage = env.storage().persistent();
+    storage.set(admin_key, &new_admin);
+    storage.remove(pending_key);
+    AdminTransferAccepted {
+        old_admin,
+        new_admin,
+    }
+    .publish(env);
     Ok(())
 }
 

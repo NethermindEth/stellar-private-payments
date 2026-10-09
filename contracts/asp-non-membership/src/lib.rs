@@ -27,16 +27,18 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{AdminError, poseidon2_compress, poseidon2_hash2};
 
 /// Storage keys for contract data
 ///
-/// [`DataKey::Root`] is an instance key. [`DataKey::Admin`] and
-/// [`DataKey::Node`] are persistent keys.
+/// [`DataKey::Root`] is an instance key. [`DataKey::Admin`],
+/// [`DataKey::PendingAdmin`], and [`DataKey::Node`] are persistent keys.
+/// `PendingAdmin` is present only while an admin transfer is pending.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     Admin,
+    PendingAdmin,
     Root,
     Node(U256), // Node hash -> U256 (value)
 }
@@ -71,6 +73,16 @@ pub enum Error {
     InvalidProof = 4,
     NotInitialized = 5,
     Overflow = 6,
+    NoPendingAdmin = 7,
+}
+
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
+        }
+    }
 }
 
 // Events
@@ -115,23 +127,75 @@ impl ASPNonMembership {
         Ok(())
     }
 
-    /// Update the admin address
+    /// Proposes a new contract administrator.
     ///
-    /// Transfers administrative control to a new address. Requires
-    /// authorization from the current admin.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `new_admin` - New address that will have permission to modify the tree
+    /// * `new_admin` - Address proposed as the next administrator
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
+    }
+
+    /// Withdraws the pending admin transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn cancel_admin_transfer(env: Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// The previous admin loses every power over the tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(&env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(&env, &DataKey::PendingAdmin)
     }
 
     /// Hash a leaf node using Poseidon2
@@ -373,8 +437,7 @@ impl ASPNonMembership {
     #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
 
         let instance = env.storage().instance();
         let root: U256 = instance
@@ -531,8 +594,7 @@ impl ASPNonMembership {
     ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
         let instance = env.storage().instance();
         let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 

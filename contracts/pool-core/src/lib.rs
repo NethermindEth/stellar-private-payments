@@ -5,8 +5,9 @@
 //! dead-code-eliminates. Two contract crates therefore cannot depend on each
 //! other for *any* item without dragging in each other's exports and colliding
 //! on identically-named methods. This crate holds the parts that carry no
-//! exports — the Merkle tree, policy flags, external-transaction data, and the
-//! cross-contract client traits — so both contracts can share one copy.
+//! exports — the Merkle tree, policy flags, external-transaction data, the
+//! cross-contract client traits, and the events both pools publish — so both
+//! contracts can share one copy.
 //!
 //! Nothing here may declare `#[contract]` or `#[contractimpl]`.
 
@@ -14,6 +15,7 @@
 
 pub mod amounts;
 pub mod clients;
+pub mod events;
 pub mod ext_data;
 pub mod instance;
 pub mod merkle_with_history;
