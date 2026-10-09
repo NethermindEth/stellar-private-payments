@@ -15,7 +15,10 @@ use soroban_sdk::{
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    AdminTransferAccepted, AdminTransferCancelled, AdminTransferProposed, constants::bn256_modulus,
+    utils::MockToken,
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -1316,23 +1319,278 @@ fn update_asp_non_membership_requires_admin() {
 }
 
 #[test]
-fn update_admin_transfers_control() {
+fn update_admin_records_a_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
     let pool = PoolContractClient::new(&env, &pool_id);
     let new_admin = Address::generate(&env);
+    env.mock_all_auths();
 
+    pool.update_admin(&new_admin);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferProposed {
+            admin: setup.admin.clone(),
+            pending_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_admin(), setup.admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn accept_admin_installs_the_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
     env.mock_all_auths();
     pool.update_admin(&new_admin);
 
-    let stored_admin: Address = env.as_contract(&pool_id, || {
-        env.storage()
-            .persistent()
-            .get(&crate::pool::DataKey::Admin)
-            .expect("Admin set in constructor")
-    });
-    assert_eq!(stored_admin, new_admin);
+    pool.accept_admin();
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferAccepted {
+            old_admin: setup.admin.clone(),
+            new_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_admin(), new_admin);
+    assert_eq!(pool.get_pending_admin(), None);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_old_admin_loses_control_on_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+    pool.accept_admin();
+
+    let new_tree = Address::generate(&env);
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "update_asp_membership",
+            args: (new_tree.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.update_asp_membership(&new_tree);
+}
+
+#[test]
+fn the_old_admin_keeps_control_until_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+
+    assert!(pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_new_admin_has_no_control_before_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn a_replaced_proposal_cannot_be_accepted() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let replaced = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&replaced);
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &replaced,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+#[test]
+fn cancel_admin_transfer_clears_the_pending_admin() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    pool.cancel_admin_transfer();
+
+    assert_eq!(
+        env.events().all().events(),
+        [AdminTransferCancelled {
+            admin: setup.admin.clone(),
+            pending_admin: new_admin,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+    assert_eq!(pool.get_pending_admin(), None);
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.cancel_admin_transfer();
+}
+
+#[test]
+fn cancel_admin_transfer_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(
+        pool.try_cancel_admin_transfer(),
+        Err(Ok(Error::NoPendingAdmin))
+    );
+}
+
+#[test]
+fn accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn accepting_the_admin_leaves_deposits_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    pool.update_admin(&Address::generate(&env));
+    pool.accept_admin();
+
+    assert!(pool.deposits_paused());
 }
 
 #[test]
