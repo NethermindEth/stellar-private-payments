@@ -1137,6 +1137,63 @@ fn test_old_admin_cannot_insert_after_update() {
     }]);
     client.insert_leaf(&key, &value);
 }
+
+#[test]
+fn test_old_admin_can_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
+
+    assert!(client.find_key(&key).found);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_new_admin_cannot_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
+}
+
 #[test]
 fn the_root_lives_in_the_instance() {
     let env = test_env();

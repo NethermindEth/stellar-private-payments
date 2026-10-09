@@ -1395,6 +1395,58 @@ fn the_old_admin_loses_control_on_acceptance() {
     pool.update_asp_membership(&new_tree);
 }
 
+#[test]
+fn the_old_admin_keeps_control_until_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+
+    assert!(pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_new_admin_has_no_control_before_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
 /// This test is skipped under Miri because the panic formatting path triggers
 /// undefined behavior in the `ethnum` crate's unsafe formatting code.
 /// See: https://github.com/nlordell/ethnum-rs/issues/34
