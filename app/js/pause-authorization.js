@@ -265,9 +265,8 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
     if (!/Error\(Auth, InvalidAction\)/.test(err.message)) throw err;
     throw new Error('The file does not authorize the pause: it carries too few signatures, a removed signer\'s, or a previous admin\'s. The signers sign a new file.');
   });
-  // Without a `deposit_pause_changed` event, the simulation saw a paused pool.
-  // Its footprint leaves the instance unwritten, so an unpause landing first
-  // would fail it on chain and publish the authorization unspent.
+  // Without a `deposit_pause_changed` event, the simulation saw a paused pool,
+  // and sending the file would only spend it.
   if (!simulation.events.some(({ event }) => scValToNative(event.body.v0.topics[0]) === 'deposit_pause_changed')) {
     return { paused: true };
   }
