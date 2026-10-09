@@ -584,6 +584,7 @@ impl PoolGvkContract {
         let gvk_mode = Self::load_gvk_mode(env)?;
         let admin_view_key = Self::get_admin_view_key(env)?;
         let verifier = Self::get_verifier(env)?;
+        soroban_utils::extend_contract(env, &verifier);
         let client = CircomGroth16VerifierClient::new(env, &verifier);
         Self::validate_gvk_ciphertext_counts(proof, gvk_mode)?;
         Self::validate_bn256_public_inputs(env, proof, policy_flags, &bn256_modulus(env))?;
@@ -685,7 +686,8 @@ impl PoolGvkContract {
     /// Execute a shielded transaction with deposit handling.
     ///
     /// If `ext_amount > 0`, tokens are transferred from the sender to the
-    /// pool before processing the transaction.
+    /// pool before processing the transaction. Renews the pool, its tree, and
+    /// its verifier by at most a day each.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -693,9 +695,7 @@ impl PoolGvkContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
-        // The tree entry is rewritten below; keep the configuration it
-        // reads on the same lifetime.
-        pool_core::extend_instance(env);
+        soroban_utils::extend_instance(env);
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);

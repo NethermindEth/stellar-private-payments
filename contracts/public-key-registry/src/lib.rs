@@ -77,8 +77,11 @@ impl PublicKeyRegistry {
     }
 
     /// Register a user's public encryption and note keys.
+    ///
+    /// Renews the registry by at most a day.
     pub fn register(env: Env, account: Account) {
         account.owner.require_auth();
+        soroban_utils::extend_instance(&env);
         assert_eq!(account.encryption_key.len(), 32);
         assert_eq!(account.note_key.len(), 32);
 

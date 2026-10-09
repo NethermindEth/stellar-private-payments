@@ -3,8 +3,9 @@
 use super::*;
 use soroban_sdk::{
     Address, Bytes, Env, IntoVal, U256,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke},
 };
+use soroban_utils::MAX_EXTENSION_LEDGERS;
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -1068,4 +1069,18 @@ fn the_root_lives_in_the_instance() {
         assert_eq!(env.storage().instance().get(&DataKey::Root), Some(root));
         assert!(!env.storage().persistent().has(&DataKey::Root));
     });
+}
+
+#[test]
+fn test_get_root_renews_the_instance() {
+    let env = test_env();
+    let contract_id = env.register(ASPNonMembership, (Address::generate(&env),));
+    let before = env.deployer().get_contract_instance_ttl(&contract_id);
+
+    ASPNonMembershipClient::new(&env, &contract_id).get_root();
+
+    assert_eq!(
+        env.deployer().get_contract_instance_ttl(&contract_id),
+        before.saturating_add(MAX_EXTENSION_LEDGERS)
+    );
 }

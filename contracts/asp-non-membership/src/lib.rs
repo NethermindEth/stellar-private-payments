@@ -27,7 +27,7 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{extend_instance, poseidon2_compress, poseidon2_hash2};
 
 /// Storage keys for contract data
 ///
@@ -734,7 +734,8 @@ impl ASPNonMembership {
     /// Get the current root of the tree
     ///
     /// Returns the root hash of the Sparse Merkle tree. Returns zero if the
-    /// tree is empty or hasn't been initialized yet.
+    /// tree is empty. Renews the contract by at most a day, since a blocklist
+    /// pool reads the root on every transaction.
     ///
     /// # Arguments
     ///
@@ -743,7 +744,12 @@ impl ASPNonMembership {
     /// # Returns
     ///
     /// Returns the current root hash as a U256 value, or zero if empty
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
+        extend_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::Root)

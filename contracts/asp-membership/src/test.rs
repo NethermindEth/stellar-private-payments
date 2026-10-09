@@ -7,10 +7,11 @@ use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{
     Address, Bytes, Env, IntoVal, U256, Vec,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
     vec,
     xdr::ToXdr,
 };
+use soroban_utils::MAX_EXTENSION_LEDGERS;
 use taceo_poseidon2::bn254::t2;
 
 fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
@@ -896,4 +897,27 @@ fn only_the_last_ninety_roots_are_known_after_two_laps() {
         let known = client.is_known_root(&root);
         assert_eq!(known, i >= lap as usize, "root of insertion {}", i + 1);
     }
+}
+
+#[test]
+fn test_is_known_root_renews_the_instance_and_the_tree() {
+    let env = test_env();
+    let contract_id = env.register(ASPMembership, (Address::generate(&env), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let ttls = || {
+        [
+            env.deployer().get_contract_instance_ttl(&contract_id),
+            env.as_contract(&contract_id, || {
+                env.storage().persistent().get_ttl(&DataKey::State)
+            }),
+        ]
+    };
+    let before = ttls();
+
+    client.is_known_root(&client.get_root());
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
+    );
 }

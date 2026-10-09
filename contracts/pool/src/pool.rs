@@ -336,6 +336,7 @@ impl PoolContract {
         }
         let policy_flags = Self::load_policy_flags(env)?;
         let verifier = Self::get_verifier(env)?;
+        soroban_utils::extend_contract(env, &verifier);
         let client = CircomGroth16VerifierClient::new(env, &verifier);
         Self::validate_bn256_public_inputs(env, proof, policy_flags, &bn256_modulus(env))?;
 
@@ -417,7 +418,8 @@ impl PoolContract {
     ///
     /// This is the main entry point for users to interact with the pool.
     /// If `ext_amount > 0`, tokens are transferred from the sender to the pool
-    /// before processing the transaction.
+    /// before processing the transaction. Renews the pool, its tree, and its
+    /// verifier by at most a day each.
     ///
     /// # Arguments
     ///
@@ -437,9 +439,7 @@ impl PoolContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
-        // The tree entry is rewritten below; keep the configuration it
-        // reads on the same lifetime.
-        pool_core::extend_instance(env);
+        soroban_utils::extend_instance(env);
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);

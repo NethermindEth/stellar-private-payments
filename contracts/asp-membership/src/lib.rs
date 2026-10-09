@@ -8,7 +8,7 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{poseidon2_compress, zero_hash};
+use soroban_utils::{extend_instance, extend_persistent, poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -190,6 +190,9 @@ impl ASPMembership {
 
     /// Check if a root is in the recent root history
     ///
+    /// For any nonzero root, renews the contract and its tree by at most a day,
+    /// since an allowlist pool calls this on every transaction.
+    ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `root` - The Merkle root to check
@@ -213,6 +216,8 @@ impl ASPMembership {
             .persistent()
             .get(&DataKey::State)
             .ok_or(Error::NotInitialized)?;
+        extend_instance(&env);
+        extend_persistent(&env, &DataKey::State);
         Ok(state.roots.contains(&root))
     }
 

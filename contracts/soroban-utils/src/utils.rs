@@ -5,6 +5,8 @@ use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
 #[cfg(any(test, feature = "testutils"))]
 use soroban_sdk::{contract, contractimpl};
 
+use crate::ttl::LIFETIME_LEDGERS;
+
 /// Error returned by the shared admin helpers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AdminError {
@@ -17,6 +19,9 @@ pub enum AdminError {
 /// The address already stored under `admin_key` must authorize the call. Each
 /// contract passes its own storage key, so contracts sharing this helper keep
 /// separate admin entries.
+///
+/// Renews the entry to [`LIFETIME_LEDGERS`] when less remains, so a transfer
+/// leaves the new admin at least that long.
 ///
 /// # Errors
 ///
@@ -36,6 +41,7 @@ where
     admin.require_auth();
 
     store.set(admin_key, new_admin);
+    store.extend_ttl(admin_key, LIFETIME_LEDGERS, LIFETIME_LEDGERS);
     Ok(())
 }
 
