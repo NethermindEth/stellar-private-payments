@@ -535,59 +535,54 @@ mod tests {
         prove_transaction_case(&wasm, &r1cs, &case, leaves, neg_sum, LEVELS)
     }
 
+    /// Spends one note twice at one index, after two distinct notes verify.
+    /// The note is in the tree and the amounts balance, so only
+    /// `sameNullifiers` refuses it.
     #[test]
     #[ignore]
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
         let (wasm, r1cs) = load_artifacts("transaction2")?;
 
-        // Make one real note and reuse it for BOTH inputs -> identical
-        // commitments, signatures, and nullifiers
-        let privk = Scalar::from(7777u64);
-        let blind = Scalar::from(4242u64);
-        let amount = Scalar::from(33u64);
-
-        let real_idx = 13;
-
-        let in0_note = InputNote {
-            leaf_index: 0,
-            priv_key: privk,
-            blinding: blind,
-            amount,
+        let note = InputNote {
+            leaf_index: 5,
+            priv_key: Scalar::from(7777u64),
+            blinding: Scalar::from(4242u64),
+            amount: Scalar::from(33u64),
         };
-        let in1_note = InputNote {
-            leaf_index: real_idx,
-            priv_key: privk,
-            blinding: blind,
-            amount,
+        let other = InputNote {
+            leaf_index: 13,
+            priv_key: Scalar::from(7778u64),
+            blinding: Scalar::from(4243u64),
+            ..note.clone()
         };
-
-        let out_real = OutputNote {
-            pub_key: Scalar::from(9001u64),
-            blinding: Scalar::from(8001u64),
-            amount,
-        };
-        let out_dummy = OutputNote {
-            pub_key: Scalar::from(0u64),
-            blinding: Scalar::from(0u64),
-            amount: Scalar::from(0u64),
-        };
-
-        let real_idx = 5usize;
-        let case = TxCase::new(vec![in0_note, in1_note], vec![out_real, out_dummy]);
-
-        let leaves = prepopulated_leaves(LEVELS, 0xC0FFEEu64, &[0, real_idx], 24);
-
-        // Run: should fail because circuit enforces all input nullifiers to be
-        // distinct
-        let res = prove_transaction_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64), LEVELS);
-        assert!(
-            res.is_err(),
-            "Same-nullifier case unexpectedly verified; expected rejection due to duplicate nullifiers"
+        let outputs = vec![
+            OutputNote {
+                pub_key: Scalar::from(9001u64),
+                blinding: Scalar::from(8001u64),
+                amount: Scalar::from(66u64),
+            },
+            OutputNote {
+                pub_key: Scalar::from(0u64),
+                blinding: Scalar::from(0u64),
+                amount: Scalar::from(0u64),
+            },
+        ];
+        let leaves = prepopulated_leaves(
+            LEVELS,
+            0xC0FFEEu64,
+            &[note.leaf_index, other.leaf_index],
+            24,
         );
+        let prove = |inputs| {
+            let case = TxCase::new(inputs, outputs.clone());
+            prove_transaction_case(&wasm, &r1cs, &case, leaves.clone(), Scalar::zero(), LEVELS)
+        };
 
-        if let Err(e) = res {
-            println!("same-nullifier correctly rejected: {e:?}");
-        }
+        prove(vec![note.clone(), other])?;
+        assert!(
+            prove(vec![note.clone(), note]).is_err(),
+            "one note spent twice must not verify"
+        );
         Ok(())
     }
 }

@@ -70,6 +70,8 @@ fn withdraw_single_step() {
     assert!(!plan.is_complete());
 }
 
+/// A `SpendSession(_)` match also passes for an empty wallet. `PlanError` is
+/// not exported, so the `Debug` form names the variant.
 #[test]
 fn transfer_insufficient_funds() {
     let pool = test_pool(Some(&[2, 3])).expect("test pool");
@@ -79,7 +81,7 @@ fn transfer_insufficient_funds() {
         .prepare_transfer(&wallet, test_recipient(), NoteAmount::from(100u128))
         .expect_err("transfer above wallet sum should not plan");
 
-    assert!(matches!(err, Error::SpendSession(_)));
+    assert_eq!(format!("{err:?}"), "SpendSession(Plan(NoCombination))");
 }
 
 #[test]
@@ -100,6 +102,18 @@ fn prepare_deposit_zero() {
     let err = pool
         .prepare_deposit(NoteAmount::ZERO)
         .expect_err("zero deposit should not plan");
+
+    assert!(matches!(err, Error::InvalidConfig(_)));
+}
+
+#[test]
+fn transfer_zero() {
+    let pool = test_pool(Some(&[10])).expect("test pool");
+
+    let wallet = pool.spendable_notes().expect("spendable notes");
+    let err = pool
+        .prepare_transfer(&wallet, test_recipient(), NoteAmount::ZERO)
+        .expect_err("zero transfer should not plan");
 
     assert!(matches!(err, Error::InvalidConfig(_)));
 }

@@ -355,13 +355,40 @@ fn build_pool_input_note(
 
 #[cfg(test)]
 mod tests {
-    use super::load_user_key_material;
+    use super::{build_validated_pool_tree, load_user_key_material};
     use crate::{
         state::SqliteStorage,
-        types::{lock_reveal_flag, set_reveal_sensitive},
+        types::{AspMembershipSync, Field, lock_reveal_flag, set_reveal_sensitive},
+        zk::merkle::MerklePrefixTree,
     };
 
     const ADDRESS: &str = "GTESTACCOUNTWITHNOSTOREDKEYS";
+    const LEVELS: u32 = 2;
+
+    /// An empty local tree has the expected root, so only the leaf count can
+    /// refuse it.
+    #[test]
+    fn pool_tree_behind_the_chain_requires_sync() -> anyhow::Result<()> {
+        let storage = SqliteStorage::connect_in_memory()?;
+        let empty_root = MerklePrefixTree::new(LEVELS, &[])?.into_built().root()?;
+
+        let tree = build_validated_pool_tree(&storage, "CPOOL", 2, LEVELS, empty_root)?;
+        assert!(matches!(tree, Err(AspMembershipSync::SyncRequired(None))));
+        Ok(())
+    }
+
+    /// An empty local tree matches a chain with no leaves, so only the root can
+    /// refuse it.
+    #[test]
+    fn pool_tree_with_a_wrong_root_is_refused() -> anyhow::Result<()> {
+        let storage = SqliteStorage::connect_in_memory()?;
+
+        let Err(err) = build_validated_pool_tree(&storage, "CPOOL", 0, LEVELS, Field::ZERO) else {
+            panic!("a wrong root must be refused");
+        };
+        assert!(err.to_string().starts_with("pool root mismatch"), "{err}");
+        Ok(())
+    }
 
     #[test]
     fn missing_user_keys_error_redacts_the_address() {

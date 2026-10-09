@@ -1,7 +1,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::{NoteAmount, PolicyFlags};
 
-use super::support::{deploy, session};
+use super::support::{assert_contract_error, deploy, session};
 use crate::{
     network::{LocalNetwork, lock_asp_tree},
     pool::{PoolAsset, PoolOptions},
@@ -50,6 +50,46 @@ async fn blocklist_block() -> Result<()> {
         balance_after_block, balance,
         "the rejected deposit must not change the balance"
     );
+
+    Ok(())
+}
+
+/// A key blocked after proving passes the SDK's check, so only the pool's root
+/// comparison refuses it with `InvalidProof` (code 7). The same proof simulates
+/// before the insert, so the refusal comes from the blocklist its config names.
+#[tokio::test]
+async fn blocklist_block_after_proving() -> Result<()> {
+    let session = session(
+        deploy(&[PoolOptions {
+            policy_flags: PolicyFlags::BLOCKLIST,
+            asset: PoolAsset::Native,
+            ..PoolOptions::NONE
+        }])
+        .await?,
+    )
+    .await?;
+    let pool = session.pool()?;
+    let _lock = lock_asp_tree(&pool.config().contract_config.asp_non_membership).await?;
+
+    let mut plan = pool.prepare_deposit(NoteAmount::from(DEPOSIT_STROOPS))?;
+    let mut prepared = pool.prove_next(&mut plan).await?;
+    pool.simulate(&mut prepared).await?;
+
+    let (note_public_key, _) = session.account.privacy_keys().await?;
+    let network = LocalNetwork::start().await?;
+    network
+        .insert_asp_non_membership_leaf(
+            &pool.config().contract_config.asp_non_membership,
+            &session.identity.admin_secret,
+            note_public_key,
+        )
+        .await?;
+
+    let err = pool
+        .simulate(&mut prepared)
+        .await
+        .expect_err("a proof against the blocklist root before the block must be rejected");
+    assert_contract_error(err, 7);
 
     Ok(())
 }

@@ -20,7 +20,8 @@ use circuits::test::utils::{
 };
 use contract_types::Groth16Error;
 use pool::{Error, ExtData, Proof};
-use soroban_sdk::InvokeError;
+use soroban_sdk::{InvokeError, Vec as SorobanVec};
+use soroban_utils::constants::bn256_modulus;
 use stellar_private_payments::types::PolicyFlags;
 
 /// A pool transaction that is ready for `transact`, with its proof made from
@@ -94,20 +95,8 @@ fn inputs_for_flags(all: &Inputs, flags: PolicyFlags) -> Inputs {
     out
 }
 
-/// A private transfer of 13 units. The public amount stays zero, so no value
-/// enters or leaves the pool.
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_transfer_succeeds() -> Result<()> {
-    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
-    assert!(fixture.transact().is_ok(), "transfer should succeed");
-    Ok(())
-}
-
-/// A deposit moves value into the pool, so `publicAmount` is not zero.
-///
-/// `transact_transfer_succeeds` keeps `publicAmount` at zero, so this case
-/// covers the public amount encoding as well.
+/// A deposit moves value into the pool, so `publicAmount` is not zero, which
+/// covers the public amount encoding that a transfer leaves at zero.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_deposit_succeeds() -> Result<()> {
@@ -148,6 +137,33 @@ fn transact_rejects_tampered_output_commitment() -> Result<()> {
         matches!(outcome, Err(Ok(Error::InvalidProof))),
         "expected the pool's own InvalidProof for a tampered output commitment, got {outcome:?}"
     );
+    Ok(())
+}
+
+/// The pool refuses a settled proof sent again, and with each nullifier `n`
+/// sent as `n + r`. The spent check keys on the raw value and misses the alias;
+/// the canonical check stops the verifier from reducing it to a spent `n`.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_a_settled_proof_and_its_field_aliases() -> Result<()> {
+    let mut fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    assert_eq!(fixture.transact(), Ok(Ok(())), "the first send settles");
+
+    let err = fixture
+        .transact()
+        .expect_err("a settled proof must not settle again");
+    assert_eq!(err, Ok(Error::AlreadySpentNullifier));
+
+    // An unaliased nullifier would answer `AlreadySpentNullifier` first.
+    let r = bn256_modulus(&fixture.env);
+    fixture.proof.input_nullifiers = SorobanVec::from_iter(
+        &fixture.env,
+        fixture.proof.input_nullifiers.iter().map(|n| n.add(&r)),
+    );
+    let err = fixture
+        .transact()
+        .expect_err("an aliased nullifier must not settle");
+    assert_eq!(err, Ok(Error::NonCanonicalPublicInput));
     Ok(())
 }
 

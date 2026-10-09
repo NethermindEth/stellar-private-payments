@@ -15,7 +15,7 @@ use stellar_xdr::{self as xdr, ReadXdr};
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
     ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NotePublicKey,
-    PoolInfo, SMT_DEPTH, TransactChainContext, U256, transact_chain_context_from_state,
+    PoolInfo, SMT_DEPTH, TransactChainContext, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -83,24 +83,17 @@ pub struct PreparedSorobanTx {
 }
 
 impl StateFetcher {
-    fn u256_to_i128_checked(v: U256, what: &'static str) -> Result<i128> {
-        let be = v.to_big_endian();
-
-        // Must fit into 128 bits to be representable as i128.
-        if be[..16].iter().any(|&b| b != 0) {
-            return Err(anyhow!("{what} does not fit into i128"));
-        }
-
-        let mut low_bytes = [0u8; 16];
-        low_bytes.copy_from_slice(&be[16..]);
-        let low = u128::from_be_bytes(low_bytes);
-
-        if low > i128::MAX as u128 {
-            return Err(anyhow!("{what} does not fit into i128"));
-        }
-
-        let value = i128::try_from(low).map_err(|_| anyhow!("{what} does not fit into i128"))?;
-        Ok(value)
+    /// Reads a pool's deposit cap, saturated at `i128::MAX`.
+    ///
+    /// The pool checks a deposit against the stored `U256` cap and then
+    /// converts the deposit to `i128`, so no cap above `i128::MAX` admits a
+    /// larger deposit.
+    fn maximum_deposit_from_pool_state(
+        pool_state: &HashMap<String, xdr::ScVal>,
+        pool_id: &str,
+    ) -> Result<ExtAmount> {
+        let cap = scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", pool_id)?)?;
+        Ok(ExtAmount::from(i128::try_from(cap).unwrap_or(i128::MAX)))
     }
 
     /// Reads the Global View Key storage keys out of a pool's fetched state,
@@ -269,15 +262,8 @@ impl StateFetcher {
                 scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
             let merkle_capacity = 2u64.pow(merkle_levels);
             let merkle_next_index = tree.next_index;
-            let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
-                pool_state,
-                "MaximumDepositAmount",
-                pool.pool_contract_id
-            )?)?;
-            let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
-                maximum_deposit_amount_u256,
-                "maximum_deposit_amount",
-            )?);
+            let maximum_deposit_amount =
+                Self::maximum_deposit_from_pool_state(pool_state, &pool.pool_contract_id)?;
             let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
             Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
 
@@ -705,6 +691,7 @@ impl StateFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::U256;
 
     /// A pool inserts two leaves per call, so the ring advances one slot every
     /// two leaves and wraps after as many calls as the ring has slots. The
@@ -827,6 +814,27 @@ mod tests {
             })
         );
         assert_eq!(gvk_mode, Some(2));
+    }
+
+    /// The pool never takes a deposit above `i128::MAX`, so a larger cap reads
+    /// as `i128::MAX` instead of failing the whole pool read. A smaller cap
+    /// reads unchanged.
+    #[test]
+    fn maximum_deposit_saturates_at_i128_max() {
+        let read = |cap: U256| {
+            let pool_state = HashMap::from([(
+                "MaximumDepositAmount".to_string(),
+                field_to_scval_u256(Field(cap)),
+            )]);
+            StateFetcher::maximum_deposit_from_pool_state(&pool_state, "CPOOL").expect("cap reads")
+        };
+
+        assert_eq!(read(U256::from(1u128 << 127)), ExtAmount::MAX);
+        assert_eq!(read(U256::MAX), ExtAmount::MAX);
+        assert_eq!(
+            read(U256::from(i128::MAX - 1)),
+            ExtAmount::from(i128::MAX - 1)
+        );
     }
 
     fn pool_entry(

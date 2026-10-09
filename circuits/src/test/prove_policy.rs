@@ -6,10 +6,10 @@ mod tests {
         },
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
-        keypair::derive_public_key,
+        keypair::{derive_public_key, sign},
         merkle_tree::PrefixTree,
         sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
-        transaction::{commitment, prepopulated_prefix},
+        transaction::{commitment, nullifier, prepopulated_prefix},
         transaction_case::{
             InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
             prepare_transaction_witness,
@@ -17,7 +17,7 @@ mod tests {
     };
     use anyhow::{Context, Result, ensure};
     use ark_bn254::Fr as Scalar;
-    use ark_ff::{BigInteger, PrimeField, Zero};
+    use ark_ff::{BigInteger, Field, PrimeField, Zero};
     use num_bigint::{BigInt, Sign};
     use std::{
         panic::{self, AssertUnwindSafe},
@@ -1043,141 +1043,259 @@ mod tests {
         })
     }
 
+    /// Spends one note twice at one index, after two distinct notes verify.
+    /// The note is in the tree and the amounts balance, so only
+    /// `sameNullifiers` refuses it.
     #[test]
     #[ignore]
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
-        for_each_policy(PolicyCircuitSet::All, |asp, wasm, r1cs| {
-            // Same note material used twice
-            let privk = Scalar::from(7777u64);
-            let blind = Scalar::from(4242u64);
-            let amount = Scalar::from(33u64);
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
 
-            let same_note = InputNote {
-                leaf_index: 0,
-                priv_key: privk,
-                blinding: blind,
-                amount,
-            };
-
-            let out_real = OutputNote {
+        let note = InputNote {
+            leaf_index: 5,
+            priv_key: Scalar::from(7777u64),
+            blinding: Scalar::from(4242u64),
+            amount: Scalar::from(33u64),
+        };
+        let other = InputNote {
+            leaf_index: 13,
+            priv_key: Scalar::from(7778u64),
+            blinding: Scalar::from(4243u64),
+            ..note.clone()
+        };
+        let outputs = vec![
+            OutputNote {
                 pub_key: Scalar::from(9001u64),
                 blinding: Scalar::from(8001u64),
-                amount,
-            };
-            let out_dummy = OutputNote {
+                amount: Scalar::from(66u64),
+            },
+            OutputNote {
                 pub_key: Scalar::from(0u64),
                 blinding: Scalar::from(0u64),
                 amount: Scalar::from(0u64),
-            };
-
-            let case = TxCase::new(
-                vec![
-                    same_note.clone(), // in0 @ real_id=0
-                    InputNote {
-                        leaf_index: 5,
-                        ..same_note.clone()
-                    }, // in1 @ real_id=5 (same note material)
-                ],
-                vec![out_real, out_dummy],
-            );
-
-            let leaves = prepopulated_prefix(
-                0xC0FFEEu64,
-                &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                LEAF_PREFIX,
-            );
-
-            let membership_trees = default_membership_trees(&case, 0xFEFE_FEF1u64);
-
-            let keys = default_non_membership_keys(&case);
-
-            let res = run_case_with_non_membership_builder(
-                wasm,
-                r1cs,
-                &case,
-                leaves,
-                Scalar::from(0u64),
-                &membership_trees,
-                &keys,
-                |key, pubs| {
-                    let overrides = non_membership_overrides_from_pubs(pubs);
-                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
-                },
-                asp,
+            },
+        ];
+        let leaves = prepopulated_prefix(
+            0xC0FFEEu64,
+            &[note.leaf_index, other.leaf_index],
+            LEAF_PREFIX,
+        );
+        let prove = |inputs| {
+            run_case(
+                &wasm,
+                &r1cs,
+                &TxCase::new(inputs, outputs.clone()),
+                leaves.clone(),
+                Scalar::zero(),
+                &[],
+                &[],
+                PolicyAspWitness::None,
                 None::<fn(&mut Inputs)>,
-            );
-            expect_proof_rejected(res, "duplicate nullifiers must not verify")
-        })
+            )
+        };
+
+        prove(vec![note.clone(), other])?;
+        expect_proof_rejected(
+            prove(vec![note.clone(), note]),
+            "one note spent twice must not verify",
+        )
     }
 
+    /// Returns the pool tree's leaves for [`amounts_case`], with its input
+    /// slots 0 and 7 left empty.
+    fn amounts_leaves() -> Vec<Scalar> {
+        prepopulated_prefix(0xDEAD_BEEFu64, &[0, 7], LEAF_PREFIX)
+    }
+
+    /// Returns notes of the given amounts at fixed keys and leaves.
+    fn amounts_case([in0, in1]: [Scalar; 2], [out0, out1]: [Scalar; 2]) -> TxCase {
+        TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(101u64),
+                    blinding: Scalar::from(201u64),
+                    amount: in0,
+                },
+                InputNote {
+                    leaf_index: 7,
+                    priv_key: Scalar::from(102u64),
+                    blinding: Scalar::from(211u64),
+                    amount: in1,
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(501u64),
+                    blinding: Scalar::from(601u64),
+                    amount: out0,
+                },
+                OutputNote {
+                    pub_key: Scalar::from(502u64),
+                    blinding: Scalar::from(602u64),
+                    amount: out1,
+                },
+            ],
+        )
+    }
+
+    /// Proves `policy_tx_2_2` for [`amounts_case`], with `root` in place of
+    /// the tree's root when given.
+    fn prove_amounts(
+        ins: [Scalar; 2],
+        outs: [Scalar; 2],
+        public_amount: Scalar,
+        root: Option<Scalar>,
+    ) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
+        run_case(
+            &wasm,
+            &r1cs,
+            &amounts_case(ins, outs),
+            amounts_leaves(),
+            public_amount,
+            &[],
+            &[],
+            PolicyAspWitness::None,
+            root.map(|root| move |inputs: &mut Inputs| inputs.set("root", root)),
+        )
+    }
+
+    /// Proves a transfer of 13, then the same notes with a public amount of
+    /// 1. Only the balance constraint ties the public amount to the notes.
+    #[test]
+    #[ignore]
+    fn test_public_amount_off_by_one_should_fail() -> Result<()> {
+        let ins = [Scalar::zero(), Scalar::from(13u64)];
+        let outs = [Scalar::from(13u64), Scalar::zero()];
+
+        prove_amounts(ins, outs, Scalar::zero(), None)?;
+        expect_proof_rejected(
+            prove_amounts(ins, outs, Scalar::from(1u64), None),
+            "a public amount off by one must not verify",
+        )
+    }
+
+    /// Proves a transfer of 13, then outputs of 14 and `p - 1`, which balance
+    /// it in the field. Only the 248-bit range check on outputs refuses
+    /// `p - 1`.
+    #[test]
+    #[ignore]
+    fn test_output_wrapping_the_field_should_fail() -> Result<()> {
+        let a = Scalar::from(13u64);
+        let ins = [Scalar::zero(), a];
+
+        prove_amounts(ins, [a, Scalar::zero()], Scalar::zero(), None)?;
+        expect_proof_rejected(
+            prove_amounts(
+                ins,
+                [a + Scalar::from(1u64), -Scalar::from(1u64)],
+                Scalar::zero(),
+                None,
+            ),
+            "an output wrapping the field must not verify",
+        )
+    }
+
+    /// Deposits an output of `2^248 - 1`, then one of `2^248`. Only the
+    /// 248-bit range check on outputs refuses the second.
+    #[test]
+    #[ignore]
+    fn test_output_at_two_to_the_248_should_fail() -> Result<()> {
+        let bound = Scalar::from(2u64).pow([248]);
+        let deposit =
+            |amount| prove_amounts([Scalar::zero(); 2], [amount, Scalar::zero()], amount, None);
+
+        deposit(bound - Scalar::from(1u64))?;
+        expect_proof_rejected(deposit(bound), "an output of 2^248 must not verify")
+    }
+
+    /// Proves a transfer of 13, then the same notes against the root of the
+    /// tree without them. Only the root check on nonzero inputs refuses it.
+    #[test]
+    #[ignore]
+    fn test_nonzero_input_against_an_earlier_root_should_fail() -> Result<()> {
+        let ins = [Scalar::zero(), Scalar::from(13u64)];
+        let outs = [Scalar::from(13u64), Scalar::zero()];
+        let earlier_root = PrefixTree::new(&amounts_leaves(), LEVELS).root();
+
+        prove_amounts(ins, outs, Scalar::zero(), None)?;
+        expect_proof_rejected(
+            prove_amounts(ins, outs, Scalar::zero(), Some(earlier_root)),
+            "a nonzero input against an earlier root must not verify",
+        )
+    }
+
+    /// Deposits 12 against a root no tree has. The root check skips
+    /// zero-amount inputs, and deposits rely on it.
+    #[test]
+    #[ignore]
+    fn test_zero_amount_inputs_ignore_the_root() -> Result<()> {
+        let deposit = Scalar::from(12u64);
+        prove_amounts(
+            [Scalar::zero(); 2],
+            [deposit, Scalar::zero()],
+            deposit,
+            Some(Scalar::from(123u64)),
+        )
+    }
+
+    /// Proves a transfer of 13, then the same spend at its leaf index plus
+    /// `2^20`, which walks the same path and gives the note a fresh nullifier.
+    /// Only the index's range check refuses it.
+    #[test]
+    #[ignore]
+    fn test_leaf_index_aliased_past_the_depth_should_fail() -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let mut witness = prepare_transaction_witness(&case, amounts_leaves(), LEVELS)?;
+        let prove = |witness: &TransactionWitness| {
+            let inputs = build_base_inputs(&case, witness, Scalar::zero());
+            prove_and_expect_verify(&wasm, &r1cs, &inputs)
+        };
+
+        prove(&witness)?;
+        let note = &case.inputs[0];
+        let cm = commitment(note.amount, witness.public_keys[0], note.blinding);
+        let index = witness.path_indices[0] + Scalar::from(1u64 << LEVELS);
+        witness.path_indices[0] = index;
+        witness.nullifiers[0] = nullifier(cm, index, sign(note.priv_key, cm, index));
+        expect_proof_rejected(
+            prove(&witness),
+            "a leaf index past the tree depth must not verify",
+        )
+    }
+
+    /// Proves a transfer of 13, then the same transfer by a key outside the
+    /// allowlist that presents an allowlisted key's leaf and path. Only the
+    /// check that the leaf hashes the input key refuses it.
     #[test]
     #[ignore]
     fn test_membership_should_fail_wrong_privkey() -> Result<()> {
-        for_each_policy(PolicyCircuitSet::Membership, |asp, wasm, r1cs| {
-            let case = TxCase::new(
-                vec![
-                    InputNote {
-                        leaf_index: 0,
-                        priv_key: Scalar::from(101u64),
-                        blinding: Scalar::from(201u64),
-                        amount: Scalar::from(0u64),
-                    },
-                    InputNote {
-                        leaf_index: 7,
-                        priv_key: Scalar::from(111u64),
-                        blinding: Scalar::from(211u64),
-                        amount: Scalar::from(13u64),
-                    },
-                ],
-                vec![
-                    OutputNote {
-                        pub_key: Scalar::from(501u64),
-                        blinding: Scalar::from(601u64),
-                        amount: Scalar::from(13u64),
-                    },
-                    OutputNote {
-                        pub_key: Scalar::from(502u64),
-                        blinding: Scalar::from(602u64),
-                        amount: Scalar::from(0u64),
-                    },
-                ],
-            );
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2_A")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let trees = default_membership_trees(&case, 0x1111_2222u64);
+        let allowed: Vec<Scalar> = case
+            .inputs
+            .iter()
+            .map(|note| derive_public_key(note.priv_key))
+            .collect();
+        let prove = |case: &TxCase| {
+            let witness = prepare_transaction_witness(case, amounts_leaves(), LEVELS)?;
+            let mut inputs = build_base_inputs(case, &witness, Scalar::zero());
+            apply_membership_proofs(&mut inputs, case, &allowed, &trees)?;
+            prove_and_expect_verify(&wasm, &r1cs, &inputs)
+        };
 
-            let leaves = prepopulated_prefix(
-                0xCAFE_BE5Eu64,
-                &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                LEAF_PREFIX,
-            );
-
-            // Normal membership trees (blinding = 0)
-            let membership_trees = default_membership_trees(&case, 0x1111_2222u64);
-            let keys = default_non_membership_keys(&case);
-
-            // Set inPrivateKey[0] to the wrong value
-            let original_keys: Vec<BigInt> = case
-                .inputs
-                .iter()
-                .map(|n| scalar_to_bigint(n.priv_key))
-                .collect();
-            let mut modified_keys = original_keys.clone();
-            modified_keys[0] = scalar_to_bigint(Scalar::from(999u64)); // Wrong private key for index 0
-
-            let res = run_case(
-                wasm,
-                r1cs,
-                &case,
-                leaves,
-                Scalar::from(0u64),
-                &membership_trees,
-                &keys,
-                asp,
-                Some(|inputs: &mut Inputs| {
-                    inputs.set("inPrivateKey", modified_keys.clone());
-                }),
-            );
-
-            expect_proof_rejected(res, "wrong membership private key must not verify")
-        })
+        prove(&case)?;
+        let mut outsider = case.clone();
+        outsider.inputs[0].priv_key = Scalar::from(999u64);
+        expect_proof_rejected(
+            prove(&outsider),
+            "a key outside the allowlist must not verify",
+        )
     }
 
     #[test]
@@ -1513,6 +1631,95 @@ mod tests {
             let res = run_non_membership_depth_case(asp, wasm, r1cs, shared_bits);
             expect_proof_rejected(res, "path filling every sibling slot must not verify")
         })
+    }
+
+    /// Proves a transfer of 13 on `policy_tx_2_2_B`, then blocks the spender's
+    /// key `pk` as leaf `(pk, pk)` and expects a rejection once `forge(pk)`
+    /// replaces the `oldKey`, `oldValue`, and `isOld0` of its witness.
+    fn expect_blocked_key_rejected(
+        forge: impl FnOnce(Scalar) -> [Scalar; 3],
+        context: &str,
+    ) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2_B")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let keys = default_non_membership_keys(&case);
+        let pk = derive_public_key(case.inputs[0].priv_key);
+
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            amounts_leaves(),
+            Scalar::zero(),
+            &[],
+            &keys,
+            PolicyAspWitness::NonMembership,
+            None::<fn(&mut Inputs)>,
+        )?;
+        let blocked = (scalar_to_bigint(pk), scalar_to_bigint(pk));
+        let forged = forge(pk);
+        let field = |name| {
+            SignalKey::new("nonMembershipProofs")
+                .idx(0)
+                .idx(0)
+                .field(name)
+        };
+        expect_proof_rejected(
+            run_case_with_non_membership_builder(
+                &wasm,
+                &r1cs,
+                &case,
+                amounts_leaves(),
+                Scalar::zero(),
+                &[],
+                &keys,
+                |key, pubs| {
+                    let mut leaves = non_membership_overrides_from_pubs(pubs);
+                    leaves.push(blocked.clone());
+                    prepare_smt_proof_with_overrides(key, &leaves, SMT_LEVELS)
+                },
+                PolicyAspWitness::NonMembership,
+                Some(|inputs: &mut Inputs| {
+                    for (name, value) in ["oldKey", "oldValue", "isOld0"].into_iter().zip(forged) {
+                        inputs.set_key(&field(name), value);
+                    }
+                }),
+            ),
+            context,
+        )
+    }
+
+    /// Spends from a blocked key whose witness names the key's own leaf as the
+    /// leaf it collides with. Only the check that `oldKey` differs from the key
+    /// refuses it.
+    #[test]
+    #[ignore]
+    fn test_blocked_key_with_its_own_leaf_as_old_should_fail() -> Result<()> {
+        expect_blocked_key_rejected(
+            |pk| [pk, pk, Scalar::zero()],
+            "a blocked key naming its own leaf must not verify",
+        )
+    }
+
+    /// Spends from a blocked key with leaf `(1, 0)` as `oldKey` and `oldValue`,
+    /// and an `isOld0` that scales that leaf's hash into the blocked leaf's.
+    /// Only the bit check on `isOld0` refuses it.
+    #[test]
+    #[ignore]
+    fn test_blocked_key_with_a_non_boolean_is_old0_should_fail() -> Result<()> {
+        let one = Scalar::from(1u64);
+        let leaf = |key, value| poseidon2_hash2(key, value, Some(one));
+        expect_blocked_key_rejected(
+            |pk| {
+                [
+                    one,
+                    Scalar::zero(),
+                    one - leaf(pk, pk) / leaf(one, Scalar::zero()),
+                ]
+            },
+            "a non-boolean isOld0 must not verify",
+        )
     }
 
     #[test]
