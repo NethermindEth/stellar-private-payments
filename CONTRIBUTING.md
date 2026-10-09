@@ -91,6 +91,7 @@ stellar-private-payments/
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
+- [**jq**](https://jqlang.github.io/jq/) for the MSRV and release scripts.
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
 - [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
 - [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
@@ -100,8 +101,16 @@ stellar-private-payments/
 All first-party Rust packages share the minimum supported Rust version (MSRV)
 declared in the root `Cargo.toml`. Workspace members inherit it; excluded packages
 declare the same version explicitly. `bash scripts/msrv.sh` uses stable Cargo and
-`jq` to print the minimum and check the resolved declarations. Vendored dependency manifests
-retain their own requirements.
+`jq` to check the resolved declarations and workspace inheritance. The root field
+uses the canonical `rust-version = "X.Y.Z"` layout in `[workspace.package]`.
+Independent packages are listed explicitly in the checker; add new independent
+first-party packages there. Untracked scratch projects are not part of the policy.
+Vendored dependencies retain their own requirements and are checked by the actual
+MSRV builds; do not raise their requirements merely to match the development pin.
+
+The baseline is Rust 1.95.0, matching the requirement declared by
+`rusqlite_migration` in the locked SDK dependency graph. The vendored
+`cranelift-control` retains upstream 0.133.0's Rust 1.94.0 requirement.
 
 The development/release compiler in `rust-toolchain.toml` may be newer. Updating
 that pin does not raise the MSRV. Keep the minimum until a language feature,
@@ -111,7 +120,7 @@ boundary over a routine patch release. Update the workspace declaration and the
 excluded packages together. Older compiler support branches are not promised.
 
 The MSRV workflow runs on every PR, including source-only changes. Configure its
-four checks as required in branch protection. Run
+three locked build checks as required in branch protection. Run
 its checks locally with the minimum toolchain installed:
 
 ```sh
@@ -129,7 +138,10 @@ bootnode tests, and compilation of the excluded integration suites. Browser and
 contract checks install their Rust targets. The consumer check resolves fresh
 dependencies for the packaged SDK outside the workspace; it intentionally does
 not reuse the repository lockfile. Dependency updates must preserve both forms
-of compatibility.
+of compatibility. Fresh consumer resolution runs separately on dependency-related
+PRs, relevant pushes to main, or manual dispatch. It is not a required PR check:
+upstream releases must not block unrelated PRs. Run it manually before releasing
+or when investigating dependency changes.
 
 The contract check requires Stellar CLI 28.1.0 (the version installed by CI),
 which performs the Soroban SDK's required contract post-processing.

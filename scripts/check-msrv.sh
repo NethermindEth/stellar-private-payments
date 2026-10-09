@@ -25,9 +25,11 @@ case "${1:-}" in
     # against a network; use a committed fixture only if no local deployment exists.
     fixture="$ROOT/deployments/local/deployments.json"
     if [[ ! -e "$fixture" && ! -L "$fixture" ]]; then
+      created_directory=false
+      [[ -d "$(dirname "$fixture")" ]] || created_directory=true
       mkdir -p "$(dirname "$fixture")"
       cp "$ROOT/deployments/testnet/deployments.json" "$fixture"
-      trap 'rm -f "$fixture"' EXIT
+      trap 'rm -f "$fixture"; if $created_directory; then rmdir "$(dirname "$fixture")" 2>/dev/null || true; fi' EXIT
     fi
     cargo check --locked --target wasm32-unknown-unknown --manifest-path integration-tests-web/Cargo.toml --all-targets
     ;;
@@ -43,7 +45,8 @@ case "${1:-}" in
     trap 'rm -rf "$consumer"' EXIT
     cargo package --locked --allow-dirty --no-verify -p stellar-private-payments \
       --target-dir "$consumer/package"
-    sdk_version=$(cargo read-manifest --manifest-path sdk/native/Cargo.toml | jq -er '.version')
+    sdk_version=$(cargo metadata --locked --offline --no-deps --format-version 1 |
+      jq -er '.packages[] | select(.name == "stellar-private-payments") | .version')
     tar -xzf "$consumer/package/package/stellar-private-payments-$sdk_version.crate" -C "$consumer"
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}/msrv-consumer"
     mkdir "$consumer/src"
