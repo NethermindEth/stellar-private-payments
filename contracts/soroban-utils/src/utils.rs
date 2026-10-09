@@ -1,9 +1,11 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
+#[cfg(any(test, feature = "testutils"))]
+use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec};
 #[cfg(any(test, feature = "testutils"))]
-use soroban_sdk::{contract, contractimpl};
+use soroban_sdk::{contract, contractimpl, crypto::bn254::Bn254Fr};
 
 /// Error returned by the shared admin helpers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -59,6 +61,24 @@ impl MockToken {
 
     pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
         0
+    }
+}
+
+/// A verifier that accepts every proof, so a test reaches the steps after
+/// verification without a proving key. It skips the pairing check entirely.
+#[cfg(any(test, feature = "testutils"))]
+#[contract]
+pub struct AcceptingVerifier;
+
+#[cfg(any(test, feature = "testutils"))]
+#[contractimpl]
+impl AcceptingVerifier {
+    pub fn verify(
+        _env: Env,
+        _proof: Groth16Proof,
+        _public_inputs: Vec<Bn254Fr>,
+    ) -> Result<bool, Groth16Error> {
+        Ok(true)
     }
 }
 

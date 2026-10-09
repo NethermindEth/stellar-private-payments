@@ -6,11 +6,12 @@ use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, U256, Vec,
+    Address, Bytes, Env, IntoVal, InvokeError, U256, Vec,
     testutils::{Address as _, MockAuth, MockAuthInvoke},
     vec,
     xdr::ToXdr,
 };
+use soroban_utils::constants::bn256_modulus;
 use taceo_poseidon2::bn254::t2;
 
 fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
@@ -228,12 +229,9 @@ fn test_insert_leaf_requires_admin() {
     client.insert_leaf(&leaf);
 }
 
-/// This test is skipped under Miri because the panic formatting path triggers
-/// undefined behavior in the `ethnum` crate's unsafe formatting code.
-/// See: https://github.com/nlordell/ethnum-rs/issues/34
+/// A bare `should_panic` also passed when the fifth insert failed with any
+/// other error.
 #[test]
-#[cfg_attr(miri, ignore)]
-#[should_panic]
 fn test_insert_leaf_merkle_tree_full() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -249,9 +247,31 @@ fn test_insert_leaf_merkle_tree_full() {
         client.insert_leaf(&leaf);
     }
 
-    // Try to insert one more leaf, which should fail as the tree is full
     let leaf5 = U256::from_u32(&env, 5u32);
-    client.insert_leaf(&leaf5);
+    assert!(matches!(
+        client.try_insert_leaf(&leaf5),
+        Err(Ok(Error::MerkleTreeFull))
+    ));
+}
+
+/// The host reduces Poseidon2 inputs modulo `r`, so only the hash's range
+/// check stops a leaf of `r` hashing as 0. The control `r − 1` inserts.
+#[test]
+fn insert_leaf_refuses_a_leaf_at_the_field_modulus() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let r = bn256_modulus(&env);
+
+    assert!(matches!(
+        client.try_insert_leaf(&r),
+        Err(Err(InvokeError::Abort))
+    ));
+
+    client.insert_leaf(&r.sub(&U256::from_u32(&env, 1)));
+    assert_eq!(next_index(&env, &contract_id), 1);
 }
 
 #[test]

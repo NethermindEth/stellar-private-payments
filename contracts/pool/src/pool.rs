@@ -47,7 +47,7 @@ pub enum Error {
     NextIndexNotEven = 5,
     /// External amount is invalid (negative or exceeds 2^248)
     WrongExtAmount = 6,
-    /// Zero-knowledge proof verification failed or proof is empty
+    /// Zero-knowledge proof verification failed
     InvalidProof = 7,
     /// Provided Merkle root is not in the recent history
     UnknownRoot = 8,
@@ -330,10 +330,6 @@ impl PoolContract {
     /// rejection is a `Groth16Error`, so that error is translated here rather
     /// than allowed to cross the contract boundary raw.
     fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
-        // Check proof is not empty
-        if proof.proof.is_empty() {
-            return Err(Error::InvalidProof);
-        }
         let policy_flags = Self::load_policy_flags(env)?;
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);

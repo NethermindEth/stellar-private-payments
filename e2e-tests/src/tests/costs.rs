@@ -55,11 +55,12 @@ use pool_gvk::{
 use public_key_registry::{Account, PublicKeyRegistry, PublicKeyRegistryClient};
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
-    Address, Bytes, Env, I256, U256, Vec, contract, contractimpl,
-    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    Address, Bytes, Env, I256, U256, Vec,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Ledger as _},
     token::StellarAssetClient,
 };
+use soroban_utils::utils::AcceptingVerifier;
 
 /// Mainnet's `min_persistent_ttl`, in ledgers (120 days).
 const MIN_PERSISTENT_TTL: u32 = 2_073_600;
@@ -100,25 +101,6 @@ const FUNDING: i128 = 1_000_000;
 
 /// Deposit and withdrawal amount of the measured calls.
 const AMOUNT: i32 = 100;
-
-/// A verifier that accepts every proof, so a measured `transact` reaches the
-/// storage writes without a proving key.
-///
-/// The pairing check it skips is the one host cost a real verifier adds; the
-/// real-proof row measures that separately.
-#[contract]
-struct AcceptingVerifier;
-
-#[contractimpl]
-impl AcceptingVerifier {
-    pub fn verify(
-        _env: Env,
-        _proof: Groth16Proof,
-        _public_inputs: Vec<Bn254Fr>,
-    ) -> Result<bool, contract_types::Groth16Error> {
-        Ok(true)
-    }
-}
 
 /// What the host metered for one invocation.
 struct Row {
@@ -229,6 +211,8 @@ impl PoolFixture {
         let token = env
             .register_stellar_asset_contract_v2(Address::generate(&env))
             .address();
+        // The pairing check this verifier skips is the one host cost a real
+        // verifier adds; the real-proof row measures that separately.
         let verifier = env.register(AcceptingVerifier, ());
         let asp_membership = env.register(ASPMembership, (admin.clone(), MEMBERSHIP_LEVELS));
         let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));

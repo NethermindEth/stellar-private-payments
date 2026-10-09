@@ -2,9 +2,10 @@
 
 use super::*;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, U256,
+    Address, Bytes, Env, IntoVal, InvokeError, U256,
     testutils::{Address as _, MockAuth, MockAuthInvoke},
 };
+use soroban_utils::constants::bn256_modulus;
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -74,12 +75,9 @@ fn test_insert_multiple_keys() {
     assert_ne!(root, U256::from_u32(&env, 0u32));
 }
 
-/// This test is skipped under Miri because the panic formatting path triggers
-/// undefined behavior in the `ethnum` crate's unsafe formatting code.
-/// See: https://github.com/nlordell/ethnum-rs/issues/34
+/// A bare `should_panic` also passed when the second insert failed with any
+/// other error.
 #[test]
-#[cfg_attr(miri, ignore)]
-#[should_panic]
 fn test_duplicate_insert_fails() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -95,8 +93,32 @@ fn test_duplicate_insert_fails() {
     // First insert should succeed
     client.insert_leaf(&key, &value);
 
-    // Second insert with same key should fail
-    client.insert_leaf(&key, &second_value);
+    assert!(matches!(
+        client.try_insert_leaf(&key, &second_value),
+        Err(Ok(Error::KeyAlreadyExists))
+    ));
+}
+
+/// The host reduces Poseidon2 inputs modulo `r`, so only the leaf hash's range
+/// check stops a key of `r` hashing as 0. The control `r − 1` inserts.
+#[test]
+fn insert_leaf_refuses_a_key_at_the_field_modulus() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let r = bn256_modulus(&env);
+    let below_r = r.sub(&U256::from_u32(&env, 1u32));
+    let value = U256::from_u32(&env, 42u32);
+
+    assert!(matches!(
+        client.try_insert_leaf(&r, &value),
+        Err(Err(InvokeError::Abort))
+    ));
+
+    client.insert_leaf(&below_r, &value);
+    assert!(client.find_key(&below_r).found);
 }
 
 /// Test that matches the circuits test: insert key=1, value=42
@@ -488,6 +510,32 @@ fn test_verify_non_membership_single_leaf_collision() {
         result,
         "Non-membership should be verified for collision case"
     );
+}
+
+/// A leaf whose value is 0 still hashes as a leaf, so a key that collides with
+/// it is absent and verifies.
+#[test]
+fn verify_non_membership_accepts_a_key_beside_a_zero_valued_leaf() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let zero = U256::from_u32(&env, 0u32);
+    client.insert_leaf(&U256::from_u32(&env, 1u32), &zero);
+
+    let key = U256::from_u32(&env, 99u32);
+    let find_result = client.find_key(&key);
+    assert!(!find_result.is_old0);
+    assert_eq!(find_result.not_found_key, U256::from_u32(&env, 1u32));
+    assert_eq!(find_result.not_found_value, zero);
+
+    assert!(client.verify_non_membership(
+        &key,
+        &find_result.siblings,
+        &find_result.not_found_key,
+        &find_result.not_found_value,
+    ));
 }
 
 /// Test verify_non_membership returns false when the key actually exists

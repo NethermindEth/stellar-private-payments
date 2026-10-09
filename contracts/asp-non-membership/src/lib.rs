@@ -704,12 +704,11 @@ impl ASPNonMembership {
 
         // Reconstruct root from proof (process siblings in reverse: leaf to
         // root)
-        let mut computed_root =
-            if not_found_key != key && not_found_value != U256::from_u32(&env, 0u32) {
-                Self::hash_leaf(&env, not_found_key, not_found_value)
-            } else {
-                U256::from_u32(&env, 0u32)
-            };
+        let mut computed_root = if find_result.is_old0 {
+            U256::from_u32(&env, 0u32)
+        } else {
+            Self::hash_leaf(&env, not_found_key, not_found_value)
+        };
 
         let siblings_len = siblings.len();
         for level_idx in 0..siblings_len {

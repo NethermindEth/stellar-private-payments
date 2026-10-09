@@ -21,12 +21,16 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, IntoVal, InvokeError, String, Symbol, U256, Vec, contract,
+    contractimpl, contracttype,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events},
     token::{Client as TokenClient, StellarAssetClient},
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    constants::bn256_modulus,
+    utils::{AcceptingVerifier, MockToken},
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -748,9 +752,13 @@ fn assert_policy_transact_rejects_wrong_asp_root(
     );
 }
 
+/// Sends a non-canonical root in the ASP field `flags` ignores. The call
+/// settles, where excluding only `NonCanonicalPublicInput` let any refusal
+/// through. `AcceptingVerifier` skips the pairing check, which is not covered.
 fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifier: u32) {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
+    let mut setup = setup_test_contracts(&env);
+    setup.verifier = env.register(AcceptingVerifier, ());
     let pool_id = register_pool_gvk(
         &env,
         &setup,
@@ -786,14 +794,13 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
     );
 
     assert!(
-        !matches!(
-            pool.try_transact(&proof, &ext, &sender),
-            Err(Ok(Error::NonCanonicalPublicInput))
-        ),
+        matches!(pool.try_transact(&proof, &ext, &sender), Ok(Ok(()))),
         "expected ASP root field to be skipped for flags={flags}"
     );
 }
 
+/// The ext hash is wrong too, and answers `WrongExtHash` if the root check
+/// moves after it, so the test pins `UnknownRoot`, not just an error.
 #[test]
 fn transact_rejects_unknown_root() {
     let env = test_env();
@@ -832,9 +839,14 @@ fn transact_rejects_unknown_root() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::UnknownRoot))
+    ));
 }
 
+/// With the hash check removed the call still fails at the verifier, so the
+/// test pins `WrongExtHash`, not just an error.
 #[test]
 fn transact_rejects_bad_ext_hash() {
     let env = test_env();
@@ -874,9 +886,14 @@ fn transact_rejects_bad_ext_hash() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtHash))
+    ));
 }
 
+/// With the public amount check removed the call still fails at the verifier,
+/// so the test pins `WrongExtAmount`, not just an error.
 #[test]
 fn transact_rejects_bad_public_amount() {
     let env = test_env();
@@ -917,9 +934,116 @@ fn transact_rejects_bad_public_amount() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::WrongExtAmount))
+    ));
 }
 
+/// A withdrawal of 5 must carry `r − 5`, not the 5 a deposit carries. An
+/// absolute value taken where the sign matters would let this call reach the
+/// verifier.
+#[test]
+fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, mut ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xA1,
+        VIEW_ONLY,
+    );
+    ext.ext_amount = I256::from_i32(&env, -5);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+    proof.public_amount = U256::from_u32(&env, 5);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a withdrawal with a deposit's public amount must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
+}
+
+/// This is the only bound on the public amount: the circuit's balance equation
+/// holds in the field, and only the outputs are range-checked. Policy flags 0
+/// keep the ASP root checks from answering `InvalidProof` first.
+#[test]
+fn transact_bounds_withdrawals_below_two_to_the_248() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let r = bn256_modulus(&env);
+    let cases = [
+        // −2^248, with the public amount it would map to without the bound.
+        (
+            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0),
+            r.sub(&U256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
+            Error::WrongExtAmount,
+        ),
+        // −(2^248 − 1), which reaches the verifier.
+        (
+            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 1),
+            r.sub(&U256::from_parts(
+                &env,
+                0x00FF_FFFF_FFFF_FFFF,
+                u64::MAX,
+                u64::MAX,
+                u64::MAX,
+            )),
+            Error::InvalidProof,
+        ),
+    ];
+
+    for (ext_amount, public_amount, expected) in cases {
+        let (mut proof, mut ext) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root.clone(),
+            non_member_root.clone(),
+            0xA2,
+            VIEW_ONLY,
+        );
+        ext.ext_amount = ext_amount;
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+        proof.public_amount = public_amount;
+
+        let err = pool
+            .try_transact(&proof, &ext, &Address::generate(&env))
+            .expect_err("a mock proof must never settle");
+        assert_eq!(err, Ok(expected));
+    }
+}
+
+/// The spent check keys on the raw value, so this is the only refusal of a
+/// spent `n` resent as `n + r`.
 #[test]
 fn transact_rejects_non_canonical_nullifier() {
     let env = test_env();
@@ -1012,6 +1136,9 @@ fn transact_rejects_non_canonical_output_commitment() {
     ));
 }
 
+/// The modulus minus one is canonical, so the call reaches the verifier, where
+/// excluding only `NonCanonicalPublicInput` passed on any refusal. Policy
+/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
 #[test]
 fn transact_does_not_reject_boundary_canonical_public_input() {
     let env = test_env();
@@ -1021,7 +1148,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         &setup,
         U256::from_u32(&env, 1000),
         3,
-        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+        0,
         mk_point(&env, 1, 2),
         VIEW_ONLY,
     );
@@ -1053,9 +1180,9 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         input_gvk_ciphertexts: Vec::new(&env),
     };
 
-    assert!(!matches!(
+    assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
+        Err(Ok(Error::InvalidProof))
     ));
 }
 
@@ -1163,6 +1290,47 @@ fn transact_rejects_an_evicted_asp_membership_root() {
         pool.try_transact(&proof, &ext, &Address::generate(&env)),
         Err(Ok(Error::InvalidProof))
     ));
+}
+
+/// The pool compares the blocklist root with the current one only, so a root
+/// one insert old is refused. The output commitment `r` would stop a call that
+/// passed that check with `NonCanonicalPublicInput`.
+#[test]
+fn transact_rejects_a_blocklist_root_one_insert_old() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::BLOCKLIST_BIT,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (member_root, stale_root) = asp_roots(&setup);
+    setup
+        .asp_non_membership_client
+        .insert_leaf(&U256::from_u32(&env, 1), &U256::from_u32(&env, 1));
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        stale_root,
+        0xBA,
+        VIEW_ONLY,
+    );
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a stale blocklist root must be refused");
+    assert_eq!(err, Ok(Error::InvalidProof));
 }
 
 #[test]
@@ -1374,6 +1542,9 @@ fn transact_rejects_non_canonical_gvk_ciphertext_field() {
     }
 }
 
+/// A ciphertext field of the modulus minus one is canonical, so the call
+/// reaches the verifier. Excluding only `NonCanonicalPublicInput` would pass on
+/// an earlier refusal too.
 #[test]
 fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
     let env = test_env();
@@ -1406,9 +1577,9 @@ fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
     boundary_output.c1 = bn256_modulus(&env).sub(&one);
     proof.output_gvk_ciphertexts.set(0, boundary_output);
 
-    assert!(!matches!(
+    assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
+        Err(Ok(Error::InvalidProof))
     ));
 }
 
@@ -2067,6 +2238,122 @@ fn transact_rejects_deposit_over_maximum() {
     ));
 }
 
+/// A deposit equal to the cap settles and moves the cap. `AcceptingVerifier`
+/// stands in for the pairing check, which this test does not cover.
+#[test]
+fn transact_accepts_deposit_at_maximum_bound() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD2,
+        VIEW_ONLY,
+    );
+    let at = mk_ext_data(&env, Address::generate(&env), 1000);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &at);
+    proof.public_amount = U256::from_u32(&env, 1000);
+
+    pool.transact(&proof, &at, &sender);
+    assert_eq!(token.balance(&sender), 9_000);
+    assert_eq!(token.balance(&pool_id), 1000);
+}
+
+/// The 2^200 cap and the matching public amount pass 2^127, so only the
+/// `i128` conversion before the transfer refuses it.
+#[test]
+fn transact_rejects_a_deposit_past_i128_under_a_larger_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_parts(&env, 0x100, 0, 0, 0),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (mut proof, mut ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xD3,
+        VIEW_ONLY,
+    );
+    ext.ext_amount = I256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+    proof.public_amount = U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a deposit past i128 must be refused");
+    assert_eq!(err, Ok(Error::WrongExtAmount));
+}
+
+/// A zero cap does not refuse a zero `ext_amount`, so only the verifier
+/// refuses the mock proof.
+#[test]
+fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 0),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE4,
+        VIEW_ONLY,
+    );
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
 /// Replaying the same nullifier must be rejected
 #[test]
 fn transact_rejects_replayed_nullifier() {
@@ -2084,6 +2371,96 @@ fn transact_rejects_replayed_nullifier() {
         "expected replaying the same nullifier to be rejected, got {second:?}"
     );
 }
+
+/// Marks a nullifier as spent directly in pool storage, the key a settled
+/// `transact` writes.
+fn mark_nullifier_spent(env: &Env, pool_id: &Address, nullifier: &U256) {
+    env.as_contract(pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Nullifier(nullifier.clone()), &());
+    });
+}
+
+/// The spent nullifier comes second, so a check of the first element alone
+/// would let the call reach the verifier.
+#[test]
+fn transact_rejects_a_batch_with_one_spent_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let spent = U256::from_u32(&env, 0xC2);
+    mark_nullifier_spent(&env, &pool_id, &spent);
+
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xC3,
+        VIEW_ONLY,
+    );
+    proof.input_nullifiers.push_back(spent);
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("a batch holding a spent nullifier must be refused");
+    assert_eq!(err, Ok(Error::AlreadySpentNullifier));
+}
+
+/// The spent check reads stored state only, so a nullifier repeated in one call
+/// reaches the verifier and is left to the circuit. Policy flags 0 keep the ASP
+/// root checks from answering `InvalidProof` first.
+#[test]
+fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let nullifier = 0xDEAD;
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        nullifier,
+        VIEW_ONLY,
+    );
+    proof
+        .input_nullifiers
+        .push_back(U256::from_u32(&env, nullifier));
+
+    let err = pool
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
+}
+
 #[test]
 fn the_configuration_lives_in_the_instance() {
     let env = test_env();
@@ -2164,11 +2541,6 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         VIEW_ONLY,
     );
 
-    assert!(
-        !proof.proof.is_empty(),
-        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
-    );
-
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("a proof the verifier refuses must be refused by pool-gvk");
@@ -2178,6 +2550,78 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as pool-gvk's InvalidProof"
     );
+}
+
+/// `Groth16Proof` with its points as `Bytes`, so a test can send any length.
+#[contracttype]
+struct RawGroth16Proof {
+    a: Bytes,
+    b: Bytes,
+    c: Bytes,
+}
+
+/// `Proof` carrying a [`RawGroth16Proof`].
+#[contracttype]
+struct RawProof {
+    proof: RawGroth16Proof,
+    root: U256,
+    input_nullifiers: Vec<U256>,
+    output_commitment0: U256,
+    output_commitment1: U256,
+    public_amount: U256,
+    ext_data_hash: BytesN<32>,
+    asp_membership_root: U256,
+    asp_non_membership_root: U256,
+    output_gvk_ciphertexts: Vec<GvkCiphertext>,
+    input_gvk_ciphertexts: Vec<GvkCiphertext>,
+}
+
+/// Empty points do not decode as `Groth16Proof`, so the call aborts before
+/// `transact` runs. The control differs only in the point lengths.
+#[test]
+fn transact_refuses_a_proof_with_empty_points_before_the_pool_runs() {
+    let nullifier = 0xE7;
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, nullifier, 0, 1000);
+    let mut raw = RawProof {
+        proof: RawGroth16Proof {
+            a: Bytes::new(&env),
+            b: Bytes::new(&env),
+            c: Bytes::new(&env),
+        },
+        root: proof.root,
+        input_nullifiers: proof.input_nullifiers,
+        output_commitment0: proof.output_commitment0,
+        output_commitment1: proof.output_commitment1,
+        public_amount: proof.public_amount,
+        ext_data_hash: proof.ext_data_hash,
+        asp_membership_root: proof.asp_membership_root,
+        asp_non_membership_root: proof.asp_non_membership_root,
+        output_gvk_ciphertexts: proof.output_gvk_ciphertexts,
+        input_gvk_ciphertexts: proof.input_gvk_ciphertexts,
+    };
+    let transact = |raw: &RawProof| {
+        env.try_invoke_contract::<(), Error>(
+            &pool.address,
+            &Symbol::new(&env, "transact"),
+            soroban_sdk::vec![
+                &env,
+                raw.into_val(&env),
+                ext.into_val(&env),
+                sender.into_val(&env)
+            ],
+        )
+    };
+
+    let err = transact(&raw).expect_err("empty points must not decode");
+    assert_eq!(err, Err(InvokeError::Abort));
+
+    raw.proof = RawGroth16Proof {
+        a: Bytes::from_array(&env, &[0u8; 64]),
+        b: Bytes::from_array(&env, &[0u8; 128]),
+        c: Bytes::from_array(&env, &[0u8; 64]),
+    };
+    let err = transact(&raw).expect_err("zeroed points must fail verification");
+    assert_eq!(err, Ok(Error::InvalidProof));
 }
 
 /// A verifier rejection must roll back the deposit transfer.
@@ -2227,11 +2671,6 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
     proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
     proof.public_amount = U256::from_u32(&env, deposit_amount);
 
-    assert!(
-        !proof.proof.is_empty(),
-        "the proof must be non-empty, otherwise the empty-proof guard answers instead of the verifier"
-    );
-
     assert_eq!(token.balance(&sender), funded);
     assert_eq!(token.balance(&pool_id), 0);
 
@@ -2256,4 +2695,114 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// A depth-1 tree holds one pair, so the first deposit settles and the second
+/// is refused after verification. `AcceptingVerifier` stands in for the
+/// pairing check, which this test does not cover.
+#[test]
+fn transact_refuses_an_insertion_into_a_full_tree() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 10_000);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        1,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let deposit = |nullifier| {
+        let (mut proof, _) = mk_transact_proof(
+            &env,
+            &pool,
+            &setup.token,
+            member_root.clone(),
+            non_member_root.clone(),
+            nullifier,
+            VIEW_ONLY,
+        );
+        let ext = mk_ext_data(&env, Address::generate(&env), 100);
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+        proof.public_amount = U256::from_u32(&env, 100);
+        (proof, ext)
+    };
+
+    let (proof, ext) = deposit(1);
+    pool.transact(&proof, &ext, &sender);
+
+    let (proof, ext) = deposit(2);
+    let err = pool
+        .try_transact(&proof, &ext, &sender)
+        .expect_err("a full tree must refuse the next insertion");
+    assert_eq!(err, Ok(Error::MerkleTreeFull));
+    assert_eq!(token.balance(&sender), 9_900);
+    assert_eq!(token.balance(&pool_id), 100);
+}
+
+/// Pool B shares pool A's verifier, ASP contracts, and depth, but not its
+/// address or token, so pool A's `(proof, ExtData)` must stop at pool B's
+/// `ext_data_hash` check.
+#[test]
+fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    let pool_a_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let token_a = setup.token.clone();
+    setup.token = env.register(MockToken, ());
+    let pool_b_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool_a = PoolGvkContractClient::new(&env, &pool_a_id);
+    let pool_b = PoolGvkContractClient::new(&env, &pool_b_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool_a,
+        &token_a,
+        member_root,
+        non_member_root,
+        0xF00D,
+        VIEW_ONLY,
+    );
+
+    let err_a = pool_a
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("the mock proof fails verification");
+    assert_eq!(
+        err_a,
+        Ok(Error::InvalidProof),
+        "pool A must reach the verifier, not an earlier check"
+    );
+
+    let err_b = pool_b
+        .try_transact(&proof, &ext, &Address::generate(&env))
+        .expect_err("pool A's proof must be refused on pool B");
+    assert_eq!(err_b, Ok(Error::WrongExtHash));
 }
