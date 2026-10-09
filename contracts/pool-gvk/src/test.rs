@@ -20,9 +20,12 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
-use pool_core::events::{DepositPauseChanged, DepositPauseRepeated};
+use pool_core::events::{
+    AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, IntoVal,
+    String, U256, Vec, contract, contracterror, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Events, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
@@ -92,6 +95,24 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 
 const KDF_DOMAIN: &str = "tests";
 
+/// Returns the hash of the Wasm `contract` runs.
+fn wasm_hash(contract: &Address) -> BytesN<32> {
+    match contract.executable() {
+        Some(Executable::Wasm(hash)) => hash,
+        other => panic!("expected a Wasm contract, found {other:?}"),
+    }
+}
+
+/// Deploys a contract that runs the code `contract` runs.
+///
+/// A natively registered contract runs its own code and fails the pool's code
+/// check. Mock auths first: the deployer authorizes the deploy.
+fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
+    env.deployer()
+        .with_address(Address::generate(env), [0u8; 32])
+        .deploy_contract(ContractExecutable::Wasm(wasm_hash(contract)), args)
+}
+
 fn register_pool_gvk(
     env: &Env,
     setup: &TestSetup,
@@ -109,6 +130,8 @@ fn register_pool_gvk(
             setup.verifier.clone(),
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
+            wasm_hash(&setup.asp_membership_address),
+            wasm_hash(&setup.asp_non_membership_address),
             maximum_deposit_amount,
             levels,
             policy_flags,
@@ -618,7 +641,11 @@ fn pool_gvk_update_asp_membership_transfers_control() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    let new_asp_membership = Address::generate(&env);
+    let new_asp_membership = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
     pool.update_asp_membership(&new_asp_membership);
 
     let stored: Address = env.as_contract(&pool_id, || {
@@ -646,7 +673,11 @@ fn pool_gvk_update_asp_non_membership_transfers_control() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    let new_asp_non_membership = Address::generate(&env);
+    let new_asp_non_membership = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
     pool.update_asp_non_membership(&new_asp_non_membership);
 
     let stored: Address = env.as_contract(&pool_id, || {
@@ -702,6 +733,247 @@ fn pool_gvk_update_asp_non_membership_requires_admin() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
 
     pool.update_asp_non_membership(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #21)")]
+fn constructor_refuses_an_allowlist_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.register(
+        PoolGvkContract,
+        (
+            setup.admin,
+            setup.token,
+            setup.verifier,
+            setup.asp_membership_address,
+            setup.asp_non_membership_address.clone(),
+            mk_bytesn32(&env, 7),
+            wasm_hash(&setup.asp_non_membership_address),
+            U256::from_u32(&env, 1000),
+            3u32,
+            0u32,
+            String::from_str(&env, KDF_DOMAIN),
+            mk_point(&env, 1, 2),
+            VIEW_ONLY,
+        ),
+    );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #21)")]
+fn constructor_refuses_a_blocklist_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.register(
+        PoolGvkContract,
+        (
+            setup.admin,
+            setup.token,
+            setup.verifier,
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address,
+            wasm_hash(&setup.asp_membership_address),
+            mk_bytesn32(&env, 7),
+            U256::from_u32(&env, 1000),
+            3u32,
+            0u32,
+            String::from_str(&env, KDF_DOMAIN),
+            mk_point(&env, 1, 2),
+            VIEW_ONLY,
+        ),
+    );
+}
+
+#[test]
+fn update_asp_membership_refuses_a_tree_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let asset = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    assert_eq!(
+        pool.try_update_asp_membership(&asset),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected the membership address to be stored"))
+    });
+    assert_eq!(stored, setup.asp_membership_address);
+}
+
+#[test]
+fn update_asp_non_membership_refuses_a_tree_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let asset = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    assert_eq!(
+        pool.try_update_asp_non_membership(&asset),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected the non-membership address to be stored"))
+    });
+    assert_eq!(stored, setup.asp_non_membership_address);
+}
+
+#[test]
+fn update_asp_membership_publishes_the_old_and_new_tree() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let new_tree = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+
+    pool.update_asp_membership(&new_tree);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AspMembershipUpdated {
+            old_tree: setup.asp_membership_address,
+            new_tree,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+}
+
+#[test]
+fn update_asp_non_membership_publishes_the_old_and_new_tree() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let new_tree = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    pool.update_asp_non_membership(&new_tree);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AspNonMembershipUpdated {
+            old_tree: setup.asp_non_membership_address,
+            new_tree,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+}
+
+/// Corrupts only the stored blocklist hash, so only the blocklist re-point may
+/// refuse.
+#[test]
+fn update_asp_membership_checks_only_the_membership_hash() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::ASPNonMembershipWasmHash, &mk_bytesn32(&env, 7));
+    });
+    env.mock_all_auths();
+    let allowlist = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+    let blocklist = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    assert_eq!(pool.try_update_asp_membership(&allowlist), Ok(Ok(())));
+    assert_eq!(
+        pool.try_update_asp_non_membership(&blocklist),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+}
+
+/// Corrupts only the stored allowlist hash, so only the allowlist re-point may
+/// refuse.
+#[test]
+fn update_asp_non_membership_checks_only_the_non_membership_hash() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::ASPMembershipWasmHash, &mk_bytesn32(&env, 7));
+    });
+    env.mock_all_auths();
+    let allowlist = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+    let blocklist = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    assert_eq!(pool.try_update_asp_non_membership(&blocklist), Ok(Ok(())));
+    assert_eq!(
+        pool.try_update_asp_membership(&allowlist),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+}
+
+/// Writes two distinct hashes, so the order is visible whichever hashes the
+/// test host gives the trees.
+#[test]
+fn get_asp_wasm_hashes_returns_the_membership_hash_first() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        instance.set(&DataKey::ASPMembershipWasmHash, &mk_bytesn32(&env, 1));
+        instance.set(&DataKey::ASPNonMembershipWasmHash, &mk_bytesn32(&env, 2));
+    });
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).get_asp_wasm_hashes(),
+        (mk_bytesn32(&env, 1), mk_bytesn32(&env, 2))
+    );
 }
 
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
@@ -2021,6 +2293,8 @@ fn build_gvk_transact(
             verifier_id,
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
+            wasm_hash(&setup.asp_membership_address),
+            wasm_hash(&setup.asp_non_membership_address),
             U256::from_u32(&env, maximum_deposit_amount),
             levels,
             0u32,
@@ -2243,6 +2517,8 @@ fn the_configuration_lives_in_the_instance() {
             DataKey::MaximumDepositAmount,
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,
+            DataKey::ASPMembershipWasmHash,
+            DataKey::ASPNonMembershipWasmHash,
             DataKey::PolicyFlags,
             DataKey::AdminViewKey,
             DataKey::GvkMode,
@@ -2314,6 +2590,113 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         err,
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as pool-gvk's InvalidProof"
+    );
+}
+
+/// Code 4: `asp-membership`'s `NotInitialized`, pool-gvk's `WrongLevels`.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum TreeError {
+    NotInitialized = 4,
+}
+
+/// An association set whose root reads all fail with code 4.
+#[contract]
+struct FailingTree;
+
+#[contractimpl]
+impl FailingTree {
+    pub fn get_root() -> Result<U256, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+
+    pub fn is_known_root(_root: U256) -> Result<bool, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+}
+
+/// Asserts that `transact` reports a failing tree in `field` as
+/// `InvalidProof`.
+///
+/// The output commitment is outside the field, which `transact` checks only
+/// after the trees, so `InvalidProof` must come from the failing tree. A raw
+/// tree failure would read as `WrongLevels`.
+fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: u32) {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    let flags = match field {
+        PolicyAspRootField::Membership => {
+            setup.asp_membership_address = env.register(FailingTree, ());
+            policy::ALLOWLIST_BIT
+        }
+        PolicyAspRootField::NonMembership => {
+            setup.asp_non_membership_address = env.register(FailingTree, ());
+            policy::BLOCKLIST_BIT
+        }
+    };
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        flags,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let zero = U256::from_u32(&env, 0);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        zero.clone(),
+        zero,
+        nullifier,
+        VIEW_ONLY,
+    );
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    assert_eq!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_reports_a_failing_allowlist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::Membership, 0xE7);
+}
+
+#[test]
+fn transact_reports_a_failing_blocklist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::NonMembership, 0xE8);
+}
+
+#[test]
+fn get_asp_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_membership_address = env.register(FailingTree, ());
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).try_get_asp_membership_root(),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn get_asp_non_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_non_membership_address = env.register(FailingTree, ());
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).try_get_asp_non_membership_root(),
+        Err(Ok(Error::InvalidProof))
     );
 }
 

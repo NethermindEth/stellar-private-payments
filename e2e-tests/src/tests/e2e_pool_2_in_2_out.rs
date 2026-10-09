@@ -5,12 +5,15 @@
 //! and the verification from the pool contract. That is the pipeline the CLI,
 //! the SDK and the browser use.
 use super::utils::{
-    DeployedContracts, LEAF_PREFIX, NonMembership, TRANSACT_STEMS, TransactOutcome,
-    build_membership_trees, build_policy_inputs, deploy_contracts, prove_transaction,
-    prove_with_graph, scalar_to_u256, sync_contract_state, test_env, transact,
+    ASP_MEMBERSHIP_LEVELS, DeployedContracts, LEAF_PREFIX, NonMembership, TRANSACT_STEMS,
+    TransactOutcome, build_membership_trees, build_policy_inputs, deploy_contracts,
+    deploy_same_code, membership_leaves, prove_transaction, prove_with_graph, scalar_to_u256,
+    sync_contract_state, test_env, transact,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
+use asp_membership::ASPMembershipClient;
+use asp_non_membership::ASPNonMembershipClient;
 use circuits::test::utils::{
     circom_tester::Inputs,
     general::scalar_to_bigint,
@@ -19,8 +22,8 @@ use circuits::test::utils::{
     transaction_case::{InputNote, OutputNote, TxCase},
 };
 use contract_types::Groth16Error;
-use pool::{Error, ExtData, Proof};
-use soroban_sdk::InvokeError;
+use pool::{Error, ExtData, PoolContractClient, Proof};
+use soroban_sdk::{Address, Env, InvokeError, U256, testutils::Address as _};
 use stellar_private_payments::types::PolicyFlags;
 
 /// A pool transaction that is ready for `transact`, with its proof made from
@@ -36,6 +39,11 @@ impl TransactFixture {
     /// Send the transaction to the pool contract.
     fn transact(&self) -> TransactOutcome {
         transact(&self.env, &self.contracts, &self.proof, &self.ext_data)
+    }
+
+    /// Returns a client for the pool contract.
+    fn pool(&self) -> PoolContractClient<'_> {
+        PoolContractClient::new(&self.env, &self.contracts.pool)
     }
 }
 
@@ -94,6 +102,19 @@ fn inputs_for_flags(all: &Inputs, flags: PolicyFlags) -> Inputs {
     out
 }
 
+/// Deploys an empty allowlist, of the code `allowlist` runs, under a fresh
+/// admin.
+fn deploy_allowlist(env: &Env, allowlist: &Address) -> Address {
+    deploy_same_code(
+        env,
+        allowlist,
+        (
+            Address::generate(env),
+            u32::try_from(ASP_MEMBERSHIP_LEVELS).expect("ASP_MEMBERSHIP_LEVELS fits in u32"),
+        ),
+    )
+}
+
 /// A private transfer of 13 units. The public amount stays zero, so no value
 /// enters or leaves the pool.
 #[test]
@@ -113,6 +134,113 @@ fn transact_transfer_succeeds() -> Result<()> {
 fn transact_deposit_succeeds() -> Result<()> {
     let fixture = transact_fixture([0, 0], [13, 0], 13)?;
     assert!(fixture.transact().is_ok(), "deposit should succeed");
+    Ok(())
+}
+
+/// A paused pool refuses a deposit whose proof is valid, and the same proof
+/// lands once deposits resume, so the refusal spent no nullifier.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_real_deposit_is_refused_while_deposits_are_paused() -> Result<()> {
+    let fixture = transact_fixture([0, 0], [13, 0], 13)?;
+
+    fixture.pool().pause_deposits();
+    assert_eq!(fixture.transact(), Err(Ok(Error::DepositsPaused)));
+
+    fixture.pool().unpause_deposits();
+    assert_eq!(fixture.transact(), Ok(Ok(())));
+    Ok(())
+}
+
+/// A deposit pause leaves withdrawals open.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_real_withdrawal_lands_while_deposits_are_paused() -> Result<()> {
+    let fixture = transact_fixture([13, 0], [0, 0], -13)?;
+
+    fixture.pool().pause_deposits();
+    assert_eq!(fixture.transact(), Ok(Ok(())));
+    Ok(())
+}
+
+/// A deposit pause leaves private transfers open.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_real_transfer_lands_while_deposits_are_paused() -> Result<()> {
+    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+
+    fixture.pool().pause_deposits();
+    assert_eq!(fixture.transact(), Ok(Ok(())));
+    Ok(())
+}
+
+/// After a re-point to an allowlist that never held the proof's root, the pool
+/// refuses the proof.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_re_point_to_an_allowlist_without_the_leaf_refuses_a_real_proof() -> Result<()> {
+    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+
+    fixture.pool().update_asp_membership(&deploy_allowlist(
+        &fixture.env,
+        &fixture.contracts.asp_membership,
+    ));
+    assert_eq!(fixture.transact(), Err(Ok(Error::InvalidProof)));
+    Ok(())
+}
+
+/// An allowlist with the same leaves in the same order has the same root, so
+/// the proof still lands after a re-point.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_re_point_to_an_allowlist_with_the_same_leaves_keeps_a_real_proof_valid() -> Result<()> {
+    let env = test_env();
+    env.mock_all_auths();
+    let contracts = deploy_contracts(&env);
+    let mut proven = prove_transaction(&env, &contracts, [0, 13], [13, 0], 0, 0)?;
+    let roots = sync_contract_state(
+        &env,
+        &contracts,
+        &proven.case,
+        &mut proven.leaves,
+        &proven.membership_trees,
+        &proven.witness,
+    );
+
+    let second = deploy_allowlist(&env, &contracts.asp_membership);
+    let second_client = ASPMembershipClient::new(&env, &second);
+    for leaf in &membership_leaves(
+        &proven.membership_trees,
+        &proven.witness,
+        proven.case.inputs.len(),
+    ) {
+        second_client.insert_leaf(&scalar_to_u256(&env, *leaf));
+    }
+    let pool = PoolContractClient::new(&env, &contracts.pool);
+    pool.update_asp_membership(&second);
+    // One more leaf makes the roots differ, so this matches only if the pool
+    // reads the second allowlist. The proof's root stays in its history.
+    second_client.insert_leaf(&U256::from_u32(&env, 1));
+    assert_eq!(pool.get_asp_membership_root(), second_client.get_root());
+
+    let ext_data = proven.ext_data.clone();
+    let proof = proven.into_proof(&env, &roots);
+    assert_eq!(transact(&env, &contracts, &proof, &ext_data), Ok(Ok(())));
+    Ok(())
+}
+
+/// Pools accept only the blocklist's current root, so any blocklist write
+/// voids every earlier proof, even one whose keys it does not touch.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_blocklist_write_voids_a_real_proof_built_before_it() -> Result<()> {
+    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let env = &fixture.env;
+
+    ASPNonMembershipClient::new(env, &fixture.contracts.asp_non_membership).insert_leaves(
+        &soroban_sdk::vec![env, (U256::from_u32(env, 7), U256::from_u32(env, 1))],
+    );
+    assert_eq!(fixture.transact(), Err(Ok(Error::InvalidProof)));
     Ok(())
 }
 

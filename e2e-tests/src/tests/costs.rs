@@ -41,7 +41,7 @@
 
 use super::utils::{
     ASP_MEMBERSHIP_LEVELS, LEVELS, deploy_contracts, prove_transaction, sync_contract_state,
-    test_env,
+    test_env, wasm_hash,
 };
 use anyhow::Result;
 use asp_membership::{ASPMembership, ASPMembershipClient};
@@ -240,6 +240,8 @@ impl PoolFixture {
                 verifier.clone(),
                 asp_membership.clone(),
                 asp_non_membership.clone(),
+                wasm_hash(&asp_membership),
+                wasm_hash(&asp_non_membership),
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
@@ -319,6 +321,8 @@ fn gvk_transact_row() -> Row {
             base.verifier.clone(),
             base.asp_membership.clone(),
             base.asp_non_membership.clone(),
+            wasm_hash(&base.asp_membership),
+            wasm_hash(&base.asp_non_membership),
             U256::from_u32(env, 1_000_000),
             POOL_LEVELS,
             policy::BLOCKLIST_BIT,
@@ -364,8 +368,9 @@ fn membership_insert_row() -> Row {
     measure(&env, "asp-membership insert_leaf, first leaf")
 }
 
-/// Inserts eight keys, then measures the ninth insert and one delete.
-fn non_membership_rows() -> [Row; 2] {
+/// Inserts eight keys, then measures the ninth insert, one delete, and, with
+/// the deleted key back, three keys inserted in one call.
+fn non_membership_rows() -> [Row; 3] {
     let env = mainnet_env();
     let admin = Address::generate(&env);
     let id = env.register(ASPNonMembership, (admin,));
@@ -377,7 +382,14 @@ fn non_membership_rows() -> [Row; 2] {
     let insert = measure(&env, "asp-non-membership insert_leaf, ninth key");
     client.delete_leaf(&U256::from_u32(&env, 3));
     let delete = measure(&env, "asp-non-membership delete_leaf, one of nine");
-    [insert, delete]
+    client.insert_leaf(&U256::from_u32(&env, 3), &U256::from_u32(&env, 1));
+    let entries = [10, 11, 12].map(|key| (U256::from_u32(&env, key), U256::from_u32(&env, 1)));
+    client.insert_leaves(&Vec::from_array(&env, entries));
+    let batch = measure(
+        &env,
+        "asp-non-membership insert_leaves, three keys into nine",
+    );
+    [insert, delete, batch]
 }
 
 fn registry_row() -> Row {
@@ -431,17 +443,18 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_191;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_191;
+    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_359;
+    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_359;
+    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_359;
     "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_191;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_191;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_359;
+    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_359;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_367;
+    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_535;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
+    "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
     "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
 };
 
