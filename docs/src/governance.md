@@ -55,7 +55,7 @@ from every pool and tree the manifest names and every tree those pools read:
 | Event | Published by | When |
 | --- | --- | --- |
 | `DepositPauseChanged` | pools | Deposits pause or unpause |
-| `DepositPauseRepeated` | pools | A pause lands on a pool that is already paused, which spends the pause file |
+| `DepositPauseRepeated` | pools | A pause or unpause finds the flag already set; `paused` is the flag. A pause file sent this way is spent |
 | `AspMembershipUpdated`, `AspNonMembershipUpdated` | pools | The pool switches to another allowlist or blocklist |
 | `AdminTransferProposed`, `AdminTransferCancelled`, `AdminTransferAccepted` | pools and trees | An admin transfer starts, is withdrawn, or completes |
 | `LeafAdded` | allowlists | A member joins |
@@ -63,9 +63,9 @@ from every pool and tree the manifest names and every tree those pools read:
 
 The pool and admin transfer events use their name in lowercase with underscores as their topic,
 for example `deposit_pause_changed`. A pre-signed pause comes from a holder's account, so only the
-pool's events show it. After a `deposit_pause_repeated`, read the nonce from its transaction, as
-[Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find whose file was spent, and sign
-that holder a replacement.
+pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the nonce from its
+transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find whose file was
+spent, and sign that holder a replacement.
 
 After a blocklist re-point, a pool reads a tree the manifest does not name. To list the trees a
 pool reads, read its instance entry, whose key is `AAAAFA==`:
