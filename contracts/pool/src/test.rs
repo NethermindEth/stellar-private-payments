@@ -14,7 +14,9 @@ use soroban_sdk::{
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{
+    LIFETIME_LEDGERS, MAX_EXTENSION_LEDGERS, constants::bn256_modulus, utils::MockToken,
+};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -1331,6 +1333,22 @@ fn update_admin_transfers_control() {
             .expect("Admin set in constructor")
     });
     assert_eq!(stored_admin, new_admin);
+}
+
+#[test]
+fn update_admin_renews_the_admin_entry() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+
+    let ttl = env.as_contract(&pool_id, || {
+        env.storage().persistent().get_ttl(&DataKey::Admin)
+    });
+    assert_eq!(ttl, LIFETIME_LEDGERS);
 }
 
 #[test]
