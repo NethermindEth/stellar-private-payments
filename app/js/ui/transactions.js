@@ -6,7 +6,8 @@
  * @module ui/transactions
  */
 
-import { client, isRuntimeReady } from '../wasm-facade.js';
+import { client, isRuntimeReady, parseTokenAmount } from '../wasm-facade.js';
+import { resolveAmountContext, requireSamePool as checkPool } from '../token-metadata.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import { App, Toast, Utils } from './core.js';
@@ -20,7 +21,6 @@ import { SigningAccount } from './signing-account.js';
 import { RecipientAccount } from './recipient-account.js';
 import { signingPrivacyWarning, withdrawalLinksAccounts } from '../signing-account.js';
 
-const DECIMALS = 7;
 const N_OUTPUTS = 2;
 const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
@@ -28,20 +28,26 @@ function selectedPool() {
     return Utils.selectedPool();
 }
 
-function parseAmount(value, { allowNegative = false } = {}) {
+function parseAmount(value, decimals) {
     const raw = String(value ?? '').trim();
     if (!raw) return { ok: true, value: 0n };
-    const match = /^([+-])?(\d*)(?:\.(\d*))?$/.exec(raw);
-    if (!match) return { ok: false, error: 'Invalid amount' };
-    const sign = match[1] || '';
-    const intPart = match[2] || '0';
-    const frac = (match[3] || '').padEnd(DECIMALS, '0');
-    if ((match[3] || '').length > DECIMALS) return { ok: false, error: 'Too many decimal places' };
-    const valueInt = (BigInt(intPart) * (10n ** BigInt(DECIMALS))) + BigInt(frac || '0');
-    if (sign === '-' && !allowNegative && valueInt !== 0n) {
-        return { ok: false, error: 'Amount must be non-negative' };
+    try {
+        return { ok: true, value: parseTokenAmount(raw, decimals) };
+    } catch (error) {
+        return { ok: false, error: error.message };
     }
-    return { ok: true, value: sign === '-' ? -valueInt : valueInt };
+}
+
+async function amountContext() {
+    const sdk = client();
+    const pools = App.state.pools;
+    return resolveAmountContext(selectedPool(), sdk.account(),
+        () => isRuntimeReady() && client() === sdk && App.state.pools === pools ? selectedPool() : null,
+        () => App.events.dispatchEvent(new CustomEvent('pool:config')));
+}
+
+function requireSamePool(pool) {
+    checkPool(pool, selectedPool());
 }
 
 function requireWallet() {
@@ -137,6 +143,7 @@ async function txCountRow(amountValue) {
 async function submitDeposit(button, amountValue, pool) {
     setLoading(button, true, 'Preparing deposit…');
     const session = await ensureAppPool();
+    requireSamePool(pool);
     const result = await runPoolOp('deposit', button, () => session.deposit(amountValue));
     if (Transactions.showExecuteResult(result, 'Deposit')) {
         const hashes = result?.hashes ?? txResultsToHashes(result);
@@ -155,6 +162,7 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
     const encKey = transferRefs.encKey.value.trim();
     setLoading(button, true, 'Preparing transfer…');
     const session = await ensureAppPool();
+    requireSamePool(pool);
     const result = await runPoolOp('transfer', button, () =>
         session.transferToKeys(noteKey, encKey, amountValue),
     );
@@ -180,6 +188,7 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
 async function submitWithdraw(button, amountValue, pool, recipient) {
     setLoading(button, true, 'Preparing withdrawal…');
     const session = await ensureAppPool();
+    requireSamePool(pool);
     const result = await runPoolOp('withdraw', button, () =>
         session.withdraw(amountValue, recipient),
     );
@@ -222,7 +231,7 @@ function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
     if (!el) return;
     const balance = (App.state.balances || []).find(b => b.poolContractId === App.state.selectedPoolId);
-    el.textContent = balance ? Utils.formatTokenAmount(balance.amount, balance.tokenLabel) : '—';
+    el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
 }
 
 async function lookupRecipient(address, refs) {
@@ -258,13 +267,13 @@ function collectInputNotes(rootId) {
         .filter(Boolean);
 }
 
-function collectAdvancedOutputs() {
+function collectAdvancedOutputs(decimals) {
     const rows = Array.from(document.querySelectorAll('#advanced-outputs .advanced-output-row'));
     const amounts = [];
     const noteKeys = [];
     const encKeys = [];
     for (const row of rows) {
-        const amount = parseAmount(row.querySelector('.output-amount')?.value, { allowNegative: false });
+        const amount = parseAmount(row.querySelector('.output-amount')?.value, decimals);
         if (!amount.ok) throw new Error(amount.error);
         amounts.push(amount.value);
         noteKeys.push(row.querySelector('.output-note-key')?.value?.trim() || null);
@@ -297,7 +306,7 @@ function updateInputAmount(row) {
     const note = id ? App.state.notes.find(n => n.id === id) : null;
     if (note) {
         const pool = App.state.pools.find(p => p.poolContractId === note.poolContractId);
-        amountEl.textContent = `Amount: ${Utils.formatTokenAmount(note.amount, Utils.poolLabel(pool))}`;
+        amountEl.textContent = `Amount: ${Utils.formatPoolAmount(note.amount, note.poolContractId)}`;
     } else {
         amountEl.textContent = '';
     }
@@ -377,12 +386,14 @@ export const Transactions = {
         async function runDeposit(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
+                setLoading(button, true, 'Checking token precision…');
+                const { pool, decimals } = await amountContext();
+                setLoading(button, true, 'Reviewing transaction…');
+                const amount = parseAmount(depositAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
-                const pool = selectedPool();
                 const rows = [
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const confirmed = await confirmAction({
@@ -432,19 +443,21 @@ export const Transactions = {
         async function runTransfer(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(transferAmountInput?.value, { allowNegative: false });
+                setLoading(button, true, 'Checking token precision…');
+                const { pool, decimals } = await amountContext();
+                setLoading(button, true, 'Reviewing transaction…');
+                const amount = parseAmount(transferAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a transfer amount');
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
                 const signer = await SigningAccount.forTransaction('move');
-                const  pool = selectedPool();
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
                     : Utils.shortAddress(noteKey);
                 const rows = [
                     { label: 'Recipient', value: recipientLabel },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
@@ -500,7 +513,10 @@ export const Transactions = {
         async function runWithdraw(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(withdrawAmountInput?.value, { allowNegative: false });
+                setLoading(button, true, 'Checking token precision…');
+                const { pool, decimals } = await amountContext();
+                setLoading(button, true, 'Reviewing transaction…');
+                const amount = parseAmount(withdrawAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a withdrawal amount');
                 const recipient = RecipientAccount.value('withdraw');
                 if (!recipient) throw new Error('Choose a withdrawal recipient or enter another address.');
@@ -508,10 +524,9 @@ export const Transactions = {
                     throw new Error('Invalid Stellar address');
                 }
                 const signer = await SigningAccount.forTransaction('move');
-                const pool = selectedPool();
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
                 ];
                 const countRow = await txCountRow(amount.value);
@@ -553,11 +568,17 @@ export const Transactions = {
         const depositInput = document.getElementById('advanced-public-deposit');
         const withdrawInput = document.getElementById('advanced-public-withdraw');
         const updateSignerVisibility = () => {
-            const deposit = parseAmount(depositInput?.value);
-            const withdraw = parseAmount(withdrawInput?.value);
+            const decimals = selectedPool()?.decimals;
+            const signerControl = document.querySelector('[data-signing-account="advanced"]');
+            signerControl?.classList.remove('hidden');
+            if (decimals == null || !isRuntimeReady()) return;
+            const deposit = parseAmount(depositInput?.value, decimals);
+            const withdraw = parseAmount(withdrawInput?.value, decimals);
             const isDeposit = deposit.ok && withdraw.ok && deposit.value > withdraw.value;
-            document.querySelector('[data-signing-account="advanced"]')?.classList.toggle('hidden', isDeposit);
+            signerControl?.classList.toggle('hidden', isDeposit);
         };
+        App.events.addEventListener('pool:config', updateSignerVisibility);
+        App.events.addEventListener('pool:selected', updateSignerVisibility);
         depositInput?.addEventListener('input', updateSignerVisibility);
         withdrawInput?.addEventListener('input', updateSignerVisibility);
         updateSignerVisibility();
@@ -565,14 +586,17 @@ export const Transactions = {
             const button = event.currentTarget;
             try {
                 requireWallet();
+                setLoading(button, true, 'Checking token precision…');
+                const { pool, decimals } = await amountContext();
+                setLoading(button, true, 'Reviewing transaction…');
                 const deposit = parseAmount(
                     document.getElementById('advanced-public-deposit')?.value,
-                    { allowNegative: false },
+                    decimals,
                 );
                 if (!deposit.ok) throw new Error(`Public deposit: ${deposit.error}`);
                 const withdraw = parseAmount(
                     document.getElementById('advanced-public-withdraw')?.value,
-                    { allowNegative: false },
+                    decimals,
                 );
                 if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
                 // Public deposit is value entering the transaction (input, positive);
@@ -581,8 +605,7 @@ export const Transactions = {
                 const publicAmount = deposit.value - withdraw.value;
                 const signer = await SigningAccount.forTransaction('advanced', { ownerOnly: publicAmount > 0n });
                 const inputNoteIds = collectInputNotes('advanced-inputs');
-                const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
-                const pool = selectedPool();
+                const { amounts, noteKeys, encKeys } = collectAdvancedOutputs(decimals);
                 const enteredRecipient = RecipientAccount.value('advanced');
                 if (publicAmount < 0n && !enteredRecipient) throw new Error('Choose a withdrawal recipient or enter another address.');
                 if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
@@ -595,10 +618,10 @@ export const Transactions = {
                     { label: 'Outputs', value: `${amounts.length}` },
                 ];
                 if (deposit.value > 0n) {
-                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool)) });
+                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool), decimals) });
                 }
                 if (withdraw.value > 0n) {
-                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool)) });
+                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
                 }
                 rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
@@ -619,6 +642,7 @@ export const Transactions = {
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();
+                requireSamePool(pool);
                 const result = await runPoolOp('transact', button, () => session.transact({
                     extRecipient: recipient,
                     extAmount: publicAmount,

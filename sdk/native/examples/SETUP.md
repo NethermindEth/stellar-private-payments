@@ -259,11 +259,15 @@ required by most examples; everything else has a sensible default.
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
+| `SPP_AMOUNT_STROOPS` | `10000000` token base units | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
 | `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw`/`plan` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw` and `plan`** |
 | `SPP_REGISTER` | unset | `account_pool` (set to `1` to call `register_public_keys`) |
+
+`SPP_AMOUNT_STROOPS` is a legacy variable name: its value is in the selected
+pool token's base units. The human-readable amount depends on that token's
+decimals; `10000000` base units equals 1 token only when decimals are 7.
 
 > `SPP_BOOTNODE_URL` is read directly by the examples and overrides the default
 > public bootnode. Every example that opens a client reads it, not just `sync`.
@@ -309,15 +313,15 @@ cargo run --release --example sync
 # Transaction-count estimation.
 cargo run --release --example estimate
 
-# Deposit 1 XLM into the pool (proving + submission).
+# Deposit SPP_AMOUNT_STROOPS token base units into the selected pool (default: 10000000).
 cargo run --release --example deposit
 
 # Private transfer to Bob's registered address.
 SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 
-# Withdraw 1 XLM back to the wallet's public address. `env -u` clears the
-# recipient exported for `transfer` above, which `withdraw` would otherwise
-# use as the withdrawal destination.
+# Withdraw the configured token amount to the wallet's public address.
+# `env -u` clears the recipient exported for `transfer` above, which
+# `withdraw` would otherwise use as the withdrawal destination.
 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
 
 # Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
@@ -336,8 +340,8 @@ Run order for a full demo:
 7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
 > **Each spend consumes a note.** With the default `SPP_AMOUNT_STROOPS`
-> (1 XLM), one `deposit` creates exactly one 1-XLM note, and `transfer` and
-> `withdraw` each consume one. A single `deposit` therefore leaves nothing for
+> (10000000 token base units), one `deposit` creates exactly one note of that
+> amount, and `transfer` and `withdraw` each consume one. A single `deposit` therefore leaves nothing for
 > `withdraw`, which then prints `Skipping: no spendable notes in the selected
 > pool.` and exits 0 — a pass that demonstrated nothing. Run `deposit` once per
 > spend you intend to make, or re-run it before `withdraw`.

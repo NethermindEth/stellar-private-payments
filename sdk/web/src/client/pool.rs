@@ -39,6 +39,11 @@ impl PrivatePool {
 
 #[wasm_bindgen]
 impl PrivatePool {
+    #[wasm_bindgen(js_name = tokenDecimals)]
+    pub async fn token_decimals(&self) -> Result<u32, JsError> {
+        self.inner().token_decimals().await.map_err(pool_err)
+    }
+
     /// Balance in stroops (`bigint` in JS).
     pub async fn balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;

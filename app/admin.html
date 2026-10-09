@@ -239,11 +239,11 @@
                     </div>
                     <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (XLM)</label>
+                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (token units)</label>
                             <div class="mt-2 flex items-center gap-2">
-                                <input id="gvkFilterAmountMin" type="number" min="0" step="0.0000001" placeholder="min" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterAmountMin" type="text" inputmode="decimal" placeholder="min" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                                 <span class="text-slate-600">–</span>
-                                <input id="gvkFilterAmountMax" type="number" min="0" step="0.0000001" placeholder="max" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterAmountMax" type="text" inputmode="decimal" placeholder="max" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">

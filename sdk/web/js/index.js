@@ -1,6 +1,8 @@
 import init, {
   Client as WasmClient,
   DisclosureRequest,
+  readTokenDecimals,
+  parseTokenAmount as wasmParseTokenAmount,
   Storage as WasmStorage,
   ProverBridge,
   WalletSigner as WasmWalletSigner,
@@ -26,6 +28,15 @@ export const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
  * instead of leaking forever.
  */
 const telemetryFinalizer = new FinalizationRegistry((telemetrySinks) => telemetrySinks.free());
+
+/** Parse token units exactly into bigint base units. */
+function parseTokenAmount(value, decimals) {
+  if (typeof value !== 'string') throw new TypeError('Amount must be a string');
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 0xffff_ffff) {
+    throw new RangeError('Decimals must be a u32 integer');
+  }
+  return wasmParseTokenAmount(value, decimals);
+}
 
 function requireField(value, name) {
   if (value === undefined || value === null) {
@@ -201,7 +212,7 @@ export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
 };
-export { DisclosureRequest, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

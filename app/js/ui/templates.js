@@ -31,7 +31,7 @@ export const Templates = {
         tokenLink.textContent = balance.tokenLabel;
         tokenLink.href = Utils.explorerContractUrl(balance.tokenContractId);
         tokenLink.title = balance.tokenContractId;
-        el.querySelector('.balance-amount').textContent = Utils.formatTokenAmount(balance.amount, balance.tokenLabel);
+        el.querySelector('.balance-amount').textContent = Utils.formatPoolAmount(balance.amount, balance.poolContractId);
         el.querySelector('.balance-notes').textContent = `${balance.noteCount} note${balance.noteCount === 1 ? '' : 's'}`;
         const poolLink = el.querySelector('.balance-pool');
         poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
@@ -64,7 +64,7 @@ export const Templates = {
         row.querySelector('.note-token').textContent = note.tokenLabel || 'Token';
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
         row.querySelector('.note-id').title = note.id;
-        row.querySelector('.note-amount').textContent = Utils.formatTokenAmount(note.amount, note.tokenLabel || 'XLM');
+        row.querySelector('.note-amount').textContent = Utils.formatPoolAmount(note.amount, note.poolContractId);
         row.querySelector('.note-ledger').textContent = `Ledger ${note.createdAtLedger || 0}`;
         row.querySelector('.note-pool').textContent = Utils.shortAddress(note.poolContractId, 6, 4);
 

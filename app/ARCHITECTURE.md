@@ -89,7 +89,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Per-pool session: client SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
 - **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
 - Exports: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
-- Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
+- Amounts are **token base units** as JavaScript `bigint` (same units as Rust `NoteAmount`).
 - Proving, signing, and submit run inside this session; returns tx hashes to JS.
 
 **`StorageBridge` (WASM main thread)**

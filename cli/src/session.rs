@@ -10,7 +10,7 @@ use stellar_private_payments::{
     LocalProver, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{
-        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
+        EncryptionPublicKey, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
         TransferRecipient,
     },
 };
@@ -122,6 +122,38 @@ impl ClientSession {
             .map_err(|e| anyhow::anyhow!("open pool session: {e}"))
     }
 
+    pub fn token_decimals<'a>(
+        &self,
+        pool_ids: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::HashMap<String, Result<u32>> {
+        let pools: std::collections::HashMap<_, _> = pool_ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .map(|id| (id.to_string(), self.pool(id)))
+            .collect();
+        std::thread::scope(|scope| {
+            let reads: Vec<_> = pools
+                .into_iter()
+                .map(|(id, pool)| {
+                    (
+                        id,
+                        scope.spawn(move || pool.and_then(|pool| Ok(pool.token_decimals()?))),
+                    )
+                })
+                .collect();
+            reads
+                .into_iter()
+                .map(|(id, read)| {
+                    let result = read
+                        .join()
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("token precision read failed")));
+                    (id, result)
+                })
+                .collect()
+        })
+    }
+
     /// Register this account's public keys on the deployment-wide registry.
     pub fn register_public_keys(
         &self,
@@ -203,58 +235,6 @@ fn alias_signer(config: &CliConfig, signer: &Account, network: &StellarNetwork) 
     })
 }
 
-pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
-    const DECIMALS: u32 = 7;
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Err(anyhow::anyhow!("invalid amount: empty input"));
-    }
-
-    let (negative, digits) = match raw.as_bytes()[0] {
-        b'+' => (false, &raw[1..]),
-        b'-' => (true, &raw[1..]),
-        _ => (false, raw),
-    };
-    let (int_part, frac_part) = match digits.split_once('.') {
-        Some((int_part, frac_part)) => {
-            (if int_part.is_empty() { "0" } else { int_part }, frac_part)
-        }
-        None => (if digits.is_empty() { "0" } else { digits }, ""),
-    };
-
-    if int_part.is_empty() || !int_part.chars().all(|c| c.is_ascii_digit()) {
-        return Err(anyhow::anyhow!("invalid amount: {raw}"));
-    }
-    if !frac_part.chars().all(|c| c.is_ascii_digit()) {
-        return Err(anyhow::anyhow!("invalid amount: {raw}"));
-    }
-    if frac_part.len() > DECIMALS as usize {
-        return Err(anyhow::anyhow!("too many decimal places (max {DECIMALS})"));
-    }
-
-    let scale = 10u128.pow(DECIMALS);
-    let int_units = int_part
-        .parse::<u128>()
-        .map_err(|e| anyhow::anyhow!("invalid amount: {e}"))?;
-    let frac_units = if frac_part.is_empty() {
-        0u128
-    } else {
-        let padded = format!("{frac_part:0<width$}", width = DECIMALS as usize);
-        padded
-            .parse::<u128>()
-            .map_err(|e| anyhow::anyhow!("invalid amount: {e}"))?
-    };
-
-    let amount = int_units
-        .checked_mul(scale)
-        .and_then(|v| v.checked_add(frac_units))
-        .ok_or_else(|| anyhow::anyhow!("amount is too large"))?;
-    if negative && amount != 0 {
-        return Err(anyhow::anyhow!("amount must be non-negative"));
-    }
-    Ok(NoteAmount::from(amount))
-}
-
 /// Parse `--to` address or explicit note + encryption keys into a
 /// [`TransferRecipient`].
 pub fn parse_transfer_recipient(
@@ -273,40 +253,5 @@ pub fn parse_transfer_recipient(
         _ => anyhow::bail!(
             "specify the recipient with --to <G…>, or both --note-key <hex> and --encryption-key <hex>"
         ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_amount;
-    use stellar_private_payments::types::NoteAmount;
-
-    #[test]
-    fn parses_token_units_with_decimals() {
-        assert_eq!(
-            parse_amount("1").expect("1 should parse as 1 token"),
-            NoteAmount::from(10_000_000u128)
-        );
-        assert_eq!(
-            parse_amount("1.").expect("1. should parse as 1 token"),
-            NoteAmount::from(10_000_000u128)
-        );
-        assert_eq!(
-            parse_amount(".5").expect(".5 should parse as 0.5 token"),
-            NoteAmount::from(5_000_000u128)
-        );
-        assert_eq!(
-            parse_amount("0.0000001").expect("smallest unit should parse"),
-            NoteAmount::from(1u128)
-        );
-        assert_eq!(
-            parse_amount("12.3456789").expect("12.3456789 should parse"),
-            NoteAmount::from(123_456_789u128)
-        );
-    }
-
-    #[test]
-    fn rejects_too_many_decimals() {
-        assert!(parse_amount("0.00000001").is_err());
     }
 }

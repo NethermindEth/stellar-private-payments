@@ -26,6 +26,7 @@ parallel = [
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
+bigdecimal = "0.4.11"
 circom-witness-rs = { workspace = true }
 ed25519-dalek = { version = "3.0", default-features = false, features = ["digest", "zeroize"] }
 futures = { workspace = true, features = ["executor"] }

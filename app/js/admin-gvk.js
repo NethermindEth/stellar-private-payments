@@ -9,9 +9,11 @@ import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import { symbol, symbolCircle } from 'd3-shape';
 import { rpc } from '@stellar/stellar-sdk';
-import { client, getCurrentRpcUrl } from './wasm-facade.js';
+import { readDisplayDecimals } from './token-metadata.js';
+import { parseAmountRange } from './amount-filter.js';
+import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
-import { el, formatAmount as formatTokenAmount } from './ui/notes-view.js';
+import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 
 const BATCH_SIZE = 20;
 
@@ -42,6 +44,8 @@ const state = {
   pools: [],
   audit: null,
   auditedPoolContractId: null,
+  tokenDecimals: null,
+  tokenSymbol: null,
   rows: [],
   poolGvkMode: null,
   txCounter: 0,
@@ -431,7 +435,10 @@ function parseFieldAmount(hex) {
   }
 }
 
-const STROOPS_PER_XLM = 10_000_000n;
+function formatTokenAmount(amount) {
+  if (state.tokenDecimals == null) return `${amount} base units`;
+  return formatBaseUnits(amount, state.tokenSymbol, state.tokenDecimals);
+}
 
 function formatAmount(hex) {
   return hex ? formatTokenAmount(parseFieldAmount(hex)) : '—';
@@ -567,14 +574,6 @@ function readFilters() {
     return Number.isFinite(n) ? n : null;
   };
 
-  const toStroops = (el) => {
-    const raw = el?.value?.trim();
-    if (!raw) return null;
-    const xlm = Number(raw);
-    if (!Number.isFinite(xlm) || xlm < 0) return null;
-    return BigInt(Math.round(xlm * Number(STROOPS_PER_XLM)));
-  };
-
   // Comma-separated: matches a note whose PK contains ANY of the given terms.
   const pkTerms = (filterPkEl?.value ?? '')
     .split(',')
@@ -582,8 +581,7 @@ function readFilters() {
     .filter(Boolean);
 
   return {
-    amountMin: toStroops(filterAmountMinEl),
-    amountMax: toStroops(filterAmountMaxEl),
+    ...parseAmountRange(filterAmountMinEl?.value, filterAmountMaxEl?.value, state.tokenDecimals, parseTokenAmount),
     ledgerFrom: combineBound(toInt(filterLedgerFromEl), state.timeFilterLedgers.from, Math.max),
     ledgerTo: combineBound(toInt(filterLedgerToEl), state.timeFilterLedgers.to, Math.min),
     pk: pkTerms.length > 0 ? pkTerms : null,
@@ -637,6 +635,7 @@ function computeFilteredRows(filters) {
 
 /** The tx rows any view/export should use: filtered + paginated, same as the tables. */
 function computeVisibleRows(filters) {
+  if (!filters.valid) return [];
   const filteredRows = computeFilteredRows(filters);
   return isFiltersActive(filters) ? filteredRows.slice(0, state.filteredVisibleCount) : state.rows;
 }
@@ -645,6 +644,14 @@ function renderResults() {
   if (!resultsEl || !emptyEl) return;
 
   const filters = readFilters();
+  filterAmountMinEl?.setCustomValidity(filters.errors[0]);
+  filterAmountMaxEl?.setCustomValidity(filters.errors[1]);
+  if (!filters.valid) {
+    resultsEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    emptyEl.textContent = 'Correct the amount filters to view results.';
+    return;
+  }
   const filtersActive = isFiltersActive(filters);
   const visibleRows = computeVisibleRows(filters);
 
@@ -2180,9 +2187,9 @@ function updateLoadMoreButton() {
   }
 
   const filters = readFilters();
-  const hasMore = isFiltersActive(filters)
+  const hasMore = filters.valid && (isFiltersActive(filters)
     ? state.filteredVisibleCount < computeFilteredRows(filters).length
-    : !state.exhausted;
+    : !state.exhausted);
 
   loadMoreBtnEl.disabled = !hasMore;
   setLoadMoreHighlight(hasMore);
@@ -2190,7 +2197,7 @@ function updateLoadMoreButton() {
 
 function updateExportButton() {
   if (!exportBtnEl) return;
-  exportBtnEl.disabled = !state.audit;
+  exportBtnEl.disabled = !state.audit || !readFilters().valid;
 }
 
 function syncActionButtons() {
@@ -2218,6 +2225,7 @@ function slotToCsvRow(txIndex, tx, side, slot) {
 }
 
 function buildNotesCsvRows() {
+  // CSV keeps the legacy amount_stroops name; all amount columns contain token base units.
   const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'commitment', 'nullifier'];
   const rows = [header];
 
@@ -2285,6 +2293,10 @@ function downloadCsv(filename, rows) {
 
 function updateStatus() {
   const filters = readFilters();
+  if (!filters.valid) {
+    setPanelStatus(filters.errors.filter(Boolean).join('; '), 'error');
+    return;
+  }
 
   if (state.rows.length === 0) {
     setPanelStatus('No audited transacts yet — pool may have no activity.', 'info');
@@ -2334,14 +2346,14 @@ function setFilterControlsDisabled(disabled) {
     filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl,
     filterPkEl, filterTimeFromEl, filterTimeToEl, filtersClearBtnEl,
   ]) {
-    if (filterEl) filterEl.disabled = disabled;
+    if (filterEl) filterEl.disabled = disabled || (state.tokenDecimals == null && [filterAmountMinEl, filterAmountMaxEl].includes(filterEl));
   }
 }
 
 /** Drains the cursor first (if a filter needs the full result set), then re-renders. */
 async function applyFiltersAndRender() {
   const filters = readFilters();
-  if (isFiltersActive(filters) && state.audit && !state.exhausted) {
+  if (filters.valid && isFiltersActive(filters) && state.audit && !state.exhausted) {
     setFilterControlsDisabled(true);
     setPanelStatus('Loading full result set to apply filters…', 'info');
     try {
@@ -2405,6 +2417,11 @@ async function loadStoredAuthorityKey() {
 function resetAuditState() {
   state.audit = null;
   state.auditedPoolContractId = null;
+  state.tokenDecimals = null;
+  state.tokenSymbol = null;
+  for (const input of [filterAmountMinEl, filterAmountMaxEl]) {
+    if (input) { input.value = ''; input.disabled = true; input.setCustomValidity(''); }
+  }
   state.rows = [];
   state.poolGvkMode = null;
   state.txCounter = 0;
@@ -2442,9 +2459,13 @@ async function startAudit({ reset }) {
     }
     await client().openAccount(wallet);
     const pool = await client().account().pool({ poolContract: poolContractId });
+    const decimals = await readDisplayDecimals(pool);
     state.audit = await pool.audit(privateKey);
+    state.tokenDecimals = decimals;
     state.auditedPoolContractId = poolContractId;
     const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+    state.tokenSymbol = tokenLabel(poolEntry);
+    setFilterControlsDisabled(false);
     state.poolGvkMode = poolEntry?.gvkMode ?? null;
   }
 
@@ -2480,6 +2501,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     filterEl?.addEventListener('input', () => {
       state.filteredVisibleCount = BATCH_SIZE;
       applyFiltersAndRender();
+      if ([filterAmountMinEl, filterAmountMaxEl].includes(filterEl)) filterEl.reportValidity();
     });
   }
 
@@ -2535,6 +2557,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
   });
 
   loadMoreBtnEl?.addEventListener('click', async () => {
+    if (!readFilters().valid) return;
     // Filters already forced a full drain, so "load more" just widens the
     // locally-visible window instead of touching the cursor.
     if (isFiltersActive(readFilters())) {
@@ -2561,7 +2584,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
   });
 
   exportBtnEl?.addEventListener('click', async () => {
-    if (!state.audit) return;
+    if (!state.audit || !readFilters().valid) return;
 
     const originalText = exportBtnEl.textContent;
     try {
@@ -2569,6 +2592,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       exportBtnEl.textContent = 'Exporting…';
       if (!state.exhausted) setPanelStatus('Loading full result set to export…', 'info');
       await ensureFullyLoaded();
+      if (!readFilters().valid) throw new Error('Correct the amount filters before exporting.');
 
       const poolContractId = poolSelectEl?.value?.trim() || 'pool';
       const rows = state.view === 'note'

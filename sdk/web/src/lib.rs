@@ -138,6 +138,27 @@ pub fn register_telemetry_sinks(
     crate::telemetry::register_worker_sinks(storage, prover)
 }
 
+/// Parse token units into unsigned base units without rounding.
+#[wasm_bindgen(js_name = parseTokenAmount)]
+pub fn parse_token_amount(value: &str, decimals: u32) -> Result<u128, JsError> {
+    stellar_private_payments::types::NoteAmount::from_decimal(value, decimals)
+        .map(u128::from)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Read token precision without opening a wallet session.
+#[wasm_bindgen(js_name = readTokenDecimals)]
+pub async fn read_token_decimals(rpc_url: String, token_contract: String) -> Result<u32, JsError> {
+    let rpc = stellar_private_payments::chain::RpcClient::new(&rpc_url)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    rpc.get_token_decimals(
+        &token_contract,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    )
+    .await
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

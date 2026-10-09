@@ -28,6 +28,8 @@ struct PoolRow {
     token_link: String,
     asset: String,
     balance: String,
+    balance_base_units: String,
+    decimals: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -91,41 +93,13 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
 
     match session.account().portfolio() {
         Ok(portfolio) => {
-            for balance in &portfolio {
-                if !allowed.contains(balance.pool_contract_id.as_str()) {
-                    continue;
-                }
-                let Some(entry) = entries
+            let precision = session.token_decimals(
+                portfolio
                     .iter()
-                    .find(|entry| entry.pool_contract_id == balance.pool_contract_id)
-                else {
-                    continue;
-                };
-                pools.push(PoolRow {
-                    pool_contract_id: balance.pool_contract_id.clone(),
-                    pool_link: explorer.contract(&balance.pool_contract_id),
-                    token_contract_id: entry.token_contract_id.clone(),
-                    token_link: explorer.contract(&entry.token_contract_id),
-                    asset: asset_label(&entry.asset),
-                    balance: output::format_token_amount(
-                        u128::from(balance.amount),
-                        &asset_symbol(&entry.asset),
-                        7,
-                    ),
-                });
-            }
-            for entry in entries {
-                if portfolio
-                    .iter()
-                    .any(|balance| balance.pool_contract_id == entry.pool_contract_id)
-                {
-                    continue;
-                }
-                errors.push(PoolErrorRow {
-                    pool_contract_id: entry.pool_contract_id.clone(),
-                    error: "pool balance unavailable".into(),
-                });
-            }
+                    .map(|balance| balance.pool_contract_id.as_str())
+                    .filter(|id| allowed.contains(id)),
+            );
+            (pools, errors) = portfolio_rows(&portfolio, &entries, &explorer, &precision);
         }
         Err(e) => {
             log::warn!("portfolio: {e:#}");
@@ -249,5 +223,102 @@ fn asset_label(asset: &AssetDescriptor) -> String {
         AssetDescriptor::Native => "XLM (native)".to_string(),
         AssetDescriptor::Classic { code, .. } => format!("{code} (classic)"),
         AssetDescriptor::Contract { symbol, .. } => format!("{symbol} (contract)"),
+    }
+}
+
+fn portfolio_rows(
+    portfolio: &[stellar_private_payments::types::PortfolioBalance],
+    entries: &[&stellar_private_payments::types::PoolConfigEntry],
+    explorer: &Explorer,
+    precision: &std::collections::HashMap<String, Result<u32>>,
+) -> (Vec<PoolRow>, Vec<PoolErrorRow>) {
+    let mut pools = Vec::new();
+    let mut errors = Vec::new();
+    for balance in portfolio {
+        let Some(entry) = entries
+            .iter()
+            .find(|entry| entry.pool_contract_id == balance.pool_contract_id)
+        else {
+            continue;
+        };
+        let decimals = match precision.get(&entry.pool_contract_id) {
+            Some(Ok(decimals)) => Some(*decimals),
+            Some(Err(error)) => {
+                errors.push(PoolErrorRow {
+                    pool_contract_id: entry.pool_contract_id.clone(),
+                    error: error.to_string(),
+                });
+                None
+            }
+            None => None,
+        };
+        pools.push(PoolRow {
+            pool_contract_id: balance.pool_contract_id.clone(),
+            pool_link: explorer.contract(&balance.pool_contract_id),
+            token_contract_id: entry.token_contract_id.clone(),
+            token_link: explorer.contract(&entry.token_contract_id),
+            asset: asset_label(&entry.asset),
+            balance_base_units: balance.amount.to_string(),
+            decimals,
+            balance: output::format_token_amount(
+                u128::from(balance.amount),
+                &asset_symbol(&entry.asset),
+                decimals,
+            ),
+        });
+    }
+    for entry in entries {
+        if portfolio
+            .iter()
+            .any(|balance| balance.pool_contract_id == entry.pool_contract_id)
+        {
+            continue;
+        }
+        errors.push(PoolErrorRow {
+            pool_contract_id: entry.pool_contract_id.clone(),
+            error: "pool balance unavailable".into(),
+        });
+    }
+    (pools, errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stellar_private_payments::types::{NoteAmount, PortfolioBalance};
+
+    #[test]
+    fn metadata_failure_keeps_balance_and_reports_pool_error() {
+        let entry = serde_json::from_value(serde_json::json!({
+            "poolContractId": "pool", "tokenContractId": "token", "enabled": true,
+            "deploymentLedger": 0, "policyFlags": [], "asset": {"kind": "native"}
+        }))
+        .expect("pool");
+        let balances = [PortfolioBalance {
+            pool_contract_id: "pool".into(),
+            token_contract_id: "token".into(),
+            token_label: "XLM".into(),
+            amount: NoteAmount::from(123u128),
+            note_count: 1,
+        }];
+        let (rows, errors) = portfolio_rows(
+            &balances,
+            &[&entry],
+            &Explorer::new("https://example.test"),
+            &[("pool".into(), Err(anyhow::anyhow!("offline")))].into(),
+        );
+        assert_eq!(rows.len(), 1);
+        let row = serde_json::to_value(&rows[0]).expect("JSON");
+        assert_eq!(row["balance"], "123 base units");
+        assert_eq!(row["balance_base_units"], "123");
+        assert!(row["decimals"].is_null());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].pool_contract_id, "pool");
+        assert_eq!(errors[0].error, "offline");
+        assert!(
+            portfolio_rows(&balances, &[], &Explorer::new(""), &Default::default())
+                .0
+                .is_empty()
+        );
     }
 }
