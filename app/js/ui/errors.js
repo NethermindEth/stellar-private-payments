@@ -67,6 +67,12 @@ const ERROR_PATTERNS = [
         message: 'Pool state has changed. Please wait for sync to complete and try again.',
     },
     {
+        // The pool reads an allowlist the manifest does not name. Must precede
+        // the network entry, which also matches the SDK's "fetch chain context".
+        test: (msg) => msg.toLowerCase().includes('deployment manifest does not name'),
+        message: 'This pool now uses an allowlist this version of the app does not know. Reload the page. If that does not help, the operator has not published the updated deployment yet.',
+    },
+    {
         // ASP membership issues
         test: (msg) => {
             const lower = msg.toLowerCase();

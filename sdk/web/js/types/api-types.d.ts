@@ -49,6 +49,8 @@ export interface ContractConfigInput {
   deployer: string;
   admin: string;
   asp_membership: string;
+  /** ASP membership contracts deployed after `asp_membership`. */
+  added_asp_memberships?: { contractId: string; deploymentLedger: number }[];
   asp_non_membership: string;
   verifiers: Record<string, string>;
   public_key_registry: string;

@@ -22,16 +22,8 @@ pub(crate) fn build_invoke_contract_tx_envelope(
     auth_entries: Vec<xdr::SorobanAuthorizationEntry>,
 ) -> Result<xdr::TransactionEnvelope> {
     let source = muxed_account_from_g(source_account)?;
-    let contract_address = contract_scaddress_from_str(contract_id)?;
-    let function_name =
-        xdr::ScSymbol::try_from(function).map_err(|_| anyhow!("invalid function name"))?;
-    let args = xdr::VecM::try_from(args)?;
-
-    let invoke_args = xdr::InvokeContractArgs {
-        contract_address,
-        function_name,
-        args,
-    };
+    let invoke_args =
+        invoke_contract_args(contract_scaddress_from_str(contract_id)?, function, args)?;
     let host_function = xdr::HostFunction::InvokeContract(invoke_args);
     let invoke_op = xdr::InvokeHostFunctionOp {
         host_function,
@@ -57,6 +49,21 @@ pub(crate) fn build_invoke_contract_tx_envelope(
         tx,
         signatures: xdr::VecM::default(),
     }))
+}
+
+/// Returns the call of `function` on `contract_address` with `args`, in the
+/// form that both a host function and an authorized function carry.
+pub(crate) fn invoke_contract_args(
+    contract_address: xdr::ScAddress,
+    function: &str,
+    args: Vec<xdr::ScVal>,
+) -> Result<xdr::InvokeContractArgs> {
+    Ok(xdr::InvokeContractArgs {
+        contract_address,
+        function_name: xdr::ScSymbol::try_from(function)
+            .map_err(|_| anyhow!("invalid function name {function}"))?,
+        args: xdr::VecM::try_from(args)?,
+    })
 }
 
 fn muxed_account_from_g(account: &str) -> Result<xdr::MuxedAccount> {

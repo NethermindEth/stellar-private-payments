@@ -114,6 +114,12 @@ struct Cli {
         default_value_t = true
     )]
     delete_other_deployments: bool,
+
+    /// Replays events from this ledger instead of the stored cursor until one
+    /// round succeeds. An empty archive starts at the earlier of this and the
+    /// deployment's first ledger.
+    #[arg(long, env = "BOOTNODE_RESCAN_FROM")]
+    rescan_from: Option<u32>,
 }
 
 impl Cli {
@@ -201,6 +207,7 @@ impl Cli {
             otel,
             initial_ledger_tip: 0,
             delete_other_deployments: self.delete_other_deployments,
+            rescan_from: self.rescan_from,
         }
     }
 

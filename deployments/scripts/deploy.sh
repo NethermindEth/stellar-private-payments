@@ -875,7 +875,7 @@ while [[ "$_pi" -lt "$_plen" ]]; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"

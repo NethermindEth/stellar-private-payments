@@ -7,9 +7,11 @@ use std::{path::PathBuf, time::Duration};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use stellar_private_payments::types::{
-    ContractConfig, Field, GvkAuthoritySetting, GvkMode, NotePublicKey,
+use stellar_private_payments::{
+    chain::RpcClient,
+    types::{ContractConfig, Field, GvkAuthoritySetting, GvkMode, NotePublicKey},
 };
+use stellar_strkey::ed25519;
 use tokio::process::Command;
 
 use crate::{keypair::TestKeypair, pool::PoolOptions};
@@ -306,6 +308,66 @@ impl LocalNetwork {
             .context("parse contract id from stellar contract asset deploy output")
     }
 
+    /// Deploys an ASP membership contract that the deployer administers, and
+    /// returns the contract id and the latest ledger before the deploy.
+    pub async fn deploy_asp_membership(
+        &self,
+        deployer_secret: &str,
+        levels: u32,
+    ) -> Result<(String, u32)> {
+        let ledger = RpcClient::new(&self.rpc_url)?
+            .get_latest_ledger()
+            .await?
+            .sequence;
+        let id = deploy_tree(
+            deployer_secret,
+            "asp_membership",
+            &["--levels", &levels.to_string()],
+        )
+        .await?;
+        Ok((id, ledger))
+    }
+
+    /// Deploys an ASP non-membership contract that the deployer administers,
+    /// and returns the contract id.
+    pub async fn deploy_asp_non_membership(&self, deployer_secret: &str) -> Result<String> {
+        deploy_tree(deployer_secret, "asp_non_membership", &[]).await
+    }
+
+    pub async fn update_asp_membership(
+        &self,
+        pool_contract_id: &str,
+        admin_secret: &str,
+        asp_membership: &str,
+    ) -> Result<()> {
+        self.invoke_contract(
+            pool_contract_id,
+            admin_secret,
+            &[
+                "update_asp_membership",
+                "--new_asp_membership",
+                asp_membership,
+            ],
+        )
+        .await
+    }
+
+    /// Pauses or unpauses deposits into a pool, as its admin.
+    pub async fn set_deposits_paused(
+        &self,
+        pool_contract_id: &str,
+        admin_secret: &str,
+        paused: bool,
+    ) -> Result<()> {
+        let function = if paused {
+            "pause_deposits"
+        } else {
+            "unpause_deposits"
+        };
+        self.invoke_contract(pool_contract_id, admin_secret, &[function])
+            .await
+    }
+
     pub async fn insert_asp_membership_leaf(
         &self,
         contract_id: &str,
@@ -356,6 +418,24 @@ impl LocalNetwork {
         .await
     }
 
+    pub async fn update_asp_non_membership(
+        &self,
+        pool_contract_id: &str,
+        admin_secret: &str,
+        asp_non_membership: &str,
+    ) -> Result<()> {
+        self.invoke_contract(
+            pool_contract_id,
+            admin_secret,
+            &[
+                "update_asp_non_membership",
+                "--new_asp_non_membership",
+                asp_non_membership,
+            ],
+        )
+        .await
+    }
+
     async fn invoke_contract(
         &self,
         contract_id: &str,
@@ -381,6 +461,32 @@ impl LocalNetwork {
         }
         Ok(())
     }
+}
+
+/// Deploys `target/stellar/<name>.wasm` with the deployer as its admin and
+/// `args` after the admin, and returns the contract id.
+async fn deploy_tree(deployer_secret: &str, name: &str, args: &[&str]) -> Result<String> {
+    let admin =
+        TestKeypair::from_seed(ed25519::PrivateKey::from_string(deployer_secret)?.0).address();
+    let output = Command::new("stellar")
+        .args(["contract", "deploy", "--wasm"])
+        .arg(repo_root().join(format!("target/stellar/{name}.wasm")))
+        .args(["--source-account", deployer_secret])
+        .args(["--network", STELLAR_CLI_NETWORK])
+        .args(["--", "--admin", &admin])
+        .args(args)
+        .output()
+        .await
+        .context("run stellar contract deploy")?;
+    if !output.status.success() {
+        bail!(
+            "stellar contract deploy {name}.wasm failed ({}):\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    extract_contract_id(&String::from_utf8_lossy(&output.stdout))
+        .context("parse contract id from stellar contract deploy output")
 }
 
 /// A fresh `--local` network never instantiates the native XLM SAC (unlike

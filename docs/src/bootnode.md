@@ -35,6 +35,16 @@ Handoff response shape:
 
 The web platform orchestrator treats `-32002` as an archive handoff and resumes on the wallet RPC at `fromLedger`.
 
+## Add an allowlist
+
+The bootnode names its archive after the network, the earliest pool deployment ledger, and the IDs of the enabled pools, `asp_membership`, and `public_key_registry`. Allowlists in `added_asp_memberships` are left out, so adding one keeps the archive. Restarted with the new manifest, the bootnode serves the allowlist's events, but its indexer resumes from the stored cursor and misses the earlier ones. To fill them in:
+
+1. Point `--deployment` (or `BOOTNODE_DEPLOYMENT`) at the manifest that names the allowlist.
+2. Restart the bootnode with `--rescan-from` (or `BOOTNODE_RESCAN_FROM`) set to the allowlist's deployment ledger. Indexing replays from that ledger until one round succeeds, then continues from the cursor that round stored, skipping events already archived. The ledger must be no later than the last one ingested before the stop, or the events in between are never archived. A bootnode that was in sync when it stopped meets this.
+3. Remove the option before the next restart, or every restart replays again.
+
+Run the rescan while the upstream RPC still holds the deployment ledger. Past that, the rescan's requests fail and the indexer stalls until you restart without the option.
+
 ## Trust assumptions
 
 Using a bootnode adds additional trust and privacy considerations:

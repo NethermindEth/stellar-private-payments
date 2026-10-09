@@ -19,6 +19,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU32},
 };
+use stellar_private_payments::chain::MAX_FILTER_CONTRACT_IDS;
 use storage::Storage;
 
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
@@ -82,18 +83,41 @@ pub struct DeploymentSpec {
     pub network_passphrase: String,
     pub contract_ids: Vec<String>,
     pub min_deployment_ledger: u32,
+    /// Storage namespace of the archive, which can leave out some of
+    /// `contract_ids`.
+    pub deployment_id: String,
 }
 
 impl DeploymentSpec {
+    /// Returns the spec of `deployment`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest's network passphrase is missing, if it
+    /// names more contracts than one `getEvents` request can filter, or if it
+    /// names no enabled pool.
     pub fn from_config(deployment: &ContractConfig) -> Result<Self> {
         deployment
             .validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
+        check_filter_ceiling(deployment)?;
         Ok(Self {
             network_passphrase: deployment.network_passphrase.clone().unwrap_or_default(),
             contract_ids: deployment.all_contract_ids(),
             min_deployment_ledger: deployment.min_deployment_ledger()?,
+            deployment_id: deployment::current_deployment_storage_id(deployment)?,
         })
     }
+}
+
+/// Refuses a manifest naming more contracts than one `getEvents` request can
+/// filter; neither the bootnode nor a client could follow them all.
+fn check_filter_ceiling(deployment: &ContractConfig) -> Result<()> {
+    let count = deployment.all_contract_ids().len();
+    anyhow::ensure!(
+        count <= MAX_FILTER_CONTRACT_IDS,
+        "the deployment manifest names {count} contracts, but one getEvents request filters at most {MAX_FILTER_CONTRACT_IDS}: drop an allowlist no pool reads from added_asp_memberships"
+    );
+    Ok(())
 }
 
 pub struct Bootnode {
@@ -124,13 +148,8 @@ impl Bootnode {
         let cfg = Arc::new(cfg);
         let contract_ids = Arc::new(deployment.contract_ids);
         let min_deployment_ledger = deployment.min_deployment_ledger;
-        let deployment_id = deployment::deployment_storage_id(
-            contract_ids.as_ref(),
-            min_deployment_ledger,
-            &deployment.network_passphrase,
-        );
         tracing::info!(
-            %deployment_id,
+            deployment_id = %deployment.deployment_id,
             min_deployment_ledger,
             contracts = contract_ids.len(),
             "bootnode deployment namespace"
@@ -284,5 +303,45 @@ mod network_tests {
         }
         assert_ne!(ids[0], ids[1]);
         assert!(read_deployment(&root.join("missing-config.json")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_FILTER_CONTRACT_IDS, check_filter_ceiling, read_deployment};
+    use stellar_private_payments::types::TreeConfigEntry;
+
+    fn added_allowlist(contract_id: String) -> TreeConfigEntry {
+        TreeConfigEntry {
+            contract_id,
+            deployment_ledger: 1,
+        }
+    }
+
+    #[test]
+    fn a_manifest_one_contract_over_the_filter_ceiling_is_refused() -> anyhow::Result<()> {
+        let mut manifest = read_deployment(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deployments/testnet"),
+        )?;
+        let named = manifest.all_contract_ids().len();
+        manifest.added_asp_memberships.extend(
+            (named..MAX_FILTER_CONTRACT_IDS).map(|i| added_allowlist(format!("CALLOWLIST{i}"))),
+        );
+        check_filter_ceiling(&manifest)?;
+
+        manifest
+            .added_asp_memberships
+            .push(added_allowlist("CONEOVERTHECEILING".into()));
+        let count = manifest.all_contract_ids().len();
+        let refused = check_filter_ceiling(&manifest)
+            .expect_err("a manifest over the ceiling must be refused");
+
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "the deployment manifest names {count} contracts, but one getEvents request filters at most {MAX_FILTER_CONTRACT_IDS}: drop an allowlist no pool reads from added_asp_memberships"
+            )
+        );
+        Ok(())
     }
 }
