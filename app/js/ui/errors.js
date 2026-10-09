@@ -16,7 +16,6 @@ export const CONTRACT_ERRORS = {
         8: 'Invalid merkle root. The pool state may have changed.',
         9: 'Note already spent. This is a double-spend attempt.',
         18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
-        19: 'Deposits into this pool are not paused.',
         20: 'No admin transfer is pending.',
         21: 'The tree does not run the code this pool accepts.',
     },
@@ -80,11 +79,6 @@ const ERROR_PATTERNS = [
                    (lower.includes('deposits into pool') && lower.includes('are paused'));
         },
         message: CONTRACT_ERRORS.pool[18],
-    },
-    {
-        // Deposits not paused (#19)
-        test: (msg) => msg.toLowerCase().includes('#19') && msg.toLowerCase().includes('contract'),
-        message: CONTRACT_ERRORS.pool[19],
     },
     {
         // The pool reads an allowlist the manifest does not name. Must precede
