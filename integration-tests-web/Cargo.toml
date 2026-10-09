@@ -2,6 +2,7 @@
 name = "integration-tests-web"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.97.1"
 repository = "https://github.com/NethermindEth/stellar-private-transactions"
 license = "Apache-2.0"
 publish = false

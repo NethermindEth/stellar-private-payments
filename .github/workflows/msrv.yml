@@ -1,0 +1,57 @@
+name: MSRV
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  msrv:
+    name: MSRV (${{ matrix.surface }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [native, browser, contracts, consumer]
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      # Native test binaries pull in Wasmer/Cranelift; debug symbols dominate disk use.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      SPP_NETWORK: testnet
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - name: Read and validate MSRV declarations
+        id: policy
+        run: |
+          version=$(bash scripts/msrv.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Select the minimum compiler, including subprocesses
+        run: |
+          rustup toolchain install '${{ steps.policy.outputs.version }}' --profile minimal
+          echo 'RUSTUP_TOOLCHAIN=${{ steps.policy.outputs.version }}' >> "$GITHUB_ENV"
+      - name: Show effective compiler
+        run: |
+          rustc --version --verbose
+          cargo --version
+      - name: Install contract build tooling
+        if: matrix.surface == 'contracts'
+        uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0
+        with:
+          version: v28.1.0
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: msrv-${{ matrix.surface }}
+      - name: Verify supported build surface
+        run: bash scripts/check-msrv.sh '${{ matrix.surface }}'
