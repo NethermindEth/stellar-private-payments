@@ -225,6 +225,12 @@ enum DisclosureCommands {
     Verify {
         /// Receipt JSON path
         receipt: PathBuf,
+        /// Expected pool contract address (C…)
+        #[arg(long)]
+        pool: String,
+        /// Expected authority identity payload as 0x-prefixed hex
+        #[arg(long)]
+        authority: Option<String>,
         /// Override the canonical verifying-key hash pinned by the CLI
         #[arg(long)]
         expected_vk_hash: Option<String>,
@@ -379,11 +385,15 @@ fn main() -> Result<()> {
             ),
             DisclosureCommands::Verify {
                 receipt,
+                pool,
+                authority,
                 expected_vk_hash,
                 require_unspent,
             } => cmd::disclosure::verify(
                 &config,
                 &receipt,
+                &pool,
+                authority.as_deref(),
                 expected_vk_hash.as_deref(),
                 require_unspent,
                 json,
@@ -391,5 +401,94 @@ fn main() -> Result<()> {
         },
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disclosure_verify_requires_pool() {
+        let err = Cli::try_parse_from(["spp", "disclosure", "verify", "receipt.json"])
+            .expect_err("missing --pool should be rejected");
+        assert!(
+            err.to_string().contains("--pool"),
+            "expected error to mention missing --pool, got: {err}"
+        );
+    }
+
+    #[test]
+    fn disclosure_verify_accepts_pool() {
+        let cli = Cli::try_parse_from([
+            "spp",
+            "disclosure",
+            "verify",
+            "receipt.json",
+            "--pool",
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ])
+        .expect("valid disclosure verify arguments should parse");
+
+        match cli.command {
+            Commands::Disclosure {
+                command:
+                    DisclosureCommands::Verify {
+                        receipt,
+                        pool,
+                        authority,
+                        expected_vk_hash,
+                        require_unspent,
+                    },
+            } => {
+                assert_eq!(receipt, PathBuf::from("receipt.json"));
+                assert_eq!(
+                    pool,
+                    "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                );
+                assert_eq!(authority, None);
+                assert_eq!(expected_vk_hash, None);
+                assert!(!require_unspent);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn disclosure_verify_accepts_pool_and_authority() {
+        let cli = Cli::try_parse_from([
+            "spp",
+            "disclosure",
+            "verify",
+            "receipt.json",
+            "--pool",
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--authority",
+            "010203",
+        ])
+        .expect("valid disclosure verify arguments should parse");
+
+        match cli.command {
+            Commands::Disclosure {
+                command:
+                    DisclosureCommands::Verify {
+                        receipt,
+                        pool,
+                        authority,
+                        expected_vk_hash,
+                        require_unspent,
+                    },
+            } => {
+                assert_eq!(receipt, PathBuf::from("receipt.json"));
+                assert_eq!(
+                    pool,
+                    "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                );
+                assert_eq!(authority.as_deref(), Some("010203"));
+                assert_eq!(expected_vk_hash, None);
+                assert!(!require_unspent);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
     }
 }

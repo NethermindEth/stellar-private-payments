@@ -136,7 +136,7 @@ matching bundled circuit artifacts, and queries the configured Stellar network
 for root and nullifier status.
 
 ```bash
-spp disclosure verify receipt.json
+spp disclosure verify receipt.json --pool C<pool-contract-address>
 ```
 
 Use `--expected-vk-hash 0x…` together with alternate artifacts supplied through
