@@ -69,6 +69,8 @@ pub enum Error {
     InvalidPolicyFlags = 14,
     /// Deposits are paused
     DepositsPaused = 18,
+    /// No admin transfer is pending
+    NoPendingAdmin = 20,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -90,6 +92,7 @@ impl From<AdminError> for Error {
     fn from(e: AdminError) -> Self {
         match e {
             AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
         }
     }
 }
@@ -127,12 +130,15 @@ pub struct Proof {
 /// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
 /// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], and
 /// [`DataKey::DepositsPaused`], lives in the contract's instance entry.
-/// [`DataKey::Admin`] and [`DataKey::Nullifier`] are persistent keys.
+/// [`DataKey::Admin`], [`DataKey::PendingAdmin`], and [`DataKey::Nullifier`]
+/// are persistent keys.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
     /// Administrator address with permissions to modify contract settings
     Admin,
+    /// Proposed next administrator, present only during a transfer
+    PendingAdmin,
     /// Address of the token contract used for deposits/withdrawals
     Token,
     /// Address of the ZK proof verifier contract
@@ -707,22 +713,75 @@ impl PoolContract {
         Ok(env.storage().persistent().has(&key))
     }
 
-    /// Update the contract administrator
+    /// Proposes a new contract administrator.
     ///
-    /// Transfers administrative control to a new address. Requires
-    /// authorization from the current admin.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `new_admin` - New address that will have administrative permissions
+    /// * `new_admin` - Address proposed as the next administrator
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin).map_err(Error::from)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
+    }
+
+    /// Withdraws the pending admin transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn cancel_admin_transfer(env: &Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// The previous admin loses every power over the contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call.
+    pub fn accept_admin(env: &Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: &Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: &Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(env, &DataKey::PendingAdmin)
     }
 
     /// Pauses deposits.
