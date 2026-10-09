@@ -10,6 +10,39 @@ use stellar_xdr::{
 
 use super::{contract_state::PreparedSorobanTx, rpc::SimulateTransactionResponse};
 
+/// Refundable fee added for each contract code entry in a footprint: 1.5
+/// times the rent for one hour (`soroban_utils::MIN_EXTENSION_LEDGERS`, 720
+/// ledgers) of the largest code entry, measured on testnet on 2026-10-09 at
+/// 980,109 stroops for the blocklist tree.
+const CODE_RENT_MARGIN: i64 = 1_500_000;
+
+/// Refundable fee added for each other persistent contract data entry: covers
+/// an hour of rent for the largest data entry, measured on testnet on
+/// 2026-10-09 at about 12,500 stroops for the allowlist `State`, plus about
+/// 2,542 for the extension's TTL write.
+const DATA_RENT_MARGIN: i64 = 25_000;
+
+/// Returns the rent a transaction may owe beyond its simulation. Contracts
+/// extend an entry an hour at a time, so an entry that crosses that step
+/// between simulation and apply owes an hour of rent the simulation did not
+/// include.
+fn rent_margin(footprint: &xdr::LedgerFootprint) -> i64 {
+    footprint
+        .read_only
+        .iter()
+        .chain(footprint.read_write.iter())
+        .map(|key| match key {
+            xdr::LedgerKey::ContractCode(_) => CODE_RENT_MARGIN,
+            xdr::LedgerKey::ContractData(data)
+                if data.durability == xdr::ContractDataDurability::Persistent =>
+            {
+                DATA_RENT_MARGIN
+            }
+            _ => 0,
+        })
+        .fold(0, i64::saturating_add)
+}
+
 /// Builds an unsigned, unsubmitted transaction envelope invoking `function`
 /// on `contract_id`, for read-only simulation.
 pub(crate) fn build_invoke_contract_tx_envelope(
@@ -129,6 +162,9 @@ impl SimulateTransactionResponse {
 /// Merges simulation resource data and authorization into `raw`.
 ///
 /// Mirrors `assembleTransaction` from the JS Stellar SDK.
+///
+/// Adds [`rent_margin`] to the refundable fee; the network refunds what is
+/// unused.
 fn assemble_soroban_transaction(
     raw: &xdr::TransactionEnvelope,
     sim: &SimulateTransactionResponse,
@@ -136,8 +172,14 @@ fn assemble_soroban_transaction(
     sim.ensure_success()?;
 
     let min_resource_fee = sim.min_resource_fee_u64()?;
-    let soroban_data = sim.soroban_transaction_data()?;
+    let mut soroban_data = sim.soroban_transaction_data()?;
     let auth_entries = sim.auth_entries()?;
+
+    let margin = rent_margin(&soroban_data.resources.footprint);
+    soroban_data.resource_fee = soroban_data
+        .resource_fee
+        .checked_add(margin)
+        .ok_or_else(|| anyhow!("resourceFee plus the rent margin overflows"))?;
 
     let xdr::TransactionEnvelope::Tx(v1) = raw else {
         return Err(anyhow!("expected TransactionEnvelope::Tx"));
@@ -151,9 +193,11 @@ fn assemble_soroban_transaction(
         ));
     }
 
-    let resource_fee: u32 = min_resource_fee
-        .try_into()
-        .map_err(|_| anyhow!("minResourceFee does not fit into u32"))?;
+    let resource_fee = i64::try_from(min_resource_fee)
+        .ok()
+        .and_then(|fee| fee.checked_add(margin))
+        .and_then(|fee| u32::try_from(fee).ok())
+        .ok_or_else(|| anyhow!("minResourceFee plus the rent margin does not fit into u32"))?;
 
     let mut classic_fee = u64::from(tx.fee);
     if let xdr::TransactionExt::V1(existing) = &tx.ext {
@@ -321,6 +365,83 @@ mod tests {
         };
         assert_eq!(v1.tx.fee, 600);
         assert!(matches!(v1.tx.ext, TransactionExt::V1(_)));
+    }
+
+    /// Returns a simulation whose footprint holds two code entries, a
+    /// persistent and a temporary data entry, and an account.
+    fn extendable_entries_sim(min_resource_fee: &str) -> SimulateTransactionResponse {
+        let contract = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([3u8; 32])));
+        let data_key = |durability| {
+            xdr::LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                contract: contract.clone(),
+                key: xdr::ScVal::LedgerKeyContractInstance,
+                durability,
+            })
+        };
+        let mut data = empty_soroban_data();
+        data.resource_fee = 500;
+        let code_key = |byte| {
+            xdr::LedgerKey::ContractCode(xdr::LedgerKeyContractCode {
+                hash: xdr::Hash([byte; 32]),
+            })
+        };
+        data.resources.footprint = xdr::LedgerFootprint {
+            read_only: vec![
+                code_key(4),
+                code_key(6),
+                data_key(xdr::ContractDataDurability::Temporary),
+            ]
+            .try_into()
+            .expect("read-only footprint"),
+            read_write: vec![
+                data_key(xdr::ContractDataDurability::Persistent),
+                xdr::LedgerKey::Account(xdr::LedgerKeyAccount {
+                    account_id: xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
+                        [5u8; 32],
+                    ))),
+                }),
+            ]
+            .try_into()
+            .expect("read-write footprint"),
+        };
+        SimulateTransactionResponse {
+            latest_ledger: 0,
+            result: None,
+            results: vec![crate::chain::rpc::SimulateHostFunctionResult::default()],
+            transaction_data: Some(data.to_xdr_base64(Limits::none()).expect("xdr base64")),
+            min_resource_fee: Some(min_resource_fee.to_string()),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn assemble_pads_the_fee_for_each_extendable_entry() {
+        let sim = extendable_entries_sim("500");
+
+        let assembled = assemble_soroban_transaction(&empty_envelope(), &sim).expect("assemble");
+        let xdr::TransactionEnvelope::Tx(v1) = &assembled else {
+            panic!("expected v1 envelope")
+        };
+        let margin = CODE_RENT_MARGIN
+            .saturating_mul(2)
+            .saturating_add(DATA_RENT_MARGIN);
+        assert_eq!(i64::from(v1.tx.fee), margin.saturating_add(600));
+        let TransactionExt::V1(applied) = &v1.tx.ext else {
+            panic!("expected soroban transaction data")
+        };
+        assert_eq!(applied.resource_fee, margin.saturating_add(500));
+    }
+
+    #[test]
+    fn assemble_rejects_a_fee_the_margin_pushes_past_u32() {
+        let sim = extendable_entries_sim(&u32::MAX.to_string());
+
+        let err = assemble_soroban_transaction(&empty_envelope(), &sim)
+            .expect_err("a fee past u32 must fail");
+        assert_eq!(
+            err.to_string(),
+            "minResourceFee plus the rent margin does not fit into u32"
+        );
     }
 
     #[test]

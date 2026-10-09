@@ -175,8 +175,10 @@ restores it.
 
 Without that upkeep, a user call extends an entry once the entry has lost an
 hour. A transaction simulated just before that point and applied just after
-it owes rent the simulation did not include, so it can fail with an
-insufficient refundable fee and has to be submitted again.
+it owes an hour of rent that its simulation did not include. The SDK adds
+that hour to the refundable fee of every transaction it builds. The sender
+needs just over 0.6 XLM more balance to submit a `transact`, and the network
+refunds whatever rent the transaction does not owe.
 
 For each contract in the deployment, the following loop extends its instance,
 its `State`, `Admin`, and `NextIndex` entries, and its Wasm:
