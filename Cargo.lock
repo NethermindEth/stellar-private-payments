@@ -6162,6 +6162,8 @@ dependencies = [
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
+ "asp-membership",
+ "asp-non-membership",
  "async-trait",
  "base64 0.23.1",
  "bigdecimal",
