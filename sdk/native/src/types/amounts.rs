@@ -60,30 +60,17 @@ fn parse_decimal_amount(raw: &str, decimals: u32) -> Result<(bool, u128)> {
         Some(b'+') => (false, &raw[1..]),
         _ => (false, raw),
     };
-    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
-    if (whole.is_empty() && fraction.is_empty())
-        || !whole
-            .bytes()
-            .chain(fraction.bytes())
-            .all(|b| b.is_ascii_digit())
-    {
+    if !digits.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
         return Err(anyhow!("invalid decimal amount"));
     }
-    let fraction_len = u32::try_from(fraction.len())?;
-    let padding = decimals
-        .checked_sub(fraction_len)
+    let value =
+        bigdecimal::BigDecimal::from_str(digits).map_err(|_| anyhow!("invalid decimal amount"))?;
+    let (coefficient, scale) = value.into_bigint_and_scale();
+    let padding = i64::from(decimals)
+        .checked_sub(scale)
+        .and_then(|padding| u32::try_from(padding).ok())
         .ok_or_else(|| anyhow!("too many decimal places (max {decimals})"))?;
-    let mut amount = 0u128;
-    for digit in whole.bytes().chain(fraction.bytes()) {
-        amount = amount
-            .checked_mul(10)
-            .and_then(|v| {
-                v.checked_add(u128::from(
-                    digit.checked_sub(b'0').expect("validated digit"),
-                ))
-            })
-            .ok_or_else(|| anyhow!("amount is too large"))?;
-    }
+    let mut amount = u128::try_from(coefficient).map_err(|_| anyhow!("amount is too large"))?;
     if amount != 0 {
         amount = 10u128
             .checked_pow(padding)
