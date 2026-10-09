@@ -36,6 +36,7 @@ pub use pool_core::{ExtData, hash_ext_data};
 ///
 /// Duplicated 1:1 from `pool::Error` plus the GVK-specific codes 15 to 17.
 /// `pool` leaves those unassigned, so both pools share every code from 18 on.
+/// Code 19 is unassigned.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -76,8 +77,6 @@ pub enum Error {
     InvalidAdminViewKey = 17,
     /// Deposits are paused
     DepositsPaused = 18,
-    /// Deposits are not paused
-    DepositsNotPaused = 19,
 }
 
 impl From<MerkleError> for Error {
@@ -380,12 +379,7 @@ impl PoolGvkContract {
     ///
     /// While paused, `transact` refuses `ext_amount > 0` before any token
     /// moves. Transfers and withdrawals still go through. Publishes
-    /// [`DepositPauseChanged`].
-    ///
-    /// On a paused pool, writes nothing and publishes [`DepositPauseRepeated`].
-    /// Succeeding spends the authorization's nonce; a refusal would leave the
-    /// signed authorization in a public failed transaction, replayable after
-    /// the next unpause.
+    /// [`DepositPauseChanged`], or [`DepositPauseRepeated`] on a paused pool.
     ///
     /// # Errors
     ///
@@ -399,13 +393,13 @@ impl PoolGvkContract {
         Self::set_deposits_paused(env, true)
     }
 
-    /// Resumes deposits and publishes [`DepositPauseChanged`].
+    /// Resumes deposits. Publishes [`DepositPauseChanged`], or
+    /// [`DepositPauseRepeated`] on an open pool.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DepositsNotPaused`] if deposits are not paused, and
-    /// [`Error::NotInitialized`] if the admin or the deposit flag is not
-    /// stored.
+    /// Returns [`Error::NotInitialized`] if the admin or the deposit flag is
+    /// not stored.
     ///
     /// # Panics
     ///
@@ -416,18 +410,18 @@ impl PoolGvkContract {
 
     fn set_deposits_paused(env: &Env, paused: bool) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
-        if Self::deposits_paused(env)? == paused {
-            return if paused {
-                DepositPauseRepeated.publish(env);
-                Ok(())
-            } else {
-                Err(Error::DepositsNotPaused)
-            };
-        }
+        // A failed call publishes the signed authorization unspent, for anyone
+        // to replay. So a no-op succeeds, and still writes: simulated as a
+        // no-op, the call keeps write access if the opposite call lands first.
+        let changed = Self::deposits_paused(env)? != paused;
         env.storage()
             .instance()
             .set(&DataKey::DepositsPaused, &paused);
-        DepositPauseChanged { paused }.publish(env);
+        if changed {
+            DepositPauseChanged { paused }.publish(env);
+        } else {
+            DepositPauseRepeated { paused }.publish(env);
+        }
         Ok(())
     }
 

@@ -2409,18 +2409,38 @@ fn unpause_deposits_lets_a_deposit_reach_the_verifier() {
 /// instead of leaving it open to replay.
 #[test]
 fn pause_deposits_on_a_paused_pool_changes_nothing() {
-    use soroban_sdk::events::Event;
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_open_pool_gvk(&env, &setup);
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     pool.pause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
 
     assert_eq!(pool.try_pause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
+    assert_eq!(
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "pause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
     assert_eq!(
         env.events().all().events(),
-        [DepositPauseRepeated.to_xdr(&env, &pool_id)]
+        [DepositPauseRepeated { paused: true }.to_xdr(&env, &pool_id)]
     );
     assert!(pool.deposits_paused());
 }
@@ -2455,17 +2475,42 @@ fn pause_deposits_on_a_paused_pool_requires_admin() {
 }
 
 #[test]
-fn unpause_deposits_refuses_an_open_pool() {
+fn unpause_deposits_on_an_open_pool_changes_nothing() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_open_pool_gvk(&env, &setup);
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
+    pool.pause_deposits();
+    pool.unpause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
 
+    assert_eq!(pool.try_unpause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
     assert_eq!(
-        pool.try_unpause_deposits(),
-        Err(Ok(Error::DepositsNotPaused))
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "unpause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
     );
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    assert!(!pool.deposits_paused());
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers

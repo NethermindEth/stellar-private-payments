@@ -10,10 +10,14 @@ pub struct DepositPauseChanged {
     pub paused: bool,
 }
 
-/// The event a pool publishes when the admin pauses an already paused pool.
+/// The event a pool publishes when a pause or unpause leaves its deposit flag
+/// unchanged.
 ///
-/// The call writes nothing, so this event is the only record that it spent
-/// the admin's authorization, such as a second pre-signed pause.
+/// It records that the call spent the admin's authorization, such as a
+/// pre-signed pause.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DepositPauseRepeated;
+pub struct DepositPauseRepeated {
+    /// `true` while the pool refuses deposits.
+    pub paused: bool,
+}
