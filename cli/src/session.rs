@@ -106,6 +106,15 @@ impl ClientSession {
             .map_err(|e| anyhow::anyhow!("operational feed: {e}"))
     }
 
+    pub fn recipient_lookup(
+        &self,
+        address: &str,
+    ) -> Result<stellar_private_payments::types::RecipientLookup> {
+        self.client
+            .recipient_lookup(address)
+            .map_err(|e| anyhow::anyhow!("look up recipient {address}: {e}"))
+    }
+
     pub fn pool(&self, pool_contract_id: &str) -> Result<PrivatePool> {
         log::info!("Opening pool {pool_contract_id}");
         self.account
