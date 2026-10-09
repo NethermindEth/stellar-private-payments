@@ -4,7 +4,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::NoteAmount;
 
-use super::support::{deploy_default, session};
+use super::support::{assert_contract_error, deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
@@ -91,6 +91,8 @@ async fn withdraw_malformed_address() -> Result<()> {
     Ok(())
 }
 
+/// Once the first spend is in a ledger, the pool refuses the second with
+/// `AlreadySpentNullifier` (code 9), not just any failure up to confirm.
 #[tokio::test]
 async fn withdraw_double_spend() -> Result<()> {
     let session = session(deploy_default().await?).await?;
@@ -118,20 +120,11 @@ async fn withdraw_double_spend() -> Result<()> {
     let hash_a = pool.submit(signed_a).await?;
     pool.confirm(&hash_a).await?;
 
-    let rejected = match pool.simulate(&mut prepared_b).await {
-        Err(_) => true,
-        Ok(()) => {
-            let signed_b = pool.sign(&prepared_b).await?;
-            match pool.submit(signed_b).await {
-                Err(_) => true,
-                Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
-            }
-        }
-    };
-    assert!(
-        rejected,
-        "spending the same note a second time must be rejected on-chain"
-    );
+    let err = pool
+        .simulate(&mut prepared_b)
+        .await
+        .expect_err("spending the same note a second time must be rejected on-chain");
+    assert_contract_error(err, 9);
 
     Ok(())
 }
