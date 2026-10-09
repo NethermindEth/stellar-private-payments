@@ -1043,71 +1043,62 @@ mod tests {
         })
     }
 
+    /// Spends one note twice at one index, after two distinct notes verify.
+    /// The note is in the tree and the amounts balance, so only
+    /// `sameNullifiers` refuses it.
     #[test]
     #[ignore]
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
-        for_each_policy(PolicyCircuitSet::All, |asp, wasm, r1cs| {
-            // Same note material used twice
-            let privk = Scalar::from(7777u64);
-            let blind = Scalar::from(4242u64);
-            let amount = Scalar::from(33u64);
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
 
-            let same_note = InputNote {
-                leaf_index: 0,
-                priv_key: privk,
-                blinding: blind,
-                amount,
-            };
-
-            let out_real = OutputNote {
+        let note = InputNote {
+            leaf_index: 5,
+            priv_key: Scalar::from(7777u64),
+            blinding: Scalar::from(4242u64),
+            amount: Scalar::from(33u64),
+        };
+        let other = InputNote {
+            leaf_index: 13,
+            priv_key: Scalar::from(7778u64),
+            blinding: Scalar::from(4243u64),
+            ..note.clone()
+        };
+        let outputs = vec![
+            OutputNote {
                 pub_key: Scalar::from(9001u64),
                 blinding: Scalar::from(8001u64),
-                amount,
-            };
-            let out_dummy = OutputNote {
+                amount: Scalar::from(66u64),
+            },
+            OutputNote {
                 pub_key: Scalar::from(0u64),
                 blinding: Scalar::from(0u64),
                 amount: Scalar::from(0u64),
-            };
-
-            let case = TxCase::new(
-                vec![
-                    same_note.clone(), // in0 @ real_id=0
-                    InputNote {
-                        leaf_index: 5,
-                        ..same_note.clone()
-                    }, // in1 @ real_id=5 (same note material)
-                ],
-                vec![out_real, out_dummy],
-            );
-
-            let leaves = prepopulated_prefix(
-                0xC0FFEEu64,
-                &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                LEAF_PREFIX,
-            );
-
-            let membership_trees = default_membership_trees(&case, 0xFEFE_FEF1u64);
-
-            let keys = default_non_membership_keys(&case);
-
-            let res = run_case_with_non_membership_builder(
-                wasm,
-                r1cs,
-                &case,
-                leaves,
-                Scalar::from(0u64),
-                &membership_trees,
-                &keys,
-                |key, pubs| {
-                    let overrides = non_membership_overrides_from_pubs(pubs);
-                    prepare_smt_proof_with_overrides(key, &overrides, SMT_LEVELS)
-                },
-                asp,
+            },
+        ];
+        let leaves = prepopulated_prefix(
+            0xC0FFEEu64,
+            &[note.leaf_index, other.leaf_index],
+            LEAF_PREFIX,
+        );
+        let prove = |inputs| {
+            run_case(
+                &wasm,
+                &r1cs,
+                &TxCase::new(inputs, outputs.clone()),
+                leaves.clone(),
+                Scalar::zero(),
+                &[],
+                &[],
+                PolicyAspWitness::None,
                 None::<fn(&mut Inputs)>,
-            );
-            expect_proof_rejected(res, "duplicate nullifiers must not verify")
-        })
+            )
+        };
+
+        prove(vec![note.clone(), other])?;
+        expect_proof_rejected(
+            prove(vec![note.clone(), note]),
+            "one note spent twice must not verify",
+        )
     }
 
     #[test]
