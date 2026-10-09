@@ -185,7 +185,7 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
+      # rust-toolchain.toml pins the actual build version; dtolnay only
       # sets the rustup default, which that file overrides.
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
@@ -269,7 +269,7 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # rust-toolchain.toml pins the actual build version (1.92.0); dtolnay only
+      # rust-toolchain.toml pins the actual build version; dtolnay only
       # sets the rustup default, which that file overrides.
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:

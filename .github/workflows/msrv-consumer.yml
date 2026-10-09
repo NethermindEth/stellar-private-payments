@@ -1,0 +1,53 @@
+name: MSRV consumer dependencies
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "scripts/*msrv*"
+      - ".github/workflows/msrv-consumer.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "sdk/native/**"
+      - "scripts/*msrv*"
+      - ".github/workflows/msrv-consumer.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - name: Read and validate MSRV declarations
+        id: policy
+        run: |
+          version=$(bash scripts/msrv.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install the minimum compiler
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: ${{ steps.policy.outputs.version }}
+      - name: Select the minimum compiler, including subprocesses
+        run: echo 'RUSTUP_TOOLCHAIN=${{ steps.policy.outputs.version }}' >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: msrv-consumer
+      - name: Build packaged SDK with freshly resolved dependencies
+        run: bash scripts/check-msrv.sh consumer

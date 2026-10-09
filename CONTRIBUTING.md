@@ -83,7 +83,7 @@ stellar-private-payments/
 
 ## Prerequisites
 
-- [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
+- [**Rust**](https://www.rust-lang.org/tools/install): the supported minimum is declared in `workspace.package.rust-version` in `Cargo.toml`; `rust-toolchain.toml` selects the development and release compiler.
 - [**Circom**](https://github.com/iden3/circom) **2.2.3** for circuit / graph builds (`circuits/circom.lock`; same tag as the Rust circom crates in `circuits/Cargo.toml`).
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
@@ -91,9 +91,70 @@ stellar-private-payments/
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
+- [**jq**](https://jqlang.github.io/jq/) for the MSRV and release scripts.
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
 - [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
 - [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
+
+## Rust version support
+
+All first-party Rust packages share the minimum supported Rust version (MSRV)
+declared in the root `Cargo.toml`. Workspace members inherit it; excluded packages
+declare the same version explicitly. `bash scripts/msrv.sh` uses stable Cargo and
+`jq` to check the resolved declarations and workspace inheritance. The root field
+uses the canonical `rust-version = "X.Y.Z"` layout in `[workspace.package]`.
+Independent packages are listed explicitly in the checker; add new independent
+first-party packages there. Untracked scratch projects are not part of the policy.
+Vendored dependencies retain their own requirements and are checked by the actual
+MSRV builds; do not raise their requirements merely to match the development pin.
+
+The baseline is Rust 1.95.0, matching the requirement declared by
+`rusqlite_migration` in the locked SDK dependency graph. The vendored
+`cranelift-control` retains upstream 0.133.0's Rust 1.94.0 requirement.
+
+The development/release compiler in `rust-toolchain.toml` may be newer. Updating
+that pin does not raise the MSRV. Keep the minimum until a language feature,
+dependency update, correctness fix, or maintenance need justifies an increase.
+Explain increases in the PR and release notes, and prefer a planned release
+boundary over a routine patch release. Update the workspace declaration and the
+excluded packages together. Older compiler support branches are not promised.
+
+The MSRV workflow runs on every PR, including source-only changes. Configure its
+three locked build checks as required in branch protection. Run
+its checks locally with the minimum toolchain installed:
+
+```sh
+rustup toolchain install "$(bash scripts/msrv.sh)" --profile minimal
+bash scripts/check-msrv.sh native
+bash scripts/check-msrv.sh browser
+bash scripts/check-msrv.sh contracts
+bash scripts/check-msrv.sh consumer
+```
+
+The scripts explicitly select the minimum compiler, independently of the local
+toolchain pin. Locked checks cover native workspace targets, the SDK's optional
+native `parallel` feature, browser WASM and workers, all deployable contracts,
+bootnode tests, and compilation of the excluded integration suites. Browser and
+contract checks install their Rust targets. The consumer check resolves fresh
+dependencies for the packaged SDK outside the workspace; it intentionally does
+not reuse the repository lockfile. Dependency updates must preserve both forms
+of compatibility. Fresh consumer resolution runs separately on dependency-related
+PRs, relevant pushes to main, or manual dispatch. It is not a required PR check:
+upstream releases must not block unrelated PRs. Run it manually before releasing
+or when investigating dependency changes.
+
+The contract check requires Stellar CLI 28.1.0 (the version installed by CI),
+which performs the Soroban SDK's required contract post-processing.
+
+The MSRV gate builds native test targets but leaves circuit-dependent test
+execution, browser execution, and local-network integration execution to their
+existing workflows. It covers native Linux and the two WASM targets; release CI
+provides the additional platform coverage. Formatting, Miri, coverage, and
+external tool installation can use separate toolchains.
+
+Circuit-specific witness graph regeneration (`circuit-compiler/witness-graph`)
+requires Circom and generated C++ inputs and is outside this MSRV guarantee;
+use the pinned development toolchain for that operation.
 
 ## Building and testing crates
 
