@@ -1101,12 +1101,19 @@ mod tests {
         )
     }
 
+    /// Returns the pool tree's leaves for [`prove_amounts`], with its input
+    /// slots 0 and 7 left empty.
+    fn amounts_leaves() -> Vec<Scalar> {
+        prepopulated_prefix(0xDEAD_BEEFu64, &[0, 7], LEAF_PREFIX)
+    }
+
     /// Proves `policy_tx_2_2` for notes of the given amounts, at fixed keys
-    /// and leaves.
+    /// and leaves, with `root` in place of the tree's root when given.
     fn prove_amounts(
         [in0, in1]: [Scalar; 2],
         [out0, out1]: [Scalar; 2],
         public_amount: Scalar,
+        root: Option<Scalar>,
     ) -> Result<()> {
         let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
         let case = TxCase::new(
@@ -1141,12 +1148,12 @@ mod tests {
             &wasm,
             &r1cs,
             &case,
-            prepopulated_prefix(0xDEAD_BEEFu64, &[0, 7], LEAF_PREFIX),
+            amounts_leaves(),
             public_amount,
             &[],
             &[],
             PolicyAspWitness::None,
-            None::<fn(&mut Inputs)>,
+            root.map(|root| move |inputs: &mut Inputs| inputs.set("root", root)),
         )
     }
 
@@ -1158,9 +1165,9 @@ mod tests {
         let ins = [Scalar::zero(), Scalar::from(13u64)];
         let outs = [Scalar::from(13u64), Scalar::zero()];
 
-        prove_amounts(ins, outs, Scalar::zero())?;
+        prove_amounts(ins, outs, Scalar::zero(), None)?;
         expect_proof_rejected(
-            prove_amounts(ins, outs, Scalar::from(1u64)),
+            prove_amounts(ins, outs, Scalar::from(1u64), None),
             "a public amount off by one must not verify",
         )
     }
@@ -1174,12 +1181,13 @@ mod tests {
         let a = Scalar::from(13u64);
         let ins = [Scalar::zero(), a];
 
-        prove_amounts(ins, [a, Scalar::zero()], Scalar::zero())?;
+        prove_amounts(ins, [a, Scalar::zero()], Scalar::zero(), None)?;
         expect_proof_rejected(
             prove_amounts(
                 ins,
                 [a + Scalar::from(1u64), -Scalar::from(1u64)],
                 Scalar::zero(),
+                None,
             ),
             "an output wrapping the field must not verify",
         )
@@ -1191,10 +1199,41 @@ mod tests {
     #[ignore]
     fn test_output_at_two_to_the_248_should_fail() -> Result<()> {
         let bound = Scalar::from(2u64).pow([248]);
-        let deposit = |amount| prove_amounts([Scalar::zero(); 2], [amount, Scalar::zero()], amount);
+        let deposit =
+            |amount| prove_amounts([Scalar::zero(); 2], [amount, Scalar::zero()], amount, None);
 
         deposit(bound - Scalar::from(1u64))?;
         expect_proof_rejected(deposit(bound), "an output of 2^248 must not verify")
+    }
+
+    /// Proves a transfer of 13, then the same notes against the root of the
+    /// tree without them. Only the root check on nonzero inputs refuses it.
+    #[test]
+    #[ignore]
+    fn test_nonzero_input_against_an_earlier_root_should_fail() -> Result<()> {
+        let ins = [Scalar::zero(), Scalar::from(13u64)];
+        let outs = [Scalar::from(13u64), Scalar::zero()];
+        let earlier_root = PrefixTree::new(&amounts_leaves(), LEVELS).root();
+
+        prove_amounts(ins, outs, Scalar::zero(), None)?;
+        expect_proof_rejected(
+            prove_amounts(ins, outs, Scalar::zero(), Some(earlier_root)),
+            "a nonzero input against an earlier root must not verify",
+        )
+    }
+
+    /// Deposits 12 against a root no tree has. The root check skips
+    /// zero-amount inputs, and deposits rely on it.
+    #[test]
+    #[ignore]
+    fn test_zero_amount_inputs_ignore_the_root() -> Result<()> {
+        let deposit = Scalar::from(12u64);
+        prove_amounts(
+            [Scalar::zero(); 2],
+            [deposit, Scalar::zero()],
+            deposit,
+            Some(Scalar::from(123u64)),
+        )
     }
 
     #[test]
