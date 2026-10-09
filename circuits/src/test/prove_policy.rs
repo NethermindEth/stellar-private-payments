@@ -6,10 +6,10 @@ mod tests {
         },
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
-        keypair::derive_public_key,
+        keypair::{derive_public_key, sign},
         merkle_tree::PrefixTree,
         sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
-        transaction::{commitment, prepopulated_prefix},
+        transaction::{commitment, nullifier, prepopulated_prefix},
         transaction_case::{
             InputNote, OutputNote, TransactionWitness, TxCase, build_base_inputs,
             prepare_transaction_witness,
@@ -1101,22 +1101,15 @@ mod tests {
         )
     }
 
-    /// Returns the pool tree's leaves for [`prove_amounts`], with its input
+    /// Returns the pool tree's leaves for [`amounts_case`], with its input
     /// slots 0 and 7 left empty.
     fn amounts_leaves() -> Vec<Scalar> {
         prepopulated_prefix(0xDEAD_BEEFu64, &[0, 7], LEAF_PREFIX)
     }
 
-    /// Proves `policy_tx_2_2` for notes of the given amounts, at fixed keys
-    /// and leaves, with `root` in place of the tree's root when given.
-    fn prove_amounts(
-        [in0, in1]: [Scalar; 2],
-        [out0, out1]: [Scalar; 2],
-        public_amount: Scalar,
-        root: Option<Scalar>,
-    ) -> Result<()> {
-        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
-        let case = TxCase::new(
+    /// Returns notes of the given amounts at fixed keys and leaves.
+    fn amounts_case([in0, in1]: [Scalar; 2], [out0, out1]: [Scalar; 2]) -> TxCase {
+        TxCase::new(
             vec![
                 InputNote {
                     leaf_index: 0,
@@ -1143,11 +1136,22 @@ mod tests {
                     amount: out1,
                 },
             ],
-        );
+        )
+    }
+
+    /// Proves `policy_tx_2_2` for [`amounts_case`], with `root` in place of
+    /// the tree's root when given.
+    fn prove_amounts(
+        ins: [Scalar; 2],
+        outs: [Scalar; 2],
+        public_amount: Scalar,
+        root: Option<Scalar>,
+    ) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
         run_case(
             &wasm,
             &r1cs,
-            &case,
+            &amounts_case(ins, outs),
             amounts_leaves(),
             public_amount,
             &[],
@@ -1233,6 +1237,33 @@ mod tests {
             [deposit, Scalar::zero()],
             deposit,
             Some(Scalar::from(123u64)),
+        )
+    }
+
+    /// Proves a transfer of 13, then the same spend at its leaf index plus
+    /// `2^20`, which walks the same path and gives the note a fresh nullifier.
+    /// Only the index's range check refuses it.
+    #[test]
+    #[ignore]
+    fn test_leaf_index_aliased_past_the_depth_should_fail() -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let mut witness = prepare_transaction_witness(&case, amounts_leaves(), LEVELS)?;
+        let prove = |witness: &TransactionWitness| {
+            let inputs = build_base_inputs(&case, witness, Scalar::zero());
+            prove_and_expect_verify(&wasm, &r1cs, &inputs)
+        };
+
+        prove(&witness)?;
+        let note = &case.inputs[0];
+        let cm = commitment(note.amount, witness.public_keys[0], note.blinding);
+        let index = witness.path_indices[0] + Scalar::from(1u64 << LEVELS);
+        witness.path_indices[0] = index;
+        witness.nullifiers[0] = nullifier(cm, index, sign(note.priv_key, cm, index));
+        expect_proof_rejected(
+            prove(&witness),
+            "a leaf index past the tree depth must not verify",
         )
     }
 
