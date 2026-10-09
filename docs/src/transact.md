@@ -11,7 +11,7 @@ values, and must balance:
 input notes + deposit = private outputs + withdrawal
 ```
 
-Amounts are in whole tokens with up to 7 decimal places, so `4.5` is 4.5 tokens.
+Amounts are in whole tokens, with up to as many decimal places as the pool's token defines, so `4.5` is 4.5 tokens.
 
 List your unspent notes to get their commitments:
 
