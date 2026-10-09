@@ -9,12 +9,15 @@
  * Contract error code mappings.
  * These map to the Error enums defined in the Soroban contracts.
  */
-const CONTRACT_ERRORS = {
+export const CONTRACT_ERRORS = {
     // Pool contract errors
     pool: {
         7: 'Proof verification failed. The ZK proof is invalid.',
         8: 'Invalid merkle root. The pool state may have changed.',
         9: 'Note already spent. This is a double-spend attempt.',
+        18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
+        20: 'No admin transfer is pending.',
+        21: 'The tree does not run the code this pool accepts.',
     },
     // Groth16 verifier errors 
     verifier: {
@@ -23,11 +26,13 @@ const CONTRACT_ERRORS = {
     // ASP Non-Membership errors 
     aspNonMembership: {
         2: 'Key not found in ASP tree.',
+        3: 'A key is already on the blocklist.',
         4: 'ASP non-membership proof verification failed.',
+        7: 'No admin transfer is pending.',
     },
     // ASP Membership errors
     aspMembership: {
-        3: 'Not authorized to perform this action.',
+        6: 'No admin transfer is pending.',
     },
 };
 
@@ -65,6 +70,15 @@ const ERROR_PATTERNS = [
         // Invalid merkle root (#8)
         test: (msg) => msg.toLowerCase().includes('#8') && msg.toLowerCase().includes('contract'),
         message: 'Pool state has changed. Please wait for sync to complete and try again.',
+    },
+    {
+        // Deposits paused: the pool's #18, or the SDK's refusal before proving
+        test: (msg) => {
+            const lower = msg.toLowerCase();
+            return (lower.includes('#18') && lower.includes('contract')) ||
+                   (lower.includes('deposits into pool') && lower.includes('are paused'));
+        },
+        message: CONTRACT_ERRORS.pool[18],
     },
     {
         // The pool reads an allowlist the manifest does not name. Must precede

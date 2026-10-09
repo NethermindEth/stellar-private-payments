@@ -1,11 +1,13 @@
 import { deploymentDefaults } from './network-config.js';
-import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
+import { contract, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig } from './wasm-facade.js';
+import { connectWallet, getWalletNetwork, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
+import { buildAdminCall, describeAdminCall, explainFailure, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -37,15 +39,37 @@ const addToAllowlistBtn = document.getElementById('addToAllowlistBtn');
 const addToBlocklistBtn = document.getElementById('addToBlocklistBtn');
 const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn');
 
+// Admin transaction card
+const adminTxXdrInput = document.getElementById('adminTxXdr');
+const adminTxDescriptionEl = document.getElementById('adminTxDescription');
+const adminTxSignaturesEl = document.getElementById('adminTxSignatures');
+const signAdminTxBtn = document.getElementById('signAdminTxBtn');
+const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
+const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
+
+// The buttons that need a connected wallet.
+const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn];
+
+// Pools tab
+const poolRowsEl = document.getElementById('poolRows');
+const poolsNoticeEl = document.getElementById('poolsNotice');
+const poolRowTemplate = document.getElementById('tpl-pool-row');
+
+// Admins tab
+const adminRowsEl = document.getElementById('adminRows');
+const adminsNoticeEl = document.getElementById('adminsNotice');
+const adminRowTemplate = document.getElementById('tpl-admin-row');
+
 const state = {
   address: null,
   networkPassphrase: null,
   rpcUrl: null,
   contracts: null,
-  membershipClient: null,
-  nonMembershipClient: null,
-  membershipClientId: null,
-  nonMembershipClientId: null,
+  adminTxKind: null,
+  // The manifest's pools, which a pasted call's kind is read against.
+  pools: [],
+  // The manifest's added allowlists, which a pasted call's kind is read against.
+  addedAllowlists: [],
   cryptoReady: false,
 };
 
@@ -124,13 +148,6 @@ function parseBigIntInput(value, label) {
   }
 }
 
-const reverseHexWithPrefix = (hex) => {
-  const hasPrefix = hex.startsWith("0x");
-  const pureHex = hasPrefix ? hex.slice(2) : hex;
-  const reversed = pureHex.match(/.{1,2}/g).reverse().join("");
-  return hasPrefix ? "0x" + reversed : reversed;
-};
-
 // -----------------------------
 // Wallet & signer helpers
 // -----------------------------
@@ -138,55 +155,6 @@ function ensureWalletConnected() {
   if (!state.address) {
     throw new Error('Connect wallet first');
   }
-}
-
-function buildSigner() {
-  return {
-    signTransaction: async (transactionXdr, opts = {}) => {
-      return signWalletTransaction(transactionXdr, {
-        networkPassphrase: state.networkPassphrase,
-        address: state.address,
-        ...opts,
-      });
-    },
-    signAuthEntry: async (entryXdr, opts = {}) => {
-      return signWalletAuthEntry(entryXdr, {
-        networkPassphrase: state.networkPassphrase,
-        address: state.address,
-        ...opts,
-      });
-    },
-  };
-}
-
-async function getMembershipClient(contractId) {
-  if (state.membershipClient && state.membershipClientId === contractId) return state.membershipClient;
-  const signer = buildSigner();
-  state.membershipClient = await contract.Client.from({
-    rpcUrl: state.rpcUrl,
-    networkPassphrase: state.networkPassphrase,
-    publicKey: state.address,
-    signTransaction: signer.signTransaction,
-    signAuthEntry: signer.signAuthEntry,
-    contractId,
-  });
-  state.membershipClientId = contractId;
-  return state.membershipClient;
-}
-
-async function getNonMembershipClient(contractId) {
-  if (state.nonMembershipClient && state.nonMembershipClientId === contractId) return state.nonMembershipClient;
-  const signer = buildSigner();
-  state.nonMembershipClient = await contract.Client.from({
-    rpcUrl: state.rpcUrl,
-    networkPassphrase: state.networkPassphrase,
-    publicKey: state.address,
-    signTransaction: signer.signTransaction,
-    signAuthEntry: signer.signAuthEntry,
-    contractId,
-  });
-  state.nonMembershipClientId = contractId;
-  return state.nonMembershipClient;
 }
 
 async function ensureCryptoReady() {
@@ -252,17 +220,17 @@ async function connect() {
     connectBtn.classList.add('bg-white/[0.05]', 'text-slate-100');
 
     // Enable Action Buttons & remove tooltips
-    const actionBtns = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn];
-    actionBtns.forEach(btn => {
+    ACTION_BUTTONS.forEach(btn => {
       btn.disabled = false;
       btn.removeAttribute('title');
     });
 
-    state.membershipClient = null;
-    state.nonMembershipClient = null;
-
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
+    await refreshPools();
+    await refreshAdmins();
+    // The card reads a pasted call's kind against the contracts the tables load.
+    renderAdminTx();
 
   } catch (err) {
     if (err.code === 'USER_REJECTED') {
@@ -278,8 +246,6 @@ function disconnect() {
   state.address = null;
   state.networkPassphrase = null;
   state.rpcUrl = null;
-  state.membershipClient = null;
-  state.nonMembershipClient = null;
 
   walletChip.textContent = 'Connect Freighter';
   connectBtn.removeAttribute('title');
@@ -291,12 +257,13 @@ function disconnect() {
   connectBtn.classList.remove('bg-white/[0.05]', 'text-slate-100');
 
   // Disable Action Buttons & restore tooltips
-  const actionBtns = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn];
-  actionBtns.forEach(btn => {
+  ACTION_BUTTONS.forEach(btn => {
     btn.disabled = true;
     btn.title = "Please connect your wallet first";
   });
 
+  refreshPools();
+  refreshAdmins();
   setStatus('Wallet disconnected', 'info');
   showToast('Wallet disconnected', 'info');
 }
@@ -333,11 +300,149 @@ async function refreshState() {
   } catch (err) {
     setStatus('State load error', 'error');
   }
+  await refreshPools();
+  await refreshAdmins();
 }
 
 // -----------------------------
-// Transaction Submissions
+// Admin transaction card
 // -----------------------------
+// Returns the kind of contract a pasted call targets, which decides how its
+// error codes read. An unlisted contract is `unknown`, and the card flags it so
+// signers don't take it for a pool.
+function kindOf(contractId) {
+  if (contractId === membershipContractInput.value.trim()) return 'asp-membership';
+  if (contractId === nonMembershipContractInput.value.trim()) return 'asp-non-membership';
+  if (state.pools.includes(contractId)) return 'pool';
+  if (state.addedAllowlists.includes(contractId)) return 'asp-membership';
+  return 'unknown';
+}
+
+function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
+  // Show a blocklist call's numbers as the note public keys signers were asked
+  // to list or release.
+  const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
+  return [
+    `Source: ${source}`,
+    `Sequence: ${sequence}`,
+    `Maximum fee: ${fee} stroops`,
+    `Valid until: ${new Date(validUntil * 1000).toISOString()}`,
+    `Contract: ${contract}${kind === 'unknown' ? ' (not a contract this page lists)' : ''}`,
+    `Function: ${method}`,
+    `Arguments: ${JSON.stringify(args, (_, value) => (typeof value === 'bigint' ? number(value) : value))}`,
+  ].join('\n');
+}
+
+// Describes the envelope in the card. `kind` comes from the page when it built
+// the call, and from the contract otherwise.
+function renderAdminTx(kind) {
+  const xdr = adminTxXdrInput.value.trim();
+  state.adminTxKind = null;
+  adminTxSignaturesEl.textContent = '0';
+  adminTxDescriptionEl.textContent = '';
+  if (!xdr) return;
+  if (!state.networkPassphrase) {
+    adminTxDescriptionEl.textContent = 'Connect your wallet to read the transaction.';
+    return;
+  }
+  try {
+    const call = describeAdminCall(xdr, state.networkPassphrase);
+    const count = signatureCount(xdr, state.networkPassphrase);
+    state.adminTxKind = kind ?? kindOf(call.contract);
+    adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
+    adminTxSignaturesEl.textContent = count;
+    // Fetch the threshold after drawing; Sign reads it again, so a failed read
+    // just leaves the bare count.
+    rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
+      if (adminTxXdrInput.value.trim() === xdr) adminTxSignaturesEl.textContent = `${count} of ${signingRule(account).threshold}`;
+    }, () => {});
+  } catch (err) {
+    adminTxDescriptionEl.textContent = `Not an admin call: ${err.message}`;
+  }
+}
+
+function loadAdminTx(xdr, kind) {
+  adminTxXdrInput.value = xdr;
+  renderAdminTx(kind);
+}
+
+// Builds an admin call to a contract of the given kind into the card.
+async function prepareAdminCall(kind, call) {
+  const { xdr } = await buildAdminCall({
+    rpcUrl: state.rpcUrl,
+    networkPassphrase: state.networkPassphrase,
+    ...call,
+  });
+  loadAdminTx(xdr, kind);
+  setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
+}
+
+async function signAdminTx() {
+  try {
+    ensureWalletConnected();
+    // The card sets a kind only once it has described the envelope.
+    if (!state.adminTxKind) throw new Error('Only an envelope the card can describe can be signed');
+    const envelope = adminTxXdrInput.value.trim();
+    const { source } = describeAdminCall(envelope, state.networkPassphrase);
+    const rule = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(source));
+    const refusal = signRefusal(rule, envelope, state.networkPassphrase, state.address);
+    if (refusal) throw new Error(refusal);
+    const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address: state.address });
+    loadAdminTx(signedTxXdr, state.adminTxKind);
+    showToast('Signed. Pass the XDR to the next signer, or submit it.', 'success');
+  } catch (err) {
+    showToast(`Signing failed: ${explainFailure(err, state.adminTxKind)}`, 'error');
+  }
+}
+
+async function submitAdminTx() {
+  try {
+    ensureWalletConnected();
+    setStatus('Submitting the admin transaction...', 'info');
+    await submitAdminCall({
+      rpcUrl: state.rpcUrl,
+      networkPassphrase: state.networkPassphrase,
+      xdr: adminTxXdrInput.value.trim(),
+    });
+    setStatus('Admin transaction succeeded', 'ok');
+    showToast('Admin transaction succeeded', 'success');
+    loadAdminTx('');
+    await refreshState();
+  } catch (err) {
+    setStatus('Admin transaction failed', 'error');
+    showToast(`Admin transaction failed: ${explainFailure(err, state.adminTxKind)}`, 'error');
+  }
+}
+
+async function copyAdminTx() {
+  try {
+    await navigator.clipboard.writeText(adminTxXdrInput.value.trim());
+    showToast('Transaction XDR copied', 'success');
+  } catch (err) {
+    showToast(`Copy failed: ${err.message}`, 'error');
+  }
+}
+
+// -----------------------------
+// Admin calls
+// -----------------------------
+// Reads a contract's admin from its `Admin` entry, which also works for
+// contracts without `get_admin`. Every call the page builds uses it as source.
+async function storedAdmin(contractId) {
+  const { val } = await rpcServer(state.rpcUrl).getContractData(contractId, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('Admin')]));
+  return scValToNative(val.contractData.val);
+}
+
+// Returns a client that reads a contract by simulation, with no account to sign.
+function readClient(contractId) {
+  return contract.Client.from({
+    rpcUrl: state.rpcUrl,
+    networkPassphrase: state.networkPassphrase,
+    contractId,
+    server: rpcServer(state.rpcUrl),
+  });
+}
+
 async function insertMembershipLeaf() {
   const originalText = addToAllowlistBtn.textContent;
   try {
@@ -358,24 +463,24 @@ async function insertMembershipLeaf() {
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.textContent = 'Processing...';
 
-    setStatus('Computing and submitting allowlist insert transaction...', 'info');
+    setStatus('Building the allowlist insert...', 'info');
     await ensureCryptoReady();
 
     const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
 
-    const mClient = await getMembershipClient(contractId);
-    const tx = await mClient.insert_leaf({ leaf: leafValue });
-    await tx.signAndSend();
+    await prepareAdminCall('asp-membership', {
+      source: await storedAdmin(contractId),
+      contractId,
+      method: 'insert_leaf',
+      args: { leaf: leafValue },
+    });
 
-    setStatus('The allowlist insert transaction sent', 'ok');
-    showToast('Added to the allowlist successfully', 'success');
     allowlistPublicKeyInput.value = '';
     allowlistAspSecretInput.value = '';
-    await refreshState();
   } catch (err) {
     setStatus('Allowlist insert failed', 'error');
-    showToast(`Allowlist insert failed: ${err.message}`, 'error');
+    showToast(`Allowlist insert failed: ${explainFailure(err, 'asp-membership')}`, 'error');
   } finally {
     if (state.address) addToAllowlistBtn.disabled = false;
     addToAllowlistBtn.textContent = originalText;
@@ -389,26 +494,20 @@ async function insertNonMembershipLeaf() {
     const contractId = nonMembershipContractInput.value.trim();
     if (!contractId) throw new Error('Non-membership contract ID is required');
 
-    const keyValue = parseBigIntInput(reverseHexWithPrefix(blocklistPublicKeyInput.value), 'Key');
-    if (keyValue === null) throw new Error('User note public key is required');
-
-    const valueValue = keyValue;
+    const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
+    if (keys.length === 0) throw new Error('User note public key is required');
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.textContent = 'Processing...';
 
-    setStatus('Submitting blocklist insert transaction...', 'info');
-    const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.insert_leaf({ key: keyValue, value: valueValue });
-    await tx.signAndSend();
+    setStatus('Building the blocklist insert...', 'info');
+    const call = blocklistInsertCall(keys, Boolean((await readClient(contractId)).insert_leaves));
+    await prepareAdminCall('asp-non-membership', { source: await storedAdmin(contractId), contractId, ...call });
 
-    setStatus('The blocklist insert transaction sent', 'ok');
-    showToast('Added to the blocklist successfully', 'success');
     blocklistPublicKeyInput.value = '';
-    await refreshState();
   } catch (err) {
     setStatus('Blocklist insert failed', 'error');
-    showToast(`Blocklist insert failed: ${err.message}`, 'error');
+    showToast(`Blocklist insert failed: ${explainFailure(err, 'asp-non-membership')}`, 'error');
   } finally {
     if (state.address) addToBlocklistBtn.disabled = false;
     addToBlocklistBtn.textContent = originalText;
@@ -422,28 +521,152 @@ async function removeNonMembershipLeaf() {
     const contractId = nonMembershipContractInput.value.trim();
     if (!contractId) throw new Error('Non-membership contract ID is required');
 
-    const keyValue = parseBigIntInput(reverseHexWithPrefix(blocklistPublicKeyInput.value), 'Key');
-    if (keyValue === null) throw new Error('User note public key is required');
+    const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
+    if (keyValue === undefined) throw new Error('User note public key is required');
+    if (others.length > 0) throw new Error('Remove takes one note public key at a time');
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
 
-    setStatus('Submitting blocklist removal transaction...', 'info');
-    const nmClient = await getNonMembershipClient(contractId);
-    const tx = await nmClient.delete_leaf({ key: keyValue });
-    await tx.signAndSend();
+    setStatus('Building the blocklist removal...', 'info');
+    await prepareAdminCall('asp-non-membership', {
+      source: await storedAdmin(contractId),
+      contractId,
+      method: 'delete_leaf',
+      args: { key: keyValue },
+    });
 
-    setStatus('The blocklist removal transaction sent', 'ok');
-    showToast('Removed from the blocklist successfully', 'success');
     blocklistPublicKeyInput.value = '';
-    await refreshState();
   } catch (err) {
     setStatus('User key removal from the blocklist failed', 'error');
-    showToast(`User key removal from the blocklist failed: ${err.message}`, 'error');
+    showToast(`User key removal from the blocklist failed: ${explainFailure(err, 'asp-non-membership')}`, 'error');
   } finally {
     if (state.address) removeFromBlocklistBtn.disabled = false;
     removeFromBlocklistBtn.textContent = originalText;
   }
+}
+
+// -----------------------------
+// Pools
+// -----------------------------
+// Fills a table with the rows `rowsFor` builds from the manifest. Rows read
+// contracts by simulation, so they need the connected wallet's network.
+async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
+  rowsEl.replaceChildren();
+  if (!state.rpcUrl) {
+    noticeEl.textContent = `Connect your wallet to read the ${noun}.`;
+    return;
+  }
+  try {
+    rowsEl.replaceChildren(...(await Promise.all(rowsFor(await loadDeploymentConfig()))));
+    noticeEl.textContent = '';
+  } catch (err) {
+    noticeEl.textContent = `The ${noun} could not be read: ${err.message}`;
+  }
+}
+
+// Lists each pool the manifest names with its deposit flag, a disabled pool
+// too, since it still takes deposits on chain.
+function refreshPools() {
+  return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
+    state.pools = pools.map(({ poolContractId }) => poolContractId);
+    return state.pools.map((contractId) => poolRow(contractId));
+  });
+}
+
+// A pool without `deposits_paused` cannot be paused, and an unreadable pool
+// shows its error; neither row gets buttons.
+async function poolRow(contractId) {
+  const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
+  row.querySelector('.pool-id').textContent = contractId;
+  const depositsEl = row.querySelector('.pool-deposits');
+  try {
+    const pool = await readClient(contractId);
+    if (!pool.deposits_paused) {
+      depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
+      row.querySelector('.pool-actions').remove();
+      return row;
+    }
+    const [{ result }, admin] = await Promise.all([pool.deposits_paused(), storedAdmin(contractId)]);
+    const paused = result.unwrap();
+    depositsEl.textContent = paused ? 'paused' : 'open';
+    // A pause on a paused pool changes nothing, yet the signers would still sign and pay for it.
+    const pause = row.querySelector('.pause-deposits-btn');
+    const unpause = row.querySelector('.unpause-deposits-btn');
+    pause.disabled = paused;
+    unpause.disabled = !paused;
+    pause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'pause_deposits' }));
+    unpause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'unpause_deposits' }));
+  } catch (err) {
+    depositsEl.textContent = `could not be read: ${err.message}`;
+    row.querySelector('.pool-actions').remove();
+  }
+  return row;
+}
+
+// Builds a table row's call into the card. `kind` decides how error codes
+// read.
+async function buildRowCall(kind, call) {
+  try {
+    ensureWalletConnected();
+    setStatus(`Building ${call.method}...`, 'info');
+    await prepareAdminCall(kind, call);
+  } catch (err) {
+    setStatus(`Building ${call.method} failed`, 'error');
+    showToast(`Building ${call.method} failed: ${explainFailure(err, kind)}`, 'error');
+  }
+}
+
+// -----------------------------
+// Admins
+// -----------------------------
+// Lists each contract the manifest names, a disabled pool too, with its admin
+// and its pending admin.
+function refreshAdmins() {
+  return fillTable(adminRowsEl, adminsNoticeEl, 'admins', ({ pools, asp_membership, added_asp_memberships: added = [], asp_non_membership }) => {
+    state.addedAllowlists = added.map(({ contractId }) => contractId);
+    return [
+      ...pools.map(({ poolContractId }) => ({ label: 'Pool', kind: 'pool', contractId: poolContractId })),
+      { label: 'Allowlist', kind: 'asp-membership', contractId: asp_membership },
+      ...added.map(({ contractId }) => ({ label: 'Added allowlist', kind: 'asp-membership', contractId })),
+      { label: 'Blocklist', kind: 'asp-non-membership', contractId: asp_non_membership },
+    ].map(adminRow);
+  });
+}
+
+// A contract without `get_pending_admin` hands over control at once on
+// `update_admin`, and an unreadable contract shows its error; neither row gets
+// buttons.
+async function adminRow({ label, kind, contractId }) {
+  const row = adminRowTemplate.content.cloneNode(true).firstElementChild;
+  row.querySelector('.admin-label').textContent = label;
+  row.querySelector('.admin-contract').textContent = contractId;
+  const adminEl = row.querySelector('.admin-current');
+  const pendingEl = row.querySelector('.admin-pending');
+  try {
+    const [admin, target] = await Promise.all([storedAdmin(contractId), readClient(contractId)]);
+    adminEl.textContent = admin;
+    if (!target.get_pending_admin) {
+      pendingEl.textContent = 'not available';
+      row.querySelector('.admin-actions').remove();
+      return row;
+    }
+    const { result: pending } = await target.get_pending_admin();
+    pendingEl.textContent = pending ?? 'none';
+    const newAdminInput = row.querySelector('.new-admin-input');
+    row.querySelector('.propose-admin-btn').addEventListener('click', () => buildRowCall(kind, {
+      source: admin,
+      contractId,
+      method: 'update_admin',
+      args: { new_admin: newAdminInput.value.trim() },
+    }));
+    row.querySelector('.cancel-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
+    row.querySelector('.accept-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: pending, contractId, method: 'accept_admin' }));
+  } catch (err) {
+    adminEl.textContent = `could not be read: ${err.message}`;
+    row.querySelector('.admin-actions').remove();
+  }
+  return row;
 }
 
 // -----------------------------
@@ -481,6 +704,11 @@ refreshBtn.addEventListener('click', refreshState);
 addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
 addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);
 removeFromBlocklistBtn.addEventListener('click', removeNonMembershipLeaf);
+
+adminTxXdrInput.addEventListener('input', () => renderAdminTx());
+signAdminTxBtn.addEventListener('click', signAdminTx);
+submitAdminTxBtn.addEventListener('click', submitAdminTx);
+copyAdminTxBtn.addEventListener('click', copyAdminTx);
 
 membershipContractInput?.addEventListener('input', () => {
   updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
