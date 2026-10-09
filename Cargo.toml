@@ -35,7 +35,7 @@ pool-core = { path = "contracts/pool-core" }
 pool-gvk = { path = "contracts/pool-gvk" }
 public-key-registry = { path = "contracts/public-key-registry" }
 soroban-utils = { path = "contracts/soroban-utils" }
-stellar-private-payments = { path = "sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "sdk/native", version = "0.2.0" }
 
 # external
 anyhow = { version = "1", default-features = false }
