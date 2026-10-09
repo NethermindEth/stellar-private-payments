@@ -88,12 +88,15 @@ construction, and the deployer keeps no power over them:
 
 ```bash
 deployments/scripts/deploy.sh testnet --deployer DEPLOYER --admin ADMIN_ACCOUNT \
-  --asp-levels 10 --pool-levels 20 --max-deposit 1000000000 \
+  --kdf-domain KDF_DOMAIN --asp-levels 10 --pool-levels 20 --max-deposit 1000000000 \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
-Replace `DEPLOYER` with the deployer's `stellar keys` identity and `ADMIN_ACCOUNT` with the admin
-account's address.
+Replace the following:
+
+- `DEPLOYER`: the deployer's `stellar keys` identity.
+- `ADMIN_ACCOUNT`: the admin account's address.
+- `KDF_DOMAIN`: the key derivation domain, which users see in the message they sign.
 
 `deploy.sh` admits only native XLM and classic assets whose issuer has `AUTH_IMMUTABLE` set and
 neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so no issuer or token code can freeze or take
@@ -334,9 +337,11 @@ RPC's event retention, about seven days on the public testnet RPC:
 
 4. For an allowlist, add `{ "contractId": "TREE", "deploymentLedger": LEDGER }` to the manifest's
    `added_asp_memberships`, with `LEDGER` the deployment ledger from step 1, and merge it, since
-   clients refuse a pool whose allowlist the manifest does not name. Rebuild the bootnode and
-   restart it once with `--rescan-from LEDGER`, as [Add an allowlist](./bootnode.md#add-an-allowlist)
-   describes, and release a CLI build, which embeds the manifest.
+   clients refuse a pool whose allowlist the manifest does not name. Point the bootnode at the new
+   manifest and restart it once with `--rescan-from LEDGER`, as
+   [Add an allowlist](./bootnode.md#add-an-allowlist) describes. Redeploy the web app, which
+   bundles the manifest when it is built, and give CLI users the new `deployments.json` for
+   `--deployment` or their provisioned copy.
 5. On the Pools tab's Re-point panel, choose the pool and the kind of tree, enter the new tree's
    address, choose the records file, and press Check. A blocklist also takes its deployment
    ledger; an allowlist's comes from the manifest. The panel checks the tree's code, an
