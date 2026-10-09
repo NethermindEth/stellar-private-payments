@@ -17,7 +17,7 @@ mod tests {
     };
     use anyhow::{Context, Result, ensure};
     use ark_bn254::Fr as Scalar;
-    use ark_ff::{BigInteger, PrimeField, Zero};
+    use ark_ff::{BigInteger, Field, PrimeField, Zero};
     use num_bigint::{BigInt, Sign};
     use std::{
         panic::{self, AssertUnwindSafe},
@@ -1099,6 +1099,102 @@ mod tests {
             prove(vec![note.clone(), note]),
             "one note spent twice must not verify",
         )
+    }
+
+    /// Proves `policy_tx_2_2` for notes of the given amounts, at fixed keys
+    /// and leaves.
+    fn prove_amounts(
+        [in0, in1]: [Scalar; 2],
+        [out0, out1]: [Scalar; 2],
+        public_amount: Scalar,
+    ) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
+        let case = TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(101u64),
+                    blinding: Scalar::from(201u64),
+                    amount: in0,
+                },
+                InputNote {
+                    leaf_index: 7,
+                    priv_key: Scalar::from(102u64),
+                    blinding: Scalar::from(211u64),
+                    amount: in1,
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(501u64),
+                    blinding: Scalar::from(601u64),
+                    amount: out0,
+                },
+                OutputNote {
+                    pub_key: Scalar::from(502u64),
+                    blinding: Scalar::from(602u64),
+                    amount: out1,
+                },
+            ],
+        );
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            prepopulated_prefix(0xDEAD_BEEFu64, &[0, 7], LEAF_PREFIX),
+            public_amount,
+            &[],
+            &[],
+            PolicyAspWitness::None,
+            None::<fn(&mut Inputs)>,
+        )
+    }
+
+    /// Proves a transfer of 13, then the same notes with a public amount of
+    /// 1. Only the balance constraint ties the public amount to the notes.
+    #[test]
+    #[ignore]
+    fn test_public_amount_off_by_one_should_fail() -> Result<()> {
+        let ins = [Scalar::zero(), Scalar::from(13u64)];
+        let outs = [Scalar::from(13u64), Scalar::zero()];
+
+        prove_amounts(ins, outs, Scalar::zero())?;
+        expect_proof_rejected(
+            prove_amounts(ins, outs, Scalar::from(1u64)),
+            "a public amount off by one must not verify",
+        )
+    }
+
+    /// Proves a transfer of 13, then outputs of 14 and `p - 1`, which balance
+    /// it in the field. Only the 248-bit range check on outputs refuses
+    /// `p - 1`.
+    #[test]
+    #[ignore]
+    fn test_output_wrapping_the_field_should_fail() -> Result<()> {
+        let a = Scalar::from(13u64);
+        let ins = [Scalar::zero(), a];
+
+        prove_amounts(ins, [a, Scalar::zero()], Scalar::zero())?;
+        expect_proof_rejected(
+            prove_amounts(
+                ins,
+                [a + Scalar::from(1u64), -Scalar::from(1u64)],
+                Scalar::zero(),
+            ),
+            "an output wrapping the field must not verify",
+        )
+    }
+
+    /// Deposits an output of `2^248 - 1`, then one of `2^248`. Only the
+    /// 248-bit range check on outputs refuses the second.
+    #[test]
+    #[ignore]
+    fn test_output_at_two_to_the_248_should_fail() -> Result<()> {
+        let bound = Scalar::from(2u64).pow([248]);
+        let deposit = |amount| prove_amounts([Scalar::zero(); 2], [amount, Scalar::zero()], amount);
+
+        deposit(bound - Scalar::from(1u64))?;
+        expect_proof_rejected(deposit(bound), "an output of 2^248 must not verify")
     }
 
     #[test]
