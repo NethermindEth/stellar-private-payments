@@ -81,3 +81,40 @@ pub fn try_decrypt_and_derive_user_note(
         expected_nullifier,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::KeyDerivationSignature;
+
+    /// A zero-amount output that decrypts and matches its commitment still
+    /// yields no note. The same output carrying 5 yields one.
+    #[test]
+    fn zero_amount_note_is_not_a_spendable_note() -> Result<()> {
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+        let blinding = Field::from(NoteAmount::from(7u128));
+        let derive = |amount: NoteAmount| {
+            let commitment: [u8; 32] = crypto::compute_commitment(
+                &Field::from(amount).to_le_bytes(),
+                note_keypair.public.as_ref(),
+                &blinding.to_le_bytes(),
+            )?
+            .try_into()
+            .map_err(|_| anyhow!("commitment: expected 32 bytes"))?;
+            let encrypted_output =
+                encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+            try_decrypt_and_derive_user_note(
+                &note_keypair,
+                &enc_keypair.private,
+                &Field::try_from_le_bytes(commitment)?,
+                0,
+                &encrypted_output,
+            )
+        };
+
+        assert!(derive(NoteAmount::ZERO)?.is_none());
+        assert!(derive(NoteAmount::from(5u128))?.is_some());
+        Ok(())
+    }
+}

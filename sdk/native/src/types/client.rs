@@ -121,17 +121,7 @@ mod split_tests {
         PrivatePoolConfig {
             // Contents are irrelevant here: validate() checks both addresses
             // before it looks the pool up, so these tests never reach it.
-            contract_config: ContractConfig {
-                network: String::new(),
-                kdf_domain: String::new(),
-                deployer: String::new(),
-                admin: String::new(),
-                asp_membership: String::new(),
-                asp_non_membership: String::new(),
-                verifiers: Default::default(),
-                public_key_registry: String::new(),
-                pools: Vec::new(),
-            },
+            contract_config: ContractConfig::default(),
             pool_contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
             user_address: NoteOwnerAddress::new(user),
             signer_address: SignerAddress::new(signer),

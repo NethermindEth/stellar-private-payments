@@ -325,6 +325,8 @@ mod tests {
         assert_eq!(find(&dataset, goal(10)), CombinationResult::OneExact(2));
     }
 
+    /// The pair scan stops where its pointers meet. Past that, it would pair
+    /// the 5 with itself.
     #[test]
     fn comb_two_overshoot() {
         let dataset = amounts(&[1, 2, 5, 6, 12]);
@@ -365,5 +367,15 @@ mod tests {
     fn comb_two_exact_before_one_exact() {
         let dataset = amounts(&[4, 6, 10]);
         assert_eq!(find(&dataset, goal(10)), CombinationResult::TwoExact(0, 1));
+    }
+
+    /// The pair scan runs first, so it refuses the overflow although one note
+    /// covers the goal.
+    #[test]
+    fn notes_summing_past_u128_overflow() {
+        assert!(matches!(
+            find_combination(&amounts(&[u128::MAX, 1]), goal(u128::MAX)),
+            Err(PlanError::InputAmountOverflow)
+        ));
     }
 }

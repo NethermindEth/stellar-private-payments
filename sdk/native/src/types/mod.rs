@@ -31,6 +31,7 @@ pub const SMT_DEPTH: u32 = 32;
 
 // deployments/<network>/deployments.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct ContractConfig {
     pub network: String,
     /// Privacy key derivation domain.
