@@ -6,3 +6,7 @@ src = "src"
 
 [output.html]
 git-repository-url = "https://github.com/NethermindEth/stellar-private-payments"
+
+# The README is a symlinked page whose links are written for GitHub.
+[output.html.redirect]
+"/docs/src/operator/README.html" = "../../../operator/index.html"

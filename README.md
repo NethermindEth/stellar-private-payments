@@ -19,6 +19,8 @@ A privacy-preserving payment system for the Stellar network using zero-knowledge
 
 The system incorporates **Association Set Provider (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
 
+To run your own pool or ASP, start with the [operator manual](docs/src/operator/README.md).
+
 ## Features
 
 - **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
