@@ -1267,74 +1267,35 @@ mod tests {
         )
     }
 
+    /// Proves a transfer of 13, then the same transfer by a key outside the
+    /// allowlist that presents an allowlisted key's leaf and path. Only the
+    /// check that the leaf hashes the input key refuses it.
     #[test]
     #[ignore]
     fn test_membership_should_fail_wrong_privkey() -> Result<()> {
-        for_each_policy(PolicyCircuitSet::Membership, |asp, wasm, r1cs| {
-            let case = TxCase::new(
-                vec![
-                    InputNote {
-                        leaf_index: 0,
-                        priv_key: Scalar::from(101u64),
-                        blinding: Scalar::from(201u64),
-                        amount: Scalar::from(0u64),
-                    },
-                    InputNote {
-                        leaf_index: 7,
-                        priv_key: Scalar::from(111u64),
-                        blinding: Scalar::from(211u64),
-                        amount: Scalar::from(13u64),
-                    },
-                ],
-                vec![
-                    OutputNote {
-                        pub_key: Scalar::from(501u64),
-                        blinding: Scalar::from(601u64),
-                        amount: Scalar::from(13u64),
-                    },
-                    OutputNote {
-                        pub_key: Scalar::from(502u64),
-                        blinding: Scalar::from(602u64),
-                        amount: Scalar::from(0u64),
-                    },
-                ],
-            );
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2_A")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let trees = default_membership_trees(&case, 0x1111_2222u64);
+        let allowed: Vec<Scalar> = case
+            .inputs
+            .iter()
+            .map(|note| derive_public_key(note.priv_key))
+            .collect();
+        let prove = |case: &TxCase| {
+            let witness = prepare_transaction_witness(case, amounts_leaves(), LEVELS)?;
+            let mut inputs = build_base_inputs(case, &witness, Scalar::zero());
+            apply_membership_proofs(&mut inputs, case, &allowed, &trees)?;
+            prove_and_expect_verify(&wasm, &r1cs, &inputs)
+        };
 
-            let leaves = prepopulated_prefix(
-                0xCAFE_BE5Eu64,
-                &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                LEAF_PREFIX,
-            );
-
-            // Normal membership trees (blinding = 0)
-            let membership_trees = default_membership_trees(&case, 0x1111_2222u64);
-            let keys = default_non_membership_keys(&case);
-
-            // Set inPrivateKey[0] to the wrong value
-            let original_keys: Vec<BigInt> = case
-                .inputs
-                .iter()
-                .map(|n| scalar_to_bigint(n.priv_key))
-                .collect();
-            let mut modified_keys = original_keys.clone();
-            modified_keys[0] = scalar_to_bigint(Scalar::from(999u64)); // Wrong private key for index 0
-
-            let res = run_case(
-                wasm,
-                r1cs,
-                &case,
-                leaves,
-                Scalar::from(0u64),
-                &membership_trees,
-                &keys,
-                asp,
-                Some(|inputs: &mut Inputs| {
-                    inputs.set("inPrivateKey", modified_keys.clone());
-                }),
-            );
-
-            expect_proof_rejected(res, "wrong membership private key must not verify")
-        })
+        prove(&case)?;
+        let mut outsider = case.clone();
+        outsider.inputs[0].priv_key = Scalar::from(999u64);
+        expect_proof_rejected(
+            prove(&outsider),
+            "a key outside the allowlist must not verify",
+        )
     }
 
     #[test]
@@ -1670,6 +1631,95 @@ mod tests {
             let res = run_non_membership_depth_case(asp, wasm, r1cs, shared_bits);
             expect_proof_rejected(res, "path filling every sibling slot must not verify")
         })
+    }
+
+    /// Proves a transfer of 13 on `policy_tx_2_2_B`, then blocks the spender's
+    /// key `pk` as leaf `(pk, pk)` and expects a rejection once `forge(pk)`
+    /// replaces the `oldKey`, `oldValue`, and `isOld0` of its witness.
+    fn expect_blocked_key_rejected(
+        forge: impl FnOnce(Scalar) -> [Scalar; 3],
+        context: &str,
+    ) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("policy_tx_2_2_B")?;
+        let amount = Scalar::from(13u64);
+        let case = amounts_case([amount, Scalar::zero()], [amount, Scalar::zero()]);
+        let keys = default_non_membership_keys(&case);
+        let pk = derive_public_key(case.inputs[0].priv_key);
+
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            amounts_leaves(),
+            Scalar::zero(),
+            &[],
+            &keys,
+            PolicyAspWitness::NonMembership,
+            None::<fn(&mut Inputs)>,
+        )?;
+        let blocked = (scalar_to_bigint(pk), scalar_to_bigint(pk));
+        let forged = forge(pk);
+        let field = |name| {
+            SignalKey::new("nonMembershipProofs")
+                .idx(0)
+                .idx(0)
+                .field(name)
+        };
+        expect_proof_rejected(
+            run_case_with_non_membership_builder(
+                &wasm,
+                &r1cs,
+                &case,
+                amounts_leaves(),
+                Scalar::zero(),
+                &[],
+                &keys,
+                |key, pubs| {
+                    let mut leaves = non_membership_overrides_from_pubs(pubs);
+                    leaves.push(blocked.clone());
+                    prepare_smt_proof_with_overrides(key, &leaves, SMT_LEVELS)
+                },
+                PolicyAspWitness::NonMembership,
+                Some(|inputs: &mut Inputs| {
+                    for (name, value) in ["oldKey", "oldValue", "isOld0"].into_iter().zip(forged) {
+                        inputs.set_key(&field(name), value);
+                    }
+                }),
+            ),
+            context,
+        )
+    }
+
+    /// Spends from a blocked key whose witness names the key's own leaf as the
+    /// leaf it collides with. Only the check that `oldKey` differs from the key
+    /// refuses it.
+    #[test]
+    #[ignore]
+    fn test_blocked_key_with_its_own_leaf_as_old_should_fail() -> Result<()> {
+        expect_blocked_key_rejected(
+            |pk| [pk, pk, Scalar::zero()],
+            "a blocked key naming its own leaf must not verify",
+        )
+    }
+
+    /// Spends from a blocked key with leaf `(1, 0)` as `oldKey` and `oldValue`,
+    /// and an `isOld0` that scales that leaf's hash into the blocked leaf's.
+    /// Only the bit check on `isOld0` refuses it.
+    #[test]
+    #[ignore]
+    fn test_blocked_key_with_a_non_boolean_is_old0_should_fail() -> Result<()> {
+        let one = Scalar::from(1u64);
+        let leaf = |key, value| poseidon2_hash2(key, value, Some(one));
+        expect_blocked_key_rejected(
+            |pk| {
+                [
+                    one,
+                    Scalar::zero(),
+                    one - leaf(pk, pk) / leaf(one, Scalar::zero()),
+                ]
+            },
+            "a non-boolean isOld0 must not verify",
+        )
     }
 
     #[test]
