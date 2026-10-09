@@ -22,7 +22,7 @@
 //! these functions.
 
 use soroban_sdk::{Env, U256, Vec, contracttype};
-use soroban_utils::{poseidon2_compress, zero_hash};
+use soroban_utils::{extend_persistent, poseidon2_compress, zero_hash};
 
 /// Number of roots kept in history for proof verification
 const ROOT_HISTORY_SIZE: u32 = 90;
@@ -230,6 +230,8 @@ impl MerkleTreeWithHistory {
             .roots
             .set(root_index_for(state.next_index)?, current_hash);
         storage.set(&MerkleDataKey::State, &state);
+        // A rewrite keeps the entry's lifetime.
+        extend_persistent(env, &MerkleDataKey::State);
 
         // Return the index of the left leaf
         Ok((

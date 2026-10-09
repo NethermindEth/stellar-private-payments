@@ -14,7 +14,7 @@ use soroban_sdk::{
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus, utils::MockToken};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -2103,4 +2103,22 @@ fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
         ),
         other => panic!("unexpected result reaching a check this test does not isolate: {other:?}"),
     }
+}
+
+/// A rewrite keeps an entry's lifetime, so an insertion also extends the tree.
+#[test]
+fn an_insertion_renews_the_tree_entry_by_a_day() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let tree_ttl = || {
+        env.as_contract(&pool_id, || {
+            env.storage().persistent().get_ttl(&MerkleDataKey::State)
+        })
+    };
+    let before = tree_ttl();
+
+    insert_pair(&env, &pool_id, 1, 2);
+
+    assert_eq!(tree_ttl(), before.saturating_add(MAX_EXTENSION_LEDGERS));
 }

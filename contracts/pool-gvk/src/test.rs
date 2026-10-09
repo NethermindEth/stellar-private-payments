@@ -23,10 +23,10 @@ use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Events},
+    testutils::{Address as _, Deployer as _, Events, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus, utils::MockToken};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -2255,5 +2255,33 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         token.balance(&pool_id),
         0,
         "a refused deposit must not credit the pool"
+    );
+}
+
+#[test]
+fn transact_renews_the_pool_the_tree_and_the_verifier_by_a_day() {
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE6, 0, 1000);
+    let verifier: Address = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::Verifier)
+            .expect("verifier set in constructor")
+    });
+    let ttls = || {
+        [
+            env.deployer().get_contract_instance_ttl(&pool.address),
+            env.as_contract(&pool.address, || {
+                env.storage().persistent().get_ttl(&MerkleDataKey::State)
+            }),
+            env.deployer().get_contract_instance_ttl(&verifier),
+        ]
+    };
+    let before = ttls();
+
+    pool.transact(&proof, &ext, &sender);
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
     );
 }

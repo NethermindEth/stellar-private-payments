@@ -11,9 +11,10 @@
 //! The entry count is the size of the footprint the host recorded: every
 //! contract data and code key the call touched, present or absent, plus the
 //! authorizer's nonce entry and the entry of the authorizing address itself.
-//! Every native test contract shares one placeholder code entry, so a live
-//! deployment adds one code entry per distinct Wasm beyond the first, which is
-//! two for a pool call that reaches the verifier and one association set.
+//! A native test contract's code entry joins the footprint only when the call
+//! extends that contract's lifetime. A live call reads the code of every
+//! contract it invokes, so on a network those entries are in the footprint
+//! either way.
 //!
 //! The `Entries` and `Disk entries` columns count different things and are
 //! billed differently. Live Soroban state is held in memory, so reading it
@@ -48,6 +49,7 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use contract_types::Groth16Proof;
 use pool::{ExtData, PoolContract, PoolContractClient, hash_ext_data, policy};
+use pool_core::merkle_with_history::MerkleDataKey;
 use pool_gvk::{
     PoolGvkContract, PoolGvkContractClient,
     gvk::{self, BabyJubJubPoint, GvkCiphertext},
@@ -57,9 +59,10 @@ use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
     Address, Bytes, Env, I256, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, Deployer as _, Ledger as _, storage::Persistent as _},
     token::StellarAssetClient,
 };
+use soroban_utils::MAX_EXTENSION_LEDGERS;
 
 /// Mainnet's `min_persistent_ttl`, in ledgers (120 days).
 const MIN_PERSISTENT_TTL: u32 = 2_073_600;
@@ -431,14 +434,14 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_978_147;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_978_147;
-    "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_978_147;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_978_147;
+    "pool transact, deposit, blocklist, fresh tree" => 13, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, blocklist, fresh tree" => 10, 4, 4444, 2, 530_841_344;
+    "pool transact, withdrawal, blocklist, fresh tree" => 13, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, root one transaction old" => 10, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 12, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, membership root one insert old" => 12, 4, 4444, 2, 530_841_344;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_978_323;
+    "pool-gvk transact, transfer, view-only" => 10, 4, 4444, 2, 530_841_344;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
@@ -599,8 +602,45 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     assert_same_footprint(&rows, both_row, stale_member_row);
 }
 
+/// Ledgers the renewal test lets pass before its `transact`: 100 days, enough
+/// for mainnet's 120-day entries to fall below the 30-day target.
+const IDLE_LEDGERS: u32 = 1_728_000;
+
+/// After an idle stretch, a `transact` renews the entries it reads by a day
+/// each.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_transact_renews_its_entries_by_a_day() {
+    let fixture = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
+    let env = &fixture.env;
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence().saturating_add(IDLE_LEDGERS));
+    let ttls = || {
+        let instance = |id: &Address| env.deployer().get_contract_instance_ttl(id);
+        let code = |id: &Address| env.deployer().get_contract_code_ttl(id);
+        [
+            instance(&fixture.pool),
+            code(&fixture.pool),
+            env.as_contract(&fixture.pool, || {
+                env.storage().persistent().get_ttl(&MerkleDataKey::State)
+            }),
+            code(&fixture.verifier),
+            instance(&fixture.verifier),
+        ]
+    };
+    let (proof, ext) = fixture.proof(fixture.client().get_root(), 1, 0);
+    let before = ttls();
+
+    fixture.client().transact(&proof, &ext, &fixture.sender);
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
+    );
+}
+
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (11, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (12, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.
