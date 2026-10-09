@@ -434,14 +434,14 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 13, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, blocklist, fresh tree" => 10, 4, 4444, 2, 530_841_344;
-    "pool transact, withdrawal, blocklist, fresh tree" => 13, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, root one transaction old" => 10, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 12, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, membership root one insert old" => 12, 4, 4444, 2, 530_841_344;
+    "pool transact, deposit, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, blocklist, fresh tree" => 11, 4, 4444, 2, 530_841_344;
+    "pool transact, withdrawal, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, root one transaction old" => 11, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, membership root one insert old" => 14, 4, 4444, 2, 530_841_344;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 10, 4, 4444, 2, 530_841_344;
+    "pool-gvk transact, transfer, view-only" => 11, 4, 4444, 2, 530_841_344;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
@@ -626,8 +626,11 @@ fn a_transact_renews_its_entries_by_a_day() {
             }),
             code(&fixture.verifier),
             instance(&fixture.verifier),
+            instance(&fixture.asp_membership),
+            instance(&fixture.asp_non_membership),
         ]
     };
+    // Building the proof reads the blocklist's root, which renews it too.
     let (proof, ext) = fixture.proof(fixture.client().get_root(), 1, 0);
     let before = ttls();
 
@@ -640,7 +643,7 @@ fn a_transact_renews_its_entries_by_a_day() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (12, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (14, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.
