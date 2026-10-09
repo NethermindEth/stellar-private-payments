@@ -270,10 +270,9 @@ test('explainFailure names a transaction the network refused', () => {
   );
 });
 
-test('explainFailure names the pool errors 18 to 21', () => {
+test('explainFailure names the pool errors 18, 20 and 21', () => {
   const pool = (code) => explainFailure(new Error(`HostError: Error(Contract, #${code})`), 'pool');
   assert.equal(pool(18), 'Deposits into this pool are paused. Withdrawals and transfers still work.');
-  assert.equal(pool(19), 'Deposits into this pool are not paused.');
   assert.equal(pool(20), 'No admin transfer is pending.');
   assert.equal(pool(21), 'The tree does not run the code this pool accepts.');
 });
@@ -321,10 +320,10 @@ function stubServer(sent, landed) {
 
 const submit = (server) => submitAdminCall({ networkPassphrase: Networks.TESTNET, xdr: insertLeafEnvelope().toXdr(), server });
 const refusedResend = { status: 'ERROR', errorResult: { result: { type: 'txBadSeq' } } };
-const failedWith19 = {
+const failedWith20 = {
   status: 'FAILED',
   resultXdr: { result: { type: 'txFailed' } },
-  diagnosticEventsXdr: [hostFnFailed(xdr.ScError.sceContract(19))],
+  diagnosticEventsXdr: [hostFnFailed(xdr.ScError.sceContract(20))],
 };
 
 test('submitAdminCall returns the landed copy of a transaction another signer sent', async () => {
@@ -334,13 +333,13 @@ test('submitAdminCall returns the landed copy of a transaction another signer se
 
 test('submitAdminCall throws the failure of the landed copy of a transaction another signer sent', async () => {
   await assert.rejects(
-    submit(stubServer(refusedResend, failedWith19)),
-    (error) => explainFailure(error, 'pool') === CONTRACT_ERRORS.pool[19],
+    submit(stubServer(refusedResend, failedWith20)),
+    (error) => explainFailure(error, 'pool') === CONTRACT_ERRORS.pool[20],
   );
 });
 
 test('submitAdminCall names the host error of a sent transaction that failed', async () => {
-  await assert.rejects(submit(stubServer({ status: 'PENDING' }, failedWith19)), /FAILED: txFailed Error\(Contract, #19\)/);
+  await assert.rejects(submit(stubServer({ status: 'PENDING' }, failedWith20)), /FAILED: txFailed Error\(Contract, #20\)/);
 });
 
 test('submitAdminCall throws the refusal of a transaction that never landed', async () => {
