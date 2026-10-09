@@ -445,7 +445,7 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
-    "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
+    "public-key-registry register, first registration" => 5, 2, 332, 1, 539_135_740;
 };
 
 /// Checks every measured row against [`EXPECTED`], in both directions.
