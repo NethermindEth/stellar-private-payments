@@ -47,7 +47,7 @@ default.
 
 | Option | Meaning |
 |---|---|
-| `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's |
+| `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's. For the multisig admin account a shared deployment needs, see the [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) |
 | `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |

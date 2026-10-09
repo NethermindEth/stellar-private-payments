@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from '../../../app/js/blocklist-keys.js';
+import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from '../../../app/js/blocklist-keys.js';
 
 const ONE = `0x01${'00'.repeat(31)}`;
 const TWO = `0x02${'00'.repeat(31)}`;
@@ -44,4 +44,12 @@ test('blocklistInsertCall refuses several keys on a blocklist without insert_lea
     () => blocklistInsertCall([1n, 2n], false),
     { message: 'This blocklist predates batched inserts. Add one key at a time.' },
   );
+});
+
+test('unreadBlocklistWarning warns of a blocklist no pool reads, and of no other', () => {
+  assert.equal(
+    unreadBlocklistWarning('MANIFEST_BLOCKLIST', ['NEW_BLOCKLIST']),
+    'No pool on the Pools tab reads MANIFEST_BLOCKLIST, so a key written there blocks or releases no one. Build the call anyway?',
+  );
+  assert.equal(unreadBlocklistWarning('NEW_BLOCKLIST', ['NEW_BLOCKLIST', 'NEW_BLOCKLIST']), null);
 });
