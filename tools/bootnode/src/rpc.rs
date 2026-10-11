@@ -13,7 +13,7 @@ use jsonrpsee::{
 };
 use metrics::counter;
 use serde_json::json;
-use std::sync::atomic::Ordering;
+use std::sync::{PoisonError, atomic::Ordering};
 
 /// `-32004`: bootnode warming up (unknown tip or pre-cutoff archive not ready).
 pub const WARMING_UP_CODE: i32 = -32_004;
@@ -56,6 +56,20 @@ impl BootnodeRpc {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
             return Err(invalid_params("unsupported filters"));
+        }
+        let refused = self
+            .state
+            .unarchived
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|tree| tree.contract_id.clone())
+            .find(|id| params.filters.iter().any(|f| f.contract_ids.contains(id)));
+        if let Some(contract_id) = refused {
+            counter!("bootnode_unarchived_allowlist_refusals_total").increment(1);
+            return Err(invalid_params(format!(
+                "the archive lacks the earlier events of allowlist {contract_id}"
+            )));
         }
 
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);

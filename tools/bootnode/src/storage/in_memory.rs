@@ -13,6 +13,7 @@ struct DeploymentState {
     ledger_tip: u32,
     oldest_ledger: u32,
     archive_ready: bool,
+    archived_allowlists: Vec<String>,
     events: BTreeMap<(u32, String), Event>,
 }
 
@@ -83,6 +84,7 @@ impl Storage for InMemory {
             ledger_tip: state.ledger_tip,
             oldest_ledger: state.oldest_ledger,
             archive_ready: state.archive_ready,
+            archived_allowlists: state.archived_allowlists.clone(),
         }))
     }
 
@@ -103,6 +105,11 @@ impl Storage for InMemory {
 
     async fn set_archive_ready(&self) -> Result<()> {
         self.with_deployment_mut(|state| state.archive_ready = true);
+        Ok(())
+    }
+
+    async fn set_archived_allowlists(&self, contract_ids: &[String]) -> Result<()> {
+        self.with_deployment_mut(|state| state.archived_allowlists = contract_ids.to_vec());
         Ok(())
     }
 

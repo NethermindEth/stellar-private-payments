@@ -16,7 +16,7 @@ mod upstream;
 use anyhow::Result;
 use config::Config;
 use std::sync::{
-    Arc,
+    Arc, RwLock,
     atomic::{AtomicBool, AtomicU32},
 };
 use stellar_private_payments::chain::MAX_FILTER_CONTRACT_IDS;
@@ -25,7 +25,7 @@ use storage::Storage;
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
 pub use deployment::{current_deployment_storage_id, deployment_storage_id, read_deployment};
-use stellar_private_payments::types::ContractConfig;
+use stellar_private_payments::types::{ContractConfig, TreeConfigEntry};
 pub use storage::{InMemory, Postgres};
 
 /// Default upstream RPC from the selected deployment.
@@ -83,9 +83,10 @@ pub struct DeploymentSpec {
     pub network_passphrase: String,
     pub contract_ids: Vec<String>,
     pub min_deployment_ledger: u32,
-    /// Storage namespace of the archive, which can leave out some of
-    /// `contract_ids`.
+    /// Storage namespace of the archive, which leaves out `added_allowlists`.
     pub deployment_id: String,
+    /// Allowlists in `added_asp_memberships`.
+    pub added_allowlists: Vec<TreeConfigEntry>,
 }
 
 impl DeploymentSpec {
@@ -105,6 +106,7 @@ impl DeploymentSpec {
             contract_ids: deployment.all_contract_ids(),
             min_deployment_ledger: deployment.min_deployment_ledger()?,
             deployment_id: deployment::current_deployment_storage_id(deployment)?,
+            added_allowlists: deployment.added_asp_memberships.clone(),
         })
     }
 }
@@ -136,6 +138,9 @@ pub(crate) struct AppState {
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
     pub(crate) min_deployment_ledger: u32,
+    /// Added allowlists whose earlier events the archive lacks. `getEvents`
+    /// refuses them.
+    pub(crate) unarchived: Arc<RwLock<Vec<TreeConfigEntry>>>,
 }
 
 impl Bootnode {
@@ -156,6 +161,22 @@ impl Bootnode {
         );
         let indexer = storage.load_indexer_state().await?;
         let ledger_tip = cfg.initial_ledger_tip.max(indexer.ledger_tip);
+        // An empty archive fills from the earliest ledger, added allowlists
+        // included. Dropping the allowlists the manifest no longer names stops
+        // a later re-add from counting as archived.
+        let (archived, unarchived): (Vec<_>, Vec<_>) =
+            deployment.added_allowlists.into_iter().partition(|tree| {
+                indexer.last_upstream_cursor.is_none()
+                    || indexer.archived_allowlists.contains(&tree.contract_id)
+            });
+        storage
+            .set_archived_allowlists(
+                &archived
+                    .into_iter()
+                    .map(|tree| tree.contract_id)
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
 
         Ok(Self {
             state: AppState {
@@ -168,6 +189,7 @@ impl Bootnode {
                 prom_handle,
                 contract_ids,
                 min_deployment_ledger,
+                unarchived: Arc::new(RwLock::new(unarchived)),
             },
         })
     }

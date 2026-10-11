@@ -21,6 +21,9 @@ pub struct IndexerState {
     pub ledger_tip: u32,
     pub oldest_ledger: u32,
     pub archive_ready: bool,
+    /// Added allowlists whose events the archive holds from their deployment
+    /// ledger.
+    pub archived_allowlists: Vec<String>,
 }
 
 #[async_trait]
@@ -31,6 +34,7 @@ pub trait Storage: Send + Sync {
     async fn set_ledger_tip(&self, ledger_tip: u32) -> Result<()>;
     async fn set_oldest_ledger(&self, oldest_ledger: u32) -> Result<()>;
     async fn set_archive_ready(&self) -> Result<()>;
+    async fn set_archived_allowlists(&self, contract_ids: &[String]) -> Result<()>;
     async fn upsert_events(&self, events: &[Event]) -> Result<()>;
     async fn page_events_ledger(
         &self,

@@ -37,13 +37,9 @@ The web platform orchestrator treats `-32002` as an archive handoff and resumes 
 
 ## Add an allowlist
 
-The archive is named after the network, the earliest pool deployment ledger, and the IDs of the enabled pools, `asp_membership`, and `public_key_registry`. Allowlists in `added_asp_memberships` are left out, so adding one keeps the archive. After a restart with the new manifest, the bootnode serves the allowlist's new events but not its earlier ones. To fill them in:
+The archive is named after the network, the earliest pool deployment ledger, and the IDs of the enabled pools, `asp_membership`, and `public_key_registry`. Allowlists in `added_asp_memberships` are left out, so adding one keeps the archive.
 
-1. Point `--deployment` (or `BOOTNODE_DEPLOYMENT`) at the manifest that names the allowlist.
-2. Restart with `--rescan-from` (or `BOOTNODE_RESCAN_FROM`) set to the allowlist's deployment ledger. Indexing replays from there until one round succeeds, then resumes from that round's cursor. The ledger must be no later than the last one ingested before the stop, or the events in between are never archived. A bootnode in sync when it stopped meets this.
-3. Remove the option before the next restart, or every restart replays again.
-
-Run the rescan while the upstream RPC still holds the deployment ledger. After that, its requests fail and the indexer stalls until you restart without the option.
+Restart the bootnode with `--deployment` (or `BOOTNODE_DEPLOYMENT`) pointing at the manifest that names the allowlist. The bootnode fetches the allowlist's events from its deployment ledger and refuses `getEvents` requests that name it with a `-32602` error until the fetch completes. Removing an allowlist and adding it back fetches its events again. If the upstream RPC no longer holds that ledger, the bootnode logs an error and keeps refusing the allowlist. To fill it, restart with `--upstream-rpc-url` (or `BOOTNODE_UPSTREAM_RPC_URL`) set to an RPC for the same network that still holds the ledger.
 
 ## Trust assumptions
 

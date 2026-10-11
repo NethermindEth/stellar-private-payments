@@ -141,7 +141,7 @@ impl Storage for Postgres {
             .query_one(
                 &format!(
                     r#"
-SELECT last_upstream_cursor, ledger_tip, oldest_ledger, archive_ready
+SELECT last_upstream_cursor, ledger_tip, oldest_ledger, archive_ready, archived_allowlists
 FROM {STATE} WHERE deployment_id = $1
 "#
                 ),
@@ -153,6 +153,7 @@ FROM {STATE} WHERE deployment_id = $1
         let ledger_tip: i32 = row.get(1);
         let oldest_ledger: i32 = row.get(2);
         let archive_ready: bool = row.get(3);
+        let archived_allowlists: Vec<String> = row.get(4);
 
         Ok(IndexerState {
             last_upstream_cursor,
@@ -160,6 +161,7 @@ FROM {STATE} WHERE deployment_id = $1
             oldest_ledger: u32::try_from(oldest_ledger.max(0))
                 .context("oldest_ledger exceeds u32")?,
             archive_ready,
+            archived_allowlists,
         })
     }
 
@@ -232,6 +234,25 @@ FROM {STATE} WHERE deployment_id = $1
                     "UPDATE {STATE} SET archive_ready = true, updated_at = now() WHERE deployment_id = $1"
                 ),
                 &[&self.deployment_id()],
+            )
+            .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
+        Ok(())
+    }
+
+    async fn set_archived_allowlists(&self, contract_ids: &[String]) -> Result<()> {
+        let client = self.pool.get().await?;
+        let updated = client
+            .execute(
+                &format!(
+                    "UPDATE {STATE} SET archived_allowlists = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
+                &[&contract_ids, &self.deployment_id()],
             )
             .await?;
         if updated != 1 {

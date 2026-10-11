@@ -1,6 +1,9 @@
 use crate::{AppState, messages::GetEventsParams};
 use metrics::{counter, gauge};
-use std::{sync::atomic::Ordering, time::Instant};
+use std::{
+    sync::{PoisonError, atomic::Ordering},
+    time::Instant,
+};
 use tokio::time::{Duration, sleep};
 
 pub(crate) struct Indexer {
@@ -13,10 +16,12 @@ impl Indexer {
     }
 
     pub(crate) async fn run(self) {
-        let mut rescan_from = self.state.cfg.rescan_from;
+        let mut retry_backfill = true;
         loop {
-            let round = self.run_round(rescan_from).await;
-            rescan_from = rescan_after(rescan_from, &round);
+            let round = self.run_round().await;
+            if retry_backfill && round.is_ok() {
+                retry_backfill = self.backfill().await;
+            }
             match round {
                 Ok(may_have_more) => {
                     if !may_have_more {
@@ -32,7 +37,7 @@ impl Indexer {
         }
     }
 
-    async fn run_round(&self, rescan_from: Option<u32>) -> anyhow::Result<bool> {
+    async fn run_round(&self) -> anyhow::Result<bool> {
         let t0 = Instant::now();
 
         let latest = self.state.upstream.get_latest_ledger().await?;
@@ -42,11 +47,8 @@ impl Indexer {
         self.state.storage.set_ledger_tip(tip_sequence).await?;
 
         let indexer = self.state.storage.load_indexer_state().await?;
-        let (mut cursor, mut start_ledger) = round_start(
-            indexer.last_upstream_cursor,
-            rescan_from,
-            self.state.min_deployment_ledger,
-        );
+        let mut cursor = indexer.last_upstream_cursor;
+        let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
         let page_size = self.state.cfg.page_size;
         let mut may_have_more = false;
         let cutoff = tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers());
@@ -115,6 +117,71 @@ impl Indexer {
         Ok(may_have_more)
     }
 
+    /// Archives the events of each added allowlist the upstream still holds,
+    /// from the earliest such deployment ledger, then lets `getEvents` serve
+    /// them.
+    ///
+    /// Runs after a round, so `oldest_ledger` is the upstream's current one.
+    /// Returns whether to retry after the next round.
+    async fn backfill(&self) -> bool {
+        let oldest = self.state.oldest_ledger.load(Ordering::Relaxed);
+        let (fillable, lost): (Vec<_>, Vec<_>) = self
+            .state
+            .unarchived
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .partition(|tree| tree.deployment_ledger >= oldest);
+        if !lost.is_empty() {
+            tracing::error!(
+                oldest,
+                allowlists = ?lost,
+                "upstream no longer holds these added allowlists' events; getEvents refuses them"
+            );
+        }
+        let Some(from) = fillable.iter().map(|tree| tree.deployment_ledger).min() else {
+            return false;
+        };
+        let contract_ids: Vec<String> = fillable.into_iter().map(|tree| tree.contract_id).collect();
+        match self.archive_from(&contract_ids, from).await {
+            Ok(()) => false,
+            Err(e) => {
+                tracing::error!(error = %e, "added allowlist backfill failed");
+                true
+            }
+        }
+    }
+
+    async fn archive_from(&self, contract_ids: &[String], from: u32) -> anyhow::Result<()> {
+        let mut start_ledger = Some(from);
+        let mut cursor: Option<String> = None;
+        loop {
+            let params = GetEventsParams::for_contracts(
+                contract_ids,
+                start_ledger.take(),
+                cursor.as_deref(),
+                Some(self.state.cfg.page_size),
+            );
+            let result = self.state.upstream.get_events(params).await?;
+            self.state.storage.upsert_events(&result.events).await?;
+            if cursor.as_deref() == Some(result.cursor.as_str()) {
+                break;
+            }
+            cursor = Some(result.cursor);
+        }
+        let storage = &self.state.storage;
+        let mut archived = storage.load_indexer_state().await?.archived_allowlists;
+        archived.extend_from_slice(contract_ids);
+        storage.set_archived_allowlists(&archived).await?;
+        self.state
+            .unarchived
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|tree| !contract_ids.contains(&tree.contract_id));
+        Ok(())
+    }
+
     async fn mark_archive_ready(&self) -> anyhow::Result<()> {
         if self.state.archive_ready.load(Ordering::Relaxed) {
             return Ok(());
@@ -123,70 +190,5 @@ impl Indexer {
         self.state.archive_ready.store(true, Ordering::Relaxed);
         tracing::info!("archive ready: ingestion crossed retention cutoff");
         Ok(())
-    }
-}
-
-/// Returns the cursor and start ledger a round's first request uses.
-///
-/// A rescan ledger replaces the stored cursor. With no stored cursor, the
-/// round starts at the earlier of the rescan ledger and the deployment's
-/// minimum, so an empty archive still fills from the start.
-fn round_start(
-    stored_cursor: Option<String>,
-    rescan_from: Option<u32>,
-    min_deployment_ledger: u32,
-) -> (Option<String>, Option<u32>) {
-    match (rescan_from, stored_cursor) {
-        (Some(ledger), Some(_)) => (None, Some(ledger)),
-        (Some(ledger), None) => (None, Some(ledger.min(min_deployment_ledger))),
-        (None, Some(cursor)) => (Some(cursor), None),
-        (None, None) => (None, Some(min_deployment_ledger)),
-    }
-}
-
-/// Returns the rescan ledger for the round after `round`.
-///
-/// The rescan ends after the first successful round; a failed round keeps it
-/// for the retry.
-fn rescan_after(rescan_from: Option<u32>, round: &anyhow::Result<bool>) -> Option<u32> {
-    rescan_from.filter(|_| round.is_err())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{rescan_after, round_start};
-
-    #[test]
-    fn a_rescan_starts_the_first_round_at_its_ledger() {
-        assert_eq!(
-            round_start(Some("cursor".into()), Some(500), 100),
-            (None, Some(500))
-        );
-    }
-
-    #[test]
-    fn without_a_rescan_the_stored_cursor_wins() {
-        assert_eq!(
-            round_start(Some("cursor".into()), None, 100),
-            (Some("cursor".into()), None)
-        );
-    }
-
-    #[test]
-    fn a_rescan_ends_with_the_first_round_that_succeeds() {
-        let failed: anyhow::Result<bool> = Err(anyhow::anyhow!("upstream unavailable"));
-        assert_eq!(rescan_after(Some(500), &failed), Some(500));
-
-        let next = rescan_after(Some(500), &Ok(true));
-        assert_eq!(
-            round_start(Some("cursor".into()), next, 100),
-            (Some("cursor".into()), None)
-        );
-    }
-
-    #[test]
-    fn an_empty_archive_starts_at_the_deployment() {
-        assert_eq!(round_start(None, None, 100), (None, Some(100)));
-        assert_eq!(round_start(None, Some(500), 100), (None, Some(100)));
     }
 }
