@@ -223,7 +223,8 @@ including any restore the pause needs.
 
 On testnet on 2026-10-03, a pause that restored nothing cost 500,686 stroops, about 0.05 XLM, and
 a restore can cost several XLM. Keep at least 10 XLM above the minimum balance for each pool file
-you hold.
+you hold. That covers a deployment the operator keeps alive. A pause that restores a pool's archived
+Wasm pays a full minimum lifetime of rent for it and can cost more.
 
 A file that lands after another pause has closed the pool still counts as used: it publishes
 `deposit_pause_repeated` and spends the nonce. Neither pause event names the file, so read a
