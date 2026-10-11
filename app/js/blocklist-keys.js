@@ -1,8 +1,7 @@
 /**
  * Converts note public keys to blocklist keys and back, builds the insert
- * call, and warns of writes to a blocklist no pool reads.
- *
- * Separate from `admin.js` so Node can import it in unit tests.
+ * call, and warns of writes to a blocklist no pool reads. Kept out of
+ * `admin.js` so Node unit tests can import it.
  */
 
 // The form the app shows a note public key in: `0x` and 32 bytes of hex.

@@ -1,22 +1,16 @@
 /**
- * Re-point checks: reads a tree's code, settings, and entries and compares
- * them with the pool, the manifest, and the operator's records.
- *
- * Separate from `admin.js` so Node can import it in unit tests.
+ * Re-point checks: compares a tree's code, settings, and entries with the pool,
+ * the manifest, and the operator's records. Kept out of `admin.js` so Node unit
+ * tests can import it.
  */
 import { scValToNative, xdr } from '@stellar/stellar-sdk';
 
 /**
- * Reads a contract's instance entry: the hash of the Wasm it runs, and its
- * instance storage by key.
+ * Reads a contract's instance entry.
  *
- * `stored` maps each `DataKey` variant's name to its value.
- *
- * @param {rpc.Server} server - The RPC client.
- * @param {string} contractId
  * @returns {Promise<{wasmHash: (Uint8Array|undefined), stored: Map<string, *>}>}
- *   `wasmHash` is absent for a contract that runs no Wasm, such as a Stellar
- *   asset contract.
+ *   `wasmHash` is absent for a contract running no Wasm, such as a Stellar asset
+ *   contract. `stored` maps each `DataKey` variant's name to its value.
  */
 export async function readInstance(server, contractId) {
   const { val } = await server.getContractData(contractId, xdr.ScVal.scvLedgerKeyContractInstance());
@@ -28,15 +22,10 @@ export async function readInstance(server, contractId) {
 }
 
 /**
- * Reads every event a contract published from `startLedger` on.
+ * Reads every event a contract published from `startLedger` on. The RPC scans a
+ * window of ledgers per request, so an empty page is not the end; the read ends
+ * when the cursor stops moving.
  *
- * The RPC scans a window of ledgers per request, so an empty page is not the
- * end: the reading ends when the cursor stops moving.
- *
- * @param {rpc.Server} server - The RPC client.
- * @param {string} contractId
- * @param {number} startLedger
- * @returns {Promise<Array>} The events, as `getEvents` returns them.
  * @throws {Error} when the RPC no longer holds `startLedger`.
  */
 export async function eventsSince(server, contractId, startLedger) {
@@ -56,22 +45,15 @@ export async function eventsSince(server, contractId, startLedger) {
 }
 
 /**
- * Returns the ledger from which the re-point check reads a tree's events.
+ * Returns the ledger the re-point check reads a tree's events from: an added
+ * allowlist's manifest ledger, the operator's ledger for a blocklist, or the
+ * earliest pool's ledger for the manifest's own allowlist. That last one comes
+ * after the allowlist's deployment, so a leaf added in between fails the read
+ * instead of going unseen.
  *
- * An added allowlist starts at its manifest entry's ledger, and a blocklist at
- * the ledger the operator enters. The manifest's own allowlist starts at the
- * earliest pool's ledger, after its own deployment, so a leaf added in between
- * fails the read rather than going unseen.
- *
- * @param {Object} options
- * @param {boolean} options.allowlist - Whether the tree is an allowlist.
- * @param {string} options.tree - The tree's address.
- * @param {Object} options.manifest - The deployment manifest.
- * @param {number} options.blocklistLedger - The ledger the operator entered,
- *   read only for a blocklist.
- * @returns {number}
- * @throws {Error} when the manifest names no ledger for the allowlist, or
- *   the operator entered none for the blocklist.
+ * @param {{allowlist: boolean, tree: string, manifest: Object, blocklistLedger: number}} options
+ * @throws {Error} when the manifest names no ledger for the allowlist, or the
+ *   operator entered none for the blocklist.
  */
 export function historyStart({ allowlist, tree, manifest, blocklistLedger }) {
   const ledger = !allowlist
@@ -89,14 +71,12 @@ export function historyStart({ allowlist, tree, manifest, blocklistLedger }) {
 const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 /**
- * Checks that a tree runs the code a pool accepts for the tree's kind.
+ * Checks that a tree runs the code the pool accepts for its kind, and returns the
+ * check's line.
  *
- * @param {Uint8Array[]} acceptedHashes - The pool's `get_asp_wasm_hashes()`
- *   value: the allowlist's hash, then the blocklist's.
- * @param {(Uint8Array|undefined)} treeHash - The hash of the Wasm the tree
- *   runs, as `readInstance` returns it.
- * @param {boolean} allowlist - Whether the tree is an allowlist.
- * @returns {string} The check's line.
+ * @param {Uint8Array[]} acceptedHashes The pool's `get_asp_wasm_hashes()`.
+ * @param {(Uint8Array|undefined)} treeHash From `readInstance`.
+ * @param {boolean} allowlist
  * @throws {Error} when the tree runs other code, or no Wasm.
  */
 export function codeLine(acceptedHashes, treeHash, allowlist) {
@@ -109,13 +89,9 @@ export function codeLine(acceptedHashes, treeHash, allowlist) {
 }
 
 /**
- * Checks that a new allowlist has the depth of the pool's current one, which
- * the tree's code does not fix.
+ * Checks that a new allowlist has the current one's depth, which its code does not
+ * fix, and returns the check's line.
  *
- * @param {string} current - The pool's current allowlist.
- * @param {number} levels - The current allowlist's `Levels`.
- * @param {(number|undefined)} treeLevels - The new allowlist's `Levels`.
- * @returns {string} The check's line.
  * @throws {Error} when the depths differ.
  */
 export function levelsLine(current, levels, treeLevels) {
@@ -126,13 +102,10 @@ export function levelsLine(current, levels, treeLevels) {
 }
 
 /**
- * Checks who runs a tree.
+ * Checks who runs a tree, and returns the check's line when the pool's admin does.
  *
- * @param {string} treeAdmin - The tree's admin.
- * @param {string} poolAdmin - The pool's admin.
- * @returns {string} The check's line, when the pool's admin runs the tree.
- * @throws {Error} carrying `treeAdmin` as `confirm` when another party runs
- *   the tree, which passes only once the operator confirms that party.
+ * @throws {Error} carrying `treeAdmin` as `confirm` when another party runs the
+ *   tree; the check passes once the operator confirms that party.
  */
 export function adminLine(treeAdmin, poolAdmin) {
   if (treeAdmin === poolAdmin) return `${treeAdmin}, the pool's admin`;
@@ -140,14 +113,10 @@ export function adminLine(treeAdmin, poolAdmin) {
 }
 
 /**
- * Checks that the manifest names an allowlist, since clients index only the
- * allowlists it names.
+ * Checks that the manifest names an allowlist, since clients index only those, and
+ * returns the check's line.
  *
- * @param {Object} manifest - The deployment manifest.
- * @param {string} tree - The allowlist's address.
- * @returns {string} The check's line.
- * @throws {Error} when the manifest names the allowlist in neither
- *   `asp_membership` nor `added_asp_memberships`.
+ * @throws {Error} when neither `asp_membership` nor `added_asp_memberships` names it.
  */
 export function manifestLine(manifest, tree) {
   if (tree === manifest.asp_membership || (manifest.added_asp_memberships ?? []).some(({ contractId }) => contractId === tree)) {
@@ -162,10 +131,8 @@ const decode = ({ topic: [name], value }) => ({ name: scValToNative(name), ...sc
 /**
  * Returns the leaves an allowlist's `LeafAdded` events added, in index order.
  *
- * @param {Array} events - The allowlist's events, as `getEvents` returns them.
- * @returns {bigint[]}
- * @throws {Error} when the events skip an index, which they do when the read
- *   starts after the allowlist's first leaves.
+ * @throws {Error} when the events skip an index, as they do when the read starts
+ *   after the first leaves.
  */
 export function allowlistLeavesFromEvents(events) {
   const added = events
@@ -180,12 +147,8 @@ export function allowlistLeavesFromEvents(events) {
 }
 
 /**
- * Returns the keys a blocklist holds: those its `LeafInserted` events added
- * and no later `LeafDeleted` event removed.
- *
- * @param {Array} events - The blocklist's events, in the order `getEvents`
- *   returns them.
- * @returns {bigint[]}
+ * Returns the keys a blocklist holds: those `LeafInserted` events added and no
+ * later `LeafDeleted` removed. Expects events in `getEvents` order.
  */
 export function blocklistKeysFromEvents(events) {
   const keys = new Set();
@@ -197,12 +160,10 @@ export function blocklistKeysFromEvents(events) {
 }
 
 /**
- * Compares the entries a tree holds with the operator's records.
+ * Compares a tree's entries with the operator's records.
  *
- * @param {bigint[]} onChain - The entries the tree holds.
- * @param {bigint[]} records - The entries the operator expects it to hold.
- * @returns {{missing: bigint[], unexpected: bigint[]}} `missing` holds the
- *   records the tree lacks, and `unexpected` the entries no record names.
+ * @returns {{missing: bigint[], unexpected: bigint[]}} Records the tree lacks, and
+ *   entries no record names.
  */
 export function compareEntries(onChain, records) {
   const held = new Set(onChain);
@@ -216,8 +177,6 @@ export function compareEntries(onChain, records) {
 /**
  * Parses an allowlist's records, one `0x` hex leaf per line.
  *
- * @param {string} text
- * @returns {bigint[]}
  * @throws {Error} naming the first line that is not a hex value.
  */
 export function parseRecords(text) {
