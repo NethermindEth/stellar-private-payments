@@ -19,6 +19,15 @@ import { CONTRACT_ERRORS } from './ui/errors.js';
 /** Seconds an admin transaction stays valid: a day, since collecting signatures outlasts the SDK's five-minute default. */
 const ADMIN_TX_TIMEOUT_SECONDS = 86_400;
 
+/**
+ * Refundable fee added to every admin call, in stroops. `accept_admin` and
+ * `update_admin` extend an admin entry to 30 days from the ledger they land on,
+ * so each ledger spent signing adds rent the simulation left out: about 14,000
+ * stroops for a day on testnet in October 2026, its lifetime write included. The
+ * network refunds what the call does not owe.
+ */
+const ADMIN_RENT_MARGIN = 100_000;
+
 /** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
 export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
 
@@ -44,10 +53,18 @@ export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contra
   if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(simulation.error);
   }
-  const xdr = tx.toXdr();
+  const xdr = withRentMargin(tx.toXdr(), networkPassphrase);
   // Throws if `source` is not the admin, before anyone signs.
   describeAdminCall(xdr, networkPassphrase);
   return { xdr };
+}
+
+/** Returns the envelope with `ADMIN_RENT_MARGIN` added to its refundable fee and its fee. */
+export function withRentMargin(xdr, networkPassphrase) {
+  const envelope = TransactionBuilder.fromXdr(xdr, networkPassphrase).toEnvelope();
+  envelope.value.tx.fee += ADMIN_RENT_MARGIN;
+  envelope.value.tx.ext.value.resourceFee += BigInt(ADMIN_RENT_MARGIN);
+  return envelope.toXdr('base64');
 }
 
 /**

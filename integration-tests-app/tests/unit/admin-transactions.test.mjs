@@ -8,6 +8,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  SorobanDataBuilder,
   TransactionBuilder,
   nativeToScVal,
   xdr,
@@ -22,6 +23,7 @@ import {
   signingRule,
   signRefusal,
   submitAdminCall,
+  withRentMargin,
 } from '../../../app/js/admin-transactions.js';
 import { CONTRACT_ERRORS } from '../../../app/js/ui/errors.js';
 
@@ -138,6 +140,18 @@ test('describeAdminCall refuses an operation whose source is not the transaction
     /authorizes something other than this call/,
   );
   assert.equal(describeAdminCall(authorizedInsertLeaf(sourceAccount, { source: ADMIN }), Networks.TESTNET).method, 'insert_leaf');
+});
+
+test('withRentMargin raises the refundable fee and the fee by the same margin and keeps the call', () => {
+  const built = insertLeafBuilder().setSorobanData(new SorobanDataBuilder().setResourceFee(1_213n).build()).setTimeout(86_400).build();
+  const padded = TransactionBuilder.fromXdr(withRentMargin(built.toXdr(), Networks.TESTNET), Networks.TESTNET);
+  const resourceFee = (tx) => tx.toEnvelope().value.tx.ext.value.resourceFee;
+  assert.equal(resourceFee(padded) - resourceFee(built), 100_000n);
+  assert.equal(Number(padded.fee) - Number(built.fee), 100_000);
+  assert.deepEqual(describeAdminCall(padded.toXdr(), Networks.TESTNET), {
+    ...describeAdminCall(built.toXdr(), Networks.TESTNET),
+    fee: padded.fee,
+  });
 });
 
 test('signatureCount counts the signatures added to an envelope', () => {
