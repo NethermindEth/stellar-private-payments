@@ -143,6 +143,15 @@ and the admin account pays for the restore within the call's fee. On testnet on 
 `insert_leaf` that restored five entries simulated to a fee of 66,214,618 stroops, about 6.6 XLM.
 The card shows the maximum fee before anyone signs.
 
+An entry that archives while signers sign makes the call fail once sent, so the page refuses to
+build a call that reads an entry with less than 25 hours left, the call's 24 hours plus an hour.
+The card then lists a `stellar contract extend` command for each such entry. Run them from any
+funded account, replacing `ACCOUNT`, then build the call again.
+
+`accept_admin` and `update_admin` extend an admin entry from the ledger they land on, so every
+call the page builds carries 100,000 stroops of refundable fee beyond its simulation. The network
+refunds what the call does not owe.
+
 ### Sign with the CLI
 
 The card describes only contract calls. A signer change, and the acceptance of a tree the manifest
@@ -150,15 +159,23 @@ does not name, go through the Stellar CLI as a file passed from signer to signer
 
 The CLI builds a transaction with no time bound, which, once signed, stays valid until another
 admin transaction uses its sequence number. Before the first signature, whoever built `tx.xdr`
-bounds it to 24 hours, as the admin page does:
+bounds it to 24 hours and, for a contract call, adds the same refundable fee as the admin page:
 
 ```bash
 stellar tx decode --output json < tx.xdr \
   | jq -c --argjson t $(( $(date +%s) + 86400 )) \
-    '.tx.tx.cond = {time: {min_time: 0, max_time: $t}}' \
+    '.tx.tx.cond = {time: {min_time: 0, max_time: $t}}
+    | if (.tx.tx.ext | type) == "object"
+      then .tx.tx.fee += 100000 | .tx.tx.ext.v1.resource_fee |= (tonumber + 100000 | tostring)
+      else . end' \
   | stellar tx encode > tx-bounded.xdr
 mv tx-bounded.xdr tx.xdr
 ```
+
+The CLI does not check how long the call's entries live. Before the first signature, fetch each
+persistent entry in the footprint `stellar tx decode` shows with `stellar ledger entry fetch`, and
+extend with `stellar contract extend` any whose `liveUntilLedgerSeq` is less than 18,000 ledgers
+(25 hours) past `latestLedger`.
 
 Each signer, on their own device, reads the transaction and adds a signature:
 
