@@ -28,6 +28,9 @@ const ADMIN_TX_TIMEOUT_SECONDS = 86_400;
  */
 const ADMIN_RENT_MARGIN = 100_000;
 
+/** Ledgers an entry an admin call reads must outlive its build: 24 hours of five-second ledgers, plus an hour. */
+const ADMIN_TX_LEDGERS = 18_000;
+
 /** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
 export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
 
@@ -39,11 +42,12 @@ export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.
  * @param {{rpcUrl: string, networkPassphrase: string, source: string, contractId: string, method: string, args?: Object}} call
  *   `source` is the contract's admin; `args` are by name.
  * @returns {Promise<{xdr: string}>}
- * @throws {Error} if the contract has no `method`, refuses the call, or has
- *   another admin than `source`.
+ * @throws {Error} if the contract has no `method`, refuses the call, or
+ *   `finishAdminCall` refuses it.
  */
 export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contractId, method, args }) {
-  const client = await contract.Client.from({ rpcUrl, networkPassphrase, publicKey: source, contractId, server: rpcServer(rpcUrl) });
+  const server = rpcServer(rpcUrl);
+  const client = await contract.Client.from({ rpcUrl, networkPassphrase, publicKey: source, contractId, server });
   if (typeof client[method] !== 'function') {
     throw new Error(`${contractId} has no ${method} entry point`);
   }
@@ -53,10 +57,66 @@ export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contra
   if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(simulation.error);
   }
-  const xdr = withRentMargin(tx.toXdr(), networkPassphrase);
+  return finishAdminCall({ server, rpcUrl, networkPassphrase, xdr: tx.toXdr() });
+}
+
+/**
+ * Pads a simulated admin call's fee, checks its source, and refuses it when an
+ * entry it reads archives within its 24 hours.
+ *
+ * @param {{server: rpc.Server, rpcUrl: string, networkPassphrase: string, xdr: string}} call
+ * @returns {Promise<{xdr: string}>}
+ * @throws {Error} if `describeAdminCall` refuses the envelope, or with the
+ *   `stellar contract extend` command of each short-lived entry as `extendCommands`.
+ */
+export async function finishAdminCall({ server, rpcUrl, networkPassphrase, xdr: simulated }) {
+  const xdr = withRentMargin(simulated, networkPassphrase);
   // Throws if `source` is not the admin, before anyone signs.
   describeAdminCall(xdr, networkPassphrase);
+  const keys = liveFootprintKeys(xdr, networkPassphrase);
+  if (keys.length > 0) {
+    const { entries, latestLedger } = await server.getLedgerEntries(...keys);
+    const commands = shortLivedEntries(entries, latestLedger).map((key) => extendCommand(key, rpcUrl, networkPassphrase));
+    if (commands.length > 0) {
+      throw Object.assign(new Error('Entries this call reads archive within its 24 hours, so it would fail once sent. Extend them from any funded account, then build the call again.'), { extendCommands: commands });
+    }
+  }
   return { xdr };
+}
+
+/**
+ * Returns the persistent entries an envelope reads that it does not restore
+ * itself. An entry archived between building and sending fails the call.
+ */
+export function liveFootprintKeys(xdr, networkPassphrase) {
+  const data = TransactionBuilder.fromXdr(xdr, networkPassphrase).toEnvelope().value.tx.ext.value;
+  const { readOnly, readWrite } = data.resources.footprint;
+  const restored = new Set((data.ext.value?.archivedSorobanEntries ?? []).map((index) => readWrite[index].toXdr('base64')));
+  return [...readOnly, ...readWrite].filter((key) => !restored.has(key.toXdr('base64'))
+    && (key.type === 'contractCode' || (key.type === 'contractData' && key.value.durability.name === 'persistent')));
+}
+
+/**
+ * Returns the keys of `entries`, as `getLedgerEntries` returns them, that
+ * archive within `ADMIN_TX_LEDGERS` of `latestLedger`.
+ */
+export function shortLivedEntries(entries, latestLedger) {
+  return entries
+    .filter(({ liveUntilLedgerSeq }) => liveUntilLedgerSeq < latestLedger + ADMIN_TX_LEDGERS)
+    .map(({ key }) => key);
+}
+
+/**
+ * Returns the Stellar CLI command that extends the entry under `key` to the
+ * longest lifetime the network accepts. `ACCOUNT` stands for the paying account.
+ */
+export function extendCommand(key, rpcUrl, networkPassphrase) {
+  const target = key.type === 'contractCode'
+    ? `--wasm-hash ${key.value.hash.toXdr('hex')}`
+    : `--id ${Address.fromScAddress(key.value.contract)}`
+      + (key.value.key.type === 'scvLedgerKeyContractInstance' ? '' : ` --key-xdr ${key.value.key.toXdr('base64')}`);
+  return `stellar contract extend ${target} --ledgers-to-extend 3110399 --source-account ACCOUNT `
+    + `--rpc-url ${rpcUrl} --network-passphrase '${networkPassphrase}'`;
 }
 
 /** Returns the envelope with `ADMIN_RENT_MARGIN` added to its refundable fee and its fee. */

@@ -364,12 +364,22 @@ function loadAdminTx(xdr, kind) {
 
 // Builds an admin call to a contract of the given kind into the card.
 async function prepareAdminCall(kind, call) {
-  const { xdr } = await buildAdminCall({
-    rpcUrl: state.rpcUrl,
-    networkPassphrase: state.networkPassphrase,
-    ...call,
-  });
-  loadAdminTx(xdr, kind);
+  let built;
+  try {
+    built = await buildAdminCall({
+      rpcUrl: state.rpcUrl,
+      networkPassphrase: state.networkPassphrase,
+      ...call,
+    });
+  } catch (err) {
+    // The card keeps the extend commands, which outlast the toast.
+    if (err.extendCommands) {
+      loadAdminTx('', kind);
+      adminTxDescriptionEl.textContent = [err.message, ...err.extendCommands].join('\n\n');
+    }
+    throw err;
+  }
+  loadAdminTx(built.xdr, kind);
   setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
 }
 
