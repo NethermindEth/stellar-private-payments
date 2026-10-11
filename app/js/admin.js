@@ -66,9 +66,8 @@ const state = {
   rpcUrl: null,
   contracts: null,
   adminTxKind: null,
-  // The manifest's pools, which a pasted call's kind is read against.
+  // The manifest's pools and added allowlists; `kindOf` reads a pasted call against them.
   pools: [],
-  // The manifest's added allowlists, which a pasted call's kind is read against.
   addedAllowlists: [],
   cryptoReady: false,
 };
@@ -308,8 +307,7 @@ async function refreshState() {
 // Admin transaction card
 // -----------------------------
 // Returns the kind of contract a pasted call targets, which decides how its
-// error codes read. An unlisted contract is `unknown`, and the card flags it so
-// signers don't take it for a pool.
+// error codes read. The card flags an unlisted contract as `unknown`.
 function kindOf(contractId) {
   if (contractId === membershipContractInput.value.trim()) return 'asp-membership';
   if (contractId === nonMembershipContractInput.value.trim()) return 'asp-non-membership';
@@ -319,8 +317,7 @@ function kindOf(contractId) {
 }
 
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
-  // Show a blocklist call's numbers as the note public keys signers were asked
-  // to list or release.
+  // Show blocklist keys as the note public keys signers were asked about.
   const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
   return [
     `Source: ${source}`,
@@ -351,8 +348,7 @@ function renderAdminTx(kind) {
     state.adminTxKind = kind ?? kindOf(call.contract);
     adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
     adminTxSignaturesEl.textContent = count;
-    // Fetch the threshold after drawing; Sign reads it again, so a failed read
-    // just leaves the bare count.
+    // Sign reads the threshold again, so a failed read here only leaves the bare count.
     rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
       if (adminTxXdrInput.value.trim() === xdr) adminTxSignaturesEl.textContent = `${count} of ${signingRule(account).threshold}`;
     }, () => {});
@@ -590,7 +586,7 @@ async function poolRow(contractId) {
     const [{ result }, admin] = await Promise.all([pool.deposits_paused(), storedAdmin(contractId)]);
     const paused = result.unwrap();
     depositsEl.textContent = paused ? 'paused' : 'open';
-    // A pause on a paused pool changes nothing, yet the signers would still sign and pay for it.
+    // A pause on a paused pool changes nothing but still costs a signed transaction.
     const pause = row.querySelector('.pause-deposits-btn');
     const unpause = row.querySelector('.unpause-deposits-btn');
     pause.disabled = paused;
@@ -604,8 +600,7 @@ async function poolRow(contractId) {
   return row;
 }
 
-// Builds a table row's call into the card. `kind` decides how error codes
-// read.
+// Builds a table row's call into the card.
 async function buildRowCall(kind, call) {
   try {
     ensureWalletConnected();
