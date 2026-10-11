@@ -31,15 +31,17 @@ Arguments:
 Options:
   --deployer NAME       Stellar identity or secret key used to deploy (required)
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
-  --token ADDRESS       Legacy single-pool token contract address (cannot be mixed with --pool)
+  --token ADDRESS       Legacy single-pool native XLM contract address (cannot be mixed with --pool)
   --pool SPEC           Pool spec (repeatable). Optional prefixes per pool:
                         [policy:][gvk-mode:]<ASSET-SPEC>
                         policy: none | allowlist | blocklist | allowlist-blocklist
                         gvk-mode: gvk-off | gvk-viewonly | gvk-traceable
                         <ASSET-SPEC>:
-                        contract:<TOKEN_CONTRACT_ID>
                         native:<TOKEN_CONTRACT_ID>
                         classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>
+                        <TOKEN_CONTRACT_ID> must be the asset's own Stellar asset contract.
+                        A classic issuer needs AUTH_IMMUTABLE and neither
+                        AUTH_REVOCABLE nor AUTH_CLAWBACK_ENABLED.
   --gvk-authority-pubkey JSON
                         Admin Baby JubJub public key {"x":"0x..","y":"0x.."} for
                         every pool with gvk-viewonly or gvk-traceable
@@ -66,7 +68,7 @@ Examples:
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
     --pool blocklist:native:CB... \
-    --pool allowlist-blocklist:contract:CC... \
+    --pool allowlist-blocklist:classic:ABC:GA...:CC... \
     --asp-levels 10 \
     --pool-levels 20 \
     --max-deposit 1000000000 \
@@ -87,7 +89,7 @@ Examples:
     --deployer alice \
     --gvk-authority-pubkey-file ./admin-d.json \
     --pool blocklist:gvk-off:native:CB... \
-    --pool blocklist:gvk-traceable:contract:CC... \
+    --pool blocklist:gvk-traceable:native:CB... \
     --asp-levels 10 \
     --pool-levels 20 \
     --max-deposit 1000000000 \
@@ -319,6 +321,62 @@ trim() {
   printf '%s' "$s"
 }
 
+# Dies unless TOKEN is the Stellar asset contract of ASSET (`native` or CODE:ISSUER).
+require_asset_contract() {
+  local spec="$1" asset="$2" token="$3" expected
+  expected="$(stellar contract id asset --asset "$asset" --network "$NETWORK" 2>/dev/null || true)"
+  expected="$(strip_surrounding_quotes "$expected")"
+  [[ -n "$expected" ]] || die "failed to resolve the Stellar asset contract of $asset on '$NETWORK'"
+  [[ "$token" == "$expected" ]] \
+    || die "invalid pool spec '$spec': $token is not the Stellar asset contract of $asset ($expected)"
+}
+
+# Prints the token contract id, then the manifest's asset JSON. Refuses any token whose issuer or
+# code could freeze the pool's balance or take it.
+parse_pool_spec() {
+  local spec="$1"
+  local kind token code issuer rest flags
+  kind="${spec%%:*}"
+  rest="${spec#*:}"
+
+  case "$kind" in
+    contract)
+      die "invalid pool spec '$spec': a token contract's own code could move or freeze the pool's balance; use native: or classic:"
+      ;;
+    native)
+      token="$(strip_surrounding_quotes "$rest")"
+      [[ -n "$token" ]] || die "invalid pool spec '$spec': missing native token contract id"
+      require_asset_contract "$spec" native "$token"
+      printf '%s\n' "$token"
+      printf '%s\n' "{\"kind\":\"native\"}"
+      ;;
+    classic)
+      code="${rest%%:*}"
+      rest="${rest#*:}"
+      issuer="${rest%%:*}"
+      token="${rest#*:}"
+      token="$(strip_surrounding_quotes "$token")"
+      if [[ -z "$code" || -z "$issuer" || -z "$token" || "$token" == "$rest" ]]; then
+        die "invalid pool spec '$spec': expected classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>"
+      fi
+      require_asset_contract "$spec" "$code:$issuer" "$token"
+      flags="$(stellar ledger entry fetch account --account "$issuer" --network "$NETWORK" --output json 2>/dev/null \
+        | jq '.entries[0].val.account.flags' || true)"
+      [[ "$flags" =~ ^[0-9]+$ ]] || die "invalid pool spec '$spec': could not read the account flags of issuer $issuer"
+      # AUTH_REVOCABLE (2) lets the issuer freeze a balance and AUTH_CLAWBACK_ENABLED (8) lets it
+      # take one. AUTH_IMMUTABLE (4) stops it from ever setting either.
+      (( flags & 2 )) && die "invalid pool spec '$spec': issuer $issuer has AUTH_REVOCABLE set and could freeze the pool's balance"
+      (( flags & 8 )) && die "invalid pool spec '$spec': issuer $issuer has AUTH_CLAWBACK_ENABLED set and could claw back the pool's balance"
+      (( flags & 4 )) || die "invalid pool spec '$spec': issuer $issuer does not have AUTH_IMMUTABLE set and could still set AUTH_REVOCABLE or AUTH_CLAWBACK_ENABLED"
+      printf '%s\n' "$token"
+      printf '%s\n' "{\"kind\":\"classic\",\"code\":\"$code\",\"issuer\":\"$issuer\"}"
+      ;;
+    *)
+      die "invalid pool spec '$spec': expected native:<id> | classic:<code>:<issuer>:<id>"
+      ;;
+  esac
+}
+
 VERIFIER_KEY_LIST=()
 VERIFIER_ID_LIST=()
 
@@ -442,6 +500,8 @@ POOL_BODY_SPECS=()
 POOL_POLICY_SUFFIXES=()
 POOL_GVK_MODES=()
 POOL_VERIFIER_KEYS=()
+POOL_TOKEN_IDS=()
+POOL_ASSET_JSONS=()
 NEEDS_GVK_POOL=false
 
 _ps_i=0
@@ -462,8 +522,10 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
 
   asset_kind="${body%%:*}"
   if ! is_asset_spec_prefix "$asset_kind"; then
-    die "invalid pool spec '$spec': expected asset spec contract:|native:|classic: after optional policy:/gvk-mode: prefixes"
+    die "invalid pool spec '$spec': expected asset spec native:|classic: after optional policy:/gvk-mode: prefixes"
   fi
+  # Checks every token before deploying anything; `set -e` stops the script on a refusal.
+  token_and_asset="$(parse_pool_spec "$body")"
 
   verifier_key="$(verifier_key_for "$policy_suffix" "$gvk_mode")"
   if [[ "$gvk_mode" != "off" ]]; then
@@ -474,6 +536,8 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
   POOL_POLICY_SUFFIXES+=("$policy_suffix")
   POOL_GVK_MODES+=("$gvk_mode")
   POOL_VERIFIER_KEYS+=("$verifier_key")
+  POOL_TOKEN_IDS+=("${token_and_asset%%$'\n'*}")
+  POOL_ASSET_JSONS+=("${token_and_asset#*$'\n'}")
   _ps_i=$((_ps_i + 1))
 done
 
@@ -595,6 +659,18 @@ if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
   [[ -f "$POOL_GVK_WASM" ]] || die "missing wasm: $POOL_GVK_WASM"
 fi
 
+# The network names uploaded code by the SHA-256 of its bytes.
+wasm_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+ASP_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_MEMBERSHIP_WASM")"
+ASP_NON_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_NON_MEMBERSHIP_WASM")"
+
 deploy_contract() {
   local name="$1"
   local wasm="$2"
@@ -627,52 +703,6 @@ verify_deployed_gvk() {
   mode="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" --send=no -- get_gvk_mode)" \
     || die "failed to read GvkMode from pool $id"
   [[ "$mode" == "$expected_mode" ]] || die "pool $id GvkMode mismatch: chain=$mode expected=$expected_mode"
-}
-
-fetch_token_symbol() {
-  local id="$1" out
-  out="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" -- symbol 2>/dev/null || true)"
-  out="${out//\"/}"
-  printf '%s' "$out" | tr -d '[:space:]'
-}
-
-parse_pool_spec() {
-  local spec="$1"
-  local kind token code issuer rest symbol
-  kind="${spec%%:*}"
-  rest="${spec#*:}"
-
-  case "$kind" in
-    contract)
-      token="$(strip_surrounding_quotes "$rest")"
-      [[ -n "$token" ]] || die "invalid pool spec '$spec': missing token contract id"
-      symbol="$(fetch_token_symbol "$token")"
-      [[ -n "$symbol" ]] || die "invalid pool spec '$spec': could not read symbol() from token contract $token"
-      printf '%s\n' "$token"
-      printf '%s\n' "{\"kind\":\"contract\",\"contractId\":\"$token\",\"symbol\":\"$symbol\"}"
-      ;;
-    native)
-      token="$(strip_surrounding_quotes "$rest")"
-      [[ -n "$token" ]] || die "invalid pool spec '$spec': missing native token contract id"
-      printf '%s\n' "$token"
-      printf '%s\n' "{\"kind\":\"native\"}"
-      ;;
-    classic)
-      code="${rest%%:*}"
-      rest="${rest#*:}"
-      issuer="${rest%%:*}"
-      token="${rest#*:}"
-      token="$(strip_surrounding_quotes "$token")"
-      if [[ -z "$code" || -z "$issuer" || -z "$token" || "$token" == "$rest" ]]; then
-        die "invalid pool spec '$spec': expected classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>"
-      fi
-      printf '%s\n' "$token"
-      printf '%s\n' "{\"kind\":\"classic\",\"code\":\"$code\",\"issuer\":\"$issuer\"}"
-      ;;
-    *)
-      die "invalid pool spec '$spec': expected contract:<id> | native:<id> | classic:<code>:<issuer>:<id>"
-      ;;
-  esac
 }
 
 step "deploy asp-membership"
@@ -729,8 +759,6 @@ else
 fi
 
 POOL_IDS=()
-POOL_TOKEN_IDS=()
-POOL_ASSET_JSONS=()
 POOL_DEPLOYMENT_LEDGERS=()
 
 _pool_i=0
@@ -740,10 +768,7 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
   policy_suffix="${POOL_POLICY_SUFFIXES[$_pool_i]}"
   gvk_mode="${POOL_GVK_MODES[$_pool_i]}"
   verifier_key="${POOL_VERIFIER_KEYS[$_pool_i]}"
-  {
-    IFS= read -r token_id
-    IFS= read -r asset_json
-  } < <(parse_pool_spec "$body")
+  token_id="${POOL_TOKEN_IDS[$_pool_i]}"
 
   pool_deployment_ledger="$(get_latest_ledger_seq)"
   step "deploy pool ($(policy_suffix_label "$verifier_key"), gvk=$gvk_mode) for spec '$body'"
@@ -754,6 +779,8 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
       pool_id="$(deploy_contract pool "$POOL_WASM" \
         --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
+        --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
+        --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN")"
@@ -761,6 +788,8 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
       pool_id="$(deploy_contract pool-gvk "$POOL_GVK_WASM" \
         --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
+        --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
+        --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN" \
@@ -777,8 +806,6 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
   fi
 
   POOL_IDS+=("$pool_id")
-  POOL_TOKEN_IDS+=("$token_id")
-  POOL_ASSET_JSONS+=("$asset_json")
   POOL_DEPLOYMENT_LEDGERS+=("$pool_deployment_ledger")
   _pool_i=$((_pool_i + 1))
 done
@@ -848,7 +875,7 @@ while [[ "$_pi" -lt "$_plen" ]]; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"

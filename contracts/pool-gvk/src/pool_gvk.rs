@@ -17,7 +17,10 @@ use crate::gvk::{self, BabyJubJubPoint, GvkCiphertext};
 use contract_types::Groth16Proof;
 use pool_core::{
     ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
-    events::{DepositPauseChanged, DepositPauseRepeated},
+    clients::runs_wasm,
+    events::{
+        AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+    },
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
@@ -79,6 +82,8 @@ pub enum Error {
     DepositsPaused = 18,
     /// No admin transfer is pending
     NoPendingAdmin = 20,
+    /// An association set does not run the code fixed at construction
+    TreeCodeMismatch = 21,
 }
 
 impl From<MerkleError> for Error {
@@ -103,17 +108,10 @@ impl From<AdminError> for Error {
     }
 }
 
-/// Storage keys for contract data.
+/// Storage keys: everything `pool` stores, plus `AdminViewKey` and `GvkMode`.
 ///
-/// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
-/// The configuration the constructor writes, [`DataKey::Token`],
-/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
-/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
-/// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], [`DataKey::AdminViewKey`],
-/// [`DataKey::GvkMode`], and [`DataKey::DepositsPaused`], lives in the
-/// contract's instance entry.
 /// [`DataKey::Admin`], [`DataKey::PendingAdmin`], and [`DataKey::Nullifier`]
-/// are persistent keys.
+/// are persistent. Every other key lives in the instance.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -133,20 +131,21 @@ pub(crate) enum DataKey {
     ASPMembership,
     /// Address of the ASP Non-Membership contract
     ASPNonMembership,
+    /// Wasm hash every ASP Membership tree must run
+    ASPMembershipWasmHash,
+    /// Wasm hash every ASP Non-Membership tree must run
+    ASPNonMembershipWasmHash,
     /// Pool ASP policy flags (bitset; see `crate::policy`).
     PolicyFlags,
     /// Privacy key derivation domain. Immutable.
     KdfDomain,
-    /// Admin's Global View Key public point `D`, set once at construction.
+    /// Admin's Global View Key public point `D`, fixed at construction.
     ///
-    /// Immutable by design (issue #220): there is no setter, and an admin
-    /// transfer (`update_admin`, then `accept_admin`) moves only the admin
-    /// *address*. A rotated-out admin therefore keeps the ability to decrypt
-    /// every future note, and a leaked private `d` retroactively
-    /// deanonymizes the pool's whole history — the only recovery is
-    /// deploying a new pool and migrating. `D` is a circuit public input,
-    /// so forward-only rotation would be circuit-compatible if this trade
-    /// is ever revisited.
+    /// No setter. An admin transfer moves only the admin address, so a former
+    /// admin still decrypts every later note, and a leaked `d` exposes the
+    /// pool's whole history. Recovery is a new pool. `D` is a circuit
+    /// public input, so a forward-only rotation would need no circuit
+    /// change.
     AdminViewKey,
     /// Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     GvkMode,
@@ -231,11 +230,18 @@ pub struct PoolGvkContract;
 
 #[contractimpl]
 impl PoolGvkContract {
-    /// Constructor: initialize the GVK privacy pool contract.
+    /// Initializes the pool.
     ///
-    /// Same parameters as `pool::PoolContract::__constructor`, plus the
-    /// admin view key and GVK mode. The admin view key is stored as-is and
-    /// never updatable afterwards.
+    /// Takes `pool`'s constructor arguments plus the admin view key and the GVK
+    /// mode, both fixed for the pool's life.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidPolicyFlags`] for an unsupported bit,
+    /// [`Error::TreeCodeMismatch`] if a tree runs other code,
+    /// [`Error::InvalidGvkMode`] for an unsupported mode,
+    /// [`Error::InvalidAdminViewKey`] if the key is not a usable circuit input,
+    /// and [`Error::WrongLevels`] if `levels` is outside 1 to 32.
     pub fn __constructor(
         env: Env,
         admin: Address,
@@ -243,6 +249,8 @@ impl PoolGvkContract {
         verifier: Address,
         asp_membership: Address,
         asp_non_membership: Address,
+        asp_membership_wasm_hash: BytesN<32>,
+        asp_non_membership_wasm_hash: BytesN<32>,
         maximum_deposit_amount: U256,
         levels: u32,
         policy_flags: u32,
@@ -252,6 +260,11 @@ impl PoolGvkContract {
     ) -> Result<(), Error> {
         if !policy::is_valid(policy_flags) {
             return Err(Error::InvalidPolicyFlags);
+        }
+        if !runs_wasm(&asp_membership, &asp_membership_wasm_hash)
+            || !runs_wasm(&asp_non_membership, &asp_non_membership_wasm_hash)
+        {
+            return Err(Error::TreeCodeMismatch);
         }
         if !gvk::is_valid(gvk_mode) {
             return Err(Error::InvalidGvkMode);
@@ -263,6 +276,11 @@ impl PoolGvkContract {
         instance.set(&DataKey::Verifier, &verifier);
         instance.set(&DataKey::ASPMembership, &asp_membership);
         instance.set(&DataKey::ASPNonMembership, &asp_non_membership);
+        instance.set(&DataKey::ASPMembershipWasmHash, &asp_membership_wasm_hash);
+        instance.set(
+            &DataKey::ASPNonMembershipWasmHash,
+            &asp_non_membership_wasm_hash,
+        );
         instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         instance.set(&DataKey::PolicyFlags, &policy_flags);
         instance.set(&DataKey::KdfDomain, &kdf_domain);
@@ -508,77 +526,114 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Update the ASP Membership contract address.
+    /// Points the pool at another ASP Membership tree and publishes
+    /// [`AspMembershipUpdated`].
     ///
-    /// Changes the ASP Membership contract address. Requires admin
-    /// authorization.
+    /// # Errors
     ///
-    /// # Arguments
+    /// Returns [`Error::TreeCodeMismatch`] if the tree does not run the Wasm
+    /// fixed at construction, and [`Error::NotInitialized`] if the admin,
+    /// the hash, or the current tree is not stored.
     ///
-    /// * `env` - The Soroban environment
-    /// * `new_asp_membership` - New ASP Membership contract address
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        let (wasm_hash, _) = Self::get_asp_wasm_hashes(env)?;
+        if !runs_wasm(&new_asp_membership, &wasm_hash) {
+            return Err(Error::TreeCodeMismatch);
+        }
+        let old_tree = Self::get_asp_membership(env)?;
         env.storage()
             .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
+        AspMembershipUpdated {
+            old_tree,
+            new_tree: new_asp_membership,
+        }
+        .publish(env);
         Ok(())
     }
 
-    /// Update the ASP Non-Membership contract address.
+    /// Points the pool at another ASP Non-Membership tree and publishes
+    /// [`AspNonMembershipUpdated`].
     ///
-    /// Changes the ASP Non-Membership contract address. Requires admin
-    /// authorization.
+    /// # Errors
     ///
-    /// # Arguments
+    /// Returns [`Error::TreeCodeMismatch`] if the tree does not run the Wasm
+    /// fixed at construction, and [`Error::NotInitialized`] if the admin,
+    /// the hash, or the current tree is not stored.
     ///
-    /// * `env` - The Soroban environment
-    /// * `new_asp_non_membership` - New ASP Non-Membership contract address
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_asp_non_membership(
         env: &Env,
         new_asp_non_membership: Address,
     ) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        let (_, wasm_hash) = Self::get_asp_wasm_hashes(env)?;
+        if !runs_wasm(&new_asp_non_membership, &wasm_hash) {
+            return Err(Error::TreeCodeMismatch);
+        }
+        let old_tree = Self::get_asp_non_membership(env)?;
         env.storage()
             .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+        AspNonMembershipUpdated {
+            old_tree,
+            new_tree: new_asp_non_membership,
+        }
+        .publish(env);
         Ok(())
     }
 
-    /// Get the current Merkle root from the ASP Membership contract.
+    /// Returns the Wasm hashes the ASP Membership and ASP Non-Membership trees
+    /// must run, in that order.
     ///
-    /// Makes a cross-contract call to retrieve the current root of the
-    /// membership Merkle tree.
+    /// # Errors
     ///
-    /// # Arguments
+    /// Returns [`Error::NotInitialized`] if either hash is missing.
+    pub fn get_asp_wasm_hashes(env: &Env) -> Result<(BytesN<32>, BytesN<32>), Error> {
+        let instance = env.storage().instance();
+        let membership = instance
+            .get(&DataKey::ASPMembershipWasmHash)
+            .ok_or(Error::NotInitialized)?;
+        let non_membership = instance
+            .get(&DataKey::ASPNonMembershipWasmHash)
+            .ok_or(Error::NotInitialized)?;
+        Ok((membership, non_membership))
+    }
+
+    /// Returns the ASP Membership tree's current root.
     ///
-    /// * `env` - The Soroban environment
+    /// # Errors
     ///
-    /// # Returns
-    ///
-    /// The current membership Merkle root as U256
+    /// Returns [`Error::InvalidProof`] if the tree call fails, and
+    /// [`Error::NotInitialized`] if no tree is stored.
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
-        Ok(client.get_root())
+        match client.try_get_root() {
+            Ok(Ok(root)) => Ok(root),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
-    /// Get the current Merkle root from the ASP Non-Membership contract.
+    /// Returns the ASP Non-Membership tree's current root.
     ///
-    /// Makes a cross-contract call to retrieve the current root of the
-    /// non-membership Sparse Merkle tree.
+    /// # Errors
     ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    ///
-    /// The current non-membership Merkle root as U256
+    /// Returns [`Error::InvalidProof`] if the tree call fails, and
+    /// [`Error::NotInitialized`] if no tree is stored.
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
-        Ok(client.get_root())
+        match client.try_get_root() {
+            Ok(Ok(root)) => Ok(root),
+            _ => Err(Error::InvalidProof),
+        }
     }
 
     /// Get the token contract address.
@@ -816,38 +871,25 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Execute a shielded transaction with deposit handling.
+    /// Executes a shielded transaction.
     ///
-    /// If `ext_amount > 0`, tokens are transferred from the sender to the
-    /// pool before processing the transaction. Renews the pool, its tree, and
-    /// its verifier by at most a day each.
+    /// A deposit (`ext_amount > 0`) first moves the tokens from `sender` to the
+    /// pool. Renews the pool, its tree, and its verifier by at most a day
+    /// each.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DepositsPaused`] for a deposit while deposits are
-    /// paused, before the cap check and any token transfer, and
-    /// [`Error::WrongExtAmount`] if a deposit exceeds the cap, `ext_amount` is
-    /// outside the 2^248 bound or `i128`, or the proof's public amount differs.
-    ///
-    /// Returns [`Error::UnknownRoot`] if the proof's root is not in the recent
-    /// root history, [`Error::AlreadySpentNullifier`] if an input nullifier is
-    /// spent, [`Error::WrongExtHash`] if the proof's external data hash does
-    /// not match `ext_data`, [`Error::WrongGvkCiphertextCount`] if the proof's
-    /// GVK ciphertext counts do not match the pool's GVK mode,
-    /// [`Error::NonCanonicalPublicInput`] if a public input or a ciphertext
-    /// field is outside the BN254 scalar field, and [`Error::InvalidProof`] if
-    /// the proof is empty, the verifier refuses it, or its non-membership root
-    /// is not current or its membership root unknown.
-    ///
-    /// Returns [`Error::MerkleTreeFull`] if the tree cannot take two more
-    /// commitments, and [`Error::NotInitialized`] if configuration or tree
-    /// state is missing. [`Error::NextIndexNotEven`], [`Error::WrongLevels`],
-    /// and [`Error::Overflow`] mean corrupt tree state.
+    /// Returns [`Error::DepositsPaused`] for a deposit while paused, before the
+    /// cap check and any transfer, [`Error::WrongExtAmount`] for a deposit
+    /// over the cap or an out-of-range or mismatched amount, and
+    /// [`Error::InvalidProof`] for an empty or refused proof, an ASP root
+    /// the trees reject, or a failed tree call. Every other error names the
+    /// failed check or marks missing or corrupt state.
     ///
     /// # Panics
     ///
-    /// Panics if `sender` does not authorize the call, or if a token transfer
-    /// or an association set call fails.
+    /// Panics if `sender` does not authorize the call or a token transfer
+    /// fails.
     pub fn transact(
         env: &Env,
         proof: Proof,
@@ -928,7 +970,12 @@ impl PoolGvkContract {
         if policy::requires_membership_proofs(policy_flags) {
             let asp_address = Self::get_asp_membership(env)?;
             let client = ASPMembershipClient::new(env, &asp_address);
-            if !client.is_known_root(&proof.asp_membership_root) {
+            // `try_` here and in the root getters: tree error codes overlap the
+            // pool's, so a trapped tree error would read as a pool error.
+            if !matches!(
+                client.try_is_known_root(&proof.asp_membership_root),
+                Ok(Ok(true))
+            ) {
                 return Err(Error::InvalidProof);
             }
         }
