@@ -27,7 +27,7 @@ verifier contract, since the verifying key is baked into the WASM.
 |---|---|
 | `<policy>` | See [ASP policies](#asp-policies) below. |
 | `<gvk-mode>` | Omit for `gvk-off`. See [Global View Key (GVK)](#global-view-key-gvk) below. |
-| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract, and a classic issuer must have `AUTH_IMMUTABLE` set and neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so no issuer can freeze or claw back a pool's balance. |
+| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract. A classic issuer needs `AUTH_IMMUTABLE` and neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so it cannot freeze or claw back the pool's balance. |
 
 If neither `--token` nor `--pool` is given, one native XLM pool deploys by
 default.

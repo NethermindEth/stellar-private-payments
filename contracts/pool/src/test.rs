@@ -156,10 +156,9 @@ fn wasm_hash(contract: &Address) -> BytesN<32> {
     }
 }
 
-/// Deploys a contract that runs the code `contract` runs.
-///
-/// A natively registered contract runs its own code and fails the pool's code
-/// check. Mock auths first: the deployer authorizes the deploy.
+/// Deploys a contract running `contract`'s code; a natively registered contract
+/// fails the pool's code check. Mock auths first: the deployer authorizes the
+/// deploy.
 fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
     env.deployer()
         .with_address(Address::generate(env), [0u8; 32])
@@ -2570,12 +2569,9 @@ impl FailingTree {
     }
 }
 
-/// Asserts that `transact` reports a failing tree in `field` as
-/// `InvalidProof`.
-///
-/// The output commitment is outside the field, which `transact` checks only
-/// after the trees, so `InvalidProof` must come from the failing tree. A raw
-/// tree failure would read as `WrongLevels`.
+/// Asserts that `transact` reports a failing tree in `field` as `InvalidProof`.
+/// The output commitment is out of field, checked only after the trees, and a
+/// raw tree failure would read as `WrongLevels`.
 fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: u32) {
     let env = test_env();
     let mut setup = setup_test_contracts(&env);

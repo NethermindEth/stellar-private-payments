@@ -128,16 +128,10 @@ pub struct Proof {
     pub asp_non_membership_root: U256,
 }
 
-/// Storage keys for contract data
+/// Storage keys.
 ///
-/// The configuration the constructor writes, [`DataKey::Token`],
-/// [`DataKey::Verifier`], [`DataKey::MaximumDepositAmount`],
-/// [`DataKey::ASPMembership`], [`DataKey::ASPNonMembership`],
-/// [`DataKey::ASPMembershipWasmHash`], [`DataKey::ASPNonMembershipWasmHash`],
-/// [`DataKey::PolicyFlags`], [`DataKey::KdfDomain`], and
-/// [`DataKey::DepositsPaused`], lives in the contract's instance entry.
 /// [`DataKey::Admin`], [`DataKey::PendingAdmin`], and [`DataKey::Nullifier`]
-/// are persistent keys.
+/// are persistent. Every other key lives in the instance.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -157,9 +151,9 @@ pub(crate) enum DataKey {
     ASPMembership,
     /// Address of the ASP Non-Membership contract
     ASPNonMembership,
-    /// Hash of the Wasm every ASP Membership contract must run
+    /// Wasm hash every ASP Membership tree must run
     ASPMembershipWasmHash,
-    /// Hash of the Wasm every ASP Non-Membership contract must run
+    /// Wasm hash every ASP Non-Membership tree must run
     ASPNonMembershipWasmHash,
     /// Pool ASP policy flags (bitset; see `crate::policy`).
     PolicyFlags,
@@ -206,40 +200,18 @@ pub struct PoolContract;
 
 #[contractimpl]
 impl PoolContract {
-    /// Constructor: initialize the privacy pool contract
+    /// Initializes the pool.
     ///
-    /// Sets up the contract with the specified token, verifier, and Merkle tree
-    /// configuration. This function can only be called once.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `admin` - Address of the contract administrator
-    /// * `token` - Address of the token contract for deposits/withdrawals
-    /// * `verifier` - Address of the ZK proof verifier contract
-    /// * `asp_membership` - Address of the ASP Membership contract
-    /// * `asp_non_membership` - Address of the ASP Non-Membership contract
-    /// * `asp_membership_wasm_hash` - Hash of the Wasm every ASP Membership
-    ///   contract the pool reads must run
-    /// * `asp_non_membership_wasm_hash` - Hash of the Wasm every ASP
-    ///   Non-Membership contract the pool reads must run
-    /// * `maximum_deposit_amount` - Maximum allowed deposit per transaction
-    /// * `levels` - Number of levels in the commitment Merkle tree (1-32)
-    /// * `policy_flags` - ASP policy flag bitset enforced by the transact
-    ///   circuit
-    /// * `kdf_domain` - Privacy key derivation domain
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if already initialized or
-    /// invalid configuration
+    /// Each tree must run the Wasm its hash names, and every later re-point is
+    /// checked against the same hash. `levels` is the commitment tree
+    /// depth. `policy_flags` is the ASP bitset the transact circuit
+    /// enforces.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidPolicyFlags`] if `policy_flags` holds an
-    /// unsupported bit, [`Error::TreeCodeMismatch`] if either association set
-    /// does not run the Wasm its hash names, and [`Error::WrongLevels`] if
-    /// `levels` is outside 1 to 32.
+    /// Returns [`Error::InvalidPolicyFlags`] for an unsupported bit,
+    /// [`Error::TreeCodeMismatch`] if a tree runs other code, and
+    /// [`Error::WrongLevels`] if `levels` is outside 1 to 32.
     pub fn __constructor(
         env: Env,
         admin: Address,
@@ -470,49 +442,24 @@ impl PoolContract {
         hash_ext_data(env, ext, token)
     }
 
-    /// Execute a shielded transaction with deposit handling
+    /// Executes a shielded transaction.
     ///
-    /// This is the main entry point for users to interact with the pool.
-    /// If `ext_amount > 0`, tokens are transferred from the sender to the pool
-    /// before processing the transaction. Renews the pool, its tree, and its
-    /// verifier by at most a day each.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `proof` - Zero-knowledge proof and public inputs
-    /// * `ext_data` - External transaction data
-    /// * `sender` - Address of the transaction sender (must authorize funding
-    ///   transaction)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if validation fails
+    /// A deposit (`ext_amount > 0`) first moves the tokens from `sender` to the
+    /// pool. Renews the pool, its tree, and its verifier by at most a day
+    /// each.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::DepositsPaused`] for a deposit while deposits are
-    /// paused, before the cap check and any token transfer, and
-    /// [`Error::WrongExtAmount`] if a deposit exceeds the cap, `ext_amount` is
-    /// outside the 2^248 bound or `i128`, or the proof's public amount differs.
-    ///
-    /// Returns [`Error::UnknownRoot`] if the proof's root is not in the recent
-    /// root history, [`Error::AlreadySpentNullifier`] if an input nullifier is
-    /// spent, [`Error::WrongExtHash`] if the proof's external data hash does
-    /// not match `ext_data`, [`Error::NonCanonicalPublicInput`] if a public
-    /// input is outside the BN254 scalar field, and [`Error::InvalidProof`] if
-    /// the proof is empty, the verifier refuses it, its non-membership root is
-    /// not current or its membership root unknown, or a call to an association
-    /// set fails.
-    ///
-    /// Returns [`Error::MerkleTreeFull`] if the tree cannot take two more
-    /// commitments, and [`Error::NotInitialized`] if configuration or tree
-    /// state is missing. [`Error::NextIndexNotEven`], [`Error::WrongLevels`],
-    /// and [`Error::Overflow`] mean corrupt tree state.
+    /// Returns [`Error::DepositsPaused`] for a deposit while paused, before the
+    /// cap check and any transfer, [`Error::WrongExtAmount`] for a deposit
+    /// over the cap or an out-of-range or mismatched amount, and
+    /// [`Error::InvalidProof`] for an empty or refused proof, an ASP root
+    /// the trees reject, or a failed tree call. Every other error names the
+    /// failed check or marks missing or corrupt state.
     ///
     /// # Panics
     ///
-    /// Panics if `sender` does not authorize the call, or if a token transfer
+    /// Panics if `sender` does not authorize the call or a token transfer
     /// fails.
     pub fn transact(
         env: &Env,
@@ -604,10 +551,8 @@ impl PoolContract {
         if policy::requires_membership_proofs(policy_flags) {
             let asp_address = Self::get_asp_membership(env)?;
             let client = ASPMembershipClient::new(env, &asp_address);
-            // `try_`, here and in the root getters: tree error codes overlap
-            // the pool's (`asp-membership`'s `NotInitialized` and the pool's
-            // `WrongLevels` are both 4), so a trapped tree error would read as
-            // a pool error. Every failed tree call is `InvalidProof`.
+            // `try_` here and in the root getters: tree error codes overlap the
+            // pool's, so a trapped tree error would read as a pool error.
             if !matches!(
                 client.try_is_known_root(&proof.asp_membership_root),
                 Ok(Ok(true))
@@ -893,21 +838,14 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Update the ASP Membership contract address
-    ///
-    /// Changes the ASP Membership contract address and publishes
+    /// Points the pool at another ASP Membership tree and publishes
     /// [`AspMembershipUpdated`].
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `new_asp_membership` - New ASP Membership contract address
     ///
     /// # Errors
     ///
-    /// Returns [`Error::TreeCodeMismatch`] if `new_asp_membership` does not
-    /// run the Wasm fixed at construction, and [`Error::NotInitialized`] if
-    /// the admin, the hash, or the current address is not stored.
+    /// Returns [`Error::TreeCodeMismatch`] if the tree does not run the Wasm
+    /// fixed at construction, and [`Error::NotInitialized`] if the admin,
+    /// the hash, or the current tree is not stored.
     ///
     /// # Panics
     ///
@@ -930,21 +868,14 @@ impl PoolContract {
         Ok(())
     }
 
-    /// Update the ASP Non-Membership contract address
-    ///
-    /// Changes the ASP Non-Membership contract address and publishes
+    /// Points the pool at another ASP Non-Membership tree and publishes
     /// [`AspNonMembershipUpdated`].
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `new_asp_non_membership` - New ASP Non-Membership contract address
     ///
     /// # Errors
     ///
-    /// Returns [`Error::TreeCodeMismatch`] if `new_asp_non_membership` does
-    /// not run the Wasm fixed at construction, and [`Error::NotInitialized`]
-    /// if the admin, the hash, or the current address is not stored.
+    /// Returns [`Error::TreeCodeMismatch`] if the tree does not run the Wasm
+    /// fixed at construction, and [`Error::NotInitialized`] if the admin,
+    /// the hash, or the current tree is not stored.
     ///
     /// # Panics
     ///
@@ -970,12 +901,12 @@ impl PoolContract {
         Ok(())
     }
 
-    /// Returns the hashes of the Wasm the ASP Membership and ASP
-    /// Non-Membership contracts must run, in that order.
+    /// Returns the Wasm hashes the ASP Membership and ASP Non-Membership trees
+    /// must run, in that order.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotInitialized`] if either hash is not stored.
+    /// Returns [`Error::NotInitialized`] if either hash is missing.
     pub fn get_asp_wasm_hashes(env: &Env) -> Result<(BytesN<32>, BytesN<32>), Error> {
         let instance = env.storage().instance();
         let membership = instance
@@ -987,24 +918,12 @@ impl PoolContract {
         Ok((membership, non_membership))
     }
 
-    /// Get the current Merkle root from the ASP Membership contract
-    ///
-    /// Makes a cross-contract call to retrieve the current root of the
-    /// membership Merkle tree.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    ///
-    /// The current membership Merkle root as U256
+    /// Returns the ASP Membership tree's current root.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidProof`] if the call to the ASP Membership
-    /// contract fails, and [`Error::NotInitialized`] if no ASP Membership
-    /// address is stored.
+    /// Returns [`Error::InvalidProof`] if the tree call fails, and
+    /// [`Error::NotInitialized`] if no tree is stored.
     pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
@@ -1014,24 +933,12 @@ impl PoolContract {
         }
     }
 
-    /// Get the current Merkle root from the ASP Non-Membership contract
-    ///
-    /// Makes a cross-contract call to retrieve the current root of the
-    /// non-membership Sparse Merkle tree.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    ///
-    /// The current non-membership Merkle root as U256
+    /// Returns the ASP Non-Membership tree's current root.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidProof`] if the call to the ASP Non-Membership
-    /// contract fails, and [`Error::NotInitialized`] if no ASP Non-Membership
-    /// address is stored.
+    /// Returns [`Error::InvalidProof`] if the tree call fails, and
+    /// [`Error::NotInitialized`] if no tree is stored.
     pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
         let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);

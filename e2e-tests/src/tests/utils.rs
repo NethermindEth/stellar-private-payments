@@ -188,8 +188,7 @@ pub struct DeployedContracts {
     pub asp_non_membership: Address,
 }
 
-/// Returns the hash of the Wasm `contract` runs, which a pool's constructor
-/// takes for each association set.
+/// Returns the hash of the Wasm `contract` runs.
 ///
 /// # Panics
 ///
@@ -201,14 +200,12 @@ pub fn wasm_hash(contract: &Address) -> BytesN<32> {
     }
 }
 
-/// Deploys a contract that runs the code `contract` runs.
-///
-/// A natively registered contract runs its own code and fails a pool's code
-/// check.
+/// Deploys a contract running `contract`'s code; a natively registered contract
+/// fails a pool's code check.
 ///
 /// # Panics
 ///
-/// Panics if `contract` is not a deployed Wasm contract, or if the deployer's
+/// Panics if `contract` is not a deployed Wasm contract or the deployer's
 /// authorization is not mocked.
 pub fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
     env.deployer()

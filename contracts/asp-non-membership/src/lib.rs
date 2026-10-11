@@ -439,19 +439,19 @@ impl ASPNonMembership {
         Self::insert(&env, key, value)
     }
 
-    /// Inserts several key-value pairs into the tree, in order.
+    /// Inserts several key-value pairs, in order, under one admin
+    /// authorization.
     ///
-    /// Each pair follows [`ASPNonMembership::insert_leaf`] and publishes its
-    /// own `LeafInsertedEvent` with the root after that insert. The admin
-    /// authorizes once. Any existing key fails the whole call; an empty list
-    /// does nothing. Each insert writes the leaf, its path, and the root, so
-    /// the write footprint caps the list: simulate first.
+    /// Each pair publishes its own `LeafInsertedEvent`. A key already in the
+    /// tree fails the whole call, and an empty list does nothing. Each
+    /// insert writes the leaf, its path, and the root, so the write
+    /// footprint caps the list: simulate first.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated
-    /// in `entries`, [`Error::KeyNotFound`] if a stored node is missing or
-    /// malformed, and [`Error::NotInitialized`] if no admin is stored.
+    /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated,
+    /// [`Error::KeyNotFound`] if a stored node is missing or malformed, and
+    /// [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
