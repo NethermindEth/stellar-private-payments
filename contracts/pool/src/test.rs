@@ -11,7 +11,7 @@ use pool_core::events::{DepositPauseChanged, DepositPauseRepeated};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, IntoVal, String, U256, Val, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
+    testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ToXdr,
 };
@@ -1600,12 +1600,38 @@ fn accept_admin_renews_the_admin_entry() {
     let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
     let pool = PoolContractClient::new(&env, &pool_id);
 
+    let admin_ttl = || {
+        env.as_contract(&pool_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Admin)
+        })
+    };
+    let before = admin_ttl();
+
     env.mock_all_auths();
     pool.update_admin(&Address::generate(&env));
+    assert_eq!(admin_ttl(), before);
     pool.accept_admin();
 
+    assert_eq!(admin_ttl(), LIFETIME_LEDGERS);
+}
+
+/// A replacement proposal gets a full lifetime, not the remainder of the one it
+/// replaces.
+#[test]
+fn update_admin_renews_the_pending_admin_entry() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence().saturating_add(1_000));
+
+    pool.update_admin(&Address::generate(&env));
+
     let ttl = env.as_contract(&pool_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Admin)
+        env.storage().persistent().get_ttl(&DataKey::PendingAdmin)
     });
     assert_eq!(ttl, LIFETIME_LEDGERS);
 }

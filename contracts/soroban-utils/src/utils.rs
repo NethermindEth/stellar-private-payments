@@ -79,6 +79,9 @@ where
 /// `new_admin` calls [`accept_admin`]. Each contract passes its own keys, so
 /// contracts sharing this helper keep separate entries.
 ///
+/// Renews the proposal to [`LIFETIME_LEDGERS`] when less remains, so a
+/// replacement does not inherit an older proposal's remaining lifetime.
+///
 /// # Errors
 ///
 /// Returns [`AdminError::NotInitialized`] if no address is stored under
@@ -99,7 +102,9 @@ where
     let admin = get_admin(env, admin_key)?;
     admin.require_auth();
 
-    env.storage().persistent().set(pending_key, new_admin);
+    let storage = env.storage().persistent();
+    storage.set(pending_key, new_admin);
+    storage.extend_ttl(pending_key, LIFETIME_LEDGERS, LIFETIME_LEDGERS);
     AdminTransferProposed {
         admin,
         pending_admin: new_admin.clone(),
