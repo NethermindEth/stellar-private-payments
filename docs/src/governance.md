@@ -356,7 +356,7 @@ RPC's event retention, about seven days on the public testnet RPC:
 4. For an allowlist, add `{ "contractId": "TREE", "deploymentLedger": LEDGER }` to the manifest's
    `added_asp_memberships`, with `LEDGER` the deployment ledger from step 1, and merge it, since
    clients refuse a pool whose allowlist the manifest does not name. Point the bootnode at the new
-   manifest and restart it once with `--rescan-from LEDGER`, as
+   manifest and restart it while its upstream RPC still holds `LEDGER`, as
    [Add an allowlist](./bootnode.md#add-an-allowlist) describes. Redeploy the web app, which
    bundles the manifest when it is built, and give CLI users the new `deployments.json` for
    `--deployment` or their provisioned copy.
