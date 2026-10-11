@@ -17,7 +17,7 @@ DROP TABLE asp_membership_leaves;
 ALTER TABLE new_asp_membership_leaves RENAME TO asp_membership_leaves;
 CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
--- Keyed by index alone, the table dropped a leaf whose index another allowlist held, yet the
--- processor marked its event. Clearing the marks replays every event without a row in a
--- derived table: the dropped leaves and the events no table records.
+-- Keyed by index alone, the table dropped any leaf whose index another allowlist held, but the
+-- processor still marked its event. Clearing every mark replays those events; the rest replay
+-- harmlessly.
 DELETE FROM processed_events;

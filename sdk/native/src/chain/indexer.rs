@@ -154,11 +154,11 @@ impl<S: ContractDataStorage> Indexer<S> {
 /// Returns the ledger an indexing pass starts at, and the cursor it resumes
 /// from.
 ///
-/// Each contract resumes at its `last_indexed_ledger`; one without sync
-/// metadata starts at its deployment ledger (the manifest's earliest for
-/// `asp_membership` and the registry). The pass starts at the earliest of
-/// these, and keeps the shared cursor only if every contract has metadata,
-/// since that cursor is past a new contract's history.
+/// A contract with sync metadata resumes at its `last_indexed_ledger`; one
+/// without starts at its deployment ledger, or the manifest's earliest for
+/// `asp_membership` and the registry. The pass starts at the earliest of these,
+/// and drops the shared cursor if any contract lacks metadata, since the cursor
+/// is past its history.
 fn pass_start(config: &ContractConfig, sync: &[SyncMetadata]) -> Result<(u32, Option<String>)> {
     let min_deployment_ledger = config.min_deployment_ledger()?;
     let resume_points: Vec<(u32, Option<&SyncMetadata>)> = config

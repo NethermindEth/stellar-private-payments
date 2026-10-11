@@ -358,10 +358,8 @@ impl StateFetcher {
     fn pool_request(pool: &crate::types::PoolConfigEntry) -> ContractDataBulkRequest<'_> {
         ContractDataBulkRequest {
             contract_id: &pool.pool_contract_id,
-            // The administrator and the tree state are the only entries a pool
-            // keeps under their own ledger keys. Everything else, including the
-            // `AdminViewKey` and `GvkMode` that only `contracts/pool-gvk`
-            // writes, rides the instance entry and arrives with it.
+            // Only the admin and the tree state have their own ledger keys.
+            // Everything else, `pool-gvk`'s keys included, rides the instance.
             enum_keys: vec!["Admin", "State"],
         }
     }

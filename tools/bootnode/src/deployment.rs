@@ -40,7 +40,7 @@ pub fn deployment_storage_id(
 
 /// Storage id for `deployment`, leaving out `added_asp_memberships`.
 ///
-/// So adding an allowlist keeps the archive: a new one would refill from the
+/// Adding an allowlist then keeps the archive. A new id would refill from the
 /// oldest pool's ledger, which a retention-limited upstream may have dropped.
 pub fn current_deployment_storage_id(deployment: &ContractConfig) -> anyhow::Result<String> {
     let passphrase = deployment.network_passphrase.as_deref().unwrap_or_default();

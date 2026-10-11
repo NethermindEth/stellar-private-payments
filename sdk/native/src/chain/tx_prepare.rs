@@ -157,14 +157,14 @@ fn next_sequence(current: xdr::SequenceNumber) -> Result<xdr::SequenceNumber> {
     Ok(xdr::SequenceNumber(next))
 }
 
-/// Refuses simulated authorization for a pool `transact` that reaches beyond
-/// that call and, for a deposit, the token transfer into the pool.
+/// Refuses simulated authorization beyond this `transact` and, for a deposit,
+/// its token transfer into the pool.
 ///
-/// The sender signs whatever tree the simulation returns, including calls the
-/// RPC server or a contract adds. The root must be the exact `transact` built
-/// from `args`, or an entry signed for another proof or `ExtData` could move
-/// the deposit into someone else's notes. Entry and envelope signatures
-/// authorize the same tree, so the credential type is not checked.
+/// The sender signs whatever tree the simulation returns, calls added by the
+/// RPC or a contract included. The root must be the exact `transact` built from
+/// `args`, or an entry signed for another proof could move the deposit into
+/// someone else's notes. Entry and envelope signatures authorize the same tree,
+/// so the credential type is not checked.
 fn check_transact_auth(
     entries: &[xdr::SorobanAuthorizationEntry],
     pool: &xdr::ScAddress,
