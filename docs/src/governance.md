@@ -351,8 +351,10 @@ RPC's event retention, about seven days on the public testnet RPC:
 6. Once every check passes, press Build re-point and make the admin call.
 
 `deploy.sh` points every pool at the same trees, so re-point each pool that reads the old tree,
-one admin call per pool. A removed member still transacts in every pool that reads the old
-allowlist.
+one admin call per pool. The keep-alive loop in
+[Keep a deployment alive](./deploy.md#keep-a-deployment-alive) reads each pool's trees, so it
+covers the new tree from its next run. A removed member still transacts in every pool that reads
+the old allowlist.
 
 A blocklist re-point skips step 4, since clients prove against whichever blocklist the pool reads.
 An allowlist another party runs is deployed and loaded by that party, and its
