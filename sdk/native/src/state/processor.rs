@@ -169,4 +169,38 @@ mod tests {
         assert!(!process_events(&mut storage, 10)?);
         Ok(())
     }
+
+    #[test]
+    fn a_same_ledger_re_registration_resolves_to_the_later_key() -> Result<()> {
+        let owner = xdr::ScVal::Address(xdr::ScAddress::Account(xdr::AccountId(
+            xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([7; 32])),
+        )));
+        let registration = |id, key: u8| {
+            let bytes = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into().expect("key")));
+            let entries = vec![
+                xdr::ScMapEntry {
+                    key: symbol("encryption_key"),
+                    val: bytes.clone(),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("note_key"),
+                    val: bytes,
+                },
+            ];
+            raw_event(id, &[symbol("public_key_event"), owner.clone()], entries)
+        };
+        let mut storage = storage_with(vec![
+            registration("0000000000000000001-0000000000", 1),
+            registration("0000000000000000001-0000000001", 2),
+        ])?;
+
+        assert!(process_events(&mut storage, 1)?);
+        assert!(process_events(&mut storage, 1)?);
+
+        let entry = storage
+            .lookup_public_key_by_address(&crate::chain::scval_to_address_string(&owner)?)?
+            .expect("registered");
+        assert_eq!(entry.encryption_key.0, [2; 32]);
+        Ok(())
+    }
 }

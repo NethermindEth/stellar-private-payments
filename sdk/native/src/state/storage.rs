@@ -452,14 +452,12 @@ impl Storage {
     ) -> Result<Option<crate::types::PublicKeyEntry>> {
         self.conn
             .query_row(
-                "SELECT owner, encryption_key, note_key, ledger
-                 FROM (
-                    SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
-                    FROM public_keys p
-                    JOIN raw_contract_events r ON r.id = p.event_id
-                    WHERE p.owner = ?1
-                    GROUP BY p.owner
-                 )",
+                "SELECT p.owner, p.encryption_key, p.note_key, r.ledger
+                 FROM public_keys p
+                 JOIN raw_contract_events r ON r.id = p.event_id
+                 WHERE p.owner = ?1
+                 ORDER BY r.ledger DESC, r.id DESC
+                 LIMIT 1",
                 params![address],
                 map_public_key_entry,
             )
