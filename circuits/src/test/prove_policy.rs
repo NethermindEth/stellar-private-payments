@@ -862,62 +862,81 @@ mod tests {
         })
     }
 
+    /// Proves a deposit of `deposit` from two zero-amount inputs.
+    fn run_deposit_case(
+        asp: PolicyAspWitness,
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        out_amounts: [u64; 2],
+        deposit: u64,
+    ) -> Result<()> {
+        let case = TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(11u64),
+                    blinding: Scalar::from(21u64),
+                    amount: Scalar::from(0u64),
+                },
+                InputNote {
+                    leaf_index: 5,
+                    priv_key: Scalar::from(12u64),
+                    blinding: Scalar::from(22u64),
+                    amount: Scalar::from(0u64),
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(101u64),
+                    blinding: Scalar::from(201u64),
+                    amount: Scalar::from(out_amounts[0]),
+                },
+                OutputNote {
+                    pub_key: Scalar::from(102u64),
+                    blinding: Scalar::from(202u64),
+                    amount: Scalar::from(out_amounts[1]),
+                },
+            ],
+        );
+
+        let leaves = prepopulated_prefix(
+            0xD3AD0517u64,
+            &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+            LEAF_PREFIX,
+        );
+
+        let membership_trees = default_membership_trees(&case, 0x5555_AAAAu64);
+
+        let keys = default_non_membership_keys(&case);
+
+        run_case(
+            wasm,
+            r1cs,
+            &case,
+            leaves,
+            Scalar::from(deposit),
+            &membership_trees,
+            &keys,
+            asp,
+            None::<fn(&mut Inputs)>,
+        )
+    }
+
     #[test]
     #[ignore]
     fn test_tx_only_adds_notes_deposit() -> Result<()> {
         for_each_policy(PolicyCircuitSet::All, |asp, wasm, r1cs| {
-            // both inputs dummy -> Merkle checks gated off by amount=0
-            let case = TxCase::new(
-                vec![
-                    InputNote {
-                        leaf_index: 0,
-                        priv_key: Scalar::from(11u64),
-                        blinding: Scalar::from(21u64),
-                        amount: Scalar::from(0u64),
-                    },
-                    InputNote {
-                        leaf_index: 5,
-                        priv_key: Scalar::from(12u64),
-                        blinding: Scalar::from(22u64),
-                        amount: Scalar::from(0u64),
-                    },
-                ],
-                vec![
-                    OutputNote {
-                        pub_key: Scalar::from(101u64),
-                        blinding: Scalar::from(201u64),
-                        amount: Scalar::from(7u64),
-                    },
-                    OutputNote {
-                        pub_key: Scalar::from(102u64),
-                        blinding: Scalar::from(202u64),
-                        amount: Scalar::from(5u64),
-                    },
-                ],
-            );
+            run_deposit_case(asp, wasm, r1cs, [7, 5], 12)
+        })
+    }
 
-            let deposit = Scalar::from(12u64);
-            let leaves = prepopulated_prefix(
-                0xD3AD0517u64,
-                &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
-                LEAF_PREFIX,
-            );
-
-            let membership_trees = default_membership_trees(&case, 0x5555_AAAAu64);
-
-            let keys = default_non_membership_keys(&case);
-
-            run_case(
-                wasm,
-                r1cs,
-                &case,
-                leaves,
-                deposit,
-                &membership_trees,
-                &keys,
-                asp,
-                None::<fn(&mut Inputs)>,
-            )
+    #[test]
+    #[ignore]
+    fn test_tx_moving_no_value_should_fail() -> Result<()> {
+        for_each_policy(PolicyCircuitSet::All, |asp, wasm, r1cs| {
+            run_deposit_case(asp, wasm, r1cs, [7, 5], 12)?;
+            let res = run_deposit_case(asp, wasm, r1cs, [0, 0], 0);
+            expect_proof_rejected(res, "a transaction moving no value must not verify")
         })
     }
 

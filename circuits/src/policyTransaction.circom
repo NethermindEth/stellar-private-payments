@@ -93,9 +93,7 @@ template PolicyTransaction(nIns, nOuts, levels) {
         inCheckRoot[tx].in[1] <== inTree[tx].root;
         inCheckRoot[tx].enabled <== inAmount[tx];
 
-        // We don't need to range check input amounts, since all inputs are valid UTXOs that
-        // were already checked as outputs in the previous transaction (or zero amount UTXOs that don't
-        // need to be checked either).
+        // Inputs need no range check: each non-zero input is a leaf that passed the output check.
 
         sumIns += inAmount[tx];
     }
@@ -135,6 +133,11 @@ template PolicyTransaction(nIns, nOuts, levels) {
 
     // Verify amount invariant
     sumIns + publicAmount === sumOuts;
+
+    // Refuse zero value. Amounts are below 2^248, so the sum cannot wrap to zero.
+    component isZeroValue = IsZero();
+    isZeroValue.in <== sumIns + sumOuts;
+    isZeroValue.out === 0;
 
     // Optional safety constraint to make sure extDataHash cannot be changed
     signal extDataSquare <== extDataHash * extDataHash;

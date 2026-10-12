@@ -1,83 +1,83 @@
 {
-  "version": "0.5",
+  "version": "0.6",
   "meta": {
     "repository": "NethermindEth/stellar-private-payments",
-    "commit": "83043b60ed665b647f11f9f58e049f611de13c1d",
+    "commit": "ef42a47ee6a84b5c7a289b979e2fa2526c73aabc",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
     "circom-witness-rs": "0.3.0"
   },
   "policy_tx_2_2": {
     "setup": "local",
-    "r1cs": "ba68665e343afa2873924f568a1508fc3cac08a71cbae208b868feb00abf8e38",
-    "graph.bin": "d590a22ef504713a0d258f4704d3845d6dfa4964595416d82a74f965c52d1add",
-    "proving_key.bin": "aed4f1091c3901e90c595c2386a489835e5ab1bc05f0d66a107437e062b5235e"
+    "r1cs": "6441e50b470cafb31eea0ffda5e7286607353e37bcf5391c5f0e2fd6fe511e76",
+    "graph.bin": "2ae64f376e971c054db03d509e9fee625891a6f4cc0530923b7fb7abf9a0edf2",
+    "proving_key.bin": "0ca2da7a7ed9ccb24232d5ba99d049099e772cf3165cd4799f7e428038f95125"
   },
   "policy_tx_2_2_A": {
     "setup": "local",
-    "r1cs": "70d7438fb0665c3e45445686261b982455962baa721cbea4265e74adb68c721b",
-    "graph.bin": "c57c80450210b897109ab81996cfcdc31fa41617800812d2f9ac9d2cfd25ab11",
-    "proving_key.bin": "54a78cb3f85d13b0c1d4ca52f2750e8ad124a993c6434e2db8d77ccd77f23a63"
+    "r1cs": "591bfbf5b125e4e4566a9d8a28936f55471b9bc2f600ec5e5ddad39a5df8db52",
+    "graph.bin": "9a99c2b8f7cec0c785c6b9beebca047f93a3b03a798adc991196fd2361683b3a",
+    "proving_key.bin": "b084716b02c22e658dac8305cdefe8ccbee892e39f27ca4b4b016bbceb9947de"
   },
   "policy_tx_2_2_B": {
     "setup": "local",
-    "r1cs": "3cd79e47a124b99d3ec698dcf63938fe5bb51a05ff13b7b3d98a854336bbaa7c",
-    "graph.bin": "d4dc29962f760ce9ed5ddbab3619e3c0502daa02d6b8a608d77df330cff6a397",
-    "proving_key.bin": "16721797e783b728d82276ac2a333d18a7479ded69af5241556d20e0130e4244"
+    "r1cs": "dee636a4c8603d9c81a2fead1ff5139166c5a65a45cba81300d0bad97d964ed4",
+    "graph.bin": "943dc322c53664e60d707a1b0191a8a56980c3810ab03cfbf58d5c89153dcac1",
+    "proving_key.bin": "e12bc6063195be15fcd9890d0adcf916d3a8335acb642a34fbfa3294f3608a15"
   },
   "policy_tx_2_2_AB": {
     "setup": "local",
-    "r1cs": "115f3ed13f4669584c57c3884c0cb89d29207b256386446d30e0124a5fcf2df6",
-    "graph.bin": "07a7a87c040fcbb57fc3661ed3c39238d7f15e5e405609ea469cc5b40b748aff",
-    "proving_key.bin": "82b38d34f2f85e613a985347a28e312c94e126e89ffba1cb9acd6b4808af8999"
+    "r1cs": "e0016a6bfdf1d757937c6fca27b40ccb60b0785bdea203b697f2305232425700",
+    "graph.bin": "798795b1bce70f855f95eac21d5fc856d7521975189200b0088778ca483810aa",
+    "proving_key.bin": "1ad0d9354790473dff7fd19ba35ca39b77b9d1e2c518392447ce7c684ad72283"
   },
   "policy_tx_2_2_gvk_V": {
     "setup": "local",
-    "r1cs": "9e70b2abd247db0b0c21ba4d1da2f65d05e8f56274d9e23cb519d6bf521b5ba6",
-    "graph.bin": "88b7bfe0af6c2c77d0b69fcf4e9cf34511edc52e26a4a35435cb056c656f8f41",
-    "proving_key.bin": "6cbdf1cf4cbf30da2da251338539cc0d3441b86ea60212e1712ae2d939b5e3f4"
+    "r1cs": "9f501147070e85abe48c5eb03be0f5c746749506065012113e5ca1bd614da992",
+    "graph.bin": "b021afddd804b907cdc8d2f502ba35bb546e8d81b3cd4d2fb352960403f527a3",
+    "proving_key.bin": "81717e603e14f164d86b82426354d07ecc4800367bae663e505f64af6608a3e2"
   },
   "policy_tx_2_2_gvk_T": {
     "setup": "local",
-    "r1cs": "14a747ef5b6c10455b01b5c7fdd751dd1e63b855b404106c4e72a89cfe2f96c9",
-    "graph.bin": "8404605cae44f43fcc8339ca2bc71ee2d83f05568867303384b78e63ccdd7bdc",
-    "proving_key.bin": "b67a17d2dcc73c55c08e5be8c2ae75336bbe514a4a4585861ea4581c4618dd5c"
+    "r1cs": "11f28c3fae54570fd0144b3c6250b3350198e2460642279a771c4cc955e08bd3",
+    "graph.bin": "f15ce74cadaa710189954cc4e4aac3bd4c95198ff22845b9f8154bbc7e238996",
+    "proving_key.bin": "816370b948ba40dde53c4e3e1867c9cf5c7cb1a9405e788af7db318a0f3c76a5"
   },
   "policy_tx_2_2_A_gvk_V": {
     "setup": "local",
-    "r1cs": "530f5d6e3499e6b843ae354482907cb6ca7ab1237bf18e54d09c884d50be3f16",
-    "graph.bin": "8258cef14df52ce281485dfa7bd73dfbf3e9500dca071e4b8ab176d55f851931",
-    "proving_key.bin": "92cb086168bb387a8ed997b4afe88382c23f9dd5c13d10d6061f66788fd7caf1"
+    "r1cs": "7ca200414f012c707b7c8f728d2e1368c74f7d5191e23e4267a866f810a6a810",
+    "graph.bin": "371e0bc990c54db930a79740c3de541240d3f170317e73957c4bc3cb61f988b3",
+    "proving_key.bin": "50eb4b9843f6f3eb18b234534eac2e7a282f155885535a8a8595970ed2c2cc4e"
   },
   "policy_tx_2_2_A_gvk_T": {
     "setup": "local",
-    "r1cs": "fc8fde0994dd4a770710f818b642c5d4794b13611fd2cf79d61129581c00f658",
-    "graph.bin": "3d7969c6f12820003e66136769b9aaeabe4b6b2a353c78c747c424b2d960a1e4",
-    "proving_key.bin": "60f548ad439a530c1ce0bcc5c8f837c5add328ba2e91839f3b12e6ac69009212"
+    "r1cs": "94843af0ff56dd351eed79dc112c716e2a5c32dae4784cd6b2efde00f683c399",
+    "graph.bin": "9f9f2aa11f6868a6a4956ad7dc3a4a294ad8d5a4298d8a6f767d0b877fe3e488",
+    "proving_key.bin": "0282671ec3a3bc9ed43769413cf761ded190df0596fb8781cc2f337c8e6d7ed4"
   },
   "policy_tx_2_2_B_gvk_V": {
     "setup": "local",
-    "r1cs": "e50cd5d7d0ae93562fb6d0f846a2d91645a6232fe6180197f3e0661d10345b55",
-    "graph.bin": "c7a22ea94155d557d50ce14546349d0da42cf57023afa8d958042c89f952eeb2",
-    "proving_key.bin": "ee0db70b74178fbb5a8fd7605f010516efc0e0e36fbca0f7fddcca96f8f1767b"
+    "r1cs": "e100ad1b596f7b38555edf2852cf14e1879218a338d9e58845f8a4d873094a86",
+    "graph.bin": "47582fde47629514dcb0ad6ad947f0cef462a25e07e9d9d3b5de6bb1c507b9f0",
+    "proving_key.bin": "33b36ebdef13d0225297327d4ff2b5cb11db41e5e401b01b8dcc016511042a73"
   },
   "policy_tx_2_2_B_gvk_T": {
     "setup": "local",
-    "r1cs": "8514637dad5c1e8ba52734ecfdfa94f14ff8af3cc6cb69222a52a97a009043d7",
-    "graph.bin": "ceea1207bcff4b940a180bc03366193865441de6af7452e109bda90d860a711f",
-    "proving_key.bin": "bf118df2dd7185694ea8c15ebabd9fce12e4609e128232c6e5d763e0def21270"
+    "r1cs": "1f07fe3c5237b7f8725d1f67ccbd024844eeb35e0bbefe6c92b533820a5a3e3a",
+    "graph.bin": "f34994070c70155504f25a426a8fe852b369aee8a0c746db30aa72b4fc580152",
+    "proving_key.bin": "1c8d1bbc865a18c03d868756d012f8fc94289fc0aa3b1267ed68f2c094684dc8"
   },
   "policy_tx_2_2_AB_gvk_V": {
     "setup": "local",
-    "r1cs": "ef1e8745d13a565495782e89d26c92dfd6ab5748d43e49feb0ebe1b32239f28a",
-    "graph.bin": "fc74c75d4db6f6a70f0bc881b2b3d47f614d61e5f493d867a9a27d91d578b808",
-    "proving_key.bin": "d8b9478c23d4881fa10c6817753d591cde975dbda17ffaff37b857805887c602"
+    "r1cs": "e536c6dbc3bfdd894b90ec3b57e117e0e2a1089a19fd2cf4466df34fbb3a1ca5",
+    "graph.bin": "a0a6c1fbfbc956272c2c69037767371dc445737d03cacd4a599e9bdefa2f6b8b",
+    "proving_key.bin": "6fa075647fa43baa643fe3970a5065c9bcee55cc81fbe8c59c3901ed9b4eee6a"
   },
   "policy_tx_2_2_AB_gvk_T": {
     "setup": "local",
-    "r1cs": "2036fe1bed4a5bdf136de3d17bd8aeb679cc7f9c553ec22f22d07ccacd3f5412",
-    "graph.bin": "a3802f69d70a61b7623ac0196dcfc85fbe80eb5328f8ea4308b3479d9bed10e8",
-    "proving_key.bin": "dc28c20d03cd86fa74cef7ec48d7930409dc1750367de5059467bee2dee77930"
+    "r1cs": "8d4478f5259b391ff71d0306ca1021722a489386d902f4485ad3c1e3297548df",
+    "graph.bin": "8688002eaf8040a08218b469b24c2cd8b9450b287672148268d522cdc01d1940",
+    "proving_key.bin": "1aeeffd0f01d0a17e012130adedbdfa061409bba52fbad7f62c7817618b01e8e"
   },
   "selectiveDisclosure_1": {
     "setup": "local",
