@@ -509,6 +509,11 @@ where
 /// - circuit inputs suitable for the witness calculator,
 /// - per-output encrypted note data, and
 /// - convenience derived values (nullifiers/commitments).
+///
+/// # Errors
+///
+/// Returns an error if the parameters do not fit the circuit, the amounts do
+/// not balance or are all zero, or hashing or encryption fails.
 pub fn transact<H>(params: TransactParams, hash_ext_data: H) -> Result<TransactArtifacts>
 where
     H: Fn(&ExtData, &str, &str) -> Result<[u8; 32]>,
@@ -636,6 +641,9 @@ where
             ext_amount,
             outputs_sum
         ));
+    }
+    if inputs_sum.is_zero() && outputs_sum.is_zero() {
+        return Err(anyhow!("a transaction must deposit or spend a note"));
     }
 
     let sender_note_pubkey_bytes = crypto::derive_public_key(&priv_key.0)?;
@@ -1834,6 +1842,83 @@ mod tests {
         );
 
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn transact_refuses_a_transaction_that_moves_no_value() {
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::ZERO,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                membership_proof: None,
+                non_membership_proof: None,
+                tree_depth: 10,
+                asp_depth: 8,
+                smt_depth: 10,
+                policy_flags: PolicyFlags::EMPTY,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            |_, _, _| Ok([0u8; 32]),
+        );
+
+        let err = res.expect_err("a transaction that moves no value must be refused");
+        assert_eq!(
+            err.to_string(),
+            "a transaction must deposit or spend a note"
+        );
+    }
+
+    #[test]
+    fn withdraw_of_the_whole_note_builds() {
+        let input = TransactInputNote {
+            amount: NoteAmount::from(10),
+            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_elements: vec![Field::ZERO; 10],
+            merkle_path_indices: Field::ZERO,
+        };
+
+        let artifacts = withdraw(
+            WithdrawParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
+                withdraw_recipient: "G...".into(),
+                withdraw_amount: ExtAmount::from(10),
+                inputs: vec![input],
+                outputs: None,
+                membership_proof: None,
+                non_membership_proof: None,
+                tree_depth: 10,
+                asp_depth: 8,
+                smt_depth: 10,
+                policy_flags: PolicyFlags::EMPTY,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            |_, _, _| Ok([0u8; 32]),
+        )
+        .expect("a withdrawal of the whole note builds");
+
+        let zero = field_to_circuit_hex(&Field::ZERO).expect("zero hex");
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("outAmount")
+            .expect("outAmount present")
+        {
+            InputValue::Array(v) => assert_eq!(v, &[zero.clone(), zero]),
+            _ => panic!("outAmount should be an array"),
+        }
     }
 
     fn test_admin_key() -> BabyJubJubPoint {
