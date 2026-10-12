@@ -1,8 +1,8 @@
 {
-  "version": "0.5",
+  "version": "0.6",
   "meta": {
     "repository": "NethermindEth/stellar-private-payments",
-    "commit": "83043b60ed665b647f11f9f58e049f611de13c1d",
+    "commit": "ef42a47ee6a84b5c7a289b979e2fa2526c73aabc",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
     "circom-witness-rs": "0.3.0"
@@ -87,20 +87,20 @@
   },
   "selectiveDisclosure_2": {
     "setup": "local",
-    "r1cs": "899d9c5688e55e9bbc207b027b5a6825f0bc47e5ddf98f97f4be3901a5b4455c",
-    "graph.bin": "1e4e11e05340081b6fa5e637ba628ec31cf5a8da806a372afe64df6ceca8d350",
-    "proving_key.bin": "3377c1547d87aa867a2cd890ce19441686d10ad7f32d412f468974e69ec4c524"
+    "r1cs": "988e82bf67cc9de9638f1de76c3f9083b1674e31f8a2ab09ac1fe49cd6084605",
+    "graph.bin": "f5922a9d66a2f235c830efae8f37dbecc3f295cf821affed51d92d98041f09e3",
+    "proving_key.bin": "34afc61c840b68ea27a5045e09985109b568c11ea3cc7d67d84fa8d9c952bf49"
   },
   "selectiveDisclosure_3": {
     "setup": "local",
-    "r1cs": "ba98042223538cb048120142b0aee8eb6763c182c4ac1c69b7c8e0c9729b3531",
-    "graph.bin": "ea138a845ba366f523fa91ecd95f85f77eec18421ad50d981d7328f093a846d8",
-    "proving_key.bin": "866a92fcb57967cad4d24ae36511d4cc0f02a5754ed540e5c405d730868e7386"
+    "r1cs": "86279afd520bab980f1544c26cec5a123a0cdd04d28947d3a41ce93c796d36f1",
+    "graph.bin": "0d302c3b0bd2df04a43c586a4737121d9eafc0b72b59f3f424d52188b8eebdc1",
+    "proving_key.bin": "ae627605db21f7e0833d3dcaba3412451d89d7355bc8339d44b1d939dca3d526"
   },
   "selectiveDisclosure_4": {
     "setup": "local",
-    "r1cs": "d98821b7eac9867676f1fdabdb3eb691faba88906d3596f22a2bf414819e0506",
-    "graph.bin": "7bad1cc8c48333b08689440ee7fa757510d56de2488315ffeb295efa4d1e9531",
-    "proving_key.bin": "86bafe3e2ffd0a036aa88690338b91c646ae4a12b442e7ff0d903d2546f9f9f7"
+    "r1cs": "e8841669c28ca28acaa1d8a27e945e9ca1c87baff07dd181de4ee74393b2e63b",
+    "graph.bin": "1905662f263d08205fb24da8d8fce5dc7cddc67842e30de8259de54edda40fec",
+    "proving_key.bin": "ffa8beb90ef565d16110244c0b3c9284721218b19900ff37d41294e1312cb90d"
   }
 }
