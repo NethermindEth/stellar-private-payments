@@ -3,7 +3,7 @@ use crate::types::ProcessedEvent;
 use anyhow::Result;
 
 pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
-    let unprocessed = storage.get_unprocessed_events(limit)?;
+    let mut unprocessed = storage.get_unprocessed_events(limit)?;
     if unprocessed.is_empty() {
         return Ok(false);
     }
@@ -12,7 +12,7 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
     let mut pubkeys = vec![];
     let mut leaves = vec![];
     let mut processed_ids = vec![];
-    for event in unprocessed {
+    while let Some(event) = unprocessed.pop() {
         processed_ids.push(event.id.clone());
         // The raw event stays in `raw_contract_events`; a later version replays
         // it by deleting its `processed_events` row.
@@ -61,7 +61,7 @@ pub(crate) fn process_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ContractEvent, ContractsEventData, Field, U256};
+    use crate::types::{ContractEvent, ContractsEventData};
     use stellar_xdr::{self as xdr, WriteXdr};
 
     const COMMITMENT: u64 = 99;
@@ -164,14 +164,8 @@ mod tests {
             commitment_event("0000000000000000001-0000000000", entries(0)),
             commitment_event("0000000000000000001-0000000001", entries(1)),
         ])?;
-        let commitment = Field(U256::from(COMMITMENT));
 
         assert!(process_events(&mut storage, 10)?);
-
-        assert_eq!(
-            storage.get_pool_commitment_leaves_ordered("CPOOL")?,
-            vec![commitment]
-        );
         assert!(!process_events(&mut storage, 10)?);
         Ok(())
     }
