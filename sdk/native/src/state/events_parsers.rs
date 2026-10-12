@@ -1,8 +1,8 @@
 use crate::{
     chain::{
-        ParsedContractEvent, parse_event_metadata, scval_to_address_string, scval_to_bytes,
-        scval_to_global_view_key_ciphertext, scval_to_optional_global_view_key_ciphertext,
-        scval_to_u32, scval_to_u64, scval_to_u256,
+        ParsedContractEvent, event_name, parse_event_metadata, scval_to_address_string,
+        scval_to_bytes, scval_to_global_view_key_ciphertext,
+        scval_to_optional_global_view_key_ciphertext, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     types::{
         ContractEvent, Field, LeafAddedEvent, LeafDeletedEvent, LeafInsertedEvent,
@@ -23,30 +23,37 @@ const GVK_CIPHERTEXT_FIELD: &str = "gvk_ciphertext";
 /// Returns an error if the event's topics or data do not decode into the
 /// fields its name requires.
 pub fn parse_event(event: ContractEvent) -> Result<Option<ProcessedEvent>> {
-    let parsed = parse_event_metadata(event)?;
-    let ev = match parsed.name.as_str() {
+    // Decode the data of known events only, so an unknown one is skipped
+    // whatever its shape.
+    let name = event_name(&event.topics)?;
+    let parsed = || parse_event_metadata(event);
+    let ev = match name.as_str() {
         // Pool events contracts/pool/src/pool.rs (pool-gvk adds `gvk_ciphertext`)
         "new_nullifier_event" | "NewNullifierEvent" => {
-            ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?)
+            ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed()?)?)
         }
         "new_commitment_event" | "NewCommitmentEvent" => {
-            ProcessedEvent::Commitment(parse_new_commitment_event(parsed)?)
+            ProcessedEvent::Commitment(parse_new_commitment_event(parsed()?)?)
         }
         // Public keys registry contracts/public-key-registry/src/lib.rs
         "public_key_event" | "PublicKeyEvent" => {
-            ProcessedEvent::PublicKey(parse_public_key_event(parsed)?)
+            ProcessedEvent::PublicKey(parse_public_key_event(parsed()?)?)
         }
         // ASP membership events contracts/asp-membership
-        "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
+        "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed()?)?),
         // ASP non-membership events contracts/asp-non-membership
         // Parsed but not stored; the processor marks them processed.
         "leaf_inserted" | "LeafInserted" => {
-            ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?)
+            ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed()?)?)
         }
-        "leaf_updated" | "LeafUpdated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
-        "leaf_deleted" | "LeafDeleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
+        "leaf_updated" | "LeafUpdated" => {
+            ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed()?)?)
+        }
+        "leaf_deleted" | "LeafDeleted" => {
+            ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed()?)?)
+        }
         _ => {
-            tracing::debug!(name = %parsed.name, "skipping an event this version does not read");
+            tracing::debug!(%name, "skipping an event this version does not read");
             return Ok(None);
         }
     };

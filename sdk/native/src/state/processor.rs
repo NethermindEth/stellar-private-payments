@@ -1,6 +1,6 @@
 use super::{SqliteStorage, events_parsers::parse_event};
 use crate::types::ProcessedEvent;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
     let mut unprocessed = storage.get_unprocessed_events(limit)?;
@@ -13,16 +13,15 @@ pub(crate) fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<
     let mut leaves = vec![];
     let mut processed_ids = vec![];
     while let Some(event) = unprocessed.pop() {
-        processed_ids.push(event.id.clone());
-        // The raw event stays in `raw_contract_events`; a later version replays
-        // it by deleting its `processed_events` row.
-        let parsed = match parse_event(event) {
-            Ok(Some(parsed)) => parsed,
-            Ok(None) => continue,
-            Err(e) => {
-                tracing::error!("cannot process event: {e:?}");
-                continue;
-            }
+        let id = event.id.clone();
+        // A known event that does not decode is an SDK bug. Stop rather than
+        // save state without it.
+        let parsed = parse_event(event).with_context(|| format!("cannot process event {id}"))?;
+        processed_ids.push(id);
+        let Some(parsed) = parsed else {
+            // The raw event stays in `raw_contract_events`; a later version
+            // replays it by deleting its `processed_events` row.
+            continue;
         };
         match parsed {
             ProcessedEvent::Nullifier(ev) => nullifiers.push(ev),
@@ -97,6 +96,19 @@ mod tests {
         raw_event(id, &[symbol("new_commitment_event"), commitment], entries)
     }
 
+    fn commitment_entries(index: u32) -> Vec<xdr::ScMapEntry> {
+        vec![
+            xdr::ScMapEntry {
+                key: symbol("encrypted_output"),
+                val: xdr::ScVal::Bytes(xdr::ScBytes::default()),
+            },
+            xdr::ScMapEntry {
+                key: symbol("index"),
+                val: xdr::ScVal::U32(index),
+            },
+        ]
+    }
+
     fn storage_with(events: Vec<ContractEvent>) -> Result<SqliteStorage> {
         let mut storage = SqliteStorage::connect_in_memory()?;
         storage.save_events_batch(&ContractsEventData {
@@ -133,11 +145,58 @@ mod tests {
     }
 
     #[test]
-    fn an_event_that_fails_to_parse_is_read_once() -> Result<()> {
-        let mut storage = storage_with(vec![commitment_event(
-            "0000000000000000001-0000000000",
-            vec![],
-        )])?;
+    fn an_event_that_fails_to_parse_stops_processing() -> Result<()> {
+        let mut storage = storage_with(vec![
+            commitment_event("0000000000000000001-0000000000", vec![]),
+            commitment_event("0000000000000000001-0000000001", commitment_entries(0)),
+        ])?;
+
+        let err = process_events(&mut storage, 10).expect_err("bad event");
+
+        assert!(format!("{err:#}").contains("0000000000000000001-0000000000"));
+        assert_eq!(storage.get_unprocessed_events(10)?.len(), 2);
+        assert!(
+            storage
+                .get_pool_commitment_leaves_ordered("CPOOL")?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_nullifier_event_with_non_map_data_fails_to_parse() {
+        let event = ContractEvent {
+            value: b64(&xdr::ScVal::U32(1)),
+            ..raw_event(
+                "0000000000000000001-0000000000",
+                &[
+                    symbol("new_nullifier_event"),
+                    xdr::ScVal::U256(xdr::UInt256Parts {
+                        hi_hi: 0,
+                        hi_lo: 0,
+                        lo_hi: 0,
+                        lo_lo: 5,
+                    }),
+                ],
+                vec![],
+            )
+        };
+
+        let err = parse_event(event).expect_err("non-map data");
+
+        assert!(err.to_string().contains("should be a map"));
+    }
+
+    #[test]
+    fn an_unknown_event_with_non_map_data_is_read_once() -> Result<()> {
+        let mut storage = storage_with(vec![ContractEvent {
+            value: b64(&xdr::ScVal::U32(1)),
+            ..raw_event(
+                "0000000000000000001-0000000000",
+                &[symbol("unknown_future_event")],
+                vec![],
+            )
+        }])?;
 
         assert!(process_events(&mut storage, 10)?);
         assert!(!process_events(&mut storage, 10)?);
@@ -148,21 +207,9 @@ mod tests {
     /// read on every pass.
     #[test]
     fn a_repeated_commitment_does_not_stall_processing() -> Result<()> {
-        let entries = |index| {
-            vec![
-                xdr::ScMapEntry {
-                    key: symbol("encrypted_output"),
-                    val: xdr::ScVal::Bytes(xdr::ScBytes::default()),
-                },
-                xdr::ScMapEntry {
-                    key: symbol("index"),
-                    val: xdr::ScVal::U32(index),
-                },
-            ]
-        };
         let mut storage = storage_with(vec![
-            commitment_event("0000000000000000001-0000000000", entries(0)),
-            commitment_event("0000000000000000001-0000000001", entries(1)),
+            commitment_event("0000000000000000001-0000000000", commitment_entries(0)),
+            commitment_event("0000000000000000001-0000000001", commitment_entries(1)),
         ])?;
 
         assert!(process_events(&mut storage, 10)?);
