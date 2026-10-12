@@ -28,6 +28,8 @@ Policy entry points (`policy_tx_2_2*.circom`) compose a shared base transact cir
 (`policyTransaction.circom`) with optional ASP modules (`aspMembership.circom`,
 `aspNonMembership.circom`).
 
+`PolicyTransaction` refuses a transaction whose amounts are all zero.
+
 **Do not use `policyTransaction.circom` as a main component.** The base
 template exposes `inPublicKey` outputs for ASP wiring; when embedded as a
 subcomponent they remain private, but promoting `PolicyTransaction` to `component main`

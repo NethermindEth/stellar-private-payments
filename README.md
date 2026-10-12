@@ -66,6 +66,7 @@ The main transaction circuit proves:
 - Valid Merkle proofs for input commitments
 - Correct output commitment computation
 - Balance conservation (inputs = outputs + public amount)
+- Non-zero value moved
 - ASP membership and/or non-membership proofs, depending on pool policy flags
   (`none` = unrestricted; `allowlist`, `blocklist`, or `allowlist-blocklist`)
 
