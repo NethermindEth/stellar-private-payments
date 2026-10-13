@@ -236,91 +236,55 @@ impl BackgroundSync {
     /// [`SyncKick::kick`].
     ///
     /// On a main RPC retention gap, syncs historical events via the optional
-    /// bootnode until handoff, then resumes on the main RPC. Waits and retries
-    /// while the bootnode cannot answer.
+    /// bootnode until handoff, then resumes on the main RPC. Retries any error
+    /// not listed below after the same wait.
     ///
     /// # Errors
     ///
-    /// Returns the error that stops it; a bootnode `-32004` never does.
+    /// Returns [`RetentionGap::SyncGap`] if no bootnode is configured, and
+    /// [`RetentionGap::BootnodeFailed`] if the bootnode cannot be used.
     pub async fn run(self) -> Result<(), Error> {
-        if self.is_stopped() {
-            return Ok(());
-        }
-
         tracing::info!(
             "background sync starting (bootnode={})",
             self.bootnode_url.as_deref().unwrap_or("<none>")
         );
 
-        let indexer = match Indexer::init(
-            self.rpc.clone(),
-            self.storage.fork()?,
-            &self.contract_config,
-        )
-        .await
-        {
-            Ok(indexer) => {
-                tracing::info!("background sync: main RPC indexer ready");
-                indexer
-            }
-            Err(e) if is_rpc_sync_gap(&e) => {
-                tracing::warn!("background sync: main RPC sync gap, switching to bootnode");
-                loop {
-                    if self.is_stopped() {
-                        return Ok(());
-                    }
-                    match self.bootnode_catch_up().await {
-                        Ok(()) => break,
-                        Err(_) if self.is_stopped() => {
-                            tracing::info!("background sync stopped during bootnode catch-up");
-                            return Ok(());
-                        }
-                        Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(reason))) => {
-                            tracing::warn!(
-                                "background sync: bootnode not ready, retrying: {reason}"
-                            );
-                            self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
-                        }
-                        Err(e) => return Err(e),
-                    }
-                }
-                if self.is_stopped() {
-                    return Ok(());
-                }
-                tracing::info!("background sync: bootnode catch-up finished, resuming main RPC");
-                Indexer::init(
-                    self.rpc.clone(),
-                    self.storage.fork()?,
+        let mut indexer = None;
+        while !self.is_stopped() {
+            if indexer.is_none() {
+                match open_indexer(
+                    &self.rpc,
+                    &self.storage,
                     &self.contract_config,
+                    self.bootnode_url.as_deref(),
+                    Some(self.stop.as_ref()),
                 )
                 .await
-                .context("indexer")?
+                {
+                    Ok(opened) => {
+                        tracing::info!("background sync: main RPC indexer ready");
+                        indexer = Some(opened);
+                    }
+                    Err(_) if self.is_stopped() => break,
+                    Err(
+                        e @ Error::RetentionGap(
+                            RetentionGap::SyncGap | RetentionGap::BootnodeFailed(_),
+                        ),
+                    ) => return Err(e),
+                    Err(e) => tracing::warn!(
+                        "background sync could not open the indexer, retrying: {e:#}"
+                    ),
+                }
             }
-            Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
-        };
-
-        loop {
-            if self.is_stopped() {
-                tracing::info!("background sync stopped");
-                return Ok(());
-            }
-            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
+            if let Some(opened) = &indexer
+                && let Err(e) = catch_up_loop(opened, &self.storage, Some(self.stop.as_ref())).await
+            {
                 tracing::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
         }
-    }
-
-    /// Sync historical range via bootnode until retention handoff, then clear
-    /// cursors for main RPC resume.
-    async fn bootnode_catch_up(&self) -> Result<(), Error> {
-        bootnode_catch_up(
-            &self.storage,
-            &self.contract_config,
-            self.bootnode_url.as_deref(),
-            Some(self.stop.as_ref()),
-        )
-        .await
+        tracing::info!("background sync stopped");
+        Ok(())
     }
 }
 
@@ -486,6 +450,29 @@ async fn bootnode_catch_up(
     }
 }
 
+/// Opens the main RPC indexer, first catching up through the bootnode when the
+/// main RPC has a retention gap.
+async fn open_indexer(
+    rpc: &RpcClient,
+    storage: &StorageHandle,
+    contract_config: &ContractConfig,
+    bootnode_url: Option<&str>,
+    stop: Option<&AtomicBool>,
+) -> Result<Indexer<StorageHandle>, Error> {
+    match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
+        Ok(indexer) => return Ok(indexer),
+        Err(e) if is_rpc_sync_gap(&e) => {}
+        Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
+    }
+    bootnode_catch_up(storage, contract_config, bootnode_url, stop).await?;
+    if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+        return Err(anyhow::anyhow!("stopped during bootnode catch-up").into());
+    }
+    Ok(Indexer::init(rpc.clone(), storage.fork()?, contract_config)
+        .await
+        .context("indexer")?)
+}
+
 /// Catch local storage up to the current chain tip for a deployment.
 ///
 /// On a main RPC retention gap, syncs via `bootnode_url` until handoff, then
@@ -496,16 +483,7 @@ pub(crate) async fn catch_up(
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<(), Error> {
-    let indexer = match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
-        Ok(indexer) => indexer,
-        Err(e) if is_rpc_sync_gap(&e) => {
-            bootnode_catch_up(storage, contract_config, bootnode_url, None).await?;
-            Indexer::init(rpc.clone(), storage.fork()?, contract_config)
-                .await
-                .context("indexer")?
-        }
-        Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
-    };
+    let indexer = open_indexer(rpc, storage, contract_config, bootnode_url, None).await?;
     catch_up_loop(&indexer, storage, None)
         .await
         .context("indexer catch-up")
@@ -931,12 +909,22 @@ mod tests {
 
     async fn main_rpc_with_a_gap() -> MockServer {
         let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(|request: &wiremock::Request| {
+                request.body_json::<serde_json::Value>().is_ok_and(|body| {
+                    body["params"]["startLedger"]
+                        .as_u64()
+                        .is_some_and(|ledger| ledger < u64::from(HANDOFF_LEDGER))
+                })
+            })
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(range_error(HANDOFF_LEDGER, 3_000_000)),
+            )
+            .mount(&server)
+            .await;
         mount_get_events(
             &server,
-            vec![
-                rpc_sync_gap_response(),
-                get_events_page("main-cursor", json!([]), HANDOFF_LEDGER),
-            ],
+            vec![get_events_page("main-cursor", json!([]), HANDOFF_LEDGER)],
         )
         .await;
         server
@@ -966,6 +954,50 @@ mod tests {
         )
     }
 
+    /// Kicks `sync` until `done` holds, then stops it and returns its result.
+    async fn run_until(
+        sync: BackgroundSync,
+        storage: &StorageHandle,
+        done: impl Fn(&[SyncMetadata]) -> bool,
+    ) -> Result<(), Error> {
+        let kick = sync.kick.clone();
+        let stop = sync.stop_handle();
+        let run = sync.run();
+        futures::pin_mut!(run);
+        let reached = async {
+            loop {
+                kick.kick();
+                if done(&storage.get_sync_state().await.expect("sync state")) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        // Less than the 5 s sleep a kick cannot cut short.
+        tokio::time::timeout(Duration::from_secs(4), async {
+            tokio::select! {
+                result = &mut run => {
+                    panic!("background sync ended before the expected state: {result:?}")
+                }
+                () = reached => stop.request(),
+            }
+            run.await
+        })
+        .await
+        .expect("background sync did not reach the expected state")
+    }
+
+    fn handed_off(rows: &[SyncMetadata]) -> bool {
+        distinct_config().all_contract_ids().iter().all(|id| {
+            rows.iter()
+                .any(|row| &row.contract_id == id && row.last_indexed_ledger == HANDOFF_LEDGER)
+        })
+    }
+
+    fn at_cursor(cursor: &str) -> impl Fn(&[SyncMetadata]) -> bool + '_ {
+        move |rows: &[SyncMetadata]| !rows.is_empty() && rows.iter().all(|row| row.cursor == cursor)
+    }
+
     /// `-32004` at the probe and again mid-catch-up.
     #[tokio::test]
     async fn background_sync_waits_while_the_bootnode_is_not_ready() {
@@ -987,37 +1019,33 @@ mod tests {
         .await;
         let storage = temp_storage("not-ready-wait");
         let sync = background_sync(&rpc, &storage, Some(bootnode.uri()));
-        let kick = sync.kick.clone();
-        let stop = sync.stop_handle();
-        let contract_ids = distinct_config().all_contract_ids();
 
-        let handed_off = async {
-            loop {
-                // Skips the waits between attempts.
-                kick.kick();
-                let sync_state = storage.get_sync_state().await.expect("sync state");
-                let handed_off = contract_ids.iter().all(|id| {
-                    sync_state.iter().any(|meta| {
-                        &meta.contract_id == id && meta.last_indexed_ledger == HANDOFF_LEDGER
-                    })
-                });
-                if handed_off {
-                    stop.request();
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        };
-        // Less than the 5 s sleep a counted failure takes.
-        let (result, ()) = tokio::time::timeout(
-            Duration::from_secs(4),
-            futures::future::join(sync.run(), handed_off),
-        )
-        .await
-        .expect("background sync reaches the handoff");
+        let result = run_until(sync, &storage, handed_off).await;
 
         assert!(result.is_ok(), "{result:?}");
         assert_eq!(get_events_calls(&bootnode).await, 7);
+    }
+
+    #[tokio::test]
+    async fn background_sync_retries_the_main_rpc_after_the_handoff() {
+        let rpc = MockServer::start().await;
+        mount_get_events(
+            &rpc,
+            vec![
+                rpc_sync_gap_response(),
+                json_rpc_error(-32_603, "upstream timeout"),
+                get_events_page("main-cursor", json!([]), 3_000_000),
+            ],
+        )
+        .await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(&bootnode, vec![handoff_response()]).await;
+        let storage = temp_storage("main-rpc-error");
+        let sync = background_sync(&rpc, &storage, Some(bootnode.uri()));
+
+        let result = run_until(sync, &storage, at_cursor("main-cursor")).await;
+
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[tokio::test]
