@@ -97,9 +97,22 @@ Run the check again whenever the manifest changes:
 deployments/scripts/verify-deployment.sh testnet
 ```
 
-Publish the whole `deployments/NETWORK/` directory, with `circuits.json` and `circuit_keys/`, at a
-URL your users can download from, for example next to the web app. The CLI and the bootnode read it
-at runtime; the web app embeds it at build time.
+CLI users prove with three files per circuit: the `.r1cs` file that `make circuits` writes to
+`target/circuits-artifacts/`, and the `.graph.bin` and `_proving_key.bin` files in
+`circuit_keys/`. The CLI looks for them in a `circuits/` folder next to the manifest, so copy the
+directory and add that folder:
+
+```bash
+make circuits
+cp -R deployments/NETWORK publish
+mkdir publish/circuits
+for stem in $(jq -r 'keys[] | select(. != "meta" and . != "version")' publish/circuits.json); do
+  cp target/circuits-artifacts/$stem.r1cs publish/circuit_keys/$stem.graph.bin \
+    publish/circuit_keys/${stem}_proving_key.bin publish/circuits/
+done
+```
+
+Publish `publish/` at a URL your users can download from, for example next to the web app.
 
 ## Run a bootnode
 
