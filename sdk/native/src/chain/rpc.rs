@@ -44,6 +44,8 @@ pub enum Error {
     InvalidRpcUrl(#[from] http::uri::InvalidUri),
     #[error("invalid rpc url: {0}")]
     InvalidRpcUrlFromUriParts(#[from] http::uri::InvalidUriParts),
+    #[error("invalid rpc url: {0} is not an http or https URL")]
+    NotHttpUrl(String),
     #[error("json decoding error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("{0} not found: {1}")]
@@ -305,20 +307,17 @@ impl Client {
     /// Creates a client with a custom timeout in seconds.
     pub fn with_timeout(base_url: &str, timeout_secs: u32) -> Result<Self, Error> {
         let uri = base_url.parse::<Uri>()?;
+        if !matches!(uri.scheme_str(), Some("http" | "https")) {
+            return Err(Error::NotHttpUrl(base_url.to_owned()));
+        }
         let mut parts = uri.into_parts();
 
         if let (Some(scheme), Some(authority)) = (&parts.scheme, &parts.authority)
             && authority.port().is_none()
         {
-            let port = match scheme.as_str() {
-                "http" => Some(80),
-                "https" => Some(443),
-                _ => None,
-            };
-            if let Some(port) = port {
-                let host = authority.host();
-                parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
-            }
+            let port = if scheme.as_str() == "https" { 443 } else { 80 };
+            let host = authority.host();
+            parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
         }
 
         let uri = Uri::from_parts(parts)?;
@@ -1024,6 +1023,16 @@ mod tests {
         let names: Vec<&str> = specs.iter().map(|(_, name)| *name).collect();
 
         assert_eq!(names, vec![CONTRACT_INSTANCE_KEY, "Admin", "State"]);
+    }
+
+    #[test]
+    fn a_url_without_an_http_scheme_is_refused() {
+        for url in ["localhost:8080", "rpc.example.com", "ftp://rpc.example.com"] {
+            assert!(
+                matches!(Client::new(url), Err(Error::NotHttpUrl(_))),
+                "{url}"
+            );
+        }
     }
 
     #[test]
