@@ -1,8 +1,9 @@
 use super::*;
 use soroban_sdk::{
     Address, Bytes, Env, String,
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Deployer as _, Events as _},
 };
+use soroban_utils::MAX_EXTENSION_LEDGERS;
 
 fn test_env() -> Env {
     #[cfg(miri)]
@@ -181,4 +182,23 @@ fn get_kdf_domain_returns_constructor_value() {
     let env = test_env();
     let client = PublicKeyRegistryClient::new(&env, &register(&env));
     assert_eq!(client.get_kdf_domain(), String::from_str(&env, KDF_DOMAIN));
+}
+
+#[test]
+fn register_renews_the_instance() {
+    let env = test_env();
+    let contract_id = register(&env);
+    let client = PublicKeyRegistryClient::new(&env, &contract_id);
+    let account = account(&env, Address::generate(&env), 0x11, 0x22);
+    env.mock_all_auths();
+    client.register(&account);
+    let before = env.deployer().get_contract_instance_ttl(&contract_id);
+
+    // A registration that changes nothing still renews.
+    client.register(&account);
+
+    assert_eq!(
+        env.deployer().get_contract_instance_ttl(&contract_id),
+        before.saturating_add(MAX_EXTENSION_LEDGERS)
+    );
 }

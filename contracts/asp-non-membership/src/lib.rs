@@ -27,16 +27,18 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{AdminError, extend_instance, poseidon2_compress, poseidon2_hash2};
 
 /// Storage keys for contract data
 ///
-/// [`DataKey::Root`] is an instance key. [`DataKey::Admin`] and
-/// [`DataKey::Node`] are persistent keys.
+/// [`DataKey::Root`] is an instance key. [`DataKey::Admin`],
+/// [`DataKey::PendingAdmin`], and [`DataKey::Node`] are persistent keys.
+/// `PendingAdmin` is present only while an admin transfer is pending.
 #[contracttype]
 #[derive(Clone, Debug)]
 enum DataKey {
     Admin,
+    PendingAdmin,
     Root,
     Node(U256), // Node hash -> U256 (value)
 }
@@ -71,6 +73,16 @@ pub enum Error {
     InvalidProof = 4,
     NotInitialized = 5,
     Overflow = 6,
+    NoPendingAdmin = 7,
+}
+
+impl From<AdminError> for Error {
+    fn from(e: AdminError) -> Self {
+        match e {
+            AdminError::NotInitialized => Error::NotInitialized,
+            AdminError::NoPendingAdmin => Error::NoPendingAdmin,
+        }
+    }
 }
 
 // Events
@@ -115,23 +127,75 @@ impl ASPNonMembership {
         Ok(())
     }
 
-    /// Update the admin address
+    /// Proposes a new contract administrator.
     ///
-    /// Transfers administrative control to a new address. Requires
-    /// authorization from the current admin.
+    /// Replaces any earlier proposal. The current admin keeps every power until
+    /// `new_admin` calls `accept_admin`.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `new_admin` - New address that will have permission to modify the tree
+    /// * `new_admin` - Address proposed as the next administrator
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotInitialized`] if the contract has no admin address
     /// stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin)
-            .map_err(|soroban_utils::AdminError::NotInitialized| Error::NotInitialized)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
+            .map_err(Error::from)
+    }
+
+    /// Withdraws the pending admin transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn cancel_admin_transfer(env: Env) -> Result<(), Error> {
+        soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Installs the pending admin as the contract administrator.
+    ///
+    /// The previous admin loses every power over the tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPendingAdmin`] if no transfer is pending, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pending admin does not authorize the call.
+    pub fn accept_admin(env: Env) -> Result<(), Error> {
+        soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)
+            .map_err(Error::from)
+    }
+
+    /// Returns the contract administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the contract has no admin address
+    /// stored.
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        soroban_utils::get_admin(&env, &DataKey::Admin).map_err(Error::from)
+    }
+
+    /// Returns the address proposed as the next administrator, or `None` when
+    /// no transfer is pending.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        soroban_utils::get_pending_admin(&env, &DataKey::PendingAdmin)
     }
 
     /// Hash a leaf node using Poseidon2
@@ -370,28 +434,55 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
-    #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        Self::insert(&env, key, value)
+    }
 
+    /// Inserts several key-value pairs, in order, under one admin
+    /// authorization.
+    ///
+    /// Each pair publishes its own `LeafInsertedEvent`. A key already in the
+    /// tree fails the whole call, and an empty list does nothing. Each
+    /// insert writes the leaf, its path, and the root, so the write
+    /// footprint caps the list: simulate first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated,
+    /// [`Error::KeyNotFound`] if a stored node is missing or malformed, and
+    /// [`Error::NotInitialized`] if no admin is stored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call.
+    pub fn insert_leaves(env: Env, entries: Vec<(U256, U256)>) -> Result<(), Error> {
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        entries
+            .iter()
+            .try_for_each(|(key, value)| Self::insert(&env, key, value))
+    }
+
+    /// Inserts one key-value pair without checking authorization.
+    #[allow(clippy::cast_possible_truncation)]
+    fn insert(env: &Env, key: U256, value: U256) -> Result<(), Error> {
+        let store = env.storage().persistent();
         let instance = env.storage().instance();
         let root: U256 = instance
             .get(&DataKey::Root)
-            .unwrap_or(U256::from_u32(&env, 0u32));
+            .unwrap_or(U256::from_u32(env, 0u32));
 
         // Compute key bits
-        let key_bits = Self::split_bits(&env, &key);
+        let key_bits = Self::split_bits(env, &key);
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
+        let find_result = Self::find_key_internal(env, &store, &key, &key_bits, &root, 0u32)?;
 
         if find_result.found {
             return Err(Error::KeyAlreadyExists);
         }
 
-        let zero = U256::from_u32(&env, 0u32);
+        let zero = U256::from_u32(env, 0u32);
         let mut siblings = find_result.siblings.clone();
         let mut mixed = false;
         let mut rt_old = zero.clone();
@@ -400,7 +491,7 @@ impl ASPNonMembership {
         // Handle collision case: extend siblings for a common prefix and add
         // old leaf
         if !find_result.is_old0 {
-            let old_key_bits = Self::split_bits(&env, &find_result.not_found_key);
+            let old_key_bits = Self::split_bits(env, &find_result.not_found_key);
             let mut i = siblings.len();
             // Extend siblings with zeros for common prefix bits
             while i < old_key_bits.len()
@@ -412,7 +503,7 @@ impl ASPNonMembership {
                 i = i.checked_add(1).ok_or(Error::Overflow)?;
             }
             rt_old = Self::hash_leaf(
-                &env,
+                env,
                 find_result.not_found_key.clone(),
                 find_result.not_found_value.clone(),
             );
@@ -425,8 +516,8 @@ impl ASPNonMembership {
         }
 
         // Insert the new leaf
-        let mut rt = Self::hash_leaf(&env, key.clone(), value.clone());
-        let leaf_node = vec![&env, U256::from_u32(&env, 1u32), key.clone(), value.clone()];
+        let mut rt = Self::hash_leaf(env, key.clone(), value.clone());
+        let leaf_node = vec![env, U256::from_u32(env, 1u32), key.clone(), value.clone()];
         store.set(&DataKey::Node(rt.clone()), &leaf_node);
 
         // Build up the tree from leaf to root (process siblings in reverse)
@@ -457,9 +548,9 @@ impl ASPNonMembership {
                 };
                 let bit = key_bits.get(i as u32).ok_or(Error::KeyNotFound)?;
                 rt_old = if bit {
-                    Self::hash_internal(&env, old_sibling.clone(), rt_old.clone())
+                    Self::hash_internal(env, old_sibling.clone(), rt_old.clone())
                 } else {
-                    Self::hash_internal(&env, rt_old.clone(), old_sibling.clone())
+                    Self::hash_internal(env, rt_old.clone(), old_sibling.clone())
                 };
                 store.remove(&DataKey::Node(rt_old.clone()));
             }
@@ -472,10 +563,10 @@ impl ASPNonMembership {
                 (rt.clone(), sibling.clone())
             };
 
-            rt = Self::hash_internal(&env, left_hash.clone(), right_hash.clone());
+            rt = Self::hash_internal(env, left_hash.clone(), right_hash.clone());
 
             // Store internal node
-            let internal_node = vec![&env, left_hash, right_hash];
+            let internal_node = vec![env, left_hash, right_hash];
             store.set(&DataKey::Node(rt.clone()), &internal_node);
         }
 
@@ -502,7 +593,7 @@ impl ASPNonMembership {
             value: value.clone(),
             root: rt,
         }
-        .publish(&env);
+        .publish(env);
 
         Ok(())
     }
@@ -531,8 +622,7 @@ impl ASPNonMembership {
     ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
+        soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
         let instance = env.storage().instance();
         let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
@@ -734,7 +824,8 @@ impl ASPNonMembership {
     /// Get the current root of the tree
     ///
     /// Returns the root hash of the Sparse Merkle tree. Returns zero if the
-    /// tree is empty or hasn't been initialized yet.
+    /// tree is empty. Renews the contract by at most a day, since a blocklist
+    /// pool reads the root on every transaction.
     ///
     /// # Arguments
     ///
@@ -743,7 +834,12 @@ impl ASPNonMembership {
     /// # Returns
     ///
     /// Returns the current root hash as a U256 value, or zero if empty
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the constructor has not run.
     pub fn get_root(env: Env) -> Result<U256, Error> {
+        extend_instance(&env);
         env.storage()
             .instance()
             .get(&DataKey::Root)

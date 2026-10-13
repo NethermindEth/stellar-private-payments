@@ -20,13 +20,19 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
+use pool_core::events::{
+    AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, IntoVal,
+    String, U256, Vec, contract, contracterror, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Events},
+    testutils::{
+        Address as _, Deployer as _, Events, MockAuth, MockAuthInvoke, storage::Persistent as _,
+    },
     token::{Client as TokenClient, StellarAssetClient},
 };
-use soroban_utils::{constants::bn256_modulus, utils::MockToken};
+use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus, utils::MockToken};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -91,6 +97,23 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 
 const KDF_DOMAIN: &str = "tests";
 
+/// Returns the hash of the Wasm `contract` runs.
+fn wasm_hash(contract: &Address) -> BytesN<32> {
+    match contract.executable() {
+        Some(Executable::Wasm(hash)) => hash,
+        other => panic!("expected a Wasm contract, found {other:?}"),
+    }
+}
+
+/// Deploys a contract running `contract`'s code; a natively registered contract
+/// fails the pool's code check. Mock auths first: the deployer authorizes the
+/// deploy.
+fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
+    env.deployer()
+        .with_address(Address::generate(env), [0u8; 32])
+        .deploy_contract(ContractExecutable::Wasm(wasm_hash(contract)), args)
+}
+
 fn register_pool_gvk(
     env: &Env,
     setup: &TestSetup,
@@ -108,6 +131,8 @@ fn register_pool_gvk(
             setup.verifier.clone(),
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
+            wasm_hash(&setup.asp_membership_address),
+            wasm_hash(&setup.asp_non_membership_address),
             maximum_deposit_amount,
             levels,
             policy_flags,
@@ -407,6 +432,7 @@ fn pool_gvk_update_admin_transfers_control() {
 
     let new_admin = Address::generate(&env);
     pool.update_admin(&new_admin);
+    pool.accept_admin();
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
         env.storage()
@@ -415,6 +441,140 @@ fn pool_gvk_update_admin_transfers_control() {
             .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
     assert_eq!(stored_admin, new_admin);
+}
+
+#[test]
+fn the_old_admin_keeps_control_until_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+
+    assert!(pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn the_new_admin_has_no_control_before_acceptance() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &setup.admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.accept_admin();
+}
+
+#[test]
+fn accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn cancel_admin_transfer_clears_the_pending_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+    assert_eq!(pool.get_pending_admin(), Some(new_admin));
+
+    pool.cancel_admin_transfer();
+
+    assert_eq!(pool.get_pending_admin(), None);
+    assert_eq!(pool.get_admin(), setup.admin);
+    assert_eq!(pool.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    pool.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.cancel_admin_transfer();
 }
 
 #[test]
@@ -482,7 +642,11 @@ fn pool_gvk_update_asp_membership_transfers_control() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    let new_asp_membership = Address::generate(&env);
+    let new_asp_membership = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
     pool.update_asp_membership(&new_asp_membership);
 
     let stored: Address = env.as_contract(&pool_id, || {
@@ -510,7 +674,11 @@ fn pool_gvk_update_asp_non_membership_transfers_control() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
 
-    let new_asp_non_membership = Address::generate(&env);
+    let new_asp_non_membership = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
     pool.update_asp_non_membership(&new_asp_non_membership);
 
     let stored: Address = env.as_contract(&pool_id, || {
@@ -566,6 +734,247 @@ fn pool_gvk_update_asp_non_membership_requires_admin() {
     let pool = PoolGvkContractClient::new(&env, &pool_id);
 
     pool.update_asp_non_membership(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #21)")]
+fn constructor_refuses_an_allowlist_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.register(
+        PoolGvkContract,
+        (
+            setup.admin,
+            setup.token,
+            setup.verifier,
+            setup.asp_membership_address,
+            setup.asp_non_membership_address.clone(),
+            mk_bytesn32(&env, 7),
+            wasm_hash(&setup.asp_non_membership_address),
+            U256::from_u32(&env, 1000),
+            3u32,
+            0u32,
+            String::from_str(&env, KDF_DOMAIN),
+            mk_point(&env, 1, 2),
+            VIEW_ONLY,
+        ),
+    );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #21)")]
+fn constructor_refuses_a_blocklist_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.register(
+        PoolGvkContract,
+        (
+            setup.admin,
+            setup.token,
+            setup.verifier,
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address,
+            wasm_hash(&setup.asp_membership_address),
+            mk_bytesn32(&env, 7),
+            U256::from_u32(&env, 1000),
+            3u32,
+            0u32,
+            String::from_str(&env, KDF_DOMAIN),
+            mk_point(&env, 1, 2),
+            VIEW_ONLY,
+        ),
+    );
+}
+
+#[test]
+fn update_asp_membership_refuses_a_tree_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let asset = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    assert_eq!(
+        pool.try_update_asp_membership(&asset),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPMembership)
+            .unwrap_or_else(|| panic!("expected the membership address to be stored"))
+    });
+    assert_eq!(stored, setup.asp_membership_address);
+}
+
+#[test]
+fn update_asp_non_membership_refuses_a_tree_of_another_code() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let asset = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    assert_eq!(
+        pool.try_update_asp_non_membership(&asset),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::ASPNonMembership)
+            .unwrap_or_else(|| panic!("expected the non-membership address to be stored"))
+    });
+    assert_eq!(stored, setup.asp_non_membership_address);
+}
+
+#[test]
+fn update_asp_membership_publishes_the_old_and_new_tree() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let new_tree = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+
+    pool.update_asp_membership(&new_tree);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AspMembershipUpdated {
+            old_tree: setup.asp_membership_address,
+            new_tree,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+}
+
+#[test]
+fn update_asp_non_membership_publishes_the_old_and_new_tree() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let new_tree = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    pool.update_asp_non_membership(&new_tree);
+
+    assert_eq!(
+        env.events().all().events(),
+        [AspNonMembershipUpdated {
+            old_tree: setup.asp_non_membership_address,
+            new_tree,
+        }
+        .to_xdr(&env, &pool_id)]
+    );
+}
+
+/// Corrupts only the stored blocklist hash, so only the blocklist re-point may
+/// refuse.
+#[test]
+fn update_asp_membership_checks_only_the_membership_hash() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::ASPNonMembershipWasmHash, &mk_bytesn32(&env, 7));
+    });
+    env.mock_all_auths();
+    let allowlist = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+    let blocklist = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    assert_eq!(pool.try_update_asp_membership(&allowlist), Ok(Ok(())));
+    assert_eq!(
+        pool.try_update_asp_non_membership(&blocklist),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+}
+
+/// Corrupts only the stored allowlist hash, so only the allowlist re-point may
+/// refuse.
+#[test]
+fn update_asp_non_membership_checks_only_the_non_membership_hash() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::ASPMembershipWasmHash, &mk_bytesn32(&env, 7));
+    });
+    env.mock_all_auths();
+    let allowlist = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+    let blocklist = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+
+    assert_eq!(pool.try_update_asp_non_membership(&blocklist), Ok(Ok(())));
+    assert_eq!(
+        pool.try_update_asp_membership(&allowlist),
+        Err(Ok(Error::TreeCodeMismatch))
+    );
+}
+
+/// Writes two distinct hashes, so the order is visible whichever hashes the
+/// test host gives the trees.
+#[test]
+fn get_asp_wasm_hashes_returns_the_membership_hash_first() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        instance.set(&DataKey::ASPMembershipWasmHash, &mk_bytesn32(&env, 1));
+        instance.set(&DataKey::ASPNonMembershipWasmHash, &mk_bytesn32(&env, 2));
+    });
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).get_asp_wasm_hashes(),
+        (mk_bytesn32(&env, 1), mk_bytesn32(&env, 2))
+    );
 }
 
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
@@ -1885,6 +2294,8 @@ fn build_gvk_transact(
             verifier_id,
             setup.asp_membership_address.clone(),
             setup.asp_non_membership_address.clone(),
+            wasm_hash(&setup.asp_membership_address),
+            wasm_hash(&setup.asp_non_membership_address),
             U256::from_u32(&env, maximum_deposit_amount),
             levels,
             0u32,
@@ -2107,9 +2518,12 @@ fn the_configuration_lives_in_the_instance() {
             DataKey::MaximumDepositAmount,
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,
+            DataKey::ASPMembershipWasmHash,
+            DataKey::ASPNonMembershipWasmHash,
             DataKey::PolicyFlags,
             DataKey::AdminViewKey,
             DataKey::GvkMode,
+            DataKey::DepositsPaused,
         ] {
             assert!(instance.has(&key), "{key:?} should live in the instance");
             assert!(
@@ -2177,6 +2591,110 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         err,
         Ok(Error::InvalidProof),
         "a verifier rejection must be reported as pool-gvk's InvalidProof"
+    );
+}
+
+/// Code 4: `asp-membership`'s `NotInitialized`, pool-gvk's `WrongLevels`.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum TreeError {
+    NotInitialized = 4,
+}
+
+/// An association set whose root reads all fail with code 4.
+#[contract]
+struct FailingTree;
+
+#[contractimpl]
+impl FailingTree {
+    pub fn get_root() -> Result<U256, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+
+    pub fn is_known_root(_root: U256) -> Result<bool, TreeError> {
+        Err(TreeError::NotInitialized)
+    }
+}
+
+/// Asserts that `transact` reports a failing tree in `field` as `InvalidProof`.
+/// The output commitment is out of field, checked only after the trees, and a
+/// raw tree failure would read as `WrongLevels`.
+fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: u32) {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    let flags = match field {
+        PolicyAspRootField::Membership => {
+            setup.asp_membership_address = env.register(FailingTree, ());
+            policy::ALLOWLIST_BIT
+        }
+        PolicyAspRootField::NonMembership => {
+            setup.asp_non_membership_address = env.register(FailingTree, ());
+            policy::BLOCKLIST_BIT
+        }
+    };
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        flags,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let zero = U256::from_u32(&env, 0);
+    let (mut proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        zero.clone(),
+        zero,
+        nullifier,
+        VIEW_ONLY,
+    );
+    proof.output_commitment0 = bn256_modulus(&env);
+
+    assert_eq!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_reports_a_failing_allowlist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::Membership, 0xE7);
+}
+
+#[test]
+fn transact_reports_a_failing_blocklist_as_invalid_proof() {
+    assert_transact_reports_a_failing_tree(PolicyAspRootField::NonMembership, 0xE8);
+}
+
+#[test]
+fn get_asp_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_membership_address = env.register(FailingTree, ());
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).try_get_asp_membership_root(),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn get_asp_non_membership_root_reports_a_failing_tree_as_invalid_proof() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.asp_non_membership_address = env.register(FailingTree, ());
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert_eq!(
+        PoolGvkContractClient::new(&env, &pool_id).try_get_asp_non_membership_root(),
+        Err(Ok(Error::InvalidProof))
     );
 }
 
@@ -2256,4 +2774,406 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+#[test]
+fn transact_renews_the_pool_the_tree_and_the_verifier_by_a_day() {
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE6, 0, 1000);
+    let verifier: Address = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::Verifier)
+            .expect("verifier set in constructor")
+    });
+    let ttls = || {
+        [
+            env.deployer().get_contract_instance_ttl(&pool.address),
+            env.as_contract(&pool.address, || {
+                env.storage().persistent().get_ttl(&MerkleDataKey::State)
+            }),
+            env.deployer().get_contract_instance_ttl(&verifier),
+        ]
+    };
+    let before = ttls();
+
+    pool.transact(&proof, &ext, &sender);
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
+    );
+}
+
+/// Registers a view-only pool with a deposit cap of 1000, depth 3, and policy
+/// flags 0, so no ASP root is compared.
+fn register_open_pool_gvk(env: &Env, setup: &TestSetup) -> Address {
+    register_pool_gvk(
+        env,
+        setup,
+        U256::from_u32(env, 1000),
+        3,
+        0,
+        mk_point(env, 1, 2),
+        VIEW_ONLY,
+    )
+}
+
+/// A proof moving `ext_amount` that passes every check before the verifier on
+/// a pool with policy flags 0, so `InvalidProof` is the first error it can hit.
+fn mk_moving_transact_proof(
+    env: &Env,
+    pool: &PoolGvkContractClient,
+    token: &Address,
+    ext_amount: i32,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let zero = U256::from_u32(env, 0);
+    let (mut proof, _) =
+        mk_transact_proof(env, pool, token, zero.clone(), zero, nullifier, VIEW_ONLY);
+    let ext = mk_ext_data(env, Address::generate(env), ext_amount);
+    proof.ext_data_hash = compute_ext_hash(env, &pool.address, token, &ext);
+    proof.public_amount = pool_core::amounts::calculate_public_amount(env, ext.ext_amount.clone())
+        .expect("the amount must fit the field");
+    (proof, ext)
+}
+
+#[test]
+fn deposits_paused_is_false_after_construction() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+
+    assert!(!PoolGvkContractClient::new(&env, &pool_id).deposits_paused());
+}
+
+#[test]
+fn pause_deposits_sets_the_flag_and_publishes_the_change() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    pool.pause_deposits();
+
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: true }.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// A refused deposit changes no balance, nullifier, or event.
+#[test]
+fn transact_refuses_a_deposit_while_deposits_are_paused() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 10_000i128;
+    setup.token = register_funded_token(&env, &sender, funded);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+    let nullifier = 0xF1;
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, nullifier);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &sender),
+        Err(Ok(Error::DepositsPaused))
+    );
+    assert!(env.events().all().events().is_empty());
+    assert_eq!(token.balance(&sender), funded);
+    assert_eq!(token.balance(&pool_id), 0);
+    assert!(!pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+#[test]
+fn transact_passes_a_transfer_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, transfer) = mk_moving_transact_proof(&env, &pool, &setup.token, 0, 0xF2);
+
+    assert_eq!(
+        pool.try_transact(&proof, &transfer, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn transact_passes_a_withdrawal_to_the_verifier_while_deposits_are_paused() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, withdrawal) = mk_moving_transact_proof(&env, &pool, &setup.token, -500, 0xF3);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+#[test]
+fn unpause_deposits_lets_a_deposit_reach_the_verifier() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    pool.unpause_deposits();
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseChanged { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF4);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// A pause on a paused pool succeeds, so it spends a pre-signed authorization
+/// instead of leaving it open to replay.
+#[test]
+fn pause_deposits_on_a_paused_pool_changes_nothing() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
+
+    assert_eq!(pool.try_pause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
+    assert_eq!(
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "pause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated { paused: true }.to_xdr(&env, &pool_id)]
+    );
+    assert!(pool.deposits_paused());
+}
+
+/// A paused pool still requires the admin's authorization, so a pre-signed
+/// pause sent there is spent.
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_on_a_paused_pool_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+#[test]
+fn unpause_deposits_on_an_open_pool_changes_nothing() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+    pool.unpause_deposits();
+    let writes = env.cost_estimate().resources().write_entries;
+
+    assert_eq!(pool.try_unpause_deposits(), Ok(Ok(())));
+    assert_eq!(env.cost_estimate().resources().write_entries, writes);
+    assert_eq!(
+        env.auths(),
+        [(
+            setup.admin.clone(),
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool_id.clone(),
+                    Symbol::new(&env, "unpause_deposits"),
+                    ().into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events(),
+        [DepositPauseRepeated { paused: false }.to_xdr(&env, &pool_id)]
+    );
+    assert!(!pool.deposits_paused());
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn pause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "pause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.pause_deposits();
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn unpause_deposits_requires_admin() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    env.mock_auths(&[MockAuth {
+        address: &Address::generate(&env),
+        invoke: &MockAuthInvoke {
+            contract: &pool_id,
+            fn_name: "unpause_deposits",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.unpause_deposits();
+}
+
+/// The deposit is above the cap, so a cap check ahead of the pause would answer
+/// `WrongExtAmount` instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_the_cap() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 1500, 0xF5);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+/// The sender holds none of the token, so a transfer ahead of the pause would
+/// trap instead.
+#[test]
+fn transact_refuses_a_paused_deposit_before_moving_tokens() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    setup.token = register_funded_token(&env, &Address::generate(&env), 10_000);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    pool.pause_deposits();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF6);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+#[test]
+fn transact_errors_when_the_deposit_flag_is_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().instance().remove(&DataKey::DepositsPaused);
+    });
+    env.mock_all_auths();
+
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, 0xF7);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::NotInitialized))
+    );
+}
+
+#[test]
+fn pause_deposits_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
 }

@@ -12,7 +12,7 @@
 //! them back verbatim. Nothing here describes the storage layout, so the layout
 //! can only be described in one place: the contracts.
 
-use super::utils::test_env;
+use super::utils::{test_env, wasm_hash};
 use anyhow::Result;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
@@ -77,6 +77,8 @@ fn deploy() -> Deployment {
             verifier.clone(),
             asp_membership.clone(),
             asp_non_membership.clone(),
+            wasm_hash(&asp_membership),
+            wasm_hash(&asp_non_membership),
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,

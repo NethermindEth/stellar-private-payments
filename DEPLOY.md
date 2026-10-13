@@ -27,7 +27,7 @@ verifier contract, since the verifying key is baked into the WASM.
 |---|---|
 | `<policy>` | See [ASP policies](#asp-policies) below. |
 | `<gvk-mode>` | Omit for `gvk-off`. See [Global View Key (GVK)](#global-view-key-gvk) below. |
-| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `contract:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>` |
+| `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract. A classic issuer needs `AUTH_IMMUTABLE` and neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so it cannot freeze or claw back the pool's balance. |
 
 If neither `--token` nor `--pool` is given, one native XLM pool deploys by
 default.
@@ -48,7 +48,7 @@ default.
 | Option | Meaning |
 |---|---|
 | `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's |
-| `--token <ADDRESS>` | Legacy single-pool token contract (cannot mix with `--pool`) |
+| `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
 | `--skip-init` | Deploy WASM only, no constructors |
@@ -127,10 +127,8 @@ deployments/scripts/deploy.sh testnet \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
-Mixed-policy: a blocklist native pool alongside an allowlist-blocklist EURC
-pool (for testnet EURC, see the [Circle EURC
-docs](https://www.circle.com/eurc#how-to-start-using-eurc) and
-[faucet](https://faucet.circle.com/)):
+Mixed-policy: a blocklist pool alongside an allowlist-blocklist pool, both
+native XLM:
 
 ```sh
 deployments/scripts/deploy.sh testnet \
@@ -140,7 +138,7 @@ deployments/scripts/deploy.sh testnet \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
-  --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+  --pool allowlist-blocklist:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
 Mixing a plain pool with a GVK-traceable one in one deployment:
@@ -156,3 +154,60 @@ deployments/scripts/deploy.sh testnet \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```
+
+## Keep a deployment alive
+
+The network archives a contract entry when its lifetime runs out, and
+rewriting an entry does not extend it. Each user call extends the entries it
+depends on by at most a day, so a pool with steady traffic stays alive while a
+quiet one runs down. An archived entry is restored inside the next transaction
+that needs it, and that transaction's sender pays for a full minimum lifetime,
+which is several XLM for a contract's code.
+
+To keep the entries user calls depend on alive and spare users that cost,
+extend the deployment from an operator account at least every 150 days. User
+calls then add nothing to an entry until it falls below 30 days, and pay no
+rent for it. The loop below leaves nullifiers, registrations, and the
+blocklist's `Node` entries to archive. The next call that needs one of them
+restores it.
+
+Without that upkeep, a user call extends an entry once the entry has lost an
+hour. A transaction simulated just before that point and applied just after
+it owes an hour of rent that its simulation did not include. The SDK adds
+that hour to the refundable fee of every transaction it builds. The sender
+needs just over 0.6 XLM more balance to submit a `transact`, and the network
+refunds whatever rent the transaction does not owe.
+
+For each contract in the deployment, the following loop extends its instance,
+its `State`, `Admin`, and `NextIndex` entries, and its Wasm:
+
+```bash
+NETWORK=testnet
+OPERATOR=deployer
+STATE=AAAAEAAAAAEAAAABAAAADwAAAAVTdGF0ZQAAAA==
+ADMIN=AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==
+NEXT_INDEX=AAAAEAAAAAEAAAABAAAADwAAAAlOZXh0SW5kZXgAAAA=
+for id in $(jq -r '.asp_membership, .asp_non_membership, .public_key_registry,
+    .verifiers[], .pools[].poolContractId' "deployments/$NETWORK/deployments.json"); do
+  args=(--ledgers-to-extend 3110399 --source-account "$OPERATOR" --network "$NETWORK")
+  stellar contract extend --id "$id" "${args[@]}"
+  stellar contract extend --id "$id" --key-xdr "$STATE" --key-xdr "$ADMIN" \
+    --key-xdr "$NEXT_INDEX" "${args[@]}"
+  stellar contract extend --wasm-hash "$(stellar contract info hash --id "$id" --network "$NETWORK")" "${args[@]}"
+done
+```
+
+Replace the following:
+
+- `testnet`: the network the deployment is on.
+- `deployer`: the `stellar keys` identity that pays for the extensions.
+
+The extension skips a key the contract does not have. The value 3,110,399 is
+the longest extension the network accepts, one ledger less than its maximum
+entry lifetime. An extension also skips an entry that has already archived.
+Restore that entry first with `stellar contract restore` and the same
+arguments.
+
+The Wasm is most of the cost. At mainnet's rate on 2026-10-07, keeping the
+code of two pools, their two verifiers, and both trees alive costs about
+1.4 XLM a day.

@@ -3,8 +3,9 @@
 use super::*;
 use soroban_sdk::{
     Address, Bytes, Env, IntoVal, U256,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke},
 };
+use soroban_utils::MAX_EXTENSION_LEDGERS;
 
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
@@ -72,6 +73,146 @@ fn test_insert_multiple_keys() {
     // Root should be non-zero
     let root = client.get_root();
     assert_ne!(root, U256::from_u32(&env, 0u32));
+}
+
+/// Three key-value pairs. Keys 1 and 3 share their lowest bit, so inserting
+/// key 3 moves leaf 1 one level down.
+fn three_entries(env: &Env) -> [(U256, U256); 3] {
+    [(1, 10), (2, 20), (3, 30)]
+        .map(|(key, value)| (U256::from_u32(env, key), U256::from_u32(env, value)))
+}
+
+#[test]
+fn test_insert_leaves_matches_inserting_one_at_a_time() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let batched =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin.clone(),)));
+    let one_at_a_time =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin,)));
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+
+    batched.insert_leaves(&Vec::from_slice(&env, &entries));
+    for (key, value) in &entries {
+        one_at_a_time.insert_leaf(key, value);
+    }
+
+    assert_eq!(batched.get_root(), one_at_a_time.get_root());
+    for (key, value) in &entries {
+        let found = batched.find_key(key);
+        assert!(found.found);
+        assert_eq!(found.found_value, *value);
+    }
+}
+
+#[test]
+fn test_insert_leaves_publishes_one_leaf_inserted_per_key() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let one_at_a_time =
+        ASPNonMembershipClient::new(&env, &env.register(ASPNonMembership, (admin,)));
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+    let expected = entries.clone().map(|(key, value)| {
+        one_at_a_time.insert_leaf(&key, &value);
+        LeafInsertedEvent {
+            key,
+            value,
+            root: one_at_a_time.get_root(),
+        }
+        .to_xdr(&env, &contract_id)
+    });
+
+    client.insert_leaves(&Vec::from_array(&env, entries));
+
+    assert_eq!(env.events().all().events(), expected);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_insert_leaves_requires_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let outsider = Address::generate(&env);
+    let entries = Vec::from_array(&env, three_entries(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &outsider,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaves",
+            args: (entries.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaves(&entries);
+}
+
+#[test]
+fn test_insert_leaves_refuses_the_whole_batch_when_a_key_exists() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let entries = three_entries(&env);
+    let [(first, _), (second, second_value), _] = &entries;
+    client.insert_leaf(second, second_value);
+    let root = client.get_root();
+
+    assert_eq!(
+        client.try_insert_leaves(&Vec::from_slice(&env, &entries)),
+        Err(Ok(Error::KeyAlreadyExists))
+    );
+    assert_eq!(client.get_root(), root);
+    assert!(!client.find_key(first).found);
+}
+
+#[test]
+fn test_insert_leaves_accepts_an_empty_list() {
+    use soroban_sdk::testutils::Events;
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.insert_leaf(&U256::from_u32(&env, 1), &U256::from_u32(&env, 10));
+    let root = client.get_root();
+
+    assert_eq!(client.try_insert_leaves(&Vec::new(&env)), Ok(Ok(())));
+    assert!(env.events().all().events().is_empty());
+    assert_eq!(client.get_root(), root);
+}
+
+#[test]
+fn test_insert_leaves_refuses_a_key_repeated_in_the_batch() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let key = U256::from_u32(&env, 1);
+    let value = U256::from_u32(&env, 10);
+
+    assert_eq!(
+        client.try_insert_leaves(&Vec::from_array(
+            &env,
+            [(key.clone(), value.clone()), (key.clone(), value)]
+        )),
+        Err(Ok(Error::KeyAlreadyExists))
+    );
+    assert_eq!(client.get_root(), U256::from_u32(&env, 0));
+    assert!(!client.find_key(&key).found);
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -949,6 +1090,7 @@ fn test_update_admin() {
 
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
         env.storage()
@@ -987,6 +1129,88 @@ fn test_update_admin_requires_admin() {
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
     client.update_admin(&Address::generate(&env));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.accept_admin();
+}
+
+#[test]
+fn test_accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn test_cancel_admin_transfer_clears_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    client.cancel_admin_transfer();
+
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_admin_transfer();
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -1039,6 +1263,7 @@ fn test_old_admin_cannot_insert_after_update() {
 
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     let key = U256::from_u32(&env, 1u32);
     let value = U256::from_u32(&env, 42u32);
@@ -1053,6 +1278,63 @@ fn test_old_admin_cannot_insert_after_update() {
     }]);
     client.insert_leaf(&key, &value);
 }
+
+#[test]
+fn test_old_admin_can_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
+
+    assert!(client.find_key(&key).found);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_new_admin_cannot_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (key.clone(), value.clone()).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&key, &value);
+}
+
 #[test]
 fn the_root_lives_in_the_instance() {
     let env = test_env();
@@ -1068,4 +1350,18 @@ fn the_root_lives_in_the_instance() {
         assert_eq!(env.storage().instance().get(&DataKey::Root), Some(root));
         assert!(!env.storage().persistent().has(&DataKey::Root));
     });
+}
+
+#[test]
+fn test_get_root_renews_the_instance() {
+    let env = test_env();
+    let contract_id = env.register(ASPNonMembership, (Address::generate(&env),));
+    let before = env.deployer().get_contract_instance_ttl(&contract_id);
+
+    ASPNonMembershipClient::new(&env, &contract_id).get_root();
+
+    assert_eq!(
+        env.deployer().get_contract_instance_ttl(&contract_id),
+        before.saturating_add(MAX_EXTENSION_LEDGERS)
+    );
 }

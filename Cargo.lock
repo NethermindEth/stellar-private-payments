@@ -4813,6 +4813,7 @@ name = "public-key-registry"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
+ "soroban-utils",
 ]
 
 [[package]]

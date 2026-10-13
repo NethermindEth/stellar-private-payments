@@ -66,8 +66,12 @@ pub enum Error {
     #[error("event history is unavailable: {0}")]
     RetentionGap(#[from] RetentionGap),
 
-    #[error("{0}")]
-    Other(#[from] anyhow::Error),
+    /// An untyped failure.
+    ///
+    /// The message holds the whole `anyhow` cause chain, so the variant has no
+    /// `source`, which would print every cause twice.
+    #[error("{0:#}")]
+    Other(anyhow::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -128,5 +132,34 @@ impl From<IndexerError> for Error {
             IndexerError::Rpc(e) => e.into(),
             IndexerError::Other(e) => e.into(),
         }
+    }
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Other(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_untyped_error_prints_its_causes() {
+        let error = Error::Other(
+            anyhow::anyhow!("HostError: Error(Contract, #18)").context("simulate transaction"),
+        );
+        assert_eq!(
+            error.to_string(),
+            "simulate transaction: HostError: Error(Contract, #18)"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_untyped_error_prints_each_cause_once() {
+        let inner = Error::Other(anyhow::anyhow!("B").context("A"));
+        let error = Error::Other(anyhow::Error::from(inner).context("sync"));
+        assert_eq!(error.to_string(), "sync: A: B");
     }
 }

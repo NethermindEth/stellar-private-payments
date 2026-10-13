@@ -23,6 +23,7 @@ const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema.sql")),
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
     M::up(include_str!("schema_v3_account_kdf_domain.sql")).foreign_key_check(),
+    M::up(include_str!("schema_v4_processed_events.sql")),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -451,14 +452,12 @@ impl Storage {
     ) -> Result<Option<crate::types::PublicKeyEntry>> {
         self.conn
             .query_row(
-                "SELECT owner, encryption_key, note_key, ledger
-                 FROM (
-                    SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
-                    FROM public_keys p
-                    JOIN raw_contract_events r ON r.id = p.event_id
-                    WHERE p.owner = ?1
-                    GROUP BY p.owner
-                 )",
+                "SELECT p.owner, p.encryption_key, p.note_key, r.ledger
+                 FROM public_keys p
+                 JOIN raw_contract_events r ON r.id = p.event_id
+                 WHERE p.owner = ?1
+                 ORDER BY r.ledger DESC, r.id DESC
+                 LIMIT 1",
                 params![address],
                 map_public_key_entry,
             )
@@ -1299,6 +1298,29 @@ impl Storage {
         Ok(leaves)
     }
 
+    /// Marks events so [`Self::get_unprocessed_events`] skips them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction cannot be opened or an insert
+    /// fails.
+    pub fn save_processed_event_ids(&mut self, ids: &[String]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO processed_events (event_id)
+                    VALUES (?1)
+                    ON CONFLICT(event_id) DO NOTHING",
+            )?;
+
+            for id in ids {
+                stmt.execute(params![id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Unprocessed raw events fetch
     pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
         let mut stmt = self.conn.prepare(
@@ -1309,10 +1331,12 @@ impl Storage {
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
                 LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+                LEFT JOIN processed_events pe ON r.id = pe.event_id
                 WHERE pc.event_id IS NULL
                 AND p.event_id IS NULL
                 AND n.event_id IS NULL
                 AND l.event_id IS NULL
+                AND pe.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
         )?;
@@ -3173,5 +3197,49 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
         Ok(())
+    }
+
+    #[test]
+    fn processed_event_ids_are_not_returned_as_unprocessed() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-marked"), dummy_event("evt-other")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+
+        storage.save_processed_event_ids(&["evt-marked".to_string()])?;
+
+        let ids: Vec<String> = storage
+            .get_unprocessed_events(10)?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, vec!["evt-other".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn opening_a_v3_database_applies_the_processed_events_migration() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 3)?;
+        assert!(
+            !table_exists(&conn, "processed_events")?,
+            "v3 must predate the table"
+        );
+
+        let storage = Storage::connect_with_connection(conn)?;
+
+        assert!(table_exists(&storage.conn, "processed_events")?);
+        Ok(())
+    }
+
+    fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 }
