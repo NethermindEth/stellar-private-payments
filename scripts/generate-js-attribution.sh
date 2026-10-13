@@ -82,7 +82,7 @@ generate() {
 }
 
 # circuits/src/circomlib is intentionally excluded here: its npm dependencies
-# are build/test-time-only tooling (mirroring scripts/cargo-deny.sh's license scope),
+# are build/test-time-only tooling (mirroring deny.toml's circuits exclusion),
 # never shipped in a distributed artifact — do not add a third `generate` call
 # for it without re-checking that.
 generate "app" "app/package-lock.json"

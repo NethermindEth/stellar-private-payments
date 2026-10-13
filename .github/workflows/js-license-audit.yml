@@ -25,7 +25,7 @@ jobs:
         # circomlib's .circom sources are compiled into shipped dist/circuits/
         # artifacts, so its LGPL-3.0 license is a distribution concern. Its
         # devDependencies (GPL-3.0 build tooling) are intentionally out of
-        # scope for this scanner, mirroring scripts/cargo-deny.sh's license scope.
+        # scope for this scanner, mirroring deny.toml's circuits exclusion.
         # This tripwire catches a license change without scanning the full tree.
         shell: bash
         run: |

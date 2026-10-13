@@ -17,8 +17,8 @@ if ! cargo shear; then
 fi
 
 # Dependency audit
-if ! sh scripts/cargo-deny.sh; then
-    echo "❌ Critical: Vulnerable dependencies detected (run 'sh scripts/cargo-deny.sh')"
+if ! cargo deny check; then
+    echo "❌ Critical: Vulnerable dependencies detected (run 'cargo deny check')"
     exit 2
 fi
 

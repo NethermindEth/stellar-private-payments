@@ -39,4 +39,15 @@ jobs:
       - name: Run audit-check action
         run: |
           which cargo-deny || cargo install cargo-deny --locked --version 0.20.2
-          sh scripts/cargo-deny.sh
+          cargo deny check
+
+      - name: Flag ignored ruzstd advisory
+        if: always()
+        run: |
+          versions=$(awk '/^name = "ruzstd"$/ { getline; gsub(/"/, "", $3); print $3 }' Cargo.lock)
+          vulnerable=$(printf '%s\n' $versions | awk -F. 'NF && ($1 == 0 && ($2 < 9 || ($2 == 9 && $3 < 1)))')
+          if [ -n "$vulnerable" ]; then
+            echo "::warning title=RUSTSEC-2026-0344 ignored::ruzstd $vulnerable is vulnerable (decompression bomb, fixed in 0.9.1). It comes from wasmer 7.2's object 0.39; newer wasmer needs arbitrary ^1.4, which soroban-sdk's ~1.3.0 pin blocks. Upgrade once soroban-sdk relaxes the pin."
+          else
+            echo "::warning title=RUSTSEC-2026-0344 resolved::Cargo.lock no longer contains a vulnerable ruzstd. Remove RUSTSEC-2026-0344 from deny.toml and this step."
+          fi
