@@ -153,11 +153,16 @@ async fn serve(bootnode: Bootnode, port: u16) -> tokio::task::JoinHandle<()> {
     server
 }
 
-async fn events_of(port: u16, contract_id: &str, from: u32) -> JsonRpcEnvelope<GetEventsResponse> {
+async fn events_of(
+    port: u16,
+    contract_ids: &[&str],
+    from: u32,
+) -> JsonRpcEnvelope<GetEventsResponse> {
+    let contract_ids: Vec<String> = contract_ids.iter().map(|id| (*id).to_owned()).collect();
     post_get_events(
         &reqwest::Client::new(),
         &format!("http://127.0.0.1:{port}"),
-        GetEventsParams::for_contracts(&[contract_id.into()], Some(from), None, Some(10)),
+        GetEventsParams::for_contracts(&contract_ids, Some(from), None, Some(10)),
     )
     .await
 }
@@ -186,15 +191,15 @@ async fn an_added_allowlist_is_refused_until_its_events_are_archived() {
     let server = serve(setup(PORT, &archive, &upstream.url, trees).await, PORT).await;
 
     wait_for(|| upstream.backfills.load(Ordering::SeqCst) > 0).await;
-    let refused = events_of(PORT, ALLOWLIST_B, from).await;
+    let refused = events_of(PORT, &[ALLOWLIST_B], from).await;
     upstream.open.store(true, Ordering::SeqCst);
-    let mut served = events_of(PORT, ALLOWLIST_A, from).await;
+    let mut served = events_of(PORT, &[ALLOWLIST_A, ALLOWLIST_B], from).await;
     for _ in 0..50 {
         if served.result.is_some() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
-        served = events_of(PORT, ALLOWLIST_A, from).await;
+        served = events_of(PORT, &[ALLOWLIST_A, ALLOWLIST_B], from).await;
     }
     let state = archive.load_indexer_state().await.expect("state");
     server.abort();
@@ -218,8 +223,8 @@ async fn only_an_allowlist_older_than_upstream_retention_is_refused() {
 
     // A second round starts only after the first round's backfill returns.
     wait_for(|| upstream.rounds.load(Ordering::SeqCst) >= 2).await;
-    let refused = events_of(PORT, ALLOWLIST_A, lost).await;
-    let served = events_of(PORT, ALLOWLIST_B, lost).await;
+    let refused = events_of(PORT, &[ALLOWLIST_A], lost).await;
+    let served = events_of(PORT, &[ALLOWLIST_B], lost).await;
     let state = archive.load_indexer_state().await.expect("state");
     server.abort();
     upstream.task.abort();

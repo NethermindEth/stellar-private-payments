@@ -57,6 +57,7 @@ impl BootnodeRpc {
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
             return Err(invalid_params("unsupported filters"));
         }
+        let requested: Vec<String> = params.contract_ids().cloned().collect();
         let refused = self
             .state
             .unarchived
@@ -105,7 +106,7 @@ impl BootnodeRpc {
             let (cursor_ledger, events) = self
                 .state
                 .storage
-                .page_events_cursor(cursor, cutoff_ledger, limit)
+                .page_events_cursor(&requested, cursor, cutoff_ledger, limit)
                 .await
                 .map_err(internal_error)?;
 
@@ -135,7 +136,7 @@ impl BootnodeRpc {
                 .unwrap_or(self.state.min_deployment_ledger);
             self.state
                 .storage
-                .page_events_ledger(start_ledger, cutoff_ledger, limit)
+                .page_events_ledger(&requested, start_ledger, cutoff_ledger, limit)
                 .await
                 .map_err(internal_error)?
         };

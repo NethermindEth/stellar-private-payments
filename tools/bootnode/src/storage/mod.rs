@@ -36,14 +36,20 @@ pub trait Storage: Send + Sync {
     async fn set_archive_ready(&self) -> Result<()>;
     async fn set_archived_allowlists(&self, contract_ids: &[String]) -> Result<()>;
     async fn upsert_events(&self, events: &[Event]) -> Result<()>;
+    /// Returns up to `limit` events of `contract_ids` in
+    /// `[start_ledger, cutoff_ledger)`, by ledger then ID.
     async fn page_events_ledger(
         &self,
+        contract_ids: &[String],
         start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
     ) -> Result<Vec<Event>>;
+    /// Like `page_events_ledger`, after event `after_event_id`, whose ledger it
+    /// returns. `None` if no event has that ID; it may be any contract's.
     async fn page_events_cursor(
         &self,
+        contract_ids: &[String],
         after_event_id: &str,
         cutoff_ledger: u32,
         limit: u32,

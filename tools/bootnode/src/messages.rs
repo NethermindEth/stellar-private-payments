@@ -132,6 +132,11 @@ impl GetEventsParams {
         }
     }
 
+    /// Returns the contract IDs the filters name.
+    pub fn contract_ids(&self) -> impl Iterator<Item = &String> {
+        self.filters.iter().flat_map(|filter| &filter.contract_ids)
+    }
+
     pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
         // RPC filters are OR-ed, so every filter is checked. A client built
         // from an older manifest asks for a subset of the archived

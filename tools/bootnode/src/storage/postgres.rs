@@ -279,6 +279,7 @@ FROM {STATE} WHERE deployment_id = $1
 
     async fn page_events_ledger(
         &self,
+        contract_ids: &[String],
         start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
@@ -298,11 +299,18 @@ SELECT payload FROM {EVENTS}
 WHERE deployment_id = $1
   AND ledger >= $2
   AND ledger < $3
+  AND payload->>'contractId' = ANY($5)
 ORDER BY ledger, id
 LIMIT $4
 "#
                 ),
-                &[&self.deployment_id(), &start_ledger, &cutoff, &limit],
+                &[
+                    &self.deployment_id(),
+                    &start_ledger,
+                    &cutoff,
+                    &limit,
+                    &contract_ids,
+                ],
             )
             .await?;
 
@@ -316,6 +324,7 @@ LIMIT $4
 
     async fn page_events_cursor(
         &self,
+        contract_ids: &[String],
         after_event_id: &str,
         cutoff_ledger: u32,
         limit: u32,
@@ -341,12 +350,19 @@ LEFT JOIN LATERAL (
   WHERE deployment_id = $1
     AND ledger < $3
     AND (ledger > c.ledger OR (ledger = c.ledger AND id > $2))
+    AND payload->>'contractId' = ANY($5)
   ORDER BY ledger, id
   LIMIT $4
 ) e ON true
 "#
                 ),
-                &[&self.deployment_id(), &after_event_id, &cutoff, &limit],
+                &[
+                    &self.deployment_id(),
+                    &after_event_id,
+                    &cutoff,
+                    &limit,
+                    &contract_ids,
+                ],
             )
             .await?;
 

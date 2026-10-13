@@ -552,3 +552,48 @@ async fn get_events_wrong_contract_id() {
     assert_eq!(err.code, -32_602);
     assert_eq!(err.message, "unsupported filters");
 }
+
+#[tokio::test]
+async fn a_subset_request_gets_only_its_contracts_events() {
+    const PORT: u16 = 40424;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let first = sample_event_at(GENESIS_LEDGER + 1_000);
+    let second = sample_event_at(GENESIS_LEDGER + 2_000);
+    let mut other = sample_event_at(GENESIS_LEDGER + 3_000);
+    other.contract_id = ids[1].clone();
+
+    let storage = test_storage(GENESIS_LEDGER);
+    seed_events(&storage, &[first.clone(), second, other.clone()]).await;
+    seed_tip(&storage, NETWORK_TIP).await;
+    seed_archive_ready(&storage).await;
+
+    let server = spawn_bootnode(storage, test_config(PORT, NETWORK_TIP), GENESIS_LEDGER).await;
+    let client = reqwest::Client::new();
+    wait_listening(&client, &base).await;
+
+    let subset = [ids[1].clone()];
+    let by_ledger = post_get_events(
+        &client,
+        &base,
+        GetEventsParams::for_contracts(&subset, Some(GENESIS_LEDGER), None, Some(1)),
+    )
+    .await;
+    // A cursor naming another contract's event still pages the subset.
+    let by_cursor = post_get_events(
+        &client,
+        &base,
+        GetEventsParams::for_contracts(&subset, None, Some(&first.id), Some(10)),
+    )
+    .await;
+
+    server.abort();
+
+    let ids_of = |page: JsonRpcEnvelope<_>| -> Vec<String> {
+        let page: bootnode::messages::GetEventsResponse = page.result.expect("page");
+        page.events.into_iter().map(|event| event.id).collect()
+    };
+    assert_eq!(ids_of(by_ledger), [other.id.clone()]);
+    assert_eq!(ids_of(by_cursor), [other.id]);
+}

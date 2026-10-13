@@ -127,6 +127,7 @@ impl Storage for InMemory {
 
     async fn page_events_ledger(
         &self,
+        contract_ids: &[String],
         start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
@@ -136,6 +137,7 @@ impl Storage for InMemory {
                 .events
                 .values()
                 .filter(|event| event.ledger < cutoff_ledger && event.ledger >= start_ledger)
+                .filter(|event| contract_ids.contains(&event.contract_id))
                 .cloned()
                 .collect();
             events.sort_by(|left, right| {
@@ -150,6 +152,7 @@ impl Storage for InMemory {
 
     async fn page_events_cursor(
         &self,
+        contract_ids: &[String],
         after_event_id: &str,
         cutoff_ledger: u32,
         limit: u32,
@@ -168,6 +171,7 @@ impl Storage for InMemory {
                 .events
                 .values()
                 .filter(|event| event.ledger < cutoff_ledger)
+                .filter(|event| contract_ids.contains(&event.contract_id))
                 .filter(|event| {
                     event.id != after_event_id
                         && (event.ledger > after_ledger
@@ -192,12 +196,15 @@ mod tests {
     use crate::messages::Event;
     use serde_json::json;
 
-    fn sample_event(id: &str, ledger: u32) -> Event {
+    const POOL: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM";
+    const OTHER: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4";
+
+    fn sample_event(id: &str, ledger: u32, contract_id: &str) -> Event {
         serde_json::from_value(json!({
             "type": "contract",
             "ledger": ledger,
             "ledgerClosedAt": "2024-01-01T00:00:00Z",
-            "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "contractId": contract_id,
             "id": id,
             "topic": [],
             "value": "00",
@@ -206,31 +213,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_events_respects_cutoff_and_cursor() {
+    async fn page_events_respects_cutoff_cursor_and_contracts() {
         let storage = InMemory::with_deployment_id("test-deployment");
         storage
             .upsert_events(&[
-                sample_event("event-a", 100),
-                sample_event("event-b", 200),
-                sample_event("event-c", 500),
+                sample_event("event-a", 100, POOL),
+                sample_event("event-o1", 150, OTHER),
+                sample_event("event-b", 200, POOL),
+                sample_event("event-o2", 300, OTHER),
+                sample_event("event-c", 500, POOL),
+                sample_event("event-d", 700, POOL),
             ])
             .await
             .expect("seed");
+        let pool = [POOL.to_string()];
 
         let first = storage
-            .page_events_ledger(100, 400, 10)
+            .page_events_ledger(&pool, 100, 400, 10)
             .await
             .expect("first page");
-        assert_eq!(first.len(), 2);
-        assert_eq!(first[0].id, "event-a");
-        assert_eq!(first[1].id, "event-b");
+        let ids: Vec<&str> = first.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["event-a", "event-b"]);
 
+        // The limit counts only the requested contract's events.
+        let limited = storage
+            .page_events_ledger(&pool, 100, 400, 2)
+            .await
+            .expect("limited page");
+        let ids: Vec<&str> = limited.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["event-a", "event-b"]);
+
+        // The cursor may be another contract's event.
         let (cursor_ledger, second) = storage
-            .page_events_cursor("event-b", 600, 10)
+            .page_events_cursor(&pool, "event-o1", 600, 10)
             .await
             .expect("second page");
-        assert_eq!(cursor_ledger, Some(200));
-        assert_eq!(second.len(), 1);
-        assert_eq!(second[0].id, "event-c");
+        let ids: Vec<&str> = second.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(cursor_ledger, Some(150));
+        assert_eq!(ids, ["event-b", "event-c"]);
     }
 }
