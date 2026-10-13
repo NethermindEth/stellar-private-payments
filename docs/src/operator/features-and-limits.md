@@ -67,6 +67,28 @@ and the
 | Event history | About seven days on the public testnet RPC. Older history needs a bootnode. |
 | Contract upgrades | None. A fix means new contracts. |
 
+### A full pool
+
+Warning: once a pool's commitment tree is full, the pool refuses every transaction with
+`MerkleTreeFull` (#2), withdrawals included, and the tokens left in it can never leave.
+
+Every transaction takes two slots, whoever sends it and whatever it moves. Pausing deposits
+doesn't stop the tree filling, because transfers and withdrawals still go through. Users leave a
+pool only by withdrawing, and a withdrawal spends at most two notes, so emptying a pool needs room
+too. No contract reports how many notes a pool still holds, so move users long before the tree
+fills:
+
+```mermaid
+flowchart LR
+    watch["Watch the fill"] --> deploy["Deploy a new pool"]
+    deploy --> pause["Pause deposits<br/>on the old pool"]
+    pause --> move["Users withdraw from the old pool<br/>and deposit into the new one"]
+```
+
+The `index` in a pool's latest `new_commitment_event` is the number of slots used, less one, out
+of 1,048,576. A new `deploy.sh` run writes a manifest with only the pools it deployed, so keep
+serving a client built from the old manifest until the old pool's users have left.
+
 ## Known gaps
 
 - Contract storage expires when unused. A call that reads an archived entry restores it and pays
