@@ -468,9 +468,12 @@ async fn open_indexer(
     if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
         return Err(anyhow::anyhow!("stopped during bootnode catch-up").into());
     }
-    Ok(Indexer::init(rpc.clone(), storage.fork()?, contract_config)
-        .await
-        .context("indexer")?)
+    match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
+        Ok(indexer) => Ok(indexer),
+        // The handoff point is older than the main RPC keeps.
+        Err(e) if is_rpc_sync_gap(&e) => Err(RetentionGap::BootnodeNotReady(e.to_string()).into()),
+        Err(e) => Err(anyhow::Error::from(e).context("indexer").into()),
+    }
 }
 
 /// Catch local storage up to the current chain tip for a deployment.
@@ -1150,5 +1153,30 @@ mod tests {
             );
             assert_eq!(get_events_calls(&bootnode).await, calls);
         }
+    }
+
+    #[tokio::test]
+    async fn inline_sync_reports_a_handoff_older_than_the_rpc_keeps() {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![range_error(HANDOFF_LEDGER + 1, 3_100_000)]).await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(&bootnode, vec![handoff_response()]).await;
+        let storage = temp_storage("handoff-outside-rpc");
+
+        let result = catch_up(
+            &RpcClient::new(&rpc.uri()).expect("rpc client"),
+            &storage,
+            &distinct_config(),
+            Some(&bootnode.uri()),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(_)))
+            ),
+            "{result:?}"
+        );
     }
 }
