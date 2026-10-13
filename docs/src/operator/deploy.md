@@ -75,6 +75,10 @@ for each policy and GVK mode in use, the public key registry, and each pool. It 
 manifest and checks the deployment against it, as
 [Deploy under the admin account](../governance.md#deploy-under-the-admin-account) describes.
 
+`deploy.sh` copies the RPC URL and passphrase from your Stellar CLI's entry for the network into
+the manifest. The bootnode uses that URL as its upstream unless `BOOTNODE_UPSTREAM_RPC_URL` is
+set, and the web app falls back to it, so give the entry a public RPC URL with no API key in it.
+
 ## Check and publish the manifest
 
 The manifest, `deployments/NETWORK/deployments.json`, is how every client finds the contracts:
@@ -174,6 +178,17 @@ Replace the following:
 
 A user who sets `deployment` under `[defaults]` in `~/.config/spp/config.toml` can leave out
 `--deployment`.
+
+The CLI reads the RPC URL and passphrase from the user's Stellar CLI entry named like the
+manifest's `network`, and refuses one whose passphrase differs. On a network other than testnet,
+users add the entry first:
+
+```bash
+stellar network add NETWORK --rpc-url RPC_URL --network-passphrase "PASSPHRASE"
+```
+
+Replace `NETWORK`, `RPC_URL`, and `PASSPHRASE` with the manifest's `network`, `rpcUrl`, and
+`networkPassphrase`.
 
 ## Sign pause files and watch the contracts
 
