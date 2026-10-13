@@ -3,6 +3,7 @@ mod common;
 use bootnode::{
     Bootnode, InMemory,
     messages::{Event, GetEventsParams, GetEventsResponse},
+    rpc::WARMING_UP_CODE,
     storage::Storage,
 };
 use common::*;
@@ -205,7 +206,14 @@ async fn an_added_allowlist_is_refused_until_its_events_are_archived() {
     server.abort();
     upstream.task.abort();
 
-    assert_eq!(refused.error.expect("refused").code, -32_602);
+    let error = refused.error.expect("refused");
+    assert_eq!(error.code, i64::from(WARMING_UP_CODE));
+    assert_eq!(
+        error.message,
+        format!(
+            "the bootnode is still fetching the events of allowlist {ALLOWLIST_B}; retry later"
+        )
+    );
     let events = served.result.expect("served").events;
     let contracts: Vec<&str> = events.iter().map(|e| e.contract_id.as_str()).collect();
     assert_eq!(contracts, [ALLOWLIST_A, ALLOWLIST_B]);
@@ -230,10 +238,12 @@ async fn only_an_allowlist_older_than_upstream_retention_is_refused() {
     upstream.task.abort();
 
     let error = refused.error.expect("refused");
-    assert_eq!(error.code, -32_602);
+    assert_eq!(error.code, i64::from(WARMING_UP_CODE));
     assert_eq!(
         error.message,
-        format!("the archive lacks the earlier events of allowlist {ALLOWLIST_A}")
+        format!(
+            "the bootnode's upstream no longer holds the deployment ledger of allowlist {ALLOWLIST_A}; retry once the bootnode restarts with an RPC that does"
+        )
     );
     let events = served.result.expect("served").events;
     let contracts: Vec<&str> = events.iter().map(|e| e.contract_id.as_str()).collect();

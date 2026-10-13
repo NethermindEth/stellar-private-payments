@@ -15,7 +15,7 @@ use metrics::counter;
 use serde_json::json;
 use std::sync::{PoisonError, atomic::Ordering};
 
-/// `-32004`: bootnode warming up (unknown tip or pre-cutoff archive not ready).
+/// `-32004`: not ready for this request; retry later.
 pub const WARMING_UP_CODE: i32 = -32_004;
 
 /// `-32002`: resume `getEvents` on the wallet RPC from `fromLedger`.
@@ -50,8 +50,8 @@ impl BootnodeRpc {
     ///
     /// Cutoff ledger is 5 days ago from current time.
     ///
-    /// Return warm-up (code -32004) while tip is unknown or the pre-cutoff
-    /// archive is not ready.
+    /// Return [`WARMING_UP_CODE`] while the bootnode is not ready for the
+    /// request.
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
@@ -64,19 +64,28 @@ impl BootnodeRpc {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .map(|tree| tree.contract_id.clone())
-            .find(|id| params.filters.iter().any(|f| f.contract_ids.contains(id)));
-        if let Some(contract_id) = refused {
+            .find(|tree| requested.contains(&tree.contract_id))
+            .cloned();
+        if let Some(tree) = refused {
             counter!("bootnode_unarchived_allowlist_refusals_total").increment(1);
-            return Err(invalid_params(format!(
-                "the archive lacks the earlier events of allowlist {contract_id}"
-            )));
+            let id = &tree.contract_id;
+            return Err(not_ready(
+                if tree.deployment_ledger < self.state.oldest_ledger.load(Ordering::Relaxed) {
+                    format!(
+                        "the bootnode's upstream no longer holds the deployment ledger of allowlist {id}; retry once the bootnode restarts with an RPC that does"
+                    )
+                } else {
+                    format!(
+                        "the bootnode is still fetching the events of allowlist {id}; retry later"
+                    )
+                },
+            ));
         }
 
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);
         if tip == 0 || !self.state.archive_ready.load(Ordering::Relaxed) {
             counter!("bootnode_warming_up_total").increment(1);
-            return Err(warming_up());
+            return Err(not_ready("bootnode warming up; retry later"));
         }
 
         let cutoff_ledger = tip.saturating_sub(self.state.cfg.cutoff_ledgers());
@@ -209,12 +218,8 @@ fn internal_error(err: impl std::fmt::Display) -> ErrorObjectOwned {
     ErrorObject::owned(-32_603, err.to_string(), None::<()>)
 }
 
-fn warming_up() -> ErrorObjectOwned {
-    ErrorObject::owned(
-        WARMING_UP_CODE,
-        "bootnode warming up; retry later",
-        None::<()>,
-    )
+fn not_ready(msg: impl Into<String>) -> ErrorObjectOwned {
+    ErrorObject::owned(WARMING_UP_CODE, msg.into(), None::<()>)
 }
 
 pub fn retention_handoff(from_ledger: u32) -> ErrorObjectOwned {

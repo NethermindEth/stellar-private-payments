@@ -17,7 +17,7 @@ The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC
 
 | Code | Meaning | Client action |
 |------|---------|---------------|
-| `-32004` | **Warming up** — ledger tip unknown or pre-cutoff archive not ready. | Retry with backoff (`bootnode warming up; retry later`). |
+| `-32004` | **Not ready** — ledger tip unknown, pre-cutoff archive not ready, or an added allowlist not fetched yet. | Retry with backoff. |
 | `-32002` | **Retention handoff** — the requested range is within the retention window. | Stop using the bootnode and continue `getEvents` on the wallet's main RPC from `error.data.fromLedger`. |
 
 Handoff response shape:
@@ -39,7 +39,7 @@ The web platform orchestrator treats `-32002` as an archive handoff and resumes 
 
 The archive is named after the network, the earliest pool deployment ledger, and the IDs of the enabled pools, `asp_membership`, and `public_key_registry`. Allowlists in `added_asp_memberships` are left out, so adding one keeps the archive.
 
-Restart the bootnode with `--deployment` (or `BOOTNODE_DEPLOYMENT`) pointing at the manifest that names the allowlist. The bootnode fetches the allowlist's events from its deployment ledger and refuses `getEvents` requests that name it with a `-32602` error until the fetch completes. Removing an allowlist and adding it back fetches its events again. If the upstream RPC no longer holds that ledger, the bootnode logs an error and keeps refusing the allowlist. To fill it, restart with `--upstream-rpc-url` (or `BOOTNODE_UPSTREAM_RPC_URL`) set to an RPC for the same network that still holds the ledger.
+Restart the bootnode with `--deployment` (or `BOOTNODE_DEPLOYMENT`) pointing at the manifest that names the allowlist. The bootnode fetches the allowlist's events from its deployment ledger and answers `getEvents` requests that name it with `-32004` until the fetch completes. Removing an allowlist and adding it back fetches its events again. If the upstream RPC no longer holds that ledger, the bootnode logs an error and keeps answering `-32004`; clients wait. To fill it, restart with `--upstream-rpc-url` (or `BOOTNODE_UPSTREAM_RPC_URL`) set to an RPC for the same network that still holds the ledger.
 
 ## Trust assumptions
 
