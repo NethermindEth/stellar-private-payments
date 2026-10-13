@@ -137,20 +137,25 @@ impl GetEventsParams {
         self.filters.iter().flat_map(|filter| &filter.contract_ids)
     }
 
-    pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
-        // RPC filters are OR-ed, so every filter is checked. A client built
-        // from an older manifest asks for a subset of the archived
-        // contracts.
+    /// Reports whether every filter asks for all events of a non-empty contract
+    /// list.
+    pub fn is_contract_filter(&self) -> bool {
         !self.filters.is_empty()
             && self.filters.iter().all(|filter| {
                 filter.filter_type == "contract"
                     && filter.topics == [vec!["**".to_string()]]
                     && !filter.contract_ids.is_empty()
-                    && filter
-                        .contract_ids
-                        .iter()
-                        .all(|id| allowed_contract_ids.contains(id))
             })
+    }
+
+    pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
+        // RPC filters are OR-ed, so every filter is checked. A client built
+        // from an older manifest asks for a subset of the archived
+        // contracts.
+        self.is_contract_filter()
+            && self
+                .contract_ids()
+                .all(|id| allowed_contract_ids.contains(id))
     }
 
     pub fn for_contracts(

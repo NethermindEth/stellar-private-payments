@@ -54,10 +54,22 @@ impl BootnodeRpc {
     /// request.
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
-        if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
+        let allowed = self.state.contract_ids.as_ref();
+        let requested: Vec<String> = params.contract_ids().cloned().collect();
+        if !params.is_allowed_filters(allowed) {
+            // Some known IDs: a client on a newer or older manifest. None:
+            // another deployment.
+            if let Some(id) = requested.iter().find(|id| !allowed.contains(id))
+                && params.is_contract_filter()
+                && requested.iter().any(|id| allowed.contains(id))
+            {
+                counter!("bootnode_unknown_contract_refusals_total").increment(1);
+                return Err(not_ready(format!(
+                    "the bootnode does not follow contract {id}; retry later"
+                )));
+            }
             return Err(invalid_params("unsupported filters"));
         }
-        let requested: Vec<String> = params.contract_ids().cloned().collect();
         let refused = self
             .state
             .unarchived
