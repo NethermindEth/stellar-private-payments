@@ -97,6 +97,7 @@ struct JsonRpcErrorResponse {
 
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
 const BOOTNODE_NOT_READY_CODE: i64 = -32_004;
+pub(crate) const INVALID_PARAMS_CODE: i64 = -32_602;
 
 /// The name a contract's instance entry is reported under.
 ///
