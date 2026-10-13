@@ -280,6 +280,9 @@ impl BackgroundSync {
                 && let Err(e) = catch_up_loop(opened, &self.storage, Some(self.stop.as_ref())).await
             {
                 tracing::error!("background sync fetch failed: {e:#}");
+                if matches!(e, Error::Rpc(RpcError::RpcSyncGap(_))) {
+                    indexer = None;
+                }
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
         }
@@ -1047,6 +1050,35 @@ mod tests {
         let result = run_until(sync, &storage, at_cursor("main-cursor")).await;
 
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// The bootnode call shows that the indexer was reopened.
+    #[tokio::test]
+    async fn background_sync_returns_to_the_bootnode_after_falling_behind_the_rpc() {
+        let rpc = MockServer::start().await;
+        let before = get_events_page("before", json!([]), 2_990_000);
+        let behind = range_error(2_995_000, 3_100_000);
+        mount_get_events(
+            &rpc,
+            vec![
+                before.clone(),
+                before.clone(),
+                before,
+                behind.clone(),
+                behind,
+                get_events_page("after-handoff", json!([]), 3_000_000),
+            ],
+        )
+        .await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(&bootnode, vec![handoff_response()]).await;
+        let storage = temp_storage("fell-behind");
+        let sync = background_sync(&rpc, &storage, Some(bootnode.uri()));
+
+        let result = run_until(sync, &storage, at_cursor("after-handoff")).await;
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(get_events_calls(&bootnode).await, 1);
     }
 
     #[tokio::test]
