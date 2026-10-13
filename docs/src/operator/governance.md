@@ -39,10 +39,47 @@ change who signs, replace signers on the same account; that needs no contract ca
 
 ## Pause deposits
 
+A pause closes one pool to deposits. The pool refuses every `transact` that brings tokens in,
+before any token moves, and handles transfers and withdrawals as before:
+
+```mermaid
+flowchart LR
+    call["transact"] --> deposit{"Brings tokens in?"}
+    deposit -- "yes" --> paused{"Pool paused?"}
+    paused -- "yes" --> refused["Refused: DepositsPaused, error 18.<br/>No tokens move."]
+    paused -- "no" --> checks["The usual checks"]
+    deposit -- "no: a transfer<br/>or a withdrawal" --> checks
+```
+
+Warning: a pause doesn't freeze a pool. Users keep transferring and withdrawing, and each of
+those transactions still fills the commitment tree, as
+[A full pool](features-and-limits.md#a-full-pool) explains. No call stops withdrawals: the
+contracts can't be upgraded, so a stop would have no fix to wait for.
+
+A pause covers one pool and has no end. Deposits stay closed until the admin calls
+`unpause_deposits`. The app and the SDK refuse a deposit into a paused pool before proving, and
+the app tells the user that transfers and withdrawals still work.
+
 Collecting M signatures takes longer than a soundness bug in a circuit or contract allows, so the
-signers sign pause files ahead of time. A holder submits one with no signer present, and it stops
-deposits into one pool while users keep transferring and withdrawing. Each file works once and
-expires after about 180 days.
+signers sign pause files ahead of time and give one per pool to each person on call:
+
+```mermaid
+sequenceDiagram
+    participant S as Signers (M of N)
+    actor H as Holder
+    participant P as Pool
+    Note over S,H: Ahead of time
+    S->>H: A pause file for one pool
+    Note over H,P: During an incident
+    H->>P: pause_deposits(), sent from the holder's account
+    Note over P: Deposits closed. The file is spent.
+    Note over S,P: Afterwards
+    S->>P: unpause_deposits(), an admin call
+    S->>H: A replacement file
+```
+
+A holder can pause and can't unpause. Each file works once and expires after about 180 days, and
+a signer change or an admin transfer voids it.
 
 ## Procedures
 

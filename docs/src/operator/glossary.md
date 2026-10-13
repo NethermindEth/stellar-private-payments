@@ -18,6 +18,7 @@ differs.
 | Commitment | The hash of a note that the pool stores in its commitment tree. |
 | Deployer | The account that pays for the deployment. It keeps no power once the contracts name another admin. |
 | Deployment ledger | The ledger a contract was deployed in. Clients and the bootnode read its events from there. |
+| Deposit pause | A flag on one pool that, while set, refuses deposits. Transfers and withdrawals still go through. |
 | Encryption key | The X25519 key pair a user receives notes with. Senders encrypt each note to the recipient's encryption public key. |
 | GVK | Global View Key: a Baby JubJub key pair fixed in a `pool-gvk` pool at construction. Every note in that pool is encrypted to the GVK public key. |
 | GVK holder | Whoever holds a GVK private key, and so can decrypt that pool's notes. The GVK holder need not be the admin. |
