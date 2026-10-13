@@ -421,13 +421,14 @@ state. To actually run them you need one of:
 - A full-history `SPP_RPC_URL`.
 - A fresh contract deployment, which resets the 7-day clock.
 
-Retrying later does **not** help: the window moves forward, not back.
+Retrying later does **not** help: the window moves forward, not back. Except
+for `RetentionGap::BootnodeNotReady`: retry once the bootnode is ready.
 
 An already-synced wallet is unaffected, because it syncs incrementally and never
 needs the missing history. This is specifically a first-run problem.
 
 > **Implementation note for maintainers:** `common::is_retention_gap_error`
-> matches on `Error::RetentionGap(_)`.
+> matches on `Error::RetentionGap(_)`, except `RetentionGap::BootnodeNotReady`.
 
 ### Insufficient funds
 

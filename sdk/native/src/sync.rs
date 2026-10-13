@@ -237,7 +237,12 @@ impl BackgroundSync {
     /// [`SyncKick::kick`].
     ///
     /// On a main RPC retention gap, syncs historical events via the optional
-    /// bootnode until handoff, then resumes on the main RPC.
+    /// bootnode until handoff, then resumes on the main RPC. Waits and retries
+    /// while the bootnode answers `-32004`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error that stops it; a bootnode `-32004` never does.
     pub async fn run(self) -> Result<(), Error> {
         if self.is_stopped() {
             return Ok(());
@@ -260,17 +265,25 @@ impl BackgroundSync {
                 indexer
             }
             Err(e) if is_rpc_sync_gap(&e) => {
-                if self.is_stopped() {
-                    return Ok(());
-                }
                 tracing::warn!("background sync: main RPC sync gap, switching to bootnode");
-                match self.bootnode_catch_up().await {
-                    Ok(()) => {}
-                    Err(_) if self.is_stopped() => {
-                        tracing::info!("background sync stopped during bootnode catch-up");
+                loop {
+                    if self.is_stopped() {
                         return Ok(());
                     }
-                    Err(e) => return Err(e),
+                    match self.bootnode_catch_up().await {
+                        Ok(()) => break,
+                        Err(_) if self.is_stopped() => {
+                            tracing::info!("background sync stopped during bootnode catch-up");
+                            return Ok(());
+                        }
+                        Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(reason))) => {
+                            tracing::warn!(
+                                "background sync: bootnode not ready, retrying: {reason}"
+                            );
+                            self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 if self.is_stopped() {
                     return Ok(());
@@ -431,6 +444,9 @@ async fn bootnode_catch_up(
                 apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
                 return Ok(());
             }
+            Err(IndexerError::Rpc(RpcError::BootnodeNotReady(reason))) => {
+                return Err(RetentionGap::BootnodeNotReady(reason).into());
+            }
             Err(e) => return Err(RetentionGap::BootnodeFailed(format!("{e:#}")).into()),
         };
 
@@ -452,6 +468,9 @@ async fn bootnode_catch_up(
             Err(Error::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
                 apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
                 return Ok(());
+            }
+            Err(Error::Rpc(RpcError::BootnodeNotReady(reason))) => {
+                return Err(RetentionGap::BootnodeNotReady(reason).into());
             }
             // bootnode generic error
             Err(e) => {
@@ -625,6 +644,8 @@ mod tests {
         }))
     }
 
+    const HANDOFF_LEDGER: u32 = 2_999_000;
+
     fn handoff_response() -> serde_json::Value {
         json!({
             "jsonrpc": "2.0",
@@ -632,7 +653,7 @@ mod tests {
             "error": {
                 "code": -32002,
                 "message": "Continue syncing on your RPC endpoint",
-                "data": { "fromLedger": 2_999_000 },
+                "data": { "fromLedger": HANDOFF_LEDGER },
             }
         })
     }
@@ -664,7 +685,7 @@ mod tests {
         assert!(matches!(
             err,
             RpcError::RetentionHandoff {
-                from_ledger: 2_999_000
+                from_ledger: HANDOFF_LEDGER
             }
         ));
     }
@@ -833,8 +854,250 @@ mod tests {
         );
         assert_eq!(
             storage.sync.lock().expect("lock poisoned")[0].last_indexed_ledger,
-            2_999_000
+            HANDOFF_LEDGER
         );
         let _ = storage.batches;
+    }
+
+    /// Distinct ids, so the handoff is checked for every contract.
+    fn distinct_config() -> ContractConfig {
+        serde_json::from_value(json!({
+            "network": "test",
+            "kdf_domain": "tests",
+            "deployer": "GDEPLOYER",
+            "admin": "GADMIN",
+            "asp_membership": "CMEMBERSHIP",
+            "asp_non_membership": "CNONMEMBERSHIP",
+            "verifiers": {},
+            "public_key_registry": "CREGISTRY",
+            "pools": [{
+                "poolContractId": "CPOOL",
+                "tokenContractId": "CTOKEN",
+                "deploymentLedger": 1,
+                "enabled": true,
+                "policyFlags": ["allowlist"],
+                "asset": {"kind": "native"}
+            }]
+        }))
+        .expect("config")
+    }
+
+    fn temp_storage(name: &str) -> StorageHandle {
+        let path =
+            std::env::temp_dir().join(format!("spp-sync-{name}-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        StorageHandle::from(
+            crate::LocalStorage::open(path.to_string_lossy().as_ref()).expect("open storage"),
+        )
+    }
+
+    fn json_rpc_error(code: i64, message: &str) -> serde_json::Value {
+        json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": code, "message": message } })
+    }
+
+    fn not_ready_response() -> serde_json::Value {
+        json_rpc_error(-32_004, "bootnode warming up; retry later")
+    }
+
+    /// Answers the nth `getEvents` call with `responses[n]`, then the last.
+    async fn mount_get_events(server: &MockServer, responses: Vec<serde_json::Value>) {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(move |_: &wiremock::Request| {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                let response = responses
+                    .get(n)
+                    .or(responses.last())
+                    .cloned()
+                    .unwrap_or_default();
+                ResponseTemplate::new(200).set_body_json(response)
+            })
+            .mount(server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getLatestLedger"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
+                "id": "latest",
+                "protocolVersion": 22,
+                "sequence": 3_000_000u32,
+            }))))
+            .mount(server)
+            .await;
+    }
+
+    async fn main_rpc_with_a_gap() -> MockServer {
+        let server = MockServer::start().await;
+        mount_get_events(
+            &server,
+            vec![
+                rpc_sync_gap_response(),
+                get_events_page("main-cursor", json!([]), HANDOFF_LEDGER),
+            ],
+        )
+        .await;
+        server
+    }
+
+    async fn get_events_calls(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| String::from_utf8_lossy(&request.body).contains("getEvents"))
+            .count()
+    }
+
+    fn background_sync(
+        rpc: &MockServer,
+        storage: &StorageHandle,
+        bootnode: &MockServer,
+    ) -> (BackgroundSync, Handle<SyncKick>) {
+        let kick = SyncKick::new(SyncMode::Background);
+        let sync = BackgroundSync::new(
+            RpcClient::new(&rpc.uri()).expect("rpc client"),
+            storage.clone(),
+            distinct_config(),
+            Some(bootnode.uri()),
+            kick.clone(),
+        );
+        (sync, kick)
+    }
+
+    /// `-32004` at the probe and again mid-catch-up.
+    #[tokio::test]
+    async fn background_sync_waits_while_the_bootnode_is_not_ready() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        let page = get_events_page("bootnode-cursor", json!([]), 3_000_000);
+        mount_get_events(
+            &bootnode,
+            vec![
+                not_ready_response(),
+                page.clone(),
+                page.clone(),
+                not_ready_response(),
+                page.clone(),
+                page,
+                handoff_response(),
+            ],
+        )
+        .await;
+        let storage = temp_storage("not-ready-wait");
+        let (sync, kick) = background_sync(&rpc, &storage, &bootnode);
+        let stop = sync.stop_handle();
+        let contract_ids = distinct_config().all_contract_ids();
+
+        let handed_off = async {
+            loop {
+                // Skips the waits between attempts.
+                kick.kick();
+                let sync_state = storage.get_sync_state().await.expect("sync state");
+                let handed_off = contract_ids.iter().all(|id| {
+                    sync_state.iter().any(|meta| {
+                        &meta.contract_id == id && meta.last_indexed_ledger == HANDOFF_LEDGER
+                    })
+                });
+                if handed_off {
+                    stop.request();
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        // Less than the 5 s sleep a counted failure takes.
+        let (result, ()) = tokio::time::timeout(
+            Duration::from_secs(4),
+            futures::future::join(sync.run(), handed_off),
+        )
+        .await
+        .expect("background sync reaches the handoff");
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(get_events_calls(&bootnode).await, 7);
+    }
+
+    #[tokio::test]
+    async fn background_sync_ends_on_an_unsupported_filters_refusal() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(
+            &bootnode,
+            vec![json_rpc_error(-32_602, "unsupported filters")],
+        )
+        .await;
+        let storage = temp_storage("unsupported-filters");
+        let (sync, _kick) = background_sync(&rpc, &storage, &bootnode);
+
+        let result = tokio::time::timeout(Duration::from_secs(10), sync.run())
+            .await
+            .expect("background sync ends");
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::RetentionGap(RetentionGap::BootnodeFailed(_)))
+            ),
+            "{result:?}"
+        );
+        assert_eq!(get_events_calls(&bootnode).await, 1);
+    }
+
+    #[tokio::test]
+    async fn background_sync_stops_during_a_not_ready_wait() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(&bootnode, vec![not_ready_response()]).await;
+        let storage = temp_storage("stop-while-waiting");
+        let (sync, _kick) = background_sync(&rpc, &storage, &bootnode);
+        let stop = sync.stop_handle();
+
+        let stop_once_asked = async {
+            while get_events_calls(&bootnode).await == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            stop.request();
+        };
+        // Less than the 5 s wait: only the stop can end it.
+        let (result, ()) = tokio::time::timeout(
+            Duration::from_secs(2),
+            futures::future::join(sync.run(), stop_once_asked),
+        )
+        .await
+        .expect("stop ends the wait");
+
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// `-32004` mid-catch-up returns at once, not as a counted failure.
+    #[tokio::test]
+    async fn inline_sync_reports_a_bootnode_that_is_not_ready() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        let page = get_events_page("bootnode-cursor", json!([]), 3_000_000);
+        mount_get_events(&bootnode, vec![page.clone(), page, not_ready_response()]).await;
+        let storage = temp_storage("inline-not-ready");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(4),
+            catch_up(
+                &RpcClient::new(&rpc.uri()).expect("rpc client"),
+                &storage,
+                &distinct_config(),
+                Some(&bootnode.uri()),
+            ),
+        )
+        .await
+        .expect("inline sync returns without retrying");
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(_)))
+            ),
+            "{result:?}"
+        );
+        assert_eq!(get_events_calls(&bootnode).await, 3);
     }
 }

@@ -85,6 +85,10 @@ pub enum RetentionGap {
 
     #[error("configured bootnode failed to fill retention gap: {0}")]
     BootnodeFailed(String),
+
+    /// The bootnode answered `-32004`; retry later.
+    #[error("configured bootnode cannot serve the event history yet: {0}")]
+    BootnodeNotReady(String),
 }
 
 /// Multi-tx plan stopped after one or more steps had already confirmed

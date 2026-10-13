@@ -36,6 +36,8 @@ pub enum Error {
     JsonRpc { code: i64, message: String },
     #[error("bootnode retention handoff - continue on main RPC from ledger {from_ledger}")]
     RetentionHandoff { from_ledger: u32 },
+    #[error("bootnode not ready: {0}")]
+    BootnodeNotReady(String),
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -92,6 +94,7 @@ struct JsonRpcErrorResponse {
 }
 
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
+const BOOTNODE_NOT_READY_CODE: i64 = -32_004;
 
 /// The name a contract's instance entry is reported under.
 ///
@@ -111,6 +114,9 @@ fn map_json_rpc_error(err: JsonRpcErrorResponse) -> Error {
         && let Some(from_ledger) = retention_handoff_from_data(err.data)
     {
         return Error::RetentionHandoff { from_ledger };
+    }
+    if err.code == BOOTNODE_NOT_READY_CODE {
+        return Error::BootnodeNotReady(err.message);
     }
     Error::JsonRpc {
         code: err.code,
@@ -989,6 +995,19 @@ mod tests {
             Error::RetentionHandoff {
                 from_ledger: 2_913_600
             }
+        ));
+    }
+
+    #[test]
+    fn parse_bootnode_not_ready_error() {
+        let err = map_json_rpc_error(JsonRpcErrorResponse {
+            code: BOOTNODE_NOT_READY_CODE,
+            message: "bootnode warming up; retry later".into(),
+            data: None,
+        });
+        assert!(matches!(
+            err,
+            Error::BootnodeNotReady(message) if message == "bootnode warming up; retry later"
         ));
     }
 

@@ -32,7 +32,8 @@
 use std::path::PathBuf;
 
 use stellar_private_payments::{
-    CircuitStore, Error, LocalProver, LocalSigner, LocalStorage, ProverHandle, SignerHandle,
+    CircuitStore, Error, LocalProver, LocalSigner, LocalStorage, ProverHandle, RetentionGap,
+    SignerHandle,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
@@ -275,7 +276,7 @@ pub fn require_onboarded(account: &Account) -> Result<(), String> {
 /// history, and the default bootnode handoff can be stale. This detector is
 /// used by examples to turn the failure into a graceful skip message.
 pub fn is_retention_gap_error(e: &Error) -> bool {
-    matches!(e, Error::RetentionGap(_))
+    matches!(e, Error::RetentionGap(gap) if !matches!(gap, RetentionGap::BootnodeNotReady(_)))
 }
 
 /// Print the retention-gap skip message and exit 0.
