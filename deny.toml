@@ -15,10 +15,6 @@ targets = [
 ]
 all-features = true
 no-default-features = false
-exclude = [
-    "circuits",
-    "circuit-compiler",
-] # GPL-3.0 circom dependencies are used as a tool in building, and are not linked in any of the artefacts
 
 [output]
 feature-depth = 1
@@ -28,10 +24,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 ignore = [
-    "RUSTSEC-2026-0344", # ruzstd via wasmer's object 0.39; newer wasmer needs arbitrary ^1.4, blocked by soroban-sdk's ~1.3.0 pin. Tracked by a warning in dependency-audit.yml
 ]
 unmaintained = "workspace"
 
+# Licenses are checked only for crates we distribute; scripts/cargo-deny.sh
+# excludes tools, tests and dev-dependencies from this check and runs
+# deny-tools.toml over the whole workspace instead.
 [licenses]
 allow = [
     "0BSD",
@@ -92,6 +90,9 @@ unused = 'warn'
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+allow-git = [
+    "https://github.com/iden3/circom", # circom compiler, used by tools/circuit-compiler
+]
 
 [sources.allow-org]
 github = ["NethermindEth"]
