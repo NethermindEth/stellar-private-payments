@@ -65,7 +65,8 @@ events, read through an RPC or, for events older than the RPC keeps, a bootnode.
    bootnode.
 5. [Run an ASP](run-an-asp.md): add and remove allowlist members and blocklist entries.
 6. [Compliance controls](compliance.md): what each control enforces and what it doesn't.
-7. [Governance](governance.md): what the admin can do, and how to hand it over.
+7. [Governance](governance.md): what the admin can do, what a pause stops, and what happens if
+   the admin account is lost or stolen.
 8. [Features and limits](features-and-limits.md): what users and operators can do, and the
    fixed limits.
 9. [Glossary](glossary.md): the terms these pages use.

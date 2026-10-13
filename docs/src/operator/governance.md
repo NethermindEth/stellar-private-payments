@@ -81,6 +81,17 @@ sequenceDiagram
 A holder can pause and can't unpause. Each file works once and expires after about 180 days, and
 a signer change or an admin transfer voids it.
 
+## If the admin account is lost or stolen
+
+The design trusts the admin account's signers with every decision about who may use the pools.
+Admin calls take effect in the ledger they land in, with no delay and no notice to users. The code
+keeps two things from the admin: moving funds and changing contract code.
+
+| Case | What follows | Response |
+| --- | --- | --- |
+| Lost: fewer than M signers remain | Every setting stays as it is. Users keep transacting under the current lists, and an unused pause file can still close deposits for good. | Deploy new contracts and move users |
+| Stolen: someone else controls M signers | They can freeze users, by listing keys or re-pointing a pool to an empty allowlist, admit anyone, keep deposits closed, and transfer the admin to themselves. They can't move funds. | Warn users, deploy new contracts, and move users |
+
 ## Procedures
 
 | Task | Runbook section |
