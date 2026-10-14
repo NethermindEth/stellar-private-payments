@@ -17,6 +17,10 @@ use crate::{
 };
 
 const MAX_DEPOSIT_STROOPS: u128 = 1_000_000_000_000;
+/// The fee every deployed pool charges on each `transact`.
+pub const FEE_STROOPS: u128 = 1_000;
+/// The least a deposit leaves in notes once the fee is paid.
+pub const MIN_DEPOSIT_STROOPS: u128 = 10_000;
 const ASP_LEVELS: u32 = 10;
 const POOL_LEVELS: u32 = 20;
 
@@ -83,7 +87,15 @@ pub async fn deploy_with_max_deposit(
 ) -> Result<(ContractConfig, DeploymentIdentity)> {
     let network = LocalNetwork::start().await?;
     network
-        .deploy(max_deposit, ASP_LEVELS, POOL_LEVELS, pools, None)
+        .deploy(
+            max_deposit,
+            FEE_STROOPS,
+            MIN_DEPOSIT_STROOPS,
+            ASP_LEVELS,
+            POOL_LEVELS,
+            pools,
+            None,
+        )
         .await
 }
 
@@ -98,6 +110,8 @@ pub async fn deploy_scoped(
     network
         .deploy(
             MAX_DEPOSIT_STROOPS,
+            FEE_STROOPS,
+            MIN_DEPOSIT_STROOPS,
             ASP_LEVELS,
             POOL_LEVELS,
             pools,

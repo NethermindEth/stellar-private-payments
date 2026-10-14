@@ -59,12 +59,13 @@ export async function run(helpers) {
     const status = await lookup.innerText().catch(() => '(unavailable)');
     assert(false, `advanced recipient registry lookup did not resolve for ${recipient} (status: "${status}")`);
   }
-  await output.getByTestId('advanced-output-amount').fill('0.01');
+  // The output and the 0.0001 XLM pool fee together balance the 0.01 input note.
+  await output.getByTestId('advanced-output-amount').fill('0.0099');
 
   const advancedResult = await advancedTransfer(helpers, { logTag, rpcUrl });
   assert(
     depositResult.transactionHash !== advancedResult.transactionHash,
     'deposit and advanced transfer somehow produced the same transaction hash',
   );
-  log.info('OK: 0.01 XLM advanced transfer', advancedResult.transactionHash.slice(0, 8), 'confirmed SUCCESS on-chain');
+  log.info('OK: 0.0099 XLM advanced transfer', advancedResult.transactionHash.slice(0, 8), 'confirmed SUCCESS on-chain');
 }
