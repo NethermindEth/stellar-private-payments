@@ -322,6 +322,8 @@ function kindOf(contractId) {
   return 'unknown';
 }
 
+const KIND_LABELS = { pool: 'pool', 'asp-membership': 'allowlist', 'asp-non-membership': 'blocklist', unknown: 'not a contract this page lists' };
+
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
   // Show blocklist keys as the note public keys signers were asked about.
   const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
@@ -330,7 +332,7 @@ function formatAdminCall({ source, sequence, fee, validUntil, contract, method, 
     `Sequence: ${sequence}`,
     `Maximum fee: ${fee} stroops`,
     `Valid until: ${new Date(validUntil * 1000).toISOString()}`,
-    `Contract: ${contract}${kind === 'unknown' ? ' (not a contract this page lists)' : ''}`,
+    `Contract: ${contract} (${KIND_LABELS[kind]})`,
     `Function: ${method}`,
     `Arguments: ${JSON.stringify(args, (_, value) => (typeof value === 'bigint' ? number(value) : value))}`,
   ].join('\n');
