@@ -123,20 +123,21 @@ function withdrawalRecipientWarning(owner) {
     return `You are withdrawing to the same account used for deposits (${Utils.shortAddress(owner)}). This can link your withdrawal to your deposits. For better privacy, withdraw to an unrelated account.`;
 }
 
-// Builds a confirmation-dialog row with the number of transactions the action
-// requires. Best-effort only: a failed estimate must not block the action.
-async function txCountRow(amountValue) {
+// Builds confirmation-dialog rows with the number of transactions the action
+// requires and the pool fees they pay. Best-effort only: a failed estimate must
+// not block the action.
+async function estimateRows(amountValue, pool, decimals) {
     try {
         const session = await ensureAppPool();
         const estimate = await session.estimate(amountValue);
         const txCount = estimate?.txCount;
-        if (!txCount) return null;
-        return {
-            label: 'Transactions',
-            value: `${txCount} transaction${txCount === 1 ? '' : 's'}`,
-        };
+        if (!txCount) return [];
+        return [
+            { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
+            { label: 'Fee', value: Utils.formatTokenAmount(estimate.fees, Utils.poolLabel(pool), decimals) },
+        ];
     } catch {
-        return null;
+        return [];
     }
 }
 
@@ -226,12 +227,38 @@ function updatePoolLabels() {
     });
 }
 
-// Show the balance of the currently selected token in Move Funds.
-function updateMoveFundsBalance() {
+// A pool's fee is fixed at construction, so one read per pool serves every
+// balance refresh.
+const poolFees = new Map();
+
+async function poolFee(poolId) {
+    if (!poolFees.has(poolId)) {
+        const session = await client().account().pool({ poolContract: poolId });
+        poolFees.set(poolId, await session.fee());
+    }
+    return poolFees.get(poolId);
+}
+
+// Show the balance of the currently selected token in Move Funds, and the most
+// one transfer or withdrawal can send from it after the pool fees.
+async function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
-    if (!el) return;
-    const balance = (App.state.balances || []).find(b => b.poolContractId === App.state.selectedPoolId);
+    const maxEl = document.getElementById('move-funds-max-spend');
+    if (!el || !maxEl) return;
+    const poolId = App.state.selectedPoolId;
+    const balance = (App.state.balances || []).find(b => b.poolContractId === poolId);
     el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
+    let maxSpend = null;
+    try {
+        if (balance) {
+            const session = await client().account().pool({ poolContract: poolId });
+            maxSpend = await session.maxSpend(await poolFee(poolId));
+        }
+    } catch {
+        // Leave the placeholder when the account or the pool cannot be read.
+    }
+    if (App.state.selectedPoolId !== poolId) return;
+    maxEl.textContent = maxSpend == null ? '—' : Utils.formatPoolAmount(maxSpend, poolId);
 }
 
 async function lookupRecipient(address, refs) {
@@ -391,9 +418,23 @@ export const Transactions = {
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(depositAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
+                // The SDK also refuses a deposit below the minimum, but names it in base units.
+                let minimum = 0n;
+                try {
+                    const { pools } = await client().allContractsData();
+                    minimum = BigInt(pools.find(p => p.contractId === pool.poolContractId)?.minimumDepositAmount ?? 0);
+                } catch {
+                    // Any one unreadable pool fails this read; the SDK's own check stands in.
+                }
+                if (amount.value < minimum) {
+                    throw new Error(`The minimum deposit is ${Utils.formatTokenAmount(minimum, Utils.poolLabel(pool), decimals)}`);
+                }
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
+                const fee = await poolFee(pool.poolContractId);
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
+                    { label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) },
+                    { label: 'Total', value: Utils.formatTokenAmount(amount.value + fee, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const confirmed = await confirmAction({
@@ -460,8 +501,7 @@ export const Transactions = {
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
                 ];
-                const countRow = await txCountRow(amount.value);
-                if (countRow) rows.push(countRow);
+                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const confirmed = await confirmAction({
                     title: 'Confirm transfer',
                     rows,
@@ -529,8 +569,7 @@ export const Transactions = {
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
                 ];
-                const countRow = await txCountRow(amount.value);
-                if (countRow) rows.push(countRow);
+                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const owner = App.state.wallet.address;
                 const warning = [
                     withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
@@ -623,6 +662,8 @@ export const Transactions = {
                 if (withdraw.value > 0n) {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
                 }
+                const fee = await poolFee(pool.poolContractId);
+                rows.push({ label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) });
                 rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
