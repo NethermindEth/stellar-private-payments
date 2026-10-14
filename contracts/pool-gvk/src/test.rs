@@ -4120,3 +4120,77 @@ fn transact_refuses_an_ext_amount_outside_i128() {
         );
     }
 }
+
+/// Registers a pool charging a fee of 5 with a minimum deposit of 10, and a
+/// proof moving `ext_amount` with a public amount of `public_amount`.
+fn mk_transact_charging_five_minimum_ten(
+    env: &Env,
+    setup: &TestSetup,
+    ext_amount: i32,
+    public_amount: i128,
+) -> (PoolGvkContractClient<'static>, Proof, ExtData) {
+    let pool = PoolGvkContractClient::new(env, &register_pool_charging(env, setup, 5, 10));
+    let (proof, ext) = mk_paying_proof(env, &pool, &setup.token, ext_amount, public_amount, 0xFA);
+    (pool, proof, ext)
+}
+
+/// Without the minimum check the call would reach the verifier, which refuses
+/// this proof as `InvalidProof`.
+#[test]
+fn transact_refuses_a_deposit_below_the_minimum_after_the_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 14, 9);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::WrongExtAmount))
+    );
+}
+
+/// The deposit is below the minimum, so a minimum check ahead of the pause
+/// would answer `WrongExtAmount` instead.
+#[test]
+fn transact_reports_a_paused_pool_before_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 12, 7);
+    pool.pause_deposits();
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+/// The real verifier refuses the mock proof, so `InvalidProof` means every
+/// amount check passed.
+#[test]
+fn transact_admits_a_deposit_at_the_minimum_after_the_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 15, 10);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// The real verifier refuses the mock proof, so `InvalidProof` means every
+/// amount check passed.
+#[test]
+fn transact_does_not_bound_a_withdrawal_by_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, withdrawal) = mk_transact_charging_five_minimum_ten(&env, &setup, -1, -6);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
