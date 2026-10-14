@@ -43,9 +43,11 @@ scripts/gov/create-multisig.sh testnet --account admin --threshold 2 --fund \
 ```
 
 Replace `SIGNER_1`, `SIGNER_2`, and `SIGNER_3` with the signers' addresses (`G...`). The script
-refuses a threshold below 2 and an account that already has signers. On mainnet, fund the account
-from another account, leave out `--fund`, and pass `--yes`. Keep the account funded: it pays the
-fee of every admin call.
+refuses a threshold below 2, an account that already has signers, and the account's own address as
+a signer, since it sets that key's weight to 0. During a fee surge, raise the most it pays per
+operation with `--base-fee STROOPS` (default 100). On mainnet, fund the account from another
+account, leave out `--fund`, and pass `--yes`. Keep the account funded: it pays the fee of every
+admin call.
 
 ### Watch the account and the contracts
 
@@ -98,9 +100,12 @@ Replace the following:
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `KDF_DOMAIN`: the key derivation domain, which users see in the message they sign.
 
-`deploy.sh` admits only native XLM and classic assets whose issuer has `AUTH_IMMUTABLE` set and
-neither `AUTH_REVOCABLE` nor `AUTH_CLAWBACK_ENABLED`, so no issuer or token code can freeze or take
-a pool's balance. For the spec syntax, see [Deploying pools](./deploy.md).
+`deploy.sh` takes native XLM and classic assets, and refuses a token ID that is not the asset's own
+Stellar asset contract. For a classic asset, it warns about each power the issuer's flags give it
+over the pool's balance: `AUTH_REQUIRED` stops deposits until the issuer authorizes the pool,
+`AUTH_REVOCABLE` lets it freeze the balance, `AUTH_CLAWBACK_ENABLED` lets it take the balance back,
+and without `AUTH_IMMUTABLE` it can still set any of them. For the spec syntax, see
+[Deploying pools](./deploy.md).
 
 `deploy.sh` then runs `deployments/scripts/verify-deployment.sh` on the manifest it wrote and exits
 with its status. The check compares each contract's admin, pending transfer, token, and tree code
@@ -355,11 +360,12 @@ RPC's event retention, about seven days on the public testnet RPC:
 
 4. For an allowlist, add `{ "contractId": "TREE", "deploymentLedger": LEDGER }` to the manifest's
    `added_asp_memberships`, with `LEDGER` the deployment ledger from step 1, and merge it, since
-   clients refuse a pool whose allowlist the manifest does not name. Point the bootnode at the new
-   manifest and restart it while its upstream RPC still holds `LEDGER`, as
-   [Add an allowlist](./bootnode.md#add-an-allowlist) describes. Redeploy the web app, which
-   bundles the manifest when it is built, and give CLI users the new `deployments.json` for
-   `--deployment` or their provisioned copy.
+   clients refuse a pool whose allowlist the manifest does not name. The deployment check on the
+   pull request fails a new entry whose `LEDGER` the RPC no longer holds, since the bootnode could
+   never index that allowlist. Point the bootnode at the new manifest and restart it while its
+   upstream RPC still holds `LEDGER`, as [Add an allowlist](./bootnode.md#add-an-allowlist)
+   describes. Redeploy the web app, which bundles the manifest when it is built, and give CLI
+   users the new `deployments.json` for `--deployment` or their provisioned copy.
 5. On the Pools tab's Re-point panel, choose the pool and the kind of tree, enter the new tree's
    address, choose the records file, and press Check. A blocklist also takes its deployment
    ledger; an allowlist's comes from the manifest. The panel checks the tree's code, an
