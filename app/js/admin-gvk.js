@@ -11,6 +11,7 @@ import { symbol, symbolCircle } from 'd3-shape';
 import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
+import { classifyTx, withdrawalsByPk } from './gvk-classify.js';
 import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
@@ -48,6 +49,7 @@ const state = {
   tokenSymbol: null,
   rows: [],
   poolGvkMode: null,
+  poolFee: 0n,
   txCounter: 0,
   exhausted: false,
   noteLinks: new Map(),
@@ -474,15 +476,14 @@ function sumAuditedAmounts(slots) {
   );
 }
 
-/** Mirrors classify_tx in sdk/native/examples/gvk-audit.rs. */
-function classifyTx(tx) {
+function txKind(tx) {
   const inputs = normalizedInputs(tx);
-  const hasRealInput = inputs.some((slot) => slot.audited);
-  if (!hasRealInput) return 'deposit';
-
-  const inputSum = sumAuditedAmounts(inputs);
-  const outputSum = sumAuditedAmounts(normalizedOutputs(tx));
-  return inputSum > outputSum ? 'withdraw' : 'transfer';
+  return classifyTx(
+    inputs.some((slot) => slot.audited),
+    sumAuditedAmounts(inputs),
+    sumAuditedAmounts(normalizedOutputs(tx)),
+    state.poolFee,
+  );
 }
 
 function setPanelStatus(message, kind = 'info') {
@@ -858,10 +859,9 @@ function amountByPk(slots) {
 }
 
 /**
- * Per input PK: what went in, minus what came back as change or went on to
- * someone else. Computed over the tx's full slot set — hiding one of its notes
- * with the amount filter must not change the withdrawal; the filter applies to
- * the resulting amount instead.
+ * Per input PK, the withdrawal from withdrawalsByPk, computed over the tx's
+ * full slot set — hiding one of its notes with the amount filter must not
+ * change the withdrawal; the filter applies to the resulting amount instead.
  */
 function withdrawnByPk(inputs, outputs, filters) {
   const inputTotals = amountByPk(inputs);
@@ -876,12 +876,10 @@ function withdrawnByPk(inputs, outputs, filters) {
     for (const pk of charged) spent.set(pk, (spent.get(pk) ?? 0n) + amount);
   }
 
-  const withdrawn = new Map();
-  for (const [pk, inputTotal] of inputTotals) {
-    const amount = inputTotal - (spent.get(pk) ?? 0n);
-    if (amount > 0n && amountMatchesRange(amount, filters)) withdrawn.set(pk, amount);
-  }
-  return withdrawn;
+  return new Map(
+    [...withdrawalsByPk(inputTotals, spent, state.poolFee)]
+      .filter(([, amount]) => amountMatchesRange(amount, filters)),
+  );
 }
 
 /** Builds a PK-node / transfer-edge graph out of the given tx rows. Only a deposit has no counterparty PK. */
@@ -2132,7 +2130,7 @@ function renderPkGraph(rows, containerWidth, filters) {
 function pushTx(tx) {
   state.txCounter += 1;
   const index = state.txCounter;
-  const kind = state.poolGvkMode === 'traceable' ? classifyTx(tx) : null;
+  const kind = state.poolGvkMode === 'traceable' ? txKind(tx) : null;
   state.rows.push({ tx, index, kind });
 }
 
@@ -2435,6 +2433,7 @@ function resetAuditState() {
   }
   state.rows = [];
   state.poolGvkMode = null;
+  state.poolFee = 0n;
   state.txCounter = 0;
   state.exhausted = false;
   state.filteredVisibleCount = BATCH_SIZE;
@@ -2471,8 +2470,10 @@ async function startAudit({ reset }) {
     await client().openAccount(wallet);
     const pool = await client().account().pool({ poolContract: poolContractId });
     const decimals = await readDisplayDecimals(pool);
+    const fee = await pool.fee();
     state.audit = await pool.audit(privateKey);
     state.tokenDecimals = decimals;
+    state.poolFee = fee;
     state.auditedPoolContractId = poolContractId;
     const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
     state.tokenSymbol = tokenLabel(poolEntry);
