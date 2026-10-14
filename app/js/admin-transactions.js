@@ -208,13 +208,32 @@ export function signRefusal({ threshold, weights }, xdr, networkPassphrase, addr
   if (!(weights.get(address) > 0)) {
     return `The connected account does not sign for ${TransactionBuilder.fromXdr(xdr, networkPassphrase).source}`;
   }
-  if (signatureCount(xdr, networkPassphrase) >= threshold) {
+  if (signedWeight({ weights }, xdr, networkPassphrase) >= threshold) {
     return 'The envelope already carries the signatures it needs. Submit it.';
   }
   if (signedBy(xdr, networkPassphrase, address)) {
     return 'This account has already signed the envelope';
   }
   return null;
+}
+
+/**
+ * Lists each key of weight above 0 with whether the envelope carries its
+ * signature, or `null` for a key that is not an ed25519 key, whose signature
+ * cannot be matched to it.
+ *
+ * @returns {Array<{key: string, signed: boolean|null}>}
+ */
+export function signerStatus({ weights }, xdr, networkPassphrase) {
+  return [...weights]
+    .filter(([, weight]) => weight > 0)
+    .map(([key]) => ({ key, signed: StrKey.isValidEd25519PublicKey(key) ? signedBy(xdr, networkPassphrase, key) : null }));
+}
+
+/** Returns the summed weight of the keys whose signatures an envelope carries. */
+export function signedWeight(rule, xdr, networkPassphrase) {
+  return signerStatus(rule, xdr, networkPassphrase)
+    .reduce((sum, { key, signed }) => sum + (signed ? rule.weights.get(key) : 0), 0);
 }
 
 /**

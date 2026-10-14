@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { buildAdminCall, custodyProblems, custodyVerdict, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { buildAdminCall, custodyProblems, custodyVerdict, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
@@ -43,6 +43,8 @@ const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn')
 const adminTxXdrInput = document.getElementById('adminTxXdr');
 const adminTxDescriptionEl = document.getElementById('adminTxDescription');
 const adminTxSignaturesEl = document.getElementById('adminTxSignatures');
+const adminTxSignersEl = document.getElementById('adminTxSigners');
+const adminTxSignRefusalEl = document.getElementById('adminTxSignRefusal');
 const signAdminTxBtn = document.getElementById('signAdminTxBtn');
 const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
 const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
@@ -223,6 +225,8 @@ async function connect() {
       btn.disabled = false;
       btn.removeAttribute('title');
     });
+    // The card keeps Sign and Submit off until it has read the admin account.
+    renderAdminTx();
 
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
@@ -260,6 +264,7 @@ function disconnect() {
     btn.disabled = true;
     btn.title = "Please connect your wallet first";
   });
+  renderAdminTx();
 
   refreshPools();
   refreshAdmins();
@@ -330,13 +335,20 @@ function formatAdminCall({ source, sequence, fee, validUntil, contract, method, 
   ].join('\n');
 }
 
-// Describes the envelope in the card. `kind` comes from the page when it built
-// the call, and from the contract otherwise.
+const SIGNED_LABELS = new Map([[true, 'signed'], [false, 'not yet'], [null, 'cannot tell: not an ed25519 key']]);
+
+// Describes the envelope and its signers in the card, and enables Sign and
+// Submit only once the admin account is read. `kind` comes from the page when
+// it built the call, and from the contract otherwise.
 function renderAdminTx(kind) {
   const xdr = adminTxXdrInput.value.trim();
   state.adminTxKind = null;
   adminTxSignaturesEl.textContent = '0';
+  adminTxSignersEl.textContent = '';
   adminTxDescriptionEl.textContent = '';
+  adminTxSignRefusalEl.textContent = '';
+  signAdminTxBtn.disabled = true;
+  submitAdminTxBtn.disabled = true;
   if (!xdr) return;
   if (!state.networkPassphrase) {
     adminTxDescriptionEl.textContent = 'Connect your wallet to read the transaction.';
@@ -348,10 +360,25 @@ function renderAdminTx(kind) {
     state.adminTxKind = kind ?? kindOf(call.contract);
     adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
     adminTxSignaturesEl.textContent = count;
-    // Sign reads the threshold again, so a failed read here only leaves the bare count.
+    // A read landing after the card changed or the wallet disconnected is stale.
+    const current = () => adminTxXdrInput.value.trim() === xdr && state.address;
     rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
-      if (adminTxXdrInput.value.trim() === xdr) adminTxSignaturesEl.textContent = `${count} of ${signingRule(account).threshold}`;
-    }, () => {});
+      if (!current()) return;
+      const rule = signingRule(account);
+      const refusal = signRefusal(rule, xdr, state.networkPassphrase, state.address);
+      const weight = signedWeight(rule, xdr, state.networkPassphrase);
+      adminTxSignaturesEl.textContent = weight === count
+        ? `${count} of ${rule.threshold}`
+        : `${count}, weight ${weight} of ${rule.threshold}`;
+      adminTxSignersEl.textContent = signerStatus(rule, xdr, state.networkPassphrase)
+        .map(({ key, signed }) => `${key}: ${SIGNED_LABELS.get(signed)}`)
+        .join('\n');
+      adminTxSignRefusalEl.textContent = refusal ?? '';
+      signAdminTxBtn.disabled = refusal !== null;
+      submitAdminTxBtn.disabled = weight < rule.threshold;
+    }, (err) => {
+      if (current()) adminTxSignRefusalEl.textContent = `The admin account could not be read: ${err.message}`;
+    });
   } catch (err) {
     adminTxDescriptionEl.textContent = `Not an admin call: ${err.message}`;
   }

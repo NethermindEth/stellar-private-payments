@@ -29,6 +29,8 @@ import {
   shortLivedEntries,
   signatureCount,
   signedBy,
+  signedWeight,
+  signerStatus,
   signingRule,
   signRefusal,
   submitAdminCall,
@@ -268,6 +270,9 @@ const twoOfThree = {
   weights: new Map([[ADMIN, 0], [first.publicKey(), 1], [second.publicKey(), 1], [third.publicKey(), 1]]),
 };
 
+// A signer key that is not ed25519: the hash-x key of 32 zero bytes.
+const hashKey = StrKey.encodeSha256Hash(Buffer.alloc(32));
+
 // An insert_leaf envelope carrying a signature by each of `signers`.
 function envelopeSignedBy(...signers) {
   const envelope = insertLeafEnvelope();
@@ -292,6 +297,26 @@ test('signRefusal refuses a key of weight 0, a signature past the threshold, and
 
 test('signRefusal lets a signer who has not signed add a signature below the threshold', () => {
   assert.equal(signRefusal(twoOfThree, envelopeSignedBy(first), Networks.TESTNET, second.publicKey()), null);
+});
+
+test('signerStatus marks the signer who signed and the two who have not, gives null for a hash key, and leaves out the key of weight 0', () => {
+  const rule = { ...twoOfThree, weights: new Map([...twoOfThree.weights, [hashKey, 1]]) };
+  assert.deepEqual(signerStatus(rule, envelopeSignedBy(first), Networks.TESTNET), [
+    { key: first.publicKey(), signed: true },
+    { key: second.publicKey(), signed: false },
+    { key: third.publicKey(), signed: false },
+    { key: hashKey, signed: null },
+  ]);
+});
+
+test('signedWeight sums the weights of the keys that signed, so one signature of weight 2 meets a threshold of 2, and counts nothing for a hash key', () => {
+  const weighted = { ...twoOfThree, weights: new Map([...twoOfThree.weights, [first.publicKey(), 2], [hashKey, 1]]) };
+  const envelope = envelopeSignedBy(first);
+  assert.equal(signedWeight(weighted, envelope, Networks.TESTNET), 2);
+  assert.equal(
+    signRefusal(weighted, envelope, Networks.TESTNET, second.publicKey()),
+    'The envelope already carries the signatures it needs. Submit it.',
+  );
 });
 
 test('newAdminRefusal refuses an empty value, a secret, a muxed or corrupted address, the admin, and the pending admin', () => {
