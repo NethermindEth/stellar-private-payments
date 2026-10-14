@@ -35,9 +35,28 @@ impl PrivatePool {
         self.inner.config()
     }
 
+    /// Reads the fee the pool charges on every `transact`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::fee`].
+    pub fn fee(&self) -> Result<NoteAmount, Error> {
+        block_on(self.inner.fee())
+    }
+
     #[tracing::instrument(name = "blocking_estimate", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
-    pub fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
-        block_on(self.inner.estimate(amount))
+    pub fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {
+        block_on(self.inner.estimate(amount, fee))
+    }
+
+    /// Returns the most one spend from the spendable notes can send after
+    /// paying `fee` on every step.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::max_spend`].
+    pub fn max_spend(&self, fee: NoteAmount) -> Result<NoteAmount, Error> {
+        block_on(self.inner.max_spend(fee))
     }
 
     #[tracing::instrument(name = "blocking_deposit", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
@@ -77,8 +96,9 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        block_on(self.inner.prepare_transfer(wallet, recipient, amount))
+        block_on(self.inner.prepare_transfer(wallet, recipient, amount, fee))
     }
 
     pub fn prepare_withdraw(
@@ -86,8 +106,9 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        self.inner.prepare_withdraw(wallet, amount, recipient)
+        self.inner.prepare_withdraw(wallet, amount, recipient, fee)
     }
 
     pub fn prepare_transact(&self, step: crate::planner::Transact) -> PreparedTransactionPlan {

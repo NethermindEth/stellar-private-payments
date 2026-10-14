@@ -362,6 +362,7 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
     let mut session = SpendSession::setup(
         spendable_notes(&test_wallet),
         NoteAmount::from(10u128),
+        NoteAmount::ZERO,
         POOL_ADDRESS.to_string(),
         transfer_target(),
     )?;

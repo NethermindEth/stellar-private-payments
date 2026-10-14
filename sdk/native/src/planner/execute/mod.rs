@@ -78,16 +78,18 @@ pub struct SpendSession {
 }
 
 impl SpendSession {
-    /// Create a new SpendSession from a wallet, amount, and target.
+    /// Creates a session that sends `amount` from `wallet` to `target`, paying
+    /// `fee` on every step.
     #[tracing::instrument(skip_all, fields(stage = "spend_session_setup", correlation_id = %correlation_id_or_new(), wallet_size = wallet.len(), amount = ?Sensitive(&amount), target = ?Sensitive(&target)))]
     pub fn setup(
         wallet: Vec<SpendableNote>,
         amount: NoteAmount,
+        fee: NoteAmount,
         pool_address: String,
         target: SpendTarget,
     ) -> Result<Self, SpendSessionError> {
         validate_target(&target)?;
-        let tx_plan = plan(amount, &wallet)?;
+        let tx_plan = plan(amount, fee, &wallet)?;
         Ok(Self {
             steps: tx_plan.into_iter().collect(),
             wallet,
@@ -304,6 +306,7 @@ mod tests {
         let exec = SpendSession::setup(
             vec![note(10)],
             NoteAmount::from(10),
+            NoteAmount::ZERO,
             "POOL".into(),
             transfer_target(),
         )
@@ -323,6 +326,7 @@ mod tests {
         let exec = SpendSession::setup(
             vec![note(15)],
             NoteAmount::from(10),
+            NoteAmount::ZERO,
             "POOL".into(),
             transfer_target(),
         )
@@ -344,6 +348,7 @@ mod tests {
         let exec = SpendSession::setup(
             vec![note(15)],
             NoteAmount::from(10),
+            NoteAmount::ZERO,
             "POOL".into(),
             SpendTarget::withdraw(
                 "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".into(),
@@ -355,11 +360,30 @@ mod tests {
         assert_eq!(step.output_amounts, [NoteAmount::from(5), NoteAmount::ZERO]);
     }
 
+    /// 15 sends 10, pays the fee of 1, and keeps 4 as change.
+    #[test]
+    fn withdraw_with_change_pays_the_fee() {
+        let exec = SpendSession::setup(
+            vec![note(15)],
+            NoteAmount::from(10),
+            NoteAmount::ONE,
+            "POOL".into(),
+            SpendTarget::withdraw(
+                "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".into(),
+            ),
+        )
+        .expect("setup withdraw");
+        let step = exec.step().expect("step").expect("one step");
+        assert_eq!(step.ext_amount, ExtAmount::from(-10));
+        assert_eq!(step.output_amounts, [NoteAmount::from(4), NoteAmount::ZERO]);
+    }
+
     #[test]
     fn complete_all_steps() {
         let mut exec = SpendSession::setup(
             vec![note(2), note(3), note(5)],
             NoteAmount::from(10),
+            NoteAmount::ZERO,
             "POOL".into(),
             transfer_target(),
         )
@@ -387,6 +411,7 @@ mod tests {
         let mut exec = SpendSession::setup(
             vec![note(10)],
             NoteAmount::from(10),
+            NoteAmount::ZERO,
             "POOL".into(),
             transfer_target(),
         )
@@ -406,6 +431,7 @@ mod tests {
             SpendSession::setup(
                 vec![note(amount)],
                 NoteAmount::from(amount),
+                NoteAmount::ZERO,
                 "POOL".into(),
                 SpendTarget::withdraw(
                     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".into(),

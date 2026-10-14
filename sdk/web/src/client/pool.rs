@@ -56,12 +56,32 @@ impl PrivatePool {
         Ok(user_note_summaries(notes))
     }
 
+    /// Fee the pool charges on every transaction, in stroops (`bigint` in JS).
+    pub async fn fee(&self) -> Result<u128, JsError> {
+        let fee = self.inner().fee().await.map_err(pool_err)?;
+        Ok(u128::from(fee))
+    }
+
+    /// Most one spend can send after paying `fee` on every step, in stroops
+    /// (`bigint` in JS). The pool's fee never changes, so read it once with
+    /// [`Self::fee`].
+    #[wasm_bindgen(js_name = maxSpend)]
+    pub async fn max_spend(&self, fee: u128) -> Result<u128, JsError> {
+        let amount = self
+            .inner()
+            .max_spend(NoteAmount::from(fee))
+            .await
+            .map_err(pool_err)?;
+        Ok(u128::from(amount))
+    }
+
     /// Estimate how many on-chain transactions a spend of `amount` stroops
-    /// would require.
+    /// would require, and the pool fees they pay.
     pub async fn estimate(&self, amount: u128) -> Result<PoolEstimate, JsError> {
+        let fee = self.inner().fee().await.map_err(pool_err)?;
         let estimate = self
             .inner()
-            .estimate(NoteAmount::from(amount))
+            .estimate(NoteAmount::from(amount), fee)
             .await
             .map_err(pool_err)?;
         Ok(PoolEstimate::from(estimate))
@@ -95,9 +115,10 @@ impl PrivatePool {
                     .map_err(|e| JsError::new(&e.to_string()))?,
             );
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount), fee)
                 .await
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "transfer").await
@@ -113,9 +134,10 @@ impl PrivatePool {
     ) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount), fee)
                 .await
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "transfer").await
@@ -132,9 +154,10 @@ impl PrivatePool {
         with_correlation_id(new_correlation_id(), async {
             let to = recipient.unwrap_or_else(|| self.user_address.clone());
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_withdraw(&wallet, NoteAmount::from(amount), to)
+                .prepare_withdraw(&wallet, NoteAmount::from(amount), to, fee)
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "withdraw").await
         })
