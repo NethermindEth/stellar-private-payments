@@ -421,7 +421,7 @@ impl PrivatePool {
 
         let chain = self.fetch_transact_chain_context().await?;
         let step = if let Some(amount) = plan.deposit_amount() {
-            self.deposit_transact_step(amount).await?
+            self.deposit_transact_step(amount, chain.fee).await?
         } else if let Some(step) = plan.raw_transact_step() {
             step.clone()
         } else {
@@ -438,7 +438,7 @@ impl PrivatePool {
             &self.config.contract_config.kdf_domain,
             &self.config.pool_contract_id,
             &chain,
-        );
+        )?;
 
         let params = self.storage.build_transact_params(&req).await?;
         let prepared = self.prover.prove_transact(params).await?;
@@ -518,7 +518,11 @@ impl PrivatePool {
         Ok(results)
     }
 
-    async fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, Error> {
+    async fn deposit_transact_step(
+        &self,
+        amount: NoteAmount,
+        fee: NoteAmount,
+    ) -> Result<Transact, Error> {
         let (note_pub, enc_pub) = self
             .storage
             .privacy_keys(
@@ -526,6 +530,7 @@ impl PrivatePool {
                 &self.config.contract_config.kdf_domain,
             )
             .await?;
-        self.core.deposit_transact_step(note_pub, enc_pub, amount)
+        self.core
+            .deposit_transact_step(note_pub, enc_pub, amount, fee)
     }
 }
