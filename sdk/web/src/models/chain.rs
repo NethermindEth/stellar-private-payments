@@ -309,6 +309,16 @@ impl PoolInfo {
         self.inner.deposits_paused
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn fee(&self) -> String {
+        self.inner.fee.to_string()
+    }
+
+    #[wasm_bindgen(getter, js_name = minimumDepositAmount)]
+    pub fn minimum_deposit_amount(&self) -> String {
+        self.inner.minimum_deposit_amount.to_string()
+    }
+
     #[wasm_bindgen(getter, js_name = merkleRoot)]
     pub fn merkle_root(&self) -> Option<String> {
         self.inner.merkle_root.as_ref().map(field_hex)
