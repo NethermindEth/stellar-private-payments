@@ -12,7 +12,8 @@ contract IDs except `added_asp_memberships`, so deployments can share one DB.
 Clients paginate through the archive with bootnode-managed cursors (`event.id`).
 The requested contracts' events with `ledger < tip − 5 days` are served; the next
 request that enters the retention window returns JSON-RPC handoff (`-32002` with
-`fromLedger`) so the app indexer resumes on the user's configured main RPC.
+`fromLedger`) so the app indexer resumes on the user's configured main RPC. The
+tip advances only once ingestion catches up with the upstream RPC.
 
 Schema changes are versioned SQL files in `src/storage/migrations/` (tracked in
 `bootnode_schema_migrations`).
