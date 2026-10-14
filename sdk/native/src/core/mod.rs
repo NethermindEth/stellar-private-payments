@@ -42,6 +42,7 @@ impl PoolCore {
         note_public_key: NotePublicKey,
         encryption_public_key: EncryptionPublicKey,
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         if amount.is_zero() {
             return Err(Error::InvalidConfig("amount must be > 0".into()));
@@ -49,6 +50,7 @@ impl PoolCore {
         let session = SpendSession::setup(
             wallet.to_vec(),
             amount,
+            fee,
             self.config.pool_contract_id.clone(),
             SpendTarget::transfer(note_public_key, encryption_public_key),
         )?;
@@ -60,6 +62,7 @@ impl PoolCore {
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         if amount.is_zero() {
             return Err(Error::InvalidConfig("amount must be > 0".into()));
@@ -67,6 +70,7 @@ impl PoolCore {
         let session = SpendSession::setup(
             wallet.to_vec(),
             amount,
+            fee,
             self.config.pool_contract_id.clone(),
             SpendTarget::withdraw(recipient.into()),
         )?;
@@ -77,10 +81,12 @@ impl PoolCore {
         &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<Estimate, Error> {
-        let plan = crate::planner::plan(amount, wallet)?;
+        let plan = crate::planner::plan(amount, fee, wallet)?;
         Ok(Estimate {
             tx_count: u32::try_from(plan.len()).unwrap_or(u32::MAX),
+            fees: crate::planner::fees(plan.len(), fee)?,
         })
     }
 
