@@ -39,7 +39,7 @@ bash "$REPO_ROOT/deployments/scripts/deploy.sh" local \
   --policy-flags blocklist \
   --asp-levels 10 \
   --pool-levels 20 \
-  --fee 0 \
-  --min-deposit 0 \
+  --fee 1000 \
+  --min-deposit 10000 \
   --max-deposit 1000000000 \
   --kdf-domain tests

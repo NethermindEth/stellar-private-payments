@@ -131,9 +131,12 @@ impl LocalNetwork {
     /// `deployments/scripts/deploy.sh`. Coordinated per configuration (see
     /// [`acquire_deploy_lock`]), so concurrent processes deploying the same
     /// pool set share one deployment.
+    #[allow(clippy::too_many_arguments)]
     pub async fn deploy(
         &self,
         max_deposit: u128,
+        fee: u128,
+        min_deposit: u128,
         asp_levels: u32,
         pool_levels: u32,
         pools: &[PoolOptions],
@@ -153,7 +156,7 @@ impl LocalNetwork {
             .collect();
 
         let mut key = format!(
-            "{max_deposit}-{asp_levels}-{pool_levels}-{}",
+            "{max_deposit}-{fee}-{min_deposit}-{asp_levels}-{pool_levels}-{}",
             pool_specs.join(",")
         );
         if let Some(scope) = scope {
@@ -179,8 +182,8 @@ impl LocalNetwork {
             .args(["--deployer", &deployer_secret])
             .args(["--asp-levels", &asp_levels.to_string()])
             .args(["--pool-levels", &pool_levels.to_string()])
-            .args(["--fee", "0"])
-            .args(["--min-deposit", "0"])
+            .args(["--fee", &fee.to_string()])
+            .args(["--min-deposit", &min_deposit.to_string()])
             .args(["--max-deposit", &max_deposit.to_string()])
             .args(["--kdf-domain", KDF_DOMAIN])
             .current_dir(&root);
