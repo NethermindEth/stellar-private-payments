@@ -665,6 +665,10 @@ async function adminRow({ label, kind, contractId }) {
       method: 'update_admin',
       args: { new_admin: newAdminInput.value.trim() },
     }));
+    if (!pending) {
+      row.querySelectorAll('.cancel-admin-btn, .accept-admin-btn').forEach((btn) => btn.remove());
+      return row;
+    }
     row.querySelector('.cancel-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
     row.querySelector('.accept-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: pending, contractId, method: 'accept_admin' }));
   } catch (err) {
