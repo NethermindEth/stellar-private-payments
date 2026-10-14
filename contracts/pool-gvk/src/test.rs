@@ -25,7 +25,8 @@ use pool_core::events::{
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, IntoVal,
-    InvokeError, String, Symbol, U256, Vec, contract, contracterror, contractimpl, contracttype,
+    InvokeError, String, Symbol, U256, Val, Vec, contract, contracterror, contractimpl,
+    contracttype,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{
         Address as _, Deployer as _, Events, MockAuth, MockAuthInvoke, storage::Persistent as _,
@@ -127,24 +128,68 @@ fn register_pool_gvk(
     admin_view_key: BabyJubJubPoint,
     gvk_mode: u32,
 ) -> Address {
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            wasm_hash(&setup.asp_membership_address),
-            wasm_hash(&setup.asp_non_membership_address),
-            maximum_deposit_amount,
-            levels,
-            policy_flags,
-            String::from_str(env, KDF_DOMAIN),
-            admin_view_key,
-            gvk_mode,
-        ),
+    register_pool_with(
+        env,
+        setup,
+        0,
+        0,
+        maximum_deposit_amount,
+        levels,
+        policy_flags,
+        admin_view_key,
+        gvk_mode,
     )
+}
+
+/// Registers a view-only pool charging `fee` with a minimum deposit of
+/// `minimum`, a deposit cap of 1000, depth 3, and policy flags 0, the pool
+/// `mk_moving_transact_proof` expects.
+fn register_pool_charging(env: &Env, setup: &TestSetup, fee: i128, minimum: i128) -> Address {
+    register_pool_with(
+        env,
+        setup,
+        fee,
+        minimum,
+        U256::from_u32(env, 1000),
+        3,
+        0,
+        mk_point(env, 1, 2),
+        VIEW_ONLY,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn register_pool_with(
+    env: &Env,
+    setup: &TestSetup,
+    fee: i128,
+    minimum_deposit_amount: i128,
+    maximum_deposit_amount: U256,
+    levels: u32,
+    policy_flags: u32,
+    admin_view_key: BabyJubJubPoint,
+    gvk_mode: u32,
+) -> Address {
+    // 15 arguments, past the 13 a `ConstructorArgs` tuple holds.
+    let args: Vec<Val> = soroban_sdk::vec![
+        env,
+        setup.admin.into_val(env),
+        setup.token.into_val(env),
+        setup.verifier.into_val(env),
+        setup.asp_membership_address.into_val(env),
+        setup.asp_non_membership_address.into_val(env),
+        wasm_hash(&setup.asp_membership_address).into_val(env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(env),
+        fee.into_val(env),
+        minimum_deposit_amount.into_val(env),
+        maximum_deposit_amount.into_val(env),
+        levels.into_val(env),
+        policy_flags.into_val(env),
+        String::from_str(env, KDF_DOMAIN).into_val(env),
+        admin_view_key.into_val(env),
+        gvk_mode.into_val(env),
+    ];
+    env.register(PoolGvkContract, args)
 }
 
 #[test]
@@ -749,24 +794,25 @@ fn pool_gvk_update_asp_non_membership_requires_admin() {
 fn constructor_refuses_an_allowlist_of_another_code() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin,
-            setup.token,
-            setup.verifier,
-            setup.asp_membership_address,
-            setup.asp_non_membership_address.clone(),
-            mk_bytesn32(&env, 7),
-            wasm_hash(&setup.asp_non_membership_address),
-            U256::from_u32(&env, 1000),
-            3u32,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            mk_point(&env, 1, 2),
-            VIEW_ONLY,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        setup.verifier.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        mk_bytesn32(&env, 7).into_val(&env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, 1000).into_val(&env),
+        3u32.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        mk_point(&env, 1, 2).into_val(&env),
+        VIEW_ONLY.into_val(&env),
+    ];
+    env.register(PoolGvkContract, args);
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -778,23 +824,129 @@ fn constructor_refuses_an_allowlist_of_another_code() {
 fn constructor_refuses_a_blocklist_of_another_code() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin,
-            setup.token,
-            setup.verifier,
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address,
-            wasm_hash(&setup.asp_membership_address),
-            mk_bytesn32(&env, 7),
-            U256::from_u32(&env, 1000),
-            3u32,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            mk_point(&env, 1, 2),
-            VIEW_ONLY,
-        ),
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        setup.verifier.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        wasm_hash(&setup.asp_membership_address).into_val(&env),
+        mk_bytesn32(&env, 7).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, 1000).into_val(&env),
+        3u32.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        mk_point(&env, 1, 2).into_val(&env),
+        VIEW_ONLY.into_val(&env),
+    ];
+    env.register(PoolGvkContract, args);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, -5, 10);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_minimum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, 10, -5);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_above_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 600, 500);
+}
+
+#[test]
+fn constructor_accepts_a_fee_and_minimum_equal_to_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 500, 500);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_that_overflow() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The cap is past `i128::MAX`, so only the overflow can refuse the sum.
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+    register_pool_with(
+        &env,
+        &setup,
+        i128::MAX,
+        1,
+        maximum,
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+}
+
+#[test]
+fn constructor_stores_the_fee_and_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 10);
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        assert_eq!(instance.get::<_, i128>(&DataKey::Fee), Some(5));
+        assert_eq!(
+            instance.get::<_, i128>(&DataKey::MinimumDepositAmount),
+            Some(10)
+        );
+    });
+}
+
+/// The cross-check compares in `U256`, so a cap past `u128::MAX` constructs.
+#[test]
+fn constructor_accepts_a_maximum_above_u128() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+
+    register_pool_with(
+        &env,
+        &setup,
+        5,
+        10,
+        maximum,
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
     );
 }
 
@@ -2461,25 +2613,25 @@ fn build_gvk_transact(
     let verifier_id = env.register(TestVerifier, (vk_bytes,));
 
     // Install the real pool at the reserved address, replacing the placeholder.
-    env.register_at(
-        &pool_id,
-        PoolGvkContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            verifier_id,
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            wasm_hash(&setup.asp_membership_address),
-            wasm_hash(&setup.asp_non_membership_address),
-            U256::from_u32(&env, maximum_deposit_amount),
-            levels,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            admin_view_key,
-            gvk_mode,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        verifier_id.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        wasm_hash(&setup.asp_membership_address).into_val(&env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, maximum_deposit_amount).into_val(&env),
+        levels.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        admin_view_key.into_val(&env),
+        gvk_mode.into_val(&env),
+    ];
+    env.register_at(&pool_id, PoolGvkContract, args);
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -2926,6 +3078,8 @@ fn the_configuration_lives_in_the_instance() {
         for key in [
             DataKey::Token,
             DataKey::Verifier,
+            DataKey::Fee,
+            DataKey::MinimumDepositAmount,
             DataKey::MaximumDepositAmount,
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,

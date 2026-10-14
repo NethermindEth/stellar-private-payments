@@ -79,6 +79,8 @@ fn deploy() -> Deployment {
             asp_non_membership.clone(),
             wasm_hash(&asp_membership),
             wasm_hash(&asp_non_membership),
+            0i128,
+            0i128,
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
