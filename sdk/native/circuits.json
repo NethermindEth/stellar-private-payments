@@ -2,7 +2,7 @@
   "version": "0.6",
   "meta": {
     "repository": "NethermindEth/stellar-private-payments",
-    "commit": "ef42a47ee6a84b5c7a289b979e2fa2526c73aabc",
+    "commit": "affec1e9d0e6282ad35b6ab67019d84a1eb2725d",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
     "circom-witness-rs": "0.3.0"
