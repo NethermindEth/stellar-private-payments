@@ -297,13 +297,13 @@ A re-point has two uses: leaving a tree another party runs, and removing an allo
 an allowlist has no delete. To remove a member, ask them to withdraw first. Once the pool reads an
 allowlist without their leaf, their notes in that pool can no longer move.
 
-The re-point check reads the new tree's entries from its events, and clients replay a new
-allowlist from its deployment ledger, so finish these steps while the tree is younger than the
-RPC's event retention, about seven days on the public testnet RPC:
+The re-point check reads an allowlist's entries from its events, and clients replay it from its
+deployment ledger, so for an allowlist finish these steps while the tree is younger than the RPC's
+event retention, about seven days on the public testnet RPC:
 
-1. Read the latest ledger with `stellar ledger latest --network testnet` and keep it as the
-   tree's deployment ledger. Then read the tree code the pool accepts and deploy the tree from
-   that code, with the deployer as its admin so the deployer can load it without the quorum:
+1. For an allowlist, read the latest ledger with `stellar ledger latest --network testnet` and
+   keep it as the tree's deployment ledger. Read the tree code the pool accepts and deploy the tree
+   from that code, with the deployer as its admin so the deployer can load it without the quorum:
 
    ```bash
    stellar contract invoke --id POOL --source-account DEPLOYER --network testnet --send=no \
@@ -370,8 +370,7 @@ RPC's event retention, about seven days on the public testnet RPC:
    describes. Redeploy the web app, which bundles the manifest when it is built, and give CLI
    users the new `deployments.json` for `--deployment` or their provisioned copy.
 5. On the Pools tab's Re-point panel, choose the pool and the kind of tree, enter the new tree's
-   address, choose the records file, and press Check. A blocklist also takes its deployment
-   ledger; an allowlist's comes from the manifest. The panel checks the tree's code, an
+   address, choose the records file, and press Check. The panel checks the tree's code, an
    allowlist's depth and manifest entry, the tree's admin, and the tree's entries against the
    records file. A tree another party runs passes the admin check once you tick the box that
    names its admin.
@@ -396,10 +395,10 @@ The Allowlist and Blocklist tabs write to the trees in the Overview tab's contra
 which start as the manifest's. After a re-point, enter the new tree's address there before writing
 to it.
 
-The Re-point panel cannot check a tree older than the RPC's event retention, such as the
-deployment's own allowlist a week after the deploy. To re-point back to such a tree, compare its
-entries with your records some other way and, for an allowlist, make sure the manifest still
-names it. Then build the call with the CLI:
+The Re-point panel cannot check an allowlist older than the RPC's event retention, such as the
+deployment's own allowlist a week after the deploy. To re-point back to such an allowlist, compare
+its entries with your records some other way and make sure the manifest still names it. Then build
+the call with the CLI:
 
 ```bash
 stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet \
@@ -407,9 +406,8 @@ stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testn
 | stellar tx simulate --source-account ADMIN_ACCOUNT --network testnet > tx.xdr
 ```
 
-Replace `POOL` with the pool's address and `TREE` with the tree's. For a blocklist, call
-`update_asp_non_membership --new_asp_non_membership TREE` instead. Bound, sign, and send `tx.xdr`
-as [Sign with the CLI](#sign-with-the-cli) describes.
+Replace `POOL` with the pool's address and `TREE` with the allowlist's. Bound, sign, and send
+`tx.xdr` as [Sign with the CLI](#sign-with-the-cli) describes.
 
 ## Replace a signer
 

@@ -3,7 +3,7 @@
  * the manifest, and the operator's records. Kept out of `admin.js` so Node unit
  * tests can import it.
  */
-import { scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 
 /**
  * Reads a contract's instance entry.
@@ -45,25 +45,19 @@ export async function eventsSince(server, contractId, startLedger) {
 }
 
 /**
- * Returns the ledger the re-point check reads a tree's events from: an added
- * allowlist's manifest ledger, the operator's ledger for a blocklist, or the
- * earliest pool's ledger for the manifest's own allowlist. That last one comes
- * after the allowlist's deployment, so a leaf added in between fails the read
- * instead of going unseen.
+ * Returns the ledger the re-point check reads an allowlist's events from: an
+ * added allowlist's manifest ledger, or the earliest pool's ledger for the
+ * manifest's own allowlist. That last one comes after the allowlist's
+ * deployment, so a leaf added in between fails the read instead of going unseen.
  *
- * @param {{allowlist: boolean, tree: string, manifest: Object, blocklistLedger: number}} options
- * @throws {Error} when the manifest names no ledger for the allowlist, or the
- *   operator entered none for the blocklist.
+ * @param {{tree: string, manifest: Object}} options
+ * @throws {Error} when the manifest names no ledger for the allowlist.
  */
-export function historyStart({ allowlist, tree, manifest, blocklistLedger }) {
-  const ledger = !allowlist
-    ? blocklistLedger
-    : tree === manifest.asp_membership
-      ? Math.min(...manifest.pools.map(({ deploymentLedger }) => deploymentLedger))
-      : (manifest.added_asp_memberships ?? []).find(({ contractId }) => contractId === tree)?.deploymentLedger;
-  if (!(ledger > 0)) {
-    throw new Error(allowlist ? 'the manifest names no deployment ledger for the allowlist' : 'enter the blocklist\'s deployment ledger');
-  }
+export function historyStart({ tree, manifest }) {
+  const ledger = tree === manifest.asp_membership
+    ? Math.min(...manifest.pools.map(({ deploymentLedger }) => deploymentLedger))
+    : (manifest.added_asp_memberships ?? []).find(({ contractId }) => contractId === tree)?.deploymentLedger;
+  if (!(ledger > 0)) throw new Error('the manifest names no deployment ledger for the allowlist');
   return ledger;
 }
 
@@ -151,16 +145,37 @@ export function allowlistLeavesFromEvents(events, nextIndex) {
 }
 
 /**
- * Returns the keys a blocklist holds: those `LeafInserted` events added and no
- * later `LeafDeleted` removed. Expects events in `getEvents` order.
+ * Returns the keys a blocklist holds, read from its nodes from `root` down.
+ *
+ * @param {bigint} root The tree's stored `Root`, 0 when it is empty.
+ * @throws {Error} when the RPC returns no entry for a node.
  */
-export function blocklistKeysFromEvents(events) {
-  const keys = new Set();
-  for (const { name, key } of events.map(decode)) {
-    if (name === 'LeafInserted') keys.add(key);
-    if (name === 'LeafDeleted') keys.delete(key);
+export async function blocklistKeys(server, contractId, root) {
+  const contract = new Address(contractId).toScAddress();
+  const nodeKey = (hash) => xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
+    contract,
+    key: xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('Node'), nativeToScVal(hash, { type: 'u256' })]),
+    durability: xdr.ContractDataDurability.persistent,
+  }));
+  const keys = [];
+  // One level a pass, at most 200 entries a request, the RPC's limit.
+  let level = root ? [root] : [];
+  while (level.length > 0) {
+    const next = [];
+    for (let i = 0; i < level.length; i += 200) {
+      const hashes = level.slice(i, i + 200);
+      const { entries } = await server.getLedgerEntries(...hashes.map(nodeKey));
+      if (entries.length !== hashes.length) throw new Error('the RPC holds no entry for part of the tree');
+      for (const { val } of entries) {
+        // A leaf is `[1, key, value]`, an internal node `[left, right]` with 0 for no child.
+        const node = scValToNative(val.contractData.val);
+        if (node.length === 3) keys.push(node[1]);
+        else next.push(...node.filter((child) => child !== 0n));
+      }
+    }
+    level = next;
   }
-  return [...keys];
+  return keys;
 }
 
 /**

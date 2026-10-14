@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
+import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 
 import {
   adminLine,
   allowlistLeavesFromEvents,
-  blocklistKeysFromEvents,
+  blocklistKeys,
   codeLine,
   compareEntries,
   eventsSince,
@@ -26,19 +26,6 @@ const handover = [
   event('admin_transfer_proposed', { admin: 'DEPLOYER', pending_admin: 'ADMIN' }),
   event('admin_transfer_accepted', { old_admin: 'DEPLOYER', new_admin: 'ADMIN' }),
 ];
-
-test('blocklistKeysFromEvents drops a deleted key and keeps a re-inserted one', () => {
-  const events = [
-    event('LeafInserted', { key: 1n, value: 1n, root: 10n }),
-    event('LeafInserted', { key: 2n, value: 2n, root: 11n }),
-    event('LeafInserted', { key: 3n, value: 3n, root: 12n }),
-    event('LeafDeleted', { key: 1n, root: 13n }),
-    event('LeafDeleted', { key: 3n, root: 14n }),
-    event('LeafInserted', { key: 3n, value: 3n, root: 15n }),
-    ...handover,
-  ];
-  assert.deepEqual(blocklistKeysFromEvents(events), [2n, 3n]);
-});
 
 test('compareEntries reports records the tree lacks and entries no record names', () => {
   assert.deepEqual(compareEntries([1n, 2n, 4n], [1n, 2n, 3n]), { missing: [3n], unexpected: [4n] });
@@ -75,18 +62,9 @@ test('parseRecords skips blank lines and names the first line that is not hex', 
   assert.throws(() => parseRecords('0x1\nzz'), { message: 'Line 2 is not a 0x hex value' });
 });
 
-test('historyStart takes a blocklist\'s ledger from the field and refuses an empty one', () => {
-  const manifest = { asp_membership: 'ALLOWLIST', pools: [{ deploymentLedger: 50 }] };
-  assert.equal(historyStart({ allowlist: false, tree: 'BLOCKLIST', manifest, blocklistLedger: 70 }), 70);
-  assert.throws(
-    () => historyStart({ allowlist: false, tree: 'BLOCKLIST', manifest, blocklistLedger: 0 }),
-    { message: 'enter the blocklist\'s deployment ledger' },
-  );
-});
-
 test('historyStart reads the manifest\'s own allowlist from the earliest pool', () => {
   const manifest = { asp_membership: 'ALLOWLIST', pools: [{ deploymentLedger: 50 }, { deploymentLedger: 40 }] };
-  assert.equal(historyStart({ allowlist: true, tree: 'ALLOWLIST', manifest }), 40);
+  assert.equal(historyStart({ tree: 'ALLOWLIST', manifest }), 40);
 });
 
 test('historyStart reads an added allowlist from its entry and refuses one the manifest omits', () => {
@@ -95,8 +73,8 @@ test('historyStart reads an added allowlist from its entry and refuses one the m
     pools: [{ deploymentLedger: 50 }],
     added_asp_memberships: [{ contractId: 'ADDED', deploymentLedger: 60 }],
   };
-  assert.equal(historyStart({ allowlist: true, tree: 'ADDED', manifest }), 60);
-  assert.throws(() => historyStart({ allowlist: true, tree: 'OTHER', manifest }), /names no deployment ledger/);
+  assert.equal(historyStart({ tree: 'ADDED', manifest }), 60);
+  assert.throws(() => historyStart({ tree: 'OTHER', manifest }), /names no deployment ledger/);
 });
 
 test('codeLine compares an allowlist with the pool\'s first hash and a blocklist with its second', () => {
@@ -185,4 +163,49 @@ test('readInstance returns the hash of the Wasm a contract runs', async () => {
   const server = instanceServer(xdr.ContractExecutable.contractExecutableWasm(Buffer.alloc(32, 7)));
   const { wasmHash } = await readInstance(server, CONTRACT);
   assert.deepEqual(Buffer.from(wasmHash), Buffer.alloc(32, 7));
+});
+
+// An RPC stub whose `getLedgerEntries` returns the blocklist node stored under
+// each requested hash, and nothing for a hash `nodes` lacks.
+const nodeServer = (nodes) => ({
+  getLedgerEntries: async (...keys) => {
+    // The RPC refuses more than 200 keys a request.
+    assert.ok(keys.length <= 200);
+    return {
+      entries: keys
+        .map(({ contractData: { contract, key, durability } }) => {
+          assert.equal(Address.fromScAddress(contract).toString(), CONTRACT);
+          assert.equal(durability.name, 'persistent');
+          return nodes.get(scValToNative(key)[1]);
+        })
+        .filter(Boolean)
+        .map((node) => ({ val: { contractData: { val: xdr.ScVal.scvVec(node.map((v) => nativeToScVal(v, { type: 'u256' }))) } } })),
+    };
+  },
+});
+
+test('blocklistKeys reads every leaf below the root and skips empty children', async () => {
+  const nodes = new Map([
+    [100n, [101n, 0n]],
+    [101n, [102n, 103n]],
+    [102n, [1n, 11n, 1n]],
+    [103n, [1n, 33n, 1n]],
+  ]);
+  assert.deepEqual(await blocklistKeys(nodeServer(nodes), CONTRACT, 100n), [11n, 33n]);
+  assert.deepEqual(await blocklistKeys(nodeServer(nodes), CONTRACT, 0n), []);
+});
+
+test('blocklistKeys reads a level wider than one request', async () => {
+  // A full tree named by heap index: node n has children 2n and 2n + 1, and leaves 256 to 511.
+  const nodes = new Map(Array.from({ length: 511 }, (_, i) => {
+    const hash = BigInt(i + 1);
+    return [hash, hash < 256n ? [2n * hash, 2n * hash + 1n] : [1n, hash, 1n]];
+  }));
+  const keys = await blocklistKeys(nodeServer(nodes), CONTRACT, 1n);
+  assert.deepEqual(keys, Array.from({ length: 256 }, (_, i) => BigInt(256 + i)));
+});
+
+test('blocklistKeys refuses a tree the RPC returns part of', async () => {
+  const nodes = new Map([[100n, [101n, 102n]], [101n, [1n, 11n, 1n]]]);
+  await assert.rejects(blocklistKeys(nodeServer(nodes), CONTRACT, 100n), /no entry for part of the tree/);
 });

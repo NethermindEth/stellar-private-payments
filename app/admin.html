@@ -307,7 +307,7 @@
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                     <div>
                         <h3 class="text-lg font-semibold text-white">Re-point</h3>
-                        <p class="mt-1 text-sm text-slate-400">Checks a tree before a pool reads it in place of its current one. The tree's entries come from its events, so the RPC must still hold the tree's deployment ledger.</p>
+                        <p class="mt-1 text-sm text-slate-400">Checks a tree before a pool reads it in place of its current one. An allowlist's entries come from its events, so the RPC must still hold its deployment ledger.</p>
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
@@ -321,13 +321,9 @@
                                 <option value="asp-non-membership">Blocklist</option>
                             </select>
                         </div>
-                        <div>
+                        <div class="md:col-span-2">
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New tree address</label>
                             <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
-                        </div>
-                        <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointLedger">Blocklist deployment ledger</label>
-                            <input id="repointLedger" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="number" min="1" placeholder="An allowlist's comes from the manifest" />
                         </div>
                         <div class="md:col-span-2">
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointRecords">Records file, one per line: the allowlist's leaves as 0x hex, or the blocklist's note public keys as the Blocklist tab takes them</label>

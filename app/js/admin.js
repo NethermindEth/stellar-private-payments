@@ -8,7 +8,7 @@ import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
-import { adminLine, allowlistLeavesFromEvents, blocklistKeysFromEvents, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
+import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, decodeAuthorization, encodeAuthorization, pauseTransaction, walletSignature } from './pause-authorization.js';
 
 // DOM element references
@@ -61,7 +61,6 @@ const poolRowTemplate = document.getElementById('tpl-pool-row');
 const repointPoolSelect = document.getElementById('repointPool');
 const repointKindSelect = document.getElementById('repointKind');
 const repointTreeInput = document.getElementById('repointTree');
-const repointLedgerInput = document.getElementById('repointLedger');
 const repointRecordsInput = document.getElementById('repointRecords');
 const repointChecksEl = document.getElementById('repointChecks');
 const repointConfirmEl = document.getElementById('repointConfirm');
@@ -871,16 +870,20 @@ async function checkRepoint() {
       ['Entries', async () => {
         const [file] = repointRecordsInput.files;
         if (!file) throw new Error('choose the records file');
-        const ledger = historyStart({ allowlist, tree, manifest, blocklistLedger: Number(repointLedgerInput.value) });
         // Blocklist records and reported keys are note public keys in Blocklist
         // tab form, so a key loaded in the wrong byte order fails.
-        const [events, records, nextIndex] = await Promise.all([
-          eventsSince(server, tree, ledger),
-          file.text().then(allowlist ? parseRecords : parseBlocklistKeys),
-          allowlist && server.getContractData(tree, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))
-            .then(({ val }) => scValToNative(val.contractData.val)),
-        ]);
-        const onChain = allowlist ? allowlistLeavesFromEvents(events, nextIndex) : blocklistKeysFromEvents(events);
+        const records = (allowlist ? parseRecords : parseBlocklistKeys)(await file.text());
+        let onChain;
+        if (allowlist) {
+          const [events, nextIndex] = await Promise.all([
+            eventsSince(server, tree, historyStart({ tree, manifest })),
+            server.getContractData(tree, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))
+              .then(({ val }) => scValToNative(val.contractData.val)),
+          ]);
+          onChain = allowlistLeavesFromEvents(events, nextIndex);
+        } else {
+          onChain = await blocklistKeys(server, tree, treeInstance.stored.get('Root'));
+        }
         const { missing, unexpected } = compareEntries(onChain, records);
         const shown = allowlist ? (value) => `0x${value.toString(16)}` : blocklistKeyToNoteKey;
         const listed = (values) => values.map(shown).join(', ');
@@ -1178,7 +1181,7 @@ if (sharedTx) {
 }
 
 // A changed field makes the last re-point check stale.
-[repointPoolSelect, repointKindSelect, repointTreeInput, repointLedgerInput, repointRecordsInput]
+[repointPoolSelect, repointKindSelect, repointTreeInput, repointRecordsInput]
   .forEach((field) => field.addEventListener('input', resetRepoint));
 repointConfirmBox.addEventListener('change', renderRepoint);
 checkRepointBtn.addEventListener('click', checkRepoint);
