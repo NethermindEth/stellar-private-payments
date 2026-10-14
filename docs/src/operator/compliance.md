@@ -11,7 +11,7 @@ funds: only `transact` moves tokens, and only with a proof from the notes' owner
 | Deposit pause | No new deposits enter the pool | Stop transfers or withdrawals | Any time, by the admin or a pause file |
 | GVK | The GVK holder can read every note, and in traceable mode every spend | Let the holder spend, freeze, or change anything | At deployment |
 | Selective disclosure | A user can prove to an authority that they own chosen notes | Let anyone but the user produce the proof | Always available to users |
-| Asset rules | The token's issuer can't freeze or claw back the pool's balance | Apply to the asset outside the pool | At deployment |
+| Asset rules | The pool's token is its asset's own Stellar asset contract | Stop the issuer from freezing or clawing back the pool's balance. `deploy.sh` warns when the issuer's flags allow it | At deployment |
 
 ## Screening
 

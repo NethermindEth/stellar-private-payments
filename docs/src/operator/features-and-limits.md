@@ -50,7 +50,7 @@ and the
 
 | Area | Supported |
 | --- | --- |
-| Assets | Native XLM, and classic assets whose issuer can't freeze or claw back balances |
+| Assets | Native XLM and classic assets. `deploy.sh` warns when the issuer can freeze or claw back the pool's balance. |
 | Browser wallets | Freighter |
 | Browsers | Chromium-based browsers are tested. The app needs the Origin Private File System and web workers. |
 | Networks | Any Stellar network with a manifest. The repository holds a testnet manifest; `deploy-local.sh` makes a local one. |

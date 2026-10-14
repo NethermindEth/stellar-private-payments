@@ -11,7 +11,7 @@ asking users to move.
 | Choice | Option | Values | Effect |
 | --- | --- | --- | --- |
 | Network | `deploy.sh NETWORK` | A Stellar CLI network name | Names the manifest's folder. The manifest records the network's RPC URL and passphrase, and clients refuse a wallet or RPC on another network. |
-| Asset | `--pool` | Native XLM, or a classic asset through its own Stellar asset contract | One pool holds one asset. `deploy.sh` refuses other token contracts and any classic asset whose issuer can freeze or claw back balances. |
+| Asset | `--pool` | Native XLM, or a classic asset through its own Stellar asset contract | One pool holds one asset. `deploy.sh` refuses other token contracts. For a classic asset, it warns about each power the issuer's flags give it over the pool's balance, such as freezing it or clawing it back. |
 | Policy | `--pool` prefix or `--policy-flags` | `none`, `allowlist`, `blocklist`, `allowlist-blocklist` | Which ASP checks the pool requires. See [Choose a policy](#choose-a-policy). |
 | GVK mode | `--pool` prefix | `gvk-off` (default), `gvk-viewonly`, `gvk-traceable` | Whether the pool encrypts notes to a GVK, and which ones. See [Choose a GVK mode](#choose-a-gvk-mode). |
 | GVK public key | `--gvk-authority-pubkey-file` | A key from `gvkey-gen` | The key every GVK pool in the run encrypts to. |
