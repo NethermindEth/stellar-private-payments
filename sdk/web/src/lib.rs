@@ -163,6 +163,9 @@ pub async fn read_token_decimals(rpc_url: String, token_contract: String) -> Res
 mod tests {
     #[test]
     fn test_init_telemetry_native() {
+        let _guard = crate::telemetry::TEST_MUTEX
+            .lock()
+            .expect("test mutex poisoned");
         crate::telemetry::init_telemetry(None);
         assert!(crate::telemetry::is_telemetry_initialized());
     }
