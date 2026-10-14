@@ -1,7 +1,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::{NoteAmount, Sensitive, correlation_id_or_new};
 
-use super::{map_pool_err, open_pool, print_tx_results};
+use super::{map_pool_err, open_pool, pool_fee, print_tx_results};
 use crate::config::CliConfig;
 
 #[tracing::instrument(
@@ -21,9 +21,11 @@ pub fn withdraw(
         None => config.require_account()?.address,
     };
     let pool = open_pool(config, pool)?;
-    let amount = NoteAmount::from_decimal(amount, pool.token_decimals()?)?;
+    let decimals = pool.token_decimals()?;
+    let amount = NoteAmount::from_decimal(amount, decimals)?;
+    let fee = pool_fee(&pool, decimals)?;
     let results = pool
         .withdraw(amount, recipient)
-        .map_err(|e| map_pool_err(config, e, json))?;
-    print_tx_results(config, "Withdraw submitted", &results, json)
+        .map_err(|e| map_pool_err(config, &pool, decimals, Some(&fee), e, json))?;
+    print_tx_results(config, "Withdraw submitted", &results, Some(&fee), json)
 }
