@@ -3,7 +3,7 @@ mod common;
 use bootnode::{
     InMemory,
     messages::{Event, GetEventsParams},
-    storage::Storage,
+    storage::{GENESIS_CURSOR_PREFIX, Storage},
 };
 use common::*;
 use serde_json::{Value, json};
@@ -120,4 +120,46 @@ async fn handoff_moves_only_as_far_as_the_archive() {
     wait_for_handoff(&client, &base, &event.id, HANDOFF_FROM_LEDGER + 100_000).await;
     let stored = archive.load_indexer_state().await.expect("state");
     assert_eq!(stored.ledger_tip, UPSTREAM_TIP);
+}
+
+#[tokio::test]
+async fn genesis_cursor_serves_events_below_the_moved_cutoff() {
+    const PORT: u16 = 40451;
+    let base = format!("http://127.0.0.1:{PORT}");
+    let tip = Arc::new(AtomicU32::new(NETWORK_TIP));
+    let (url, _) = spawn_upstream(tip.clone(), Arc::new(AtomicBool::new(true))).await;
+
+    let event = sample_event_at(HANDOFF_FROM_LEDGER + 1);
+    serve_archive(PORT, &url, &[sample_event(), event.clone()]).await;
+    let client = reqwest::Client::new();
+
+    let ids = contract_ids();
+    let empty = post_get_events(
+        &client,
+        &base,
+        GetEventsParams::for_contracts(&ids, Some(GENESIS_LEDGER + 20_000), None, Some(10)),
+    )
+    .await
+    .result
+    .expect("empty page");
+    assert!(empty.events.is_empty());
+    assert!(empty.cursor.starts_with(GENESIS_CURSOR_PREFIX));
+    tip.store(NETWORK_TIP + 2, Ordering::SeqCst);
+    wait_for_handoff(&client, &base, &event.id, HANDOFF_FROM_LEDGER + 2).await;
+    let page = post_get_events(
+        &client,
+        &base,
+        GetEventsParams::for_contracts(&ids, None, Some(&empty.cursor), Some(10)),
+    )
+    .await;
+
+    assert_eq!(page.error, None);
+    let served: Vec<String> = page
+        .result
+        .expect("page")
+        .events
+        .into_iter()
+        .map(|event| event.id)
+        .collect();
+    assert_eq!(served, [event.id]);
 }
