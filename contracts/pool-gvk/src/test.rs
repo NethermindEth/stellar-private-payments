@@ -20,8 +20,11 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
-use pool_core::events::{
-    AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+use pool_core::{
+    events::{
+        AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+    },
+    totals::{self, TotalsDataKey},
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, IntoVal,
@@ -2623,6 +2626,14 @@ fn build_gvk_transact(
         gvk_mode.into_val(&env),
     ];
     env.register_at(&pool_id, PoolGvkContract, args);
+    if ext_amount < 0 {
+        // Stands for the deposit that made the note the withdrawal spends.
+        env.as_contract(&pool_id, || {
+            totals::record(&env, i128::from(ext_amount.unsigned_abs()), 0).unwrap_or_else(|err| {
+                panic!("expected the notes total to take the credit: {err:?}")
+            });
+        });
+    }
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -4193,4 +4204,74 @@ fn transact_does_not_bound_a_withdrawal_by_the_minimum() {
         pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
         Err(Ok(Error::InvalidProof))
     );
+}
+
+/// Registers a pool charging a fee of 5 with a minimum deposit of 1, on the
+/// accepting verifier and a real token, and deposits 50 into it.
+fn deposit_fifty_charging_five(
+    env: &Env,
+) -> (PoolGvkContractClient<'static>, TokenClient<'static>) {
+    let mut setup = setup_test_contracts(env);
+    env.mock_all_auths();
+    let sender = Address::generate(env);
+    setup.token = register_funded_token(env, &sender, 50);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let pool = PoolGvkContractClient::new(env, &register_pool_charging(env, &setup, 5, 1));
+    let (proof, deposit) = mk_paying_proof(env, &pool, &setup.token, 50, 45, 0xFB);
+    pool.transact(&proof, &deposit, &sender);
+    (pool, TokenClient::new(env, &setup.token))
+}
+
+/// Asserts the pool's notes total and fees total, and that its token balance
+/// is their sum.
+fn assert_totals(
+    env: &Env,
+    pool: &PoolGvkContractClient,
+    token: &TokenClient,
+    notes: i128,
+    fees: i128,
+) {
+    let stored_notes = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get::<_, i128>(&TotalsDataKey::NotesTotal)
+    });
+    assert_eq!(stored_notes, Some(notes));
+    assert_eq!(pool.get_fees_total(), fees);
+    assert_eq!(notes.checked_add(fees), Some(token.balance(&pool.address)));
+}
+
+/// The accepting verifier skips the pairing check, so the calls succeed and
+/// only the amounts are under test.
+#[test]
+fn the_totals_follow_a_deposit_a_transfer_and_a_withdrawal() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    assert_totals(&env, &pool, &token, 45, 5);
+
+    let (proof, transfer) = mk_paying_proof(&env, &pool, &token.address, 0, -5, 0xFC);
+    pool.transact(&proof, &transfer, &Address::generate(&env));
+    assert_totals(&env, &pool, &token, 40, 10);
+
+    let (proof, withdrawal) = mk_paying_proof(&env, &pool, &token.address, -20, -25, 0xFD);
+    pool.transact(&proof, &withdrawal, &Address::generate(&env));
+    assert_totals(&env, &pool, &token, 15, 15);
+    assert_eq!(token.balance(&withdrawal.recipient), 20);
+}
+
+/// The pool holds the tokens, so only the notes total can refuse the
+/// withdrawal. The accepting verifier skips the pairing check.
+#[test]
+fn a_withdrawal_beyond_the_notes_total_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    StellarAssetClient::new(&env, &token.address).mint(&pool.address, &1_000);
+
+    let (proof, withdrawal) = mk_paying_proof(&env, &pool, &token.address, -41, -46, 0xFC);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::NotesTotalExceeded))
+    );
+    assert_eq!(token.balance(&pool.address), 1_050);
 }
