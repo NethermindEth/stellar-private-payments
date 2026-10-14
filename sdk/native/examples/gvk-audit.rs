@@ -93,6 +93,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let d_priv = authority.private_key;
 
     let runtime = tokio::runtime::Runtime::new()?;
+    let fee = runtime
+        .block_on(
+            client
+                .state_fetcher()?
+                .contracts_data_for_pool(&pool_contract_id),
+        )
+        .map_err(|e| format!("read pool fee: {e}"))?
+        .pools
+        .into_iter()
+        .next()
+        .map(|pool| u128::from(pool.fee))
+        .ok_or("pool missing from contract state")?;
     runtime.block_on(run_audit(
         client
             .storage()
@@ -101,6 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &pool_contract_id,
         d_priv,
         pool_gvk_mode,
+        fee,
         AUDIT_LIMIT,
     ))?;
 
@@ -112,6 +125,7 @@ async fn run_audit(
     pool_contract_id: &str,
     d_priv: stellar_private_payments::types::Field,
     gvk_mode: GvkMode,
+    fee: u128,
     limit: u32,
 ) -> Result<(), String> {
     let mut audit = GvkAudit::new(storage, pool_contract_id, d_priv);
@@ -131,7 +145,7 @@ async fn run_audit(
 
         count = count.saturating_add(1);
         let prefix = (gvk_mode == GvkMode::Traceable)
-            .then(|| classify_tx(&tx))
+            .then(|| classify_tx(&tx, fee))
             .map(|kind| format!("{kind} — "))
             .unwrap_or_default();
         println!(
@@ -210,9 +224,9 @@ fn sum_input_amounts(slots: &[GvkSpentInput]) -> u128 {
         .sum()
 }
 
-/// Deposit: no real inputs. Withdraw: inputs > outputs (public exit).
-/// Otherwise transfer.
-fn classify_tx(tx: &GvkTxAudit) -> &'static str {
+/// Deposit: no real inputs. Withdraw: inputs > outputs + the pool fee (public
+/// exit). Otherwise transfer.
+fn classify_tx(tx: &GvkTxAudit, fee: u128) -> &'static str {
     let has_real_input = tx.inputs.iter().any(|slot| slot.note.is_some());
     if !has_real_input {
         return "deposit";
@@ -220,7 +234,7 @@ fn classify_tx(tx: &GvkTxAudit) -> &'static str {
 
     let input_sum = sum_input_amounts(&tx.inputs);
     let output_sum = sum_output_amounts(&tx.outputs);
-    if input_sum > output_sum {
+    if input_sum > output_sum.saturating_add(fee) {
         "withdraw"
     } else {
         "transfer"
