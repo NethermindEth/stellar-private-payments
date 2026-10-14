@@ -737,7 +737,7 @@ function refreshPools() {
   state.poolBlocklists = new Map();
   return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
     state.pools = pools.map(({ poolContractId }) => poolContractId);
-    [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => select.replaceChildren(...state.pools.map((contractId) => new Option(contractId))));
+    [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => select.replaceChildren(...state.pools.map((contractId) => new Option(shortAddress(contractId), contractId))));
     return state.pools.map((contractId) => poolRow(contractId));
   });
 }
@@ -751,7 +751,12 @@ async function poolRow(contractId) {
   try {
     const [pool, { stored }] = await Promise.all([readClient(contractId), readInstance(rpcServer(state.rpcUrl), contractId)]);
     state.poolBlocklists.set(contractId, stored.get('ASPNonMembership'));
-    row.querySelector('.pool-trees').textContent = `Allowlist ${stored.get('ASPMembership')}\nBlocklist ${stored.get('ASPNonMembership')}`;
+    row.querySelector('.pool-trees').replaceChildren(...[['Allowlist', 'ASPMembership'], ['Blocklist', 'ASPNonMembership']].map(([label, key]) => {
+      const line = document.createElement('div');
+      showAddress(line, stored.get(key));
+      line.prepend(`${label} `);
+      return line;
+    }));
     if (!pool.deposits_paused) {
       depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
       row.querySelector('.pool-actions').remove();
