@@ -30,7 +30,7 @@ use crate::{
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
         Estimate, Field, GvkMode, PrivatePoolConfig, SignedTransaction, TransactChainContext,
-        TransactionResult, TransferRecipient,
+        TransactionResult, TransferRecipient, first_duplicate,
     },
 };
 
@@ -178,6 +178,11 @@ impl PrivatePool {
         if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
             return Err(Error::Other(anyhow::anyhow!(
                 "selective disclosure requires 1..=4 selected commitments"
+            )));
+        }
+        if let Some(duplicate) = first_duplicate(&req.selected_commitments) {
+            return Err(Error::Other(anyhow::anyhow!(
+                "duplicate note commitment in disclosure: {duplicate}"
             )));
         }
 
