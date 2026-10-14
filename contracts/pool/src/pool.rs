@@ -447,6 +447,8 @@ impl PoolContract {
 
     /// Executes a shielded transaction.
     ///
+    /// Every call pays the pool fee, from its deposit or from the notes it
+    /// spends, so the proof's public amount is `ext_amount` minus the fee.
     /// Tokens move only after every check and the proof pass and the pool's
     /// state is updated: a deposit pulls `ext_amount` from `sender`, a
     /// withdrawal pays `recipient`. Renews the pool, its tree, and its
@@ -538,9 +540,14 @@ impl PoolContract {
             return Err(Error::WrongExtHash);
         }
 
-        // 5. Public amount and withdrawal range check
-        let expected_public_amount =
-            Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
+        // 5. Public amount, net of the pool fee, and withdrawal range check
+        let fee = Self::get_fee(env)?;
+        let net = ext_data
+            .ext_amount
+            .to_i128()
+            .and_then(|amount| amount.checked_sub(fee))
+            .ok_or(Error::WrongExtAmount)?;
+        let expected_public_amount = Self::calculate_public_amount(env, I256::from_i128(env, net))?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
@@ -636,6 +643,14 @@ impl PoolContract {
         env.storage()
             .instance()
             .get(&DataKey::MaximumDepositAmount)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Get the fee every transaction pays
+    fn get_fee(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Fee)
             .ok_or(Error::NotInitialized)
     }
 
