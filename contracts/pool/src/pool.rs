@@ -19,6 +19,7 @@ use pool_core::{
     clients::runs_wasm,
     events::{
         AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+        FeesClaimed,
     },
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
@@ -81,6 +82,8 @@ pub enum Error {
     TreeCodeMismatch = 21,
     /// A call would take the notes total below zero
     NotesTotalExceeded = 22,
+    /// A claim is negative or above the fees total
+    InvalidClaimAmount = 23,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -104,6 +107,7 @@ impl From<TotalsError> for Error {
             TotalsError::NotInitialized => Error::NotInitialized,
             TotalsError::NotesTotalExceeded => Error::NotesTotalExceeded,
             TotalsError::Overflow => Error::Overflow,
+            TotalsError::InvalidClaimAmount => Error::InvalidClaimAmount,
         }
     }
 }
@@ -888,6 +892,29 @@ impl PoolContract {
         } else {
             DepositPauseRepeated { paused }.publish(env);
         }
+        Ok(())
+    }
+
+    /// Pays `amount` of the collected fees to `to` and publishes
+    /// [`FeesClaimed`].
+    ///
+    /// Pays out fees only, never note value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidClaimAmount`] for a negative amount or one above
+    /// the fees total.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call or the token transfer
+    /// fails.
+    pub fn claim_fees(env: &Env, to: Address, amount: i128) -> Result<(), Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        totals::claim(env, amount)?;
+        let token_client = TokenClient::new(env, &Self::get_token(env)?);
+        token_client.transfer(&env.current_contract_address(), &to, &amount);
+        FeesClaimed { to, amount }.publish(env);
         Ok(())
     }
 

@@ -23,6 +23,7 @@ use contract_types::VerificationKeyBytes;
 use pool_core::{
     events::{
         AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+        FeesClaimed,
     },
     totals::{self, TotalsDataKey},
 };
@@ -4105,4 +4106,135 @@ fn a_withdrawal_beyond_the_notes_total_is_refused() {
         Err(Ok(Error::NotesTotalExceeded))
     );
     assert_eq!(token.balance(&pool.address), 1_050);
+}
+
+#[test]
+fn the_admin_claims_collected_fees() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+    let admin = pool.get_admin();
+
+    pool.claim_fees(&to, &3);
+
+    assert_eq!(
+        env.auths(),
+        [(
+            admin,
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool.address.clone(),
+                    Symbol::new(&env, "claim_fees"),
+                    (to.clone(), 3i128).into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events().last(),
+        Some(
+            &FeesClaimed {
+                to: to.clone(),
+                amount: 3
+            }
+            .to_xdr(&env, &pool.address)
+        )
+    );
+    assert_totals(&env, &pool, &token, 45, 2);
+    assert_eq!(token.balance(&to), 3);
+}
+
+#[test]
+fn the_admin_claims_the_whole_fees_total_while_deposits_are_paused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+    pool.pause_deposits();
+
+    pool.claim_fees(&to, &5);
+
+    assert_totals(&env, &pool, &token, 45, 0);
+    assert_eq!(token.balance(&to), 5);
+}
+
+#[test]
+fn a_claim_above_the_fees_total_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &6),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_negative_claim_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &-1),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_zero_claim_is_accepted() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &0),
+        Ok(Ok(()))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn claim_fees_requires_the_admin() {
+    let env = test_env();
+    let (pool, _) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+
+    // The recipient signs for itself, which only the admin check refuses.
+    env.mock_auths(&[MockAuth {
+        address: &to,
+        invoke: &MockAuthInvoke {
+            contract: &pool.address,
+            fn_name: "claim_fees",
+            args: (to.clone(), 3i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.claim_fees(&to, &3);
+}
+
+#[test]
+fn claim_fees_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &0),
+        Err(Ok(Error::NotInitialized))
+    );
 }
