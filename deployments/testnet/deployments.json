@@ -1,20 +1,22 @@
 {
   "network": "testnet",
   "kdf_domain": "Nethermind",
-  "deployer": "GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG",
-  "admin": "GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG",
-  "asp_membership": "CDD2KXEROPUJSSUTX2XD4I666LII56KNVDHSCU5S7CPKMAKKJ6UPLIDL",
-  "asp_non_membership": "CDKNKASOCTSJ5RTPQ2CJ2AC4O7CYAPPLCHCBK6AXZTG6VV7EPGZSITYT",
+  "deployer": "GCBTXCQFE3SUEOEF63MLUEWYBY4SO2PWR7KQUVCRPGM54P5W33DKALEW",
+  "admin": "GCBTXCQFE3SUEOEF63MLUEWYBY4SO2PWR7KQUVCRPGM54P5W33DKALEW",
+  "asp_membership": "CBIIM5NROBSQDS2NAZ32R3FUYZVALTSV5ZZSAQ46RPQWRM5RFBBWBC4O",
+  "asp_non_membership": "CARVREMY7J5M2LELIK6GDN24XUBGIBGLD5FL3NKXB7PIGAFKHY67JRUC",
+  "asp_membership_wasm_hash": "738c6d0746a3d6c6a3e32312776ef453eb0e1ae0034db8cf7d88c7da2a589ea6",
+  "asp_non_membership_wasm_hash": "8011a585cd2eaa52620b53c23cdaff202c6347f5e14d25fcda50b39eb447f975",
   "verifiers": {
-    "B": "CDGDIT6ZSZSDTHULT4ISNHXIZNNRLLD5N44G24R5UV3UKK3T337NXHMO",
-    "B_gvk_T": "CA3MFL6VZ73CIDF27WAJQRUXMZ7MOSN66IO3RL62U2LKHK6C6BNGOBOF"
+    "B": "CA66PGQD3OUO5R64CMOWL3FIRAQTWORLX36ZERALPPYOJ4ORETGFO3P5",
+    "B_gvk_T": "CDKKM5WNIV57OXOWZ2CDRV4Y7B2C2EPPI4YKKXQLLQWXBIM6HE3L34SH"
   },
-  "public_key_registry": "CBUBFQ2LJZT26N5ONWJX2RGXE456WYSYOZYNTAZLDJDMGY4PAR7QTT47",
+  "public_key_registry": "CARLOV7O2W2O4NR6Y4FTEQC4SWZZATH2B6KZV3AEKSB36P54IGSZGLED",
   "pools": [
     {
-      "poolContractId": "CAFV5M75EYAFK53OFLLEVVVCICH4WEGRMK7DGR3TOFVUWDCDQHETOV7E",
+      "poolContractId": "CA73PEBSX2GXZSMMVL46PTCXY424AIMPXKI7WWUMYJXV22AVY2DXC6DQ",
       "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-      "deploymentLedger": 5037307,
+      "deploymentLedger": 5190086,
       "enabled": true,
       "policyFlags": [
         "blocklist"
@@ -24,9 +26,9 @@
       }
     },
     {
-      "poolContractId": "CCZXOSWEGBVM3LUZJPV7A2PBOB6JGCC63LSZTP2BR4LPGR54OWJSWSZ6",
+      "poolContractId": "CCIVQDB36TYWZ5ZN4P33OJ3BMHTMNFCT7KSSBBEVSLC2BCV36LAHGWFL",
       "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-      "deploymentLedger": 5037309,
+      "deploymentLedger": 5190087,
       "enabled": true,
       "policyFlags": [
         "blocklist"
@@ -36,11 +38,11 @@
       },
       "gvkMode": "traceable",
       "gvkAuthorityPubKey": {
-        "x": "0x2cbbc711f33fd3b3bb4bff90154c5704564a121ac8a20baedda9e4f553c2be08",
-        "y": "0x01e0794e7aeef82ba1d53c14f342cea9e8777470b76f48ef6be7e98dd32ab344"
+        "x": "0x1d4bec5dd168994372d7ff9443c23c8ac3fda4deaf5397799ab2b22fb14d69bf",
+        "y": "0x1227c96e8d46d17a581035707fa89b0f695ff6f3d451ec57b3c223395996913f"
       }
     }
   ],
-  "networkPassphrase": "Test SDF Network ; September 2015",
-  "rpcUrl": "https://soroban-testnet.stellar.org"
+  "rpcUrl": "https://soroban-testnet.stellar.org/",
+  "networkPassphrase": "Test SDF Network ; September 2015"
 }
