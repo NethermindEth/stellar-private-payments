@@ -20,6 +20,9 @@ Arguments:
 
 Options:
   --manifest PATH    Manifest to check (default deployments/<network>/deployments.json)
+  --base-manifest PATH
+                     Manifest the change starts from, which decides which added
+                     allowlists are new
   -h, --help         Show this help
 
 Checks:
@@ -41,6 +44,15 @@ Checks:
     signers that are all ed25519 keys of weight 1, and no fewer signers than the
     threshold. Off mainnet, a failure here prints as a notice. A contract admin
     (a C address) has no account to read, so it fails this check on mainnet.
+  - Clients can index every allowlist in added_asp_memberships: its deployment
+    ledger is closed and the RPC still holds it, and its first leaf from that
+    ledger has index 0. A ledger after the latest one always fails. One the RPC
+    no longer holds fails only for an allowlist the base manifest does not
+    name, and prints as a notice without --base-manifest. A new allowlist with
+    less than a day of retention left prints a notice to restart the bootnode
+    before then. The check reads the CLI's RPC in place of the bootnode's
+    upstream, so an upstream that keeps less history can still lose an
+    allowlist this check passes.
 
 Exits 1 when any check failed, 0 otherwise.
 USAGE
@@ -54,10 +66,12 @@ NETWORK="${1:-}"
 shift || true
 
 MANIFEST=""
+BASE_MANIFEST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest) MANIFEST="$2"; shift 2 ;;
+    --base-manifest) BASE_MANIFEST="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
   esac
@@ -69,6 +83,7 @@ need jq
 
 MANIFEST="${MANIFEST:-$ROOT_DIR/deployments/$NETWORK/deployments.json}"
 [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
+[[ -z "$BASE_MANIFEST" || -f "$BASE_MANIFEST" ]] || die "base manifest not found: $BASE_MANIFEST"
 
 FAILED=0
 
@@ -90,12 +105,11 @@ read_entry() {
     | jq -c '.entries[0].val.contract_data.val'
 }
 
-# Prints the address under a unit-variant key (a one-symbol ScVec, built as XDR), or `none`.
-read_address() {
-  local key
-  key="$(printf '{"vec":[{"symbol":"%s"}]}' "$2" | stellar xdr encode --type ScVal)"
-  read_entry "$1" "$key" | jq -r '.address // "none"'
-}
+# Prints a unit-variant key, a one-symbol ScVec, as XDR.
+unit_key() { printf '{"vec":[{"symbol":"%s"}]}' "$1" | stellar xdr encode --type ScVal; }
+
+# Prints the address under a unit-variant key, or `none`.
+read_address() { read_entry "$1" "$(unit_key "$2")" | jq -r '.address // "none"'; }
 
 # Prints the address that an instance entry from `read_entry` stores under a unit-variant key, or
 # nothing.
@@ -104,11 +118,13 @@ stored() {
     | .val.address' <<<"$1"
 }
 
+allowlists() { jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId' "$1"; }
+
 ADMIN="$(jq -r '.admin' "$MANIFEST")"
 DEPLOYER="$(jq -r '.deployer' "$MANIFEST")"
 # Disabled pools too: `enabled` only hides a pool from clients; on chain it still takes deposits.
 POOLS="$(jq -r '.pools[].poolContractId' "$MANIFEST")"
-ALLOWLISTS="$(jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId' "$MANIFEST")"
+ALLOWLISTS="$(allowlists "$MANIFEST")"
 
 # Each contract and its expected admin. An allowlist another party runs names its own admin in
 # its manifest entry.
@@ -221,6 +237,52 @@ else
   QUORUM="at least 2, at most $SIGNERS signers"
   ((HIGH >= 2 && HIGH <= SIGNERS)) && GOT="$QUORUM" || GOT="$HIGH"
   check "$ADMIN" threshold "$QUORUM" "$GOT" "$CUSTODY"
+fi
+
+ADDED="$(jq -r '(.added_asp_memberships // [])[] | "\(.contractId) \(.deploymentLedger | tojson)"' \
+  "$MANIFEST")"
+if [[ -n "$ADDED" ]]; then
+  step "checking that clients can index every added allowlist"
+  HEALTH="$(stellar network health --network "$NETWORK" --output json)"
+  OLDEST="$(jq .oldestLedger <<<"$HEALTH")"
+  LATEST="$(jq .latestLedger <<<"$HEALTH")"
+  LEAF_ADDED="$(printf '{"symbol":"LeafAdded"}' | stellar xdr encode --type ScVal)"
+  while read -r id ledger <&3; do
+    # The bootnode fetches a new allowlist's events from its deployment ledger when it restarts,
+    # and refuses the allowlist for good once its upstream no longer holds that ledger. An
+    # allowlist the base manifest names was fetched when it was added.
+    label=notice
+    [[ -z "$BASE_MANIFEST" ]] || grep -qxF "$id" <<<"$(allowlists "$BASE_MANIFEST")" || label=FAIL
+    # Clients parse the ledger only as a u32 JSON number, which `tojson` prints as at most ten
+    # bare digits. Arithmetic on any other text can run a command substitution in it.
+    [[ "$ledger" =~ ^[0-9]{1,10}$ ]] \
+      || { check "$id" deploymentLedger "a ledger number" "$ledger"; continue; }
+    # A ledger after the latest one is a typo, so it fails whatever the base manifest names.
+    ((ledger <= LATEST)) || { check "$id" "deploymentLedger $ledger" "a closed ledger" \
+      "after the latest ledger $LATEST"; continue; }
+    ((ledger >= OLDEST)) && got="held by the RPC" || got="older than its oldest ledger $OLDEST"
+    check "$id" "deploymentLedger $ledger" "held by the RPC" "$got" "$label"
+    ((ledger >= OLDEST)) || continue
+    if [[ "$label" == FAIL ]]; then
+      ((ledger - OLDEST >= 17280)) && got="a day or more" \
+        || got="$((ledger - OLDEST)) ledgers, restart the bootnode before then"
+      check "$id" "retention left" "a day or more" "$got" notice
+    fi
+    # Clients index the allowlist from its deployment ledger, so they miss any leaf added before
+    # it. One getEvents call scans at most 10,000 ledgers, and the CLI reports a call that finds
+    # no event on stderr.
+    index="" from="$ledger"
+    while [[ -z "$index" ]] && ((from <= LATEST)); do
+      index="$(stellar events --network "$NETWORK" --start-ledger "$from" --id "$id" \
+        --topic "$LEAF_ADDED" --count 1 --output json 2>/dev/null \
+        | jq -r '.params.index // "unreadable"' || echo unreadable)"
+      from=$((from + 10000))
+    done
+    # With no leaf since the deployment ledger, the next one takes index NextIndex.
+    [[ -n "$index" ]] || index="$(read_entry "$id" "$(unit_key NextIndex)" \
+      | jq -r '.u64 // "unreadable"' || echo unreadable)"
+    check "$id" "index of the first leaf from ledger $ledger" 0 "$index"
+  done 3<<<"$ADDED"
 fi
 
 exit "$FAILED"

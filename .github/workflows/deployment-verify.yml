@@ -30,6 +30,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install Stellar CLI
@@ -48,16 +49,22 @@ jobs:
 
       # With no network named, check every manifest, since the trigger fires on any of them.
       # The input reaches the shell as an environment variable, never as interpolated source.
+      # On a pull request, the base branch's manifest tells the check which allowlists it adds.
       - name: Verify deployment
         env:
           NETWORK: ${{ inputs.network }}
           MAINNET_RPC_URL: ${{ vars.MAINNET_RPC_URL }}
         run: |
           verify() {
+            local base=() file="$RUNNER_TEMP/$1.json"
+            if [[ -n "$GITHUB_BASE_REF" ]] \
+              && git show "origin/$GITHUB_BASE_REF:deployments/$1/deployments.json" >"$file"; then
+              base=(--base-manifest "$file")
+            fi
             if [[ "$1" == mainnet && -z "$MAINNET_RPC_URL" ]]; then
               echo "::notice::Skipped mainnet: no MAINNET_RPC_URL repository variable names an RPC"
             else
-              deployments/scripts/verify-deployment.sh "$1"
+              deployments/scripts/verify-deployment.sh "$1" "${base[@]}"
             fi
           }
           if [[ -n "$NETWORK" ]]; then
