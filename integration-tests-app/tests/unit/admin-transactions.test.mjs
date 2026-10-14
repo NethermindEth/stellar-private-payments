@@ -283,8 +283,8 @@ function envelopeSignedBy(...signers) {
 
 test('signRefusal refuses a key of weight 0, a signature past the threshold, and a second signature by one key', () => {
   assert.equal(
-    signRefusal(twoOfThree, envelopeSignedBy(), Networks.TESTNET, ADMIN),
-    `The connected account does not sign for ${ADMIN}`,
+    signRefusal({ ...twoOfThree, weights: new Map([...twoOfThree.weights, [third.publicKey(), 0]]) }, envelopeSignedBy(), Networks.TESTNET, third.publicKey()),
+    `${third.publicKey()} does not sign for ${ADMIN}`,
   );
   assert.equal(
     signRefusal(twoOfThree, envelopeSignedBy(first, second), Networks.TESTNET, third.publicKey()),

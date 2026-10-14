@@ -206,7 +206,7 @@ export function signingRule(account) {
  */
 export function signRefusal({ threshold, weights }, xdr, networkPassphrase, address) {
   if (!(weights.get(address) > 0)) {
-    return `The connected account does not sign for ${TransactionBuilder.fromXdr(xdr, networkPassphrase).source}`;
+    return `${address} does not sign for ${TransactionBuilder.fromXdr(xdr, networkPassphrase).source}`;
   }
   if (signedWeight({ weights }, xdr, networkPassphrase) >= threshold) {
     return 'The envelope already carries the signatures it needs. Submit it.';

@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
@@ -44,14 +44,13 @@ const adminTxXdrInput = document.getElementById('adminTxXdr');
 const adminTxDescriptionEl = document.getElementById('adminTxDescription');
 const adminTxSignaturesEl = document.getElementById('adminTxSignatures');
 const adminTxSignersEl = document.getElementById('adminTxSigners');
-const adminTxSignRefusalEl = document.getElementById('adminTxSignRefusal');
-const signAdminTxBtn = document.getElementById('signAdminTxBtn');
+const adminTxNoticeEl = document.getElementById('adminTxNotice');
 const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
 const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
 const copyAdminTxLinkBtn = document.getElementById('copyAdminTxLinkBtn');
 
 // The buttons that need a connected wallet.
-const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn];
+const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, submitAdminTxBtn];
 
 // Pools tab
 const poolRowsEl = document.getElementById('poolRows');
@@ -62,6 +61,7 @@ const poolRowTemplate = document.getElementById('tpl-pool-row');
 const adminRowsEl = document.getElementById('adminRows');
 const adminsNoticeEl = document.getElementById('adminsNotice');
 const adminRowTemplate = document.getElementById('tpl-admin-row');
+const signerTemplate = document.getElementById('tpl-signer');
 
 const state = {
   address: null,
@@ -226,7 +226,7 @@ async function connect() {
       btn.disabled = false;
       btn.removeAttribute('title');
     });
-    // The card keeps Sign and Submit off until it has read the admin account.
+    // The card keeps Submit off until it has read the admin account.
     renderAdminTx();
 
     setStatus('Wallet connected', 'ok');
@@ -340,17 +340,16 @@ function formatAdminCall({ source, sequence, fee, validUntil, contract, method, 
 
 const SIGNED_LABELS = new Map([[true, 'signed'], [false, 'not yet'], [null, 'cannot tell: not an ed25519 key']]);
 
-// Describes the envelope and its signers in the card, and enables Sign and
-// Submit only once the admin account is read. `kind` comes from the page when
-// it built the call, and from the contract otherwise.
+// Describes the envelope and its signers in the card, and enables Submit only
+// once the admin account is read. `kind` comes from the page when it built the
+// call, and from the contract otherwise.
 function renderAdminTx(kind) {
   const xdr = adminTxXdrInput.value.trim();
   state.adminTxKind = null;
   adminTxSignaturesEl.textContent = '0';
-  adminTxSignersEl.textContent = '';
+  adminTxSignersEl.replaceChildren();
   adminTxDescriptionEl.textContent = '';
-  adminTxSignRefusalEl.textContent = '';
-  signAdminTxBtn.disabled = true;
+  adminTxNoticeEl.textContent = '';
   submitAdminTxBtn.disabled = true;
   if (!xdr) return;
   if (!state.networkPassphrase) {
@@ -368,23 +367,31 @@ function renderAdminTx(kind) {
     rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
       if (!current()) return;
       const rule = signingRule(account);
-      const refusal = signRefusal(rule, xdr, state.networkPassphrase, state.address);
       const weight = signedWeight(rule, xdr, state.networkPassphrase);
       adminTxSignaturesEl.textContent = weight === count
         ? `${count} of ${rule.threshold}`
         : `${count}, weight ${weight} of ${rule.threshold}`;
-      adminTxSignersEl.textContent = signerStatus(rule, xdr, state.networkPassphrase)
-        .map(({ key, signed }) => `${key}: ${SIGNED_LABELS.get(signed)}`)
-        .join('\n');
-      adminTxSignRefusalEl.textContent = refusal ?? '';
-      signAdminTxBtn.disabled = refusal !== null;
+      adminTxSignersEl.replaceChildren(...signerStatus(rule, xdr, state.networkPassphrase).map(({ key, signed }) =>
+        signerItem(key, signed, signed === false && weight < rule.threshold)));
       submitAdminTxBtn.disabled = weight < rule.threshold;
     }, (err) => {
-      if (current()) adminTxSignRefusalEl.textContent = `The admin account could not be read: ${err.message}`;
+      if (current()) adminTxNoticeEl.textContent = `The admin account could not be read: ${err.message}`;
     });
   } catch (err) {
     adminTxDescriptionEl.textContent = `Not an admin call: ${err.message}`;
   }
+}
+
+function signerItem(key, signed, canSign) {
+  const item = signerTemplate.content.cloneNode(true).firstElementChild;
+  item.querySelector('.signer-key').textContent = key;
+  const status = item.querySelector('.signer-status');
+  status.textContent = SIGNED_LABELS.get(signed);
+  status.classList.add(signed ? 'text-emerald-300' : 'text-slate-500');
+  const button = item.querySelector('.sign-as-btn');
+  if (canSign) button.addEventListener('click', () => signAdminTx(key));
+  else button.remove();
+  return item;
 }
 
 function loadAdminTx(xdr, kind) {
@@ -413,21 +420,25 @@ async function prepareAdminCall(kind, call) {
   setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
 }
 
-async function signAdminTx() {
+// Freighter switches to `signer` when it holds that account.
+async function signAdminTx(signer) {
   try {
-    ensureWalletConnected();
-    // The card sets a kind only once it has described the envelope.
-    if (!state.adminTxKind) throw new Error('Only an envelope the card can describe can be signed');
     const envelope = adminTxXdrInput.value.trim();
     const { source } = describeAdminCall(envelope, state.networkPassphrase);
     const rule = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(source));
-    const refusal = signRefusal(rule, envelope, state.networkPassphrase, state.address);
+    const refusal = signRefusal(rule, envelope, state.networkPassphrase, signer);
     if (refusal) throw new Error(refusal);
-    const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address: state.address });
+    const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address: signer });
+    if (adminTxXdrInput.value.trim() !== envelope) throw new Error('The card changed while Freighter was signing. Sign again.');
+    // The wallet's own check passes a reply that names no signer.
+    if (!signedBy(signedTxXdr, state.networkPassphrase, signer)) throw new Error(`Freighter did not sign as ${shortAddress(signer)}`);
     loadAdminTx(signedTxXdr, state.adminTxKind);
-    showToast('Signed. Pass the XDR to the next signer, or submit it.', 'success');
+    showToast('Signed. Press Copy link and send the new link to the next signer, or submit it.', 'success');
   } catch (err) {
-    showToast(`Signing failed: ${explainFailure(err, state.adminTxKind)}`, 'error');
+    const reason = err.code === 'SIGNER_ADDRESS_MISMATCH'
+      ? `Freighter does not hold ${shortAddress(signer)}. Pass the link to that signer.`
+      : explainFailure(err, state.adminTxKind);
+    showToast(`Signing failed: ${reason}`, 'error');
   }
 }
 
@@ -779,7 +790,6 @@ addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);
 removeFromBlocklistBtn.addEventListener('click', removeNonMembershipLeaf);
 
 adminTxXdrInput.addEventListener('input', () => renderAdminTx());
-signAdminTxBtn.addEventListener('click', signAdminTx);
 submitAdminTxBtn.addEventListener('click', submitAdminTx);
 copyAdminTxBtn.addEventListener('click', () => copyText(adminTxXdrInput.value.trim(), 'Transaction XDR'));
 copyAdminTxLinkBtn.addEventListener('click', () =>
