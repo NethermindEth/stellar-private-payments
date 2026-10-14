@@ -316,6 +316,7 @@
                     <table class="w-full min-w-[960px] text-left text-sm">
                         <thead>
                             <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                                <th class="pb-3 pr-4 font-medium" scope="col">Kind</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Admin</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pending admin</th>
@@ -409,17 +410,15 @@
 
     <!-- Admin Row Template -->
     <template id="tpl-admin-row">
-        <tr class="align-top">
-            <td class="py-3 pr-4">
-                <div class="admin-label text-[10px] uppercase tracking-wide text-slate-500"></div>
-                <div class="admin-contract mt-1 break-all font-mono text-xs text-slate-200"></div>
-            </td>
-            <td class="admin-current py-3 pr-4 break-all font-mono text-xs text-slate-300"></td>
-            <td class="admin-pending py-3 pr-4 break-all font-mono text-xs text-slate-300"></td>
+        <tr class="whitespace-nowrap align-middle">
+            <td class="admin-label py-3 pr-4 text-[10px] uppercase tracking-wide text-slate-500"></td>
+            <td class="admin-contract py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="admin-current py-3 pr-4 font-mono text-xs text-slate-300"></td>
+            <td class="admin-pending py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="py-3">
                 <div class="admin-actions flex flex-col gap-2">
                     <input type="text" class="new-admin-input w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="New admin G..." aria-label="New admin address" autocomplete="off" spellcheck="false" />
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div class="flex flex-nowrap items-center gap-2">
                         <button type="button" class="propose-admin-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/20">Propose</button>
                         <button type="button" class="cancel-admin-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20">Cancel</button>
                         <button type="button" class="accept-admin-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Accept</button>

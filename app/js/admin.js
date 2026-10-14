@@ -420,10 +420,10 @@ async function submitAdminTx() {
   }
 }
 
-async function copyAdminTx() {
+async function copyText(text, what) {
   try {
-    await navigator.clipboard.writeText(adminTxXdrInput.value.trim());
-    showToast('Transaction XDR copied', 'success');
+    await navigator.clipboard.writeText(text);
+    showToast(`${what} copied`, 'success');
   } catch (err) {
     showToast(`Copy failed: ${err.message}`, 'error');
   }
@@ -661,25 +661,34 @@ async function confirmCustody(newAdmin) {
   return false;
 }
 
+function showAddress(cell, address) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'transition hover:text-cyan-100';
+  button.title = `${address} (click to copy)`;
+  button.textContent = shortAddress(address);
+  button.addEventListener('click', () => copyText(address, 'Address'));
+  cell.replaceChildren(button);
+}
+
 // A contract without `get_pending_admin` hands over control at once on
 // `update_admin`, and an unreadable contract shows its error; neither row gets
 // buttons.
 async function adminRow({ label, kind, contractId }) {
   const row = adminRowTemplate.content.cloneNode(true).firstElementChild;
   row.querySelector('.admin-label').textContent = label;
-  row.querySelector('.admin-contract').textContent = contractId;
+  showAddress(row.querySelector('.admin-contract'), contractId);
   const adminEl = row.querySelector('.admin-current');
   const pendingEl = row.querySelector('.admin-pending');
   try {
     const [admin, target] = await Promise.all([storedAdmin(contractId), readClient(contractId)]);
-    adminEl.textContent = admin;
+    showAddress(adminEl, admin);
     if (!target.get_pending_admin) {
       pendingEl.textContent = 'not available';
       row.querySelector('.admin-actions').remove();
       return row;
     }
     const { result: pending } = await target.get_pending_admin();
-    pendingEl.textContent = pending ?? 'none';
     const newAdminInput = row.querySelector('.new-admin-input');
     row.querySelector('.propose-admin-btn').addEventListener('click', async () => {
       const newAdmin = newAdminInput.value.trim();
@@ -693,9 +702,11 @@ async function adminRow({ label, kind, contractId }) {
       }
     });
     if (!pending) {
+      pendingEl.textContent = 'none';
       row.querySelectorAll('.cancel-admin-btn, .accept-admin-btn').forEach((btn) => btn.remove());
       return row;
     }
+    showAddress(pendingEl, pending);
     row.querySelector('.cancel-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
     row.querySelector('.accept-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: pending, contractId, method: 'accept_admin' }));
   } catch (err) {
@@ -744,7 +755,7 @@ removeFromBlocklistBtn.addEventListener('click', removeNonMembershipLeaf);
 adminTxXdrInput.addEventListener('input', () => renderAdminTx());
 signAdminTxBtn.addEventListener('click', signAdminTx);
 submitAdminTxBtn.addEventListener('click', submitAdminTx);
-copyAdminTxBtn.addEventListener('click', copyAdminTx);
+copyAdminTxBtn.addEventListener('click', () => copyText(adminTxXdrInput.value.trim(), 'Transaction XDR'));
 
 membershipContractInput?.addEventListener('input', () => {
   updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
