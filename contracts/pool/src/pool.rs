@@ -22,6 +22,7 @@ use pool_core::{
     },
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
+    totals::{self, Error as TotalsError},
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
@@ -78,6 +79,8 @@ pub enum Error {
     NoPendingAdmin = 20,
     /// An association set does not run the code fixed at construction
     TreeCodeMismatch = 21,
+    /// A call would take the notes total below zero
+    NotesTotalExceeded = 22,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -91,6 +94,16 @@ impl From<MerkleError> for Error {
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
             MerkleError::NotInitialized => Error::NotInitialized,
             MerkleError::Overflow => Error::Overflow,
+        }
+    }
+}
+
+impl From<TotalsError> for Error {
+    fn from(e: TotalsError) -> Self {
+        match e {
+            TotalsError::NotInitialized => Error::NotInitialized,
+            TotalsError::NotesTotalExceeded => Error::NotesTotalExceeded,
+            TotalsError::Overflow => Error::Overflow,
         }
     }
 }
@@ -271,6 +284,7 @@ impl PoolContract {
         instance.set(&DataKey::PolicyFlags, &policy_flags);
         instance.set(&DataKey::KdfDomain, &kdf_domain);
         instance.set(&DataKey::DepositsPaused, &false);
+        totals::init(&env);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -604,6 +618,10 @@ impl PoolContract {
             NewNullifierEvent { nullifier: n }.publish(env);
         }
 
+        // Only a broken circuit or verifier could take the notes total below
+        // zero, since every note a call spends came from an earlier output.
+        totals::record(env, net, fee)?;
+
         // 7. Process withdrawal if ext_amount < 0
         let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
@@ -713,6 +731,11 @@ impl PoolContract {
             .instance()
             .get(&DataKey::DepositsPaused)
             .ok_or(Error::NotInitialized)
+    }
+
+    /// Returns the fees the pool has collected and not paid out.
+    pub fn get_fees_total(env: &Env) -> Result<i128, Error> {
+        Ok(totals::fees_total(env)?)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool
