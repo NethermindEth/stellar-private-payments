@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, decodeAuthorization, encodeAuthorization, pauseTransaction, walletSignature } from './pause-authorization.js';
@@ -944,9 +944,10 @@ async function buildPauseAuthorizationFile() {
     const holder = pauseAuthHolderInput.value.trim();
     if (!pool || !holder) throw new Error('Choose a pool and name the holder');
     buildPauseAuthBtn.disabled = true;
-    const [admin, { sequence }] = await Promise.all([storedAdmin(pool), rpcServer(state.rpcUrl).getLatestLedger()]);
+    const server = rpcServer(state.rpcUrl);
+    const [admin, { sequence }, ttl] = await Promise.all([storedAdmin(pool), server.getLatestLedger(), maxEntryTtl(server)]);
     const [nonce] = crypto.getRandomValues(new BigInt64Array(1));
-    const entry = buildPauseAuthorization({ admin, pool, nonce, latestLedger: sequence });
+    const entry = buildPauseAuthorization({ admin, pool, nonce, latestLedger: sequence, maxEntryTtl: ttl });
     offerFile(`pause-${holder}-${pool}.json`, encodeAuthorization({ holder, entry }));
     setStatus('Pause authorization built. Each signer signs the file, then the holder keeps it.', 'ok');
   } catch (err) {

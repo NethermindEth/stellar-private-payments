@@ -208,8 +208,9 @@ pool, and its holder sends it from their own account with no signer present. Sig
 holder per pool.
 
 A file works once, because the network spends its nonce when the pause lands, and a used file fails
-with `Error(Auth, ExistingValue)`. A file expires 3,110,399 ledgers after the ledger it was built
-at, about 180 days at five seconds a ledger.
+with `Error(Auth, ExistingValue)`. The page reads the network's `max_entry_ttl`, and a file expires
+`max_entry_ttl - 1` ledgers after the ledger it was built at: 3,110,399 ledgers, about 180 days, on
+testnet and mainnet as of 2026-10-14.
 
 To make a file, use the Pause authorizations panel on the Pools tab:
 
@@ -249,14 +250,10 @@ The signers sign a replacement file:
 - After each signer change, since a file with a removed signer's signature fails as a whole.
 - After an admin transfer, since a file authorizes the pool's previous admin.
 - Before the expiration ledger.
-- After the network lowers its `max_entry_ttl` setting, once the page builds files for the new
-  value.
+- After the network lowers its `max_entry_ttl` setting.
 
-The page sets each expiration as far out as `max_entry_ttl` allowed on 2026-10-03, when it read
-3,110,400. If an upgrade lowers the setting, existing files fail at Submit with
-`Error(Auth, InvalidInput)` until their expiration falls within the new bound, and new files fail
-until `MAX_ENTRY_TTL` in `app/js/pause-authorization.js` is updated. Read the setting each time
-the signers re-sign files:
+If an upgrade lowers the setting, existing files fail at Submit with `Error(Auth, InvalidInput)`
+until their expiration falls within the new bound. Read the setting after each network upgrade:
 
 ```bash
 stellar network settings --network testnet \

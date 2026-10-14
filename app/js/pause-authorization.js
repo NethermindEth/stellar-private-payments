@@ -22,27 +22,20 @@ import {
 import { rpcServer } from './admin-transactions.js';
 
 /**
- * The network's `max_entry_ttl` in ledgers: 3,110,400 on testnet and mainnet as
- * read on 2026-09-21. The host refuses an authorization expiring more than
- * `max_entry_ttl - 1` ledgers past the ledger that uses it.
- */
-const MAX_ENTRY_TTL = 3_110_400;
-
-/**
  * Builds an unsigned authorization, by a pool's admin, of one `pause_deposits()`
- * on the pool, expiring `MAX_ENTRY_TTL - 1` ledgers after `latestLedger`, the
+ * on the pool, expiring `maxEntryTtl - 1` ledgers after `latestLedger`, the
  * latest the host accepts.
  *
- * @param {{admin: string, pool: string, nonce: bigint, latestLedger: number}} pause
+ * @param {{admin: string, pool: string, nonce: bigint, latestLedger: number, maxEntryTtl: number}} pause
  *   `nonce` is a random `i64`, spent when the pause lands.
  * @returns {xdr.SorobanAuthorizationEntry}
  */
-export function buildPauseAuthorization({ admin, pool, nonce, latestLedger }) {
+export function buildPauseAuthorization({ admin, pool, nonce, latestLedger, maxEntryTtl }) {
   return new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
       address: new Address(admin).toScAddress(),
       nonce,
-      signatureExpirationLedger: latestLedger + MAX_ENTRY_TTL - 1,
+      signatureExpirationLedger: latestLedger + maxEntryTtl - 1,
       signature: xdr.ScVal.scvVec([]),
     })),
     rootInvocation: new xdr.SorobanAuthorizedInvocation({

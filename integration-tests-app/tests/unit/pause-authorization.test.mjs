@@ -28,7 +28,7 @@ const ADMIN = Keypair.random().publicKey();
 const HOLDER = Keypair.random().publicKey();
 const POOL = 'CBZAWV3AKKKIIO3LEIF7DHODHHHTTL47M7WQSZYTU3ZYSBMM32MUM5H4';
 
-const pauseEntry = () => buildPauseAuthorization({ admin: ADMIN, pool: POOL, nonce: -7n, latestLedger: 1_000 });
+const pauseEntry = () => buildPauseAuthorization({ admin: ADMIN, pool: POOL, nonce: -7n, latestLedger: 1_000, maxEntryTtl: 17_280 });
 
 // Signs an authorization's preimage the way Freighter's signAuthEntry does.
 const sign = (entry, signer, network = Networks.TESTNET) => signer.sign(hash(Buffer.from(authorizationPreimage(entry, network), 'base64')));
@@ -37,7 +37,7 @@ test('authorizationPreimage matches a preimage built by hand from the same field
   const preimage = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(new xdr.HashIdPreimageSorobanAuthorization({
     networkId: hash(Buffer.from(Networks.TESTNET)),
     nonce: -7n,
-    signatureExpirationLedger: 1_000 + 3_110_400 - 1,
+    signatureExpirationLedger: 1_000 + 17_280 - 1,
     invocation: new xdr.SorobanAuthorizedInvocation({
       function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(new xdr.InvokeContractArgs({
         contractAddress: new Address(POOL).toScAddress(),
@@ -110,7 +110,7 @@ test('an authorization file round-trips', () => {
     admin: ADMIN,
     holder: 'Alex',
     nonce: -7n,
-    expirationLedger: 1_000 + 3_110_400 - 1,
+    expirationLedger: 1_000 + 17_280 - 1,
     signers: [signer.publicKey()],
   });
   assert.equal(decoded.toXdr('base64'), entry.toXdr('base64'));
@@ -152,7 +152,7 @@ test('pauseTransaction refuses a file whose expiration has passed before buildin
   };
   await assert.rejects(
     pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
-    /expired at ledger 3111399/,
+    /expired at ledger 18279/,
   );
 });
 
