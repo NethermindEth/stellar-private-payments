@@ -26,12 +26,12 @@ const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
 const execFileAsync = promisify(execFile);
 // ScVal::LedgerKeyContractInstance. Both pool contract variants keep
-// MaximumDepositAmount in the instance entry's storage map, under the key
-// ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]).
+// MaximumDepositAmount and Fee in the instance entry's storage map, each under
+// a key such as ScVal::Vec([ScVal::Symbol("MaximumDepositAmount")]).
 const CONTRACT_INSTANCE_KEY_XDR = 'AAAAFA==';
 const LOCAL_PASSPHRASE = 'Standalone Network ; February 2017';
 
-async function readMaximumDepositAmount(poolContractId, rpcUrl) {
+async function readInstanceAmount(poolContractId, rpcUrl, name) {
   const { stdout } = await execFileAsync('stellar', [
     'contract', 'read',
     '--id', poolContractId,
@@ -47,9 +47,9 @@ async function readMaximumDepositAmount(poolContractId, rpcUrl) {
     .replace(/",\d+,\d+\s*$/, '')
     .replaceAll('""', '"');
   const entry = (JSON.parse(json).contract_instance.storage ?? [])
-    .find(({ key }) => key.vec?.[0]?.symbol === 'MaximumDepositAmount');
-  if (!entry) throw new Error(`could not read MaximumDepositAmount from ${poolContractId}`);
-  return BigInt(entry.val.u256);
+    .find(({ key }) => key.vec?.[0]?.symbol === name);
+  if (!entry) throw new Error(`could not read ${name} from ${poolContractId}`);
+  return BigInt(entry.val.u256 ?? entry.val.i128);
 }
 
 function stroopsToDecimal(stroops) {
@@ -149,17 +149,19 @@ export async function run(helpers) {
   await page.locator('#transfer-address').fill('');
   await waitForRecipientLookupReset(page);
 
-  // (4) Read the deployed pool's live cap and exceed it by one stroop.
-  // Deployment parameters can change independently of this test branch; a
-  // hard-coded amount can silently become valid and open a wallet approval.
+  // (4) Read the deployed pool's live cap and fee, and deposit a note that,
+  // with the fee on top, exceeds the cap by one stroop. Deployment parameters
+  // can change independently of this test branch; a hard-coded amount can
+  // silently become valid and open a wallet approval.
   // Mirrors app/js/ui/pool.js's getActivePoolContractId: first enabled pool.
   const poolContractId = await page.evaluate(() =>
     fetch('./deployments.json')
       .then((r) => r.json())
       .then((c) => (c.pools.find((pool) => pool.enabled) || c.pools[0]).poolContractId),
   );
-  const maximumDeposit = await readMaximumDepositAmount(poolContractId, rpcUrl);
-  const aboveMaximumDeposit = stroopsToDecimal(maximumDeposit + 1n);
+  const maximumDeposit = await readInstanceAmount(poolContractId, rpcUrl, 'MaximumDepositAmount');
+  const fee = await readInstanceAmount(poolContractId, rpcUrl, 'Fee');
+  const aboveMaximumDeposit = stroopsToDecimal(maximumDeposit - fee + 1n);
   await gotoMoveFlow(page, 'deposit');
   await page.locator('#deposit-amount').fill(aboveMaximumDeposit);
   await page.locator('#btn-deposit').click();
@@ -182,7 +184,20 @@ export async function run(helpers) {
   await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
   log.info(`(4) above max-deposit (${aboveMaximumDeposit} XLM):`, aboveCap.message);
 
-  // (5) Signing account: a pasted value that is not an address is refused in
+  // (5) A deposit below the pool's 0.001 minimum is refused in the form, which
+  // names the minimum, before any confirmation or wallet approval.
+  await page.locator('#deposit-amount').fill('0.0001');
+  await page.locator('#btn-deposit').click();
+  const belowMinimum = await waitForToast(page, {
+    origin: 'deposit',
+    predicate: (toast) => /minimum deposit is 0\.001 XLM/i.test(toast.message),
+  });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for a deposit below the minimum');
+  await assertNoApproval(context, 'below-minimum deposit');
+  await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
+  log.info('(5) below-minimum deposit:', belowMinimum.message);
+
+  // (6) Signing account: a pasted value that is not an address is refused in
   // the picker itself and never becomes a choice.
   await gotoMoveFlow(page, 'withdraw');
   await page.locator('#withdraw-amount').fill('0.01');
@@ -195,9 +210,9 @@ export async function run(helpers) {
     (await signingSelect.locator('option[value="GNOTANADDRESS"]').count()) === 0,
     'an invalid pasted address was added to the signing-account list',
   );
-  log.info('(5) invalid signing account: refused in the picker');
+  log.info('(6) invalid signing account: refused in the picker');
 
-  // (6) "Enter another address…" left without an address must not quietly fall
+  // (7) "Enter another address…" left without an address must not quietly fall
   // back to signing as the owner.
   await page.locator('#withdraw-amount').fill('0.01');
   await page.locator('#btn-withdraw').click();
@@ -208,9 +223,9 @@ export async function run(helpers) {
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened without a chosen signer');
   await assertNoApproval(context, 'no signing account entered');
   await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
-  log.info('(6) no signing account entered:', noSigner.message);
+  log.info('(7) no signing account entered:', noSigner.message);
 
-  // (7) A valid account that does not exist on the network cannot be the
+  // (8) A valid account that does not exist on the network cannot be the
   // transaction's source; stopped before the confirmation and before proving.
   await page.getByTestId('signing-account-input').fill(unregisteredAddress);
   await page.getByTestId('signing-account-use').click();
@@ -223,7 +238,7 @@ export async function run(helpers) {
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for an unfunded signing account');
   await assertNoApproval(context, 'unfunded signing account');
   await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
-  log.info('(7) unfunded signing account:', unfunded.message);
+  log.info('(8) unfunded signing account:', unfunded.message);
 
   // Deposits still use the owner regardless of the withdrawal selection.
   await gotoMoveFlow(page, 'deposit');

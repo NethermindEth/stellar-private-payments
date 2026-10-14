@@ -41,7 +41,8 @@ export async function run(helpers) {
     notes: { minCount: 1, predicate: (note) => note.state === 'spent' },
   });
   await gotoMoveFlow(page, 'withdraw');
-  await withdraw(helpers, { logTag, amount: '0.01', rpcUrl, progressTimeoutMs: 180_000 });
+  // With the 0.0001 XLM pool fee, 0.0099 spends exactly one 0.01 note.
+  await withdraw(helpers, { logTag, amount: '0.0099', rpcUrl, progressTimeoutMs: 180_000 });
 
   await gotoAdvanced(page);
   const spentNotes = await spentNoteReady;
