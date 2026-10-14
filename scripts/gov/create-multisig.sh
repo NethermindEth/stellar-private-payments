@@ -23,7 +23,9 @@ Arguments:
   network            Network name from Stellar CLI config (e.g. testnet, futurenet)
 
 Options:
-  --account ALIAS    Stellar identity that owns the account and signs the change (required)
+  --account ALIAS    Stellar identity whose account becomes the multisig (required). Its own key
+                     signs this one transaction and nothing after, so it is never a --signer
+                     and never deploy.sh's --deployer.
   --signer ADDRESS   Signer to add with weight 1 (repeatable, required)
   --threshold N      Signatures every later operation needs, at least 2 (required)
   --fund             Fund the account before the change, on a network with a friendbot
@@ -70,10 +72,14 @@ if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
   die "mainnet requires --yes"
 fi
 
+ACCOUNT_ADDR="$(stellar keys address "$ACCOUNT")"
+
 # Addresses only: the CLI resolves aliases, so an alias plus its address would count as two signers
 # and leave the account short of its threshold.
 for signer in "${SIGNERS[@]}"; do
   [[ "$signer" =~ ^G[A-Z2-7]{55}$ ]] || die "--signer takes an account address (G...), got $signer"
+  [[ "$signer" != "$ACCOUNT_ADDR" ]] \
+    || die "--signer $signer is the account's own key, whose weight this script sets to 0"
 done
 [[ "$THRESHOLD" =~ ^[0-9]+$ && "$THRESHOLD" -ge 2 ]] \
   || die "--threshold must be 2 or more: a 1-of-N account survives no stolen signer"
@@ -81,8 +87,6 @@ done
   || die "--threshold $THRESHOLD is above the ${#SIGNERS[@]} signers given"
 [[ "$(printf '%s\n' "${SIGNERS[@]}" | sort -u | wc -l)" -eq ${#SIGNERS[@]} ]] \
   || die "the same signer was given twice"
-
-ACCOUNT_ADDR="$(stellar keys address "$ACCOUNT")"
 
 if [[ "$FUND" == "true" ]]; then
   [[ "$NETWORK" != "mainnet" ]] || die "--fund has no friendbot on mainnet"
