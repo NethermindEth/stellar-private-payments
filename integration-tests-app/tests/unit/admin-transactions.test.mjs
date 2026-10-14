@@ -187,21 +187,27 @@ test('shortLivedEntries keeps the entries that archive within the call\'s 24 hou
 });
 
 test('extendCommand names a data entry by its key, an instance by its contract, and code by its hash', () => {
-  const network = ['https://rpc.example.com', Networks.TESTNET];
-  const tail = ` --ledgers-to-extend 3110399 --source-account ACCOUNT --rpc-url https://rpc.example.com --network-passphrase '${Networks.TESTNET}'`;
-  assert.equal(extendCommand(treeKey('Admin'), ...network), `stellar contract extend --id ${TREE} --key-xdr AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==${tail}`);
-  assert.equal(extendCommand(new Contract(TREE).getFootprint(), ...network), `stellar contract extend --id ${TREE}${tail}`);
+  const args = [99_999, 'https://rpc.example.com', Networks.TESTNET];
+  const tail = ` --ledgers-to-extend 99999 --source-account ACCOUNT --rpc-url https://rpc.example.com --network-passphrase '${Networks.TESTNET}'`;
+  assert.equal(extendCommand(treeKey('Admin'), ...args), `stellar contract extend --id ${TREE} --key-xdr AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==${tail}`);
+  assert.equal(extendCommand(new Contract(TREE).getFootprint(), ...args), `stellar contract extend --id ${TREE}${tail}`);
   const code = xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: new Uint8Array(32).fill(0xab) }));
-  assert.equal(extendCommand(code, ...network), `stellar contract extend --wasm-hash ${'ab'.repeat(32)}${tail}`);
+  assert.equal(extendCommand(code, ...args), `stellar contract extend --wasm-hash ${'ab'.repeat(32)}${tail}`);
 });
 
 // A simulated insert_leaf reading the tree's `Admin` and `Root`, with an RPC
-// stub whose entries live until `liveUntil` past ledger 1,000.
-function finishInsertLeaf(liveUntil) {
+// stub whose entries live until `liveUntil` past ledger 1,000. Only a refused
+// call reads `maxEntryTtl`.
+function finishInsertLeaf(liveUntil, maxEntryTtl) {
   const data = new SorobanDataBuilder().setFootprint([treeKey('Admin')], [treeKey('Root')]).setResourceFee(1_213n).build();
   const simulated = insertLeafBuilder().setSorobanData(data).setTimeout(86_400).build();
   const server = {
     getLedgerEntries: async (...keys) => ({ latestLedger: 1_000, entries: keys.map((key) => ({ key, liveUntilLedgerSeq: 1_000 + liveUntil })) }),
+    getLedgerEntry: async (key) => {
+      assert.equal(key.value.configSettingId.name, 'configSettingStateArchival');
+      assert.ok(maxEntryTtl);
+      return { val: { configSetting: { stateArchivalSettings: { maxEntryTtl } } } };
+    },
   };
   return finishAdminCall({ server, rpcUrl: 'https://rpc.example.com', networkPassphrase: Networks.TESTNET, xdr: simulated.toXdr() });
 }
@@ -212,9 +218,10 @@ test('finishAdminCall pads the fee of a call whose entries outlive its 24 hours'
 });
 
 test('finishAdminCall refuses a call whose entries archive within its 24 hours, with a command for each', async () => {
-  await assert.rejects(finishInsertLeaf(17_999), (err) => {
+  await assert.rejects(finishInsertLeaf(17_999, 100_000), (err) => {
     assert.match(err.message, /archive within its 24 hours/);
     assert.equal(err.extendCommands.length, 2);
+    assert.match(err.extendCommands[0], / --ledgers-to-extend 99999 /);
     return true;
   });
 });

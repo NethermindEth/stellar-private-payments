@@ -12,6 +12,7 @@ import {
   contract,
   rpc,
   scValToNative,
+  xdr,
 } from '@stellar/stellar-sdk';
 
 import { CONTRACT_ERRORS } from './ui/errors.js';
@@ -33,6 +34,13 @@ const ADMIN_TX_LEDGERS = 18_000;
 
 /** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
 export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+
+/** Reads the network's `max_entry_ttl`: an entry lives at most that many ledgers, counting the current one. */
+export async function maxEntryTtl(server) {
+  const key = xdr.LedgerKey.configSetting(new xdr.LedgerKeyConfigSetting({ configSettingId: xdr.ConfigSettingId.configSettingStateArchival }));
+  const { val } = await server.getLedgerEntry(key);
+  return val.configSetting.stateArchivalSettings.maxEntryTtl;
+}
 
 /**
  * Builds the unsigned, simulated envelope `{ xdr }` of a contract call whose
@@ -76,9 +84,10 @@ export async function finishAdminCall({ server, rpcUrl, networkPassphrase, xdr: 
   const keys = liveFootprintKeys(xdr, networkPassphrase);
   if (keys.length > 0) {
     const { entries, latestLedger } = await server.getLedgerEntries(...keys);
-    const commands = shortLivedEntries(entries, latestLedger).map((key) => extendCommand(key, rpcUrl, networkPassphrase));
-    if (commands.length > 0) {
-      throw Object.assign(new Error('Entries this call reads archive within its 24 hours, so it would fail once sent. Extend them from any funded account, then build the call again.'), { extendCommands: commands });
+    const short = shortLivedEntries(entries, latestLedger);
+    if (short.length > 0) {
+      const ledgers = (await maxEntryTtl(server)) - 1;
+      throw Object.assign(new Error('Entries this call reads archive within its 24 hours, so it would fail once sent. Extend them from any funded account, then build the call again.'), { extendCommands: short.map((key) => extendCommand(key, ledgers, rpcUrl, networkPassphrase)) });
     }
   }
   return { xdr };
@@ -107,15 +116,15 @@ export function shortLivedEntries(entries, latestLedger) {
 }
 
 /**
- * Returns the Stellar CLI command that extends the entry under `key` to the
- * longest lifetime the network accepts. `ACCOUNT` stands for the paying account.
+ * Returns the Stellar CLI command that extends the entry under `key` to live
+ * `ledgers` ledgers past the current one. `ACCOUNT` stands for the paying account.
  */
-export function extendCommand(key, rpcUrl, networkPassphrase) {
+export function extendCommand(key, ledgers, rpcUrl, networkPassphrase) {
   const target = key.type === 'contractCode'
     ? `--wasm-hash ${key.value.hash.toXdr('hex')}`
     : `--id ${Address.fromScAddress(key.value.contract)}`
       + (key.value.key.type === 'scvLedgerKeyContractInstance' ? '' : ` --key-xdr ${key.value.key.toXdr('base64')}`);
-  return `stellar contract extend ${target} --ledgers-to-extend 3110399 --source-account ACCOUNT `
+  return `stellar contract extend ${target} --ledgers-to-extend ${ledgers} --source-account ACCOUNT `
     + `--rpc-url ${rpcUrl} --network-passphrase '${networkPassphrase}'`;
 }
 
