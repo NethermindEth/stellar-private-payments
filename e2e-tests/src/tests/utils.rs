@@ -799,6 +799,8 @@ pub struct SyncedRoots {
 /// the tests must insert the same leaves before they call `transact`. The
 /// function inserts the membership leaves, the non-membership overrides and the
 /// pool commitments, then checks that the pool root equals the circuit root.
+/// It also credits the pool's notes total with the input amounts, standing for
+/// the deposits that made the input notes.
 ///
 /// The last two pool leaves stay empty, so that the tree is not full and the
 /// pool accepts the two new output commitments.
@@ -815,7 +817,8 @@ pub struct SyncedRoots {
 /// # Panics
 ///
 /// Panics if the pool root does not equal the circuit root, because the
-/// on-chain verification cannot succeed in that state.
+/// on-chain verification cannot succeed in that state, or if the input amounts
+/// overflow the notes total.
 pub fn sync_contract_state(
     env: &Env,
     contracts: &DeployedContracts,
@@ -854,6 +857,16 @@ pub fn sync_contract_state(
             );
         });
     }
+
+    let deposited = case
+        .inputs
+        .iter()
+        .map(|note| scalar_to_bigint(note.amount))
+        .sum::<BigInt>();
+    env.as_contract(&contracts.pool, || {
+        let deposited = i128::try_from(&deposited).expect("input amounts fit i128");
+        pool_core::totals::record(env, deposited, 0).expect("the notes total takes the credit");
+    });
 
     let circuit_root = scalar_to_u256(env, witness.root);
     let pool_root = pool_client.get_root();

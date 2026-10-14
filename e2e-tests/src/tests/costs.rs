@@ -244,6 +244,11 @@ impl PoolFixture {
         let mint = StellarAssetClient::new(&env, &token);
         mint.mint(&sender, &FUNDING);
         mint.mint(&pool, &FUNDING);
+        // The minted tokens stand for the deposits that made the notes a
+        // withdrawal spends.
+        env.as_contract(&pool, || {
+            pool_core::totals::record(&env, FUNDING, 0).expect("the notes total takes the credit");
+        });
         Self {
             env,
             admin,
@@ -456,14 +461,14 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, blocklist, fresh tree" => 11, 4, 4444, 2, 530_841_344;
-    "pool transact, withdrawal, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, root one transaction old" => 11, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, membership root one insert old" => 14, 4, 4444, 2, 530_841_344;
+    "pool transact, deposit, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
+    "pool transact, transfer, blocklist, fresh tree" => 11, 5, 5460, 2, 530_841_344;
+    "pool transact, withdrawal, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
+    "pool transact, transfer, root one transaction old" => 11, 5, 5460, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 5, 5460, 2, 530_841_344;
+    "pool transact, transfer, membership root one insert old" => 14, 5, 5460, 2, 530_841_344;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 11, 4, 4444, 2, 530_841_344;
+    "pool-gvk transact, transfer, view-only" => 11, 5, 5636, 2, 530_841_344;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
@@ -675,7 +680,7 @@ fn a_transact_renews_its_entries_by_a_day() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (14, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (14, 5);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.
