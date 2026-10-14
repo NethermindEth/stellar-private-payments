@@ -28,9 +28,9 @@ Checks:
     admin its added_asp_memberships entry names.
   - The manifest names at most 25 contracts for clients to index: its enabled
     pools, its allowlists, and the public key registry.
-  - Every pool's token is its asset's own Stellar asset contract, and a classic
-    asset's issuer has AUTH_IMMUTABLE set and neither AUTH_REVOCABLE nor
-    AUTH_CLAWBACK_ENABLED. A pool whose asset is a contract token fails.
+  - Every pool's token is its asset's own Stellar asset contract. A pool whose
+    asset is a contract token fails. A classic asset's issuer prints as a notice
+    listing each power its flags give it over the pool's balance.
   - Every pool, a disabled one too, stores the manifest's tree code hashes and
     reads an allowlist the manifest names. A manifest without the hashes, from
     before pools stored them, skips these checks with a notice.
@@ -159,11 +159,18 @@ for pool in $POOLS; do
     issuer="${asset#*:}"
     flags="$(stellar ledger entry fetch account --account "$issuer" --network "$NETWORK" \
       | jq '.entries[0].val.account.flags' || echo unreadable)"
-    # AUTH_REVOCABLE (2) lets the issuer freeze a balance and AUTH_CLAWBACK_ENABLED (8) lets it
-    # take one. AUTH_IMMUTABLE (4) stops it from ever setting either.
-    rule="AUTH_IMMUTABLE without AUTH_REVOCABLE or AUTH_CLAWBACK_ENABLED"
-    [[ "$flags" =~ ^[0-9]+$ ]] && (((flags & 14) == 4)) && got="$rule" || got="flags $flags"
-    check "$pool" "issuer $issuer" "$rule" "$got"
+    # deploy.sh warns about these powers and deploys the pool anyway, so they print as a notice.
+    rule="no power over the pool's balance"
+    got="flags $flags"
+    if [[ "$flags" =~ ^[0-9]+$ ]]; then
+      got=""
+      ((flags & 1)) && got+=", must authorize it (AUTH_REQUIRED)"
+      ((flags & 2)) && got+=", can freeze it (AUTH_REVOCABLE)"
+      ((flags & 8)) && got+=", can claw it back (AUTH_CLAWBACK_ENABLED)"
+      ((flags & 4)) || got+=", can still set its flags (no AUTH_IMMUTABLE)"
+      got="${got#, }"
+    fi
+    check "$pool" "issuer $issuer" "$rule" "${got:-$rule}" notice
   fi
   if [[ -n "$HASHES" ]]; then
     # Read-only simulation, so the source account only has to exist on the network.
