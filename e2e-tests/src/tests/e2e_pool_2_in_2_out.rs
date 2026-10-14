@@ -7,8 +7,8 @@
 use super::utils::{
     ASP_MEMBERSHIP_LEVELS, DeployedContracts, LEAF_PREFIX, NonMembership, TRANSACT_STEMS,
     TransactOutcome, build_membership_trees, build_policy_inputs, deploy_contracts,
-    deploy_same_code, membership_leaves, prove_transaction, prove_with_graph, scalar_to_u256,
-    sync_contract_state, test_env, transact,
+    deploy_contracts_with_fee, deploy_same_code, membership_leaves, prove_transaction,
+    prove_with_graph, scalar_to_u256, sync_contract_state, test_env, transact,
 };
 use anyhow::Result;
 use ark_bn254::Fr as Scalar;
@@ -23,6 +23,7 @@ use circuits::test::utils::{
 };
 use contract_types::Groth16Error;
 use pool::{Error, ExtData, PoolContractClient, Proof};
+use pool_core::totals::TotalsDataKey;
 use soroban_sdk::{Address, Env, InvokeError, U256, Vec as SorobanVec, testutils::Address as _};
 use soroban_utils::constants::bn256_modulus;
 use stellar_private_payments::types::PolicyFlags;
@@ -48,19 +49,22 @@ impl TransactFixture {
     }
 }
 
-/// Build a 2-in/2-out pool transaction, prove it from the witness graph, and
-/// put the contracts into the state the proof was made against.
+/// Build a 2-in/2-out pool transaction against a pool deployed with `fee` and
+/// `minimum`, prove it from the witness graph, and put the contracts into the
+/// state the proof was made against.
 ///
-/// The amounts must balance: `inputs + ext_amount = outputs`. A positive
+/// The amounts must balance: `inputs + ext_amount = outputs + fee`. A positive
 /// `ext_amount` is a deposit, and zero is a private transfer.
 fn transact_fixture(
     in_amounts: [u64; 2],
     out_amounts: [u64; 2],
     ext_amount: i32,
+    fee: i128,
+    minimum: i128,
 ) -> Result<TransactFixture> {
     let env = test_env();
     env.mock_all_auths();
-    let contracts = deploy_contracts(&env);
+    let contracts = deploy_contracts_with_fee(&env, fee, minimum);
     let mut proven = prove_transaction(&env, &contracts, in_amounts, out_amounts, ext_amount, 0)?;
 
     let roots = sync_contract_state(
@@ -121,7 +125,7 @@ fn deploy_allowlist(env: &Env, allowlist: &Address) -> Address {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_deposit_succeeds() -> Result<()> {
-    let fixture = transact_fixture([0, 0], [13, 0], 13)?;
+    let fixture = transact_fixture([0, 0], [13, 0], 13, 0, 0)?;
     assert!(fixture.transact().is_ok(), "deposit should succeed");
     Ok(())
 }
@@ -131,7 +135,7 @@ fn transact_deposit_succeeds() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_real_deposit_is_refused_while_deposits_are_paused() -> Result<()> {
-    let fixture = transact_fixture([0, 0], [13, 0], 13)?;
+    let fixture = transact_fixture([0, 0], [13, 0], 13, 0, 0)?;
 
     fixture.pool().pause_deposits();
     assert_eq!(fixture.transact(), Err(Ok(Error::DepositsPaused)));
@@ -145,7 +149,7 @@ fn a_real_deposit_is_refused_while_deposits_are_paused() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_real_withdrawal_lands_while_deposits_are_paused() -> Result<()> {
-    let fixture = transact_fixture([13, 0], [0, 0], -13)?;
+    let fixture = transact_fixture([13, 0], [0, 0], -13, 0, 0)?;
 
     fixture.pool().pause_deposits();
     assert_eq!(fixture.transact(), Ok(Ok(())));
@@ -156,10 +160,30 @@ fn a_real_withdrawal_lands_while_deposits_are_paused() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_real_transfer_lands_while_deposits_are_paused() -> Result<()> {
-    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let fixture = transact_fixture([0, 13], [13, 0], 0, 0, 0)?;
 
     fixture.pool().pause_deposits();
     assert_eq!(fixture.transact(), Ok(Ok(())));
+    Ok(())
+}
+
+/// The real verifier checks a public amount net of the fee, and a transfer's
+/// is non-zero only because of the fee. The fee moves from the notes total to
+/// the fees total.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_real_transfer_pays_the_fee() -> Result<()> {
+    let fixture = transact_fixture([13, 0], [10, 0], 0, 3, 1)?;
+    let env = &fixture.env;
+
+    assert_eq!(fixture.transact(), Ok(Ok(())));
+    let notes = env.as_contract(&fixture.contracts.pool, || {
+        env.storage()
+            .instance()
+            .get::<_, i128>(&TotalsDataKey::NotesTotal)
+    });
+    assert_eq!(notes, Some(10));
+    assert_eq!(fixture.pool().get_fees_total(), 3);
     Ok(())
 }
 
@@ -168,7 +192,7 @@ fn a_real_transfer_lands_while_deposits_are_paused() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_re_point_to_an_allowlist_without_the_leaf_refuses_a_real_proof() -> Result<()> {
-    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let fixture = transact_fixture([0, 13], [13, 0], 0, 0, 0)?;
 
     fixture.pool().update_asp_membership(&deploy_allowlist(
         &fixture.env,
@@ -223,7 +247,7 @@ fn a_re_point_to_an_allowlist_with_the_same_leaves_keeps_a_real_proof_valid() ->
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_blocklist_write_voids_a_real_proof_built_before_it() -> Result<()> {
-    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let fixture = transact_fixture([0, 13], [13, 0], 0, 0, 0)?;
     let env = &fixture.env;
 
     ASPNonMembershipClient::new(env, &fixture.contracts.asp_non_membership).insert_leaves(
@@ -247,7 +271,7 @@ fn a_blocklist_write_voids_a_real_proof_built_before_it() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_tampered_output_commitment() -> Result<()> {
-    let mut fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let mut fixture = transact_fixture([0, 13], [13, 0], 0, 0, 0)?;
 
     let tampered = commitment(
         Scalar::from(13u64),
@@ -274,7 +298,7 @@ fn transact_rejects_tampered_output_commitment() -> Result<()> {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_a_settled_proof_and_its_field_aliases() -> Result<()> {
-    let mut fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    let mut fixture = transact_fixture([0, 13], [13, 0], 0, 0, 0)?;
     assert_eq!(fixture.transact(), Ok(Ok(())), "the first send settles");
 
     let err = fixture
