@@ -232,6 +232,37 @@ export function newAdminRefusal(value, { admin, pending }) {
 }
 
 /**
+ * Lists how an admin account breaks the custody rules `verify-deployment.sh`
+ * checks, one problem per rule broken, or `[]`.
+ *
+ * @param {xdr.AccountEntry} account
+ * @returns {string[]}
+ */
+export function custodyProblems(account) {
+  const [master, low, medium, high] = account.thresholds.value;
+  const { signers } = account;
+  const problems = [];
+  if (master !== 0) problems.push(`its own key has weight ${master}, not 0`);
+  if (low !== high || medium !== high) problems.push(`its low, medium, and high thresholds are ${low}, ${medium}, and ${high}, not equal`);
+  if (high < 2) problems.push(`its threshold is ${high}, below 2`);
+  if (high > signers.length) problems.push(`its threshold is ${high}, above its ${signers.length} signers`);
+  for (const { key, weight } of signers) {
+    const signer = SignerKey.encodeSignerKey(key);
+    if (!StrKey.isValidEd25519PublicKey(signer)) problems.push(`signer ${signer} is not an ed25519 key`);
+    if (weight !== 1) problems.push(`signer ${signer} has weight ${weight}, not 1`);
+  }
+  return problems;
+}
+
+/**
+ * Returns `null` when `problems` is empty, `'refuse'` on mainnet, and
+ * `'confirm'` on any other network, since local and test deployments run on
+ * one key.
+ */
+export const custodyVerdict = (problems, network) =>
+  (problems.length === 0 ? null : network === 'mainnet' ? 'refuse' : 'confirm');
+
+/**
  * Formats a `host_fn_failed` diagnostic event's error the way a failed simulation
  * does, for example `Error(Contract, #20)`, or returns `''`. A failed sent
  * transaction reports its error only in these events.

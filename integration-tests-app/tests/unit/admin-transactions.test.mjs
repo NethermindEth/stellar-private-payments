@@ -10,12 +10,15 @@ import {
   Networks,
   Operation,
   SorobanDataBuilder,
+  StrKey,
   TransactionBuilder,
   nativeToScVal,
   xdr,
 } from '@stellar/stellar-sdk';
 
 import {
+  custodyProblems,
+  custodyVerdict,
   describeAdminCall,
   extendCommand,
   explainFailure,
@@ -306,6 +309,39 @@ test('newAdminRefusal refuses an empty value, a secret, a muxed or corrupted add
 test('newAdminRefusal lets an account or a contract address through', () => {
   assert.equal(newAdminRefusal(Keypair.random().publicKey(), { admin: ADMIN, pending: null }), null);
   assert.equal(newAdminRefusal(TREE, { admin: ADMIN, pending: null }), null);
+});
+
+// The signer entry of `keypair`'s key with `weight`.
+const ed25519Signer = (keypair, weight = 1) =>
+  new xdr.Signer({ key: xdr.SignerKey.signerKeyTypeEd25519(keypair.rawPublicKey()), weight });
+const threeSigners = [first, second, third].map((keypair) => ed25519Signer(keypair));
+
+test('custodyProblems finds nothing wrong with a 2-of-3 or 3-of-3 account whose own key has weight 0', () => {
+  assert.deepEqual(custodyProblems(adminAccount([0, 2, 2, 2], threeSigners)), []);
+  assert.deepEqual(custodyProblems(adminAccount([0, 3, 3, 3], threeSigners)), []);
+});
+
+test('custodyProblems names each custody rule an account breaks alone', () => {
+  const hash = Buffer.alloc(32);
+  const hashSigner = new xdr.Signer({ key: xdr.SignerKey.signerKeyTypeHashX(hash), weight: 1 });
+  const cases = [
+    [[1, 2, 2, 2], threeSigners, 'its own key has weight 1, not 0'],
+    [[0, 1, 2, 2], threeSigners, 'its low, medium, and high thresholds are 1, 2, and 2, not equal'],
+    [[0, 2, 1, 2], threeSigners, 'its low, medium, and high thresholds are 2, 1, and 2, not equal'],
+    [[0, 1, 1, 1], threeSigners, 'its threshold is 1, below 2'],
+    [[0, 4, 4, 4], threeSigners, 'its threshold is 4, above its 3 signers'],
+    [[0, 2, 2, 2], [...threeSigners.slice(0, 2), hashSigner], `signer ${StrKey.encodeSha256Hash(hash)} is not an ed25519 key`],
+    [[0, 2, 2, 2], [...threeSigners.slice(0, 2), ed25519Signer(third, 2)], `signer ${third.publicKey()} has weight 2, not 1`],
+  ];
+  for (const [thresholds, signers, problem] of cases) {
+    assert.deepEqual(custodyProblems(adminAccount(thresholds, signers)), [problem]);
+  }
+});
+
+test('custodyVerdict refuses a broken admin on mainnet, asks on any other network, and passes a sound one', () => {
+  assert.equal(custodyVerdict(['its own key has weight 1, not 0'], 'mainnet'), 'refuse');
+  assert.equal(custodyVerdict(['its own key has weight 1, not 0'], 'testnet'), 'confirm');
+  assert.equal(custodyVerdict([], 'mainnet'), null);
 });
 
 // The diagnostic event a sent transaction publishes when its host function fails with `error`.
