@@ -20,7 +20,6 @@ import {
   adminTxFromHash,
   adminTxLink,
   custodyProblems,
-  custodyVerdict,
   describeAdminCall,
   extendCommand,
   explainFailure,
@@ -375,12 +374,6 @@ test('custodyProblems names each custody rule an account breaks alone', () => {
   for (const [thresholds, signers, problem] of cases) {
     assert.deepEqual(custodyProblems(adminAccount(thresholds, signers)), [problem]);
   }
-});
-
-test('custodyVerdict refuses a broken admin on mainnet, asks on any other network, and passes a sound one', () => {
-  assert.equal(custodyVerdict(['its own key has weight 1, not 0'], 'mainnet'), 'refuse');
-  assert.equal(custodyVerdict(['its own key has weight 1, not 0'], 'testnet'), 'confirm');
-  assert.equal(custodyVerdict([], 'mainnet'), null);
 });
 
 // The diagnostic event a sent transaction publishes when its host function fails with `error`.

@@ -283,14 +283,6 @@ export function custodyProblems(account) {
 }
 
 /**
- * Returns `null` when `problems` is empty, `'refuse'` on mainnet, and
- * `'confirm'` on any other network, since local and test deployments run on
- * one key.
- */
-export const custodyVerdict = (problems, network) =>
-  (problems.length === 0 ? null : network === 'mainnet' ? 'refuse' : 'confirm');
-
-/**
  * Formats a `host_fn_failed` diagnostic event's error the way a failed simulation
  * does, for example `Error(Contract, #20)`, or returns `''`. A failed sent
  * transaction reports its error only in these events.

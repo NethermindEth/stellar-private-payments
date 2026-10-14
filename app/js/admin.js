@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, custodyVerdict, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
@@ -683,12 +683,8 @@ async function confirmCustody(newAdmin) {
       return false;
     }
   }
-  const verdict = custodyVerdict(problems, deploymentDefaults.network);
-  if (!verdict) return true;
-  const message = `The new admin is not a multisig account: ${problems.join('; ')}`;
-  if (verdict === 'confirm') return window.confirm(`${message}.\n\nPropose it anyway?`);
-  showToast(message, 'error');
-  return false;
+  return problems.length === 0
+    || window.confirm(`The new admin is not a multisig account: ${problems.join('; ')}.\n\nPropose it anyway?`);
 }
 
 function showAddress(cell, address) {
