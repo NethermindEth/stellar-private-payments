@@ -1465,11 +1465,10 @@ fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
     assert_eq!(err, Ok(Error::WrongExtAmount));
 }
 
-/// Withdrawals are bounded both by `calculate_public_amount` (`< 2^248`) and by
-/// `i256_to_i128_nonneg` (`<= i128::MAX`) before proof verification. Policy
-/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
+/// Fee 0 and policy flags 0 leave `i256_to_i128_nonneg` the only refusal of
+/// `i128::MIN` before verification; `-i128::MAX` reaches the verifier.
 #[test]
-fn transact_bounds_withdrawals_below_two_to_the_248() {
+fn transact_bounds_withdrawals_to_i128() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
@@ -1479,21 +1478,13 @@ fn transact_bounds_withdrawals_below_two_to_the_248() {
 
     let r = bn256_modulus(&env);
     let cases = [
-        // −2^248, refused by `calculate_public_amount`.
+        // `i128::MIN`, refused by `i256_to_i128_nonneg` before proof verification.
         (
-            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0),
-            r.sub(&U256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
-            Error::WrongExtAmount,
-        ),
-        // −2^127 (−i128::MAX − 1), which passes `calculate_public_amount` and
-        // is refused by `i256_to_i128_nonneg` before proof verification.
-        (
-            I256::from_parts(&env, -1, u64::MAX, 0x8000_0000_0000_0000, 0),
+            I256::from_i128(&env, i128::MIN),
             r.sub(&U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0)),
             Error::WrongExtAmount,
         ),
-        // −(2^127 − 1) (−i128::MAX), which passes both bounds and reaches the
-        // verifier.
+        // `-i128::MAX`, which passes both bounds and reaches the verifier.
         (
             I256::from_i128(&env, -i128::MAX),
             r.sub(&U256::from_u128(&env, i128::MAX as u128)),
@@ -3725,4 +3716,78 @@ fn pause_deposits_errors_when_admin_unset() {
     });
 
     assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
+}
+
+/// A proof moving `ext_amount` with a public amount of `public_amount`.
+fn mk_paying_proof(
+    env: &Env,
+    pool: &PoolContractClient,
+    token: &Address,
+    ext_amount: i32,
+    public_amount: i128,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let (mut proof, ext) = mk_moving_transact_proof(env, pool, token, ext_amount, nullifier);
+    proof.public_amount =
+        pool_core::amounts::calculate_public_amount(env, I256::from_i128(env, public_amount))
+            .expect("the amount must fit the field");
+    (proof, ext)
+}
+
+/// Asserts that a proof moving `ext_amount` with a public amount of
+/// `public_amount` gets `expected` from a pool charging a fee of 5.
+fn assert_transact_charging_five(ext_amount: i32, public_amount: i128, expected: Error) {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_paying_proof(&env, &pool, &setup.token, ext_amount, public_amount, 0xF8);
+
+    assert_eq!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(expected))
+    );
+}
+
+/// The real verifier refuses the mock proof, so `InvalidProof` means every
+/// amount check passed.
+#[test]
+fn transact_takes_the_fee_from_a_transfer() {
+    assert_transact_charging_five(0, -5, Error::InvalidProof);
+}
+
+/// The all-zero call, which needs no funds, must pay the fee like any other.
+#[test]
+fn transact_refuses_a_transfer_that_skips_the_fee() {
+    assert_transact_charging_five(0, 0, Error::WrongExtAmount);
+}
+
+/// `I256::MIN` does not convert to `i128`, and `i128::MIN` minus the fee
+/// overflows it. The public amounts are what a wrapping or a saturating
+/// subtraction would give, so only the overflow check refuses them.
+#[test]
+fn transact_refuses_an_ext_amount_outside_i128() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    for (ext_amount, public_amount) in [
+        (I256::min_value(&env), -5),
+        (I256::from_i128(&env, i128::MIN), i128::MIN.wrapping_sub(5)),
+        (I256::from_i128(&env, i128::MIN), i128::MIN),
+    ] {
+        let (mut proof, mut ext) =
+            mk_paying_proof(&env, &pool, &setup.token, 0, public_amount, 0xF9);
+        ext.ext_amount = ext_amount;
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+
+        assert_eq!(
+            pool.try_transact(&proof, &ext, &Address::generate(&env)),
+            Err(Ok(Error::WrongExtAmount))
+        );
+    }
 }
