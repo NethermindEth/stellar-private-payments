@@ -366,12 +366,12 @@ event retention, about seven days on the public testnet RPC:
    upstream RPC still holds `LEDGER`, as [Add an allowlist](./bootnode.md#add-an-allowlist)
    describes. Redeploy the web app, which bundles the manifest when it is built, and give CLI
    users the new `deployments.json` for `--deployment` or their provisioned copy.
-5. On the Pools tab's Re-point panel, choose the pool and the kind of tree, enter the new tree's
-   address, choose the records file, and press Check. The panel checks the tree's code, an
-   allowlist's depth and manifest entry, the tree's admin, and the tree's entries against the
-   records file. A tree another party runs passes the admin check once you tick the box that
-   names its admin.
-6. Once every check passes, press Build re-point and make the admin call.
+5. On the Pools tab's Change compliance contracts panel, choose the pool, choose Allowlist or
+   Blocklist under Policy, enter the new tree's address under New contract address, choose the
+   records file, and press Check. The panel checks the tree's code, an allowlist's depth and
+   manifest entry, the tree's admin, and the tree's entries against the records file. A tree
+   another party runs passes the admin check once you tick the box that names its admin.
+6. Once every check passes, press Build and make the admin call.
 
 `deploy.sh` points every pool at the same trees, so re-point each pool that reads the old tree,
 one admin call per pool. The keep-alive loop in
@@ -392,10 +392,10 @@ The Allowlist and Blocklist tabs write to the trees in the Overview tab's contra
 which start as the manifest's. After a re-point, enter the new tree's address there before writing
 to it.
 
-The Re-point panel cannot check an allowlist older than the RPC's event retention, such as the
-deployment's own allowlist a week after the deploy. To re-point back to such an allowlist, compare
-its entries with your records some other way and make sure the manifest still names it. Then build
-the call with the CLI:
+The Change compliance contracts panel cannot check an allowlist older than the RPC's event
+retention, such as the deployment's own allowlist a week after the deploy. To re-point back to such
+an allowlist, compare its entries with your records some other way and make sure the manifest still
+names it. Then build the call with the CLI:
 
 ```bash
 stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet \

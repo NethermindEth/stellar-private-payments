@@ -802,7 +802,7 @@ async function buildRowCall(button, kind, call) {
 // Re-point
 // -----------------------------
 // Draws the last re-point check. An outside admin's line passes once the
-// operator confirms it; Build re-point waits for every line.
+// operator confirms it; Build waits for every line.
 function renderRepoint() {
   const lines = state.repoint?.lines ?? [];
   const passes = ({ ok, confirm }) => ok || (Boolean(confirm) && repointConfirmBox.checked);
@@ -812,7 +812,7 @@ function renderRepoint() {
   })));
   const confirm = lines.find((line) => line.confirm)?.confirm;
   repointConfirmEl.classList.toggle('hidden', !confirm);
-  repointConfirmTextEl.textContent = confirm ? `Let the pool read a tree that ${confirm} runs, not the pool's admin` : '';
+  repointConfirmTextEl.textContent = confirm ? `Let the pool use a contract that ${confirm} runs, not the pool's admin` : '';
   buildRepointBtn.disabled = lines.length === 0 || !lines.every(passes);
 }
 
@@ -835,12 +835,12 @@ async function checkRepoint() {
     ensureWalletConnected();
     const pool = repointPoolSelect.value;
     const tree = repointTreeInput.value.trim();
-    if (!pool || !tree) throw new Error('Choose a pool and enter the new tree address');
+    if (!pool || !tree) throw new Error('Choose a pool and enter the new contract address');
     const allowlist = repointKindSelect.value === 'asp-membership';
 
     checkRepointBtn.disabled = true;
     checkRepointBtn.textContent = 'Checking...';
-    setStatus('Checking the tree...', 'info');
+    setStatus('Checking the contract...', 'info');
     const server = rpcServer(state.rpcUrl);
     const [manifest, admin, poolInstance, treeInstance] = await Promise.all([
       loadDeploymentConfig(),
@@ -852,7 +852,7 @@ async function checkRepoint() {
       ['Code', async () => {
         const client = await readClient(pool);
         if (!client.get_asp_wasm_hashes) {
-          throw new Error('the pool has no get_asp_wasm_hashes entry point, so it accepts a tree of any code');
+          throw new Error('the pool has no get_asp_wasm_hashes entry point, so it accepts a contract running any code');
         }
         return codeLine((await client.get_asp_wasm_hashes()).result.unwrap(), treeInstance.wasmHash, allowlist);
       }],
@@ -863,7 +863,7 @@ async function checkRepoint() {
       }],
       ['Admin', async () => {
         const client = await readClient(tree);
-        if (!client.get_admin) throw new Error('the tree has no get_admin entry point');
+        if (!client.get_admin) throw new Error('the contract has no get_admin entry point');
         return adminLine((await client.get_admin()).result.unwrap(), admin);
       }],
       allowlist && ['Manifest', async () => manifestLine(manifest, tree)],
@@ -888,7 +888,7 @@ async function checkRepoint() {
         const shown = allowlist ? (value) => `0x${value.toString(16)}` : blocklistKeyToNoteKey;
         const listed = (values) => values.map(shown).join(', ');
         const problems = [
-          missing.length > 0 && `missing from the tree: ${listed(missing)}`,
+          missing.length > 0 && `missing from the contract: ${listed(missing)}`,
           unexpected.length > 0 && `not in the records: ${listed(unexpected)}`,
         ].filter(Boolean);
         if (problems.length > 0) throw new Error(problems.join('; '));
@@ -900,7 +900,7 @@ async function checkRepoint() {
       (err) => ({ label, ok: false, text: err.message, confirm: err.confirm }),
     )));
     if (state.repoint !== check) return;
-    setStatus('Tree checked', 'info');
+    setStatus('Contract checked', 'info');
     Object.assign(check, {
       lines,
       call: {
@@ -912,8 +912,8 @@ async function checkRepoint() {
     });
     renderRepoint();
   } catch (err) {
-    setStatus('Tree check failed', 'error');
-    showToast(`Tree check failed: ${err.message}`, 'error');
+    setStatus('Contract check failed', 'error');
+    showToast(`Contract check failed: ${err.message}`, 'error');
   } finally {
     if (state.address) checkRepointBtn.disabled = false;
     checkRepointBtn.textContent = originalText;

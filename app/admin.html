@@ -294,7 +294,7 @@
                         <thead>
                             <tr class="text-[10px] uppercase tracking-wide text-slate-500">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
-                                <th class="pb-3 pr-4 font-medium" scope="col">Trees</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Policies</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
                                 <th class="pb-3 font-medium" scope="col">Actions</th>
                             </tr>
@@ -306,8 +306,8 @@
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                     <div>
-                        <h3 class="text-lg font-semibold text-white">Re-point</h3>
-                        <p class="mt-1 text-sm text-slate-400">Checks a tree before a pool reads it in place of its current one. An allowlist's entries come from its events, so the RPC must still hold its deployment ledger.</p>
+                        <h3 class="text-lg font-semibold text-white">Change compliance contracts</h3>
+                        <p class="mt-1 text-sm text-slate-400">Checks a new contract before a pool uses it instead of its current one. An allowlist's entries come from its events, so the RPC must still hold its deployment ledger.</p>
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
@@ -315,14 +315,14 @@
                             <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">Tree</label>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">Policy</label>
                             <select id="repointKind" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
                                 <option value="asp-membership">Allowlist</option>
                                 <option value="asp-non-membership">Blocklist</option>
                             </select>
                         </div>
                         <div class="md:col-span-2">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New tree address</label>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New contract address</label>
                             <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div class="md:col-span-2">
@@ -342,7 +342,7 @@
                             Check
                         </button>
                         <button class="flex-1 rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed" id="buildRepointBtn" type="button" disabled>
-                            Build re-point
+                            Build
                         </button>
                     </div>
                 </div>

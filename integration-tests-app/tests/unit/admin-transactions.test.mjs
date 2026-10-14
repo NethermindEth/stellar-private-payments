@@ -439,7 +439,7 @@ test('explainFailure names the pool errors 18, 20 and 21', () => {
   const pool = (code) => explainFailure(new Error(`HostError: Error(Contract, #${code})`), 'pool');
   assert.equal(pool(18), 'Deposits into this pool are paused. Withdrawals and transfers still work.');
   assert.equal(pool(20), 'No admin transfer is pending.');
-  assert.equal(pool(21), 'The tree does not run the code this pool accepts.');
+  assert.equal(pool(21), 'The contract does not run the code this pool accepts.');
 });
 
 test('explainFailure reads #6 as NoPendingAdmin from an allowlist and not from a blocklist', () => {

@@ -51,9 +51,9 @@ test('allowlistLeavesFromEvents refuses events that start after the first leaf',
 
 test('allowlistLeavesFromEvents compares the leaf count with NextIndex, zero included', () => {
   const events = [event('LeafAdded', { leaf: 10n, index: 0n, root: 10n }), event('LeafAdded', { leaf: 20n, index: 1n, root: 11n })];
-  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /hold 2 leaves and the tree 3/);
-  assert.throws(() => allowlistLeavesFromEvents(events, 1n), /hold 2 leaves and the tree 1/);
-  assert.throws(() => allowlistLeavesFromEvents(handover, 2n), /hold 0 leaves and the tree 2/);
+  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /hold 2 leaves and the allowlist holds 3/);
+  assert.throws(() => allowlistLeavesFromEvents(events, 1n), /hold 2 leaves and the allowlist holds 1/);
+  assert.throws(() => allowlistLeavesFromEvents(handover, 2n), /hold 0 leaves and the allowlist holds 2/);
   assert.deepEqual(allowlistLeavesFromEvents(handover, 0n), []);
 });
 
@@ -80,19 +80,19 @@ test('historyStart reads an added allowlist from its entry and refuses one the m
 test('codeLine compares an allowlist with the pool\'s first hash and a blocklist with its second', () => {
   const [allowlistHash, blocklistHash] = [Buffer.alloc(32, 1), Buffer.alloc(32, 2)];
   const accepted = [allowlistHash, blocklistHash];
-  assert.equal(codeLine(accepted, blocklistHash, false), `the tree runs ${'02'.repeat(32)}, the code the pool accepts`);
+  assert.equal(codeLine(accepted, blocklistHash, false), `the contract runs ${'02'.repeat(32)}, the code the pool accepts`);
   assert.throws(
     () => codeLine(accepted, allowlistHash, false),
-    { message: `the tree runs ${'01'.repeat(32)}, and the pool accepts ${'02'.repeat(32)}` },
+    { message: `the contract runs ${'01'.repeat(32)}, and the pool accepts ${'02'.repeat(32)}` },
   );
-  assert.equal(codeLine(accepted, allowlistHash, true), `the tree runs ${'01'.repeat(32)}, the code the pool accepts`);
-  assert.throws(() => codeLine(accepted, undefined, true), /the tree runs no Wasm/);
+  assert.equal(codeLine(accepted, allowlistHash, true), `the contract runs ${'01'.repeat(32)}, the code the pool accepts`);
+  assert.throws(() => codeLine(accepted, undefined, true), /the contract runs no Wasm/);
 });
 
 test('levelsLine fails an 11-level allowlist in place of a 10-level one', () => {
   assert.throws(
     () => levelsLine('CURRENT', 10, 11),
-    { message: 'the tree has 11 levels, and the pool\'s current allowlist CURRENT has 10' },
+    { message: 'the new allowlist has 11 levels, and the pool\'s current allowlist CURRENT has 10' },
   );
   assert.equal(levelsLine('CURRENT', 10, 10), '10, as in the pool\'s current allowlist');
 });
@@ -207,5 +207,5 @@ test('blocklistKeys reads a level wider than one request', async () => {
 
 test('blocklistKeys refuses a tree the RPC returns part of', async () => {
   const nodes = new Map([[100n, [101n, 102n]], [101n, [1n, 11n, 1n]]]);
-  await assert.rejects(blocklistKeys(nodeServer(nodes), CONTRACT, 100n), /no entry for part of the tree/);
+  await assert.rejects(blocklistKeys(nodeServer(nodes), CONTRACT, 100n), /no entry for part of the blocklist/);
 });

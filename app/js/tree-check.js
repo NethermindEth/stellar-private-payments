@@ -31,7 +31,7 @@ export async function readInstance(server, contractId) {
 export async function eventsSince(server, contractId, startLedger) {
   const { oldestLedger } = await server.getHealth();
   if (startLedger < oldestLedger) {
-    throw new Error(`the RPC no longer holds ledger ${startLedger}, where the tree's events start, only ledgers from ${oldestLedger} on`);
+    throw new Error(`the RPC no longer holds ledger ${startLedger}, where the allowlist's events start, only ledgers from ${oldestLedger} on`);
   }
   const filters = [{ type: 'contract', contractIds: [contractId] }];
   const events = [];
@@ -77,9 +77,9 @@ export function codeLine(acceptedHashes, treeHash, allowlist) {
   const accepted = hex(acceptedHashes[allowlist ? 0 : 1]);
   const runs = treeHash ? hex(treeHash) : 'no Wasm';
   if (runs !== accepted) {
-    throw new Error(`the tree runs ${runs}, and the pool accepts ${accepted}`);
+    throw new Error(`the contract runs ${runs}, and the pool accepts ${accepted}`);
   }
-  return `the tree runs ${accepted}, the code the pool accepts`;
+  return `the contract runs ${accepted}, the code the pool accepts`;
 }
 
 /**
@@ -90,7 +90,7 @@ export function codeLine(acceptedHashes, treeHash, allowlist) {
  */
 export function levelsLine(current, levels, treeLevels) {
   if (treeLevels !== levels) {
-    throw new Error(`the tree has ${treeLevels ?? 'no'} levels, and the pool's current allowlist ${current} has ${levels}`);
+    throw new Error(`the new allowlist has ${treeLevels ?? 'no'} levels, and the pool's current allowlist ${current} has ${levels}`);
   }
   return `${levels}, as in the pool's current allowlist`;
 }
@@ -139,7 +139,7 @@ export function allowlistLeavesFromEvents(events, nextIndex) {
     throw new Error(`the events hold no leaf at index ${gap}, so they miss part of the allowlist's history`);
   }
   if (BigInt(added.length) !== nextIndex) {
-    throw new Error(`the events hold ${added.length} leaves and the tree ${nextIndex}, so they miss part of the allowlist's history`);
+    throw new Error(`the events hold ${added.length} leaves and the allowlist holds ${nextIndex}, so they miss part of its history`);
   }
   return added.map(({ leaf }) => leaf);
 }
@@ -165,7 +165,7 @@ export async function blocklistKeys(server, contractId, root) {
     for (let i = 0; i < level.length; i += 200) {
       const hashes = level.slice(i, i + 200);
       const { entries } = await server.getLedgerEntries(...hashes.map(nodeKey));
-      if (entries.length !== hashes.length) throw new Error('the RPC holds no entry for part of the tree');
+      if (entries.length !== hashes.length) throw new Error('the RPC holds no entry for part of the blocklist');
       for (const { val } of entries) {
         // A leaf is `[1, key, value]`, an internal node `[left, right]` with 0 for no child.
         const node = scValToNative(val.contractData.val);
