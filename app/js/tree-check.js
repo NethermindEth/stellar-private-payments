@@ -131,10 +131,11 @@ const decode = ({ topic: [name], value }) => ({ name: scValToNative(name), ...sc
 /**
  * Returns the leaves an allowlist's `LeafAdded` events added, in index order.
  *
- * @throws {Error} when the events skip an index, as they do when the read starts
- *   after the first leaves.
+ * @param {bigint} nextIndex The tree's stored `NextIndex`.
+ * @throws {Error} when the events skip an index or hold other than `nextIndex`
+ *   leaves, as they do when the read starts after the first leaves.
  */
-export function allowlistLeavesFromEvents(events) {
+export function allowlistLeavesFromEvents(events, nextIndex) {
   const added = events
     .map(decode)
     .filter(({ name }) => name === 'LeafAdded')
@@ -142,6 +143,9 @@ export function allowlistLeavesFromEvents(events) {
   const gap = added.findIndex(({ index }, position) => index !== BigInt(position));
   if (gap !== -1) {
     throw new Error(`the events hold no leaf at index ${gap}, so they miss part of the allowlist's history`);
+  }
+  if (BigInt(added.length) !== nextIndex) {
+    throw new Error(`the events hold ${added.length} leaves and the tree ${nextIndex}, so they miss part of the allowlist's history`);
   }
   return added.map(({ leaf }) => leaf);
 }

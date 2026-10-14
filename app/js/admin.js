@@ -874,11 +874,13 @@ async function checkRepoint() {
         const ledger = historyStart({ allowlist, tree, manifest, blocklistLedger: Number(repointLedgerInput.value) });
         // Blocklist records and reported keys are note public keys in Blocklist
         // tab form, so a key loaded in the wrong byte order fails.
-        const [events, records] = await Promise.all([
+        const [events, records, nextIndex] = await Promise.all([
           eventsSince(server, tree, ledger),
           file.text().then(allowlist ? parseRecords : parseBlocklistKeys),
+          allowlist && server.getContractData(tree, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))
+            .then(({ val }) => scValToNative(val.contractData.val)),
         ]);
-        const onChain = allowlist ? allowlistLeavesFromEvents(events) : blocklistKeysFromEvents(events);
+        const onChain = allowlist ? allowlistLeavesFromEvents(events, nextIndex) : blocklistKeysFromEvents(events);
         const { missing, unexpected } = compareEntries(onChain, records);
         const shown = allowlist ? (value) => `0x${value.toString(16)}` : blocklistKeyToNoteKey;
         const listed = (values) => values.map(shown).join(', ');

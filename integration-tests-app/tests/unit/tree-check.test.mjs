@@ -51,7 +51,7 @@ test('allowlistLeavesFromEvents orders the leaves by index', () => {
     event('LeafAdded', { leaf: 20n, index: 1n, root: 11n }),
     ...handover,
   ];
-  assert.deepEqual(allowlistLeavesFromEvents(events), [10n, 20n, 30n]);
+  assert.deepEqual(allowlistLeavesFromEvents(events, 3n), [10n, 20n, 30n]);
 });
 
 test('allowlistLeavesFromEvents refuses events that start after the first leaf', () => {
@@ -59,7 +59,15 @@ test('allowlistLeavesFromEvents refuses events that start after the first leaf',
     event('LeafAdded', { leaf: 20n, index: 1n, root: 11n }),
     event('LeafAdded', { leaf: 30n, index: 2n, root: 12n }),
   ];
-  assert.throws(() => allowlistLeavesFromEvents(events), /no leaf at index 0/);
+  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /no leaf at index 0/);
+});
+
+test('allowlistLeavesFromEvents compares the leaf count with NextIndex, zero included', () => {
+  const events = [event('LeafAdded', { leaf: 10n, index: 0n, root: 10n }), event('LeafAdded', { leaf: 20n, index: 1n, root: 11n })];
+  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /hold 2 leaves and the tree 3/);
+  assert.throws(() => allowlistLeavesFromEvents(events, 1n), /hold 2 leaves and the tree 1/);
+  assert.throws(() => allowlistLeavesFromEvents(handover, 2n), /hold 0 leaves and the tree 2/);
+  assert.deepEqual(allowlistLeavesFromEvents(handover, 0n), []);
 });
 
 test('parseRecords skips blank lines and names the first line that is not hex', () => {
