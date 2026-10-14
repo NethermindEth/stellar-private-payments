@@ -78,8 +78,9 @@ sequenceDiagram
     S->>H: A replacement file
 ```
 
-A holder can pause and can't unpause. Each file works once and expires after about 180 days, and
-a signer change or an admin transfer voids it.
+A holder can pause and can't unpause. Each file works once and expires `max_entry_ttl - 1` ledgers
+after it is built, about 180 days on testnet and mainnet, and a signer change or an admin transfer
+voids it.
 
 ## If the admin account is lost or stolen
 
