@@ -95,11 +95,12 @@ A pool accepts only trees of its tree code. To run a tree for a pool another ope
 2. Enter your tree's address in the admin page's Overview tab, and load the entries on the
    Allowlist or Blocklist tab, signing as `ASP_ADMIN`.
 3. Send the pool's operator the tree's address, your records of its entries, and, for an
-   allowlist, its deployment ledger. They check the tree on the Re-point panel and re-point their
-   pool. For an allowlist, they first add it to `added_asp_memberships` in their manifest with
-   `ASP_ADMIN` as its admin, because clients refuse an allowlist the manifest doesn't name.
+   allowlist, its deployment ledger. They check the tree on the Change compliance contracts panel
+   and re-point their pool. For an allowlist, they first add it to `added_asp_memberships` in their
+   manifest with `ASP_ADMIN` as its admin, because clients refuse an allowlist the manifest doesn't
+   name.
 
-The Re-point panel reads an allowlist's entries from its events, so for an allowlist step 3 has to
-finish while the tree is younger than the RPC's event retention, about seven days on the public
-testnet RPC. After the re-point, you edit the tree and the pool's operator decides whether their
-pool keeps reading it.
+The Change compliance contracts panel reads an allowlist's entries from its events, so for an
+allowlist step 3 has to finish while the tree is younger than the RPC's event retention, about
+seven days on the public testnet RPC. After the re-point, you edit the tree and the pool's operator
+decides whether their pool keeps reading it.
