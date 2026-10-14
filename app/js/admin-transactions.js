@@ -237,6 +237,15 @@ export function signedWeight(rule, xdr, networkPassphrase) {
 }
 
 /**
+ * Returns `pageUrl` carrying the envelope in its fragment, which the browser
+ * never sends to a server.
+ */
+export const adminTxLink = (pageUrl, xdr) => `${pageUrl}#tx=${encodeURIComponent(xdr)}`;
+
+/** Returns the envelope in a fragment `adminTxLink` wrote, or `''`. */
+export const adminTxFromHash = (hash) => new URLSearchParams(hash.slice(1)).get('tx') ?? '';
+
+/**
  * Returns why `value` cannot be proposed as a contract's new admin, or `null`.
  * No message repeats `value`, so a secret key pasted by mistake stays out of a toast.
  */

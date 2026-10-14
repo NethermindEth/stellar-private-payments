@@ -17,6 +17,8 @@ import {
 } from '@stellar/stellar-sdk';
 
 import {
+  adminTxFromHash,
+  adminTxLink,
   custodyProblems,
   custodyVerdict,
   describeAdminCall,
@@ -317,6 +319,18 @@ test('signedWeight sums the weights of the keys that signed, so one signature of
     signRefusal(weighted, envelope, Networks.TESTNET, second.publicKey()),
     'The envelope already carries the signatures it needs. Submit it.',
   );
+});
+
+test('adminTxLink carries base64 holding +, /, and = through a URL to adminTxFromHash', () => {
+  const envelope = 'AAAAAgAA+/8AAA==';
+  const link = new URL(adminTxLink('https://example.com/admin.html', envelope));
+  assert.equal(link.origin + link.pathname, 'https://example.com/admin.html');
+  assert.equal(adminTxFromHash(link.hash), envelope);
+});
+
+test('adminTxFromHash gives an empty string for a fragment without tx=', () => {
+  assert.equal(adminTxFromHash(''), '');
+  assert.equal(adminTxFromHash('#admins'), '');
 });
 
 test('newAdminRefusal refuses an empty value, a secret, a muxed or corrupted address, the admin, and the pending admin', () => {

@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { buildAdminCall, custodyProblems, custodyVerdict, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, custodyVerdict, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
@@ -48,6 +48,7 @@ const adminTxSignRefusalEl = document.getElementById('adminTxSignRefusal');
 const signAdminTxBtn = document.getElementById('signAdminTxBtn');
 const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
 const copyAdminTxBtn = document.getElementById('copyAdminTxBtn');
+const copyAdminTxLinkBtn = document.getElementById('copyAdminTxLinkBtn');
 
 // The buttons that need a connected wallet.
 const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, signAdminTxBtn, submitAdminTxBtn];
@@ -783,6 +784,15 @@ adminTxXdrInput.addEventListener('input', () => renderAdminTx());
 signAdminTxBtn.addEventListener('click', signAdminTx);
 submitAdminTxBtn.addEventListener('click', submitAdminTx);
 copyAdminTxBtn.addEventListener('click', () => copyText(adminTxXdrInput.value.trim(), 'Transaction XDR'));
+copyAdminTxLinkBtn.addEventListener('click', () =>
+  copyText(adminTxLink(window.location.origin + window.location.pathname, adminTxXdrInput.value.trim()), 'Link'));
+
+const sharedTx = adminTxFromHash(window.location.hash);
+if (sharedTx) {
+  loadAdminTx(sharedTx);
+  // A reload would otherwise bring back an envelope that was since submitted.
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+}
 
 membershipContractInput?.addEventListener('input', () => {
   updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
