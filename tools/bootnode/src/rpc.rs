@@ -48,7 +48,7 @@ impl BootnodeRpc {
     /// - requested startLedger >= cutoff ledger, or
     /// - requested cursor's ledger >= cutoff ledger.
     ///
-    /// Cutoff ledger is 5 days ago from current time.
+    /// Cutoff ledger is 5 days before the archived tip.
     ///
     /// Return [`WARMING_UP_CODE`] while the bootnode is not ready for the
     /// request.
