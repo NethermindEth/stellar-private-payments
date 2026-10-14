@@ -14,6 +14,8 @@ pub enum Error {
     NotesTotalExceeded,
     /// A total would overflow `i128`.
     Overflow,
+    /// A claim is negative or above the fees total.
+    InvalidClaimAmount,
 }
 
 /// Storage keys for the two totals, both instance keys.
@@ -56,6 +58,24 @@ pub fn record(env: &Env, net: i128, fee: i128) -> Result<(), Error> {
     let fees = fees_total(env)?.checked_add(fee).ok_or(Error::Overflow)?;
     instance.set(&TotalsDataKey::NotesTotal, &notes);
     instance.set(&TotalsDataKey::FeesTotal, &fees);
+    Ok(())
+}
+
+/// Subtracts `amount` from the fees total.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidClaimAmount`] if `amount` is negative or above the
+/// fees total, and [`Error::NotInitialized`] if the fees total is not stored.
+pub fn claim(env: &Env, amount: i128) -> Result<(), Error> {
+    let fees = fees_total(env)?;
+    let remaining = fees
+        .checked_sub(amount)
+        .filter(|_| (0..=fees).contains(&amount))
+        .ok_or(Error::InvalidClaimAmount)?;
+    env.storage()
+        .instance()
+        .set(&TotalsDataKey::FeesTotal, &remaining);
     Ok(())
 }
 
