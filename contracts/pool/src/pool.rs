@@ -145,6 +145,10 @@ pub(crate) enum DataKey {
     Verifier,
     /// Maximum allowed deposit amount per transaction
     MaximumDepositAmount,
+    /// Fee every transaction pays. Immutable.
+    Fee,
+    /// Smallest amount a deposit may add to notes after the fee. Immutable.
+    MinimumDepositAmount,
     /// Spent nullifier marker keyed by nullifier (presence-only; value unused).
     Nullifier(U256),
     /// Address of the ASP Membership contract
@@ -210,7 +214,9 @@ impl PoolContract {
     /// # Errors
     ///
     /// Returns [`Error::InvalidPolicyFlags`] for an unsupported bit,
-    /// [`Error::TreeCodeMismatch`] if a tree runs other code, and
+    /// [`Error::TreeCodeMismatch`] if a tree runs other code,
+    /// [`Error::WrongExtAmount`] for a negative fee or minimum, or for a fee
+    /// and minimum that together exceed the maximum, and
     /// [`Error::WrongLevels`] if `levels` is outside 1 to 32.
     pub fn __constructor(
         env: Env,
@@ -221,6 +227,8 @@ impl PoolContract {
         asp_non_membership: Address,
         asp_membership_wasm_hash: BytesN<32>,
         asp_non_membership_wasm_hash: BytesN<32>,
+        fee: i128,
+        minimum_deposit_amount: i128,
         maximum_deposit_amount: U256,
         levels: u32,
         policy_flags: u32,
@@ -234,6 +242,16 @@ impl PoolContract {
         {
             return Err(Error::TreeCodeMismatch);
         }
+        if fee < 0 || minimum_deposit_amount < 0 {
+            return Err(Error::WrongExtAmount);
+        }
+        let smallest_deposit = fee
+            .checked_add(minimum_deposit_amount)
+            .and_then(|sum| u128::try_from(sum).ok())
+            .ok_or(Error::WrongExtAmount)?;
+        if U256::from_u128(&env, smallest_deposit) > maximum_deposit_amount {
+            return Err(Error::WrongExtAmount);
+        }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         let instance = env.storage().instance();
         instance.set(&DataKey::Token, &token);
@@ -245,6 +263,8 @@ impl PoolContract {
             &DataKey::ASPNonMembershipWasmHash,
             &asp_non_membership_wasm_hash,
         );
+        instance.set(&DataKey::Fee, &fee);
+        instance.set(&DataKey::MinimumDepositAmount, &minimum_deposit_amount);
         instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         instance.set(&DataKey::PolicyFlags, &policy_flags);
         instance.set(&DataKey::KdfDomain, &kdf_domain);

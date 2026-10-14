@@ -54,6 +54,9 @@ Options:
                         File containing the same JSON object
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
+  --fee N               Fee every transaction pays, in the token's smallest unit (required)
+  --min-deposit N       Smallest amount a deposit may add to notes after the fee,
+                        in the token's smallest unit (required)
   --max-deposit U256    Maximum deposit amount (required)
   --kdf-domain STRING   Privacy key derivation domain (required)
   --policy-flags SPEC   Default pool ASP policy when a --pool spec omits the prefix:
@@ -76,6 +79,8 @@ Examples:
     --pool allowlist-blocklist:classic:ABC:GA...:CC... \
     --asp-levels 10 \
     --pool-levels 20 \
+    --fee 1000000 \
+    --min-deposit 10000000 \
     --max-deposit 1000000000 \
     --kdf-domain Nethermind
 
@@ -86,6 +91,8 @@ Examples:
     --pool blocklist:gvk-traceable:native:CB... \
     --asp-levels 10 \
     --pool-levels 20 \
+    --fee 1000000 \
+    --min-deposit 10000000 \
     --max-deposit 1000000000 \
     --kdf-domain Nethermind
 
@@ -97,6 +104,8 @@ Examples:
     --pool blocklist:gvk-traceable:native:CB... \
     --asp-levels 10 \
     --pool-levels 20 \
+    --fee 1000000 \
+    --min-deposit 10000000 \
     --max-deposit 1000000000 \
     --kdf-domain Nethermind
 
@@ -123,6 +132,8 @@ TOKEN=""
 POOL_SPECS=()
 ASP_LEVELS=""
 POOL_LEVELS=""
+FEE=""
+MIN_DEPOSIT=""
 MAX_DEPOSIT=""
 KDF_DOMAIN=""
 VK_JSON=""
@@ -442,6 +453,8 @@ while [[ $# -gt 0 ]]; do
     --pool) POOL_SPECS+=("$(strip_surrounding_quotes "$2")"); shift 2 ;;
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
+    --fee) FEE="$2"; shift 2 ;;
+    --min-deposit) MIN_DEPOSIT="$2"; shift 2 ;;
     --max-deposit) MAX_DEPOSIT="$2"; shift 2 ;;
     --kdf-domain) KDF_DOMAIN="$(trim "$2")"; shift 2 ;;
     --policy-flags) POLICY_FLAGS_SUFFIX="$(parse_policy_flags_spec "$2")"; POLICY_FLAGS_EXPLICIT=true; shift 2 ;;
@@ -475,6 +488,9 @@ need jq
 [[ -n "$DEPLOYER" ]] || die "--deployer is required"
 [[ -n "$ASP_LEVELS" ]] || die "--asp-levels is required"
 [[ -n "$POOL_LEVELS" ]] || die "--pool-levels is required"
+# At most 38 digits fits i128, so an out-of-range value stops here, before anything deploys.
+[[ "$FEE" =~ ^[0-9]{1,38}$ ]] || die "--fee is required, a non-negative integer of at most 38 digits"
+[[ "$MIN_DEPOSIT" =~ ^[0-9]{1,38}$ ]] || die "--min-deposit is required, a non-negative integer of at most 38 digits"
 [[ -n "$MAX_DEPOSIT" ]] || die "--max-deposit is required"
 [[ -n "$KDF_DOMAIN" ]] || die "--kdf-domain is required"
 
@@ -788,6 +804,7 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
         --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
+        --fee "$FEE" --minimum-deposit-amount "$MIN_DEPOSIT" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN")"
@@ -797,6 +814,7 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
         --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
+        --fee "$FEE" --minimum-deposit-amount "$MIN_DEPOSIT" \
         --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN" \

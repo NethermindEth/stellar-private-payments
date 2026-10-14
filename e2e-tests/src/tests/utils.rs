@@ -254,6 +254,8 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             asp_non_membership.clone(),
             wasm_hash(&asp_membership),
             wasm_hash(&asp_non_membership),
+            0i128,
+            0i128,
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
             (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
