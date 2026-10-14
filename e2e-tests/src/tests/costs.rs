@@ -61,7 +61,7 @@ use public_key_registry::{
 };
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec,
     address_payload::AddressPayload,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Deployer as _, Ledger as _, storage::Persistent as _},
@@ -233,6 +233,8 @@ impl PoolFixture {
                 asp_non_membership.clone(),
                 wasm_hash(&asp_membership),
                 wasm_hash(&asp_non_membership),
+                0i128,
+                0i128,
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
@@ -304,24 +306,25 @@ fn gvk_transact_row() -> Row {
         x: U256::from_u32(env, 1),
         y: U256::from_u32(env, 2),
     };
-    let pool = env.register(
-        PoolGvkContract,
-        (
-            base.admin.clone(),
-            base.token.clone(),
-            base.verifier.clone(),
-            base.asp_membership.clone(),
-            base.asp_non_membership.clone(),
-            wasm_hash(&base.asp_membership),
-            wasm_hash(&base.asp_non_membership),
-            U256::from_u32(env, 1_000_000),
-            POOL_LEVELS,
-            policy::BLOCKLIST_BIT,
-            soroban_sdk::String::from_str(env, "tests"),
-            view_key,
-            gvk::VIEW_ONLY,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        env,
+        base.admin.into_val(env),
+        base.token.into_val(env),
+        base.verifier.into_val(env),
+        base.asp_membership.into_val(env),
+        base.asp_non_membership.into_val(env),
+        wasm_hash(&base.asp_membership).into_val(env),
+        wasm_hash(&base.asp_non_membership).into_val(env),
+        0i128.into_val(env),
+        0i128.into_val(env),
+        U256::from_u32(env, 1_000_000).into_val(env),
+        POOL_LEVELS.into_val(env),
+        policy::BLOCKLIST_BIT.into_val(env),
+        soroban_sdk::String::from_str(env, "tests").into_val(env),
+        view_key.into_val(env),
+        gvk::VIEW_ONLY.into_val(env),
+    ];
+    let pool = env.register(PoolGvkContract, args);
     let client = PoolGvkContractClient::new(env, &pool);
     let ext = ext_data(env, &base.sender, 0);
     let (membership_root, non_membership_root) = base.roots();

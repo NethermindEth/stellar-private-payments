@@ -175,6 +175,33 @@ fn register_pool(
     levels: u32,
     policy_flags: u32,
 ) -> Address {
+    register_pool_with(
+        env,
+        setup,
+        0,
+        0,
+        maximum_deposit_amount,
+        levels,
+        policy_flags,
+    )
+}
+
+/// Registers a pool charging `fee` with a minimum deposit of `minimum`, a
+/// deposit cap of 1000, depth 3, and policy flags 0, the pool
+/// `mk_moving_transact_proof` expects.
+fn register_pool_charging(env: &Env, setup: &TestSetup, fee: i128, minimum: i128) -> Address {
+    register_pool_with(env, setup, fee, minimum, U256::from_u32(env, 1000), 3, 0)
+}
+
+fn register_pool_with(
+    env: &Env,
+    setup: &TestSetup,
+    fee: i128,
+    minimum_deposit_amount: i128,
+    maximum_deposit_amount: U256,
+    levels: u32,
+    policy_flags: u32,
+) -> Address {
     env.register(
         PoolContract,
         (
@@ -185,6 +212,8 @@ fn register_pool(
             setup.asp_non_membership_address.clone(),
             wasm_hash(&setup.asp_membership_address),
             wasm_hash(&setup.asp_non_membership_address),
+            fee,
+            minimum_deposit_amount,
             maximum_deposit_amount,
             levels,
             policy_flags,
@@ -489,6 +518,8 @@ fn the_tree_is_one_persistent_entry() {
             tree.clone(),
             wasm_hash(&tree),
             wasm_hash(&tree),
+            0i128,
+            0i128,
             U256::from_u32(&env, 1000),
             8u32,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
@@ -676,6 +707,8 @@ fn the_configuration_lives_in_the_instance() {
         for key in [
             DataKey::Token,
             DataKey::Verifier,
+            DataKey::Fee,
+            DataKey::MinimumDepositAmount,
             DataKey::MaximumDepositAmount,
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,
@@ -772,6 +805,8 @@ fn constructor_refuses_an_allowlist_of_another_code() {
             setup.asp_non_membership_address.clone(),
             mk_bytesn32(&env, 7),
             wasm_hash(&setup.asp_non_membership_address),
+            0i128,
+            0i128,
             U256::from_u32(&env, 1000),
             3u32,
             0u32,
@@ -799,12 +834,99 @@ fn constructor_refuses_a_blocklist_of_another_code() {
             setup.asp_non_membership_address,
             wasm_hash(&setup.asp_membership_address),
             mk_bytesn32(&env, 7),
+            0i128,
+            0i128,
             U256::from_u32(&env, 1000),
             3u32,
             0u32,
             String::from_str(&env, KDF_DOMAIN),
         ),
     );
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, -5, 10);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_minimum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, 10, -5);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_above_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 600, 500);
+}
+
+#[test]
+fn constructor_accepts_a_fee_and_minimum_equal_to_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 500, 500);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_that_overflow() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The cap is past `i128::MAX`, so only the overflow can refuse the sum.
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+    register_pool_with(&env, &setup, i128::MAX, 1, maximum, 3, 0);
+}
+
+#[test]
+fn constructor_stores_the_fee_and_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 10);
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        assert_eq!(instance.get::<_, i128>(&DataKey::Fee), Some(5));
+        assert_eq!(
+            instance.get::<_, i128>(&DataKey::MinimumDepositAmount),
+            Some(10)
+        );
+    });
+}
+
+/// The cross-check compares in `U256`, so a cap past `u128::MAX` constructs.
+#[test]
+fn constructor_accepts_a_maximum_above_u128() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+
+    register_pool_with(&env, &setup, 5, 10, maximum, 3, 0);
 }
 
 #[test]
