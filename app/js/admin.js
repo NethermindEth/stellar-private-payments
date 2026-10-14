@@ -614,7 +614,7 @@ function refreshPools() {
 // shows its error; neither row gets buttons.
 async function poolRow(contractId) {
   const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
-  row.querySelector('.pool-id').textContent = contractId;
+  showAddress(row.querySelector('.pool-id'), contractId);
   const depositsEl = row.querySelector('.pool-deposits');
   try {
     const pool = await readClient(contractId);
