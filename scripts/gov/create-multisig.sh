@@ -28,6 +28,8 @@ Options:
                      and never deploy.sh's --deployer.
   --signer ADDRESS   Signer to add with weight 1 (repeatable, required)
   --threshold N      Signatures every later operation needs, at least 2 (required)
+  --base-fee STROOPS Highest fee to pay per operation, at least 100 (default 100). Raise it
+                     during a fee surge.
   --fund             Fund the account before the change, on a network with a friendbot
   --yes              Skip confirmation for mainnet
   -h, --help         Show this help
@@ -44,6 +46,7 @@ shift || true
 
 ACCOUNT=""
 THRESHOLD=""
+BASE_FEE=100
 FUND=false
 YES=false
 SIGNERS=()
@@ -53,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --account) ACCOUNT="$2"; shift 2 ;;
     --signer) SIGNERS+=("$2"); shift 2 ;;
     --threshold) THRESHOLD="$2"; shift 2 ;;
+    --base-fee) BASE_FEE="$2"; shift 2 ;;
     --fund) FUND=true; shift ;;
     --yes) YES=true; shift ;;
     -h|--help) usage ;;
@@ -87,6 +91,8 @@ done
   || die "--threshold $THRESHOLD is above the ${#SIGNERS[@]} signers given"
 [[ "$(printf '%s\n' "${SIGNERS[@]}" | sort -u | wc -l)" -eq ${#SIGNERS[@]} ]] \
   || die "the same signer was given twice"
+[[ "$BASE_FEE" =~ ^[1-9][0-9]*$ && "$BASE_FEE" -ge 100 ]] \
+  || die "--base-fee must be a whole number of stroops, at least 100"
 
 if [[ "$FUND" == "true" ]]; then
   [[ "$NETWORK" != "mainnet" ]] || die "--fund has no friendbot on mainnet"
@@ -102,9 +108,9 @@ EXISTING="$(stellar ledger entry fetch account --account "$ACCOUNT" --network "$
 # The network checks signatures against the account as it was before the transaction, so the
 # account's own key can authorize the change that sets its weight to zero.
 step "building the signer set for $ACCOUNT_ADDR"
-# One operation per signer plus the one that sets the thresholds, each charged the 100-stroop
-# base fee. See https://developers.stellar.org/docs/learn/fundamentals/fees-resource-limits-metering.
-INCLUSION_FEE=$(( (${#SIGNERS[@]} + 1) * 100 ))
+# One operation per signer plus the one that sets the thresholds, each bidding at most --base-fee.
+# See https://developers.stellar.org/docs/learn/fundamentals/fees-resource-limits-metering.
+INCLUSION_FEE=$(( (${#SIGNERS[@]} + 1) * BASE_FEE ))
 TX="$(stellar tx new set-options --source-account "$ACCOUNT" --network "$NETWORK" --build-only \
   --inclusion-fee "$INCLUSION_FEE" --low-threshold "$THRESHOLD" --med-threshold "$THRESHOLD" \
   --high-threshold "$THRESHOLD" --master-weight 0)"
