@@ -54,7 +54,9 @@ pub enum Error {
     WrongLevels = 4,
     /// Internal error: next leaf index is not even
     NextIndexNotEven = 5,
-    /// External amount is invalid (negative or exceeds 2^248)
+    /// A deposit over the maximum or below the minimum after the fee, an
+    /// amount outside the range the pool can hold, or a public amount other
+    /// than `ext_amount` minus the fee
     WrongExtAmount = 6,
     /// Zero-knowledge proof verification failed
     InvalidProof = 7,
@@ -680,6 +682,14 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Get the smallest amount a deposit may add to notes after the fee.
+    fn get_minimum_deposit(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinimumDepositAmount)
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Get the verifier contract address.
     fn get_verifier(env: &Env) -> Result<Address, Error> {
         env.storage()
@@ -907,11 +917,12 @@ impl PoolGvkContract {
     /// # Errors
     ///
     /// Returns [`Error::DepositsPaused`] for a deposit while paused, before the
-    /// cap check and any transfer, [`Error::WrongExtAmount`] for a deposit
-    /// over the cap or an out-of-range or mismatched amount, and
-    /// [`Error::InvalidProof`] for an empty or refused proof, an ASP root
-    /// the trees reject, or a failed tree call. Every other error names the
-    /// failed check or marks missing or corrupt state.
+    /// cap and minimum checks and any transfer, [`Error::WrongExtAmount`] for
+    /// a deposit over the cap or below the pool minimum after the fee, or an
+    /// out-of-range or mismatched amount, and [`Error::InvalidProof`] for an
+    /// empty or refused proof, an ASP root the trees reject, or a failed tree
+    /// call. Every other error names the failed check or marks missing or
+    /// corrupt state.
     ///
     /// # Panics
     ///
@@ -940,6 +951,12 @@ impl PoolGvkContract {
             }
             let this = env.current_contract_address();
             let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
+            let net = amount
+                .checked_sub(Self::get_fee(env)?)
+                .ok_or(Error::WrongExtAmount)?;
+            if net < Self::get_minimum_deposit(env)? {
+                return Err(Error::WrongExtAmount);
+            }
             token_client.transfer(&sender, &this, &amount);
         }
 
