@@ -131,10 +131,11 @@ signers sign the transaction itself. The admin page builds it and carries it bet
    Allowlist and Blocklist tabs, pauses and re-points on the Pools tab, and admin transfers on the
    Admins tab. The page reads the contract's admin from its `Admin` entry, builds the call with
    that account as the source, valid for 24 hours, and loads it into the Admin transaction card.
-2. Copy the XDR and send it to the first signer.
-3. Each signer, on their own device, pastes the XDR into the card and reads the call it describes.
-   A signer who did not expect this exact call stops here. Otherwise the signer connects Freighter
-   with their signer key, presses Sign with Freighter, and passes the XDR on. The card counts the
+2. Press Copy link and send the link to the first signer.
+3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
+   describes. A signer who did not expect this exact call stops here. Otherwise the signer presses
+   Sign beside their key in the card's signer list, then Copy link, and sends the new link on.
+   Freighter switches to that key when it holds it. The card shows who has signed and counts the
    signatures against the account's threshold.
 4. Once the count reaches the threshold, anyone presses Submit.
 
@@ -275,7 +276,9 @@ builds an admin call into the card:
 | Accept | `accept_admin()` | the pending admin | Installs the pending admin and clears the entry |
 
 The current admin keeps every power until the new admin's own signers sign the acceptance. Cancel
-and Accept fail with `NoPendingAdmin` when nothing is pending.
+and Accept show only while a transfer is pending. Propose refuses a malformed address, an account
+that does not exist, the current admin, and the pending admin, and asks for confirmation when the
+new admin lacks the shape in [Set up the admin account](#set-up-the-admin-account).
 
 Replacing a signer needs no transfer. Transfer the admin only when the contracts move to another
 account, such as another institution's. A transfer moves no view key: a `pool-gvk` pool's view key
