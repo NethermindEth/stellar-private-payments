@@ -71,7 +71,9 @@ The main transaction circuit proves:
 - Correct nullifier computation (prevents double-spending)
 - Valid Merkle proofs for input commitments
 - Correct output commitment computation
-- Balance conservation (inputs = outputs + public amount)
+- Balance conservation (inputs + public amount = outputs). The pool requires the public amount
+  to be `ext_amount - fee`: the tokens the call sends in (negative for a withdrawal) minus the
+  pool fee.
 - ASP membership and/or non-membership proofs, depending on pool policy flags
   (`none` = unrestricted; `allowlist`, `blocklist`, or `allowlist-blocklist`)
 

@@ -96,6 +96,36 @@ cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
 generate` can also save the key into a client SDK wallet database via
 `--db PATH`.
 
+## Fee and minimum deposit
+
+Every `transact` pays the pool fee. A deposit sends the fee on top of what it
+puts in notes, and a transfer or withdrawal pays it out of the notes it spends.
+The SDK spends three or more notes as a chain of transactions, one fewer than
+the notes, and each one pays the fee. `--min-deposit` applies to what a
+deposit puts in notes after the fee, which is the amount a user types in the
+app or in `spp deposit`. Withdrawals have no minimum. No entry point changes
+the fee or the minimum after deployment. The examples below charge 0.1 XLM
+(1,000,000 stroops) and accept deposits of at least 1 XLM.
+
+When you choose the values, weigh these effects:
+
+- A note worth no more than the fee leaves nothing once the fee is paid, so
+  it is worth spending only beside a second note, when the two sum to more
+  than the fee, or beside a deposit of at least the fee plus the minimum. With
+  a higher fee, more small notes, such as change, are worth nothing on their
+  own.
+- With a fee above 0 and a minimum of at least 1, a call that spends no notes
+  must deposit more than the fee. With a fee of 0, the pool accepts all-zero
+  calls whatever the minimum, since the minimum applies only to deposits. Such
+  calls spend nothing and deposit nothing but still add two notes to the
+  pool's tree. With a fee above 0 and a minimum of 0, a call can deposit
+  exactly the fee into two zero-value notes, so adding two notes to the tree
+  costs only the fee.
+- `--max-deposit` caps what a deposit sends, fee included, so one deposit puts
+  at most the maximum minus the fee in notes.
+- The fee plus the minimum must not exceed `--max-deposit`. The constructor
+  refuses such a pool with `Error(Contract, #6)`.
+
 ## Template
 
 Every option in its generic `<placeholder>` form:
@@ -164,6 +194,37 @@ deployments/scripts/deploy.sh testnet \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```
+
+## Claim collected fees
+
+A pool keeps two totals: the value of its unspent notes, and the fees it has
+collected and not paid out. Its token balance is their sum, plus any tokens
+sent to the pool directly, which belong to neither total and stay in the pool.
+`claim_fees` pays out of the fees total and nothing else, so the admin can
+claim fees but never note value. It refuses a negative amount or one above the
+fees total with `Error(Contract, #23)`. A claim needs the admin's authorization
+and works while deposits are paused. Each claim publishes a `FeesClaimed`
+event.
+
+The following commands read a pool's fees total and pay 0.1 XLM of it to the
+admin:
+
+```bash
+NETWORK=testnet
+ADMIN_ID=deployer
+POOL=$(jq -r '.pools[0].poolContractId' "deployments/$NETWORK/deployments.json")
+stellar contract invoke --id "$POOL" --source-account "$ADMIN_ID" --network "$NETWORK" \
+  --send=no -- get_fees_total
+stellar contract invoke --id "$POOL" --source-account "$ADMIN_ID" --network "$NETWORK" \
+  -- claim_fees --to "$(stellar keys address "$ADMIN_ID")" --amount 1000000
+```
+
+Replace the following:
+
+- `testnet`: the network the deployment is on.
+- `deployer`: the `stellar keys` identity of the pool's admin.
+- `.pools[0]`: the pool to claim from.
+- `1000000`: the amount to claim, in the token's smallest unit.
 
 ## Keep a deployment alive
 

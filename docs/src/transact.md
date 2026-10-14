@@ -8,8 +8,21 @@ A transaction takes at most two `--input` notes and at most two `--output`
 values, and must balance:
 
 ```text
-input notes + deposit = private outputs + withdrawal
+input notes + deposit = private outputs + withdrawal + pool fee
 ```
+
+Every transaction pays the pool fee, a fixed amount set when the pool is
+deployed. `--deposit` is what leaves your account, fee included, and
+`--withdraw` is what the recipient receives. `spp transact` refuses an
+unbalanced transaction before proving, and its error names the fee in the
+token's smallest unit. The examples below assume a fee of 0.1 tokens.
+
+A note worth no more than the fee leaves nothing once the fee is paid. A
+transaction pays one fee whether it spends one note or two, so spend such a
+note as one of two `--input` notes whose sum is above the fee, or beside a
+`--deposit` of at least the fee plus the pool's minimum deposit.
+`spp transfer` and `spp withdraw` never deposit, so they spend such a note
+only beside a second note, or not at all.
 
 Amounts are in whole tokens, with up to as many decimal places as the pool's token defines, so `4.5` is 4.5 tokens.
 
@@ -22,13 +35,13 @@ spp notes --account alice CPOOL --unspent
 ## Private transfer with change
 
 This spends one 10-token note, sends 4 tokens to a registered Stellar address,
-and returns 6 tokens to you:
+returns 5.9 tokens to you, and pays the 0.1 fee:
 
 ```sh
 spp transact --account alice CPOOL \
   --input 0xINPUT_COMMITMENT \
   --output 4@GRECIPIENT \
-  --output 6
+  --output 5.9
 ```
 
 An output has one of these forms:
@@ -43,24 +56,25 @@ An output of `0` cannot name a recipient.
 
 ## Deposit
 
-A deposit can create one or two private outputs:
+A deposit can create one or two private outputs. This one sends 10 tokens
+from your account, puts 9.9 in notes, and pays the 0.1 fee:
 
 ```sh
 spp transact --account alice CPOOL \
   --deposit 10 \
   --output 4@GRECIPIENT \
-  --output 6
+  --output 5.9
 ```
 
 ## Withdrawal
 
-This spends one 10-token note, withdraws 4 tokens publicly, and keeps 6 as a
-private note:
+This spends one 10-token note, withdraws 4 tokens publicly, keeps 5.9 as a
+private note, and pays the 0.1 fee:
 
 ```sh
 spp transact --account alice CPOOL \
   --input 0xINPUT_COMMITMENT \
-  --output 6 \
+  --output 5.9 \
   --withdraw 4 \
   --withdraw-to GDESTINATION
 ```
@@ -73,5 +87,7 @@ payer.
 ## Requirements
 
 - Each `--input` must be an unspent note owned by `--account` in this pool.
+- A deposit must put at least the pool's minimum deposit in notes after the
+  fee.
 - A Stellar-address recipient must have registered their keys. If the registry
   is unavailable or the recipient hasn't registered, use the explicit-key form.
