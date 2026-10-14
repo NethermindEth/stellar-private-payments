@@ -6,6 +6,7 @@ import {
   Address,
   Contract,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   SorobanDataBuilder,
@@ -21,6 +22,7 @@ import {
   finishAdminCall,
   hostError,
   liveFootprintKeys,
+  newAdminRefusal,
   shortLivedEntries,
   signatureCount,
   signedBy,
@@ -287,6 +289,23 @@ test('signRefusal refuses a key of weight 0, a signature past the threshold, and
 
 test('signRefusal lets a signer who has not signed add a signature below the threshold', () => {
   assert.equal(signRefusal(twoOfThree, envelopeSignedBy(first), Networks.TESTNET, second.publicKey()), null);
+});
+
+test('newAdminRefusal refuses an empty value, a secret, a muxed or corrupted address, the admin, and the pending admin', () => {
+  const pending = Keypair.random().publicKey();
+  const refusal = (value) => newAdminRefusal(value, { admin: ADMIN, pending });
+  const notAnAddress = 'The new admin must be an account address (G...) or a contract address (C...)';
+  assert.equal(refusal(''), 'The new admin\'s address is required');
+  assert.equal(refusal(Keypair.random().secret()), notAnAddress);
+  assert.equal(refusal(new MuxedAccount(new Account(ADMIN, '0'), '1').accountId()), notAnAddress);
+  assert.equal(refusal(`${pending.slice(0, -1)}${pending.endsWith('A') ? 'B' : 'A'}`), notAnAddress);
+  assert.equal(refusal(ADMIN), 'The new admin is already the contract\'s admin');
+  assert.equal(refusal(pending), 'The new admin is already the pending admin');
+});
+
+test('newAdminRefusal lets an account or a contract address through', () => {
+  assert.equal(newAdminRefusal(Keypair.random().publicKey(), { admin: ADMIN, pending: null }), null);
+  assert.equal(newAdminRefusal(TREE, { admin: ADMIN, pending: null }), null);
 });
 
 // The diagnostic event a sent transaction publishes when its host function fails with `error`.

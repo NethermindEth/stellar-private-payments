@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { buildAdminCall, describeAdminCall, explainFailure, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { buildAdminCall, describeAdminCall, explainFailure, newAdminRefusal, rpcServer, signatureCount, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 
 // DOM element references
@@ -659,12 +659,15 @@ async function adminRow({ label, kind, contractId }) {
     const { result: pending } = await target.get_pending_admin();
     pendingEl.textContent = pending ?? 'none';
     const newAdminInput = row.querySelector('.new-admin-input');
-    row.querySelector('.propose-admin-btn').addEventListener('click', () => buildRowCall(kind, {
-      source: admin,
-      contractId,
-      method: 'update_admin',
-      args: { new_admin: newAdminInput.value.trim() },
-    }));
+    row.querySelector('.propose-admin-btn').addEventListener('click', () => {
+      const newAdmin = newAdminInput.value.trim();
+      const refusal = newAdminRefusal(newAdmin, { admin, pending });
+      if (refusal) {
+        showToast(refusal, 'error');
+        return;
+      }
+      buildRowCall(kind, { source: admin, contractId, method: 'update_admin', args: { new_admin: newAdmin } });
+    });
     if (!pending) {
       row.querySelectorAll('.cancel-admin-btn, .accept-admin-btn').forEach((btn) => btn.remove());
       return row;

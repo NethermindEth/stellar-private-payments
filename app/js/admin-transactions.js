@@ -218,6 +218,20 @@ export function signRefusal({ threshold, weights }, xdr, networkPassphrase, addr
 }
 
 /**
+ * Returns why `value` cannot be proposed as a contract's new admin, or `null`.
+ * No message repeats `value`, so a secret key pasted by mistake stays out of a toast.
+ */
+export function newAdminRefusal(value, { admin, pending }) {
+  if (!value) return 'The new admin\'s address is required';
+  if (!StrKey.isValidEd25519PublicKey(value) && !StrKey.isValidContract(value)) {
+    return 'The new admin must be an account address (G...) or a contract address (C...)';
+  }
+  if (value === admin) return 'The new admin is already the contract\'s admin';
+  if (value === pending) return 'The new admin is already the pending admin';
+  return null;
+}
+
+/**
  * Formats a `host_fn_failed` diagnostic event's error the way a failed simulation
  * does, for example `Error(Contract, #20)`, or returns `''`. A failed sent
  * transaction reports its error only in these events.
