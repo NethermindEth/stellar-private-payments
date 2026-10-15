@@ -102,7 +102,7 @@ impl StateFetcher {
         owner: &NoteOwnerAddress,
         payer: &SignerAddress,
         note_key: [u8; 32],
-        encryption_key: [u8; 32],
+        encryption_key: &[u8],
     ) -> Result<PreparedSorobanTx> {
         let account_scval = register_account_to_scval(owner.as_str(), encryption_key, note_key)?;
 
@@ -150,7 +150,7 @@ mod tests {
             rpc::{Error as RpcError, SimulateHostFunctionResult, SimulateTransactionResponse},
             tx_assemble::test_fixtures::{empty_envelope, empty_soroban_data},
         },
-        types::{ContractConfig, NoteOwnerAddress, SignerAddress},
+        types::{ContractConfig, EncryptionPublicKey, NoteOwnerAddress, SignerAddress},
     };
     use futures::executor::block_on;
     use serde_json::json;
@@ -352,7 +352,12 @@ mod tests {
             .expect("state fetcher");
 
         let prepared = fetcher
-            .prepare_register(&owner, &payer, [0xAB; 32], [0xEE; 32])
+            .prepare_register(
+                &owner,
+                &payer,
+                [0xAB; 32],
+                &[0xEE; EncryptionPublicKey::LEN],
+            )
             .await
             .expect("prepare register");
 

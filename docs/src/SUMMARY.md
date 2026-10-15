@@ -5,6 +5,7 @@
 - [Deploy](./deploy.md)
 - [Security](./security.md)
   - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
+  - [Post-quantum readiness](./pq-readiness.md)
 
 - [Selective Disclosure](./disclosure.md)
 - [Advanced Transactions](./transact.md)

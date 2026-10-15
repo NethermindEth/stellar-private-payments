@@ -7,7 +7,7 @@ use stellar_private_payments::{
     LocalProver, LocalSigner, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account, Client, PrivatePool},
     types::{
-        CircuitStem, ContractConfig, EncryptionPublicKey, Field, GvkMode, NoteAmount,
+        CircuitStem, ContractConfig, Field, GvkMode, KeyDerivationSignature, NoteAmount,
         NoteOwnerAddress, NotePublicKey, PolicyFlags, SignerAddress, TransferRecipient,
     },
 };
@@ -105,10 +105,13 @@ pub fn test_recipient() -> TransferRecipient {
     TransferRecipient::keys(
         NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000001")
             .expect("note public key"),
-        EncryptionPublicKey::parse(
-            "0x0000000000000000000000000000000000000000000000000000000000000002",
+        // A real encryption key: the recipient's note is actually encrypted to it.
+        stellar_private_payments::zk::encryption::derive_encryption_and_note_keypairs(
+            KeyDerivationSignature(vec![2u8; 64]),
         )
-        .expect("encryption public key"),
+        .expect("recipient keys")
+        .1
+        .public,
     )
 }
 

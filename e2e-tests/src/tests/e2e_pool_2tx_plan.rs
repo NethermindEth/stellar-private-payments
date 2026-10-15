@@ -25,7 +25,7 @@ use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
 use stellar_private_payments::{
     planner::{SpendSession, SpendTarget, SpendableNote, Transact},
-    types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey},
+    types::{Field, NoteAmount, NotePublicKey},
 };
 
 const USER_SKEY: u64 = 1001;
@@ -89,10 +89,13 @@ fn transfer_target() -> SpendTarget {
     SpendTarget::transfer(
         NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000501")
             .expect("test recipient note key"),
-        EncryptionPublicKey::parse(
-            "0x0000000000000000000000000000000000000000000000000000000000000601",
+        // A real encryption key: the recipient's note is actually encrypted to it.
+        stellar_private_payments::zk::encryption::derive_encryption_and_note_keypairs(
+            stellar_private_payments::types::KeyDerivationSignature(vec![6u8; 64]),
         )
-        .expect("test recipient enc key"),
+        .expect("test recipient keys")
+        .1
+        .public,
     )
 }
 

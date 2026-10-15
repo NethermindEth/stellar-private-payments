@@ -68,8 +68,11 @@ impl Signer for LocalSigner {
     }
 
     async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
-        let signature = self.stellar.sign(&sep53_payload(message));
-        Ok(KeyDerivationSignature(signature.as_bytes().to_vec()))
+        let mut signature = self.stellar.sign(&sep53_payload(message));
+        let bytes = signature.as_bytes().to_vec();
+        // The key-derivation signature is the root secret of the privacy keys.
+        zeroize::Zeroize::zeroize(&mut signature);
+        Ok(KeyDerivationSignature(bytes))
     }
 }
 

@@ -404,7 +404,7 @@ fn registry_row() -> Row {
     let owner = Address::generate(&env);
     PublicKeyRegistryClient::new(&env, &id).register(&Account {
         owner,
-        encryption_key: Bytes::from_array(&env, &[1u8; 32]),
+        encryption_key: Bytes::from_array(&env, &[1u8; 1216]),
         note_key: Bytes::from_array(&env, &[2u8; 32]),
     });
     measure(&env, "public-key-registry register, first registration")
@@ -458,7 +458,7 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
-    "public-key-registry register, first registration" => 5, 2, 332, 1, 539_135_740;
+    "public-key-registry register, first registration" => 5, 2, 1516, 1, 2_994_276_956;
 };
 
 /// Checks every measured row against [`EXPECTED`], in both directions.

@@ -157,7 +157,7 @@ pub struct UserNote {
 pub struct PublicKeyEntry {
     /// Stellar address (primary key).
     pub address: String,
-    /// X25519 encryption public key (hex).
+    /// Encryption public key (hex).
     pub encryption_key: EncryptionPublicKey,
     /// BN254 note public key (hex).
     pub note_key: NotePublicKey,
@@ -281,9 +281,14 @@ impl Drop for EncryptionPrivateKey {
     }
 }
 
-/// Encryption public key
+/// Encryption public key: an X-Wing (X25519 + ML-KEM-768) HPKE encapsulation
+/// key, always [`EncryptionPublicKey::LEN`] bytes.
+///
+/// Held in a `Vec` rather than an array so enums carrying a key stay small. Every
+/// constructor checks the length; do not build one from raw bytes of another
+/// length.
 #[derive(Debug, Clone)]
-pub struct EncryptionPublicKey(pub [u8; 32]);
+pub struct EncryptionPublicKey(pub Vec<u8>);
 
 /// Encryption key pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -416,9 +421,50 @@ impl ContractConfig {
 }
 
 impl EncryptionPublicKey {
-    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    /// Length in bytes of an X-Wing encapsulation key.
+    pub const LEN: usize = 1216;
+
+    /// Parse a `0x`-prefixed (or raw) hex string of [`Self::LEN`] bytes.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_0x_hex_32(s)?))
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        if s.len() != Self::LEN * 2 {
+            return Err(anyhow!(
+                "expected {} hex chars, got {}",
+                Self::LEN * 2,
+                s.len()
+            ));
+        }
+
+        let mut out = vec![0u8; Self::LEN];
+        hex::decode_to_slice(s, &mut out)
+            .map_err(|e| anyhow!("cannot decode encryption public key hex: {e}"))?;
+        Ok(Self(out))
+    }
+
+    /// `0x`-prefixed lowercase hex.
+    pub fn to_0x_hex(&self) -> String {
+        let mut out = String::with_capacity(2 + Self::LEN * 2);
+        out.push_str("0x");
+        out.push_str(&hex::encode(&self.0));
+        out
+    }
+}
+
+impl Serialize for EncryptionPublicKey {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> core::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_0x_hex())
+    }
+}
+
+impl<'de> Deserialize<'de> for EncryptionPublicKey {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> core::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::parse(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -465,7 +511,6 @@ macro_rules! impl_key_serde_hex {
 }
 
 impl_key_serde_hex!(EncryptionPrivateKey);
-impl_key_serde_hex!(EncryptionPublicKey);
 impl_key_serde_hex!(NotePrivateKey);
 impl_key_serde_hex!(NotePublicKey);
 
@@ -505,7 +550,29 @@ mod rusqlite_key_impls {
     }
 
     impl_key_rusqlite_blob_32!(EncryptionPrivateKey);
-    impl_key_rusqlite_blob_32!(EncryptionPublicKey);
+
+    impl ToSql for EncryptionPublicKey {
+        fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+            Ok(ToSqlOutput::Owned(Value::Blob(self.0.to_vec())))
+        }
+    }
+
+    impl FromSql for EncryptionPublicKey {
+        fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+            match value {
+                ValueRef::Blob(b) => {
+                    if b.len() != EncryptionPublicKey::LEN {
+                        return Err(FromSqlError::InvalidBlobSize {
+                            expected_size: EncryptionPublicKey::LEN,
+                            blob_size: b.len(),
+                        });
+                    }
+                    Ok(EncryptionPublicKey(b.to_vec()))
+                }
+                _ => Err(FromSqlError::InvalidType),
+            }
+        }
+    }
     impl_key_rusqlite_blob_32!(NotePrivateKey);
     impl_key_rusqlite_blob_32!(NotePublicKey);
 }
@@ -588,7 +655,62 @@ mod key_serde_tests {
     }
 
     hex_key_tests!(EncryptionPrivateKey, encryption_private_key);
-    hex_key_tests!(EncryptionPublicKey, encryption_public_key);
+
+    mod encryption_public_key {
+        use super::*;
+
+        fn pattern() -> [u8; EncryptionPublicKey::LEN] {
+            let mut out = [0u8; EncryptionPublicKey::LEN];
+            for (i, b) in out.iter_mut().enumerate() {
+                *b = u8::try_from(i % 251).expect("below 251 fits u8");
+            }
+            out
+        }
+
+        #[test]
+        fn serde_roundtrip_pattern() -> Result<()> {
+            let k = EncryptionPublicKey::from(pattern());
+            let s = serde_json::to_string(&k)?;
+            assert_eq!(s.len(), 2 + 2 * EncryptionPublicKey::LEN + 2);
+            assert!(s.starts_with("\"0x"));
+            let parsed: EncryptionPublicKey = serde_json::from_str(&s)?;
+            assert_eq!(parsed.0, k.0);
+            Ok(())
+        }
+
+        #[test]
+        fn parse_accepts_missing_0x_prefix() -> Result<()> {
+            let k = EncryptionPublicKey::from(pattern());
+            let parsed = EncryptionPublicKey::parse(&hex::encode(&k.0))?;
+            assert_eq!(parsed.0, k.0);
+            Ok(())
+        }
+
+        #[test]
+        fn serde_rejects_wrong_length() {
+            // A legacy 32-byte X25519 key must no longer be accepted.
+            let legacy = format!("\"0x{}\"", "00".repeat(32));
+            assert!(serde_json::from_str::<EncryptionPublicKey>(&legacy).is_err());
+            assert!(serde_json::from_str::<EncryptionPublicKey>("\"0x00\"").is_err());
+        }
+
+        #[test]
+        fn serde_rejects_invalid_hex() {
+            let s = format!("\"0x{}\"", "gg".repeat(EncryptionPublicKey::LEN));
+            assert!(serde_json::from_str::<EncryptionPublicKey>(&s).is_err());
+        }
+
+        #[test]
+        fn serde_rejects_legacy_byte_array() {
+            assert!(serde_json::from_str::<EncryptionPublicKey>("[0,1,2,3]").is_err());
+        }
+
+        #[test]
+        fn try_from_vec_checks_length() {
+            assert!(EncryptionPublicKey::try_from(vec![0u8; 32]).is_err());
+            assert!(EncryptionPublicKey::try_from(vec![0u8; EncryptionPublicKey::LEN]).is_ok());
+        }
+    }
     hex_key_tests!(NotePrivateKey, note_private_key);
     hex_key_tests!(NotePublicKey, note_public_key);
 
@@ -648,7 +770,34 @@ macro_rules! impl_byte_wrapper {
 
 // Apply the macro to your types
 impl_byte_wrapper!(EncryptionPrivateKey);
-impl_byte_wrapper!(EncryptionPublicKey);
+
+impl std::convert::TryFrom<Vec<u8>> for EncryptionPublicKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let len = value.len();
+        if len != Self::LEN {
+            return Err(anyhow!(
+                "EncryptionPublicKey: Invalid length. Expected {}, got {}",
+                Self::LEN,
+                len
+            ));
+        }
+        Ok(Self(value))
+    }
+}
+
+impl From<[u8; EncryptionPublicKey::LEN]> for EncryptionPublicKey {
+    fn from(bytes: [u8; EncryptionPublicKey::LEN]) -> Self {
+        Self(bytes.to_vec())
+    }
+}
+
+impl AsRef<[u8]> for EncryptionPublicKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 impl_byte_wrapper!(NotePrivateKey);
 impl_byte_wrapper!(NotePublicKey);
 

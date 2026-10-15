@@ -51,7 +51,8 @@ impl Signature {
     }
 
     pub fn from_base64(s: &str) -> Result<Self> {
-        let bytes = STANDARD.decode(s).context("base64 decode failed")?;
+        // Wiped on every path: a key-derivation signature is a root secret.
+        let bytes = zeroize::Zeroizing::new(STANDARD.decode(s).context("base64 decode failed")?);
         let sig: [u8; 64] = bytes
             .as_slice()
             .try_into()
@@ -61,6 +62,14 @@ impl Signature {
 
     pub const fn as_bytes(&self) -> &[u8; 64] {
         &self.0
+    }
+}
+
+/// `Signature` is `Copy`, so it cannot wipe itself on drop; callers holding a
+/// secret one (a key-derivation signature) wipe their copy explicitly.
+impl zeroize::Zeroize for Signature {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
 

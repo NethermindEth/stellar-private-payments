@@ -47,7 +47,7 @@ pub struct TransactInputNote {
 /// In transact flow, each output may either be addressed to "self" or to an
 /// external recipient by providing both:
 /// - a BN254 note public key (used to compute the commitment), and
-/// - an X25519 encryption public key (used to encrypt note data on-chain).
+/// - an encryption public key (used to encrypt note data on-chain).
 ///
 /// Circuit note: the current circuit expects exactly 2 outputs; callers may
 /// provide 0, 1, or 2, and `transact()` will pad with dummy outputs as needed.
@@ -62,7 +62,7 @@ pub struct TransactOutput {
     ///
     /// If set, `recipient_encryption_pubkey` must also be set.
     pub recipient_note_pubkey: Option<NotePublicKey>,
-    /// Optional external recipient encryption public key (X25519 - used for
+    /// Optional external recipient encryption public key (used for
     /// encrypting note data).
     ///
     /// If set, `recipient_note_pubkey` must also be set.
@@ -124,8 +124,8 @@ pub struct TransactArtifacts {
 pub struct TransactParams {
     /// User's BN254 note private key used to authorize spends (32 bytes).
     pub priv_key: NotePrivateKey,
-    /// User's X25519 encryption public key used for encrypting self-addressed
-    /// outputs (32 bytes).
+    /// User's encryption public key used for encrypting self-addressed
+    /// outputs.
     pub encryption_pubkey: EncryptionPublicKey,
 
     /// Pool Merkle root as a field element.
@@ -183,7 +183,7 @@ pub struct TransactParams {
 pub struct DepositParams {
     /// User's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,
-    /// User's X25519 encryption public key (32 bytes).
+    /// User's encryption public key.
     pub encryption_pubkey: EncryptionPublicKey,
     /// Pool Merkle root as a field element.
     pub pool_root: Field,
@@ -231,7 +231,7 @@ pub struct DepositParams {
 pub struct WithdrawParams {
     /// User's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,
-    /// User's X25519 encryption public key (32 bytes).
+    /// User's encryption public key.
     pub encryption_pubkey: EncryptionPublicKey,
     /// Pool Merkle root (little-endian field bytes).
     pub pool_root: Field,
@@ -284,7 +284,7 @@ pub struct WithdrawParams {
 pub struct TransferParams {
     /// Sender's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,
-    /// Sender's X25519 encryption public key (32 bytes).
+    /// Sender's encryption public key.
     pub encryption_pubkey: EncryptionPublicKey,
     /// Pool Merkle root (little-endian field bytes).
     pub pool_root: Field,
@@ -1306,7 +1306,7 @@ mod tests {
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
-        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
+        let encryption_pubkey = EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]);
 
         let out_blinding = Field::try_from_le_bytes([3u8; 32]).expect("field");
         let artifacts = deposit(
@@ -1385,7 +1385,7 @@ mod tests {
         let artifacts = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1435,7 +1435,7 @@ mod tests {
         let artifacts = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1487,7 +1487,7 @@ mod tests {
         let artifacts = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1539,7 +1539,7 @@ mod tests {
         let res = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1582,7 +1582,7 @@ mod tests {
         let res = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1620,7 +1620,7 @@ mod tests {
         let res = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1658,7 +1658,7 @@ mod tests {
         let res = transact(
             TransactParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1696,7 +1696,7 @@ mod tests {
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
-        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
+        let encryption_pubkey = EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]);
 
         let input = TransactInputNote {
             amount: NoteAmount::from(10),
@@ -1751,7 +1751,7 @@ mod tests {
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
-        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
+        let encryption_pubkey = EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]);
 
         let input = TransactInputNote {
             amount: NoteAmount::from(10),
@@ -1800,7 +1800,7 @@ mod tests {
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
-        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
+        let encryption_pubkey = EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]);
 
         let input0 = TransactInputNote {
             amount: NoteAmount::MAX,
@@ -1891,7 +1891,7 @@ mod tests {
         let artifacts = deposit(
             DepositParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1931,7 +1931,7 @@ mod tests {
         let artifacts = deposit(
             DepositParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
@@ -1998,7 +1998,7 @@ mod tests {
         let artifacts = transfer(
             TransferParams {
                 priv_key: NotePrivateKey([1u8; 32]),
-                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                encryption_pubkey: EncryptionPublicKey::from([2u8; EncryptionPublicKey::LEN]),
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),

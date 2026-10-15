@@ -16,6 +16,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use zeroize::{Zeroize, Zeroizing};
 
 use stellar_private_payments::{
     chain::Signature,
@@ -75,9 +76,11 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("`{bin} {}` failed: {}", args.join(" "), stderr.trim());
     }
-    let stdout =
+    let mut stdout =
         String::from_utf8(output.stdout).context("stellar CLI produced non-UTF-8 output")?;
-    Ok(stdout.trim().to_string())
+    let trimmed = stdout.trim().to_string();
+    stdout.zeroize();
+    Ok(trimmed)
 }
 
 /// Resolve an alias to its Stellar address (`G…`) via `stellar keys
@@ -128,10 +131,13 @@ pub fn sign_message(
         "--sign-with-key".to_string(),
         alias.to_string(),
     ];
-    let encoded = run(&args, config_dir)?;
-    let signature = Signature::from_base64(&encoded)
+    // The output is the signature, the root secret of the privacy keys.
+    let encoded = Zeroizing::new(run(&args, config_dir)?);
+    let mut signature = Signature::from_base64(&encoded)
         .context("decode SEP-53 signature returned by the stellar CLI")?;
-    Ok(KeyDerivationSignature(signature.as_bytes().to_vec()))
+    let bytes = signature.as_bytes().to_vec();
+    signature.zeroize();
+    Ok(KeyDerivationSignature(bytes))
 }
 
 /// Sign an unsigned transaction envelope via `stellar tx sign`.
