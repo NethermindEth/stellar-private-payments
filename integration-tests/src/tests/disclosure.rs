@@ -144,3 +144,20 @@ async fn disclose_5_notes() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn disclose_repeated_note() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+
+    let err = pool
+        .disclose(disclosure_request_with(vec![Field::ONE; 2]))
+        .await
+        .expect_err("disclosure repeating a commitment must be rejected");
+    assert!(
+        err.to_string().contains("duplicate note commitment"),
+        "{err}"
+    );
+
+    Ok(())
+}

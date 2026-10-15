@@ -5,6 +5,12 @@ on:
   push:
     branches: ["main"]
 
+# GitHub Pages accepts one deployment at a time; queue back-to-back merges
+# instead of failing the later deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   docs:
     permissions:

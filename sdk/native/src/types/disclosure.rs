@@ -220,7 +220,7 @@ fn deserialize_amounts<'de, D: Deserializer<'de>>(
 }
 
 /// Returns the first value that appears more than once, if any.
-fn first_duplicate(values: &[Field]) -> Option<Field> {
+pub(crate) fn first_duplicate(values: &[Field]) -> Option<Field> {
     let mut seen = std::collections::HashSet::with_capacity(values.len());
     values.iter().copied().find(|value| !seen.insert(*value))
 }

@@ -4,6 +4,7 @@ pragma circom 2.2.2;
 include "./merkleProof.circom";
 include "./poseidon2/poseidon2_hash.circom";
 include "./keypair.circom";
+include "./circomlib/circuits/comparators.circom";
 
 // Allows a user to demonstrate ownership of a note commitment without revealing its secrets
 // * levels: Number of levels in the Merkle tree that holds the note commitments
@@ -77,6 +78,20 @@ template SelectiveDisclosure(levels, nNotes) {
         // Ensure root matches the expected value
         roots[ni] === inTree[ni].root;
     }
+
+    // Refuse a note repeated across slots, which would count its amount twice
+    component sameNullifiers[nNotes * (nNotes - 1) / 2];
+    var index = 0;
+    for (var i = 0; i < nNotes - 1; i++) {
+        for (var j = i + 1; j < nNotes; j++) {
+            sameNullifiers[index] = IsEqual();
+            sameNullifiers[index].in[0] <== expectedNullifier[i];
+            sameNullifiers[index].in[1] <== expectedNullifier[j];
+            sameNullifiers[index].out === 0;
+            index++;
+        }
+    }
+
     // Safety constraint to bind external context
     signal extContextSquare <== extContextHash * extContextHash;
 }
