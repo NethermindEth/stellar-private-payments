@@ -69,7 +69,7 @@ test('addSignature refuses a signer who has already signed', () => {
   const signed = addSignature(entry, signer.publicKey(), sign(entry, signer), Networks.TESTNET);
   assert.throws(
     () => addSignature(signed, signer.publicKey(), sign(entry, signer), Networks.TESTNET),
-    { message: `${signer.publicKey()} has already signed the authorization` },
+    { message: `${signer.publicKey()} has already signed the pause file` },
   );
 });
 
@@ -78,7 +78,7 @@ test('addSignature refuses a signature of another network\'s preimage', () => {
   const signer = Keypair.random();
   assert.throws(
     () => addSignature(entry, signer.publicKey(), sign(entry, signer, Networks.PUBLIC), Networks.TESTNET),
-    { message: `The signature is not ${signer.publicKey()}'s signature of the authorization on this network` },
+    { message: `The signature is not ${signer.publicKey()}'s signature of the pause file on this network` },
   );
   assert.doesNotThrow(() => addSignature(entry, signer.publicKey(), sign(entry, signer), Networks.TESTNET));
 });

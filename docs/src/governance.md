@@ -212,7 +212,7 @@ with `Error(Auth, ExistingValue)`. The page reads the network's `max_entry_ttl`,
 `max_entry_ttl - 1` ledgers after the ledger it was built at: 3,110,399 ledgers, about 180 days, on
 testnet and mainnet as of 2026-10-14.
 
-To make a file, use the Pause authorizations panel on the Pools tab:
+To make a file, use the Pre-signed deposit pauses panel on the Pools tab:
 
 1. Choose the pool and press Build. The page draws a random nonce and offers the file as
    `pause-POOL-NONCE.json`.

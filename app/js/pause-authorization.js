@@ -83,11 +83,11 @@ export function addSignature(entry, publicKey, signature, networkPassphrase) {
   const key = StrKey.decodeEd25519PublicKey(publicKey);
   const signatures = scValToNative(credentials.signature);
   if (signatures.some(({ public_key: signed }) => compareKeys(signed, key) === 0)) {
-    throw new Error(`${publicKey} has already signed the authorization`);
+    throw new Error(`${publicKey} has already signed the pause file`);
   }
   // A bad signature would otherwise surface only when the pause is sent.
   if (!Keypair.fromPublicKey(publicKey).verify(hash(preimage(entry, networkPassphrase).toXdr()), signature)) {
-    throw new Error(`The signature is not ${publicKey}'s signature of the authorization on this network`);
+    throw new Error(`The signature is not ${publicKey}'s signature of the pause file on this network`);
   }
   signatures.push({ public_key: key, signature });
   signatures.sort((a, b) => compareKeys(a.public_key, b.public_key));
@@ -180,7 +180,7 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
   const { pool, expirationLedger, entry } = authorization;
   const { sequence } = await server.getLatestLedger();
   if (expirationLedger <= sequence) {
-    throw new Error(`The authorization expired at ledger ${expirationLedger}. The signers sign a new one.`);
+    throw new Error(`The pause file expired at ledger ${expirationLedger}. The signers sign a new one.`);
   }
   const build = (account, operation, fee = BASE_FEE) => new TransactionBuilder(account, { fee, networkPassphrase })
     .addOperation(operation)

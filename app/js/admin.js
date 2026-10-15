@@ -69,7 +69,7 @@ const repointConfirmTextEl = document.getElementById('repointConfirmText');
 const checkRepointBtn = document.getElementById('checkRepointBtn');
 const buildRepointBtn = document.getElementById('buildRepointBtn');
 
-// Pause authorizations panel
+// Pre-signed deposit pauses panel
 const pauseAuthPoolSelect = document.getElementById('pauseAuthPool');
 const pauseAuthFilesInput = document.getElementById('pauseAuthFiles');
 const pauseAuthResultsEl = document.getElementById('pauseAuthResults');
@@ -920,7 +920,7 @@ async function checkRepoint() {
 }
 
 // -----------------------------
-// Pause authorizations
+// Pre-signed deposit pauses
 // -----------------------------
 // Offers `text` to the browser as a file to save under `name`.
 function offerFile(name, text) {
@@ -948,9 +948,9 @@ async function buildPauseAuthorizationFile() {
     const nonce = crypto.getRandomValues(new BigUint64Array(1))[0] >> 1n;
     const entry = buildPauseAuthorization({ admin, pool, nonce, latestLedger: sequence, maxEntryTtl: ttl });
     offerFile(`pause-${pool}-${nonce}.json`, encodeAuthorization(entry));
-    setStatus('Pause authorization built. Each signer signs the file, then hand it to whoever will pause deposits.', 'ok');
+    setStatus('Pause file built. Have each signer sign it, then hand it to whoever will pause deposits.', 'ok');
   } catch (err) {
-    showToast(`Building the pause authorization failed: ${err.message}`, 'error');
+    showToast(`Building the pause file failed: ${err.message}`, 'error');
   } finally {
     if (state.address) buildPauseAuthBtn.disabled = false;
   }
@@ -961,7 +961,7 @@ async function signPauseAuthorization() {
   try {
     ensureWalletConnected();
     const [file, ...others] = pauseAuthFilesInput.files;
-    if (!file || others.length > 0) throw new Error('Choose one authorization file to sign');
+    if (!file || others.length > 0) throw new Error('Choose one pause file to sign');
     signPauseAuthBtn.disabled = true;
     const { pool, admin, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
     // Files can come from anyone: show what this one authorizes before
@@ -1000,7 +1000,7 @@ async function submitPauseAuthorizations() {
   try {
     ensureWalletConnected();
     const files = [...pauseAuthFilesInput.files];
-    if (files.length === 0) throw new Error('Choose the authorization files to submit');
+    if (files.length === 0) throw new Error('Choose the pause files to submit');
     submitPauseAuthBtn.disabled = true;
     setStatus('Submitting the pauses...', 'info');
     const network = { rpcUrl: state.rpcUrl, networkPassphrase: state.networkPassphrase };
