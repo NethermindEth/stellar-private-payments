@@ -43,6 +43,7 @@ const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn')
 const adminTxXdrInput = document.getElementById('adminTxXdr');
 const adminTxDescriptionEl = document.getElementById('adminTxDescription');
 const adminTxSignaturesEl = document.getElementById('adminTxSignatures');
+const adminTxSignaturesLineEl = document.getElementById('adminTxSignaturesLine');
 const adminTxSignersEl = document.getElementById('adminTxSigners');
 const adminTxNoticeEl = document.getElementById('adminTxNotice');
 const submitAdminTxBtn = document.getElementById('submitAdminTxBtn');
@@ -353,9 +354,14 @@ function renderAdminTx(kind) {
   adminTxDescriptionEl.textContent = '';
   adminTxNoticeEl.textContent = '';
   submitAdminTxBtn.disabled = true;
-  if (!xdr) return;
+  adminTxSignaturesLineEl.classList.toggle('hidden', !xdr || !state.networkPassphrase);
+  copyAdminTxBtn.disabled = copyAdminTxLinkBtn.disabled = !xdr;
+  if (!xdr) {
+    adminTxNoticeEl.textContent = 'No admin call loaded. Build one above, or open a link from a signer.';
+    return;
+  }
   if (!state.networkPassphrase) {
-    adminTxDescriptionEl.textContent = 'Connect your wallet to read the transaction.';
+    adminTxNoticeEl.textContent = 'Connect your wallet to read the transaction.';
     return;
   }
   try {
@@ -380,7 +386,9 @@ function renderAdminTx(kind) {
       if (current()) adminTxNoticeEl.textContent = [adminTxNoticeEl.textContent, `The admin account could not be read: ${err.message}`].filter(Boolean).join(' ');
     });
   } catch (err) {
-    adminTxDescriptionEl.textContent = `Not an admin call: ${err.message}`;
+    adminTxSignaturesLineEl.classList.add('hidden');
+    copyAdminTxLinkBtn.disabled = true;
+    adminTxNoticeEl.textContent = `Not an admin call: ${err.message}`;
   }
 }
 
@@ -432,6 +440,7 @@ async function prepareAdminCall(kind, call) {
     // The card keeps the extend commands, which outlast the toast.
     if (err.extendCommands) {
       loadAdminTx('', kind);
+      adminTxNoticeEl.textContent = '';
       adminTxDescriptionEl.textContent = [err.message, ...err.extendCommands].join('\n\n');
     }
     throw err;
@@ -841,8 +850,8 @@ copyAdminTxLinkBtn.addEventListener('click', () =>
   copyText(adminTxLink(window.location.origin + window.location.pathname, adminTxXdrInput.value.trim()), 'Link'));
 
 const sharedTx = adminTxFromHash(window.location.hash);
+loadAdminTx(sharedTx);
 if (sharedTx) {
-  loadAdminTx(sharedTx);
   // A reload would otherwise bring back an envelope that was since submitted.
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 }
