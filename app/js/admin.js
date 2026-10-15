@@ -1014,6 +1014,7 @@ async function submitPauseAuthorizations() {
     submitPauseAuthBtn.disabled = true;
     setStatus('Submitting the pauses...', 'info');
     const network = { rpcUrl: state.rpcUrl, networkPassphrase: state.networkPassphrase };
+    let sent = 0;
     let failed = 0;
     for (const file of files) {
       // A line names the file until the file names its pool.
@@ -1023,18 +1024,22 @@ async function submitPauseAuthorizations() {
         label = authorization.pool;
         const built = await pauseTransaction({ ...network, source: state.address, authorization });
         if (built.paused) {
-          reportPause(`${label}: already paused, so the file was not sent and its nonce is unspent`);
+          reportPause(`${label}: already paused, so the file was not sent and can still be used`);
           continue;
         }
         const { signedTxXdr } = await signWalletTransaction(built.xdr, { networkPassphrase: state.networkPassphrase, address: state.address });
         await submitAdminCall({ ...network, xdr: signedTxXdr });
+        sent += 1;
         reportPause(`${label}: paused`);
       } catch (err) {
         failed += 1;
         reportPause(`${label}: failed: ${explainFailure(err, 'pool')}`);
       }
     }
-    setStatus(failed > 0 ? `${failed} of ${files.length} pauses failed` : 'Pauses submitted', failed > 0 ? 'error' : 'ok');
+    const held = files.length - sent - failed;
+    setStatus(failed > 0
+      ? `${failed} of ${files.length} pauses failed`
+      : `${sent} of ${files.length} pauses sent${held > 0 ? `, ${held} held back for a paused pool` : ''}`, failed > 0 ? 'error' : 'ok');
   } catch (err) {
     setStatus('Pause submission failed', 'error');
     showToast(`Pause submission failed: ${err.message}`, 'error');
