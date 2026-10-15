@@ -425,33 +425,61 @@ function loadAdminTx(xdr, kind) {
   renderAdminTx(kind);
 }
 
-// Builds an admin call to a contract of the given kind into the card.
+// Builds an admin call into the card, and signs and submits it at once when the
+// connected account's weight alone meets the source's threshold.
 async function prepareAdminCall(kind, call) {
   if (state.busy) throw new Error('Another admin call is in progress. Wait for it to finish.');
   setBusy(true);
-  let built;
+  let signed;
   try {
-    built = await buildAdminCall({
-      rpcUrl: state.rpcUrl,
-      networkPassphrase: state.networkPassphrase,
-      ...call,
-    });
-  } catch (err) {
-    // The card keeps the extend commands, which outlast the toast.
-    if (err.extendCommands) {
-      loadAdminTx('', kind);
-      adminTxNoticeEl.textContent = '';
-      adminTxDescriptionEl.textContent = [err.message, ...err.extendCommands].join('\n\n');
+    let built;
+    try {
+      built = await buildAdminCall({
+        rpcUrl: state.rpcUrl,
+        networkPassphrase: state.networkPassphrase,
+        ...call,
+      });
+    } catch (err) {
+      // The card keeps the extend commands, which outlast the toast.
+      if (err.extendCommands) {
+        loadAdminTx('', kind);
+        adminTxNoticeEl.textContent = '';
+        adminTxDescriptionEl.textContent = [err.message, ...err.extendCommands].join('\n\n');
+      }
+      throw err;
     }
-    throw err;
+    loadAdminTx(built.xdr, kind);
+    // The card reports an account it cannot read.
+    const account = await rpcServer(state.rpcUrl).getAccountEntry(call.source).catch(() => null);
+    const rule = account && signingRule(account);
+    if (!rule || (rule.weights.get(state.address) ?? 0) < rule.threshold) {
+      setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
+      return;
+    }
+    try {
+      setStatus('Sign the admin call in Freighter...', 'info');
+      signed = await walletSign(built.xdr, state.address);
+    } catch (err) {
+      setStatus('Admin call built but not signed', 'error');
+      showToast(`Signing failed, so the call stays in the card: ${explainFailure(err, kind)}`, 'error');
+      return;
+    }
   } finally {
     setBusy(false);
   }
-  loadAdminTx(built.xdr, kind);
-  setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
+  loadAdminTx(signed, kind);
+  await submitAdminTx();
 }
 
-// Freighter switches to `signer` when it holds that account.
+// Signs `envelope` with Freighter as `address`; Freighter switches to that
+// account when it holds it.
+async function walletSign(envelope, address) {
+  const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address });
+  // The wallet's own check passes a reply that names no signer.
+  if (!signedBy(signedTxXdr, state.networkPassphrase, address)) throw new Error(`Freighter did not sign as ${shortAddress(address)}`);
+  return signedTxXdr;
+}
+
 async function signAdminTx(signer, button) {
   if (state.busy) return;
   setBusy(true);
@@ -462,10 +490,8 @@ async function signAdminTx(signer, button) {
     const rule = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(source));
     const refusal = signRefusal(rule, envelope, state.networkPassphrase, signer);
     if (refusal) throw new Error(refusal);
-    const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address: signer });
+    const signedTxXdr = await walletSign(envelope, signer);
     if (adminTxXdrInput.value.trim() !== envelope) throw new Error('The card changed while Freighter was signing. Sign again.');
-    // The wallet's own check passes a reply that names no signer.
-    if (!signedBy(signedTxXdr, state.networkPassphrase, signer)) throw new Error(`Freighter did not sign as ${shortAddress(signer)}`);
     loadAdminTx(signedTxXdr, state.adminTxKind);
     showToast('Signed. Press Copy link and send the new link to the next signer, or submit it.', 'success');
   } catch (err) {
@@ -485,14 +511,13 @@ async function submitAdminTx() {
   submitAdminTxBtn.disabled = true;
   submitAdminTxBtn.textContent = 'Submitting...';
   adminTxXdrInput.readOnly = true;
+  let method;
   try {
     ensureWalletConnected();
+    const envelope = adminTxXdrInput.value.trim();
+    ({ method } = describeAdminCall(envelope, state.networkPassphrase));
     setStatus('Submitting the admin transaction...', 'info');
-    await submitAdminCall({
-      rpcUrl: state.rpcUrl,
-      networkPassphrase: state.networkPassphrase,
-      xdr: adminTxXdrInput.value.trim(),
-    });
+    await submitAdminCall({ rpcUrl: state.rpcUrl, networkPassphrase: state.networkPassphrase, xdr: envelope });
   } catch (err) {
     const reason = explainFailure(err, state.adminTxKind);
     setStatus('Admin transaction failed', 'error');
@@ -506,7 +531,7 @@ async function submitAdminTx() {
     adminTxXdrInput.readOnly = false;
   }
   setStatus('Admin transaction succeeded', 'ok');
-  showToast('Admin transaction succeeded', 'success');
+  showToast(`${method} succeeded`, 'success');
   loadAdminTx('');
   await refreshState();
 }
@@ -695,8 +720,8 @@ async function poolRow(contractId) {
     const unpause = row.querySelector('.unpause-deposits-btn');
     pause.disabled = paused;
     unpause.disabled = !paused;
-    pause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'pause_deposits' }));
-    unpause.addEventListener('click', () => buildRowCall('pool', { source: admin, contractId, method: 'unpause_deposits' }));
+    pause.addEventListener('click', () => buildRowCall(pause, 'pool', { source: admin, contractId, method: 'pause_deposits' }));
+    unpause.addEventListener('click', () => buildRowCall(unpause, 'pool', { source: admin, contractId, method: 'unpause_deposits' }));
   } catch (err) {
     depositsEl.textContent = `could not be read: ${err.message}`;
     row.querySelector('.pool-actions').remove();
@@ -704,9 +729,13 @@ async function poolRow(contractId) {
   return row;
 }
 
-// Builds a table row's call into the card.
-async function buildRowCall(kind, call) {
+// Builds a table row's call, holding the pressed button at its width until done.
+async function buildRowCall(button, kind, call) {
   if (refuseWhileBusy()) return;
+  const { disabled, textContent } = button;
+  button.style.minWidth = `${button.offsetWidth}px`;
+  button.disabled = true;
+  button.textContent = 'Processing...';
   try {
     ensureWalletConnected();
     setStatus(`Building ${call.method}...`, 'info');
@@ -714,6 +743,9 @@ async function buildRowCall(kind, call) {
   } catch (err) {
     setStatus(`Building ${call.method} failed`, 'error');
     showToast(`Building ${call.method} failed: ${explainFailure(err, kind)}`, 'error');
+  } finally {
+    Object.assign(button, { disabled, textContent });
+    button.style.minWidth = '';
   }
 }
 
@@ -781,15 +813,19 @@ async function adminRow({ label, kind, contractId }) {
     }
     const { result: pending } = await target.get_pending_admin();
     const newAdminInput = row.querySelector('.new-admin-input');
-    row.querySelector('.propose-admin-btn').addEventListener('click', async () => {
+    const propose = row.querySelector('.propose-admin-btn');
+    propose.addEventListener('click', async () => {
+      if (refuseWhileBusy()) return;
       const newAdmin = newAdminInput.value.trim();
       const refusal = newAdminRefusal(newAdmin, { admin, pending });
       if (refusal) {
         showToast(refusal, 'error');
         return;
       }
-      if (await confirmCustody(newAdmin)) {
-        buildRowCall(kind, { source: admin, contractId, method: 'update_admin', args: { new_admin: newAdmin } });
+      propose.disabled = true;
+      const confirmed = await confirmCustody(newAdmin).finally(() => { propose.disabled = false; });
+      if (confirmed) {
+        buildRowCall(propose, kind, { source: admin, contractId, method: 'update_admin', args: { new_admin: newAdmin } });
       }
     });
     if (!pending) {
@@ -798,8 +834,10 @@ async function adminRow({ label, kind, contractId }) {
       return row;
     }
     showAddress(pendingEl, pending);
-    row.querySelector('.cancel-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
-    row.querySelector('.accept-admin-btn').addEventListener('click', () => buildRowCall(kind, { source: pending, contractId, method: 'accept_admin' }));
+    const cancel = row.querySelector('.cancel-admin-btn');
+    const accept = row.querySelector('.accept-admin-btn');
+    cancel.addEventListener('click', () => buildRowCall(cancel, kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
+    accept.addEventListener('click', () => buildRowCall(accept, kind, { source: pending, contractId, method: 'accept_admin' }));
   } catch (err) {
     adminEl.textContent = `could not be read: ${err.message}`;
     row.querySelector('.admin-actions').remove();
