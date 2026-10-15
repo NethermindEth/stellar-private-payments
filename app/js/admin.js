@@ -1184,7 +1184,11 @@ if (sharedTx) {
   .forEach((field) => field.addEventListener('input', resetRepoint));
 repointConfirmBox.addEventListener('change', renderRepoint);
 checkRepointBtn.addEventListener('click', checkRepoint);
-buildRepointBtn.addEventListener('click', () => buildRowCall(buildRepointBtn, 'pool', state.repoint.call));
+// A landed re-point clears the check, so the button follows the check again.
+buildRepointBtn.addEventListener('click', async () => {
+  await buildRowCall(buildRepointBtn, 'pool', state.repoint.call);
+  renderRepoint();
+});
 
 buildPauseAuthBtn.addEventListener('click', buildPauseAuthorizationFile);
 signPauseAuthBtn.addEventListener('click', signPauseAuthorization);
