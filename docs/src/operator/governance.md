@@ -17,7 +17,8 @@ because it has no signers to check. This page explains the model; the
 | | Upgrade any contract |
 
 Every admin call needs M signatures. The admin page builds the call, and each signer reviews and
-signs it on their own device before anyone submits it.
+signs it on their own device before anyone submits it. A connected account that can sign alone,
+such as a single-key admin, signs and sends the call at once.
 
 ## Transfer the admin
 

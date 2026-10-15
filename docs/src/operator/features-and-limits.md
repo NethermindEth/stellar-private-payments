@@ -18,8 +18,9 @@ from the one that owns their notes.
 
 ## Admin page
 
-The admin page builds every admin call into its Admin Transaction card, where the admin account's
-signers review, sign, and submit it. Its tabs:
+The admin page builds every admin call. When the connected account can sign a call alone, it signs
+and sends it at once. Otherwise the call waits in the Admin Transaction card, where the admin
+account's signers review, sign, and submit it. Its tabs:
 
 | Tab | Purpose |
 | --- | --- |
