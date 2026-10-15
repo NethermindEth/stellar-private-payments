@@ -25,7 +25,7 @@ import {
 } from '../../../app/js/pause-authorization.js';
 
 const ADMIN = Keypair.random().publicKey();
-const HOLDER = Keypair.random().publicKey();
+const SENDER = Keypair.random().publicKey();
 const POOL = 'CBZAWV3AKKKIIO3LEIF7DHODHHHTTL47M7WQSZYTU3ZYSBMM32MUM5H4';
 
 const pauseEntry = () => buildPauseAuthorization({ admin: ADMIN, pool: POOL, nonce: -7n, latestLedger: 1_000, maxEntryTtl: 17_280 });
@@ -93,7 +93,7 @@ test('walletSignature decodes the signature signAuthEntry returns into one addSi
     signerAddress: signer.publicKey(),
   };
   const signed = addSignature(entry, signer.publicKey(), walletSignature(signedAuthEntry), Networks.TESTNET);
-  assert.deepEqual(decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: signed })).signers, [signer.publicKey()]);
+  assert.deepEqual(decodeAuthorization(encodeAuthorization(signed)).signers, [signer.publicKey()]);
 });
 
 test('walletSignature refuses a result that carries no signature', () => {
@@ -103,18 +103,23 @@ test('walletSignature refuses a result that carries no signature', () => {
 test('an authorization file round-trips', () => {
   const signer = Keypair.random();
   const entry = addSignature(pauseEntry(), signer.publicKey(), sign(pauseEntry(), signer), Networks.TESTNET);
-  const file = encodeAuthorization({ holder: 'Alex', entry });
+  const file = encodeAuthorization(entry);
   const { entry: decoded, ...fields } = decodeAuthorization(file);
   assert.deepEqual(fields, {
     pool: POOL,
     admin: ADMIN,
-    holder: 'Alex',
     nonce: -7n,
     expirationLedger: 1_000 + 17_280 - 1,
     signers: [signer.publicKey()],
   });
   assert.equal(decoded.toXdr('base64'), entry.toXdr('base64'));
-  assert.equal(encodeAuthorization({ holder: 'Alex', entry: decoded }), file);
+  assert.equal(encodeAuthorization(decoded), file);
+});
+
+test('decodeAuthorization reads a file that still names a holder and drops the name', () => {
+  const file = JSON.stringify({ ...JSON.parse(encodeAuthorization(pauseEntry())), holder: 'Alex' });
+  assert.equal('holder' in decodeAuthorization(file), false);
+  assert.equal(decodeAuthorization(file).pool, POOL);
 });
 
 test('decodeAuthorization refuses a file that authorizes anything but a pause of one pool', () => {
@@ -137,13 +142,13 @@ test('decodeAuthorization refuses a file that authorizes anything but a pause of
   };
   for (const [label, [entryCredentials, rootInvocation]] of Object.entries(entries)) {
     const entry = new xdr.SorobanAuthorizationEntry({ credentials: entryCredentials, rootInvocation });
-    const file = JSON.stringify({ pool: POOL, holder: 'Alex', entry: entry.toXdr('base64') });
+    const file = JSON.stringify({ pool: POOL, entry: entry.toXdr('base64') });
     assert.throws(() => decodeAuthorization(file), /something other than a pause/, label);
   }
 });
 
 test('pauseTransaction refuses a file whose expiration has passed before building anything', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   const unreachable = async () => assert.fail('nothing is built for an expired authorization');
   const server = {
     getLatestLedger: async () => ({ sequence: authorization.expirationLedger }),
@@ -151,7 +156,7 @@ test('pauseTransaction refuses a file whose expiration has passed before buildin
     simulateTransaction: unreachable,
   };
   await assert.rejects(
-    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     /expired at ledger 18279/,
   );
 });
@@ -177,13 +182,13 @@ function diagnosticEvent(name) {
 // and whose recent Soroban inclusion fees have `p99` as their 99th percentile.
 const pauseServer = (simulations, p99 = '100') => ({
   getLatestLedger: async () => ({ sequence: 2_000 }),
-  getAccount: async () => new Account(HOLDER, '5'),
+  getAccount: async () => new Account(SENDER, '5'),
   getFeeStats: async () => ({ sorobanInclusionFee: { p99 } }),
   simulateTransaction: async () => simulations.shift(),
 });
 
 test('pauseTransaction reads a simulation with no deposit_pause_changed event as an already paused pool', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   // `deposits_paused` reads `false`, and the pause publishes the event of a
   // pause on a paused pool.
   const server = pauseServer([
@@ -194,14 +199,14 @@ test('pauseTransaction reads a simulation with no deposit_pause_changed event as
     },
   ]);
   assert.deepEqual(
-    await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     { paused: true },
   );
 });
 
 test('pauseTransaction builds the pause at the p99 inclusion fee when the simulation publishes deposit_pause_changed', async () => {
   const entry = pauseEntry();
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry }));
+  const authorization = decodeAuthorization(encodeAuthorization(entry));
   // `deposits_paused` reads `false`, and the pause publishes its event.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
@@ -214,7 +219,7 @@ test('pauseTransaction builds the pause at the p99 inclusion fee when the simula
       events: [diagnosticEvent('deposit_pause_changed')],
     },
   ], '5000');
-  const built = await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server });
+  const built = await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server });
   const { fee, operations } = TransactionBuilder.fromXDR(built.xdr, Networks.TESTNET);
   // The simulation's resource fee comes on top of the bid.
   assert.equal(Number(fee) - 100, 5_000);
@@ -225,52 +230,52 @@ test('pauseTransaction builds the pause at the p99 inclusion fee when the simula
 });
 
 test('pauseTransaction builds nothing when deposits_paused reads true', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   const server = {
     ...pauseServer([{ result: { retval: xdr.ScVal.scvBool(true) }, events: [] }]),
     getAccount: async () => assert.fail('nothing is built for a paused pool'),
   };
   assert.deepEqual(
-    await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     { paused: true },
   );
 });
 
 test('pauseTransaction reads an entry the host refuses as a file to sign again', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   // `deposits_paused` reads `false`, and the host refuses the entry.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Auth, InvalidAction)' },
   ]);
   await assert.rejects(
-    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     /does not authorize the pause/,
   );
 });
 
 test('pauseTransaction reads a spent nonce as a file already used', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   // `deposits_paused` reads `false`, and the host refuses the entry's spent nonce.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Auth, ExistingValue)' },
   ]);
   await assert.rejects(
-    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     { message: 'The file has already been used. The signers sign a new file.' },
   );
 });
 
 test('pauseTransaction passes any other refusal on unchanged', async () => {
-  const authorization = decodeAuthorization(encodeAuthorization({ holder: 'Alex', entry: pauseEntry() }));
+  const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
   // `deposits_paused` reads `false`, and the pause runs out of budget.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Budget, ExceededLimit)' },
   ]);
   await assert.rejects(
-    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: HOLDER, authorization, server }),
+    pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server }),
     { message: 'HostError: Error(Budget, ExceededLimit)' },
   );
 });

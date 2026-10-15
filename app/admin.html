@@ -350,16 +350,12 @@
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                     <div>
                         <h3 class="text-lg font-semibold text-white">Pause authorizations</h3>
-                        <p class="mt-1 text-sm text-slate-400">The admin account's signers sign a pause of one pool's deposits ahead of time. A holder keeps the file and submits it from their own account when deposits must stop. Each file pauses once, and a file submitted to a paused pool is held back.</p>
+                        <p class="mt-1 text-sm text-slate-400">The admin account's signers sign a pause of one pool's deposits ahead of time. Whoever keeps the file submits it from any funded account when deposits must stop. Each file pauses once, and a file submitted to a paused pool is held back.</p>
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
                             <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
-                        </div>
-                        <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthHolder">Holder</label>
-                            <input id="pauseAuthHolder" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="Who keeps the file" autocomplete="off" spellcheck="false" />
                         </div>
                         <div class="md:col-span-2">
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthFiles">Authorization files: one to sign, or one per pool to submit</label>

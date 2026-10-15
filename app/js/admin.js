@@ -71,7 +71,6 @@ const buildRepointBtn = document.getElementById('buildRepointBtn');
 
 // Pause authorizations panel
 const pauseAuthPoolSelect = document.getElementById('pauseAuthPool');
-const pauseAuthHolderInput = document.getElementById('pauseAuthHolder');
 const pauseAuthFilesInput = document.getElementById('pauseAuthFiles');
 const pauseAuthResultsEl = document.getElementById('pauseAuthResults');
 const buildPauseAuthBtn = document.getElementById('buildPauseAuthBtn');
@@ -935,21 +934,21 @@ function reportPause(text) {
   pauseAuthResultsEl.append(Object.assign(document.createElement('li'), { textContent: text }));
 }
 
-// Builds an unsigned pause authorization with a random nonce and offers it as
-// the holder's file.
+// Builds an unsigned pause authorization with a random nonce and offers it as a
+// file.
 async function buildPauseAuthorizationFile() {
   try {
     ensureWalletConnected();
     const pool = pauseAuthPoolSelect.value;
-    const holder = pauseAuthHolderInput.value.trim();
-    if (!pool || !holder) throw new Error('Choose a pool and name the holder');
+    if (!pool) throw new Error('Choose a pool');
     buildPauseAuthBtn.disabled = true;
     const server = rpcServer(state.rpcUrl);
     const [admin, { sequence }, ttl] = await Promise.all([storedAdmin(pool), server.getLatestLedger(), maxEntryTtl(server)]);
-    const [nonce] = crypto.getRandomValues(new BigInt64Array(1));
+    // Non-negative, so the file name carries no minus sign.
+    const nonce = crypto.getRandomValues(new BigUint64Array(1))[0] >> 1n;
     const entry = buildPauseAuthorization({ admin, pool, nonce, latestLedger: sequence, maxEntryTtl: ttl });
-    offerFile(`pause-${holder}-${pool}.json`, encodeAuthorization({ holder, entry }));
-    setStatus('Pause authorization built. Each signer signs the file, then the holder keeps it.', 'ok');
+    offerFile(`pause-${pool}-${nonce}.json`, encodeAuthorization(entry));
+    setStatus('Pause authorization built. Each signer signs the file, then hand it to whoever will pause deposits.', 'ok');
   } catch (err) {
     showToast(`Building the pause authorization failed: ${err.message}`, 'error');
   } finally {
@@ -964,14 +963,13 @@ async function signPauseAuthorization() {
     const [file, ...others] = pauseAuthFilesInput.files;
     if (!file || others.length > 0) throw new Error('Choose one authorization file to sign');
     signPauseAuthBtn.disabled = true;
-    const { pool, admin, holder, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
+    const { pool, admin, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
     // Files can come from anyone: show what this one authorizes before
     // Freighter asks.
     pauseAuthResultsEl.replaceChildren();
     Object.entries({
       Pool: pool,
       Admin: admin,
-      Holder: holder,
       Nonce: nonce,
       'Expiration ledger': expirationLedger,
       Signers: signers.join(', ') || 'none',
@@ -985,8 +983,8 @@ async function signPauseAuthorization() {
       networkPassphrase: state.networkPassphrase,
       address: state.address,
     });
-    offerFile(file.name, encodeAuthorization({ holder, entry: addSignature(entry, state.address, walletSignature(signedAuthEntry), state.networkPassphrase) }));
-    showToast(`Signed: ${signers.length + 1} of ${threshold} signatures. Pass the file to the next signer, or to its holder.`, 'success');
+    offerFile(file.name, encodeAuthorization(addSignature(entry, state.address, walletSignature(signedAuthEntry), state.networkPassphrase)));
+    showToast(`Signed: ${signers.length + 1} of ${threshold} signatures. Pass the file to the next signer, or to whoever will pause deposits.`, 'success');
   } catch (err) {
     showToast(`Signing failed: ${err.message}`, 'error');
   } finally {

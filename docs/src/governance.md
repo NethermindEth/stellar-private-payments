@@ -1,8 +1,8 @@
 # Governance runbook
 
 One key administers every pool and tree a deployment runs: the admin account, a Stellar account
-that needs M of its N signers on every change. This runbook is for those signers and for the
-holders of the account's pre-signed pauses.
+that needs M of its N signers on every change. This runbook is for those signers and for whoever
+keeps the account's pre-signed pause files.
 
 The admin can pause deposits, switch the trees a pool reads, edit the lists, and hand its role to
 another account. It cannot move funds: only `transact` moves tokens, against a verifier fixed at
@@ -64,10 +64,10 @@ from every pool and tree the manifest names and every tree those pools read:
 | `LeafInserted`, `LeafDeleted` | blocklists | A key is listed or released |
 
 The pool and admin transfer events use their name in lowercase with underscores as their topic,
-for example `deposit_pause_changed`. A pre-signed pause comes from a holder's account, so only the
+for example `deposit_pause_changed`. A pre-signed pause can come from any account, so only the
 pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the nonce from its
-transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find whose file was
-spent, and sign that holder a replacement.
+transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find which file was
+spent, and sign a replacement for whoever kept it.
 
 After a blocklist re-point, a pool reads a tree the manifest does not name. To list the trees a
 pool reads, read its instance entry, whose key is `AAAAFA==`:
@@ -204,8 +204,8 @@ stellar tx send --network testnet < tx.xdr
 
 Gathering M signers takes longer than a soundness bug allows, so the signers sign pauses ahead of
 time. A pause file holds the admin account's authorization of one `pause_deposits()` call on one
-pool, and its holder sends it from their own account with no signer present. Sign one file per
-holder per pool.
+pool, and whoever keeps it sends it from any funded account with no signer present. Sign one file
+per pool for each person who keeps files.
 
 A file works once, because the network spends its nonce when the pause lands, and a used file fails
 with `Error(Auth, ExistingValue)`. The page reads the network's `max_entry_ttl`, and a file expires
@@ -214,18 +214,19 @@ testnet and mainnet as of 2026-10-14.
 
 To make a file, use the Pause authorizations panel on the Pools tab:
 
-1. Choose the pool, name the holder, and press Build. The page draws a random nonce and offers the
-   file as `pause-HOLDER-POOL.json`, named for the holder and the pool.
+1. Choose the pool and press Build. The page draws a random nonce and offers the file as
+   `pause-POOL-NONCE.json`.
 2. Each signer loads the file and presses Sign with Freighter. The panel first shows the pool, the
-   admin, the holder, the nonce, and the expiration ledger. A signer who did not expect exactly
-   this file rejects the request. Otherwise the signer checks that Freighter shows
-   `pause_deposits` on that pool, approves, and passes the returned file on.
-3. Once the file carries M signatures, give it to its holder, and record the holder, pool, nonce,
-   and expiration ledger. A landed pause's nonce and that record name the holder.
+   admin, the nonce, and the expiration ledger. A signer who did not expect exactly this file
+   rejects the request. Otherwise the signer checks that Freighter shows `pause_deposits` on that
+   pool, approves, and passes the returned file on.
+3. Once the file carries M signatures, give it to whoever will pause deposits, and record who keeps
+   it with its pool, nonce, and expiration ledger. A landed pause's nonce and that record name who
+   kept the file.
 
-To pause, the holder connects Freighter with any funded account, chooses their files, one per
-pool, and presses Submit. The page holds back the file for a pool that is already paused, leaving
-its nonce unspent, and reports each pool on its own line. The holder's account pays the fee,
+To pause, whoever keeps the files connects Freighter with any funded account, chooses the files, one
+per pool, and presses Submit. The page holds back the file for a pool that is already paused,
+leaving its nonce unspent, and reports each pool on its own line. That account pays the fee,
 including any restore the pause needs.
 
 On testnet on 2026-10-03, a pause that restored nothing cost 500,686 stroops, about 0.05 XLM, and
@@ -428,7 +429,7 @@ that carries the old signer's signature, since those files now fail.
 | Incident | Response |
 | --- | --- |
 | A signer's device is lost or stolen | While M other signers remain, replace the signer, then sign replacements for every pause file that carries its signature. One stolen key cannot sign alone, but replace it before another is lost. |
-| A soundness bug in a circuit, the verifier, or a pool | A holder submits a pause file for every pool at once. Transfers and withdrawals cannot be stopped. Warn users and deploy fixed contracts, since none can be upgraded. |
+| A soundness bug in a circuit, the verifier, or a pool | Whoever keeps the pause files submits one for every pool at once. Transfers and withdrawals cannot be stopped. Warn users and deploy fixed contracts, since none can be upgraded. |
 | A key is sanctioned | List it, with any other keys due, in each blocklist a pool reads ([Watch the account and the contracts](#watch-the-account-and-the-contracts) shows how to find them): enter each blocklist's address in the Overview tab's ASP Non-Membership Contract ID field in turn, and add the keys on the Blocklist tab. Each write voids the proofs in flight in every pool that reads that blocklist. Until the calls land, the key's owner can move value to a fresh key. |
 | A tree another party runs misbehaves | Pause the pools that read it. Prepare a replacement tree as [Re-point a pool](#re-point-a-pool) describes, including step 4 for an allowlist, before the re-point. Then check the tree, re-point, and unpause. |
-| Deposits pause unexpectedly | Read the landed pause's nonce, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, and find its holder in the record. No call revokes a signed file, so replace a signer whose signature that holder's files carry, which voids every file with that signature. Then unpause and sign replacements for the voided files. |
+| Deposits pause unexpectedly | Read the landed pause's nonce, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, and find in the record who kept that file. No call revokes a signed file, so replace a signer whose signature that person's files carry, which voids every file with that signature. Then unpause and sign replacements for the voided files. |

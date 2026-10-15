@@ -1,6 +1,6 @@
 /**
- * Deposit pauses the admin's signers authorize ahead of time, for a holder to send
- * from their own account. Kept out of `admin.js` so Node unit tests can import it.
+ * Deposit pauses the admin's signers authorize ahead of time, for whoever keeps the
+ * file to send from their own account. Kept out of `admin.js` so Node unit tests can import it.
  */
 import {
   Account,
@@ -85,7 +85,7 @@ export function addSignature(entry, publicKey, signature, networkPassphrase) {
   if (signatures.some(({ public_key: signed }) => compareKeys(signed, key) === 0)) {
     throw new Error(`${publicKey} has already signed the authorization`);
   }
-  // A bad signature would otherwise surface only when a holder sends the pause.
+  // A bad signature would otherwise surface only when the pause is sent.
   if (!Keypair.fromPublicKey(publicKey).verify(hash(preimage(entry, networkPassphrase).toXdr()), signature)) {
     throw new Error(`The signature is not ${publicKey}'s signature of the authorization on this network`);
   }
@@ -134,17 +134,16 @@ function describePause(entry) {
 }
 
 /**
- * Writes the file a holder keeps: the pool, the holder, the nonce, the expiration
- * ledger, the signers, and the entry. Every field but `holder` is read from the entry.
+ * Writes a pause file: the entry, preceded by its pool, nonce, expiration ledger,
+ * and signers for a reader.
  *
  * @returns {string} The file's JSON.
  * @throws {Error} when the entry authorizes anything but `pause_deposits()` on one pool.
  */
-export function encodeAuthorization({ holder, entry }) {
+export function encodeAuthorization(entry) {
   const { pool, nonce, expirationLedger, signers } = describePause(entry);
   return JSON.stringify({
     pool,
-    holder,
     nonce: nonce.toString(),
     expirationLedger,
     signers,
@@ -153,24 +152,23 @@ export function encodeAuthorization({ holder, entry }) {
 }
 
 /**
- * Reads a file `encodeAuthorization` wrote. Every field but `holder` comes from
- * the entry, so an edited field cannot misdescribe it.
+ * Reads a file `encodeAuthorization` wrote. Every field comes from the entry, so
+ * an edited field cannot misdescribe it.
  *
- * @returns {{pool: string, admin: string, holder: string, nonce: bigint, expirationLedger: number, signers: string[], entry: xdr.SorobanAuthorizationEntry}}
+ * @returns {{pool: string, admin: string, nonce: bigint, expirationLedger: number, signers: string[], entry: xdr.SorobanAuthorizationEntry}}
  * @throws {Error} when the entry authorizes anything but `pause_deposits()` on one pool.
  */
 export function decodeAuthorization(text) {
-  const { holder, entry } = JSON.parse(text);
-  const decoded = xdr.SorobanAuthorizationEntry.fromXdr(entry, 'base64');
-  return { ...describePause(decoded), holder, entry: decoded };
+  const decoded = xdr.SorobanAuthorizationEntry.fromXdr(JSON.parse(text).entry, 'base64');
+  return { ...describePause(decoded), entry: decoded };
 }
 
 /**
  * Builds the unsigned, simulated envelope `{ xdr }` that sends a pre-signed pause
- * from the holder's account `source`, or returns `{ paused: true }` for a paused
+ * from any funded account `source`, or returns `{ paused: true }` for a paused
  * pool, where sending would only spend the authorization. Simulation checks the
  * signatures, so a bad one fails here, not on chain. An archived `Admin` entry is
- * restored at the holder's cost.
+ * restored at the cost of `source`.
  *
  * @param {{rpcUrl: string, networkPassphrase: string, source: string, authorization: Object, server?: rpc.Server}} pause
  *   `authorization` is a file read by `decodeAuthorization`.
