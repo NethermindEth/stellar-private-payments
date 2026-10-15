@@ -29,7 +29,7 @@ differs.
 | Note key | The key pair that owns notes. Its public half, the note public key, is what the ASP screens. |
 | Nullifier | A value derived from a note and its owner's note private key. The pool records it when the note is spent, which stops a second spend. |
 | Operator | Whoever runs a deployment: the reader of this manual. |
-| Pause file | A pre-signed authorization of one `pause_deposits` call on one pool, which its holder can submit with no signer present. The admin page calls these pause authorizations. |
+| Pause file | A pre-signed authorization of one `pause_deposits` call on one pool, which whoever keeps it can submit with no signer present. The admin page makes them in its Pre-signed deposit pauses panel. |
 | Policy | The ASP checks a pool requires: `none`, `allowlist`, `blocklist`, or `allowlist-blocklist` (`policy_flags`). |
 | Pool | The contract that holds one token and accepts deposits, transfers, and withdrawals (`pool`, or `pool-gvk` with a GVK). |
 | Proof | A zero-knowledge proof: it shows that a transaction follows the circuit's rules without revealing the notes and keys behind it. |

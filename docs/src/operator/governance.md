@@ -66,21 +66,21 @@ signers sign pause files ahead of time and give one per pool to each person on c
 ```mermaid
 sequenceDiagram
     participant S as Signers (M of N)
-    actor H as Holder
+    actor H as Person on call
     participant P as Pool
     Note over S,H: Ahead of time
     S->>H: A pause file for one pool
     Note over H,P: During an incident
-    H->>P: pause_deposits(), sent from the holder's account
+    H->>P: pause_deposits(), sent from any funded account
     Note over P: Deposits closed. The file is spent.
     Note over S,P: Afterwards
     S->>P: unpause_deposits(), an admin call
     S->>H: A replacement file
 ```
 
-A holder can pause and can't unpause. Each file works once and expires `max_entry_ttl - 1` ledgers
-after it is built, about 180 days on testnet and mainnet, and a signer change or an admin transfer
-voids it.
+Whoever keeps a file can pause and can't unpause. Each file works once and expires
+`max_entry_ttl - 1` ledgers after it is built, about 180 days on testnet and mainnet, and a signer
+change or an admin transfer voids it.
 
 ## If the admin account is lost or stolen
 

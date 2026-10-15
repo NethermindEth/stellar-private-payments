@@ -29,7 +29,7 @@ pool in the run shares them, along with the admin and the KDF domain.
 | Setting | How | Who |
 | --- | --- | --- |
 | Admin of a pool or tree | Two-step transfer. See [Governance](governance.md). | The admin, then the new admin |
-| Deposits open or paused | `pause_deposits` and `unpause_deposits` | The admin. A pause file's holder can pause and can't unpause. |
+| Deposits open or paused | `pause_deposits` and `unpause_deposits` | The admin. Whoever keeps a pause file can pause and can't unpause. |
 | Allowlist members | `insert_leaf`. There is no delete. | The allowlist's admin |
 | Blocklist entries | `insert_leaf`, `insert_leaves`, and `delete_leaf` | The blocklist's admin |
 | Trees a pool reads | Re-point to another tree of the pool's tree code | The pool's admin |

@@ -10,12 +10,11 @@ trusted setup ceremony. Don't hold real value in a deployment.
 
 ## Roles
 
-A deployment has seven roles. One organization can hold all of them.
+A deployment has six roles. One organization can hold all of them.
 
 | Role | Holds | Does |
 | --- | --- | --- |
-| Admin account signers | One signer key each | Approve admin calls: pause deposits, re-point pools, edit trees, transfer the admin |
-| Pause file holders | One pause file per pool | Pause deposits during an incident, with no signer present |
+| Admin account signers | One signer key each | Approve admin calls: pause deposits, re-point pools, edit trees, transfer the admin; sign pause files ahead of time |
 | ASP | The admin of a tree | Adds members to the allowlist, adds and removes blocklist entries |
 | GVK holder | A GVK private key | Decrypts every note in a `pool-gvk` pool |
 | Bootnode operator | A server and a PostgreSQL database | Serves contract events older than the RPC keeps |
