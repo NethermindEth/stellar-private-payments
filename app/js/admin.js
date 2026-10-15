@@ -1006,6 +1006,9 @@ async function signPauseAuthorization() {
 // reports each on its own line, so one failure stops no other file. A second
 // file for a pool an earlier one paused is held back unspent.
 async function submitPauseAuthorizations() {
+  // An admin call from the same account would clash on its sequence number.
+  if (refuseWhileBusy()) return;
+  setBusy(true);
   pauseAuthResultsEl.replaceChildren();
   try {
     ensureWalletConnected();
@@ -1044,6 +1047,7 @@ async function submitPauseAuthorizations() {
     setStatus('Pause submission failed', 'error');
     showToast(`Pause submission failed: ${err.message}`, 'error');
   } finally {
+    setBusy(false);
     if (state.address) submitPauseAuthBtn.disabled = false;
   }
   await refreshPools();
