@@ -223,7 +223,8 @@ To make a file, use the Pre-signed deposit pauses panel on the Pools tab:
 2. Each signer loads the file and presses Sign with Freighter. The panel first shows the pool, the
    admin, the nonce, and the expiration ledger. A signer who did not expect exactly this file
    rejects the request. Otherwise the signer checks that Freighter shows `pause_deposits` on that
-   pool, approves, and passes the returned file on.
+   pool, approves, and passes on the returned file, `pause-POOL-NONCE-signed-N.json` once it carries
+   N signatures.
 3. Once the file carries M signatures, give it to whoever will pause deposits, and record who keeps
    it with its pool, nonce, and expiration ledger. A landed pause's nonce and that record name who
    kept the file.

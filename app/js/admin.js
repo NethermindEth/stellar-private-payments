@@ -934,6 +934,17 @@ function reportPause(text) {
   pauseAuthResultsEl.append(Object.assign(document.createElement('li'), { textContent: text }));
 }
 
+function showPauseFile({ pool, admin, nonce, expirationLedger, signers }) {
+  pauseAuthResultsEl.replaceChildren();
+  Object.entries({
+    Pool: pool,
+    Admin: admin,
+    Nonce: nonce,
+    'Expiration ledger': expirationLedger,
+    Signers: signers.join(', ') || 'none',
+  }).forEach(([label, value]) => reportPause(`${label}: ${value}`));
+}
+
 // Builds an unsigned pause authorization with a random nonce and offers it as a
 // file.
 async function buildPauseAuthorizationFile() {
@@ -963,17 +974,11 @@ async function signPauseAuthorization() {
     const [file, ...others] = pauseAuthFilesInput.files;
     if (!file || others.length > 0) throw new Error('Choose one pause file to sign');
     signPauseAuthBtn.disabled = true;
-    const { pool, admin, nonce, expirationLedger, signers, entry } = decodeAuthorization(await file.text());
+    const pauseFile = decodeAuthorization(await file.text());
+    const { admin, entry } = pauseFile;
     // Files can come from anyone: show what this one authorizes before
     // Freighter asks.
-    pauseAuthResultsEl.replaceChildren();
-    Object.entries({
-      Pool: pool,
-      Admin: admin,
-      Nonce: nonce,
-      'Expiration ledger': expirationLedger,
-      Signers: signers.join(', ') || 'none',
-    }).forEach(([label, value]) => reportPause(`${label}: ${value}`));
+    showPauseFile(pauseFile);
     // A non-signer's signature would fail the pause and cannot be removed.
     const { threshold, weights } = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(admin));
     if (!(weights.get(state.address) > 0)) {
@@ -983,8 +988,13 @@ async function signPauseAuthorization() {
       networkPassphrase: state.networkPassphrase,
       address: state.address,
     });
-    offerFile(file.name, encodeAuthorization(addSignature(entry, state.address, walletSignature(signedAuthEntry), state.networkPassphrase)));
-    showToast(`Signed: ${signers.length + 1} of ${threshold} signatures. Pass the file to the next signer, or to whoever will pause deposits.`, 'success');
+    const text = encodeAuthorization(addSignature(entry, state.address, walletSignature(signedAuthEntry), state.networkPassphrase));
+    const signed = decodeAuthorization(text);
+    const count = signed.signers.length;
+    offerFile(`pause-${signed.pool}-${signed.nonce}-signed-${count}.json`, text);
+    showPauseFile(signed);
+    setStatus(`Pause file signed: ${count} of ${threshold} signatures`, 'ok');
+    showToast(`Signed: ${count} of ${threshold} signatures. Pass the file to the next signer, or to whoever will pause deposits.`, 'success');
   } catch (err) {
     showToast(`Signing failed: ${err.message}`, 'error');
   } finally {
