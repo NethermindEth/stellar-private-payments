@@ -211,8 +211,15 @@ done
 step "checking the custody of the admin account"
 # Local and integration deployments use one key as the admin, so a custody failure fails the run
 # only on mainnet.
+MAINNET_PASSPHRASE="Public Global Stellar Network ; September 2015"
+PASSPHRASE="$(stellar network info --network "$NETWORK" --output json \
+  | jq -r '.passphrase // empty' || true)"
 CUSTODY=notice
-[[ "$NETWORK" != mainnet ]] || CUSTODY=FAIL
+if [[ -n "$PASSPHRASE" ]]; then
+  [[ "$PASSPHRASE" != "$MAINNET_PASSPHRASE" ]] || CUSTODY=FAIL
+else
+  [[ "$NETWORK" != mainnet ]] || CUSTODY=FAIL
+fi
 ACCOUNT="$(stellar ledger entry fetch account --account "$ADMIN" --network "$NETWORK" \
   | jq -c '.entries[0].val.account' || echo null)"
 if [[ "$ACCOUNT" == null ]]; then
