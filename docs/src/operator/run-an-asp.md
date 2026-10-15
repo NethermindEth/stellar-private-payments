@@ -70,9 +70,10 @@ Write to the blocklist through the admin page. It converts each key to the byte 
 expects; a key passed raw to `insert_leaf` through the Stellar CLI is stored reversed, and its owner
 stays unblocked.
 
-## Run a tree for another operator's pool
+## Run a compliance contract for another operator's pool
 
-A pool accepts only trees of its tree code. To run a tree for a pool another operator runs:
+A pool accepts only allowlists and blocklists of its tree code. To run one for another operator's
+pool:
 
 1. For an allowlist, record the output of `stellar ledger latest --network testnet` as the tree's
    deployment ledger. Read the tree code the pool accepts and deploy your tree from it:
