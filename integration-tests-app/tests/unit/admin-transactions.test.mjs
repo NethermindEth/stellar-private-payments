@@ -503,6 +503,14 @@ test('submitAdminCall throws the failure of the landed copy of a transaction ano
   );
 });
 
+test('submitAdminCall waits for a transaction the network already holds instead of failing', async () => {
+  const landed = { status: 'SUCCESS' };
+  for (const status of ['DUPLICATE', 'TRY_AGAIN_LATER']) {
+    const server = { ...stubServer({ status }, landed), getTransaction: async () => ({ status: 'NOT_FOUND' }) };
+    assert.equal(await submit(server), landed, status);
+  }
+});
+
 test('submitAdminCall names the host error of a sent transaction that failed', async () => {
   await assert.rejects(submit(stubServer({ status: 'PENDING' }, failedWith20)), /FAILED: txFailed Error\(Contract, #20\)/);
 });

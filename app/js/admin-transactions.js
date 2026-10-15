@@ -317,7 +317,9 @@ export function hostError(events = []) {
  */
 export async function submitAdminCall({ rpcUrl, networkPassphrase, xdr, server = rpcServer(rpcUrl) }) {
   const sent = await server.sendTransaction(TransactionBuilder.fromXdr(xdr, networkPassphrase));
-  const landed = sent.status === 'PENDING'
+  // The network answers `DUPLICATE` to this envelope sent again, and
+  // `TRY_AGAIN_LATER` to a co-signer's copy carrying other signatures.
+  const landed = ['PENDING', 'DUPLICATE', 'TRY_AGAIN_LATER'].includes(sent.status)
     ? await server.pollTransaction(sent.hash, { attempts: 30 })
     : await server.getTransaction(sent.hash);
   if (landed.status === 'SUCCESS') return landed;
