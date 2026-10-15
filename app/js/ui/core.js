@@ -127,7 +127,7 @@ export const Utils = {
 
     explorerContractUrl(contractId) {
         if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return '#';
-        return `${this.explorerBaseUrl()}/contract/${contractId}`;
+        return `${this.explorerBaseUrl()}/contract/${encodeURIComponent(contractId)}`;
     },
 
     explorerContractStorageUrl(contractId) {
