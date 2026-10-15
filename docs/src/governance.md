@@ -139,6 +139,10 @@ signers sign the transaction itself. The admin page builds it and carries it bet
    signatures against the account's threshold.
 4. Once the count reaches the threshold, anyone presses Submit.
 
+When the connected account can sign the call alone, as a single-key admin or one signer of a 1-of-N
+account can, Freighter asks for its signature as soon as the call is built and the page submits it.
+A rejected request leaves the call in the card for the steps above.
+
 Make one admin call at a time: each uses the account's next sequence number, so a call built while
 another is in flight fails with `tx_bad_seq` once the other lands. After its 24 hours a call fails
 with `tx_too_late`. When Submit reports that the network has not confirmed the transaction yet,
@@ -265,7 +269,7 @@ stellar network settings --network testnet \
 
 A pool's or tree's admin changes in two steps, from the Admins tab. The tab lists every pool and
 tree the manifest names, a disabled pool too, with its admin and its pending admin. Each button
-builds an admin call into the card:
+builds an admin call as [Make an admin call](#make-an-admin-call) describes:
 
 | Button | Call | Source | Effect |
 | --- | --- | --- | --- |
@@ -340,9 +344,10 @@ event retention, about seven days on the public testnet RPC:
    them through that tab, never the CLI's `insert_leaf`, which would store each key in the wrong
    byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's
    ASP Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
-   Blocklist. The page builds the insert with the deployer as its source. Copy the XDR from the
-   Admin transaction card to `tx.xdr`, sign it with `--sign-with-key DEPLOYER`, and send it as
-   [Sign with the CLI](#sign-with-the-cli) describes.
+   Blocklist. The page builds the insert with the deployer as its source. If Freighter is
+   connected as the deployer, it signs and the page sends the insert at once. Otherwise open
+   Transaction XDR in the Admin transaction card, press Copy XDR, save it as `tx.xdr`, sign it with
+   `--sign-with-key DEPLOYER`, and send it as [Sign with the CLI](#sign-with-the-cli) describes.
 3. Hand the tree to the admin account. The deployer proposes it:
 
    ```bash
