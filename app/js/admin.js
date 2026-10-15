@@ -72,6 +72,8 @@ const state = {
   // The manifest's pools and added allowlists; `kindOf` reads a pasted call against them.
   pools: [],
   addedAllowlists: [],
+  // Set while an admin call is built, signed, or sent; change it through `setBusy`.
+  busy: false,
   cryptoReady: false,
 };
 
@@ -373,13 +375,25 @@ function renderAdminTx(kind) {
         : `${count}, weight ${weight} of ${rule.threshold}`;
       adminTxSignersEl.replaceChildren(...signerStatus(rule, xdr, state.networkPassphrase).map(({ key, signed }) =>
         signerItem(key, signed, signed === false && weight < rule.threshold)));
-      submitAdminTxBtn.disabled = weight < rule.threshold;
+      submitAdminTxBtn.disabled = state.busy || weight < rule.threshold;
     }, (err) => {
-      if (current()) adminTxNoticeEl.textContent = `The admin account could not be read: ${err.message}`;
+      if (current()) adminTxNoticeEl.textContent = [adminTxNoticeEl.textContent, `The admin account could not be read: ${err.message}`].filter(Boolean).join(' ');
     });
   } catch (err) {
     adminTxDescriptionEl.textContent = `Not an admin call: ${err.message}`;
   }
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  adminTxSignersEl.querySelectorAll('.sign-as-btn').forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+function refuseWhileBusy() {
+  if (state.busy) showToast('Finish the admin call in progress first.', 'info');
+  return state.busy;
 }
 
 function signerItem(key, signed, canSign) {
@@ -389,8 +403,12 @@ function signerItem(key, signed, canSign) {
   status.textContent = SIGNED_LABELS.get(signed);
   status.classList.add(signed ? 'text-emerald-300' : 'text-slate-500');
   const button = item.querySelector('.sign-as-btn');
-  if (canSign) button.addEventListener('click', () => signAdminTx(key));
-  else button.remove();
+  if (canSign) {
+    button.disabled = state.busy;
+    button.addEventListener('click', () => signAdminTx(key, button));
+  } else {
+    button.remove();
+  }
   return item;
 }
 
@@ -401,6 +419,8 @@ function loadAdminTx(xdr, kind) {
 
 // Builds an admin call to a contract of the given kind into the card.
 async function prepareAdminCall(kind, call) {
+  if (state.busy) throw new Error('Another admin call is in progress. Wait for it to finish.');
+  setBusy(true);
   let built;
   try {
     built = await buildAdminCall({
@@ -415,13 +435,18 @@ async function prepareAdminCall(kind, call) {
       adminTxDescriptionEl.textContent = [err.message, ...err.extendCommands].join('\n\n');
     }
     throw err;
+  } finally {
+    setBusy(false);
   }
   loadAdminTx(built.xdr, kind);
   setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
 }
 
 // Freighter switches to `signer` when it holds that account.
-async function signAdminTx(signer) {
+async function signAdminTx(signer, button) {
+  if (state.busy) return;
+  setBusy(true);
+  button.textContent = 'Signing...';
   try {
     const envelope = adminTxXdrInput.value.trim();
     const { source } = describeAdminCall(envelope, state.networkPassphrase);
@@ -439,10 +464,18 @@ async function signAdminTx(signer) {
       ? `Freighter does not hold ${shortAddress(signer)}. Pass the link to that signer.`
       : explainFailure(err, state.adminTxKind);
     showToast(`Signing failed: ${reason}`, 'error');
+  } finally {
+    button.textContent = 'Sign';
+    setBusy(false);
   }
 }
 
 async function submitAdminTx() {
+  if (state.busy) return;
+  setBusy(true);
+  submitAdminTxBtn.disabled = true;
+  submitAdminTxBtn.textContent = 'Submitting...';
+  adminTxXdrInput.readOnly = true;
   try {
     ensureWalletConnected();
     setStatus('Submitting the admin transaction...', 'info');
@@ -451,14 +484,22 @@ async function submitAdminTx() {
       networkPassphrase: state.networkPassphrase,
       xdr: adminTxXdrInput.value.trim(),
     });
-    setStatus('Admin transaction succeeded', 'ok');
-    showToast('Admin transaction succeeded', 'success');
-    loadAdminTx('');
-    await refreshState();
   } catch (err) {
+    const reason = explainFailure(err, state.adminTxKind);
     setStatus('Admin transaction failed', 'error');
-    showToast(`Admin transaction failed: ${explainFailure(err, state.adminTxKind)}`, 'error');
+    showToast('Admin transaction failed. The card shows why.', 'error');
+    renderAdminTx(state.adminTxKind);
+    adminTxNoticeEl.textContent = `Last submit: ${reason}`;
+    return;
+  } finally {
+    setBusy(false);
+    submitAdminTxBtn.textContent = 'Submit';
+    adminTxXdrInput.readOnly = false;
   }
+  setStatus('Admin transaction succeeded', 'ok');
+  showToast('Admin transaction succeeded', 'success');
+  loadAdminTx('');
+  await refreshState();
 }
 
 async function copyText(text, what) {
@@ -491,6 +532,7 @@ function readClient(contractId) {
 }
 
 async function insertMembershipLeaf() {
+  if (refuseWhileBusy()) return;
   const originalText = addToAllowlistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -535,6 +577,7 @@ async function insertMembershipLeaf() {
 }
 
 async function insertNonMembershipLeaf() {
+  if (refuseWhileBusy()) return;
   const originalText = addToBlocklistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -562,6 +605,7 @@ async function insertNonMembershipLeaf() {
 }
 
 async function removeNonMembershipLeaf() {
+  if (refuseWhileBusy()) return;
   const originalText = removeFromBlocklistBtn.textContent;
   try {
     ensureWalletConnected();
@@ -653,6 +697,7 @@ async function poolRow(contractId) {
 
 // Builds a table row's call into the card.
 async function buildRowCall(kind, call) {
+  if (refuseWhileBusy()) return;
   try {
     ensureWalletConnected();
     setStatus(`Building ${call.method}...`, 'info');
