@@ -530,7 +530,7 @@ jobs:
         with:
           name: npm-package
           path: package
-      - run: npm publish package/*.tgz --ignore-scripts --provenance
+      - run: npm publish ./package/*.tgz --ignore-scripts --provenance
 
   cli-github-release:
     name: GitHub Release
