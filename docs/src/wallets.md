@@ -4,7 +4,7 @@ SPP supports the Freighter browser extension because it provides the signing ope
 
 The contracts don't depend on Freighter. The SDK accepts other signers through its [`WalletSigner` interface](https://github.com/NethermindEth/stellar-private-payments/blob/13f2374f4a7ae5b7871caba248763d92fb7c642a/sdk/web/js/types/signer.d.ts), so a compatible wallet can be added through an adapter. The difficulty is deciding whether it is compatible: support for Stellar transactions alone doesn't cover everything SPP asks a wallet to do.
 
-The findings here come from the 8 October 2026 assessment. Freighter is the only wallet tested end-to-end with SPP; the other findings come from source code and vendor documentation.
+These findings reflect wallet support as of October 2026. Freighter is the only wallet tested end-to-end with SPP; the other findings come from source code and vendor documentation.
 
 **Signing requirements**
 
@@ -56,6 +56,8 @@ With Fireblocks, a deployer could offer wallets inside its application. The inte
 | Funding or fee payment only | Fireblocks signs transactions or supplies deposit funds while users retain their SPP privacy keys. The SDK already separates note ownership from the signer/payer. |
 
 Fireblocks documents [RAW Ed25519 signing for vaults and embedded wallets](https://developers.fireblocks.com/reference/structure-the-api-call). An adapter could send the hashes for SPP's message, authorization and transaction signing, leaving SPP to construct, simulate and submit the transactions. Production RAW signing requires paid enablement, use-case eligibility and policy configuration. Dynamic exposes Stellar message and transaction signing, but its inspected connector has no dedicated `signAuthEntry`; the lower-level raw-signing interface would need testing for that operation.
+
+For key derivation, the adapter would request the owner's SEP-53 signature of SPP's key derivation message, and the SDK would derive the note and encryption keys from that signature using SHA-256 with separate domain prefixes.
 
 Recovery needs a separate decision. Fireblocks protects the Stellar signing key, whereas SPP's privacy keys control the shielded notes. MPC signing cannot be assumed to return identical signatures. The app could preserve the original derivation signature or back up the derived keys. Another option is an independent privacy seed, which would require SDK and app changes but would not inherently require a new proof system. Fireblocks offers [signature caching](https://developers.fireblocks.com/reference/caching-signatures), but its recovery guarantees would need confirmation before SPP relied on it.
 
