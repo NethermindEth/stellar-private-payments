@@ -28,7 +28,7 @@ account's signers review, sign, and submit it. Its tabs:
 | Allowlist | Add members |
 | Blocklist | Add and remove keys |
 | Global View | Decrypt and export a GVK pool's notes with the GVK private key |
-| Pools | Pause and unpause deposits, check and build re-points, and build and submit pause files |
+| Pools | Pause and unpause deposits, check and build re-points, and make, sign, and send pause files |
 | Admins | Propose, cancel, and accept admin transfers |
 
 ## CLI

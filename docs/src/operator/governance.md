@@ -80,8 +80,9 @@ sequenceDiagram
 ```
 
 Whoever keeps a file can pause and can't unpause. Each file works once and expires
-`max_entry_ttl - 1` ledgers after it is built, about 180 days on testnet and mainnet, and a signer
-change or an admin transfer voids it.
+`max_entry_ttl - 1` ledgers after it is built, about 180 days on testnet and mainnet. An admin
+transfer voids it, and so does a signer change that leaves its remaining signatures short of the
+threshold.
 
 ## If the admin account is lost or stolen
 

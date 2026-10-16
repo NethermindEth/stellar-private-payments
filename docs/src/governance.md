@@ -218,21 +218,32 @@ testnet and mainnet as of 2026-10-14.
 
 To make a file, use the Pre-signed deposit pauses panel on the Pools tab:
 
-1. Choose the pool and press Build. The page draws a random nonce and offers the file as
-   `pause-POOL-NONCE.json`.
-2. Each signer loads the file and presses Sign with Freighter. The panel first shows the pool, the
-   admin, the nonce, and the expiration ledger. A signer who did not expect exactly this file
-   rejects the request. Otherwise the signer checks that Freighter shows `pause_deposits` on that
-   pool, approves, and passes on the returned file, `pause-POOL-NONCE-signed-N.json` once it carries
-   N signatures.
-3. Once the file carries M signatures, give it to whoever will pause deposits, and record who keeps
-   it with its pool, nonce, and expiration ledger. A landed pause's nonce and that record name who
-   kept the file.
+1. Choose the pool and press New pause file. The page draws a random nonce and holds the file in
+   the panel. When the connected account can sign alone, as a single-key admin can, Freighter asks
+   for its signature at once.
+2. Each signer reads the pool, admin, nonce, and expiration ledger on the file's card. A signer who
+   did not expect exactly this file stops here. Otherwise the signer presses Sign beside their key,
+   checks that Freighter shows `pause_deposits` on that pool, and approves. Freighter switches to
+   that key when it holds it. A signer on another device gets the file from Save file and adds it
+   with Open pause files. Opening a copy of a file the panel holds adds the copy's signatures until
+   the file meets the threshold, so copies signed on different devices combine. The panel checks
+   every signature the way the network does, and collects no more signatures than the threshold
+   needs.
+3. Once the card reads Ready, with the date the file works until, press Save file, give
+   `pause-POOL-NONCE-signed-N.json` to whoever will pause deposits, and record who keeps it with
+   its pool, nonce, and expiration ledger. A landed pause's nonce and that record name who kept
+   the file.
 
-To pause, whoever keeps the files connects Freighter with any funded account, chooses the files, one
-per pool, and presses Submit. The page holds back the file for a pool that is already paused,
-leaving its nonce unspent, and reports each pool on its own line. That account pays the fee,
-including any restore the pause needs.
+To pause, whoever keeps the files connects Freighter with any funded account, adds the files with
+Open pause files, one per pool, and presses Pause deposits now. The button stays disabled until a
+file in the panel can pause a pool whose deposits are still open, and a card whose file cannot says
+why. A signature from a key that no longer signs for the admin, such as a removed signer's, is left
+out, so the file still pauses while the signatures left meet the threshold.
+
+The page reads each pool again before sending, says why it leaves out any file, and sends the rest
+after a confirmation that names the pools. It reports each pool on its own line, and a file that
+paused its pool leaves the panel. The connected account pays the fee, including any restore the
+pause needs.
 
 On testnet on 2026-10-03, a pause that restored nothing cost 500,686 stroops, about 0.05 XLM, and
 a restore can cost several XLM. Keep at least 10 XLM above the minimum balance for each pool file
@@ -253,13 +264,13 @@ Replace `HASH` with the hash of the transaction that published the event.
 The signers sign a replacement file:
 
 - After each use, since the nonce is spent.
-- After each signer change, since a file with a removed signer's signature fails as a whole.
+- After a signer change that leaves a file's counted signatures short of the threshold.
 - After an admin transfer, since a file authorizes the pool's previous admin.
 - Before the expiration ledger.
 - After the network lowers its `max_entry_ttl` setting.
 
-If an upgrade lowers the setting, existing files fail at Submit with `Error(Auth, InvalidInput)`
-until their expiration falls within the new bound. Read the setting after each network upgrade:
+If an upgrade lowers the setting, existing files cannot pause until their expiration falls within
+the new bound, and their cards say from when. Read the setting after each network upgrade:
 
 ```bash
 stellar network settings --network testnet \
@@ -421,7 +432,9 @@ stellar tx new set-options --source-account ADMIN_ACCOUNT --network testnet --bu
 Replace `NEW_SIGNER` and `OLD_SIGNER` with the two signers' addresses. Each operation costs the
 100-stroop base fee, so `--inclusion-fee` is 200 for the two. Sign and send it as
 [Sign with the CLI](#sign-with-the-cli) describes, then sign replacements for every pause file
-that carries the old signer's signature, since those files now fail.
+that carries the old signer's signature. Such a file leaves that signature out and pauses only while
+its other signatures meet the threshold. The panel stops collecting signatures at the threshold, so
+when every signer has the same weight, a file it built is then short.
 
 ## Incidents
 
@@ -431,4 +444,4 @@ that carries the old signer's signature, since those files now fail.
 | A soundness bug in a circuit, the verifier, or a pool | Whoever keeps the pause files submits one for every pool at once. Transfers and withdrawals cannot be stopped. Warn users and deploy fixed contracts, since none can be upgraded. |
 | A key is sanctioned | List it, with any other keys due, in each blocklist a pool reads ([Watch the account and the contracts](#watch-the-account-and-the-contracts) shows how to find them): enter each blocklist's address in the Overview tab's ASP Non-Membership Contract ID field in turn, and add the keys on the Blocklist tab. Each write voids the proofs in flight in every pool that reads that blocklist. Until the calls land, the key's owner can move value to a fresh key. |
 | A tree another party runs misbehaves | Pause the pools that read it. Prepare a replacement tree as [Re-point a pool](#re-point-a-pool) describes, including step 4 for an allowlist, before the re-point. Then check the tree, re-point, and unpause. |
-| Deposits pause unexpectedly | Read the landed pause's nonce, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, and find in the record who kept that file. No call revokes a signed file, so replace a signer whose signature that person's files carry, which voids every file with that signature. Then unpause and sign replacements for the voided files. |
+| Deposits pause unexpectedly | Read the landed pause's nonce, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, and find in the record who kept that file. No call revokes a signed file. Replace signers whose signatures that person's files carry until each file falls short of the threshold; when every signer has the same weight, one replacement voids a file the panel built. Then unpause and sign replacements for the voided files. |
