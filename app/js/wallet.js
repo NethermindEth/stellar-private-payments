@@ -12,6 +12,8 @@ import { validateNetwork } from './network-config.js';
  *
  * Network identity comes from SEP-0043 getNetwork; the RPC endpoint comes
  * from deployment configuration, independently of wallet settings.
+ * The app no longer needs getNetworkDetails for endpoint discovery: the
+ * deployment selects the RPC, and the wallet passphrase must match it.
  */
 import {
     WatchWalletChanges,
@@ -178,6 +180,18 @@ export async function getWalletNetwork() {
     const { network, networkPassphrase } = details;
     const config = await loadDeploymentConfig();
     validateNetwork(config, networkPassphrase);
+    if (typeof config.rpcUrl !== 'string' || !config.rpcUrl.trim()) {
+        throw new Error('Deployment config is missing rpcUrl');
+    }
+    let rpcUrl;
+    try {
+        rpcUrl = new URL(config.rpcUrl);
+    } catch {
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+    }
+    if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+    }
     return { network, networkPassphrase, sorobanRpcUrl: config.rpcUrl };
 }
 

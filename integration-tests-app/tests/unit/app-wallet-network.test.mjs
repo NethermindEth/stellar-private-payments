@@ -49,3 +49,32 @@ test('wallet network errors are surfaced', async () => {
   const wallet = await walletWith({ error: { message: 'Network unavailable', code: -1 } });
   await assert.rejects(wallet.getWalletNetwork(), { message: 'Network unavailable', code: 'WALLET_ERROR' });
 });
+
+test('missing deployment RPC is rejected even when the wallet supplies one', async () => {
+  for (const rpcUrl of [undefined, null, '', '   ', 42]) {
+    const wallet = await walletWith(
+      { network: 'custom', networkPassphrase: 'identity', sorobanRpcUrl: 'https://wallet.example/rpc' },
+      { network: 'custom', networkPassphrase: 'identity', rpcUrl },
+    );
+    await assert.rejects(wallet.getWalletNetwork(), /Deployment config is missing rpcUrl/);
+  }
+});
+
+test('deployment RPC must be an absolute HTTP or HTTPS URL', async () => {
+  for (const rpcUrl of ['/rpc', 'not-a-url', 'https://', 'file:///tmp/rpc', 'javascript:void(0)']) {
+    const wallet = await walletWith(
+      { network: 'custom', networkPassphrase: 'identity' },
+      { network: 'custom', networkPassphrase: 'identity', rpcUrl },
+    );
+    await assert.rejects(wallet.getWalletNetwork(), /rpcUrl must be an absolute HTTP or HTTPS URL/);
+  }
+});
+
+test('deployment RPC supports local HTTP endpoints', async () => {
+  const rpcUrl = 'http://localhost:8000/rpc';
+  const wallet = await walletWith(
+    { network: 'custom', networkPassphrase: 'identity' },
+    { network: 'custom', networkPassphrase: 'identity', rpcUrl },
+  );
+  assert.equal((await wallet.getWalletNetwork()).sorobanRpcUrl, rpcUrl);
+});
