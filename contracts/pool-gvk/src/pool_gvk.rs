@@ -709,18 +709,18 @@ impl PoolGvkContract {
         policy_flags: u32,
         modulus: &U256,
     ) -> Result<(), Error> {
-        Self::validate_bn256_public_input(&proof.root, modulus)?;
-        Self::validate_bn256_public_input(&proof.public_amount, modulus)?;
-        for nullifier in proof.input_nullifiers.iter() {
-            Self::validate_bn256_public_input(&nullifier, modulus)?;
-        }
-        Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
-        Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
-        if policy::requires_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
-        }
-        if policy::requires_non_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
+        if !amounts::is_canonical_common_bn256_public_inputs(
+            &proof.root,
+            &proof.public_amount,
+            &proof.input_nullifiers,
+            &proof.output_commitment0,
+            &proof.output_commitment1,
+            &proof.asp_membership_root,
+            &proof.asp_non_membership_root,
+            policy_flags,
+            modulus,
+        ) {
+            return Err(Error::NonCanonicalPublicInput);
         }
         for ct in proof.input_gvk_ciphertexts.iter() {
             Self::validate_gvk_ciphertext(&ct, modulus)?;
