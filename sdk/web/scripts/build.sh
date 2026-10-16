@@ -25,6 +25,15 @@ WASM_OUT_NAME="stellar_private_payments_web"
 echo "==> Verifying circuit artifacts match lockfile..."
 sh "$ROOT/deployments/scripts/circuit-artifacts.sh" verify
 
+# Prefer Homebrew's clang for WebAssembly on macOS, preserving cc-rs overrides.
+# The hyphenated target override is an environment key, not a Bash identifier.
+if [[ "$(uname -s)" == "Darwin" && -z "$(printenv 'CC_wasm32-unknown-unknown' || true)${CC_wasm32_unknown_unknown:-}${TARGET_CC:-}${CC:-}" ]]; then
+  MACOS_LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
+  if [[ -n "$MACOS_LLVM_PREFIX" && -x "$MACOS_LLVM_PREFIX/bin/clang" ]]; then
+    export CC_wasm32_unknown_unknown="$MACOS_LLVM_PREFIX/bin/clang"
+  fi
+fi
+
 # Apple's ar silently drops wasm objects from archives, leaving sqlite-wasm-rs's
 # SQLite library empty (link fails with undefined sqlite3_* symbols), and cc-rs
 # only finds llvm-ar next to a non-Apple clang. On macOS, use the Rust toolchain's

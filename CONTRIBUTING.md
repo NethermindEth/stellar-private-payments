@@ -95,15 +95,21 @@ stellar-private-payments/
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
 - [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
 - [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
+- **macOS only:** Homebrew LLVM (`brew install llvm`) provides clang for WebAssembly builds.
+  `make sdk-web-build`, `make serve`, `make build`, and `npm run build --prefix sdk/web` select it
+  automatically when installed, unless `CC_wasm32-unknown-unknown`, `CC_wasm32_unknown_unknown`,
+  `TARGET_CC`, or `CC` already selects a compiler.
 - **macOS only:** `llvm-ar` for `wasm32-unknown-unknown` builds (`rustup component add llvm-tools`). Apple's `ar`
   silently drops wasm objects from archives, which breaks the SQLite build with undefined `sqlite3_*` symbols at link
   time. `make serve` / `make build` / `npm run build --prefix sdk/web` use the active Rust toolchain's `llvm-ar`
   automatically unless `AR_wasm32_unknown_unknown`, `TARGET_AR`, or `AR` is already set.
 
-For direct WebAssembly builds or the WASM tests below, select the archiver explicitly in your terminal:
+For direct WebAssembly builds or the WASM tests below, select the compiler and archiver explicitly in your terminal:
 
 ```bash
 # macOS only; run from the repository root to use the pinned Rust toolchain.
+brew install llvm
+export CC_wasm32_unknown_unknown="$(brew --prefix llvm)/bin/clang"
 rustup component add llvm-tools
 export AR_wasm32_unknown_unknown="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-ar"
 cargo build -p stellar-private-payments-web --release --target wasm32-unknown-unknown
