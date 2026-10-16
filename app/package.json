@@ -10,6 +10,8 @@
     "tailwindcss": "^4.3.3"
   },
   "dependencies": {
+    "@noble/ed25519": "^3.2.0",
+    "@noble/hashes": "^2.4.0",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^17.2.0",
     "d3-axis": "^3.0.0",
