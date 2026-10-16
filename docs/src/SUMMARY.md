@@ -1,9 +1,19 @@
 # Summary
 
 - [Introduction](./introduction.md)
+- [Operator manual](./operator/README.md)
+  - [How a pool works](./operator/how-a-pool-works.md)
+  - [Run it locally](./operator/run-locally.md)
+  - [Configuration](./operator/configuration.md)
+  - [Deploy a pool](./operator/deploy.md)
+  - [Run an ASP](./operator/run-an-asp.md)
+  - [Compliance controls](./operator/compliance.md)
+  - [Governance](./operator/governance.md)
+  - [Features and limits](./operator/features-and-limits.md)
+  - [Glossary](./operator/glossary.md)
 - [Contributing](./contributing.md)
 - [Deploy](./deploy.md)
-- [Governance](./governance.md)
+- [Governance runbook](./governance.md)
 - [Security](./security.md)
   - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
 
