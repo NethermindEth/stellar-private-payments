@@ -101,7 +101,8 @@ pool:
    manifest with `ASP_ADMIN` as its admin, because clients refuse an allowlist the manifest doesn't
    name.
 
-The Change compliance contracts panel reads an allowlist's entries from its events, so for an
-allowlist step 3 has to finish while the tree is younger than the RPC's event retention, about
-seven days on the public testnet RPC. After the re-point, you edit the tree and the pool's operator
-decides whether their pool keeps reading it.
+Clients replay an allowlist from its deployment ledger, and the Change compliance contracts panel
+reads its entries from its events to compare them with a file, so for an allowlist step 3 has to
+finish while the tree is younger than the RPC's event retention, about seven days on the public
+testnet RPC. After the re-point, you edit the tree and the pool's operator decides whether their
+pool keeps reading it.

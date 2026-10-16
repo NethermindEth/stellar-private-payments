@@ -27,6 +27,7 @@ import {
   hostError,
   liveFootprintKeys,
   newAdminRefusal,
+  repointsTo,
   shortLivedEntries,
   signatureCount,
   signedBy,
@@ -508,6 +509,16 @@ test('submitAdminCall waits for a transaction the network already holds instead 
   for (const status of ['DUPLICATE', 'TRY_AGAIN_LATER']) {
     const server = { ...stubServer({ status }, landed), getTransaction: async () => ({ status: 'NOT_FOUND' }) };
     assert.equal(await submit(server), landed, status);
+  }
+});
+
+test('repointsTo matches the pool, method, tree, and a given source', () => {
+  const call = { contract: 'POOL', method: 'update_asp_membership', args: ['TREE'], source: 'ADMIN' };
+  const repoint = { pool: 'POOL', method: 'update_asp_membership', tree: 'TREE' };
+  assert.equal(repointsTo(call, repoint), true);
+  assert.equal(repointsTo(call, { ...repoint, source: 'ADMIN' }), true);
+  for (const other of [{ source: 'OTHER' }, { tree: 'OTHER' }, { pool: 'OTHER' }, { method: 'update_asp_non_membership' }]) {
+    assert.equal(repointsTo(call, { ...repoint, ...other }), false, JSON.stringify(other));
   }
 });
 

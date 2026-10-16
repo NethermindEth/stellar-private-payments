@@ -9,12 +9,15 @@ import {
   blocklistKeys,
   codeLine,
   compareEntries,
+  entriesLine,
   eventsSince,
   historyStart,
   levelsLine,
   manifestLine,
   parseRecords,
   readInstance,
+  replacesLine,
+  usesList,
 } from '../../../app/js/tree-check.js';
 
 // A tree event named `name` carrying `fields`, as the RPC's `getEvents` returns it.
@@ -26,6 +29,49 @@ const handover = [
   event('admin_transfer_proposed', { admin: 'DEPLOYER', pending_admin: 'ADMIN' }),
   event('admin_transfer_accepted', { old_admin: 'DEPLOYER', new_admin: 'ADMIN' }),
 ];
+
+test('usesList reads the allowlist from flag value 1 and the blocklist from value 2', () => {
+  assert.deepEqual([0, 1, 2, 3, undefined].map((flags) => [usesList(flags, true), usesList(flags, false)]), [
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+    // No flags: every check runs.
+    [true, true],
+  ]);
+});
+
+test('entriesLine asks to confirm an empty tree, with a file or without, and compares any file', () => {
+  const none = { missing: [], unexpected: [] };
+  for (const [count, compared] of [[0, null], [0n, null], [0, none]]) {
+    assert.throws(() => entriesLine(false, count, compared), {
+      message: 'empty, so every blocked key could spend again',
+      confirm: 'Use an empty blocklist',
+    });
+  }
+  assert.throws(() => entriesLine(true, 0n, null), { confirm: 'Use an empty allowlist' });
+  assert.throws(() => entriesLine(true, 0, { missing: ['0x1'], unexpected: [] }), { message: 'missing 0x1' });
+  assert.throws(() => entriesLine(true, 2n, { missing: [], unexpected: ['0x3'] }), { message: 'not expected 0x3' });
+  assert.equal(entriesLine(true, 2, none), '2, all as expected');
+});
+
+test('entriesLine asks to confirm an allowlist smaller than the pool\'s current one when no file was chosen', () => {
+  assert.throws(() => entriesLine(true, 3n, null, { current: 10n }), {
+    message: '3, but the current allowlist has 10. Anyone missing couldn\'t use the pool, withdrawals included. Compare with a file above to see who.',
+    confirm: 'Use the smaller allowlist',
+  });
+  assert.equal(entriesLine(true, 10n, null, { current: 10n }), '10, as many as the current allowlist');
+  assert.equal(entriesLine(true, 11n, null, { current: 10n }), '11, more than the current allowlist\'s 10');
+});
+
+test('entriesLine asks to confirm a blocklist that releases keys the current one blocks when no file was chosen', () => {
+  assert.throws(() => entriesLine(false, 12, null, { released: 28 }), {
+    message: '12, but it lacks 28 keys the current blocklist blocks. They could spend again.',
+    confirm: 'Release 28 blocked keys',
+  });
+  assert.throws(() => entriesLine(false, 39, null, { released: 1 }), { confirm: 'Release 1 blocked key' });
+  assert.equal(entriesLine(false, 40, null, { released: 0 }), '40, blocking every key the current blocklist blocks');
+});
 
 test('compareEntries reports records the tree lacks and entries no record names', () => {
   assert.deepEqual(compareEntries([1n, 2n, 4n], [1n, 2n, 3n]), { missing: [3n], unexpected: [4n] });
@@ -89,6 +135,11 @@ test('codeLine compares an allowlist with the pool\'s first hash and a blocklist
   assert.throws(() => codeLine(accepted, undefined, true), /the contract runs no Wasm/);
 });
 
+test('replacesLine fails the contract the pool already uses', () => {
+  assert.equal(replacesLine('CCMCAW7AFVATPKIAQAMAGHJ2AHS3SMK6CALUPO3FV2XR3D7X2UECLHN6', 'NEW'), 'CCMCAW...LHN6, which the pool uses now');
+  assert.throws(() => replacesLine('CURRENT', 'CURRENT'), { message: 'the pool already uses it' });
+});
+
 test('levelsLine fails an 11-level allowlist in place of a 10-level one', () => {
   assert.throws(
     () => levelsLine('CURRENT', 10, 11),
@@ -97,9 +148,13 @@ test('levelsLine fails an 11-level allowlist in place of a 10-level one', () => 
   assert.equal(levelsLine('CURRENT', 10, 10), '10, as in the pool\'s current allowlist');
 });
 
-test('adminLine passes the pool\'s admin and asks to confirm any other by name', () => {
-  assert.equal(adminLine('POOL_ADMIN', 'POOL_ADMIN'), 'POOL_ADMIN, the pool\'s admin');
-  assert.throws(() => adminLine('OTHER', 'POOL_ADMIN'), { message: 'OTHER, not the pool\'s admin', confirm: 'OTHER' });
+test('adminLine passes the pool\'s admin and names both admins when they differ', () => {
+  const [poolAdmin, other] = ['GPOOL1ADMIN1111', 'GTREE2ADMIN2222'];
+  assert.equal(adminLine(poolAdmin, poolAdmin), 'the pool\'s admin, GPOOL1...1111');
+  assert.throws(() => adminLine(other, poolAdmin), {
+    message: 'run by GTREE2ADMIN2222, not the pool\'s admin GPOOL1...1111',
+    confirm: 'Accept GTREE2...2222 as its admin',
+  });
 });
 
 test('manifestLine fails an allowlist the manifest names in neither place', () => {
@@ -130,7 +185,18 @@ test('eventsSince refuses a start ledger the RPC no longer holds before reading 
     getHealth: async () => ({ oldestLedger: 100 }),
     getEvents: async () => assert.fail('no event is read before the RPC holds the start ledger'),
   };
-  await assert.rejects(eventsSince(server, 'TREE', 99), /no longer holds ledger 99, .* only ledgers from 100 on/);
+  await assert.rejects(eventsSince(server, 'TREE', 99), { message: 'the network no longer has this allowlist\'s full history' });
+});
+
+test('eventsSince reads the RPC\'s ledger range refusal as the retention limit', async () => {
+  // Load-balanced nodes can hold different history.
+  const server = {
+    getHealth: async () => ({ oldestLedger: 100 }),
+    getEvents: async () => Promise.reject({ code: -32600, message: 'startLedger must be within the ledger range: 150 - 900' }),
+  };
+  await assert.rejects(eventsSince(server, 'TREE', 120), { message: 'the network no longer has this allowlist\'s full history' });
+  const other = { code: -32603, message: 'request timed out after 30 seconds' };
+  await assert.rejects(eventsSince({ ...server, getEvents: async () => Promise.reject(other) }, 'TREE', 120), (err) => err === other);
 });
 
 const CONTRACT = 'CBZAWV3AKKKIIO3LEIF7DHODHHHTTL47M7WQSZYTU3ZYSBMM32MUM5H4';

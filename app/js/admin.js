@@ -6,9 +6,9 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
-import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
+import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, decodeAuthorization, encodeAuthorization, pauseTransaction, walletSignature } from './pause-authorization.js';
 
 // DOM element references
@@ -62,10 +62,9 @@ const repointPoolSelect = document.getElementById('repointPool');
 const repointKindSelect = document.getElementById('repointKind');
 const repointTreeInput = document.getElementById('repointTree');
 const repointRecordsInput = document.getElementById('repointRecords');
+const repointRecordsNameEl = document.getElementById('repointRecordsName');
+const clearRepointRecordsBtn = document.getElementById('clearRepointRecordsBtn');
 const repointChecksEl = document.getElementById('repointChecks');
-const repointConfirmEl = document.getElementById('repointConfirm');
-const repointConfirmBox = document.getElementById('repointConfirmBox');
-const repointConfirmTextEl = document.getElementById('repointConfirmText');
 const checkRepointBtn = document.getElementById('checkRepointBtn');
 const buildRepointBtn = document.getElementById('buildRepointBtn');
 
@@ -95,7 +94,7 @@ const state = {
   // The manifest's pools and added allowlists; `kindOf` reads a pasted call against them.
   pools: [],
   addedAllowlists: [],
-  // The last re-point check: its lines, and the call they allow once each passes.
+  // Last re-point check, or its Done note.
   repoint: null,
   // Pool to the blocklist it reads, which a re-point changes without the
   // manifest.
@@ -291,6 +290,7 @@ function disconnect() {
     btn.title = "Please connect your wallet first";
   });
   renderAdminTx();
+  resetRepoint();
 
   refreshPools();
   refreshAdmins();
@@ -372,6 +372,8 @@ const SIGNED_LABELS = new Map([[true, 'signed'], [false, 'not yet'], [null, 'can
 // call, and from the contract otherwise.
 function renderAdminTx(kind) {
   const xdr = adminTxXdrInput.value.trim();
+  // The re-point panel mirrors the card.
+  renderRepoint();
   state.adminTxKind = null;
   adminTxSignaturesEl.textContent = '0';
   adminTxSignersEl.replaceChildren();
@@ -538,11 +540,11 @@ async function submitAdminTx() {
   submitAdminTxBtn.disabled = true;
   submitAdminTxBtn.textContent = 'Submitting...';
   adminTxXdrInput.readOnly = true;
-  let method;
+  let call;
   try {
     ensureWalletConnected();
     const envelope = adminTxXdrInput.value.trim();
-    ({ method } = describeAdminCall(envelope, state.networkPassphrase));
+    call = describeAdminCall(envelope, state.networkPassphrase);
     setStatus('Submitting the admin transaction...', 'info');
     await submitAdminCall({ rpcUrl: state.rpcUrl, networkPassphrase: state.networkPassphrase, xdr: envelope });
   } catch (err) {
@@ -558,9 +560,14 @@ async function submitAdminTx() {
     adminTxXdrInput.readOnly = false;
   }
   setStatus('Admin transaction succeeded', 'ok');
-  showToast(`${method} succeeded`, 'success');
+  showToast(`${call.method} succeeded`, 'success');
+  // The call may have changed what the last check read. Dropping the check
+  // before the card empties keeps Build from offering it again.
+  resetRepoint();
   loadAdminTx('');
   await refreshState();
+  // Unless a new check started during the refresh.
+  if (!state.repoint && repointDescribes(call)) showRepointDone(call);
 }
 
 async function copyText(text, what) {
@@ -729,11 +736,15 @@ async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
 // Lists every pool the manifest names, disabled ones too since they still take
 // deposits, with its trees and deposit flag.
 function refreshPools() {
-  resetRepoint();
   state.poolBlocklists = new Map();
   return fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
     state.pools = pools.map(({ poolContractId }) => poolContractId);
-    [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => select.replaceChildren(...state.pools.map((contractId) => new Option(shortAddress(contractId), contractId))));
+    [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => {
+      // Keep the operator's pick across a refresh.
+      const chosen = select.value;
+      select.replaceChildren(...state.pools.map((contractId) => new Option(shortAddress(contractId), contractId)));
+      if (state.pools.includes(chosen)) select.value = chosen;
+    });
     return state.pools.map((contractId) => poolRow(contractId));
   });
 }
@@ -798,35 +809,93 @@ async function buildRowCall(button, kind, call) {
 // -----------------------------
 // Re-point
 // -----------------------------
-// Draws the last re-point check. An outside admin's line passes once the
-// operator confirms it; Build waits for every line.
+// Build waits for every line; a confirm line passes once ticked.
 function renderRepoint() {
   const lines = state.repoint?.lines ?? [];
-  const passes = ({ ok, confirm }) => ok || (Boolean(confirm) && repointConfirmBox.checked);
-  repointChecksEl.replaceChildren(...lines.map((line) => Object.assign(document.createElement('li'), {
-    className: passes(line) ? 'text-emerald-300' : 'text-rose-300',
-    textContent: `${passes(line) ? 'ok' : 'FAIL'} ${line.label}: ${line.text}`,
-  })));
-  const confirm = lines.find((line) => line.confirm)?.confirm;
-  repointConfirmEl.classList.toggle('hidden', !confirm);
-  repointConfirmTextEl.textContent = confirm ? `Let the pool use a contract that ${confirm} runs, not the pool's admin` : '';
-  buildRepointBtn.disabled = lines.length === 0 || !lines.every(passes);
+  const built = repointInCard();
+  const passes = ({ ok, confirm, confirmed }) => ok || (Boolean(confirm) && Boolean(confirmed));
+  // Once built, Build stays off: a rebuild drops the card's signatures.
+  const note = document.createElement('li');
+  const paintNote = () => {
+    const ready = lines.length > 0 && lines.every(passes);
+    const [text, className] = state.repoint?.done
+      ? [state.repoint.done, 'text-emerald-300']
+      : (!built ? ['', ''] : (ready
+        ? ['Built. Signers sign it in the Admin Transaction card below.', 'text-cyan-200']
+        : ['A box above is unticked, so don\'t sign the call in the card below.', 'text-rose-300']));
+    Object.assign(note, { textContent: text, className });
+    if (text) repointChecksEl.append(note);
+    else note.remove();
+    buildRepointBtn.disabled = built || !ready;
+  };
+  repointChecksEl.replaceChildren(...lines.map((line) => {
+    const item = document.createElement('li');
+    const text = document.createElement('span');
+    item.append(text);
+    const paint = () => {
+      // Ticked means accepted, not passed.
+      const [word, className] = line.ok ? ['OK', 'text-emerald-300'] : (line.confirm ? [line.confirmed ? 'ACCEPTED' : 'CONFIRM', 'text-amber-300'] : ['FAIL', 'text-rose-300']);
+      item.className = className;
+      text.textContent = `${word} ${line.label}: ${line.text}`;
+    };
+    if (line.confirm) {
+      const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: Boolean(line.confirmed), className: 'mt-0.5 h-4 w-4 shrink-0 accent-cyan-400' });
+      // Repaint only this line so the box keeps focus.
+      box.addEventListener('change', () => {
+        line.confirmed = box.checked;
+        paint();
+        paintNote();
+      });
+      const label = Object.assign(document.createElement('label'), { className: 'mb-1 mt-2 flex cursor-pointer items-start gap-3 font-sans text-sm text-slate-200' });
+      label.append(box, line.confirm);
+      item.append(label);
+    }
+    paint();
+    return item;
+  }));
+  paintNote();
 }
+
+const repointMethod = (allowlist) => (allowlist ? 'update_asp_membership' : 'update_asp_non_membership');
+
+// The card holds the checked re-point, unexpired.
+function repointInCard() {
+  const check = state.repoint;
+  if (!check?.call || !state.networkPassphrase) return false;
+  try {
+    const call = describeAdminCall(adminTxXdrInput.value.trim(), state.networkPassphrase);
+    return call.validUntil * 1000 > Date.now()
+      && repointsTo(call, { pool: check.call.contractId, method: check.call.method, tree: check.tree, source: check.call.source });
+  } catch {
+    return false;
+  }
+}
+
+const repointDescribes = (call) => repointsTo(call, {
+  pool: repointPoolSelect.value,
+  method: repointMethod(repointKindSelect.value === 'asp-membership'),
+  tree: repointTreeInput.value.trim(),
+});
 
 function resetRepoint() {
   state.repoint = null;
-  repointConfirmBox.checked = false;
   renderRepoint();
 }
 
-// Checks a tree before a re-point, one line per check. The pool already
-// refuses other code; the rest covers depth, admin, client indexing, and
-// entries.
+// Done note. Clears the address.
+function showRepointDone({ contract, method, args: [tree] }) {
+  const noun = method === 'update_asp_membership' ? 'allowlist' : 'blocklist';
+  state.repoint = { lines: [], done: `Done. Pool ${shortAddress(contract)} now uses ${noun} ${shortAddress(tree)}.` };
+  repointTreeInput.value = '';
+  renderRepoint();
+}
+
+// Replaces and Code first; the rest only if the pool accepts the code.
 async function checkRepoint() {
   resetRepoint();
   // A field that changes while the check runs resets it, and its result is dropped.
-  const check = {};
-  state.repoint = check;
+  const pending = {};
+  state.repoint = pending;
   const originalText = checkRepointBtn.textContent;
   try {
     ensureWalletConnected();
@@ -845,7 +914,14 @@ async function checkRepoint() {
       readInstance(server, pool),
       readInstance(server, tree),
     ]);
-    const checks = [
+    const run = (checks) => Promise.all(checks.filter(Boolean).map(([label, check]) => check().then(
+      (text) => ({ label, ok: true, text }),
+      (err) => ({ label, ok: false, text: err.message, confirm: err.confirm }),
+    )));
+    // A list the policy ignores decides nothing: check only its code.
+    const uses = usesList(poolInstance.stored.get('PolicyFlags'), allowlist);
+    const [replaces, code] = await run([
+      ['Replaces', async () => replacesLine(poolInstance.stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership'), tree)],
       ['Code', async () => {
         const client = await readClient(pool);
         if (!client.get_asp_wasm_hashes) {
@@ -853,64 +929,73 @@ async function checkRepoint() {
         }
         return codeLine((await client.get_asp_wasm_hashes()).result.unwrap(), treeInstance.wasmHash, allowlist);
       }],
-      allowlist && ['Levels', async () => {
+    ]);
+    const lines = !code.ok ? [replaces, code] : [replaces, code, ...(await run([
+      !uses && [allowlist ? 'Allowlist' : 'Blocklist', async () => 'not used by this pool, so this changes nothing for users'],
+      uses && allowlist && ['Levels', async () => {
         const current = poolInstance.stored.get('ASPMembership');
         const levels = (await readInstance(server, current)).stored.get('Levels');
         return levelsLine(current, levels, treeInstance.stored.get('Levels'));
       }],
-      ['Admin', async () => {
+      uses && ['Admin', async () => {
         const client = await readClient(tree);
         if (!client.get_admin) throw new Error('the contract has no get_admin entry point');
         return adminLine((await client.get_admin()).result.unwrap(), admin);
       }],
-      allowlist && ['Manifest', async () => manifestLine(manifest, tree)],
-      ['Entries', async () => {
+      uses && allowlist && ['Manifest', async () => manifestLine(manifest, tree)],
+      uses && ['Entries', async () => {
         const [file] = repointRecordsInput.files;
-        if (!file) throw new Error('choose the records file');
+        const nextIndex = (contract = tree) => server.getContractData(contract, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))
+          .then(({ val }) => scValToNative(val.contractData.val));
+        const keys = async (contract = tree, instance = treeInstance) => blocklistKeys(server, contract, instance.stored.get('Root'));
+        // No file: compare with the pool's current list, which storage holds at any age.
+        if (!file) {
+          const current = poolInstance.stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership');
+          const unreadable = (err) => {
+            throw new Error(`couldn't read the pool's current list: ${err.message}. Add a file to compare with instead.`);
+          };
+          if (allowlist) {
+            const [count, held] = await Promise.all([nextIndex(), nextIndex(current).catch(unreadable)]);
+            return entriesLine(true, count, null, { current: held });
+          }
+          const [fresh, held] = await Promise.all([keys(), readInstance(server, current).then((instance) => keys(current, instance)).catch(unreadable)]);
+          return entriesLine(false, fresh.length, null, { released: compareEntries(fresh, held).missing.length });
+        }
         // Blocklist records and reported keys are note public keys in Blocklist
         // tab form, so a key loaded in the wrong byte order fails.
         const records = (allowlist ? parseRecords : parseBlocklistKeys)(await file.text());
-        let onChain;
-        if (allowlist) {
-          const [events, nextIndex] = await Promise.all([
-            eventsSince(server, tree, historyStart({ tree, manifest })),
-            server.getContractData(tree, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))
-              .then(({ val }) => scValToNative(val.contractData.val)),
-          ]);
-          onChain = allowlistLeavesFromEvents(events, nextIndex);
-        } else {
-          onChain = await blocklistKeys(server, tree, treeInstance.stored.get('Root'));
-        }
+        const onChain = allowlist
+          ? await Promise.all([eventsSince(server, tree, historyStart({ tree, manifest })), nextIndex()])
+            .then(([events, count]) => allowlistLeavesFromEvents(events, count))
+            .catch((err) => {
+              throw new Error(`${err.message}. Clear the file to check just the count.`);
+            })
+          : await keys();
         const { missing, unexpected } = compareEntries(onChain, records);
         const shown = allowlist ? (value) => `0x${value.toString(16)}` : blocklistKeyToNoteKey;
-        const listed = (values) => values.map(shown).join(', ');
-        const problems = [
-          missing.length > 0 && `missing from the contract: ${listed(missing)}`,
-          unexpected.length > 0 && `not in the records: ${listed(unexpected)}`,
-        ].filter(Boolean);
-        if (problems.length > 0) throw new Error(problems.join('; '));
-        return `${onChain.length} on chain, as in the records`;
+        return entriesLine(allowlist, onChain.length, { missing: missing.map(shown), unexpected: unexpected.map(shown) });
       }],
-    ].filter(Boolean);
-    const lines = await Promise.all(checks.map(([label, run]) => run().then(
-      (text) => ({ label, ok: true, text }),
-      (err) => ({ label, ok: false, text: err.message, confirm: err.confirm }),
-    )));
-    if (state.repoint !== check) return;
+    ]))];
+    if (state.repoint !== pending) return;
     setStatus('Contract checked', 'info');
-    Object.assign(check, {
+    Object.assign(pending, {
       lines,
+      tree,
       call: {
         source: admin,
         contractId: pool,
-        method: allowlist ? 'update_asp_membership' : 'update_asp_non_membership',
+        method: repointMethod(allowlist),
         args: allowlist ? { new_asp_membership: tree } : { new_asp_non_membership: tree },
       },
     });
     renderRepoint();
   } catch (err) {
     setStatus('Contract check failed', 'error');
-    showToast(`Contract check failed: ${err.message}`, 'error');
+    // In the panel: a toast is gone in seconds.
+    if (state.repoint === pending) {
+      pending.lines = [{ label: 'Check', ok: false, text: err.message }];
+      renderRepoint();
+    }
   } finally {
     if (state.address) checkRepointBtn.disabled = false;
     checkRepointBtn.textContent = originalText;
@@ -1177,7 +1262,11 @@ connectBtn.addEventListener('click', () => {
     connect();
   }
 });
-refreshBtn.addEventListener('click', refreshState);
+// Refresh drops a finished check (the pool may have changed); a running one reads live data.
+refreshBtn.addEventListener('click', () => {
+  if (state.repoint?.lines) resetRepoint();
+  refreshState();
+});
 
 addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
 addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);
@@ -1199,9 +1288,19 @@ if (sharedTx) {
 // A changed field makes the last re-point check stale.
 [repointPoolSelect, repointKindSelect, repointTreeInput, repointRecordsInput]
   .forEach((field) => field.addEventListener('input', resetRepoint));
-repointConfirmBox.addEventListener('change', renderRepoint);
+// The native control's text follows the browser's language, so name the file here.
+repointRecordsInput.addEventListener('change', () => {
+  const [file] = repointRecordsInput.files;
+  repointRecordsNameEl.textContent = file?.name ?? 'No file chosen';
+  clearRepointRecordsBtn.classList.toggle('hidden', !file);
+});
+clearRepointRecordsBtn.addEventListener('click', () => {
+  repointRecordsInput.value = '';
+  repointRecordsInput.dispatchEvent(new Event('change'));
+  resetRepoint();
+});
 checkRepointBtn.addEventListener('click', checkRepoint);
-// A landed re-point clears the check, so the button follows the check again.
+// The build restores the button; re-sync it with the check and the card.
 buildRepointBtn.addEventListener('click', async () => {
   await buildRowCall(buildRepointBtn, 'pool', state.repoint.call);
   renderRepoint();

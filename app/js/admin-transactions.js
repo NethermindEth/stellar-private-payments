@@ -333,6 +333,11 @@ export async function submitAdminCall({ rpcUrl, networkPassphrase, xdr, server =
   throw new Error(`transaction ${sent.hash} ${landed.status}: ${landed.resultXdr?.result.type ?? ''} ${hostError(landed.diagnosticEventsXdr)}`);
 }
 
+export const repointsTo = (call, { pool, method, tree, source }) => call.contract === pool
+  && call.method === method
+  && call.args[0] === tree
+  && (source === undefined || call.source === source);
+
 // Tested in order: `tx_bad_auth_extra` before `tx_bad_auth`, which also matches it.
 const NETWORK_REFUSALS = [
   [/tx_?bad_?auth_?extra/i, 'The transaction carries a signature it does not use: more than the threshold needs, one signer twice, or a key that is not a signer. Build the call again and collect the threshold\'s signatures, one from each signer.'],

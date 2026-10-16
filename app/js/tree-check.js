@@ -5,7 +5,7 @@
  */
 import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 
-import { hex } from './admin-transactions.js';
+import { hex, shortAddress } from './admin-transactions.js';
 
 /**
  * Reads a contract's instance entry.
@@ -23,6 +23,8 @@ export async function readInstance(server, contractId) {
   };
 }
 
+const HISTORY_GONE = 'the network no longer has this allowlist\'s full history';
+
 /**
  * Reads every event a contract published from `startLedger` on. The RPC scans a
  * window of ledgers per request, so an empty page is not the end; the read ends
@@ -32,14 +34,15 @@ export async function readInstance(server, contractId) {
  */
 export async function eventsSince(server, contractId, startLedger) {
   const { oldestLedger } = await server.getHealth();
-  if (startLedger < oldestLedger) {
-    throw new Error(`the RPC no longer holds ledger ${startLedger}, where the allowlist's events start, only ledgers from ${oldestLedger} on`);
-  }
+  if (startLedger < oldestLedger) throw new Error(HISTORY_GONE);
   const filters = [{ type: 'contract', contractIds: [contractId] }];
   const events = [];
   let cursor;
   for (;;) {
-    const page = await server.getEvents(cursor ? { filters, cursor } : { startLedger, filters });
+    const page = await server.getEvents(cursor ? { filters, cursor } : { startLedger, filters }).catch((err) => {
+      // A load-balanced RPC node can hold less history than getHealth said.
+      throw /startLedger must be within the ledger range/.test(err.message) ? new Error(HISTORY_GONE) : err;
+    });
     events.push(...page.events);
     if (page.cursor === cursor) return events;
     ({ cursor } = page);
@@ -63,6 +66,9 @@ export function historyStart({ tree, manifest }) {
   return ledger;
 }
 
+/** `PolicyFlags` bit 1 is the allowlist, 2 the blocklist; no flags means both. */
+export const usesList = (policyFlags, allowlist) => policyFlags === undefined || (policyFlags & (allowlist ? 1 : 2)) !== 0;
+
 /**
  * Checks that a tree runs the code the pool accepts for its kind, and returns the
  * check's line.
@@ -81,6 +87,11 @@ export function codeLine(acceptedHashes, treeHash, allowlist) {
   return `the contract runs ${accepted}, the code the pool accepts`;
 }
 
+export function replacesLine(current, tree) {
+  if (tree === current) throw new Error('the pool already uses it');
+  return `${shortAddress(current)}, which the pool uses now`;
+}
+
 /**
  * Checks that a new allowlist has the current one's depth, which its code does not
  * fix, and returns the check's line.
@@ -94,15 +105,12 @@ export function levelsLine(current, levels, treeLevels) {
   return `${levels}, as in the pool's current allowlist`;
 }
 
-/**
- * Checks who runs a tree, and returns the check's line when the pool's admin does.
- *
- * @throws {Error} carrying `treeAdmin` as `confirm` when another party runs the
- *   tree; the check passes once the operator confirms that party.
- */
 export function adminLine(treeAdmin, poolAdmin) {
-  if (treeAdmin === poolAdmin) return `${treeAdmin}, the pool's admin`;
-  throw Object.assign(new Error(`${treeAdmin}, not the pool's admin`), { confirm: treeAdmin });
+  if (treeAdmin === poolAdmin) return `the pool's admin, ${shortAddress(treeAdmin)}`;
+  // In full: a vanity key can match a short form.
+  throw Object.assign(new Error(`run by ${treeAdmin}, not the pool's admin ${shortAddress(poolAdmin)}`), {
+    confirm: `Accept ${shortAddress(treeAdmin)} as its admin`,
+  });
 }
 
 /**
@@ -175,6 +183,37 @@ export async function blocklistKeys(server, contractId, root) {
     level = next;
   }
   return keys;
+}
+
+/** With no file (`compared` null), pass `{ current }` (allowlist) or `{ released }` (blocklist). */
+export function entriesLine(allowlist, count, compared, unfiled = {}) {
+  const problems = [
+    compared?.missing.length > 0 && `missing ${compared.missing.join(', ')}`,
+    compared?.unexpected.length > 0 && `not expected ${compared.unexpected.join(', ')}`,
+  ].filter(Boolean);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+  if (Number(count) === 0) {
+    throw Object.assign(new Error(allowlist
+      ? 'empty, so no one could use the pool or withdraw'
+      : 'empty, so every blocked key could spend again'), {
+      confirm: `Use an empty ${allowlist ? 'allowlist' : 'blocklist'}`,
+    });
+  }
+  const { current, released = 0 } = unfiled;
+  if (current !== undefined && BigInt(count) < BigInt(current)) {
+    throw Object.assign(new Error(`${count}, but the current allowlist has ${current}. Anyone missing couldn't use the pool, withdrawals included. Compare with a file above to see who.`), {
+      confirm: 'Use the smaller allowlist',
+    });
+  }
+  if (released > 0) {
+    const keys = released === 1 ? 'key' : 'keys';
+    throw Object.assign(new Error(`${count}, but it lacks ${released} ${keys} the current blocklist blocks. They could spend again.`), {
+      confirm: `Release ${released} blocked ${keys}`,
+    });
+  }
+  if (compared) return `${count}, all as expected`;
+  if (!allowlist) return `${count}, blocking every key the current blocklist blocks`;
+  return BigInt(count) === BigInt(current) ? `${count}, as many as the current allowlist` : `${count}, more than the current allowlist's ${current}`;
 }
 
 /**
