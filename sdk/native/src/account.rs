@@ -258,7 +258,7 @@ impl Account {
                 &self.user_address,
                 &self.signer_address,
                 note_pk.0,
-                enc_pk.0,
+                &enc_pk.0,
             )
             .await
             .context("prepare register")?;

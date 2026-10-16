@@ -12,7 +12,7 @@ As a consequence, on-chain observers can correlate:
 
 ## 2. Public Key Registry Opt-In Trade-off
 
-The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's public Stellar `Address` to their X25519 `encryption_key` and BN254 `note_key`.
+The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's public Stellar `Address` to their X-Wing (X25519 + ML-KEM-768) `encryption_key` and BN254 `note_key`.
 
 * **Purpose**: Allows senders to resolve a recipient's keys on-chain without out-of-band communication.
 * **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band.

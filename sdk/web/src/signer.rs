@@ -301,11 +301,16 @@ impl Signer for WalletSigner {
     }
 
     async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
-        let sig = self
-            .sign_message(message)
-            .await
-            .map_err(wallet_sign_error)?;
+        // The wallet's reply is the root secret of the privacy keys: wipe the
+        // Rust-side string as soon as it is decoded. (The JS-side string the
+        // wallet produced is immutable and cannot be overwritten from here.)
+        let mut sig = zeroize::Zeroizing::new(
+            self.sign_message(message)
+                .await
+                .map_err(wallet_sign_error)?,
+        );
         let bytes = wallet_message_signature_to_bytes(&sig).map_err(wallet_sign_error)?;
+        zeroize::Zeroize::zeroize(&mut sig);
         Ok(KeyDerivationSignature(bytes))
     }
 }

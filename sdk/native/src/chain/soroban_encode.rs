@@ -190,7 +190,7 @@ pub fn pool_ext_data_to_scval(ext: &ExtData) -> Result<ScVal> {
 /// Encodes a public-key registration `Account` for `register`.
 pub fn register_account_to_scval(
     owner: &str,
-    encryption_key: [u8; 32],
+    encryption_key: &[u8],
     note_key: [u8; 32],
 ) -> Result<ScVal> {
     sorted_map(vec![
@@ -217,7 +217,9 @@ mod tests {
     };
 
     const TEST_ACCOUNT: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-    use crate::types::{BabyJubJubPoint, ExtAmount, GlobalViewKeyCiphertext, U256};
+    use crate::types::{
+        BabyJubJubPoint, EncryptionPublicKey, ExtAmount, GlobalViewKeyCiphertext, U256,
+    };
     use stellar_xdr::{Limits, ReadXdr, WriteXdr};
 
     fn scval_xdr(sc: &ScVal) -> std::vec::Vec<u8> {
@@ -408,7 +410,7 @@ mod tests {
     fn account_encoding_matches_contracttype_xdr() {
         let env = Env::default();
         let owner = Address::from_str(&env, TEST_ACCOUNT);
-        let encryption_key = Bytes::from_array(&env, &[0xEE; 32]);
+        let encryption_key = Bytes::from_array(&env, &[0xEE; EncryptionPublicKey::LEN]);
         let note_key = Bytes::from_array(&env, &[0xAB; 32]);
         let on_chain = Account {
             owner: owner.clone(),
@@ -420,7 +422,7 @@ mod tests {
         let ours = scval_xdr(
             &register_account_to_scval(
                 TEST_ACCOUNT,
-                soroban_bytes32(&encryption_key),
+                &encryption_key.to_alloc_vec(),
                 soroban_bytes32(&note_key),
             )
             .expect("encode"),

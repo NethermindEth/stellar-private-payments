@@ -34,5 +34,5 @@ pub(crate) fn note_public_key_hex(value: &NotePublicKey) -> String {
 }
 
 pub(crate) fn encryption_public_key_hex(value: &EncryptionPublicKey) -> String {
-    encode_0x_hex(&value.0)
+    value.to_0x_hex()
 }
