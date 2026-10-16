@@ -434,6 +434,10 @@ test('explainFailure names a transaction the network refused', () => {
     explainFailure(new Error('transaction 5bb5 FAILED: txFailed Error(Auth, InvalidAction)'), 'asp-membership'),
     'The transaction\'s source is not the contract\'s admin.',
   );
+  assert.equal(
+    explainFailure(new Error('transaction ERROR: txInsufficientBalance '), 'pool'),
+    'The paying account doesn\'t have enough XLM for the fee. Add some and try again.',
+  );
 });
 
 test('explainFailure names the pool errors 18, 20 and 21', () => {

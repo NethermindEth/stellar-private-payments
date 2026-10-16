@@ -103,14 +103,14 @@ test('allowlistLeavesFromEvents refuses events that start after the first leaf',
     event('LeafAdded', { leaf: 20n, index: 1n, root: 11n }),
     event('LeafAdded', { leaf: 30n, index: 2n, root: 12n }),
   ];
-  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /no leaf at index 0/);
+  assert.throws(() => allowlistLeavesFromEvents(events, 3n), { message: 'the allowlist\'s events hold only part of its 3 entries' });
 });
 
 test('allowlistLeavesFromEvents compares the leaf count with NextIndex, zero included', () => {
   const events = [event('LeafAdded', { leaf: 10n, index: 0n, root: 10n }), event('LeafAdded', { leaf: 20n, index: 1n, root: 11n })];
-  assert.throws(() => allowlistLeavesFromEvents(events, 3n), /hold 2 leaves and the allowlist holds 3/);
-  assert.throws(() => allowlistLeavesFromEvents(events, 1n), /hold 2 leaves and the allowlist holds 1/);
-  assert.throws(() => allowlistLeavesFromEvents(handover, 2n), /hold 0 leaves and the allowlist holds 2/);
+  for (const [read, nextIndex] of [[events, 3n], [events, 1n], [handover, 2n]]) {
+    assert.throws(() => allowlistLeavesFromEvents(read, nextIndex), { message: `the allowlist's events hold only part of its ${nextIndex} entries` });
+  }
   assert.deepEqual(allowlistLeavesFromEvents(handover, 0n), []);
 });
 
@@ -131,19 +131,16 @@ test('historyStart reads an added allowlist from its entry and refuses one the m
     added_asp_memberships: [{ contractId: 'ADDED', deploymentLedger: 60 }],
   };
   assert.equal(historyStart({ tree: 'ADDED', manifest }), 60);
-  assert.throws(() => historyStart({ tree: 'OTHER', manifest }), /names no deployment ledger/);
+  assert.throws(() => historyStart({ tree: 'OTHER', manifest }), /gives no deployment ledger/);
 });
 
 test('codeLine compares an allowlist with the pool\'s first hash and a blocklist with its second', () => {
   const [allowlistHash, blocklistHash] = [Buffer.alloc(32, 1), Buffer.alloc(32, 2)];
   const accepted = [allowlistHash, blocklistHash];
-  assert.equal(codeLine(accepted, blocklistHash, false), `the contract runs ${'02'.repeat(32)}, the code the pool accepts`);
-  assert.throws(
-    () => codeLine(accepted, allowlistHash, false),
-    { message: `the contract runs ${'01'.repeat(32)}, and the pool accepts ${'02'.repeat(32)}` },
-  );
-  assert.equal(codeLine(accepted, allowlistHash, true), `the contract runs ${'01'.repeat(32)}, the code the pool accepts`);
-  assert.throws(() => codeLine(accepted, undefined, true), /the contract runs no Wasm/);
+  assert.equal(codeLine(accepted, blocklistHash, false), 'the pool accepts it');
+  assert.throws(() => codeLine(accepted, allowlistHash, false), { message: 'the pool can\'t use it, since its code is different' });
+  assert.equal(codeLine(accepted, allowlistHash, true), 'the pool accepts it');
+  assert.throws(() => codeLine(accepted, undefined, true), /its code is different/);
 });
 
 test('replacesLine fails the contract the pool already uses', () => {
@@ -152,11 +149,9 @@ test('replacesLine fails the contract the pool already uses', () => {
 });
 
 test('levelsLine fails an 11-level allowlist in place of a 10-level one', () => {
-  assert.throws(
-    () => levelsLine('CURRENT', 10, 11),
-    { message: 'the new allowlist has 11 levels, and the pool\'s current allowlist CURRENT has 10' },
-  );
-  assert.equal(levelsLine('CURRENT', 10, 10), '10, as in the pool\'s current allowlist');
+  assert.throws(() => levelsLine(10, 11), { message: '11, but the pool needs 10. Use an allowlist built with 10 levels.' });
+  assert.throws(() => levelsLine(10, undefined), { message: 'none, but the pool needs 10. Use an allowlist built with 10 levels.' });
+  assert.equal(levelsLine(10, 10), '10, same as the current allowlist');
 });
 
 test('adminLine passes the pool\'s admin and names both admins when they differ', () => {
@@ -170,9 +165,9 @@ test('adminLine passes the pool\'s admin and names both admins when they differ'
 
 test('manifestLine fails an allowlist the manifest names in neither place', () => {
   const manifest = { asp_membership: 'ALLOWLIST', added_asp_memberships: [{ contractId: 'ADDED' }] };
-  assert.equal(manifestLine(manifest, 'ALLOWLIST'), 'names the allowlist, so clients index it');
-  assert.equal(manifestLine(manifest, 'ADDED'), 'names the allowlist, so clients index it');
-  assert.throws(() => manifestLine(manifest, 'OTHER'), /in neither asp_membership nor added_asp_memberships/);
+  assert.equal(manifestLine(manifest, 'ALLOWLIST'), 'listed, so users can use it');
+  assert.equal(manifestLine(manifest, 'ADDED'), 'listed, so users can use it');
+  assert.throws(() => manifestLine(manifest, 'OTHER'), { message: 'not listed, so users can\'t use it. Add it to added_asp_memberships in deployments.json.' });
 });
 
 test('eventsSince reads past an empty page and stops when the cursor stops moving', async () => {
@@ -284,5 +279,5 @@ test('blocklistKeys reads a level wider than one request', async () => {
 
 test('blocklistKeys refuses a tree the RPC returns part of', async () => {
   const nodes = new Map([[100n, [101n, 102n]], [101n, [1n, 11n, 1n]]]);
-  await assert.rejects(blocklistKeys(nodeServer(nodes), CONTRACT, 100n), /no entry for part of the blocklist/);
+  await assert.rejects(blocklistKeys(nodeServer(nodes), CONTRACT, 100n), /missing part of this blocklist/);
 });

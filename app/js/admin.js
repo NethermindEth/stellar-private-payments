@@ -354,6 +354,21 @@ function kindOf(contractId) {
   return 'unknown';
 }
 
+// For status and toasts. The card shows the raw function, as Freighter does.
+const CALL_NAMES = {
+  pause_deposits: 'Pausing deposits',
+  unpause_deposits: 'Unpausing deposits',
+  update_asp_membership: 'Switching the allowlist',
+  update_asp_non_membership: 'Switching the blocklist',
+  insert_leaf: 'Adding the entry',
+  insert_leaves: 'Adding the keys',
+  delete_leaf: 'Removing the key',
+  update_admin: 'Proposing the new admin',
+  cancel_admin_transfer: 'Cancelling the admin transfer',
+  accept_admin: 'Accepting the admin role',
+};
+const callName = (method) => CALL_NAMES[method] ?? method;
+
 const KIND_LABELS = { pool: 'pool', 'asp-membership': 'allowlist', 'asp-non-membership': 'blocklist', unknown: 'not a contract this page lists' };
 
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
@@ -567,7 +582,7 @@ async function submitAdminTx() {
     adminTxXdrInput.readOnly = false;
   }
   setStatus('Admin transaction succeeded', 'ok');
-  showToast(`${call.method} succeeded`, 'success');
+  showToast(`${callName(call.method)}: done`, 'success');
   // The call may have changed what the last check read. Dropping the check
   // before the card empties keeps Build from offering it again.
   resetRepoint();
@@ -814,11 +829,11 @@ async function buildRowCall(button, kind, call) {
   button.textContent = 'Processing...';
   try {
     ensureWalletConnected();
-    setStatus(`Building ${call.method}...`, 'info');
+    setStatus(`${callName(call.method)}: building the call...`, 'info');
     await prepareAdminCall(kind, call);
   } catch (err) {
-    setStatus(`Building ${call.method} failed`, 'error');
-    showToast(`Building ${call.method} failed: ${explainFailure(err, kind)}`, 'error');
+    setStatus(`${callName(call.method)}: couldn't build the call`, 'error');
+    showToast(`${callName(call.method)} failed: ${explainFailure(err, kind)}`, 'error');
   } finally {
     Object.assign(button, { disabled, textContent });
     button.style.minWidth = '';
@@ -952,16 +967,15 @@ async function checkRepoint() {
     const lines = !code.ok ? [replaces, code] : [replaces, code, ...(await run([
       !uses && [allowlist ? 'Allowlist' : 'Blocklist', async () => 'not used by this pool, so this changes nothing for users'],
       uses && allowlist && ['Levels', async () => {
-        const current = poolInstance.stored.get('ASPMembership');
-        const levels = (await readInstance(server, current)).stored.get('Levels');
-        return levelsLine(current, levels, treeInstance.stored.get('Levels'));
+        const levels = (await readInstance(server, poolInstance.stored.get('ASPMembership'))).stored.get('Levels');
+        return levelsLine(levels, treeInstance.stored.get('Levels'));
       }],
       uses && ['Admin', async () => {
         const client = await readClient(tree);
         if (!client.get_admin) throw new Error('the contract has no get_admin entry point');
         return adminLine((await client.get_admin()).result.unwrap(), admin);
       }],
-      uses && allowlist && ['Manifest', async () => manifestLine(manifest, tree)],
+      uses && allowlist && ['App', async () => manifestLine(manifest, tree)],
       uses && ['Entries', async () => {
         const [file] = repointRecordsInput.files;
         const nextIndex = (contract = tree) => server.getContractData(contract, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('NextIndex')]))

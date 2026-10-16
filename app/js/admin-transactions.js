@@ -347,6 +347,7 @@ const NETWORK_REFUSALS = [
   [/TRY_AGAIN_LATER|NOT_FOUND|DUPLICATE/, 'The network has not confirmed the transaction yet. Check the contract before building the call again.'],
   [/Error\(Auth, InvalidAction\)/, 'The transaction\'s source is not the contract\'s admin.'],
   [/Error\(Budget, ExceededLimit\)/, 'The call needs more resources than one transaction allows. For a blocklist insert, add fewer keys at a time.'],
+  [/tx_?insufficient_?balance/i, 'The paying account doesn\'t have enough XLM for the fee. Add some and try again.'],
 ];
 
 /**

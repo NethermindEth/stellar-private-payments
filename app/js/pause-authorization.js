@@ -158,7 +158,7 @@ export function countedEntry(entry, { weights }) {
  * @throws {Error} when the wallet returned no signature.
  */
 export function walletSignature(signedAuthEntry) {
-  if (!signedAuthEntry) throw new Error('The wallet returned no signature');
+  if (!signedAuthEntry) throw new Error('Freighter returned no signature');
   return Uint8Array.from(atob(signedAuthEntry), (char) => char.charCodeAt(0));
 }
 
@@ -172,7 +172,7 @@ function describePause(entry) {
     || call.args.length > 0
     || entry.rootInvocation.subInvocations.length > 0
   ) {
-    throw new Error('The file authorizes something other than a pause of one pool\'s deposits');
+    throw new Error('This file does something other than pause one pool\'s deposits');
   }
   const { address, nonce, signatureExpirationLedger, signature } = entry.credentials.address;
   return {

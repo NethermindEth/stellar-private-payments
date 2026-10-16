@@ -62,7 +62,7 @@ This is [the administrative control panel](https://nethermindeth.github.io/stell
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
 
-Every admin call is a transaction from the contract's admin account. When the connected Freighter account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
+Every admin call is a transaction from the contract's admin account. When the connected Freighter account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin Transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
 
 #### Zero-Knowledge Circuits
 

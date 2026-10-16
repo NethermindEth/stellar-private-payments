@@ -121,7 +121,7 @@ test('walletSignature decodes the signature signAuthEntry returns into one addSi
 });
 
 test('walletSignature refuses a result that carries no signature', () => {
-  assert.throws(() => walletSignature(null), { message: 'The wallet returned no signature' });
+  assert.throws(() => walletSignature(null), { message: 'Freighter returned no signature' });
 });
 
 test('an authorization file round-trips', () => {
@@ -173,7 +173,7 @@ test('decodeAuthorization refuses a file that authorizes anything but a pause of
   for (const [label, [entryCredentials, rootInvocation]] of Object.entries(entries)) {
     const entry = new xdr.SorobanAuthorizationEntry({ credentials: entryCredentials, rootInvocation });
     const file = JSON.stringify({ pool: POOL, entry: entry.toXdr('base64') });
-    assert.throws(() => decodeAuthorization(file), /something other than a pause/, label);
+    assert.throws(() => decodeAuthorization(file), /does something other than pause one pool's deposits/, label);
   }
 });
 

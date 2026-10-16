@@ -130,7 +130,7 @@ signers sign the transaction itself. The admin page builds it and carries it bet
 1. Connect Freighter with any account on the network and build the call: list writes on the
    Allowlist and Blocklist tabs, pauses and re-points on the Pools tab, and admin transfers on the
    Admins tab. The page reads the contract's admin from its `Admin` entry, builds the call with
-   that account as the source, valid for 24 hours, and loads it into the Admin transaction card.
+   that account as the source, valid for 24 hours, and loads it into the Admin Transaction card.
 2. Press Copy link and send the link to the first signer.
 3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
    describes. A signer who did not expect this exact call stops here. Otherwise the signer presses
@@ -358,7 +358,7 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
    Blocklist. No pool uses the tree yet, so the page asks first; confirm. The page builds the insert
    with the deployer as its source. If Freighter is connected as the deployer, it signs and the page
-   sends the insert at once. Otherwise open Transaction XDR in the Admin transaction card, press
+   sends the insert at once. Otherwise open Transaction XDR in the Admin Transaction card, press
    Copy XDR, save it as `tx.xdr`, sign it with `--sign-with-key DEPLOYER`, and send it as [Sign with
    the CLI](#sign-with-the-cli) describes.
 3. Hand the tree to the admin account. The deployer proposes it:
@@ -385,12 +385,11 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    upstream RPC still holds `LEDGER`, as [Add an allowlist](./bootnode.md#add-an-allowlist)
    describes. Redeploy the web app, which bundles the manifest when it is built, and give CLI
    users the new `deployments.json` for `--deployment` or their provisioned copy.
-5. On the Pools tab's Change compliance contracts panel, choose the pool, choose Allowlist or
-   Blocklist under Policy, enter the new tree's address, add the records file under Compare with a
-   file of expected entries, and press Check. Each line says what it found. Tick a line that asks
-   for confirmation once you accept what it says; Build waits for every line. Without a file, the
-   panel compares a blocklist key by key with the pool's current one, and an allowlist by its entry
-   count only.
+5. On the Pools tab's Switch allowlist or blocklist panel, choose the pool and the list, enter the
+   new tree's address, add the records file under Compare with a file of expected entries, and
+   press Check. Each line says what it found. Tick a line that asks for confirmation once you
+   accept what it says; Build waits for every line. Without a file, the panel compares a blocklist
+   key by key with the pool's current one, and an allowlist by its entry count only.
 6. Once every check passes, press Build and make the admin call. The panel reads Built while the
    call waits for signers in the Admin Transaction card, and Done once the card sees it land.
 

@@ -294,7 +294,7 @@
                         <thead>
                             <tr class="text-[10px] uppercase tracking-wide text-slate-500">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
-                                <th class="pb-3 pr-4 font-medium" scope="col">Policies</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
                                 <th class="pb-3 font-medium" scope="col">Actions</th>
                             </tr>
@@ -306,7 +306,7 @@
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                     <div>
-                        <h3 class="text-lg font-semibold text-white">Change compliance contracts</h3>
+                        <h3 class="text-lg font-semibold text-white">Switch allowlist or blocklist</h3>
                         <p class="mt-1 text-sm text-slate-400">Switch a pool to a new allowlist or blocklist. Check it first to catch mistakes before users see them.</p>
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
@@ -315,7 +315,7 @@
                             <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">Policy</label>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">List</label>
                             <select id="repointKind" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
                                 <option value="asp-membership">Allowlist</option>
                                 <option value="asp-non-membership">Blocklist</option>
@@ -351,7 +351,7 @@
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                     <div>
                         <h3 class="text-lg font-semibold text-white">Pre-signed deposit pauses</h3>
-                        <p class="mt-1 text-sm text-slate-400">The admin account's signers sign a pause of one pool's deposits ahead of time. Whoever keeps the file submits it from any funded account when deposits must stop. Each file pauses once, and a file submitted to a paused pool is held back.</p>
+                        <p class="mt-1 text-sm text-slate-400">Sign a pause in advance. In an emergency, whoever holds the file can stop deposits at once.</p>
                     </div>
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                         <div class="flex-1">

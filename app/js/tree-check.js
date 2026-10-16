@@ -62,7 +62,7 @@ export function historyStart({ tree, manifest }) {
   const ledger = tree === manifest.asp_membership
     ? Math.min(...manifest.pools.map(({ deploymentLedger }) => deploymentLedger))
     : (manifest.added_asp_memberships ?? []).find(({ contractId }) => contractId === tree)?.deploymentLedger;
-  if (!(ledger > 0)) throw new Error('the manifest names no deployment ledger for the allowlist');
+  if (!(ledger > 0)) throw new Error('deployments.json gives no deployment ledger for this allowlist');
   return ledger;
 }
 
@@ -88,10 +88,8 @@ export function unusedListWarning(list, usedLists, allowlist) {
 export function codeLine(acceptedHashes, treeHash, allowlist) {
   const accepted = hex(acceptedHashes[allowlist ? 0 : 1]);
   const runs = treeHash ? hex(treeHash) : 'no Wasm';
-  if (runs !== accepted) {
-    throw new Error(`the contract runs ${runs}, and the pool accepts ${accepted}`);
-  }
-  return `the contract runs ${accepted}, the code the pool accepts`;
+  if (runs !== accepted) throw new Error('the pool can\'t use it, since its code is different');
+  return 'the pool accepts it';
 }
 
 export function replacesLine(current, tree) {
@@ -105,11 +103,11 @@ export function replacesLine(current, tree) {
  *
  * @throws {Error} when the depths differ.
  */
-export function levelsLine(current, levels, treeLevels) {
+export function levelsLine(levels, treeLevels) {
   if (treeLevels !== levels) {
-    throw new Error(`the new allowlist has ${treeLevels ?? 'no'} levels, and the pool's current allowlist ${current} has ${levels}`);
+    throw new Error(`${treeLevels ?? 'none'}, but the pool needs ${levels}. Use an allowlist built with ${levels} levels.`);
   }
-  return `${levels}, as in the pool's current allowlist`;
+  return `${levels}, same as the current allowlist`;
 }
 
 export function adminLine(treeAdmin, poolAdmin) {
@@ -128,9 +126,9 @@ export function adminLine(treeAdmin, poolAdmin) {
  */
 export function manifestLine(manifest, tree) {
   if (tree === manifest.asp_membership || (manifest.added_asp_memberships ?? []).some(({ contractId }) => contractId === tree)) {
-    return 'names the allowlist, so clients index it';
+    return 'listed, so users can use it';
   }
-  throw new Error('names the allowlist in neither asp_membership nor added_asp_memberships, so clients cannot prove against it');
+  throw new Error('not listed, so users can\'t use it. Add it to added_asp_memberships in deployments.json.');
 }
 
 // Returns a `getEvents` tree event's name (its first topic) and fields (a map).
@@ -148,13 +146,8 @@ export function allowlistLeavesFromEvents(events, nextIndex) {
     .map(decode)
     .filter(({ name }) => name === 'LeafAdded')
     .sort((a, b) => Number(a.index - b.index));
-  const gap = added.findIndex(({ index }, position) => index !== BigInt(position));
-  if (gap !== -1) {
-    throw new Error(`the events hold no leaf at index ${gap}, so they miss part of the allowlist's history`);
-  }
-  if (BigInt(added.length) !== nextIndex) {
-    throw new Error(`the events hold ${added.length} leaves and the allowlist holds ${nextIndex}, so they miss part of its history`);
-  }
+  const complete = BigInt(added.length) === nextIndex && added.every(({ index }, position) => index === BigInt(position));
+  if (!complete) throw new Error(`the allowlist's events hold only part of its ${nextIndex} entries`);
   return added.map(({ leaf }) => leaf);
 }
 
@@ -179,7 +172,7 @@ export async function blocklistKeys(server, contractId, root) {
     for (let i = 0; i < level.length; i += 200) {
       const hashes = level.slice(i, i + 200);
       const { entries } = await server.getLedgerEntries(...hashes.map(nodeKey));
-      if (entries.length !== hashes.length) throw new Error('the RPC holds no entry for part of the blocklist');
+      if (entries.length !== hashes.length) throw new Error('the network is missing part of this blocklist');
       for (const { val } of entries) {
         // A leaf is `[1, key, value]`, an internal node `[left, right]` with 0 for no child.
         const node = scValToNative(val.contractData.val);

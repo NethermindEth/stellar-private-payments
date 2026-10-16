@@ -96,12 +96,12 @@ pool:
 2. Enter your tree's address in the admin page's Overview tab, and load the entries on the
    Allowlist or Blocklist tab, signing as `ASP_ADMIN`.
 3. Send the pool's operator the tree's address, your records of its entries, and, for an
-   allowlist, its deployment ledger. They check the tree on the Change compliance contracts panel
+   allowlist, its deployment ledger. They check the tree on the Switch allowlist or blocklist panel
    and re-point their pool. For an allowlist, they first add it to `added_asp_memberships` in their
    manifest with `ASP_ADMIN` as its admin, because clients refuse an allowlist the manifest doesn't
    name.
 
-Clients replay an allowlist from its deployment ledger, and the Change compliance contracts panel
+Clients replay an allowlist from its deployment ledger, and the Switch allowlist or blocklist panel
 reads its entries from its events to compare them with a file, so for an allowlist step 3 has to
 finish while the tree is younger than the RPC's event retention, about seven days on the public
 testnet RPC. After the re-point, you edit the tree and the pool's operator decides whether their
