@@ -91,14 +91,16 @@ export function addSignature(entry, publicKey, signature, networkPassphrase) {
   }
   signatures.push({ public_key: key, signature });
   signatures.sort((a, b) => compareKeys(a.public_key, b.public_key));
-  return new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
-      ...credentials,
-      signature: nativeToScVal(signatures, { type: { public_key: ['symbol', null], signature: ['symbol', null] } }),
-    })),
-    rootInvocation: entry.rootInvocation,
-  });
+  return withSignatures(entry, signatures);
 }
+
+const withSignatures = (entry, signatures) => new xdr.SorobanAuthorizationEntry({
+  credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
+    ...entry.credentials.address,
+    signature: nativeToScVal(signatures, { type: { public_key: ['symbol', null], signature: ['symbol', null] } }),
+  })),
+  rootInvocation: entry.rootInvocation,
+});
 
 /**
  * Decodes the `signedAuthEntry` field of Freighter's `signAuthEntry` result into
@@ -163,6 +165,22 @@ export function decodeAuthorization(text) {
   return { ...describePause(decoded), entry: decoded };
 }
 
+const oneOperation = (account, operation, networkPassphrase, fee = BASE_FEE) => new TransactionBuilder(account, { fee, networkPassphrase })
+  .addOperation(operation)
+  .setTimeout(contract.DEFAULT_TIMEOUT)
+  .build();
+
+async function simulated(server, tx) {
+  const simulation = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simulation)) throw new Error(simulation.error);
+  return simulation;
+}
+
+async function depositsPaused(server, pool, networkPassphrase) {
+  const read = await simulated(server, oneOperation(new Account(contract.NULL_ACCOUNT, '0'), new Contract(pool).call('deposits_paused'), networkPassphrase));
+  return scValToNative(read.result.retval);
+}
+
 /**
  * Builds the unsigned, simulated envelope `{ xdr }` that sends a pre-signed pause
  * from any funded account `source`, or returns `{ paused: true }` for a paused
@@ -182,25 +200,16 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
   if (expirationLedger <= sequence) {
     throw new Error(`The pause file expired at ledger ${expirationLedger}. The signers sign a new one.`);
   }
-  const build = (account, operation, fee = BASE_FEE) => new TransactionBuilder(account, { fee, networkPassphrase })
-    .addOperation(operation)
-    .setTimeout(contract.DEFAULT_TIMEOUT)
-    .build();
-  const simulate = async (tx) => {
-    const simulation = await server.simulateTransaction(tx);
-    if (rpc.Api.isSimulationError(simulation)) throw new Error(simulation.error);
-    return simulation;
-  };
-  const read = await simulate(build(new Account(contract.NULL_ACCOUNT, '0'), new Contract(pool).call('deposits_paused')));
-  if (scValToNative(read.result.retval)) return { paused: true };
+  if (await depositsPaused(server, pool, networkPassphrase)) return { paused: true };
   // Bids the 99th percentile of recent Soroban inclusion fees, never below the minimum, so the pause lands in a fee surge.
   const [account, { sorobanInclusionFee }] = await Promise.all([server.getAccount(source), server.getFeeStats()]);
-  const tx = build(
+  const tx = oneOperation(
     account,
     Operation.invokeContractFunction({ contract: pool, function: 'pause_deposits', args: [], auth: [entry] }),
+    networkPassphrase,
     String(Math.max(Number(BASE_FEE), Number(sorobanInclusionFee.p99))),
   );
-  const simulation = await simulate(tx).catch((err) => {
+  const simulation = await simulated(server, tx).catch((err) => {
     // The host refuses an entry whose nonce a landed pause spent.
     if (/Error\(Auth, ExistingValue\)/.test(err.message)) {
       throw new Error('The file has already been used. The signers sign a new file.');

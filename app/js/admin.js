@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, rpcServer, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, decodeAuthorization, encodeAuthorization, pauseTransaction, walletSignature } from './pause-authorization.js';
@@ -119,11 +119,6 @@ function setStatus(text, kind = 'info') {
   if (!statusEl) return;
   statusEl.textContent = text;
   statusEl.className = 'rounded-xl border px-4 py-2 text-center text-sm font-medium transition-colors ' + (STATUS_STYLES[kind] || STATUS_STYLES.info);
-}
-
-function shortAddress(address) {
-  if (!address) return 'Disconnected';
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function showToast(message, type = 'success', duration = 4000) {
@@ -405,12 +400,15 @@ function renderAdminTx(kind) {
       if (!current()) return;
       const rule = signingRule(account);
       const weight = signedWeight(rule, xdr, state.networkPassphrase);
+      const signable = weight < rule.threshold;
       adminTxSignaturesEl.textContent = weight === count
         ? `${count} of ${rule.threshold}`
         : `${count}, weight ${weight} of ${rule.threshold}`;
       adminTxSignersEl.replaceChildren(...signerStatus(rule, xdr, state.networkPassphrase).map(({ key, signed }) =>
-        signerItem(key, signed, signed === false && weight < rule.threshold)));
-      submitAdminTxBtn.disabled = state.busy || weight < rule.threshold;
+        signerItem(key, signed, signed === false && signable && ((button) => signAdminTx(key, button)))));
+      // Same sequence number: Sign waits for any call in progress.
+      setBusy(state.busy);
+      submitAdminTxBtn.disabled = state.busy || signable;
     }, (err) => {
       if (current()) adminTxNoticeEl.textContent = [adminTxNoticeEl.textContent, `The admin account could not be read: ${err.message}`].filter(Boolean).join(' ');
     });
@@ -433,16 +431,16 @@ function refuseWhileBusy() {
   return state.busy;
 }
 
-function signerItem(key, signed, canSign) {
+// `sign` adds a Sign button.
+function signerItem(key, signed, sign) {
   const item = signerTemplate.content.cloneNode(true).firstElementChild;
   item.querySelector('.signer-key').textContent = key;
   const status = item.querySelector('.signer-status');
   status.textContent = SIGNED_LABELS.get(signed);
   status.classList.add(signed ? 'text-emerald-300' : 'text-slate-500');
   const button = item.querySelector('.sign-as-btn');
-  if (canSign) {
-    button.disabled = state.busy;
-    button.addEventListener('click', () => signAdminTx(key, button));
+  if (sign) {
+    button.addEventListener('click', () => sign(button));
   } else {
     button.remove();
   }

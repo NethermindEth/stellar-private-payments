@@ -5,6 +5,8 @@
  */
 import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 
+import { hex } from './admin-transactions.js';
+
 /**
  * Reads a contract's instance entry.
  *
@@ -60,9 +62,6 @@ export function historyStart({ tree, manifest }) {
   if (!(ledger > 0)) throw new Error('the manifest names no deployment ledger for the allowlist');
   return ledger;
 }
-
-// Returns the hex form of a byte array, such as a Wasm hash.
-const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 /**
  * Checks that a tree runs the code the pool accepts for its kind, and returns the

@@ -32,6 +32,10 @@ const ADMIN_RENT_MARGIN = 100_000;
 /** Ledgers an entry an admin call reads must outlive its build: 24 hours of five-second ledgers, plus an hour. */
 const ADMIN_TX_LEDGERS = 18_000;
 
+export const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+export const shortAddress = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
+
 /** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
 export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
 
