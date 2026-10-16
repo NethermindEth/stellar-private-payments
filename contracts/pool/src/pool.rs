@@ -444,9 +444,8 @@ impl PoolContract {
 
     /// Executes a shielded transaction.
     ///
-    /// A deposit (`ext_amount > 0`) first moves the tokens from `sender` to the
-    /// pool. Renews the pool, its tree, and its verifier by at most a day
-    /// each.
+    /// This is the main entry point for users to interact with the pool.
+    /// Renews the pool, its tree, and its verifier by at most a day each.
     ///
     /// # Errors
     ///
@@ -469,62 +468,68 @@ impl PoolContract {
     ) -> Result<(), Error> {
         sender.require_auth();
         soroban_utils::extend_instance(env);
-        let token = Self::get_token(env)?;
-        let token_client = TokenClient::new(env, &token);
-        let zero = I256::from_i32(env, 0);
 
-        // Handle deposit if ext_amount > 0
-        if ext_data.ext_amount > zero {
-            if Self::deposits_paused(env)? {
-                return Err(Error::DepositsPaused);
-            }
-            let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
-            let max = Self::get_maximum_deposit(env)?;
-            if deposit_u > max {
-                return Err(Error::WrongExtAmount);
-            }
-            let this = env.current_contract_address();
-            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
-            token_client.transfer(&sender, &this, &amount);
-        }
-
-        Self::internal_transact(env, proof, ext_data)
+        Self::internal_transact(env, proof, ext_data, &sender)
     }
 
     /// Process a private transaction
     ///
     /// Validates the proof and all public inputs, marks nullifiers as spent,
-    /// processes withdrawals, and inserts new commitments into the Merkle tree.
+    /// inserts new commitments into the Merkle tree, processes token
+    /// transfers (deposits and withdrawals), and emits transaction events.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
     /// * `proof` - Zero-knowledge proof and public inputs
     /// * `ext_data` - External transaction data
+    /// * `sender` - Address of the transaction sender
     ///
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if any validation fails
     ///
-    /// # Validation Steps
+    /// # Validation & Execution Steps
     ///
-    /// 1. Verify Merkle root is in recent history
-    /// 2. Verify no nullifiers have been spent
-    /// 3. Verify external data hash matches
-    /// 4. Verify public amount calculation
-    /// 5. Verify zero-knowledge proof
-    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
-        // 1. Merkle root check
+    /// 1. Validate deposit amount limits (if ext_amount > 0)
+    /// 2. Verify Merkle root is in recent history
+    /// 3. Verify no nullifiers have been spent
+    /// 4. Verify external data hash matches
+    /// 5. Verify public amount calculation
+    /// 6. Verify ASP membership / non-membership roots
+    /// 7. Verify zero-knowledge proof
+    /// 8. Mark nullifiers as spent
+    /// 9. Insert new commitments into Merkle tree
+    /// 10. Execute token transfers (deposit from sender or withdrawal to recipient)
+    /// 11. Emit nullifier and commitment events
+    fn internal_transact(
+        env: &Env,
+        proof: Proof,
+        ext_data: ExtData,
+        sender: &Address,
+    ) -> Result<(), Error> {
+        let zero = I256::from_i32(env, 0);
+
+        // 1. Deposit amount check
+        if ext_data.ext_amount > zero {
+            let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
+            let max = Self::get_maximum_deposit(env)?;
+            if deposit_u > max {
+                return Err(Error::WrongExtAmount);
+            }
+        }
+
+        // 2. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
-        // 2. Nullifier checks (prevent double-spending)
+        // 3. Nullifier checks (prevent double-spending)
         for n in proof.input_nullifiers.iter() {
             if Self::is_spent(env, &n)? {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-        // 3. External data hash check, bound to this pool's address and its
+        // 4. External data hash check, bound to this pool's address and its
         // own configured token, so a hash computed for another pool or token
         // cannot match here.
         let token = Self::get_token(env)?;
@@ -533,14 +538,14 @@ impl PoolContract {
             return Err(Error::WrongExtHash);
         }
 
-        // 4. Public amount check
+        // 5. Public amount check
         let expected_public_amount =
             Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
 
-        // ASP root validation
+        // 6. ASP root validation
         let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_non_membership_proofs(policy_flags) {
             let non_member_root = Self::get_asp_non_membership_root(env)?;
@@ -561,27 +566,14 @@ impl PoolContract {
             }
         }
 
-        // 5. ZK proof verification
+        // 7. ZK proof verification
         if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
 
-        // 6. Mark nullifiers as spent
+        // 8. Mark nullifiers as spent
         for n in proof.input_nullifiers.iter() {
             let _ = Self::mark_spent(env, &n);
-            NewNullifierEvent { nullifier: n }.publish(env);
-        }
-
-        // 7. Process withdrawal if ext_amount < 0
-        let token = Self::get_token(env)?;
-        let token_client = TokenClient::new(env, &token);
-        let this = env.current_contract_address();
-        let zero = I256::from_i32(env, 0);
-
-        if ext_data.ext_amount < zero {
-            let abs = zero.sub(&ext_data.ext_amount);
-            let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
-            token_client.transfer(&this, &ext_data.recipient, &amount);
         }
 
         // 9. Insert new commitments into Merkle tree
@@ -591,7 +583,24 @@ impl PoolContract {
             proof.output_commitment1.clone(),
         )?;
 
-        // 10. Emit commitment events
+        // 10. Process token transfers
+        let token_client = TokenClient::new(env, &token);
+        let this = env.current_contract_address();
+
+        if ext_data.ext_amount > zero {
+            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
+            token_client.transfer(sender, &this, &amount);
+        } else if ext_data.ext_amount < zero {
+            let abs = zero.sub(&ext_data.ext_amount);
+            let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
+            token_client.transfer(&this, &ext_data.recipient, &amount);
+        }
+
+        // 11. Emit events
+        for n in proof.input_nullifiers.iter() {
+            NewNullifierEvent { nullifier: n }.publish(env);
+        }
+
         NewCommitmentEvent {
             commitment: proof.output_commitment0,
             index: idx_0,
