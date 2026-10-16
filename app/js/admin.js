@@ -7,8 +7,8 @@ import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys, unreadBlocklistWarning } from './blocklist-keys.js';
-import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, usesList } from './tree-check.js';
+import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
+import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
 
 // DOM element references
@@ -98,9 +98,8 @@ const state = {
   addedAllowlists: [],
   // Last re-point check, or its Done note.
   repoint: null,
-  // Pool to the blocklist it reads, which a re-point changes without the
-  // manifest.
-  poolBlocklists: new Map(),
+  // Pool -> the lists its policy uses. null until every pool is read.
+  poolLists: null,
   // Each with its admin's signing rule.
   pauseFiles: [],
   // The latest refreshPauseFiles; an older one landing late is dropped.
@@ -624,6 +623,7 @@ async function insertMembershipLeaf() {
     if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
       throw new Error('ASP secret is required');
     }
+    if (!confirmListWrite(contractId, true)) return;
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.textContent = 'Processing...';
@@ -652,10 +652,11 @@ async function insertMembershipLeaf() {
   }
 }
 
-// Reports whether to write to `blocklist`: yes if a listed pool reads it,
-// otherwise only if the operator accepts the warning.
-function confirmBlocklistWrite(blocklist) {
-  const warning = unreadBlocklistWarning(blocklist, [...state.poolBlocklists.values()]);
+// Asks before writing to a list no pool uses, once every pool has been read.
+function confirmListWrite(list, allowlist) {
+  if (!state.poolLists) return true;
+  const used = [...state.poolLists.values()].map((lists) => lists[allowlist ? 'allowlist' : 'blocklist']);
+  const warning = unusedListWarning(list, used, allowlist);
   return !warning || window.confirm(warning);
 }
 
@@ -669,7 +670,7 @@ async function insertNonMembershipLeaf() {
 
     const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keys.length === 0) throw new Error('User note public key is required');
-    if (!confirmBlocklistWrite(contractId)) return;
+    if (!confirmListWrite(contractId, false)) return;
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.textContent = 'Processing...';
@@ -699,7 +700,7 @@ async function removeNonMembershipLeaf() {
     const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keyValue === undefined) throw new Error('User note public key is required');
     if (others.length > 0) throw new Error('Remove takes one note public key at a time');
-    if (!confirmBlocklistWrite(contractId)) return;
+    if (!confirmListWrite(contractId, false)) return;
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
@@ -744,7 +745,9 @@ async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
 // Lists every pool the manifest names, disabled ones too since they still take
 // deposits, with its trees and deposit flag.
 async function refreshPools() {
-  state.poolBlocklists = new Map();
+  state.poolLists = null;
+  const lists = new Map();
+  let listed = -1;
   await fillTable(poolRowsEl, poolsNoticeEl, 'pools', ({ pools }) => {
     state.pools = pools.map(({ poolContractId }) => poolContractId);
     [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => {
@@ -753,24 +756,31 @@ async function refreshPools() {
       select.replaceChildren(...state.pools.map((contractId) => new Option(shortAddress(contractId), contractId)));
       if (state.pools.includes(chosen)) select.value = chosen;
     });
-    return state.pools.map((contractId) => poolRow(contractId));
+    listed = state.pools.length;
+    return state.pools.map((contractId) => poolRow(contractId, lists));
   });
+  // One unread pool: can't tell which lists are unused.
+  state.poolLists = lists.size === listed ? lists : null;
   await refreshPauseFiles();
 }
 
-// A pool without `deposits_paused` cannot be paused, and an unreadable pool
-// shows its error; neither row gets buttons.
-async function poolRow(contractId) {
+// No `deposits_paused`, or unreadable: no buttons. Records the lists it uses in `lists`.
+async function poolRow(contractId, lists) {
   const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
   showAddress(row.querySelector('.pool-id'), contractId);
   const depositsEl = row.querySelector('.pool-deposits');
   try {
     const [pool, { stored }] = await Promise.all([readClient(contractId), readInstance(rpcServer(state.rpcUrl), contractId)]);
-    state.poolBlocklists.set(contractId, stored.get('ASPNonMembership'));
-    row.querySelector('.pool-trees').replaceChildren(...[['Allowlist', 'ASPMembership'], ['Blocklist', 'ASPNonMembership']].map(([label, key]) => {
+    const flags = stored.get('PolicyFlags');
+    const used = (allowlist) => (usesList(flags, allowlist) ? stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership') : null);
+    lists.set(contractId, { allowlist: used(true), blocklist: used(false) });
+    row.querySelector('.pool-trees').replaceChildren(...[['Allowlist', 'ASPMembership', true], ['Blocklist', 'ASPNonMembership', false]].map(([label, key, allowlist]) => {
       const line = document.createElement('div');
       showAddress(line, stored.get(key));
-      line.prepend(`${label} `);
+      // Before the address, which a phone cuts off.
+      const unused = !usesList(flags, allowlist);
+      line.prepend(unused ? `${label} (not used) ` : `${label} `);
+      line.classList.toggle('text-slate-400', unused);
       return line;
     }));
     if (!pool.deposits_paused) {

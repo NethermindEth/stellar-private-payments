@@ -354,12 +354,13 @@ than the RPC's event retention, about seven days on the public testnet RPC:
 
    For a blocklist, the records file holds note public keys as the Blocklist tab takes them. Load
    them through that tab, never the CLI's `insert_leaf`, which would store each key in the wrong
-   byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's
-   ASP Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
-   Blocklist. The page builds the insert with the deployer as its source. If Freighter is
-   connected as the deployer, it signs and the page sends the insert at once. Otherwise open
-   Transaction XDR in the Admin transaction card, press Copy XDR, save it as `tx.xdr`, sign it with
-   `--sign-with-key DEPLOYER`, and send it as [Sign with the CLI](#sign-with-the-cli) describes.
+   byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's ASP
+   Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
+   Blocklist. No pool uses the tree yet, so the page asks first; confirm. The page builds the insert
+   with the deployer as its source. If Freighter is connected as the deployer, it signs and the page
+   sends the insert at once. Otherwise open Transaction XDR in the Admin transaction card, press
+   Copy XDR, save it as `tx.xdr`, sign it with `--sign-with-key DEPLOYER`, and send it as [Sign with
+   the CLI](#sign-with-the-cli) describes.
 3. Hand the tree to the admin account. The deployer proposes it:
 
    ```bash
@@ -410,7 +411,8 @@ drop an allowlist's entry once no pool reads it.
 
 The Allowlist and Blocklist tabs write to the trees in the Overview tab's contract ID fields,
 which start as the manifest's. After a re-point, enter the new tree's address there before writing
-to it.
+to it. The page asks before a write to a list no pool on the Pools tab uses, and that tab marks a
+list a pool's policy leaves out as not used.
 
 Without a file of expected entries, the panel reads storage, which has no age limit: a blocklist's
 keys, or an allowlist's entry count. That is the way back to an allowlist older than the RPC's event

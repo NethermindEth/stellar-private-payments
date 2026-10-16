@@ -69,6 +69,13 @@ export function historyStart({ tree, manifest }) {
 /** `PolicyFlags` bit 1 is the allowlist, 2 the blocklist; no flags means both. */
 export const usesList = (policyFlags, allowlist) => policyFlags === undefined || (policyFlags & (allowlist ? 1 : 2)) !== 0;
 
+export function unusedListWarning(list, usedLists, allowlist) {
+  if (usedLists.includes(list)) return null;
+  return allowlist
+    ? `No pool uses allowlist ${shortAddress(list)}, so this member can't use any pool yet. Continue anyway?`
+    : `No pool uses blocklist ${shortAddress(list)}, so this change has no effect yet. Continue anyway?`;
+}
+
 /**
  * Checks that a tree runs the code the pool accepts for its kind, and returns the
  * check's line.

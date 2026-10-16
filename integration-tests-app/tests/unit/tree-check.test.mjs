@@ -17,6 +17,7 @@ import {
   parseRecords,
   readInstance,
   replacesLine,
+  unusedListWarning,
   usesList,
 } from '../../../app/js/tree-check.js';
 
@@ -71,6 +72,16 @@ test('entriesLine asks to confirm a blocklist that releases keys the current one
   });
   assert.throws(() => entriesLine(false, 39, null, { released: 1 }), { confirm: 'Release 1 blocked key' });
   assert.equal(entriesLine(false, 40, null, { released: 0 }), '40, blocking every key the current blocklist blocks');
+});
+
+test('unusedListWarning warns of a list no pool uses, and of no other', () => {
+  const old = 'CCMCAW7AFVATPKIAQAMAGHJ2AHS3SMK6CALUPO3FV2XR3D7X2UECLHN6';
+  assert.equal(unusedListWarning(old, ['NEW'], false), 'No pool uses blocklist CCMCAW...LHN6, so this change has no effect yet. Continue anyway?');
+  assert.equal(
+    unusedListWarning(old, ['NEW', null], true),
+    'No pool uses allowlist CCMCAW...LHN6, so this member can\'t use any pool yet. Continue anyway?',
+  );
+  assert.equal(unusedListWarning('NEW', ['NEW', 'NEW'], true), null);
 });
 
 test('compareEntries reports records the tree lacks and entries no record names', () => {
