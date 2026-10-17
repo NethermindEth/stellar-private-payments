@@ -95,6 +95,7 @@ async fn deposit_refused_while_paused() -> Result<()> {
     let admin_secret = &session.identity.admin_secret;
     let network = LocalNetwork::start().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let fees_before = network.fees_total(pool_contract_id, admin_secret).await?;
 
     pool.deposit(deposit_amount).await?;
     network
@@ -111,7 +112,7 @@ async fn deposit_refused_while_paused() -> Result<()> {
     let (note_public_key, encryption_public_key) = session.account.privacy_keys().await?;
     pool.transfer(
         TransferRecipient::keys(note_public_key, encryption_public_key),
-        NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS),
+        pool.max_spend(pool.fee().await?).await?,
     )
     .await?;
     assert_eq!(
@@ -120,7 +121,7 @@ async fn deposit_refused_while_paused() -> Result<()> {
     );
 
     pool.withdraw(
-        NoteAmount::from(DEPOSIT_STROOPS - 2 * FEE_STROOPS),
+        pool.max_spend(pool.fee().await?).await?,
         session.wallet.address(),
     )
     .await?;
@@ -131,6 +132,13 @@ async fn deposit_refused_while_paused() -> Result<()> {
         .await?;
     pool.deposit(deposit_amount).await?;
     assert_eq!(pool.balance().await?, deposit_amount);
+
+    let fees_after = network.fees_total(pool_contract_id, admin_secret).await?;
+    assert_eq!(
+        fees_after.checked_sub(fees_before),
+        Some(i128::try_from(4 * FEE_STROOPS)?),
+        "two deposits, a transfer and a withdrawal pay one fee each; the refused deposit none"
+    );
 
     Ok(())
 }
