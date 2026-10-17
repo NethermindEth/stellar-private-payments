@@ -441,16 +441,47 @@ impl LocalNetwork {
         .await
     }
 
+    /// Returns a pool's fees total, read by simulating `get_fees_total`.
+    pub async fn fees_total(&self, pool_contract_id: &str, admin_secret: &str) -> Result<i128> {
+        let total = self
+            .stellar_invoke(
+                pool_contract_id,
+                admin_secret,
+                &["--send=no"],
+                &["get_fees_total"],
+            )
+            .await?;
+        total
+            .trim_matches('"')
+            .parse()
+            .with_context(|| format!("parse get_fees_total output: {total}"))
+    }
+
     async fn invoke_contract(
         &self,
         contract_id: &str,
         admin_secret: &str,
         args: &[&str],
     ) -> Result<()> {
+        self.stellar_invoke(contract_id, admin_secret, &[], args)
+            .await
+            .map(drop)
+    }
+
+    /// Runs `stellar contract invoke` with `flags` before `--` and returns its
+    /// trimmed stdout.
+    async fn stellar_invoke(
+        &self,
+        contract_id: &str,
+        admin_secret: &str,
+        flags: &[&str],
+        args: &[&str],
+    ) -> Result<String> {
         let output = Command::new("stellar")
             .args(["contract", "invoke", "--id", contract_id])
             .args(["--source-account", admin_secret])
             .args(["--network", STELLAR_CLI_NETWORK])
+            .args(flags)
             .arg("--")
             .args(args)
             .output()
@@ -464,7 +495,7 @@ impl LocalNetwork {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 
