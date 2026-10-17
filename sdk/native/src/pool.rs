@@ -28,10 +28,10 @@ use crate::{
     sleep::sleep,
     storage::StorageHandle,
     sync::{SyncHandle, confirm_tx},
-    transact::transact_request_from_step,
+    transact::{DepositLimits, transact_request_from_step},
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
-        Estimate, ExtAmount, Field, GvkMode, PoolInfo, PrivatePoolConfig, SignedTransaction,
+        Estimate, Field, GvkMode, PoolInfo, PrivatePoolConfig, SignedTransaction,
         TransactChainContext, TransactionResult, TransferRecipient, first_duplicate,
     },
 };
@@ -470,18 +470,14 @@ impl PrivatePool {
         } else {
             transact_step_for_plan(plan)?
         };
-        if chain.deposits_paused && step.ext_amount > ExtAmount::ZERO {
-            return Err(Error::DepositsPaused {
-                pool: self.config.pool_contract_id.clone(),
-            });
-        }
+        DepositLimits::from(&chain).check(step.ext_amount, &self.config.pool_contract_id)?;
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
             &self.config.contract_config.kdf_domain,
             &self.config.pool_contract_id,
             &chain,
-        )?;
+        );
 
         let params = self.storage.build_transact_params(&req).await?;
         let prepared = self.prover.prove_transact(params).await?;
