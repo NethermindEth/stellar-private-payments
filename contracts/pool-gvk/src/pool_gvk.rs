@@ -90,7 +90,7 @@ pub enum Error {
     TreeCodeMismatch = 21,
     /// A call would take the notes total below zero
     NotesTotalExceeded = 22,
-    /// A claim is negative or above the fees total
+    /// A claim is negative, above the fees total, or paid to the pool
     InvalidClaimAmount = 23,
 }
 
@@ -560,8 +560,8 @@ impl PoolGvkContract {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidClaimAmount`] for a negative amount or one above
-    /// the fees total.
+    /// Returns [`Error::InvalidClaimAmount`] for a negative amount, one above
+    /// the fees total, or a `to` that is the pool itself.
     ///
     /// # Panics
     ///
@@ -569,7 +569,7 @@ impl PoolGvkContract {
     /// fails.
     pub fn claim_fees(env: &Env, to: Address, amount: i128) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
-        totals::claim(env, amount)?;
+        totals::claim(env, &to, amount)?;
         let token_client = TokenClient::new(env, &Self::get_token(env)?);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
         FeesClaimed { to, amount }.publish(env);

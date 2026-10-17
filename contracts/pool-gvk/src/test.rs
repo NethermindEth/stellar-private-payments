@@ -4357,6 +4357,18 @@ fn a_negative_claim_is_refused() {
 }
 
 #[test]
+fn a_claim_to_the_pool_itself_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&pool.address, &5),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
 fn a_zero_claim_is_accepted() {
     let env = test_env();
     let (pool, token) = deposit_fifty_charging_five(&env);
