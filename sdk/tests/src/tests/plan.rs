@@ -1,7 +1,11 @@
 //! PrivatePool per-step planning.
 
 use crate::pool::{test_pool, test_recipient};
-use stellar_private_payments::{Error, types::NoteAmount};
+use stellar_private_payments::{
+    Error,
+    planner::{PlanError, SpendSessionError},
+    types::NoteAmount,
+};
 
 #[test]
 fn transfer_two_steps() {
@@ -71,8 +75,7 @@ fn withdraw_single_step() {
     assert!(!plan.is_complete());
 }
 
-/// A `SpendSession(_)` match also passes for an empty wallet. `PlanError` is
-/// not exported, so the `Debug` form names the variant.
+/// A `SpendSession(_)` match also passes for an empty wallet.
 #[test]
 fn transfer_insufficient_funds() {
     let pool = test_pool(Some(&[2, 3])).expect("test pool");
@@ -87,11 +90,15 @@ fn transfer_insufficient_funds() {
         )
         .expect_err("transfer above wallet sum should not plan");
 
-    assert_eq!(format!("{err:?}"), "SpendSession(Plan(NoCombination))");
+    assert!(matches!(
+        err,
+        Error::SpendSession(SpendSessionError::Plan(PlanError::NoCombination { max_spend }))
+            if max_spend == NoteAmount::from(5u128)
+    ));
 }
 
 /// Three notes of 10 at fee 1 take two steps: 28 is the most one spend can
-/// send, its estimate charges two fees, and 29 does not plan.
+/// send, its estimate charges two fees, and a spend of 29 is refused naming 28.
 #[test]
 fn withdraw_max_spend_plans_and_one_more_does_not() {
     let pool = test_pool(Some(&[10, 10, 10])).expect("test pool");
@@ -109,7 +116,14 @@ fn withdraw_max_spend_plans_and_one_more_does_not() {
     let err = pool
         .prepare_withdraw(&wallet, NoteAmount::from(29u128), recipient, fee)
         .expect_err("one unit more does not plan");
-    assert!(matches!(err, Error::SpendSession(_)));
+    assert!(
+        matches!(
+            err,
+            Error::SpendSession(SpendSessionError::Plan(PlanError::NoCombination { max_spend }))
+                if max_spend == max
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]
