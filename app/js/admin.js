@@ -85,7 +85,6 @@ const adminsNoticeEl = document.getElementById('adminsNotice');
 const adminRowTemplate = document.getElementById('tpl-admin-row');
 const signerTemplate = document.getElementById('tpl-signer');
 
-// The buttons that need a connected wallet.
 const ACTION_BUTTONS = [addToAllowlistBtn, addToBlocklistBtn, removeFromBlocklistBtn, submitAdminTxBtn, checkRepointBtn];
 
 const state = {
@@ -313,8 +312,7 @@ async function refreshState() {
     const membershipState = appState.aspMembership;
     const nonMembershipState = appState.aspNonMembership;
 
-    // Keep a tree the operator entered, such as a re-pointed blocklist; fill an
-    // empty field from the manifest.
+    // Keep an address the operator entered; fill an empty one from the manifest.
     membershipContractInput.value ||= membershipState.contractId;
     nonMembershipContractInput.value ||= nonMembershipState.contractId;
     updateContractLink(membershipContractLinkEl, membershipContractInput.value);
@@ -811,8 +809,7 @@ async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
   }
 }
 
-// Lists every pool the manifest names, disabled ones too since they still take
-// deposits, with its trees and deposit flag.
+// Every manifest pool, disabled ones too: they still take deposits.
 async function refreshPools() {
   state.poolLists = null;
   const lists = new Map();
@@ -981,7 +978,7 @@ function showRepointDone({ contract, method, args: [tree] }) {
 // Replaces and Code first; the rest only if the pool accepts the code.
 async function checkRepoint() {
   resetRepoint();
-  // A field that changes while the check runs resets it, and its result is dropped.
+  // Editing a field mid-check drops its result.
   const pending = {};
   state.repoint = pending;
   const originalText = checkRepointBtn.textContent;
@@ -1053,8 +1050,7 @@ async function checkRepoint() {
           const [fresh, held] = await Promise.all([keys(), readInstance(server, current).then((instance) => keys(current, instance)).catch(unreadable)]);
           return entriesLine(false, fresh.length, null, { released: compareEntries(fresh, held).missing.length });
         }
-        // Blocklist records and reported keys are note public keys in Blocklist
-        // tab form, so a key loaded in the wrong byte order fails.
+        // Keys in Blocklist tab form, so a wrong byte order fails.
         const records = (allowlist ? parseRecords : parseBlocklistKeys)(await file.text());
         const onChain = allowlist
           ? await Promise.all([eventsSince(server, tree, historyStart({ tree, manifest })), nextIndex()])
@@ -1098,7 +1094,6 @@ async function checkRepoint() {
 // -----------------------------
 // Pre-signed deposit pauses
 // -----------------------------
-// Offers `text` to the browser as a file to save under `name`.
 function offerFile(name, text) {
   Object.assign(document.createElement('a'), {
     href: `data:application/json;charset=utf-8,${encodeURIComponent(text)}`,

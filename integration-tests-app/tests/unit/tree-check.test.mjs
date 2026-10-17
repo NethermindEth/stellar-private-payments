@@ -21,11 +21,9 @@ import {
   usesList,
 } from '../../../app/js/tree-check.js';
 
-// A tree event named `name` carrying `fields`, as the RPC's `getEvents` returns it.
 const event = (name, fields) => ({ topic: [xdr.ScVal.scvSymbol(name)], value: nativeToScVal(fields) });
 
-// The events a tree publishes when the deployer hands it to the admin account,
-// which every tree a pool is re-pointed to carries beside its entries.
+// Handover events every re-pointed tree carries.
 const handover = [
   event('admin_transfer_proposed', { admin: 'DEPLOYER', pending_admin: 'ADMIN' }),
   event('admin_transfer_accepted', { old_admin: 'DEPLOYER', new_admin: 'ADMIN' }),
@@ -181,7 +179,7 @@ test('eventsSince reads past an empty page and stops when the cursor stops movin
     },
   };
   assert.deepEqual(await eventsSince(server, 'TREE', 100), ['a', 'b']);
-  // The RPC refuses a request that carries both a start ledger and a cursor.
+  // The RPC refuses startLedger together with a cursor.
   const filters = [{ type: 'contract', contractIds: ['TREE'] }];
   assert.deepEqual(requests, [{ startLedger: 100, filters }, { filters, cursor: 'c1' }, { filters, cursor: 'c2' }]);
 });
@@ -207,8 +205,6 @@ test('eventsSince reads the RPC\'s ledger range refusal as the retention limit',
 
 const CONTRACT = 'CBZAWV3AKKKIIO3LEIF7DHODHHHTTL47M7WQSZYTU3ZYSBMM32MUM5H4';
 
-// An RPC stub whose `getContractData` returns an instance entry for
-// `executable` holding `storage`.
 const instanceServer = (executable, storage = []) => ({
   getContractData: async () => ({
     val: xdr.LedgerEntryData.contractData(new xdr.ContractDataEntry({
@@ -237,8 +233,7 @@ test('readInstance returns the hash of the Wasm a contract runs', async () => {
   assert.deepEqual(Buffer.from(wasmHash), Buffer.alloc(32, 7));
 });
 
-// An RPC stub whose `getLedgerEntries` returns the blocklist node stored under
-// each requested hash, and nothing for a hash `nodes` lacks.
+// Nothing for a hash `nodes` lacks.
 const nodeServer = (nodes) => ({
   getLedgerEntries: async (...keys) => {
     // The RPC refuses more than 200 keys a request.
@@ -268,7 +263,7 @@ test('blocklistKeys reads every leaf below the root and skips empty children', a
 });
 
 test('blocklistKeys reads a level wider than one request', async () => {
-  // A full tree named by heap index: node n has children 2n and 2n + 1, and leaves 256 to 511.
+  // Heap-indexed: node n has children 2n and 2n + 1; leaves are 256 to 511.
   const nodes = new Map(Array.from({ length: 511 }, (_, i) => {
     const hash = BigInt(i + 1);
     return [hash, hash < 256n ? [2n * hash, 2n * hash + 1n] : [1n, hash, 1n]];

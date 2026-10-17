@@ -1,19 +1,9 @@
-/**
- * Re-point checks: compares a tree's code, settings, and entries with the pool,
- * the manifest, and the operator's records. Kept out of `admin.js` so Node unit
- * tests can import it.
- */
+// Re-point checks. Kept out of admin.js so Node tests can import it.
 import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 
 import { hex, shortAddress } from './admin-transactions.js';
 
-/**
- * Reads a contract's instance entry.
- *
- * @returns {Promise<{wasmHash: (Uint8Array|undefined), stored: Map<string, *>}>}
- *   `wasmHash` is absent for a contract running no Wasm, such as a Stellar asset
- *   contract. `stored` maps each `DataKey` variant's name to its value.
- */
+/** Wasm hash (none for an asset contract) and stored values by `DataKey` name. */
 export async function readInstance(server, contractId) {
   const { val } = await server.getContractData(contractId, xdr.ScVal.scvLedgerKeyContractInstance());
   const { executable, storage } = val.contractData.val.instance;
@@ -25,13 +15,7 @@ export async function readInstance(server, contractId) {
 
 const HISTORY_GONE = 'the network no longer has this allowlist\'s full history';
 
-/**
- * Reads every event a contract published from `startLedger` on. The RPC scans a
- * window of ledgers per request, so an empty page is not the end; the read ends
- * when the cursor stops moving.
- *
- * @throws {Error} when the RPC no longer holds `startLedger`.
- */
+/** All events from `startLedger` on. An empty page isn't the end; the cursor stopping is. */
 export async function eventsSince(server, contractId, startLedger) {
   const { oldestLedger } = await server.getHealth();
   if (startLedger < oldestLedger) throw new Error(HISTORY_GONE);
@@ -49,15 +33,7 @@ export async function eventsSince(server, contractId, startLedger) {
   }
 }
 
-/**
- * Returns the ledger the re-point check reads an allowlist's events from: an
- * added allowlist's manifest ledger, or the earliest pool's ledger for the
- * manifest's own allowlist. That last one comes after the allowlist's
- * deployment, so a leaf added in between fails the read instead of going unseen.
- *
- * @param {{tree: string, manifest: Object}} options
- * @throws {Error} when the manifest names no ledger for the allowlist.
- */
+/** Event start ledger. A leaf added before it makes the read fail instead of going unseen. */
 export function historyStart({ tree, manifest }) {
   const ledger = tree === manifest.asp_membership
     ? Math.min(...manifest.pools.map(({ deploymentLedger }) => deploymentLedger))
@@ -76,15 +52,6 @@ export function unusedListWarning(list, usedLists, allowlist) {
     : `No pool uses blocklist ${shortAddress(list)}, so this change has no effect yet. Continue anyway?`;
 }
 
-/**
- * Checks that a tree runs the code the pool accepts for its kind, and returns the
- * check's line.
- *
- * @param {Uint8Array[]} acceptedHashes The pool's `get_asp_wasm_hashes()`.
- * @param {(Uint8Array|undefined)} treeHash From `readInstance`.
- * @param {boolean} allowlist
- * @throws {Error} when the tree runs other code, or no Wasm.
- */
 export function codeLine(acceptedHashes, treeHash, allowlist) {
   const accepted = hex(acceptedHashes[allowlist ? 0 : 1]);
   const runs = treeHash ? hex(treeHash) : 'no Wasm';
@@ -97,12 +64,7 @@ export function replacesLine(current, tree) {
   return `${shortAddress(current)}, which the pool uses now`;
 }
 
-/**
- * Checks that a new allowlist has the current one's depth, which its code does not
- * fix, and returns the check's line.
- *
- * @throws {Error} when the depths differ.
- */
+// The code doesn't fix an allowlist's depth.
 export function levelsLine(levels, treeLevels) {
   if (treeLevels !== levels) {
     throw new Error(`${treeLevels ?? 'none'}, but the pool needs ${levels}. Use an allowlist built with ${levels} levels.`);
@@ -118,12 +80,7 @@ export function adminLine(treeAdmin, poolAdmin) {
   });
 }
 
-/**
- * Checks that the manifest names an allowlist, since clients index only those, and
- * returns the check's line.
- *
- * @throws {Error} when neither `asp_membership` nor `added_asp_memberships` names it.
- */
+// Clients index only allowlists the manifest names.
 export function manifestLine(manifest, tree) {
   if (tree === manifest.asp_membership || (manifest.added_asp_memberships ?? []).some(({ contractId }) => contractId === tree)) {
     return 'listed, so users can use it';
@@ -131,16 +88,8 @@ export function manifestLine(manifest, tree) {
   throw new Error('not listed, so users can\'t use it. Add it to added_asp_memberships in deployments.json.');
 }
 
-// Returns a `getEvents` tree event's name (its first topic) and fields (a map).
 const decode = ({ topic: [name], value }) => ({ name: scValToNative(name), ...scValToNative(value) });
 
-/**
- * Returns the leaves an allowlist's `LeafAdded` events added, in index order.
- *
- * @param {bigint} nextIndex The tree's stored `NextIndex`.
- * @throws {Error} when the events skip an index or hold other than `nextIndex`
- *   leaves, as they do when the read starts after the first leaves.
- */
 export function allowlistLeavesFromEvents(events, nextIndex) {
   const added = events
     .map(decode)
@@ -151,12 +100,7 @@ export function allowlistLeavesFromEvents(events, nextIndex) {
   return added.map(({ leaf }) => leaf);
 }
 
-/**
- * Returns the keys a blocklist holds, read from its nodes from `root` down.
- *
- * @param {bigint} root The tree's stored `Root`, 0 when it is empty.
- * @throws {Error} when the RPC returns no entry for a node.
- */
+/** Walks the blocklist's nodes from `root` (0 when empty). */
 export async function blocklistKeys(server, contractId, root) {
   const contract = new Address(contractId).toScAddress();
   const nodeKey = (hash) => xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
@@ -165,7 +109,7 @@ export async function blocklistKeys(server, contractId, root) {
     durability: xdr.ContractDataDurability.persistent,
   }));
   const keys = [];
-  // One level a pass, at most 200 entries a request, the RPC's limit.
+  // The RPC takes at most 200 keys a request.
   let level = root ? [root] : [];
   while (level.length > 0) {
     const next = [];
@@ -174,7 +118,7 @@ export async function blocklistKeys(server, contractId, root) {
       const { entries } = await server.getLedgerEntries(...hashes.map(nodeKey));
       if (entries.length !== hashes.length) throw new Error('the network is missing part of this blocklist');
       for (const { val } of entries) {
-        // A leaf is `[1, key, value]`, an internal node `[left, right]` with 0 for no child.
+        // Leaf: [1, key, value]. Node: [left, right], 0 for no child.
         const node = scValToNative(val.contractData.val);
         if (node.length === 3) keys.push(node[1]);
         else next.push(...node.filter((child) => child !== 0n));
@@ -216,12 +160,6 @@ export function entriesLine(allowlist, count, compared, unfiled = {}) {
   return BigInt(count) === BigInt(current) ? `${count}, as many as the current allowlist` : `${count}, more than the current allowlist's ${current}`;
 }
 
-/**
- * Compares a tree's entries with the operator's records.
- *
- * @returns {{missing: bigint[], unexpected: bigint[]}} Records the tree lacks, and
- *   entries no record names.
- */
 export function compareEntries(onChain, records) {
   const held = new Set(onChain);
   const expected = new Set(records);
@@ -231,11 +169,7 @@ export function compareEntries(onChain, records) {
   };
 }
 
-/**
- * Parses an allowlist's records, one `0x` hex leaf per line.
- *
- * @throws {Error} naming the first line that is not a hex value.
- */
+/** One `0x` hex leaf per line. */
 export function parseRecords(text) {
   return text.split('\n').flatMap((line, index) => {
     const value = line.trim();

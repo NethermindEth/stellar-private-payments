@@ -54,7 +54,6 @@ const listing = (entry, signatures) => new xdr.SorobanAuthorizationEntry({
   rootInvocation: entry.rootInvocation,
 });
 
-// Signs an authorization's preimage the way Freighter's signAuthEntry does.
 const sign = (entry, signer, network = Networks.TESTNET) => signer.sign(hash(Buffer.from(authorizationPreimage(entry, network), 'base64')));
 
 test('authorizationPreimage matches a preimage built by hand from the same fields', () => {
@@ -110,8 +109,7 @@ test('addSignature refuses a signature of another network\'s preimage', () => {
 test('walletSignature decodes the signature signAuthEntry returns into one addSignature accepts', () => {
   const entry = pauseEntry();
   const signer = Keypair.random();
-  // `signAuthEntry` in `@stellar/freighter-api` 6 resolves to the signature as
-  // base64 text, beside the account that made it.
+  // freighter-api 6 returns the signature as base64.
   const { signedAuthEntry } = {
     signedAuthEntry: Buffer.from(sign(entry, signer)).toString('base64'),
     signerAddress: signer.publicKey(),
@@ -163,7 +161,6 @@ test('decodeAuthorization refuses a file that authorizes anything but a pause of
     subInvocations,
   });
   const pause = invocation('pause_deposits', []);
-  // One entry per thing the file must not authorize, each otherwise a pause.
   const entries = {
     'another call': [credentials, invocation('unpause_deposits', [])],
     'an argument': [credentials, invocation('pause_deposits', [xdr.ScVal.scvVoid()])],
@@ -374,8 +371,6 @@ test('pauseTransaction refuses a file whose expiration has passed before buildin
   );
 });
 
-// A diagnostic event named `name`, such as those a simulation reports around
-// every contract call.
 function diagnosticEvent(name) {
   return new xdr.DiagnosticEvent({
     inSuccessfulContractCall: true,
@@ -391,8 +386,7 @@ function diagnosticEvent(name) {
   });
 }
 
-// An RPC stub at ledger 2,000 whose simulations return `simulations` in turn,
-// and whose recent Soroban inclusion fees have `p99` as their 99th percentile.
+// RPC stub at ledger 2,000: `simulations` in turn, `p99` as the fee percentile.
 const pauseServer = (simulations, p99 = '100') => ({
   getLatestLedger: async () => ({ sequence: 2_000 }),
   getAccount: async () => new Account(SENDER, '5'),
@@ -402,8 +396,7 @@ const pauseServer = (simulations, p99 = '100') => ({
 
 test('pauseTransaction reads a simulation with no deposit_pause_changed event as an already paused pool', async () => {
   const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
-  // `deposits_paused` reads `false`, and the pause publishes the event of a
-  // pause on a paused pool.
+  // Reads unpaused, then the pause finds the pool paused.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     {
@@ -420,7 +413,6 @@ test('pauseTransaction reads a simulation with no deposit_pause_changed event as
 test('pauseTransaction builds the pause at the p99 inclusion fee when the simulation publishes deposit_pause_changed', async () => {
   const entry = pauseEntry();
   const authorization = decodeAuthorization(encodeAuthorization(entry));
-  // `deposits_paused` reads `false`, and the pause publishes its event.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     {
@@ -434,7 +426,7 @@ test('pauseTransaction builds the pause at the p99 inclusion fee when the simula
   ], '5000');
   const built = await pauseTransaction({ networkPassphrase: Networks.TESTNET, source: SENDER, authorization, server });
   const { fee, operations } = TransactionBuilder.fromXDR(built.xdr, Networks.TESTNET);
-  // The simulation's resource fee comes on top of the bid.
+  // The resource fee comes on top of the bid.
   assert.equal(Number(fee) - 100, 5_000);
   assert.equal(operations.length, 1);
   const [{ func, auth }] = operations;
@@ -456,7 +448,6 @@ test('pauseTransaction builds nothing when deposits_paused reads true', async ()
 
 test('pauseTransaction reads an entry the host refuses as a file to sign again', async () => {
   const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
-  // `deposits_paused` reads `false`, and the host refuses the entry.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Auth, InvalidAction)' },
@@ -469,7 +460,6 @@ test('pauseTransaction reads an entry the host refuses as a file to sign again',
 
 test('pauseTransaction reads a spent nonce as a file already used', async () => {
   const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
-  // `deposits_paused` reads `false`, and the host refuses the entry's spent nonce.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Auth, ExistingValue)' },
@@ -482,7 +472,6 @@ test('pauseTransaction reads a spent nonce as a file already used', async () => 
 
 test('pauseTransaction passes any other refusal on unchanged', async () => {
   const authorization = decodeAuthorization(encodeAuthorization(pauseEntry()));
-  // `deposits_paused` reads `false`, and the pause runs out of budget.
   const server = pauseServer([
     { result: { retval: xdr.ScVal.scvBool(false) }, events: [] },
     { error: 'HostError: Error(Budget, ExceededLimit)' },

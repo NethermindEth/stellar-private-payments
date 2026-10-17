@@ -1,7 +1,4 @@
-/**
- * Deposit pauses the admin's signers authorize ahead of time, for whoever keeps the
- * file to send from their own account. Kept out of `admin.js` so Node unit tests can import it.
- */
+// Pre-signed deposit pauses. Kept out of admin.js so Node tests can import it.
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import {
@@ -22,15 +19,7 @@ import {
 
 import { hex, rpcServer, shortAddress } from './admin-transactions.js';
 
-/**
- * Builds an unsigned authorization, by a pool's admin, of one `pause_deposits()`
- * on the pool, expiring `maxEntryTtl - 1` ledgers after `latestLedger`, the
- * latest the host accepts.
- *
- * @param {{admin: string, pool: string, nonce: bigint, latestLedger: number, maxEntryTtl: number}} pause
- *   `nonce` is a random `i64`, spent when the pause lands.
- * @returns {xdr.SorobanAuthorizationEntry}
- */
+/** Unsigned `pause_deposits()` authorization, valid as long as the host allows. */
 export function buildPauseAuthorization({ admin, pool, nonce, latestLedger, maxEntryTtl }) {
   return new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
@@ -50,12 +39,11 @@ export function buildPauseAuthorization({ admin, pool, nonce, latestLedger, maxE
   });
 }
 
-/** Returns the preimage each signer signs, as the base64 `HashIdPreimage` XDR Freighter's `signAuthEntry` takes. */
+/** Base64 preimage for Freighter's `signAuthEntry`. */
 export function authorizationPreimage(entry, networkPassphrase) {
   return preimage(entry, networkPassphrase).toXdr('base64');
 }
 
-// Returns the `HashIdPreimage` whose SHA-256 hash each signer signs.
 function preimage(entry, networkPassphrase) {
   const { nonce, signatureExpirationLedger } = entry.credentials.address;
   return xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(new xdr.HashIdPreimageSorobanAuthorization({
@@ -88,7 +76,7 @@ function verifiesAsHost(publicKey, message, signature) {
   }
 }
 
-// Compares public keys byte by byte, the order the host requires of an account's signatures.
+// The host requires signatures sorted by public key.
 function compareKeys(a, b) {
   const index = a.findIndex((byte, i) => byte !== b[i]);
   return index === -1 ? 0 : a[index] - b[index];
@@ -102,7 +90,6 @@ export function addSignature(entry, publicKey, signature, networkPassphrase) {
   if (signatures.some(({ public_key: signed }) => compareKeys(signed, key) === 0)) {
     throw new Error(`${shortAddress(publicKey)} has already signed this file`);
   }
-  // A bad signature would otherwise surface only when the pause is sent.
   if (!verifiesAsHost(key, hash(preimage(entry, networkPassphrase).toXdr()), signature)) {
     throw new Error(`Not a valid signature from ${shortAddress(publicKey)} on this network`);
   }
@@ -151,19 +138,12 @@ export function countedEntry(entry, { weights }) {
   return withSignatures(entry, counted);
 }
 
-/**
- * Decodes the `signedAuthEntry` field of Freighter's `signAuthEntry` result into
- * the bytes `addSignature` takes.
- *
- * @throws {Error} when the wallet returned no signature.
- */
 export function walletSignature(signedAuthEntry) {
   if (!signedAuthEntry) throw new Error('Freighter returned no signature');
   return Uint8Array.from(atob(signedAuthEntry), (char) => char.charCodeAt(0));
 }
 
-// Reads a pause authorization's pool, admin, nonce, expiry, and signers. Files can
-// come from anyone, so an entry for any other call is refused.
+// Files come from anyone: refuse anything but one pause_deposits() call.
 function describePause(entry) {
   const call = entry.rootInvocation.function.contractFn;
   if (
@@ -184,13 +164,6 @@ function describePause(entry) {
   };
 }
 
-/**
- * Writes a pause file: the entry, preceded by its pool, nonce, expiration ledger,
- * and signers for a reader.
- *
- * @returns {string} The file's JSON.
- * @throws {Error} when the entry authorizes anything but `pause_deposits()` on one pool.
- */
 export function encodeAuthorization(entry) {
   const { pool, nonce, expirationLedger, signers } = describePause(entry);
   return JSON.stringify({
@@ -279,19 +252,7 @@ export async function depositsPaused(server, pool, networkPassphrase) {
   return scValToNative(read.result.retval);
 }
 
-/**
- * Builds the unsigned, simulated envelope `{ xdr }` that sends a pre-signed pause
- * from any funded account `source`, or returns `{ paused: true }` for a paused
- * pool, where sending would only spend the authorization. Simulation checks the
- * signatures, so a bad one fails here, not on chain. An archived `Admin` entry is
- * restored at the cost of `source`.
- *
- * @param {{rpcUrl: string, networkPassphrase: string, source: string, authorization: Object, server?: rpc.Server}} pause
- *   `authorization` is a file read by `decodeAuthorization`.
- * @returns {Promise<{xdr: string}|{paused: true}>}
- * @throws {Error} when the authorization expired or the host refuses it, or with
- *   the simulation's error when the pool refuses the read or the pause.
- */
+/** Simulated pause tx paid by any funded `source`, or `{ paused: true }` if already paused. */
 export async function pauseTransaction({ rpcUrl, networkPassphrase, source, authorization, server = rpcServer(rpcUrl) }) {
   const { pool, expirationLedger, entry } = authorization;
   const { sequence } = await server.getLatestLedger();
@@ -299,7 +260,7 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
     throw new Error(`Expired. ${SIGN_AGAIN}`);
   }
   if (await depositsPaused(server, pool, networkPassphrase)) return { paused: true };
-  // Bids the 99th percentile of recent Soroban inclusion fees, never below the minimum, so the pause lands in a fee surge.
+  // Bid the p99 inclusion fee so the pause lands in a fee surge.
   const [account, { sorobanInclusionFee }] = await Promise.all([server.getAccount(source), server.getFeeStats()]);
   const tx = oneOperation(
     account,
@@ -308,14 +269,14 @@ export async function pauseTransaction({ rpcUrl, networkPassphrase, source, auth
     String(Math.max(Number(BASE_FEE), Number(sorobanInclusionFee.p99))),
   );
   const simulation = await simulated(server, tx).catch((err) => {
-    // The host refuses an entry whose nonce a landed pause spent.
+    // Nonce already spent.
     if (/Error\(Auth, ExistingValue\)/.test(err.message)) {
       throw new Error(`Already used. ${SIGN_AGAIN}`);
     }
     if (!/Error\(Auth, InvalidAction\)/.test(err.message)) throw err;
     throw new Error(`The network refused the file's signatures. ${SIGN_AGAIN}`);
   });
-  // No `deposit_pause_changed` event means the pool is paused, and sending would only spend the file.
+  // No pause event: already paused, so don't spend the file.
   if (!simulation.events.some(({ event }) => scValToNative(event.body.v0.topics[0]) === 'deposit_pause_changed')) {
     return { paused: true };
   }
