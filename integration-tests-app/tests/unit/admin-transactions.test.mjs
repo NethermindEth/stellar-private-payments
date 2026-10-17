@@ -20,13 +20,16 @@ import {
   adminTxFromHash,
   adminTxLink,
   custodyProblems,
+  deadCall,
   describeAdminCall,
   extendCommand,
   explainFailure,
   finishAdminCall,
+  hex,
   hostError,
   liveFootprintKeys,
   newAdminRefusal,
+  NoAnswer,
   repointsTo,
   rpcServer,
   shortLivedEntries,
@@ -421,11 +424,11 @@ test('explainFailure names a transaction the network refused', () => {
   );
   assert.equal(
     explainFailure(new Error('transaction ERROR: txBadSeq '), 'pool'),
-    'Another admin transaction used the sequence number first. Build the call again.',
+    'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.',
   );
   assert.equal(
     explainFailure(new Error('transaction ERROR: txTooLate '), 'pool'),
-    'The transaction\'s time bound has passed. Build the call again.',
+    'This call has expired. Build it again.',
   );
   const unconfirmed = 'The network has not confirmed the transaction yet. Check the contract before building the call again.';
   assert.equal(explainFailure(new Error('transaction TRY_AGAIN_LATER:  '), 'pool'), unconfirmed);
@@ -517,6 +520,34 @@ test('submitAdminCall waits for a transaction the network already holds instead 
   }
 });
 
+test('deadCall waits while the sequence number is free and the time bound open', async () => {
+  const envelope = insertLeafEnvelope();
+  const card = { server: { pollTransaction: async () => assert.fail('no lookup while the number is free') }, envelope: envelope.toXdr(), networkPassphrase: Networks.TESTNET, account: { seqNum: 41n } };
+  assert.equal(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 - 1 }), null);
+  assert.deepEqual(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 }), { reason: explainFailure('tx_too_late'), landed: false });
+});
+
+test('deadCall asks the network whether a used sequence number went to this call', async () => {
+  const envelope = insertLeafEnvelope();
+  const asked = [];
+  // Sequence 42 is used.
+  const dead = (landed) => deadCall({
+    server: { pollTransaction: async (hash, { attempts }) => { asked.push([hash, attempts]); if (landed instanceof Error) throw landed; return landed; } },
+    envelope: envelope.toXdr(),
+    networkPassphrase: Networks.TESTNET,
+    account: { seqNum: 42n },
+    now: 0,
+    kind: 'pool',
+  });
+  assert.deepEqual(await dead({ status: 'SUCCESS' }), { reason: 'This call already went through.', landed: true });
+  assert.deepEqual(await dead(failedWith20), { reason: `This call went through and failed: ${CONTRACT_ERRORS.pool[20]}`, landed: false });
+  assert.deepEqual(await dead({ status: 'NOT_FOUND' }), { reason: explainFailure('tx_bad_seq'), landed: false });
+  // No answer isn't "not found": the call may have landed.
+  await assert.rejects(dead(new NoAnswer()), NoAnswer);
+  // tx.hash() is a Uint8Array; its toString ignores 'hex'.
+  assert.ok(asked.every(([hash, attempts]) => hash === hex(envelope.hash()) && attempts === 10), JSON.stringify(asked));
+});
+
 test('repointsTo matches the pool, method, tree, and a given source', () => {
   const call = { contract: 'POOL', method: 'update_asp_membership', args: ['TREE'], source: 'ADMIN' };
   const repoint = { pool: 'POOL', method: 'update_asp_membership', tree: 'TREE' };
@@ -539,7 +570,7 @@ test('submitAdminCall throws the refusal of a transaction that never landed', as
   );
   await assert.rejects(
     submit(stubServer(refusedResend, notFound)),
-    (error) => explainFailure(error, 'pool') === 'Another admin transaction used the sequence number first. Build the call again.',
+    (error) => explainFailure(error, 'pool') === 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.',
   );
 });
 

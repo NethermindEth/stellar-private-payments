@@ -367,7 +367,27 @@ export async function submitAdminCall({ rpcUrl, networkPassphrase, xdr, server =
   if (sent.status !== 'PENDING' && landed.status === 'NOT_FOUND') {
     throw new Error(`transaction ${sent.status}: ${sent.errorResult?.result.type ?? ''} ${hostError(sent.diagnosticEvents)}`);
   }
-  throw new Error(`transaction ${sent.hash} ${landed.status}: ${landed.resultXdr?.result.type ?? ''} ${hostError(landed.diagnosticEventsXdr)}`);
+  throw landedFailure(sent.hash, landed);
+}
+
+const landedFailure = (hash, landed) => new Error(`transaction ${hash} ${landed.status}: ${landed.resultXdr?.result.type ?? ''} ${hostError(landed.diagnosticEventsXdr)}`);
+
+const SEQUENCE_USED = 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.';
+const TIME_BOUND_PASSED = 'This call has expired. Build it again.';
+
+/** Why the card's call can't land any more, or null. A co-signer may have sent it already. */
+export async function deadCall({ server, envelope, networkPassphrase, account, now, kind }) {
+  const tx = TransactionBuilder.fromXdr(envelope, networkPassphrase);
+  // Sequence number not used yet.
+  if (BigInt(account.seqNum) < BigInt(tx.sequence)) {
+    return Number(tx.timeBounds.maxTime) * 1000 <= now ? { reason: TIME_BOUND_PASSED, landed: false } : null;
+  }
+  const hash = hex(tx.hash());
+  // About two ledger closes: a load-balanced node can lag the account read.
+  const landed = await server.pollTransaction(hash, { attempts: 10 });
+  if (landed.status === 'SUCCESS') return { reason: 'This call already went through.', landed: true };
+  if (landed.status === 'FAILED') return { reason: `This call went through and failed: ${explainFailure(landedFailure(hash, landed), kind)}`, landed: false };
+  return { reason: SEQUENCE_USED, landed: false };
 }
 
 export const repointsTo = (call, { pool, method, tree, source }) => call.contract === pool
@@ -379,8 +399,8 @@ export const repointsTo = (call, { pool, method, tree, source }) => call.contrac
 const NETWORK_REFUSALS = [
   [/tx_?bad_?auth_?extra/i, 'The transaction carries a signature it does not use: more than the threshold needs, one signer twice, or a key that is not a signer. Build the call again and collect the threshold\'s signatures, one from each signer.'],
   [/tx_?bad_?auth/i, 'The transaction lacks signatures. Collect more from the admin account\'s signers.'],
-  [/tx_?bad_?seq/i, 'Another admin transaction used the sequence number first. Build the call again.'],
-  [/tx_?too_?late/i, 'The transaction\'s time bound has passed. Build the call again.'],
+  [/tx_?bad_?seq/i, SEQUENCE_USED],
+  [/tx_?too_?late/i, TIME_BOUND_PASSED],
   [/TRY_AGAIN_LATER|NOT_FOUND|DUPLICATE/, 'The network has not confirmed the transaction yet. Check the contract before building the call again.'],
   [/Error\(Auth, InvalidAction\)/, 'The transaction\'s source is not the contract\'s admin.'],
   [/Error\(Budget, ExceededLimit\)/, 'The call needs more resources than one transaction allows. For a blocklist insert, add fewer keys at a time.'],

@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
@@ -42,6 +42,7 @@ const addToBlocklistBtn = document.getElementById('addToBlocklistBtn');
 const removeFromBlocklistBtn = document.getElementById('removeFromBlocklistBtn');
 
 // Admin transaction card
+const adminTxCardEl = document.getElementById('admin-transaction');
 const adminTxXdrInput = document.getElementById('adminTxXdr');
 const adminTxDescriptionEl = document.getElementById('adminTxDescription');
 const adminTxSignaturesEl = document.getElementById('adminTxSignatures');
@@ -98,6 +99,8 @@ const state = {
   addedAllowlists: [],
   // Last re-point check, or its Done note.
   repoint: null,
+  // Re-renders the card when its time bound passes.
+  adminTxExpiry: null,
   // Pool -> the lists its policy uses. null until every pool is read.
   poolLists: null,
   // Each with its admin's signing rule.
@@ -392,6 +395,7 @@ const SIGNED_LABELS = new Map([[true, 'signed'], [false, 'not yet'], [null, 'can
 // call, and from the contract otherwise.
 function renderAdminTx(kind) {
   const xdr = adminTxXdrInput.value.trim();
+  clearTimeout(state.adminTxExpiry);
   // The re-point panel mirrors the card.
   renderRepoint();
   state.adminTxKind = null;
@@ -399,6 +403,7 @@ function renderAdminTx(kind) {
   adminTxSignersEl.replaceChildren();
   adminTxDescriptionEl.textContent = '';
   adminTxNoticeEl.textContent = '';
+  adminTxNoticeEl.classList.replace('text-amber-300', 'text-slate-400');
   submitAdminTxBtn.disabled = true;
   adminTxSignaturesLineEl.classList.toggle('hidden', !xdr || !state.networkPassphrase);
   copyAdminTxBtn.disabled = copyAdminTxLinkBtn.disabled = !xdr;
@@ -416,10 +421,23 @@ function renderAdminTx(kind) {
     state.adminTxKind = kind ?? kindOf(call.contract);
     adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
     adminTxSignaturesEl.textContent = count;
+    // setTimeout fires at once past 2^31 - 1 ms.
+    const untilExpiry = call.validUntil * 1000 - Date.now() + 1000;
+    if (untilExpiry > 1000) state.adminTxExpiry = setTimeout(() => renderAdminTx(state.adminTxKind), Math.min(untilExpiry, 2 ** 31 - 1));
     // A read landing after the card changed or the wallet disconnected is stale.
     const current = () => adminTxXdrInput.value.trim() === xdr && state.address;
-    rpcServer(state.rpcUrl).getAccountEntry(call.source).then((account) => {
+    const server = rpcServer(state.rpcUrl);
+    // Takes ~10 s when another transaction used the sequence number.
+    adminTxSignersEl.replaceChildren(Object.assign(document.createElement('li'), { className: 'text-sm text-slate-400', textContent: 'Checking this call with the network...' }));
+    server.getAccountEntry(call.source).then(async (account) => {
       if (!current()) return;
+      const dead = await deadCall({ server, envelope: xdr, networkPassphrase: state.networkPassphrase, account, now: Date.now(), kind: state.adminTxKind });
+      if (!current()) return;
+      // Settle a call a co-signer sent, or one that died, as if sent here.
+      if (dead) {
+        await settleAdminTx(call, dead);
+        return;
+      }
       const rule = signingRule(account);
       const weight = signedWeight(rule, xdr, state.networkPassphrase);
       const signable = weight < rule.threshold;
@@ -427,12 +445,23 @@ function renderAdminTx(kind) {
         ? `${count} of ${rule.threshold}`
         : `${count}, weight ${weight} of ${rule.threshold}`;
       adminTxSignersEl.replaceChildren(...signerStatus(rule, xdr, state.networkPassphrase).map(({ key, signed }) =>
-        signerItem(key, signed, signed === false && signable && ((button) => signAdminTx(key, button)))));
+        signerItem(key, signed, signed === false && signable && ((button) => signAdminTx(key, button)), !signable)));
       // Same sequence number: Sign waits for any call in progress.
       setBusy(state.busy);
       submitAdminTxBtn.disabled = state.busy || signable;
-    }, (err) => {
-      if (current()) adminTxNoticeEl.textContent = [adminTxNoticeEl.textContent, `The admin account could not be read: ${err.message}`].filter(Boolean).join(' ');
+    }).catch((err) => {
+      if (!current()) return;
+      adminTxSignersEl.replaceChildren();
+      let text = `Couldn't check this call: ${err.message}`;
+      // A reload would drop the call, so check again here.
+      if (err instanceof NoAnswer) {
+        text = 'Couldn\'t check this call: the network didn\'t answer. Checking again in 10 seconds.';
+        clearTimeout(state.adminTxExpiry);
+        state.adminTxExpiry = setTimeout(() => renderAdminTx(state.adminTxKind), 10_000);
+      }
+      // Keep an earlier warning, not the signing note.
+      const prior = adminTxNoticeEl.classList.contains('text-amber-300') ? adminTxNoticeEl.textContent : '';
+      warnAdminTx([prior, text].filter(Boolean).join(' '));
     });
   } catch (err) {
     adminTxSignaturesLineEl.classList.add('hidden');
@@ -505,6 +534,8 @@ async function prepareAdminCall(kind, call) {
     const rule = account && signingRule(account);
     if (!rule || (rule.weights.get(state.address) ?? 0) < rule.threshold) {
       setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
+      showToast('Built. Each signer signs it in the Admin Transaction card.', 'info');
+      adminTxCardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     try {
@@ -537,14 +568,26 @@ async function signAdminTx(signer, button) {
   button.textContent = 'Signing...';
   try {
     const envelope = adminTxXdrInput.value.trim();
-    const { source } = describeAdminCall(envelope, state.networkPassphrase);
-    const rule = signingRule(await rpcServer(state.rpcUrl).getAccountEntry(source));
+    const call = describeAdminCall(envelope, state.networkPassphrase);
+    const server = rpcServer(state.rpcUrl);
+    const account = await server.getAccountEntry(call.source);
+    // A co-signer may have sent it, or it died, since the Sign buttons were drawn.
+    const dead = await deadCall({ server, envelope, networkPassphrase: state.networkPassphrase, account, now: Date.now(), kind: state.adminTxKind });
+    if (dead) {
+      showToast(dead.reason, dead.landed ? 'success' : 'info');
+      await settleAdminTx(call, dead);
+      return;
+    }
+    const rule = signingRule(account);
     const refusal = signRefusal(rule, envelope, state.networkPassphrase, signer);
     if (refusal) throw new Error(refusal);
     const signedTxXdr = await walletSign(envelope, signer);
     if (adminTxXdrInput.value.trim() !== envelope) throw new Error('The card changed while Freighter was signing. Sign again.');
     loadAdminTx(signedTxXdr, state.adminTxKind);
-    showToast('Signed. Press Copy link and send the new link to the next signer, or submit it.', 'success');
+    // In the card: a toast would cover Copy link.
+    adminTxNoticeEl.textContent = signedWeight(rule, signedTxXdr, state.networkPassphrase) >= rule.threshold
+      ? 'Signed. That\'s enough signatures: press Submit.'
+      : 'Signed. Press Copy link and send the new link to the next signer.';
   } catch (err) {
     const reason = err.code === 'SIGNER_ADDRESS_MISMATCH'
       ? `Freighter does not hold ${shortAddress(signer)}. Pass the link to that signer.`
@@ -574,7 +617,7 @@ async function submitAdminTx() {
     setStatus('Admin transaction failed', 'error');
     showToast('Admin transaction failed. The card shows why.', 'error');
     renderAdminTx(state.adminTxKind);
-    adminTxNoticeEl.textContent = `Last submit: ${reason}`;
+    warnAdminTx(`Last submit: ${reason}`);
     return;
   } finally {
     setBusy(false);
@@ -583,13 +626,24 @@ async function submitAdminTx() {
   }
   setStatus('Admin transaction succeeded', 'ok');
   showToast(`${callName(call.method)}: done`, 'success');
-  // The call may have changed what the last check read. Dropping the check
-  // before the card empties keeps Build from offering it again.
+  await settleAdminTx(call);
+}
+
+// Empties the card and re-reads the chain. Drops the check first so Build can't reuse it.
+async function settleAdminTx(call, { landed = true, reason = '' } = {}) {
   resetRepoint();
   loadAdminTx('');
+  if (!landed) warnAdminTx(reason);
+  else if (reason) adminTxNoticeEl.textContent = reason;
   await refreshState();
   // Unless a new check started during the refresh.
-  if (!state.repoint && repointDescribes(call)) showRepointDone(call);
+  if (landed && !state.repoint && repointDescribes(call)) showRepointDone(call);
+}
+
+// Amber until the card renders again.
+function warnAdminTx(text) {
+  adminTxNoticeEl.textContent = text;
+  adminTxNoticeEl.classList.replace('text-slate-400', 'text-amber-300');
 }
 
 async function copyText(text, what) {
@@ -1462,6 +1516,7 @@ connectBtn.addEventListener('click', () => {
 // Refresh drops a finished check (the pool may have changed); a running one reads live data.
 refreshBtn.addEventListener('click', () => {
   if (state.repoint?.lines) resetRepoint();
+  if (!state.busy) renderAdminTx(state.adminTxKind);
   refreshState();
 });
 

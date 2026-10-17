@@ -144,9 +144,12 @@ account can, Freighter asks for its signature as soon as the call is built and t
 A rejected request leaves the call in the card for the steps above.
 
 Make one admin call at a time: each uses the account's next sequence number, so a call built while
-another is in flight fails with `tx_bad_seq` once the other lands. After its 24 hours a call fails
-with `tx_too_late`. When Submit reports that the network has not confirmed the transaction yet,
-check the contract before building the call again.
+another is in flight can no longer land once the other does. A call also expires after its 24
+hours. The card checks its call with the network when it loads the call, on Sign and Submit, and
+when the call's time bound passes. Once the call went through, from any signer's copy, the card
+says so. Once the call can no longer land, the card empties and says why. Then, or when Submit
+reports that the network has not confirmed the transaction yet, check the contract before building
+the call again.
 
 A call that reads an archived entry, such as an `Admin` entry nothing has extended, restores it,
 and the admin account pays for the restore within the call's fee. On testnet on 2026-10-03, an
