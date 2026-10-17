@@ -28,6 +28,7 @@ import {
   liveFootprintKeys,
   newAdminRefusal,
   repointsTo,
+  rpcServer,
   shortLivedEntries,
   signatureCount,
   signedBy,
@@ -540,4 +541,58 @@ test('submitAdminCall throws the refusal of a transaction that never landed', as
     submit(stubServer(refusedResend, notFound)),
     (error) => explainFailure(error, 'pool') === 'Another admin transaction used the sequence number first. Build the call again.',
   );
+});
+
+const UNANSWERED = 'The network didn\'t answer. Try again in a moment.';
+const rpcAnswer = (body) => Response.json({ jsonrpc: '2.0', id: 1, ...body });
+
+test('rpcServer reports a request the RPC never answered in plain words', async (t) => {
+  const failures = {
+    offline: async () => { throw new TypeError('Failed to fetch'); },
+    'gateway error': async () => new Response('Bad Gateway', { status: 502 }),
+    'rate limit': async () => new Response('Too Many Requests', { status: 429 }),
+    'a page that is not JSON': async () => new Response('<html>Sign in to the Wi-Fi</html>'),
+  };
+  for (const [name, fetch] of Object.entries(failures)) {
+    t.mock.method(globalThis, 'fetch', fetch);
+    await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: UNANSWERED }, name);
+  }
+});
+
+test('rpcServer gives up on a request after 30 seconds', async (t) => {
+  const waits = [];
+  t.mock.method(AbortSignal, 'timeout', (ms) => {
+    waits.push(ms);
+    return AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, { signal }) => {
+    signal.throwIfAborted();
+    return rpcAnswer({ result: {} });
+  });
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: UNANSWERED });
+  assert.deepEqual(waits, [30_000]);
+});
+
+test('rpcServer keeps the message of an answer the RPC gave', async (t) => {
+  const error = { code: -32600, message: 'startLedger must be within the ledger range: 1 - 2' };
+  t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ error }));
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), error);
+  t.mock.method(globalThis, 'fetch', async () => new Response('Not Found', { status: 404 }));
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: 'Request failed with status code 404' });
+});
+
+test('rpcServer keeps the error of a request it could not send', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ result: {} }));
+  await assert.rejects(rpcServer('https://rpc.test').getEvents({ startLedger: 1n, filters: [] }), { message: /BigInt/ });
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('rpcServer tells a missing account from a read that got no answer, in the SDK\'s own reads too', async (t) => {
+  const address = Keypair.random().publicKey();
+  t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ result: { entries: [], latestLedger: 1 } }));
+  await assert.rejects(rpcServer('https://rpc.test').getAccount(address), {
+    message: `${address.slice(0, 6)}...${address.slice(-4)} isn't an account on this network. Check the address, or fund the account first.`,
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response('Bad Gateway', { status: 502 }));
+  await assert.rejects(rpcServer('https://rpc.test').getAccount(address), { message: UNANSWERED });
 });

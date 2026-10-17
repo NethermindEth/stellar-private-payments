@@ -6,7 +6,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
@@ -948,9 +948,13 @@ async function checkRepoint() {
       readInstance(server, pool),
       readInstance(server, tree),
     ]);
+    // No answer on any line fails the whole check.
     const run = (checks) => Promise.all(checks.filter(Boolean).map(([label, check]) => check().then(
       (text) => ({ label, ok: true, text }),
-      (err) => ({ label, ok: false, text: err.message, confirm: err.confirm }),
+      (err) => {
+        if (err instanceof NoAnswer) throw err;
+        return { label, ok: false, text: err.message, confirm: err.confirm };
+      },
     )));
     // A list the policy ignores decides nothing: check only its code.
     const uses = usesList(poolInstance.stored.get('PolicyFlags'), allowlist);
@@ -985,6 +989,7 @@ async function checkRepoint() {
         if (!file) {
           const current = poolInstance.stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership');
           const unreadable = (err) => {
+            if (err instanceof NoAnswer) throw err;
             throw new Error(`couldn't read the pool's current list: ${err.message}. Add a file to compare with instead.`);
           };
           if (allowlist) {
@@ -1001,6 +1006,7 @@ async function checkRepoint() {
           ? await Promise.all([eventsSince(server, tree, historyStart({ tree, manifest })), nextIndex()])
             .then(([events, count]) => allowlistLeavesFromEvents(events, count))
             .catch((err) => {
+              if (err instanceof NoAnswer) throw err;
               throw new Error(`${err.message}. Clear the file to check just the count.`);
             })
           : await keys();
@@ -1090,7 +1096,11 @@ async function refreshPauseFiles() {
   if (state.rpcUrl) {
     await Promise.all(state.pauseFiles.map((file) => pauseChain(file.authorization).then(
       (chain) => state.pauseRefresh === refresh && Object.assign(file, chain, { readError: null }),
-      (err) => state.pauseRefresh === refresh && Object.assign(file, { readError: `Couldn't check this file: ${err.message}` }),
+      (err) => state.pauseRefresh === refresh && Object.assign(file, {
+        readError: err instanceof NoAnswer
+          ? 'Couldn\'t check this file: the network didn\'t answer. The page checks it again before it signs or pauses.'
+          : `Couldn't check this file: ${err.message}`,
+      }),
     )));
   }
   if (state.pauseRefresh === refresh) renderPauseFiles();
@@ -1350,7 +1360,7 @@ async function confirmCustody(newAdmin) {
     try {
       problems = custodyProblems(await rpcServer(state.rpcUrl).getAccountEntry(newAdmin));
     } catch (err) {
-      showToast(`The new admin has to be an existing account: ${err.message}`, 'error');
+      showToast(err instanceof NoAnswer ? `Couldn't check the new admin: ${err.message}` : `New admin ${err.message}`, 'error');
       return false;
     }
   }

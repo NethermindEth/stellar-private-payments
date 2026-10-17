@@ -36,8 +36,45 @@ export const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padS
 
 export const shortAddress = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 
-/** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
-export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+// Above the RPC's own 25 s limit, so a slow request still gets the RPC's answer.
+const RPC_TIMEOUT_MS = 30_000;
+
+/** The RPC didn't answer. Retrying is the only fix, so callers add no advice. */
+export class NoAnswer extends Error {
+  constructor(cause) {
+    super('The network didn\'t answer. Try again in a moment.', { cause });
+  }
+}
+
+// The SDK reports any failed account read as "not found". getAccount and contract.Client use this.
+class AdminRpcServer extends rpc.Server {
+  async getAccountEntry(address) {
+    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(address).xdrPublicKey() }));
+    const { entries } = await this.getLedgerEntries(key);
+    if (entries.length === 0) throw new Error(`${shortAddress(address)} isn't an account on this network. Check the address, or fund the account first.`);
+    return entries[0].val.account;
+  }
+}
+
+/** Throws NoAnswer when the RPC doesn't answer: offline, timeout, 5xx, 429, or not JSON. */
+export function rpcServer(rpcUrl) {
+  const server = new AdminRpcServer(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+  // The SDK's `timeout` constructor option is ignored.
+  server.httpClient.defaults.timeout = RPC_TIMEOUT_MS;
+  server.httpClient.interceptors.response.use(
+    (response) => {
+      // No body: a mid-stream timeout or a page that isn't the RPC.
+      if (typeof response.data !== 'object' || response.data === null) throw new NoAnswer(response);
+      return response;
+    },
+    (err) => {
+      const status = err?.response?.status;
+      if (!err?.isAxiosError || (status < 500 && status !== 429)) throw err;
+      throw new NoAnswer(err);
+    },
+  );
+  return server;
+}
 
 /** Reads the network's `max_entry_ttl`: an entry lives at most that many ledgers, counting the current one. */
 export async function maxEntryTtl(server) {
