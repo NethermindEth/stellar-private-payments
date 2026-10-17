@@ -3,7 +3,7 @@
 //! The pool's token balance is the two totals plus any tokens sent to it
 //! directly, and the notes total never goes below zero.
 
-use soroban_sdk::{Env, contracttype};
+use soroban_sdk::{Address, Env, contracttype};
 
 /// Errors from the totals functions.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub enum Error {
     NotesTotalExceeded,
     /// A total would overflow `i128`.
     Overflow,
-    /// A claim is negative or above the fees total.
+    /// A claim is negative, above the fees total, or paid to the pool.
     InvalidClaimAmount,
 }
 
@@ -61,13 +61,17 @@ pub fn record(env: &Env, net: i128, fee: i128) -> Result<(), Error> {
     Ok(())
 }
 
-/// Subtracts `amount` from the fees total.
+/// Subtracts `amount` from the fees total for a claim paid to `to`.
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidClaimAmount`] if `amount` is negative or above the
-/// fees total, and [`Error::NotInitialized`] if the fees total is not stored.
-pub fn claim(env: &Env, amount: i128) -> Result<(), Error> {
+/// fees total or `to` is the pool itself, and [`Error::NotInitialized`] if the
+/// fees total is not stored.
+pub fn claim(env: &Env, to: &Address, amount: i128) -> Result<(), Error> {
+    if *to == env.current_contract_address() {
+        return Err(Error::InvalidClaimAmount);
+    }
     let fees = fees_total(env)?;
     let remaining = fees
         .checked_sub(amount)
@@ -94,7 +98,7 @@ pub fn fees_total(env: &Env) -> Result<i128, Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{Address, contract, contractimpl};
+    use soroban_sdk::{contract, contractimpl};
 
     // Only ever compiled under `cfg(test)`: `pool-core` is a library and must
     // not export a contract from its production build.
@@ -148,6 +152,17 @@ mod test {
         env.as_contract(&id, || {
             assert_eq!(record(&env, 2, 0), Err(Error::Overflow));
             assert_eq!(totals(&env), (Some(i128::MAX - 1), Some(0)));
+        });
+    }
+
+    #[test]
+    fn claim_refuses_the_contract_itself() {
+        let env = Env::default();
+        let id = register_with_totals(&env, 0, 5);
+
+        env.as_contract(&id, || {
+            assert_eq!(claim(&env, &id, 5), Err(Error::InvalidClaimAmount));
+            assert_eq!(totals(&env), (Some(0), Some(5)));
         });
     }
 }
