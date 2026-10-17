@@ -3615,6 +3615,7 @@ mod tests {
             deposits_paused: false,
             fee: NoteAmount::ZERO,
             minimum_deposit_amount: NoteAmount::ZERO,
+            maximum_deposit_amount: ExtAmount::MAX,
         };
         let step = Transact::new(
             vec![c, c],

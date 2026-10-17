@@ -60,6 +60,23 @@ struct PoolFee {
     pool_fee_base_units: NoteAmount,
 }
 
+impl PoolFee {
+    /// Reports whether the pool charges no fee.
+    fn is_zero(&self) -> bool {
+        self.pool_fee_base_units == NoteAmount::ZERO
+    }
+
+    /// Returns `clause` built from this fee, or nothing for a pool that charges
+    /// no fee, so a zero fee goes unsaid.
+    fn clause(&self, clause: impl FnOnce(&str) -> String) -> String {
+        if self.is_zero() {
+            String::new()
+        } else {
+            clause(&self.pool_fee)
+        }
+    }
+}
+
 fn pool_fee(pool: &PrivatePool, decimals: u32) -> Result<PoolFee> {
     let fee = pool.fee()?;
     Ok(PoolFee {
@@ -74,14 +91,15 @@ struct Row<'a> {
     #[serde(flatten)]
     result: &'a TransactionResult,
     #[serde(flatten)]
-    fee: Option<&'a PoolFee>,
+    fee: &'a PoolFee,
 }
 
 fn map_pool_err(
     config: &CliConfig,
     pool: &PrivatePool,
     decimals: u32,
-    fee: Option<&PoolFee>,
+    fee: &PoolFee,
+    fee_included: bool,
     error: Error,
     json: bool,
 ) -> anyhow::Error {
@@ -98,22 +116,71 @@ fn map_pool_err(
             }
             anyhow::anyhow!("{}", plan.cause())
         }
-        Error::DepositBelowMinimum { minimum } => token_amount(pool, decimals, *minimum)
-            .map_or_else(
-                |_| anyhow::anyhow!("{error}"),
-                |minimum| {
-                    anyhow::anyhow!("deposit is below the pool minimum of {minimum} after the fee")
-                },
-            ),
-        _ => anyhow::anyhow!("{error}"),
+        _ => error_message(&error, fee, fee_included, |amount| {
+            token_amount(pool, decimals, amount).ok()
+        }),
     }
+}
+
+/// Describes a pool error, naming its amounts in token units through `amount`.
+/// A refused deposit names the smallest or largest deposit, since the fee comes
+/// on top, unless `fee_included` says the amount already holds the fee, as
+/// `spp transact`'s `--deposit` does.
+fn error_message(
+    error: &Error,
+    fee: &PoolFee,
+    fee_included: bool,
+    amount: impl Fn(NoteAmount) -> Option<String>,
+) -> anyhow::Error {
+    let message = match error {
+        Error::DepositBelowMinimum { minimum } => amount(*minimum).map(|minimum| {
+            if !fee_included {
+                format!(
+                    "the smallest deposit is {minimum}{}",
+                    fee.clause(|fee| format!("; the {fee} pool fee is added on top"))
+                )
+            } else if fee.is_zero() {
+                format!("--deposit must be at least {minimum}")
+            } else {
+                format!(
+                    "--deposit must leave at least {minimum} after the {} pool fee",
+                    fee.pool_fee
+                )
+            }
+        }),
+        Error::DepositAboveMaximum {
+            maximum,
+            largest_deposit,
+        } => {
+            if fee_included {
+                NoteAmount::try_from(*maximum)
+                    .ok()
+                    .and_then(&amount)
+                    .map(|maximum| {
+                        format!(
+                            "--deposit can be at most {maximum}{}",
+                            fee.clause(|_| ", pool fee included".to_owned())
+                        )
+                    })
+            } else {
+                amount(*largest_deposit).map(|largest| {
+                    format!(
+                        "the largest deposit is {largest}{}",
+                        fee.clause(|fee| format!("; the {fee} pool fee is added on top"))
+                    )
+                })
+            }
+        }
+        _ => None,
+    };
+    message.map_or_else(|| anyhow::anyhow!("{error}"), anyhow::Error::msg)
 }
 
 fn print_tx_results(
     config: &CliConfig,
     title: &str,
     results: &[TransactionResult],
-    fee: Option<&PoolFee>,
+    fee: &PoolFee,
     json: bool,
 ) -> Result<()> {
     if json {
@@ -134,39 +201,99 @@ fn print_tx_results(
             ),
             None => output::print_kv("tx_hash", &result.tx_hash),
         }
-        if let Some(fee) = fee {
-            output::print_kv("pool_fee", &fee.pool_fee);
-        }
+        output::print_kv("pool_fee", &fee.pool_fee);
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use stellar_private_payments::types::ExtAmount;
+
     use super::*;
 
+    fn fee(display: &str, base_units: u128) -> PoolFee {
+        PoolFee {
+            pool_fee: display.into(),
+            pool_fee_base_units: NoteAmount::from(base_units),
+        }
+    }
+
+    fn xlm(amount: NoteAmount) -> Option<String> {
+        Some(output::format_token_amount(amount.into(), "XLM", Some(7)))
+    }
+
     #[test]
-    fn a_json_row_carries_the_fee_only_when_known() {
+    fn a_json_row_carries_the_fee() {
         let result = TransactionResult {
             tx_hash: "abc".into(),
         };
-        let fee = PoolFee {
-            pool_fee: "0.1 XLM".into(),
-            pool_fee_base_units: NoteAmount::from(1_000_000u128),
-        };
         let row = serde_json::to_value(Row {
             result: &result,
-            fee: Some(&fee),
+            fee: &fee("0.1 XLM", 1_000_000),
         })
         .expect("JSON");
         assert_eq!(row["txHash"], "abc");
         assert_eq!(row["poolFee"], "0.1 XLM");
         assert_eq!(row["poolFeeBaseUnits"], "1000000");
-        let row = serde_json::to_value(Row {
-            result: &result,
-            fee: None,
-        })
-        .expect("JSON");
-        assert_eq!(row, serde_json::json!({ "txHash": "abc" }));
+    }
+
+    /// `spp deposit` adds the fee on top; `spp transact` counts it in.
+    #[test]
+    fn a_deposit_below_the_minimum_names_the_smallest_deposit() {
+        let error = Error::DepositBelowMinimum {
+            minimum: NoteAmount::from(10_000u128),
+        };
+        for (fee_included, with_fee, no_fee) in [
+            (
+                false,
+                "the smallest deposit is 0.001 XLM; the 0.0001 XLM pool fee is added on top",
+                "the smallest deposit is 0.001 XLM",
+            ),
+            (
+                true,
+                "--deposit must leave at least 0.001 XLM after the 0.0001 XLM pool fee",
+                "--deposit must be at least 0.001 XLM",
+            ),
+        ] {
+            assert_eq!(
+                error_message(&error, &fee("0.0001 XLM", 1_000), fee_included, xlm).to_string(),
+                with_fee
+            );
+            assert_eq!(
+                error_message(&error, &fee("0 XLM", 0), fee_included, xlm).to_string(),
+                no_fee
+            );
+        }
+    }
+
+    #[test]
+    fn an_over_cap_deposit_names_the_largest_deposit() {
+        let error = Error::DepositAboveMaximum {
+            maximum: ExtAmount::from(1_000_000_000),
+            largest_deposit: NoteAmount::from(999_000_000u128),
+        };
+        let tenth = fee("0.1 XLM", 1_000_000);
+        assert_eq!(
+            error_message(&error, &tenth, false, xlm).to_string(),
+            "the largest deposit is 99.9 XLM; the 0.1 XLM pool fee is added on top"
+        );
+        assert_eq!(
+            error_message(&error, &tenth, true, xlm).to_string(),
+            "--deposit can be at most 100 XLM, pool fee included"
+        );
+        let no_fee = Error::DepositAboveMaximum {
+            maximum: ExtAmount::from(1_000_000_000),
+            largest_deposit: NoteAmount::from(1_000_000_000u128),
+        };
+        let zero = fee("0 XLM", 0);
+        assert_eq!(
+            error_message(&no_fee, &zero, false, xlm).to_string(),
+            "the largest deposit is 100 XLM"
+        );
+        assert_eq!(
+            error_message(&no_fee, &zero, true, xlm).to_string(),
+            "--deposit can be at most 100 XLM"
+        );
     }
 }
