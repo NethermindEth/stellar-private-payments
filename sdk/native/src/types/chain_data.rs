@@ -377,11 +377,11 @@ pub enum ProcessedEvent {
 }
 
 #[cfg(test)]
-mod pool_info_gvk_tests {
+pub(crate) mod pool_info_gvk_tests {
     use super::*;
     use crate::types::U256;
 
-    fn pool_info_with_gvk() -> PoolInfo {
+    pub(crate) fn pool_info_with_gvk() -> PoolInfo {
         PoolInfo {
             ledger: 42,
             contract_id: "CPOOL".to_string(),

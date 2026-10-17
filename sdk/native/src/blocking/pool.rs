@@ -10,7 +10,10 @@ use crate::{
     error::Error,
     plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
-    types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
+    types::{
+        Estimate, PoolInfo, PrivatePoolConfig, SignedTransaction, TransactionResult,
+        TransferRecipient,
+    },
 };
 
 use super::runtime::block_on;
@@ -42,6 +45,25 @@ impl PrivatePool {
     /// Returns the errors of [`crate::PrivatePool::fee`].
     pub fn fee(&self) -> Result<NoteAmount, Error> {
         block_on(self.inner.fee())
+    }
+
+    /// Reads this pool's on-chain state, its fee and deposit limits included.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::pool_info`].
+    pub fn pool_info(&self) -> Result<PoolInfo, Error> {
+        block_on(self.inner.pool_info())
+    }
+
+    /// Refuses a deposit of `amount` that the pool would refuse, without
+    /// building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::check_deposit`].
+    pub fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
+        block_on(self.inner.check_deposit(amount))
     }
 
     #[tracing::instrument(name = "blocking_estimate", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
