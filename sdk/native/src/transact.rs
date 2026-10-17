@@ -102,9 +102,8 @@ pub(crate) fn transact_request_from_step(
     kdf_domain: &str,
     pool_address: &str,
     chain: &TransactChainContext,
-) -> Result<TransactRequest, Error> {
-    ensure_deposit_meets_minimum(step, chain)?;
-    Ok(TransactRequest {
+) -> TransactRequest {
+    TransactRequest {
         user_address: user_address.to_string(),
         kdf_domain: kdf_domain.to_string(),
         pool_root: Some(chain.pool_root),
@@ -128,25 +127,51 @@ pub(crate) fn transact_request_from_step(
         policy_flags: chain.policy_flags,
         gvk_mode: chain.gvk_mode,
         admin_view_key: chain.admin_view_key.clone(),
-    })
+    }
 }
 
-/// Refuses a deposit that leaves less than the pool minimum in notes once the
-/// fee is paid, so it fails before a proof is built.
-fn ensure_deposit_meets_minimum(
-    step: &Transact,
-    chain: &TransactChainContext,
-) -> Result<(), Error> {
-    if step.ext_amount <= ExtAmount::ZERO {
-        return Ok(());
-    }
-    let net = NoteAmount::try_from(step.ext_amount)?.checked_sub(chain.fee);
-    if net.is_none_or(|net| net < chain.minimum_deposit_amount) {
-        return Err(Error::DepositBelowMinimum {
+/// A pool's deposit rules, checked before a proof is built.
+pub(crate) struct DepositLimits {
+    paused: bool,
+    fee: NoteAmount,
+    minimum: NoteAmount,
+}
+
+impl From<&TransactChainContext> for DepositLimits {
+    fn from(chain: &TransactChainContext) -> Self {
+        Self {
+            paused: chain.deposits_paused,
+            fee: chain.fee,
             minimum: chain.minimum_deposit_amount,
-        });
+        }
     }
-    Ok(())
+}
+
+impl DepositLimits {
+    /// Refuses a deposit the pool would refuse. Transfers and withdrawals pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DepositsPaused`] while `pool` is paused, then
+    /// [`Error::DepositBelowMinimum`] when the deposit leaves less than the
+    /// minimum in notes after the fee. The pool checks them in this order.
+    pub(crate) fn check(&self, ext_amount: ExtAmount, pool: &str) -> Result<(), Error> {
+        if ext_amount <= ExtAmount::ZERO {
+            return Ok(());
+        }
+        if self.paused {
+            return Err(Error::DepositsPaused {
+                pool: pool.to_string(),
+            });
+        }
+        let net = NoteAmount::try_from(ext_amount)?.checked_sub(self.fee);
+        if net.is_none_or(|net| net < self.minimum) {
+            return Err(Error::DepositBelowMinimum {
+                minimum: self.minimum,
+            });
+        }
+        Ok(())
+    }
 }
 
 pub fn build_transact_params(
@@ -378,7 +403,7 @@ fn build_pool_input_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        TransactRequest, build_validated_pool_tree, load_user_key_material,
+        DepositLimits, build_validated_pool_tree, load_user_key_material,
         transact_request_from_step,
     };
     use crate::{
@@ -420,18 +445,9 @@ mod tests {
         Ok(())
     }
 
-    /// Builds the request for a step with `ext_amount` on a pool with fee 5 and
-    /// minimum 10.
-    fn request(ext_amount: i128) -> Result<TransactRequest, Error> {
-        let step = Transact::new(
-            Vec::new(),
-            [NoteAmount::ZERO; 2],
-            ExtAmount::from(ext_amount),
-            "POOL".into(),
-            [None, None],
-            [None, None],
-        );
-        let chain = TransactChainContext {
+    /// Returns the chain context of a pool with fee 5 and minimum 10.
+    fn chain(deposits_paused: bool) -> TransactChainContext {
+        TransactChainContext {
             pool_root: Field::ZERO,
             pool_next_index: 0,
             pool_merkle_levels: 10,
@@ -444,21 +460,39 @@ mod tests {
             policy_flags: PolicyFlags::EMPTY,
             gvk_mode: GvkMode::Off,
             admin_view_key: None,
-            deposits_paused: false,
+            deposits_paused,
             fee: NoteAmount::from(5),
             minimum_deposit_amount: NoteAmount::from(10),
-        };
-        transact_request_from_step(&step, ADDRESS, "tests", "POOL", &chain)
+        }
+    }
+
+    /// Checks `ext_amount` against the pool of [`chain`].
+    fn check(ext_amount: i128, deposits_paused: bool) -> Result<(), Error> {
+        DepositLimits::from(&chain(deposits_paused)).check(ExtAmount::from(ext_amount), "POOL")
+    }
+
+    #[test]
+    fn a_request_carries_the_chain_fee() {
+        let step = Transact::new(
+            Vec::new(),
+            [NoteAmount::ZERO; 2],
+            ExtAmount::from(15),
+            "POOL".into(),
+            [None, None],
+            [None, None],
+        );
+        let req = transact_request_from_step(&step, ADDRESS, "tests", "POOL", &chain(false));
+        assert_eq!(req.fee, NoteAmount::from(5));
     }
 
     /// A deposit of 14 leaves 9 in notes after the fee of 5, and one of 3 does
     /// not cover the fee.
     #[test]
-    fn a_deposit_below_the_minimum_is_refused_before_proving() {
+    fn a_deposit_below_the_minimum_is_refused() {
         for ext_amount in [14, 3] {
             assert!(
                 matches!(
-                    request(ext_amount),
+                    check(ext_amount, false),
                     Err(Error::DepositBelowMinimum { minimum }) if minimum == NoteAmount::from(10)
                 ),
                 "a deposit of {ext_amount} must be refused"
@@ -466,14 +500,24 @@ mod tests {
         }
     }
 
-    /// A deposit of 15 leaves exactly the minimum, and spends are not bounded
-    /// by it.
+    /// A deposit of 15 leaves exactly the minimum. Transfers and withdrawals
+    /// pass even while deposits are paused.
     #[test]
     fn a_deposit_at_the_minimum_a_transfer_and_a_withdrawal_pass() {
-        for ext_amount in [15, 0, -1] {
-            let req = request(ext_amount).expect("the minimum admits this step");
-            assert_eq!(req.fee, NoteAmount::from(5));
+        check(15, false).expect("the minimum admits a deposit of 15");
+        for (ext_amount, deposits_paused) in [(0, false), (-1, false), (0, true), (-1, true)] {
+            check(ext_amount, deposits_paused).expect("a transfer or a withdrawal passes");
         }
+    }
+
+    /// The deposit is below the minimum, so a minimum check ahead of the pause
+    /// would answer `DepositBelowMinimum` instead.
+    #[test]
+    fn a_paused_pool_reports_the_pause_before_the_minimum() {
+        assert!(matches!(
+            check(3, true),
+            Err(Error::DepositsPaused { pool }) if pool == "POOL"
+        ));
     }
 
     #[test]
