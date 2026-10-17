@@ -3624,7 +3624,7 @@ mod tests {
             [None, None],
             [None, None],
         );
-        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain)?;
+        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain);
         assert!(matches!(
             build_transact_params(&storage, &req)?,
             BuildTransactParams::Ready(params) if params.inputs.len() == 2
