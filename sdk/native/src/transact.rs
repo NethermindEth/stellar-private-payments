@@ -135,6 +135,7 @@ pub(crate) struct DepositLimits {
     paused: bool,
     fee: NoteAmount,
     minimum: NoteAmount,
+    maximum: ExtAmount,
 }
 
 impl From<&TransactChainContext> for DepositLimits {
@@ -143,6 +144,7 @@ impl From<&TransactChainContext> for DepositLimits {
             paused: chain.deposits_paused,
             fee: chain.fee,
             minimum: chain.minimum_deposit_amount,
+            maximum: chain.maximum_deposit_amount,
         }
     }
 }
@@ -153,8 +155,10 @@ impl DepositLimits {
     /// # Errors
     ///
     /// Returns [`Error::DepositsPaused`] while `pool` is paused, then
-    /// [`Error::DepositBelowMinimum`] when the deposit leaves less than the
-    /// minimum in notes after the fee. The pool checks them in this order.
+    /// [`Error::DepositAboveMaximum`] when the deposit sends more than the
+    /// maximum, then [`Error::DepositBelowMinimum`] when it leaves less than
+    /// the minimum in notes after the fee. The pool checks them in this
+    /// order.
     pub(crate) fn check(&self, ext_amount: ExtAmount, pool: &str) -> Result<(), Error> {
         if ext_amount <= ExtAmount::ZERO {
             return Ok(());
@@ -162,6 +166,15 @@ impl DepositLimits {
         if self.paused {
             return Err(Error::DepositsPaused {
                 pool: pool.to_string(),
+            });
+        }
+        if ext_amount > self.maximum {
+            return Err(Error::DepositAboveMaximum {
+                maximum: self.maximum,
+                largest_deposit: NoteAmount::try_from(self.maximum)
+                    .ok()
+                    .and_then(|maximum| maximum.checked_sub(self.fee))
+                    .unwrap_or_default(),
             });
         }
         let net = NoteAmount::try_from(ext_amount)?.checked_sub(self.fee);
@@ -445,7 +458,8 @@ mod tests {
         Ok(())
     }
 
-    /// Returns the chain context of a pool with fee 5 and minimum 10.
+    /// Returns the chain context of a pool with fee 5, minimum 10, and
+    /// maximum 100.
     fn chain(deposits_paused: bool) -> TransactChainContext {
         TransactChainContext {
             pool_root: Field::ZERO,
@@ -463,6 +477,7 @@ mod tests {
             deposits_paused,
             fee: NoteAmount::from(5),
             minimum_deposit_amount: NoteAmount::from(10),
+            maximum_deposit_amount: ExtAmount::from(100),
         }
     }
 
@@ -516,6 +531,28 @@ mod tests {
     fn a_paused_pool_reports_the_pause_before_the_minimum() {
         assert!(matches!(
             check(3, true),
+            Err(Error::DepositsPaused { pool }) if pool == "POOL"
+        ));
+    }
+
+    /// The pool caps what a deposit sends, fee included, so 100 passes and 101
+    /// does not. The largest deposit leaves room for the fee of 5.
+    #[test]
+    fn a_deposit_above_the_maximum_is_refused() {
+        assert!(matches!(
+            check(101, false),
+            Err(Error::DepositAboveMaximum { maximum, largest_deposit })
+                if maximum == ExtAmount::from(100) && largest_deposit == NoteAmount::from(95)
+        ));
+        check(100, false).expect("the maximum admits a deposit that sends exactly it");
+    }
+
+    /// The deposit is above the maximum, so a maximum check ahead of the pause
+    /// would answer `DepositAboveMaximum` instead.
+    #[test]
+    fn a_paused_pool_reports_the_pause_before_the_maximum() {
+        assert!(matches!(
+            check(101, true),
             Err(Error::DepositsPaused { pool }) if pool == "POOL"
         ));
     }

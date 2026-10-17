@@ -1,7 +1,7 @@
 use crate::{
     chain::IndexerError,
     planner::{PlanError, SpendSessionError},
-    types::{AspMembershipSync, NoteAmount, Sensitive},
+    types::{AspMembershipSync, ExtAmount, NoteAmount, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -72,8 +72,17 @@ pub enum Error {
 
     /// A deposit leaves less than the pool's minimum in notes once the fee is
     /// paid.
-    #[error("deposit is below the pool minimum of {minimum} base units after the fee")]
+    #[error("deposit is below the pool minimum of {minimum} base units after the pool fee")]
     DepositBelowMinimum { minimum: NoteAmount },
+
+    /// A deposit sends more than the pool's maximum, which counts the pool
+    /// fee. `largest_deposit` is the most a deposit can put in notes: the
+    /// maximum less the fee.
+    #[error("deposit sends more than the pool maximum of {maximum} base units, pool fee included")]
+    DepositAboveMaximum {
+        maximum: ExtAmount,
+        largest_deposit: NoteAmount,
+    },
 
     /// An untyped failure.
     ///
