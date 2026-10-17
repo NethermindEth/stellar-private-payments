@@ -74,6 +74,24 @@ the generated types: [`js/types/api-types.d.ts`](./js/types/api-types.d.ts)
 (`Client`, `Account`, `PrivatePool`, options) and
 [`js/types/index.d.ts`](./js/types/index.d.ts) (package entry).
 
+### Errors
+
+When the SDK refuses a deposit or a spend before proving, the call rejects with
+an `Error` that carries a `code` and the amounts the refusal names (`PoolRefusal`
+in `api-types.d.ts`). Amounts are decimal strings of base units, which `BigInt`
+reads without loss.
+
+| `code` | Amount properties |
+| --- | --- |
+| `DEPOSITS_PAUSED` | none |
+| `DEPOSIT_BELOW_MINIMUM` | `minimum` |
+| `DEPOSIT_ABOVE_MAXIMUM` | `maximum`, `largestDeposit` |
+| `NO_COMBINATION` | `maxSpend` |
+| `NO_SPENDABLE_NOTES` | none |
+
+A refusal after a payment's first transaction has confirmed resolves as a failed
+result instead, so the confirmed transaction's hash is not lost.
+
 ## Signer
 
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`,
