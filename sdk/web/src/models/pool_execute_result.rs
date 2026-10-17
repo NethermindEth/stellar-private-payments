@@ -2,6 +2,10 @@ use stellar_private_payments::{Error, PlanExecutionError, types::TransactionResu
 use wasm_bindgen::prelude::*;
 
 /// Result of pool transact flows (`deposit`, `transfer`, `withdraw`, …).
+///
+/// A deposit the SDK refuses before proving, because deposits are paused or
+/// the amount is outside the pool's limits, rejects with a coded error
+/// instead. A refusal the network returns later still resolves as `failed`.
 #[wasm_bindgen]
 pub struct PoolExecuteResult {
     status: String,
@@ -88,13 +92,11 @@ impl PoolExecuteResult {
                     }
                     _ => Vec::new(),
                 };
-                let code = wallet_rejection_code(&error);
-                let message = error_message(error);
                 Self {
                     status: "failed".to_string(),
                     hashes,
-                    message: Some(message),
-                    code,
+                    message: Some(error.root_cause().to_string()),
+                    code: wallet_rejection_code(&error),
                 }
             }
             ExecuteOutcome::AspNotReady => Self {
@@ -113,19 +115,8 @@ impl ExecuteOutcome {
     }
 }
 
-fn error_message(error: Error) -> String {
-    match error {
-        Error::PlanExecution(plan) => plan.cause().to_string(),
-        other => other.to_string(),
-    }
-}
-
 fn wallet_rejection_code(error: &Error) -> Option<i32> {
-    let cause = match error {
-        Error::PlanExecution(plan) => plan.cause(),
-        other => other,
-    };
-    match cause {
+    match error.root_cause() {
         Error::UserRejected(_) => Some(-4),
         _ => None,
     }
