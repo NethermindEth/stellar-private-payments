@@ -2629,9 +2629,8 @@ fn build_gvk_transact(
     if ext_amount < 0 {
         // Stands for the deposit that made the note the withdrawal spends.
         env.as_contract(&pool_id, || {
-            totals::record(&env, i128::from(ext_amount.unsigned_abs()), 0).unwrap_or_else(|err| {
-                panic!("expected the notes total to take the credit: {err:?}")
-            });
+            totals::record(&env, i128::from(ext_amount.unsigned_abs()), 0)
+                .expect("the notes total takes the credit");
         });
     }
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -4021,6 +4020,15 @@ fn transact_admits_a_deposit_at_the_minimum_after_the_fee() {
         pool.try_transact(&proof, &deposit, &Address::generate(&env)),
         Err(Ok(Error::InvalidProof))
     );
+}
+
+/// The cap counts the fee. 1001 carries its matching public amount, so only the
+/// cap answers `WrongExtAmount`; at 1000 the real verifier refuses the mock
+/// proof, so `InvalidProof` means every amount check passed.
+#[test]
+fn transact_caps_a_deposit_fee_included() {
+    assert_transact_charging_five(1001, 996, Error::WrongExtAmount);
+    assert_transact_charging_five(1000, 995, Error::InvalidProof);
 }
 
 /// The real verifier refuses the mock proof, so `InvalidProof` means every
