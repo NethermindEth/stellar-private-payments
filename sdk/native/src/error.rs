@@ -105,6 +105,36 @@ pub enum RetentionGap {
     BootnodeNotReady(String),
 }
 
+impl Error {
+    /// Returns the error that stopped a plan, past the steps it confirmed, or
+    /// this error when it is not a plan failure.
+    pub fn root_cause(&self) -> &Error {
+        match self {
+            Error::PlanExecution(plan) => plan.cause(),
+            other => other,
+        }
+    }
+
+    /// Returns the planner's error, bare or through a spend session. Call it on
+    /// [`Self::root_cause`] to read past the steps a plan confirmed.
+    pub fn plan_error(&self) -> Option<&PlanError> {
+        match self {
+            Error::Plan(error) | Error::SpendSession(SpendSessionError::Plan(error)) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Returns the most the notes can send, when planning a spend failed for
+    /// want of funds. Call it on [`Self::root_cause`] to read past the steps a
+    /// plan confirmed.
+    pub fn max_spend(&self) -> Option<NoteAmount> {
+        match self.plan_error()? {
+            PlanError::NoCombination { max_spend } => Some(*max_spend),
+            _ => None,
+        }
+    }
+}
+
 /// Multi-tx plan stopped after one or more steps had already confirmed
 /// on-chain.
 ///

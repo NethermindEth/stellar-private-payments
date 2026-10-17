@@ -110,7 +110,7 @@ export async function run(helpers) {
   await confirmOperation(page, 'Confirm withdrawal');
   const overWithdraw = await waitForToast(page, {
     origin: 'withdraw',
-    predicate: (toast) => /^withdraw failed/i.test(toast.message) && /no combination of notes/i.test(toast.message),
+    predicate: (toast) => /^withdraw failed/i.test(toast.message) && /can send at most/i.test(toast.message),
   });
   await assertNoApproval(context, 'over-withdraw');
   await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
@@ -126,7 +126,7 @@ export async function run(helpers) {
   await confirmOperation(page, 'Confirm transfer');
   const overTransfer = await waitForToast(page, {
     origin: 'transfer',
-    predicate: (toast) => /^transfer failed/i.test(toast.message) && /no combination of notes/i.test(toast.message),
+    predicate: (toast) => /^transfer failed/i.test(toast.message) && /can send at most/i.test(toast.message),
   });
   await assertNoApproval(context, 'over-transfer');
   await waitForOperationIdle(page, { submitSelector: '#btn-transfer' });
