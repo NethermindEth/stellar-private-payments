@@ -132,6 +132,7 @@ pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
     pub(crate) storage: Arc<dyn Storage>,
     pub(crate) upstream: UpstreamClient,
+    /// The archived tip: the network tip the indexer last caught up to.
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) oldest_ledger: Arc<AtomicU32>,
     pub(crate) archive_ready: Arc<AtomicBool>,

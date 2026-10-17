@@ -48,7 +48,7 @@ impl BootnodeRpc {
     /// - requested startLedger >= cutoff ledger, or
     /// - requested cursor's ledger >= cutoff ledger.
     ///
-    /// Cutoff ledger is 5 days ago from current time.
+    /// Cutoff ledger is 5 days before the archived tip.
     ///
     /// Return [`WARMING_UP_CODE`] while the bootnode is not ready for the
     /// request.
@@ -118,12 +118,10 @@ impl BootnodeRpc {
             self.state.min_deployment_ledger
         };
 
-        let events = if let Some(cursor) = parsed.cursor.as_deref() {
-            if parse_genesis_cursor(cursor).is_some() {
-                counter!("bootnode_handoffs_total").increment(1);
-                return Err(retention_handoff(cutoff_ledger));
-            }
-
+        let genesis_start = parsed.cursor.as_deref().and_then(parse_genesis_cursor);
+        let events = if let Some(cursor) = parsed.cursor.as_deref()
+            && genesis_start.is_none()
+        {
             let (cursor_ledger, events) = self
                 .state
                 .storage
@@ -152,8 +150,8 @@ impl BootnodeRpc {
                 oldest_ledger,
             ));
         } else {
-            let start_ledger = parsed
-                .start_ledger
+            let start_ledger = genesis_start
+                .or(parsed.start_ledger)
                 .unwrap_or(self.state.min_deployment_ledger);
             self.state
                 .storage
@@ -163,6 +161,10 @@ impl BootnodeRpc {
         };
 
         if events.is_empty() {
+            if genesis_start.is_some() {
+                counter!("bootnode_handoffs_total").increment(1);
+                return Err(retention_handoff(cutoff_ledger));
+            }
             counter!("bootnode_empty_pages_total").increment(1);
             return Ok(build_response(
                 events,
