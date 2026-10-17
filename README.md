@@ -19,6 +19,8 @@ A privacy-preserving payment system for the Stellar network using zero-knowledge
 
 The system incorporates **Association Set Provider (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
 
+To run your own pool or ASP, start with the [operator manual](docs/src/operator/README.md).
+
 ## Features
 
 - **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
@@ -51,12 +53,16 @@ The demo app demonstrates integration of the Stellar Private Payments [JS/TS SDK
 
 #### ASP Admin Page
 
-This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
+This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the pools and the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
-2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
+2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree, several in one call
+3. **Pause deposits, re-point pools, and pre-sign pauses** on the Pools tab
+4. **Transfer a contract's admin** in two steps on the Admins tab
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
+
+Every admin call is a transaction from the contract's admin account. When the connected Freighter account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin Transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
 
 #### Zero-Knowledge Circuits
 

@@ -9,6 +9,8 @@
     "test:unit": "node --test tests/unit/*.test.mjs"
   },
   "devDependencies": {
+    "@noble/ed25519": "^3.2.0",
+    "@noble/hashes": "^2.4.0",
     "@stellar/stellar-sdk": "^17.1.0",
     "playwright": "^1.62.1"
   }

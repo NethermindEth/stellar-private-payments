@@ -20,13 +20,18 @@ import {
   adminTxFromHash,
   adminTxLink,
   custodyProblems,
+  deadCall,
   describeAdminCall,
   extendCommand,
   explainFailure,
   finishAdminCall,
+  hex,
   hostError,
   liveFootprintKeys,
   newAdminRefusal,
+  NoAnswer,
+  repointsTo,
+  rpcServer,
   shortLivedEntries,
   signatureCount,
   signedBy,
@@ -419,11 +424,11 @@ test('explainFailure names a transaction the network refused', () => {
   );
   assert.equal(
     explainFailure(new Error('transaction ERROR: txBadSeq '), 'pool'),
-    'Another admin transaction used the sequence number first. Build the call again.',
+    'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.',
   );
   assert.equal(
     explainFailure(new Error('transaction ERROR: txTooLate '), 'pool'),
-    'The transaction\'s time bound has passed. Build the call again.',
+    'This call has expired. Build it again.',
   );
   const unconfirmed = 'The network has not confirmed the transaction yet. Check the contract before building the call again.';
   assert.equal(explainFailure(new Error('transaction TRY_AGAIN_LATER:  '), 'pool'), unconfirmed);
@@ -433,13 +438,17 @@ test('explainFailure names a transaction the network refused', () => {
     explainFailure(new Error('transaction 5bb5 FAILED: txFailed Error(Auth, InvalidAction)'), 'asp-membership'),
     'The transaction\'s source is not the contract\'s admin.',
   );
+  assert.equal(
+    explainFailure(new Error('transaction ERROR: txInsufficientBalance '), 'pool'),
+    'The paying account doesn\'t have enough XLM for the fee. Add some and try again.',
+  );
 });
 
 test('explainFailure names the pool errors 18, 20 and 21', () => {
   const pool = (code) => explainFailure(new Error(`HostError: Error(Contract, #${code})`), 'pool');
   assert.equal(pool(18), 'Deposits into this pool are paused. Withdrawals and transfers still work.');
   assert.equal(pool(20), 'No admin transfer is pending.');
-  assert.equal(pool(21), 'The tree does not run the code this pool accepts.');
+  assert.equal(pool(21), 'The contract does not run the code this pool accepts.');
 });
 
 test('explainFailure reads #6 as NoPendingAdmin from an allowlist and not from a blocklist', () => {
@@ -511,6 +520,44 @@ test('submitAdminCall waits for a transaction the network already holds instead 
   }
 });
 
+test('deadCall waits while the sequence number is free and the time bound open', async () => {
+  const envelope = insertLeafEnvelope();
+  const card = { server: { pollTransaction: async () => assert.fail('no lookup while the number is free') }, envelope: envelope.toXdr(), networkPassphrase: Networks.TESTNET, account: { seqNum: 41n } };
+  assert.equal(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 - 1 }), null);
+  assert.deepEqual(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 }), { reason: explainFailure('tx_too_late'), landed: false });
+});
+
+test('deadCall asks the network whether a used sequence number went to this call', async () => {
+  const envelope = insertLeafEnvelope();
+  const asked = [];
+  // Sequence 42 is used.
+  const dead = (landed) => deadCall({
+    server: { pollTransaction: async (hash, { attempts }) => { asked.push([hash, attempts]); if (landed instanceof Error) throw landed; return landed; } },
+    envelope: envelope.toXdr(),
+    networkPassphrase: Networks.TESTNET,
+    account: { seqNum: 42n },
+    now: 0,
+    kind: 'pool',
+  });
+  assert.deepEqual(await dead({ status: 'SUCCESS' }), { reason: 'This call already went through.', landed: true });
+  assert.deepEqual(await dead(failedWith20), { reason: `This call went through and failed: ${CONTRACT_ERRORS.pool[20]}`, landed: false });
+  assert.deepEqual(await dead({ status: 'NOT_FOUND' }), { reason: explainFailure('tx_bad_seq'), landed: false });
+  // No answer isn't "not found": the call may have landed.
+  await assert.rejects(dead(new NoAnswer()), NoAnswer);
+  // tx.hash() is a Uint8Array; its toString ignores 'hex'.
+  assert.ok(asked.every(([hash, attempts]) => hash === hex(envelope.hash()) && attempts === 10), JSON.stringify(asked));
+});
+
+test('repointsTo matches the pool, method, tree, and a given source', () => {
+  const call = { contract: 'POOL', method: 'update_asp_membership', args: ['TREE'], source: 'ADMIN' };
+  const repoint = { pool: 'POOL', method: 'update_asp_membership', tree: 'TREE' };
+  assert.equal(repointsTo(call, repoint), true);
+  assert.equal(repointsTo(call, { ...repoint, source: 'ADMIN' }), true);
+  for (const other of [{ source: 'OTHER' }, { tree: 'OTHER' }, { pool: 'OTHER' }, { method: 'update_asp_non_membership' }]) {
+    assert.equal(repointsTo(call, { ...repoint, ...other }), false, JSON.stringify(other));
+  }
+});
+
 test('submitAdminCall names the host error of a sent transaction that failed', async () => {
   await assert.rejects(submit(stubServer({ status: 'PENDING' }, failedWith20)), /FAILED: txFailed Error\(Contract, #20\)/);
 });
@@ -523,6 +570,60 @@ test('submitAdminCall throws the refusal of a transaction that never landed', as
   );
   await assert.rejects(
     submit(stubServer(refusedResend, notFound)),
-    (error) => explainFailure(error, 'pool') === 'Another admin transaction used the sequence number first. Build the call again.',
+    (error) => explainFailure(error, 'pool') === 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.',
   );
+});
+
+const UNANSWERED = 'The network didn\'t answer. Try again in a moment.';
+const rpcAnswer = (body) => Response.json({ jsonrpc: '2.0', id: 1, ...body });
+
+test('rpcServer reports a request the RPC never answered in plain words', async (t) => {
+  const failures = {
+    offline: async () => { throw new TypeError('Failed to fetch'); },
+    'gateway error': async () => new Response('Bad Gateway', { status: 502 }),
+    'rate limit': async () => new Response('Too Many Requests', { status: 429 }),
+    'a page that is not JSON': async () => new Response('<html>Sign in to the Wi-Fi</html>'),
+  };
+  for (const [name, fetch] of Object.entries(failures)) {
+    t.mock.method(globalThis, 'fetch', fetch);
+    await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: UNANSWERED }, name);
+  }
+});
+
+test('rpcServer gives up on a request after 30 seconds', async (t) => {
+  const waits = [];
+  t.mock.method(AbortSignal, 'timeout', (ms) => {
+    waits.push(ms);
+    return AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, { signal }) => {
+    signal.throwIfAborted();
+    return rpcAnswer({ result: {} });
+  });
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: UNANSWERED });
+  assert.deepEqual(waits, [30_000]);
+});
+
+test('rpcServer keeps the message of an answer the RPC gave', async (t) => {
+  const error = { code: -32600, message: 'startLedger must be within the ledger range: 1 - 2' };
+  t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ error }));
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), error);
+  t.mock.method(globalThis, 'fetch', async () => new Response('Not Found', { status: 404 }));
+  await assert.rejects(rpcServer('https://rpc.test').getLatestLedger(), { message: 'Request failed with status code 404' });
+});
+
+test('rpcServer keeps the error of a request it could not send', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ result: {} }));
+  await assert.rejects(rpcServer('https://rpc.test').getEvents({ startLedger: 1n, filters: [] }), { message: /BigInt/ });
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('rpcServer tells a missing account from a read that got no answer, in the SDK\'s own reads too', async (t) => {
+  const address = Keypair.random().publicKey();
+  t.mock.method(globalThis, 'fetch', async () => rpcAnswer({ result: { entries: [], latestLedger: 1 } }));
+  await assert.rejects(rpcServer('https://rpc.test').getAccount(address), {
+    message: `${address.slice(0, 6)}...${address.slice(-4)} isn't an account on this network. Check the address, or fund the account first.`,
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response('Bad Gateway', { status: 502 }));
+  await assert.rejects(rpcServer('https://rpc.test').getAccount(address), { message: UNANSWERED });
 });

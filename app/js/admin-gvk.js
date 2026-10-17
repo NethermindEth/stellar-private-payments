@@ -8,7 +8,7 @@ import { format } from 'd3-format';
 import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import { symbol, symbolCircle } from 'd3-shape';
-import { rpc } from '@stellar/stellar-sdk';
+import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
@@ -86,7 +86,7 @@ async function fetchLedgerTimeBounds() {
   const poolContractId = poolSelectEl?.value?.trim();
   if (!poolContractId) throw new Error('Select a pool first');
 
-  const server = new rpc.Server(rpcUrl);
+  const server = rpcServer(rpcUrl);
   const latest = await server.getLatestLedger();
   const startLedger = Math.max(1, latest.sequence - 1);
   const events = await server.getEvents({

@@ -17,7 +17,7 @@ export const CONTRACT_ERRORS = {
         9: 'Note already spent. This is a double-spend attempt.',
         18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
         20: 'No admin transfer is pending.',
-        21: 'The tree does not run the code this pool accepts.',
+        21: 'The contract does not run the code this pool accepts.',
     },
     // Groth16 verifier errors 
     verifier: {

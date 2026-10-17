@@ -47,7 +47,7 @@ default.
 
 | Option | Meaning |
 |---|---|
-| `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's |
+| `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's. For the multisig admin account a shared deployment needs, see the [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) |
 | `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
@@ -179,16 +179,28 @@ needs just over 0.6 XLM more balance to submit a `transact`, and the network
 refunds whatever rent the transaction does not owe.
 
 For each contract in the deployment, the following loop extends its instance,
-its `State`, `Admin`, and `NextIndex` entries, and its Wasm:
+its `State`, `Admin`, and `NextIndex` entries, and its Wasm. It also reads the
+trees from each pool, since a re-pointed pool can read a blocklist the manifest
+does not name:
 
 ```bash
 NETWORK=testnet
 OPERATOR=deployer
+MANIFEST="deployments/$NETWORK/deployments.json"
 STATE=AAAAEAAAAAEAAAABAAAADwAAAAVTdGF0ZQAAAA==
 ADMIN=AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==
 NEXT_INDEX=AAAAEAAAAAEAAAABAAAADwAAAAlOZXh0SW5kZXgAAAA=
-for id in $(jq -r '.asp_membership, .asp_non_membership, .public_key_registry,
-    .verifiers[], .pools[].poolContractId' "deployments/$NETWORK/deployments.json"); do
+IDS="$(
+  jq -r '.asp_membership, .asp_non_membership, .public_key_registry, .verifiers[],
+    .pools[].poolContractId, (.added_asp_memberships // [])[].contractId' "$MANIFEST"
+  for pool in $(jq -r '.pools[].poolContractId' "$MANIFEST"); do
+    stellar ledger entry fetch contract-data --contract "$pool" --network "$NETWORK" --key-xdr AAAAFA== \
+      | jq -r '.entries[0].val.contract_data.val.contract_instance.storage[]
+        | select(.key.vec[0].symbol == "ASPMembership" or .key.vec[0].symbol == "ASPNonMembership")
+        | .val.address'
+  done
+)"
+for id in $(sort -u <<<"$IDS"); do
   args=(--ledgers-to-extend 3110399 --source-account "$OPERATOR" --network "$NETWORK")
   stellar contract extend --id "$id" "${args[@]}"
   stellar contract extend --id "$id" --key-xdr "$STATE" --key-xdr "$ADMIN" \
