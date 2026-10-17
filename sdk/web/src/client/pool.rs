@@ -62,16 +62,12 @@ impl PrivatePool {
         Ok(u128::from(fee))
     }
 
-    /// Most one spend can send after paying `fee` on every step, in stroops
-    /// (`bigint` in JS). The pool's fee never changes, so read it once with
-    /// [`Self::fee`].
+    /// Most one spend can send after paying the pool fee on every step, in
+    /// stroops (`bigint` in JS).
     #[wasm_bindgen(js_name = maxSpend)]
-    pub async fn max_spend(&self, fee: u128) -> Result<u128, JsError> {
-        let amount = self
-            .inner()
-            .max_spend(NoteAmount::from(fee))
-            .await
-            .map_err(pool_err)?;
+    pub async fn max_spend(&self) -> Result<u128, JsError> {
+        let fee = self.inner().fee().await.map_err(pool_err)?;
+        let amount = self.inner().max_spend(fee).await.map_err(pool_err)?;
         Ok(u128::from(amount))
     }
 

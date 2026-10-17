@@ -1,5 +1,7 @@
 //! Async per-pool private payments API
 
+use std::sync::OnceLock;
+
 use anyhow::Context;
 
 use crate::{
@@ -50,6 +52,7 @@ pub struct PrivatePool {
     prover: ProverHandle,
     signer: SignerHandle,
     sync: SyncHandle,
+    fee: OnceLock<NoteAmount>,
 }
 
 impl PrivatePool {
@@ -73,6 +76,7 @@ impl PrivatePool {
             prover,
             signer,
             sync,
+            fee: OnceLock::new(),
         })
     }
 
@@ -120,12 +124,18 @@ impl PrivatePool {
 
     /// Reads the fee the pool charges on every `transact`.
     ///
+    /// The pool's fee never changes, so the first read serves the session.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Other`] when the pool's state cannot be fetched or does
     /// not include this pool.
     pub async fn fee(&self) -> Result<NoteAmount, Error> {
-        Ok(self.pool_info().await?.fee)
+        if let Some(&fee) = self.fee.get() {
+            return Ok(fee);
+        }
+        let fee = self.pool_info().await?.fee;
+        Ok(*self.fee.get_or_init(|| fee))
     }
 
     pub async fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {

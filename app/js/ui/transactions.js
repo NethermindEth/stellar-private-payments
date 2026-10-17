@@ -227,18 +227,6 @@ function updatePoolLabels() {
     });
 }
 
-// A pool's fee is fixed at construction, so one read per pool serves every
-// balance refresh.
-const poolFees = new Map();
-
-async function poolFee(poolId) {
-    if (!poolFees.has(poolId)) {
-        const session = await client().account().pool({ poolContract: poolId });
-        poolFees.set(poolId, await session.fee());
-    }
-    return poolFees.get(poolId);
-}
-
 // Show the balance of the currently selected token in Move Funds, and the most
 // one transfer or withdrawal can send from it after the pool fees.
 async function updateMoveFundsBalance() {
@@ -250,10 +238,7 @@ async function updateMoveFundsBalance() {
     el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
     let maxSpend = null;
     try {
-        if (balance) {
-            const session = await client().account().pool({ poolContract: poolId });
-            maxSpend = await session.maxSpend(await poolFee(poolId));
-        }
+        if (balance) maxSpend = await (await ensureAppPool()).maxSpend();
     } catch {
         // Leave the placeholder when the account or the pool cannot be read.
     }
@@ -430,7 +415,7 @@ export const Transactions = {
                     throw new Error(`The minimum deposit is ${Utils.formatTokenAmount(minimum, Utils.poolLabel(pool), decimals)}`);
                 }
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
-                const fee = await poolFee(pool.poolContractId);
+                const fee = await (await ensureAppPool()).fee();
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     { label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) },
@@ -662,7 +647,7 @@ export const Transactions = {
                 if (withdraw.value > 0n) {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
                 }
-                const fee = await poolFee(pool.poolContractId);
+                const fee = await (await ensureAppPool()).fee();
                 rows.push({ label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) });
                 rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
