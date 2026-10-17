@@ -13,7 +13,7 @@ use crate::{
     correlation::{new_correlation_id, with_correlation_id},
     models::{
         DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport, PoolEstimate,
-        PoolExecuteResult, UserNoteSummary, transact_from_js, user_note_summaries,
+        PoolExecuteResult, PoolInfo, UserNoteSummary, transact_from_js, user_note_summaries,
     },
 };
 
@@ -60,6 +60,23 @@ impl PrivatePool {
     pub async fn fee(&self) -> Result<u128, JsError> {
         let fee = self.inner().fee().await.map_err(pool_err)?;
         Ok(u128::from(fee))
+    }
+
+    /// Pool state read from the chain: fee, deposit limits, and pause flag.
+    #[wasm_bindgen(js_name = poolInfo)]
+    pub async fn pool_info(&self) -> Result<PoolInfo, JsError> {
+        let pool = self.inner().pool_info().await.map_err(pool_err)?;
+        Ok(PoolInfo::from(pool))
+    }
+
+    /// Refuses a deposit of `amount` stroops (`bigint` in JS) that the pool
+    /// would refuse, without building it.
+    #[wasm_bindgen(js_name = checkDeposit)]
+    pub async fn check_deposit(&self, amount: u128) -> Result<(), JsError> {
+        self.inner()
+            .check_deposit(NoteAmount::from(amount))
+            .await
+            .map_err(pool_err)
     }
 
     /// Most one spend can send after paying the pool fee on every step, in

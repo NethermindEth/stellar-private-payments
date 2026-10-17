@@ -122,6 +122,26 @@ impl PrivatePool {
             .await
     }
 
+    /// Reads this pool's on-chain state, its fee and deposit limits included.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Other`] when the pool's state cannot be fetched or does
+    /// not include this pool.
+    pub async fn pool_info(&self) -> Result<PoolInfo, Error> {
+        let data = self
+            .fetcher
+            .contracts_data_for_pool(&self.config.pool_contract_id)
+            .await
+            .context("fetch pool state")?;
+        data.pools.into_iter().next().ok_or_else(|| {
+            Error::Other(anyhow::anyhow!(
+                "pool {} not found in contract state",
+                self.config.pool_contract_id
+            ))
+        })
+    }
+
     /// Reads the fee the pool charges on every `transact`.
     ///
     /// The pool's fee never changes, so the first read serves the session.
@@ -155,6 +175,22 @@ impl PrivatePool {
             &self.spendable_notes().await?,
             fee,
         )?)
+    }
+
+    /// Refuses a deposit of `amount` that the pool would refuse, without
+    /// building it.
+    ///
+    /// `amount` is what the notes receive; the pool fee goes on top, as
+    /// [`Self::deposit`] adds it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::pool_info`], then
+    /// [`Error::DepositsPaused`], [`Error::DepositAboveMaximum`], or
+    /// [`Error::DepositBelowMinimum`] in the pool's order.
+    pub async fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
+        DepositLimits::from(&self.pool_info().await?)
+            .check_note_amount(amount, &self.config.pool_contract_id)
     }
 
     #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
@@ -416,20 +452,6 @@ impl PrivatePool {
             .await
     }
 
-    async fn pool_info(&self) -> Result<PoolInfo, Error> {
-        let data = self
-            .fetcher
-            .contracts_data_for_pool(&self.config.pool_contract_id)
-            .await
-            .context("fetch pool state")?;
-        data.pools.into_iter().next().ok_or_else(|| {
-            Error::Other(anyhow::anyhow!(
-                "pool {} not found in contract state",
-                self.config.pool_contract_id
-            ))
-        })
-    }
-
     async fn resolve_transfer_recipient(
         &self,
         recipient: TransferRecipient,
@@ -463,14 +485,17 @@ impl PrivatePool {
         self.ensure_synced().await?;
 
         let chain = self.fetch_transact_chain_context().await?;
+        let limits = DepositLimits::from(&chain);
         let step = if let Some(amount) = plan.deposit_amount() {
+            // Before the step, which cannot hold an amount past `ExtAmount`.
+            limits.check_note_amount(amount, &self.config.pool_contract_id)?;
             self.deposit_transact_step(amount, chain.fee).await?
         } else if let Some(step) = plan.raw_transact_step() {
             step.clone()
         } else {
             transact_step_for_plan(plan)?
         };
-        DepositLimits::from(&chain).check(step.ext_amount, &self.config.pool_contract_id)?;
+        limits.check(step.ext_amount, &self.config.pool_contract_id)?;
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
