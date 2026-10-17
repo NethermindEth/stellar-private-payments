@@ -2,9 +2,8 @@
 
 use crate::{
     planner::{SpendSession, SpendTarget, SpendableNote, Transact},
-    types::{
-        EncryptionPublicKey, Estimate, ExtAmount, NoteAmount, NotePublicKey, PrivatePoolConfig,
-    },
+    transact::deposit_ext_amount,
+    types::{EncryptionPublicKey, Estimate, NoteAmount, NotePublicKey, PrivatePoolConfig},
 };
 
 use crate::{error::Error, plan::PreparedTransactionPlan};
@@ -97,14 +96,11 @@ impl PoolCore {
         amount: NoteAmount,
         fee: NoteAmount,
     ) -> Result<Transact, Error> {
-        let ext_amount = amount
-            .checked_add(fee)
-            .and_then(|sent| ExtAmount::try_from(sent).ok())
-            .ok_or_else(|| {
-                Error::Other(anyhow::anyhow!(
-                    "deposit amount plus fee exceeds ext_amount range"
-                ))
-            })?;
+        let ext_amount = deposit_ext_amount(amount, fee).ok_or_else(|| {
+            Error::Other(anyhow::anyhow!(
+                "deposit amount plus fee exceeds ext_amount range"
+            ))
+        })?;
 
         Ok(Transact::new(
             Vec::new(),
@@ -120,7 +116,7 @@ impl PoolCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ContractConfig, NoteOwnerAddress, SignerAddress};
+    use crate::types::{ContractConfig, ExtAmount, NoteOwnerAddress, SignerAddress};
 
     /// The deposit step converts its amount to an `ext_amount` before anything
     /// is proved, and `i128::MAX` is the largest amount that converts.
