@@ -329,13 +329,13 @@ cargo run --release --example estimate
 # Deposit SPP_AMOUNT_STROOPS token base units into the selected pool (default: 10000000).
 cargo run --release --example deposit
 
-# Private transfer to Bob's registered address.
-SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
+# Transfer one deposit less the pool fee privately to Bob's registered address.
+SPP_AMOUNT_STROOPS=9000000 SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 
-# Withdraw the configured token amount to the wallet's public address.
+# Withdraw one deposit less the pool fee to the wallet's public address.
 # `env -u` clears the recipient exported for `transfer` above, which
 # `withdraw` would otherwise use as the withdrawal destination.
-env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
+SPP_AMOUNT_STROOPS=9000000 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
 
 # Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
 # 4 notes, then withdraws all of them step by step).
@@ -352,12 +352,16 @@ Run order for a full demo:
 6. `withdraw` to move funds back to a public address (spends the other).
 7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
-> **Each spend consumes a note.** With the default `SPP_AMOUNT_STROOPS`
-> (10000000 token base units), one `deposit` creates exactly one note of that
-> amount, and `transfer` and `withdraw` each consume one. A single `deposit` therefore leaves nothing for
-> `withdraw`, which then prints `Skipping: no spendable notes in the selected
-> pool.` and exits 0 — a pass that demonstrated nothing. Run `deposit` once per
-> spend you intend to make, or re-run it before `withdraw`.
+> **Each spend pays the pool fee out of the notes it spends.** One `deposit`
+> creates one note of `SPP_AMOUNT_STROOPS` and sends the pool fee on top. A
+> spend of that same amount needs the amount plus the fee, more than the note
+> holds. The commands above therefore spend 9000000 token base units, the
+> 10000000 default less testnet's 1000000 (0.1 XLM) pool fee, so `transfer`
+> and `withdraw` each spend exactly one note. If you run `transfer` and
+> `withdraw` at the default amount instead, `transfer` spends both notes, and
+> `withdraw` then finds only the change note, prints `Skipping: requested
+> amount ... exceeds the most one spend can send after the pool fees ...`, and
+> exits 0 without demonstrating anything.
 
 > `transfer` and `withdraw` require spendable notes. If the wallet has none,
 > they print a skip message and exit 0. Run `deposit` first.

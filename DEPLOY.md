@@ -98,15 +98,17 @@ generate` can also save the key into an encrypted client SDK wallet database via
 
 ## Pool fee and smallest deposit
 
-Every `transact` pays the pool fee: a deposit sends it on top of what it
-leaves in notes, and a transfer or withdrawal pays it from the notes it spends.
-The pool's `get_fee` returns the fee. No entry point changes the
-fee or the smallest deposit after deployment. The examples below set a fee of
-0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
+Every `transact` pays the pool fee: a deposit sends it on top of what it leaves
+in notes, and a transfer or withdrawal pays it from the notes it spends. The SDK
+spends three or more notes as a chain of transactions, one fewer than the notes,
+and each one pays the fee. The pool's `get_fee` returns the fee. No entry point
+changes the fee or the smallest deposit after deployment. The examples below set
+a fee of 0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
 
 When you choose the values, weigh these effects:
 
-- `--min-deposit` applies to what a deposit leaves in notes after the fee.
+- `--min-deposit` applies to what a deposit leaves in notes after the fee, which
+  is the amount a user types in the app's Deposit form or in `spp deposit`.
   Withdrawals have no minimum.
 - `--max-deposit` caps what a deposit sends, fee included, so a deposit leaves
   at most the maximum deposit less the fee in notes. The fee plus the smallest
@@ -200,10 +202,12 @@ sent to it directly, which belong to neither total and no call can pay out.
 notes, and returns `Error(Contract, #23)` for a negative amount, an amount
 above the fees collected, or the pool itself as recipient. A claim needs the
 admin's authorization, works while deposits are paused, and publishes a
-`FeesClaimed` event. The
+`FeesClaimed` event. An M-of-N admin claims with the admin page's Claim fees
+button or with the CLI, as the
 [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
-covers the recipient's trustline and how an M-of-N admin builds and signs a
-claim.
+describes. For a classic asset, the admin account needs a trustline to the
+asset, authorized by the issuer if the asset requires authorization, before a
+claim can pay it.
 
 A single-key admin can read a pool's collected fees and pay 0.1 XLM of them to
 itself with these commands:

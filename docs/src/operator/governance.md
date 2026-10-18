@@ -17,10 +17,10 @@ because it has no signers to check. This page explains the model; the
 | Propose a new admin, or cancel the proposal | Change the token, verifier, pool fee, smallest deposit, maximum deposit, policy, or GVK |
 | | Upgrade any contract |
 
-Every admin call needs M signatures. The admin page builds most calls; a fee claim goes through the
-Stellar CLI. Each signer reviews and signs the call on their own device before anyone submits it. A
-connected account that can sign alone, such as a single-key admin, signs and sends the call at
-once.
+Every admin call needs M signatures. The admin page builds the call, apart from accepting a tree the
+manifest does not name, and each signer reviews and signs it on their own device before anyone
+submits it. A connected account that can sign alone, such as a single-key admin, signs and sends the
+call at once.
 
 ## Transfer the admin
 

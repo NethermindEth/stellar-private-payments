@@ -136,9 +136,10 @@ Every admin call is a transaction whose source is the contract's admin, so the a
 signers sign the transaction itself. The admin page builds it and carries it between signers:
 
 1. Connect Freighter with any account on the network and build the call: list writes on the
-   Allowlist and Blocklist tabs, pauses and re-points on the Pools tab, and admin transfers on the
-   Admins tab. The page reads the contract's admin from its `Admin` entry, builds the call with
-   that account as the source, valid for 24 hours, and loads it into the Admin Transaction card.
+   Allowlist and Blocklist tabs, pauses, re-points, and fee claims on the Pools tab, and admin
+   transfers on the Admins tab. The page reads the contract's admin from its `Admin` entry, builds
+   the call with that account as the source, valid for 24 hours, and loads it into the Admin
+   Transaction card.
 2. Press Copy link and send the link to the first signer.
 3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
    describes. A signer who did not expect this exact call stops here. Otherwise the signer presses
@@ -155,9 +156,9 @@ Make one admin call at a time: each uses the account's next sequence number, so 
 another is in flight can no longer land once the other does. A call also expires after its 24
 hours. The card checks its call with the network when it loads the call, on Sign and Submit, and
 when the call's time bound passes. Once the call went through, from any signer's copy, the card
-says so. Once the call can no longer land, the card empties and says why. Then, or when Submit
-reports that the network has not confirmed the transaction yet, check the contract before building
-the call again.
+says so. Once the call can no longer land, or the contract would refuse it, the card empties and
+says why. Then, or when Submit reports that the network has not confirmed the transaction yet,
+check the contract before building the call again.
 
 A call that reads an archived entry, such as an `Admin` entry nothing has extended, restores it,
 and the admin account pays for the restore within the call's fee. On testnet on 2026-10-03, an
@@ -175,8 +176,8 @@ refunds what the call does not owe.
 
 ### Sign with the CLI
 
-A signer change, a fee claim, and the acceptance of a tree the manifest does not name go through the
-Stellar CLI, as a file passed from signer to signer.
+A signer change and the acceptance of a tree the manifest does not name go through the Stellar CLI,
+as a file passed from signer to signer. So does a fee claim built without the page.
 
 The CLI builds a transaction with no time bound, which, once signed, stays valid until another
 admin transaction uses its sequence number. Before the first signature, whoever built `tx.xdr`
@@ -217,12 +218,21 @@ stellar tx send --network testnet < tx.xdr
 
 ## Claim collected fees
 
-`claim_fees` pays the admin's choice of recipient from the fees a pool has collected, never from
-the value in users' notes. For a classic asset, the recipient needs a trustline to the asset,
-authorized by the issuer if the asset requires authorization, before a claim can pay it.
+The Pools tab's Fees column shows what each pool has collected and the pool fee it charges per
+transaction. The Claim fees button builds a `claim_fees` call that pays the admin account the amount
+the Fees column shows as collected. The button stays disabled while the pool has collected nothing.
+The amount is what the tab read when it last loaded, so fees collected since then stay in the pool.
+The signers sign it as [Make an admin call](#make-an-admin-call) describes. For a pool of a classic
+asset, the admin account needs a trustline to that asset, authorized by the issuer if the asset
+requires authorization, before a claim can pay it.
 
-The admin page does not build claims, so build the claim with the CLI. Read what the pool has
-collected, then build a claim that pays the admin account:
+Before signing, each signer checks that the claim pays the admin account. The card's Claim line ends
+"to the admin account (Source)", and its Arguments line and the decoded transaction show the address
+the claim pays. A claim paid anywhere else sends the fees there. The pool refuses only a claim paid
+to itself, and a claim paid to another pool or to the token contract leaves the amount where nobody
+can move it.
+
+Without the page, read what the pool has collected, then build the claim:
 
 ```bash
 stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet --send=no \
@@ -238,10 +248,6 @@ Replace the following:
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `AMOUNT`: the amount to claim in the token's smallest unit, at most what `get_fees_total`
   prints.
-
-Before signing, each signer checks the recipient in the decoded transaction, since the pool pays
-whatever address the call names. The pool refuses only a claim paid to itself; one paid to another
-pool or to the token contract leaves the amount where nobody can move it.
 
 Then sign and send `tx.xdr` as [Sign with the CLI](#sign-with-the-cli) describes.
 
