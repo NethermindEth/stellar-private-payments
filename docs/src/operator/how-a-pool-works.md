@@ -81,7 +81,7 @@ failure:
    nobody can reuse it elsewhere.
 6. The amount the proof moves into or out of notes matches the call: what a deposit sends less
    the pool fee, what a withdrawal pays out plus the pool fee, or, for a transfer, the pool fee out
-   of notes.
+   of notes. A withdrawal does not pay the pool or its token contract.
 7. For a blocklist pool, the proof's blocklist root is the blocklist's current root. For an
    allowlist pool, the proof's allowlist root is one of the allowlist's last 90 roots.
 8. The verifier accepts the proof.

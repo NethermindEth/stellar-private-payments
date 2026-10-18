@@ -454,14 +454,18 @@ test('explainFailure names a transaction the network refused', () => {
   );
 });
 
-test('explainFailure names the pool errors 18, 20, 21 and 23', () => {
+test('explainFailure names the pool errors 18, 20, 21, 23 and 24', () => {
   const pool = (code) => explainFailure(new Error(`HostError: Error(Contract, #${code})`), 'pool');
   assert.equal(pool(18), 'Deposits into this pool are paused. Withdrawals and transfers still work.');
   assert.equal(pool(20), 'No admin transfer is pending.');
   assert.equal(pool(21), 'The contract does not run the code this pool accepts.');
   assert.equal(
     pool(23),
-    'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim. The pool also refuses a claim paid to itself.',
+    'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim.',
+  );
+  assert.equal(
+    pool(24),
+    'The pool does not pay itself or its token contract. Choose another recipient.',
   );
 });
 
