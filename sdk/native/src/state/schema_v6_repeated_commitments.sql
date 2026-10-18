@@ -2,7 +2,7 @@
 -- amount, key, and blinding hash to one value. A nullifier hashes nothing pool-specific, so it can
 -- repeat across pools. Each event keeps its own row.
 --
--- The copies keep each row's id, which `user_notes` and the scan-state tables refer to.
+-- The rebuilt tables keep each row's id, which `user_notes` and the scan-state tables refer to.
 CREATE TABLE pool_commitments_new (
     id INTEGER PRIMARY KEY,
     commitment BLOB NOT NULL CHECK (length(commitment) = 32),
@@ -35,3 +35,7 @@ INSERT INTO pool_nullifiers_new (id, nullifier, event_id, gvk_ciphertext)
 DROP TABLE pool_nullifiers;
 ALTER TABLE pool_nullifiers_new RENAME TO pool_nullifiers;
 CREATE INDEX idx_pool_nullifiers_nullifier ON pool_nullifiers (nullifier);
+
+-- The unique keys dropped a repeated commitment or nullifier, but the processor still marked its
+-- event. Clearing every mark replays those events; the rest replay harmlessly.
+DELETE FROM processed_events;

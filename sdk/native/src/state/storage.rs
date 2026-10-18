@@ -1820,6 +1820,7 @@ fn optional_gvk_ciphertext_col(
 mod tests {
     use super::*;
     use crate::{
+        state::test_events,
         types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount},
         zk::{crypto, encryption},
     };
@@ -1842,42 +1843,6 @@ mod tests {
             encrypted_output: vec![],
             gvk_ciphertext: None,
         }
-    }
-
-    /// Returns a pool's `new_commitment_event` as RPC serves it.
-    fn raw_commitment_event(id: &str, commitment: u64, index: u32) -> Result<ContractEvent> {
-        use stellar_xdr::{
-            Limits, ScBytes, ScMap, ScMapEntry, ScSymbol, ScVal, UInt256Parts, WriteXdr,
-        };
-
-        let symbol = |s: &str| -> Result<ScVal> { Ok(ScVal::Symbol(ScSymbol(s.try_into()?))) };
-        let commitment = ScVal::U256(UInt256Parts {
-            hi_hi: 0,
-            hi_lo: 0,
-            lo_hi: 0,
-            lo_lo: commitment,
-        });
-        let fields = ScVal::Map(Some(ScMap(
-            vec![
-                ScMapEntry {
-                    key: symbol("encrypted_output")?,
-                    val: ScVal::Bytes(ScBytes::default()),
-                },
-                ScMapEntry {
-                    key: symbol("index")?,
-                    val: ScVal::U32(index),
-                },
-            ]
-            .try_into()?,
-        )));
-        Ok(ContractEvent {
-            topics: vec![
-                symbol("new_commitment_event")?.to_xdr_base64(Limits::none())?,
-                commitment.to_xdr_base64(Limits::none())?,
-            ],
-            value: fields.to_xdr_base64(Limits::none())?,
-            ..dummy_event(id)
-        })
     }
 
     #[test]
@@ -3234,40 +3199,42 @@ mod tests {
         let c = Field(crate::types::U256::from(1));
         let d = Field(crate::types::U256::from(2));
         let mut conn = Connection::open_in_memory()?;
-        MIGRATIONS.to_version(&mut conn, 3)?;
-        let mut v3 = Storage { conn };
-        v3.save_events_batch(&ContractsEventData {
+        MIGRATIONS.to_version(&mut conn, 5)?;
+        let mut v5 = Storage { conn };
+        v5.save_events_batch(&ContractsEventData {
             events: vec![
-                raw_commitment_event("evt-0", 1, 0)?,
-                raw_commitment_event("evt-1", 1, 1)?,
-                raw_commitment_event("evt-2", 2, 2)?,
+                test_events::commitment_event("evt-0", 1, test_events::commitment_entries(0)?)?,
+                test_events::commitment_event("evt-1", 1, test_events::commitment_entries(1)?)?,
+                test_events::commitment_event("evt-2", 2, test_events::commitment_entries(2)?)?,
                 dummy_event("evt-3"),
             ],
             cursor: "cur".to_string(),
             latest_ledger: 1,
         })?;
-        // The unique constraint dropped `evt-1`, which repeats `c`. The rows
-        // carry ids 7, 3, and 5, so a copy that renumbers them breaks the
-        // spent note's links to `evt-2` and `evt-3`.
-        v3.conn.execute(
+        // The unique constraint dropped `evt-1`, which repeats `c`, and the
+        // processor marked it anyway. The rows carry ids 7, 3, and 5, so a
+        // rebuild that renumbers them breaks the spent note's links to `evt-2`
+        // and `evt-3`.
+        v5.conn.execute(
             "INSERT INTO pool_commitments
                 (id, commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
              VALUES (7, ?1, 0, x'', 'evt-0', NULL), (3, ?2, 2, x'', 'evt-2', 'ct')",
             params![c, d],
         )?;
-        v3.conn.execute_batch(
+        v5.conn.execute_batch(
             "INSERT INTO pool_nullifiers (id, nullifier, event_id, gvk_ciphertext)
                  VALUES (5, zeroblob(32), 'evt-3', 'nct');
              INSERT INTO accounts (id, address, kdf_domain) VALUES (1, 'GUSER', 'tests');",
         )?;
-        v3.conn.execute(
+        v5.conn.execute(
             "INSERT INTO user_notes (
                 id, account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
              ) VALUES (?1, 1, 3, 5, zeroblob(32), zeroblob(32), '1')",
             params![d],
         )?;
+        v5.save_processed_event_ids(&["evt-0", "evt-1", "evt-2", "evt-3"].map(String::from))?;
 
-        let mut storage = Storage::connect_with_connection(v3.conn)?;
+        let mut storage = Storage::connect_with_connection(v5.conn)?;
         let commitments: Vec<(i64, i64, Option<String>)> = storage
             .conn
             .prepare("SELECT id, leaf_index, gvk_ciphertext FROM pool_commitments ORDER BY id")?
@@ -3289,6 +3256,83 @@ mod tests {
             storage.get_pool_commitment_leaves_ordered("CPOOL")?,
             [c, c, d]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn dropped_repeated_nullifier_heals_after_migration() -> Result<()> {
+        let n = Field(crate::types::U256::from(5));
+        let d = Field(crate::types::U256::from(2));
+        let in_pool2 = |event: ContractEvent| ContractEvent {
+            contract_id: "CPOOL2".to_string(),
+            ..event
+        };
+        let spent = |id| {
+            test_events::raw_event(
+                id,
+                &[
+                    test_events::symbol("new_nullifier_event")?,
+                    test_events::u256(5),
+                ],
+                vec![],
+            )
+        };
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 5)?;
+        let mut v5 = Storage { conn };
+        v5.save_events_batch(&ContractsEventData {
+            events: vec![
+                spent("evt-0")?,
+                in_pool2(spent("evt-1")?),
+                in_pool2(test_events::commitment_event(
+                    "evt-2",
+                    2,
+                    test_events::commitment_entries(0)?,
+                )?),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        // The unique key dropped `evt-1`, which repeats `n` in a second pool,
+        // and the processor marked it anyway.
+        v5.conn.execute(
+            "INSERT INTO pool_nullifiers (id, nullifier, event_id, gvk_ciphertext)
+             VALUES (1, ?1, 'evt-0', NULL)",
+            params![n],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO pool_commitments
+                (id, commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
+             VALUES (1, ?1, 0, x'', 'evt-2', NULL)",
+            params![d],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO accounts (id, address, kdf_domain) VALUES (1, 'GUSER', 'tests')",
+            [],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO user_notes (
+                id, account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
+             ) VALUES (?1, 1, 1, NULL, ?2, zeroblob(32), '1')",
+            params![d, n],
+        )?;
+        v5.save_processed_event_ids(&["evt-0", "evt-1", "evt-2"].map(String::from))?;
+
+        let mut storage = Storage::connect_with_connection(v5.conn)?;
+        crate::state::processor::process_events(&mut storage, 10)?;
+        storage.reconcile_nullifiers(10)?;
+
+        let rows: Vec<(i64, String)> = storage
+            .conn
+            .prepare("SELECT id, event_id FROM pool_nullifiers ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(rows, [(1, "evt-0".to_string()), (2, "evt-1".to_string())]);
+        let spent_by: Option<i64> =
+            storage
+                .conn
+                .query_row("SELECT nullifier_id FROM user_notes", [], |row| row.get(0))?;
+        assert_eq!(spent_by, Some(2));
         Ok(())
     }
 
