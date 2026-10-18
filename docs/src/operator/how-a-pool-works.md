@@ -91,6 +91,8 @@ fee to the fees collected, records the nullifiers, and adds the two new commitme
 tokens move: a deposit's from the sender to the pool, or a withdrawal's from the pool to the
 recipient. Last, the pool publishes one event for each nullifier and commitment.
 
+The clients refuse a withdrawal paid to any contract the manifest lists.
+
 ## Keys
 
 Each user has one Stellar account and three keys derived from it. Their wallet signs the message
