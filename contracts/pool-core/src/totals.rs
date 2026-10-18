@@ -110,8 +110,6 @@ mod test {
         pub fn noop() {}
     }
 
-    /// Registers a contract holding a notes total of `notes` and a fees total
-    /// of `fees`.
     fn register_with_totals(env: &Env, notes: i128, fees: i128) -> Address {
         let id = env.register(DummyContract, ());
         env.as_contract(&id, || {
@@ -122,7 +120,6 @@ mod test {
         id
     }
 
-    /// Returns the stored notes total and fees total.
     fn totals(env: &Env) -> (Option<i128>, Option<i128>) {
         let instance = env.storage().instance();
         (

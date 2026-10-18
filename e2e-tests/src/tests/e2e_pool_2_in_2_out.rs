@@ -168,8 +168,7 @@ fn a_real_transfer_lands_while_deposits_are_paused() -> Result<()> {
 }
 
 /// The real verifier checks a public amount net of the fee, and a transfer's
-/// is non-zero only because of the fee. The fee moves from the notes total to
-/// the fees total.
+/// is non-zero only because of the fee.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn a_real_transfer_pays_the_fee() -> Result<()> {
