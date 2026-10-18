@@ -17,7 +17,6 @@ import { OpHistory } from './op-history.js';
 import { Dashboard } from './dashboard.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { poolErrorMessage } from '../pool-errors.js';
-import { advancedGapMessage } from '../advanced-balance.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
@@ -666,6 +665,7 @@ export const Transactions = {
         document.getElementById('btn-advanced-transact')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             let terms = null;
+            let sums = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -693,25 +693,31 @@ export const Transactions = {
                 if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
                 // The recipient is unused when no public funds leave the pool.
                 const recipient = enteredRecipient || App.state.wallet.address;
-                const notes = await (await ensureAppPool()).notes();
+                let session = await ensureAppPool();
+                const notes = await session.notes();
                 const inputNotes = inputNoteIds.map(id => notes.find(n => n.id === id));
                 if (inputNotes.includes(undefined)) {
                     Toast.show('A selected note is not one of your notes for this token. Pick each one from your notes.', 'error', 7000, { origin: 'advanced' });
                     return;
                 }
-                const inputs = inputNotes.reduce((sum, note) => sum + BigInt(note.amount), 0n);
-                const outputs = amounts.reduce((sum, amount) => sum + amount, 0n);
-                terms = await refusalTerms(pool, decimals);
-                const unbalanced = advancedGapMessage(
-                    { inputs, deposit: deposit.value, outputs, withdraw: withdraw.value, fee: terms.fee },
-                    terms.format,
-                );
-                if (unbalanced) {
-                    Toast.show(unbalanced, 'error', 7000, { origin: 'advanced' });
+                const spent = inputNotes.find(note => note.spent);
+                if (spent) {
+                    Toast.show(`A selected note, ${Utils.truncateHex(spent.id, 10, 8)}, is already spent. Replace it with an available note.`, 'error', 7000, { origin: 'advanced' });
                     return;
                 }
-                // Public deposit already holds the fee; checkDeposit adds it back.
-                if (publicAmount > 0n) await (await ensureAppPool()).checkDeposit(publicAmount > terms.fee ? publicAmount - terms.fee : 0n);
+                const inputs = inputNotes.reduce((sum, note) => sum + BigInt(note.amount), 0n);
+                const outputs = amounts.reduce((sum, amount) => sum + amount, 0n);
+                sums = { inputs, deposit: deposit.value, outputs, withdraw: withdraw.value };
+                terms = await refusalTerms(pool, decimals);
+                const options = {
+                    extRecipient: recipient,
+                    extAmount: publicAmount,
+                    inputNoteIds,
+                    outputAmounts: amounts,
+                    outRecipientNoteKeysHex: noteKeys,
+                    outRecipientEncKeysHex: encKeys,
+                };
+                await session.checkTransact(options);
 
                 const rows = [];
                 if (inputs > 0n) rows.push({ label: 'Selected notes', value: terms.format(inputs) });
@@ -742,16 +748,9 @@ export const Transactions = {
                 SigningAccount.keep(signer);
 
                 setLoading(button, true, 'Preparing advanced transaction…');
-                const session = await ensureAppPool();
+                session = await ensureAppPool();
                 requireSamePool(pool);
-                const result = await runPoolOp('transact', button, () => session.transact({
-                    extRecipient: recipient,
-                    extAmount: publicAmount,
-                    inputNoteIds,
-                    outputAmounts: amounts,
-                    outRecipientNoteKeysHex: noteKeys,
-                    outRecipientEncKeysHex: encKeys,
-                }));
+                const result = await runPoolOp('transact', button, () => session.transact(options));
                 if (this.showExecuteResult(result, 'Advanced transaction')) {
                     const hashes = result?.hashes ?? txResultsToHashes(result);
                     const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
@@ -771,7 +770,7 @@ export const Transactions = {
                 }
             } catch (error) {
                 Toast.show(
-                    (terms && poolErrorMessage(error, { ...terms, feeIncluded: true }))
+                    (terms && poolErrorMessage(error, { ...terms, feeIncluded: true, amounts: sums }))
                         ?? getTransactionErrorMessage(error, 'Advanced transaction'),
                     'error', 7000, { origin: 'advanced' },
                 );
