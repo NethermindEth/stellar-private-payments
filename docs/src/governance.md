@@ -226,11 +226,10 @@ The signers sign it as [Make an admin call](#make-an-admin-call) describes. For 
 admin account needs a trustline to the asset, authorized by the issuer if the asset requires
 authorization, before a claim can pay it.
 
-Before signing, each signer checks that the claim pays the admin account: the card's Claim line
-ends "to the admin account (Source)", and its Arguments line and the decoded transaction show the
-recipient. A claim paid elsewhere sends the fees there. The pool refuses only a claim paid to
-itself; one paid to another pool or to the token contract leaves the amount where nobody can move
-it.
+Before signing, each signer checks that the claim pays the admin account: the card's Claim line ends
+"to the admin account (Source)", and its Arguments line and the decoded transaction show the
+recipient. A claim paid elsewhere sends the fees there. The pool refuses a claim paid to itself or
+its token contract; one paid to another pool leaves the amount where nobody can move it.
 
 Without the page, read what the pool has collected, then build the claim:
 
