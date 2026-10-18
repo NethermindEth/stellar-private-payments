@@ -17,6 +17,7 @@ import { OpHistory } from './op-history.js';
 import { Dashboard } from './dashboard.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { poolErrorMessage } from '../pool-errors.js';
+import { advancedGapMessage } from '../advanced-balance.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
@@ -277,12 +278,14 @@ async function updateMoveFundsBalance() {
     maxEl.textContent = maxSpend == null ? '—' : Utils.formatPoolAmount(maxSpend, poolId);
 }
 
-// Name the pool fee and the smallest deposit under the deposit amount, once the
-// token's decimals are known so both read in token units.
-async function updateDepositLimits() {
+// Name the pool fee and the smallest deposit under the deposit amount, and the
+// fee in the Advanced composer, once the token's decimals are known so both
+// read in token units.
+async function updatePoolFeeLines() {
     const el = document.getElementById('deposit-limits');
-    if (!el) return;
-    el.textContent = '';
+    const advancedEl = document.getElementById('advanced-pool-fee');
+    if (el) el.textContent = '';
+    if (advancedEl) advancedEl.textContent = '';
     const pool = selectedPool();
     if (pool?.decimals == null) return;
     let info = null;
@@ -296,10 +299,11 @@ async function updateDepositLimits() {
     const fee = BigInt(info.fee);
     const minimum = BigInt(info.minimumDepositAmount);
     // A pool fee or smallest deposit of zero goes unsaid.
-    el.textContent = [
+    if (el) el.textContent = [
         fee ? `A ${format(fee)} pool fee is added on top.` : '',
         minimum ? `The smallest deposit is ${format(minimum)}.` : '',
     ].filter(Boolean).join(' ');
+    if (advancedEl) advancedEl.textContent = fee ? `Every transaction pays a ${format(fee)} pool fee from its selected notes or its public deposit.` : '';
 }
 
 async function lookupRecipient(address, refs) {
@@ -441,8 +445,8 @@ export const Transactions = {
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
-        App.events.addEventListener('pool:config', updateDepositLimits);
-        App.events.addEventListener('pool:selected', updateDepositLimits);
+        App.events.addEventListener('pool:config', updatePoolFeeLines);
+        App.events.addEventListener('pool:selected', updatePoolFeeLines);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success', 4000, { origin: 'advanced' });
@@ -692,19 +696,36 @@ export const Transactions = {
                 if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
                 // The recipient is unused when no public funds leave the pool.
                 const recipient = enteredRecipient || App.state.wallet.address;
+                const notes = await (await ensureAppPool()).notes();
+                const inputNotes = inputNoteIds.map(id => notes.find(n => n.id === id));
+                if (inputNotes.includes(undefined)) {
+                    Toast.show('A selected note is not one of your notes for this token. Pick each one from your notes.', 'error', 7000, { origin: 'advanced' });
+                    return;
+                }
+                const inputs = inputNotes.reduce((sum, note) => sum + BigInt(note.amount), 0n);
+                const outputs = amounts.reduce((sum, amount) => sum + amount, 0n);
+                terms = await refusalTerms(pool, decimals);
+                const unbalanced = advancedGapMessage(
+                    { inputs, deposit: deposit.value, outputs, withdraw: withdraw.value, fee: terms.fee },
+                    terms.format,
+                );
+                if (unbalanced) {
+                    Toast.show(unbalanced, 'error', 7000, { origin: 'advanced' });
+                    return;
+                }
+                // Public deposit already holds the fee; checkDeposit adds it back.
+                if (publicAmount > 0n) await (await ensureAppPool()).checkDeposit(publicAmount > terms.fee ? publicAmount - terms.fee : 0n);
 
-                const rows = [
-                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                    { label: 'Input notes', value: `${inputNoteIds.length}` },
-                    { label: 'Outputs', value: `${amounts.length}` },
-                ];
+                const rows = [];
+                if (inputs > 0n) rows.push({ label: 'Selected notes', value: terms.format(inputs) });
+                if (outputs > 0n) rows.push({ label: 'Private outputs', value: terms.format(outputs) });
                 if (deposit.value > 0n) {
-                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool), decimals) });
+                    rows.push({ label: 'Public deposit', value: terms.format(deposit.value) });
                 }
                 if (withdraw.value > 0n) {
-                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
+                    rows.push({ label: 'Public withdraw', value: terms.format(withdraw.value) });
+                    if (publicAmount < 0n) rows.push({ label: 'Public recipient', value: Utils.shortAddress(recipient) });
                 }
-                terms = await refusalTerms(pool, decimals);
                 rows.push({ label: 'Pool fee', value: terms.format(terms.fee) });
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
