@@ -72,12 +72,8 @@ const ERROR_PATTERNS = [
         message: 'Pool state has changed. Please wait for sync to complete and try again.',
     },
     {
-        // Deposits paused: the pool's #18, or the SDK's refusal before proving
-        test: (msg) => {
-            const lower = msg.toLowerCase();
-            return (lower.includes('#18') && lower.includes('contract')) ||
-                   (lower.includes('deposits into pool') && lower.includes('are paused'));
-        },
+        // Deposits paused (#18)
+        test: (msg) => msg.toLowerCase().includes('#18') && msg.toLowerCase().includes('contract'),
         message: CONTRACT_ERRORS.pool[18],
     },
     {

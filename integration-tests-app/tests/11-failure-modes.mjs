@@ -21,6 +21,7 @@ import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { expectNoFreighterApproval } from '../src/wallet.mjs';
 import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
+import { formatAmount } from '../../app/js/ui/notes-view.js';
 
 const log = createLogger('11-failure-modes');
 const APPROVAL_KINDS = ['signMessage', 'signAuthEntry', 'signTransaction'];
@@ -58,14 +59,13 @@ function stroopsToDecimal(stroops) {
   return `${whole}.${fraction}`;
 }
 
-function randomUnregisteredAddress() {
-  return StrKey.encodeEd25519PublicKey(randomBytes(32));
+function decimalToStroops(decimal) {
+  const [whole, fraction = ''] = decimal.split('.');
+  return BigInt(whole) * 10_000_000n + BigInt(fraction.padEnd(7, '0'));
 }
 
-async function confirmOperation(page, title) {
-  const dialog = page.getByTestId('confirm-dialog').filter({ hasText: title });
-  await dialog.waitFor({ state: 'visible', timeout: 10_000 });
-  await dialog.getByTestId('confirm-dialog-confirm').click();
+function randomUnregisteredAddress() {
+  return StrKey.encodeEd25519PublicKey(randomBytes(32));
 }
 
 async function assertNoApproval(context, label) {
@@ -73,8 +73,23 @@ async function assertNoApproval(context, label) {
   log.info(`${label}: no Freighter approval appeared (pre-signing failure confirmed)`);
 }
 
+// Submits a spend on the withdraw or transfer form and expects a refusal toast
+// matching the predicate, with no confirmation and no wallet approval.
+async function expectSpendRefused(page, context, flow, amount, predicate) {
+  // The form's previous refusal can read the same, so let it expire first.
+  await page.locator(`[data-toast-origin="${flow}"]`).first()
+    .waitFor({ state: 'detached', timeout: 10_000 });
+  await page.locator(`#${flow}-amount`).fill(amount);
+  await page.locator(`#btn-${flow}`).click();
+  const toast = await waitForToast(page, { origin: flow, predicate });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), `confirm dialog opened for a ${flow} of ${amount}`);
+  await assertNoApproval(context, `${flow} of ${amount}`);
+  await waitForOperationIdle(page, { submitSelector: `#btn-${flow}` });
+  return toast.message;
+}
+
 export async function run(helpers) {
-  const { page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
   const logTag = '11-failure-modes';
   const rpcUrl = RPC_URL;
 
@@ -85,6 +100,21 @@ export async function run(helpers) {
   await gotoMoveFunds(page);
 
   const initialSync = await waitForSyncedLedger(page);
+
+  // (0) A withdrawal before the first deposit: the empty wallet is refused
+  // before the confirmation, with its own sentence.
+  await gotoMoveFlow(page, 'withdraw');
+  const signingSelect = page.getByTestId('signing-account-select');
+  const owner = await signingSelect.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
+  assert(owner && owner !== recipient, 'expected a connected owner distinct from the recipient');
+  await signingSelect.selectOption(owner);
+  await page.locator('#withdraw-recipient-select').selectOption(owner);
+  const emptyWallet = await expectSpendRefused(page, context, 'withdraw', '0.001', (toast) => (
+    toast.message === 'You have nothing to send yet. If you just deposited, try again in a few seconds; otherwise, deposit first.'
+  ));
+  log.info('(0) withdraw from an empty wallet:', emptyWallet);
+  await gotoMoveFlow(page, 'deposit');
+
   const noteReady = waitForNotesAfterIndexer(page, {
     afterLedger: initialSync.ledger,
     notes: { minCount: 1 },
@@ -98,39 +128,28 @@ export async function run(helpers) {
   const overAmount = '1000000';
   const unregisteredAddress = randomUnregisteredAddress();
 
-  // (1) Over-withdraw: planner rejects the amount before signing.
+  // (1) Over-withdraw, far above the balance and one stroop above Max to send:
+  // the planner refuses both before the confirmation, naming Max to send.
   await gotoMoveFlow(page, 'withdraw');
-  const signingSelect = page.getByTestId('signing-account-select');
-  const owner = await signingSelect.locator('option').filter({ hasText: 'Deposit account' }).getAttribute('value');
-  assert(owner && owner !== recipient, 'expected a connected owner distinct from the recipient');
-  await signingSelect.selectOption(owner);
-  await page.locator('#withdraw-recipient-select').selectOption(owner);
-  await page.locator('#withdraw-amount').fill(overAmount);
-  await page.locator('#btn-withdraw').click();
-  await confirmOperation(page, 'Confirm withdrawal');
-  const overWithdraw = await waitForToast(page, {
-    origin: 'withdraw',
-    predicate: (toast) => /^withdraw failed/i.test(toast.message) && /can send at most/i.test(toast.message),
-  });
-  await assertNoApproval(context, 'over-withdraw');
-  await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
-  log.info('(1) over-withdraw:', overWithdraw.message);
+  const maxSpend = await page.locator('#move-funds-max-spend')
+    .filter({ hasText: /^0\.\d+ XLM$/ })
+    .innerText({ timeout: 60_000 });
+  const aboveMaxSpend = stroopsToDecimal(decimalToStroops(maxSpend.replace(/ XLM$/, '')) + 1n);
+  const namesMaxSpend = (toast) => toast.message.startsWith(`You can send at most ${maxSpend}.`);
+  const overWithdraw = await expectSpendRefused(page, context, 'withdraw', overAmount, namesMaxSpend);
+  log.info('(1) over-withdraw:', overWithdraw);
+  const justOverWithdraw = await expectSpendRefused(page, context, 'withdraw', aboveMaxSpend, namesMaxSpend);
+  log.info(`(1) withdraw of ${aboveMaxSpend} XLM:`, justOverWithdraw);
 
-  // (2) Over-transfer through a registered-recipient path, isolating the
-  // same planner failure from recipient registration behavior.
+  // (2) The same two refusals on a transfer to a registered recipient,
+  // isolating the planner failure from recipient registration behavior.
   await gotoMoveFlow(page, 'transfer');
   await page.locator('#transfer-address').fill(recipient);
   await waitForRecipientLookup(page, { expectedText: 'Found local registration', manualVisible: false });
-  await page.locator('#transfer-amount').fill(overAmount);
-  await page.locator('#btn-transfer').click();
-  await confirmOperation(page, 'Confirm transfer');
-  const overTransfer = await waitForToast(page, {
-    origin: 'transfer',
-    predicate: (toast) => /^transfer failed/i.test(toast.message) && /can send at most/i.test(toast.message),
-  });
-  await assertNoApproval(context, 'over-transfer');
-  await waitForOperationIdle(page, { submitSelector: '#btn-transfer' });
-  log.info('(2) over-transfer:', overTransfer.message);
+  const overTransfer = await expectSpendRefused(page, context, 'transfer', overAmount, namesMaxSpend);
+  log.info('(2) over-transfer:', overTransfer);
+  const justOverTransfer = await expectSpendRefused(page, context, 'transfer', aboveMaxSpend, namesMaxSpend);
+  log.info(`(2) transfer of ${aboveMaxSpend} XLM:`, justOverTransfer);
 
   // Clearing the address has an asynchronous lookup reset; wait for that
   // state instead of a fixed delay before testing an unregistered recipient.
@@ -150,10 +169,9 @@ export async function run(helpers) {
   await waitForRecipientLookupReset(page);
 
   // (4) Read the deployed pool's live cap and fee, and deposit a note that,
-  // with the fee on top, exceeds the cap by one stroop. The SDK refuses it
-  // before proving. Deployment parameters can change independently of this
-  // test branch; a hard-coded amount can silently become valid and open a
-  // wallet approval.
+  // with the fee on top, exceeds the cap by one stroop. The form refuses it
+  // before any confirmation. Deployment parameters can change independently
+  // of this test branch; a hard-coded amount can silently become valid.
   // Mirrors app/js/ui/pool.js's getActivePoolContractId: first enabled pool.
   const poolContractId = await page.evaluate(() =>
     fetch('./deployments.json')
@@ -166,21 +184,12 @@ export async function run(helpers) {
   await gotoMoveFlow(page, 'deposit');
   await page.locator('#deposit-amount').fill(aboveMaximumDeposit);
   await page.locator('#btn-deposit').click();
-  await confirmOperation(page, 'Confirm deposit');
-  const aboveCapOutcome = await Promise.race([
-    waitForToast(page, {
-      origin: 'deposit',
-      predicate: (toast) => /^deposit failed/i.test(toast.message) && /more than the pool maximum/i.test(toast.message),
-      timeoutMs: 20_000,
-    }).then((toast) => ({ toast })),
-    waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 20_000 })
-      .then((approval) => ({ approval })),
-  ]);
-  assert(
-    aboveCapOutcome.toast,
-    `above-max deposit unexpectedly reached Freighter approval (${aboveCapOutcome.approval?.kind || 'unknown'})`,
-  );
-  const aboveCap = aboveCapOutcome.toast;
+  const largestDeposit = `You can deposit at most ${formatAmount(maximumDeposit - fee, 'XLM', 7)} (${formatAmount(maximumDeposit, 'XLM', 7)} with the pool fee).`;
+  const aboveCap = await waitForToast(page, {
+    origin: 'deposit',
+    predicate: (toast) => toast.message === largestDeposit,
+  });
+  assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for a deposit above the maximum');
   await assertNoApproval(context, 'above-max deposit');
   await waitForOperationIdle(page, { submitSelector: '#btn-deposit' });
   log.info(`(4) above max-deposit (${aboveMaximumDeposit} XLM):`, aboveCap.message);
@@ -191,7 +200,7 @@ export async function run(helpers) {
   await page.locator('#btn-deposit').click();
   const belowMinimum = await waitForToast(page, {
     origin: 'deposit',
-    predicate: (toast) => /minimum deposit is 0\.001 XLM/i.test(toast.message),
+    predicate: (toast) => toast.message === 'The smallest deposit is 0.001 XLM.',
   });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for a deposit below the minimum');
   await assertNoApproval(context, 'below-minimum deposit');
