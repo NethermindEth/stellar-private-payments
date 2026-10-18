@@ -28,7 +28,7 @@ use crate::{
     sleep::sleep,
     storage::StorageHandle,
     sync::{SyncHandle, confirm_tx},
-    transact::{DepositLimits, transact_request_from_step},
+    transact::{self, DepositLimits, input_total, transact_request_from_step},
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
         Estimate, ExtAmount, Field, GvkMode, PoolInfo, PrivatePoolConfig, SignedTransaction,
@@ -191,6 +191,23 @@ impl PrivatePool {
     pub async fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
         DepositLimits::from(&self.pool_info().await?)
             .check_note_amount(amount, &self.config.pool_contract_id)
+    }
+
+    /// Refuses a transaction that [`Self::transact`] would refuse before
+    /// proving, without building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deposit-limit, recipient, and balance errors of
+    /// [`Self::transact`], and [`Error::MembershipSync`] at once for an input
+    /// not yet synced.
+    pub async fn check_transact(&self, step: &Transact) -> Result<(), Error> {
+        let pool = self.pool_info().await?;
+        DepositLimits::from(&pool).check(step.ext_amount, &self.config.pool_contract_id)?;
+        if step.ext_amount < ExtAmount::ZERO {
+            self.core.check_withdrawal_recipient(&step.ext_recipient)?;
+        }
+        self.check_balance(step, pool.fee).await
     }
 
     #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
@@ -499,6 +516,9 @@ impl PrivatePool {
         if step.ext_amount < ExtAmount::ZERO {
             self.core.check_withdrawal_recipient(&step.ext_recipient)?;
         }
+        if plan.raw_transact_step().is_some() {
+            self.check_balance(&step, chain.fee).await?;
+        }
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
@@ -512,6 +532,24 @@ impl PrivatePool {
 
         plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
         Ok(prepared)
+    }
+
+    async fn check_balance(&self, step: &Transact, fee: NoteAmount) -> Result<(), Error> {
+        // No sync: `transact` has synced, and `check_transact` must not.
+        let notes = self
+            .storage
+            .spendable_notes(
+                &self.config.pool_contract_id,
+                self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
+            )
+            .await?;
+        transact::check_balance(
+            input_total(&step.input_commitments, &notes)?,
+            step.output_amounts,
+            step.ext_amount,
+            fee,
+        )
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {
