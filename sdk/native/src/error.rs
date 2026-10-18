@@ -84,6 +84,12 @@ pub enum Error {
         largest_deposit: NoteAmount,
     },
 
+    /// A withdrawal paid to a contract of this deployment.
+    #[error(
+        "cannot withdraw to a contract of this deployment, such as a pool or its token contract, because nobody could move the tokens out again; withdraw to an address outside this deployment"
+    )]
+    WithdrawalToContract,
+
     /// An untyped failure.
     ///
     /// The message holds the whole `anyhow` cause chain, so the variant has no

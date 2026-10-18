@@ -89,5 +89,7 @@ payer.
 - A deposit must put at least the pool's smallest deposit in notes after the
   pool fee.
 - A deposit must send at most the pool's maximum deposit, pool fee included.
+- `--withdraw-to` cannot be a contract of the deployment, such as a pool or its
+  token contract.
 - A Stellar-address recipient must have registered their keys. If the registry
   is unavailable or the recipient hasn't registered, use the explicit-key form.
