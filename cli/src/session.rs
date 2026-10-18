@@ -10,8 +10,8 @@ use stellar_private_payments::{
     LocalProver, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{
-        EncryptionPublicKey, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
-        TransferRecipient,
+        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, PoolInfo, Sensitive,
+        SignerAddress, TransferRecipient,
     },
 };
 
@@ -129,6 +129,27 @@ impl ClientSession {
         self.read_pools(pool_ids, "token precision", |pool| {
             Ok(pool.token_decimals()?)
         })
+    }
+
+    /// Reads each pool's state, its fee and smallest deposit included, and the
+    /// most one spend from this account's notes can send after that fee.
+    ///
+    /// The states are read in parallel, but each max spend runs alone: it syncs
+    /// notes into the one local database.
+    pub fn pool_limits<'a>(
+        &self,
+        pool_ids: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::HashMap<String, Result<(PoolInfo, NoteAmount)>> {
+        self.read_pools(pool_ids, "pool state", |pool| Ok((pool.pool_info()?, pool)))
+            .into_iter()
+            .map(|(id, read)| {
+                let limits = read.and_then(|(info, pool)| {
+                    let max_spend = pool.max_spend(info.fee)?;
+                    Ok((info, max_spend))
+                });
+                (id, limits)
+            })
+            .collect()
     }
 
     /// Runs `read` on each pool's session in parallel, keyed by pool id.
