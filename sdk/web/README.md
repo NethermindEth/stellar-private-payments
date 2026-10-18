@@ -88,6 +88,7 @@ reads without loss.
 | `DEPOSIT_ABOVE_MAXIMUM` | `maximum`, `largestDeposit` |
 | `NO_COMBINATION` | `maxSpend` |
 | `NO_SPENDABLE_NOTES` | none |
+| `NOT_BALANCED` | `gap`, negative when more goes out than comes in |
 
 A refusal after a payment's first transaction has confirmed resolves as a failed
 result instead, so the confirmed transaction's hash is not lost.
