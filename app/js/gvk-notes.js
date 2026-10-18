@@ -7,6 +7,26 @@ export function normalizeFieldKey(value) {
   return raw || null;
 }
 
+export function parseFieldAmount(hex) {
+  const s = String(hex ?? '').trim();
+  if (!s.startsWith('0x')) return 0n;
+  try {
+    return BigInt(s);
+  } catch {
+    return 0n;
+  }
+}
+
+export function amountByPk(slots) {
+  const totals = new Map();
+  for (const slot of slots) {
+    const pk = normalizeFieldKey(slot.audited.note.pk);
+    if (!pk) continue;
+    totals.set(pk, (totals.get(pk) ?? 0n) + parseFieldAmount(slot.audited.note.amount));
+  }
+  return totals;
+}
+
 /** @returns {import('stellar-private-payments/types/gvk').GvkAuditedNote | null} */
 function asAuditedNote(value) {
   if (!value) return null;
@@ -122,4 +142,9 @@ export function noteLinks(rows) {
   return groupNotes(rows)
     .filter((note) => note.spentNoteId)
     .map((note) => [note.noteId, note.spentNoteId]);
+}
+
+/** Per PK, the value of its notes that no loaded transaction spent. */
+export function unspentByPk(notes) {
+  return amountByPk(notes.filter((note) => note.spentTxIndex == null));
 }
