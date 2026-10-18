@@ -14,7 +14,9 @@ import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { Dashboard } from './dashboard.js';
 import { getTransactionErrorMessage } from './errors.js';
+import { poolErrorMessage } from '../pool-errors.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
@@ -123,22 +125,44 @@ function withdrawalRecipientWarning(owner) {
     return `You are withdrawing to the same account used for deposits (${Utils.shortAddress(owner)}). This can link your withdrawal to your deposits. For better privacy, withdraw to an unrelated account.`;
 }
 
-// Builds confirmation-dialog rows with the number of transactions the action
-// requires and the pool fees they pay. Best-effort only: a failed estimate must
-// not block the action.
-async function estimateRows(amountValue, pool, decimals) {
-    try {
-        const session = await ensureAppPool();
-        const estimate = await session.estimate(amountValue);
-        const txCount = estimate?.txCount;
-        if (!txCount) return [];
-        return [
-            { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
-            { label: 'Fee', value: Utils.formatTokenAmount(estimate.fees, Utils.poolLabel(pool), decimals) },
-        ];
-    } catch {
-        return [];
+// What poolErrorMessage needs to word a refusal in the pool's token.
+async function refusalTerms(pool, decimals) {
+    const fee = await (await ensureAppPool()).fee();
+    return { fee, format: (amount) => Utils.formatTokenAmount(amount, Utils.poolLabel(pool), decimals) };
+}
+
+// The refusals a spend's notes give.
+const SPEND_REFUSALS = ['NO_COMBINATION', 'NO_SPENDABLE_NOTES'];
+
+// Shows why a transfer or withdrawal failed. A refusal from the notes also
+// refreshes the page's balances, which can lag the notes it was planned from.
+function showSpendFailure(error, terms, label, origin) {
+    if (SPEND_REFUSALS.includes(error?.code)) {
+        Dashboard.refresh().catch((refreshError) => console.warn('[Transactions] balances refresh failed:', refreshError));
     }
+    Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, label), 'error', 7000, { origin });
+}
+
+// Throws when the notes cannot pay the spend. Any other failure, such as an RPC
+// error, returns null so the confirmation still opens without the estimate.
+async function spendEstimate(amountValue) {
+    try {
+        return await (await ensureAppPool()).estimate(amountValue);
+    } catch (error) {
+        if (SPEND_REFUSALS.includes(error?.code)) throw error;
+        return null;
+    }
+}
+
+// Builds confirmation-dialog rows with the number of transactions the action
+// requires and the pool fees they pay.
+function estimateRows(estimate, pool, decimals) {
+    const txCount = estimate?.txCount;
+    if (!txCount) return [];
+    return [
+        { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
+        { label: 'Fee', value: Utils.formatTokenAmount(estimate.fees, Utils.poolLabel(pool), decimals) },
+    ];
 }
 
 async function submitDeposit(button, amountValue, pool) {
@@ -396,6 +420,7 @@ export const Transactions = {
         const depositAmountInput = document.getElementById('deposit-amount');
 
         async function runDeposit(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -403,19 +428,10 @@ export const Transactions = {
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(depositAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
-                // The SDK also refuses a deposit below the minimum, but names it in base units.
-                let minimum = 0n;
-                try {
-                    const { pools } = await client().allContractsData();
-                    minimum = BigInt(pools.find(p => p.contractId === pool.poolContractId)?.minimumDepositAmount ?? 0);
-                } catch {
-                    // Any one unreadable pool fails this read; the SDK's own check stands in.
-                }
-                if (amount.value < minimum) {
-                    throw new Error(`The minimum deposit is ${Utils.formatTokenAmount(minimum, Utils.poolLabel(pool), decimals)}`);
-                }
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
-                const fee = await (await ensureAppPool()).fee();
+                terms = await refusalTerms(pool, decimals);
+                await (await ensureAppPool()).checkDeposit(amount.value);
+                const { fee } = terms;
                 const rows = [
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     { label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) },
@@ -431,7 +447,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
+                Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
             } finally {
                 setLoading(button, false);
             }
@@ -467,6 +483,7 @@ export const Transactions = {
         const transferButton = document.getElementById('btn-transfer');
 
         async function runTransfer(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -478,6 +495,8 @@ export const Transactions = {
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
                 const signer = await SigningAccount.forTransaction('move');
+                terms = await refusalTerms(pool, decimals);
+                const estimate = await spendEstimate(amount.value);
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
                     : Utils.shortAddress(noteKey);
@@ -485,8 +504,8 @@ export const Transactions = {
                     { label: 'Recipient', value: recipientLabel },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
+                    ...estimateRows(estimate, pool, decimals),
                 ];
-                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const confirmed = await confirmAction({
                     title: 'Confirm transfer',
                     rows,
@@ -497,7 +516,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error', 7000, { origin: 'transfer' });
+                showSpendFailure(error, terms, 'Transfer', 'transfer');
             } finally {
                 setLoading(button, false);
             }
@@ -536,6 +555,7 @@ export const Transactions = {
         const withdrawButton = document.getElementById('btn-withdraw');
 
         async function runWithdraw(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -549,12 +569,14 @@ export const Transactions = {
                     throw new Error('Invalid Stellar address');
                 }
                 const signer = await SigningAccount.forTransaction('move');
+                terms = await refusalTerms(pool, decimals);
+                const estimate = await spendEstimate(amount.value);
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
                     { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
                     ...signerRows(signer),
+                    ...estimateRows(estimate, pool, decimals),
                 ];
-                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const owner = App.state.wallet.address;
                 const warning = [
                     withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
@@ -570,7 +592,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error', 7000, { origin: 'withdraw' });
+                showSpendFailure(error, terms, 'Withdraw', 'withdraw');
             } finally {
                 setLoading(button, false);
             }
@@ -608,6 +630,7 @@ export const Transactions = {
         updateSignerVisibility();
         document.getElementById('btn-advanced-transact')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -647,8 +670,8 @@ export const Transactions = {
                 if (withdraw.value > 0n) {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
                 }
-                const fee = await (await ensureAppPool()).fee();
-                rows.push({ label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) });
+                terms = await refusalTerms(pool, decimals);
+                rows.push({ label: 'Fee', value: Utils.formatTokenAmount(terms.fee, Utils.poolLabel(pool), decimals) });
                 rows.push(...signerRows(signer));
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
@@ -695,7 +718,11 @@ export const Transactions = {
                     updateSignerVisibility();
                 }
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });
+                Toast.show(
+                    (terms && poolErrorMessage(error, { ...terms, feeIncluded: true }))
+                        ?? getTransactionErrorMessage(error, 'Advanced transaction'),
+                    'error', 7000, { origin: 'advanced' },
+                );
             } finally {
                 setLoading(button, false);
             }
