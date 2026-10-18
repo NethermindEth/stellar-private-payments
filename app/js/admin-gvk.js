@@ -13,7 +13,7 @@ import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { classifyTx, withdrawalsByPk } from './gvk-classify.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
-import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
+import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 
@@ -398,16 +398,6 @@ function bindResultHighlights() {
   });
 }
 
-function parseFieldAmount(hex) {
-  const s = String(hex ?? '').trim();
-  if (!s.startsWith('0x')) return 0n;
-  try {
-    return BigInt(s);
-  } catch {
-    return 0n;
-  }
-}
-
 function formatTokenAmount(amount) {
   if (state.tokenDecimals == null) return `${amount} base units`;
   return formatBaseUnits(amount, state.tokenSymbol, state.tokenDecimals);
@@ -727,22 +717,14 @@ let fullPkGraphCache = null;
 /** The unfiltered graph over every loaded row — rebuilt only when rows are appended or reset. */
 function fullPkGraph() {
   if (fullPkGraphCache?.rows !== state.rows || fullPkGraphCache.count !== state.rows.length) {
-    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: buildPkGraph(state.rows, NO_FILTERS) };
+    // Balances come from unspent notes: the flows can't attribute a multi-key spend or a spend's own deposit.
+    const balances = unspentByPk(collectNotes(state.rows));
+    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: { ...buildPkGraph(state.rows, NO_FILTERS), balances } };
   }
   return fullPkGraphCache.graph;
 }
 
 const NO_FILTERS = { amountMin: null, amountMax: null, ledgerFrom: null, ledgerTo: null, pk: null };
-
-function amountByPk(slots) {
-  const totals = new Map();
-  for (const slot of slots) {
-    const pk = normalizeFieldKey(slot.audited.note.pk);
-    if (!pk) continue;
-    totals.set(pk, (totals.get(pk) ?? 0n) + parseFieldAmount(slot.audited.note.amount));
-  }
-  return totals;
-}
 
 /**
  * Per input PK, the withdrawal from withdrawalsByPk, computed over the tx's
@@ -1543,11 +1525,6 @@ function pkGraphDetailPkRow(label, pk) {
   return row;
 }
 
-/** Net of every deposit/withdraw/transfer seen for this PK across the loaded audit — i.e. now, not at any one point in its history. */
-function pkGraphNodeBalance(node) {
-  return node.deposited + node.transferIn - node.withdrawn - node.transferOut;
-}
-
 /** A real balance needs spends, which only traceable pools expose; view-only can only total what came in. */
 function pkGraphDetailBalanceRow(node) {
   const traceable = state.poolGvkMode === 'traceable';
@@ -1560,7 +1537,7 @@ function pkGraphDetailBalanceRow(node) {
   row.appendChild(el(
     'div',
     'font-mono text-sm text-white',
-    formatTokenAmount(traceable ? pkGraphNodeBalance(node) : node.received + node.deposited + node.transferIn),
+    formatTokenAmount(traceable ? (fullPkGraph().balances.get(node.pk) ?? 0n) : node.received + node.deposited + node.transferIn),
   ));
   return row;
 }
