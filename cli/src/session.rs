@@ -126,28 +126,36 @@ impl ClientSession {
         &self,
         pool_ids: impl IntoIterator<Item = &'a str>,
     ) -> std::collections::HashMap<String, Result<u32>> {
+        self.read_pools(pool_ids, "token precision", |pool| {
+            Ok(pool.token_decimals()?)
+        })
+    }
+
+    /// Runs `read` on each pool's session in parallel, keyed by pool id.
+    fn read_pools<'a, T: Send>(
+        &self,
+        pool_ids: impl IntoIterator<Item = &'a str>,
+        what: &str,
+        read: impl Fn(PrivatePool) -> Result<T> + Sync,
+    ) -> std::collections::HashMap<String, Result<T>> {
         let pools: std::collections::HashMap<_, _> = pool_ids
             .into_iter()
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .map(|id| (id.to_string(), self.pool(id)))
             .collect();
+        let read = &read;
         std::thread::scope(|scope| {
             let reads: Vec<_> = pools
                 .into_iter()
-                .map(|(id, pool)| {
-                    (
-                        id,
-                        scope.spawn(move || pool.and_then(|pool| Ok(pool.token_decimals()?))),
-                    )
-                })
+                .map(|(id, pool)| (id, scope.spawn(move || pool.and_then(read))))
                 .collect();
             reads
                 .into_iter()
-                .map(|(id, read)| {
-                    let result = read
+                .map(|(id, handle)| {
+                    let result = handle
                         .join()
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!("token precision read failed")));
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("{what} read failed")));
                     (id, result)
                 })
                 .collect()
