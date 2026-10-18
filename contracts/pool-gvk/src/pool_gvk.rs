@@ -556,8 +556,6 @@ impl PoolGvkContract {
     /// Pays `amount` of the collected fees to `to` and publishes
     /// [`FeesClaimed`].
     ///
-    /// Pays out fees only, never note value.
-    ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidClaimAmount`] for a negative amount, one above
