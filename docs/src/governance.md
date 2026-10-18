@@ -4,9 +4,10 @@ One admin account administers every pool and tree a deployment runs: a Stellar a
 M of its N signers on every change. This runbook is for those signers and for whoever keeps the
 account's pause files.
 
-The admin can pause deposits, switch the trees a pool reads, edit the lists, and hand its role to
-another account. It cannot move funds: only `transact` moves tokens, against a verifier fixed at
-construction, and no contract has an upgrade entry point.
+The admin can pause deposits, switch the trees a pool reads, edit the lists, claim the fees a pool
+has collected, and hand its role to another account. It cannot move the value in users' notes:
+`claim_fees` pays out of the fees collected and nothing else, notes move only through `transact`
+against a verifier fixed at construction, and no contract has an upgrade entry point.
 
 The commands below run on `testnet`. On another network, replace `testnet` with its name.
 
@@ -59,15 +60,16 @@ from every pool and tree the manifest names and every tree those pools read:
 | `DepositPauseChanged` | pools | Deposits pause or unpause |
 | `DepositPauseRepeated` | pools | A pause or unpause finds the flag already set; `paused` is the flag. A pause file sent this way is spent |
 | `AspMembershipUpdated`, `AspNonMembershipUpdated` | pools | The pool switches to another allowlist or blocklist |
+| `FeesClaimed` | pools | The admin claims collected fees |
 | `AdminTransferProposed`, `AdminTransferCancelled`, `AdminTransferAccepted` | pools and trees | An admin transfer starts, is withdrawn, or completes |
 | `LeafAdded` | allowlists | A member joins |
 | `LeafInserted`, `LeafDeleted` | blocklists | A key is listed or released |
 
 The pool and admin transfer events use their name in lowercase with underscores as their topic,
-for example `deposit_pause_changed`. A pause file can be sent from any account, so only the
-pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the nonce from its
-transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find which file was
-spent, and sign a replacement for whoever kept it.
+for example `deposit_pause_changed` or `fees_claimed`. A pause file can be sent from any account,
+so only the pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the
+nonce from its transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find
+which file was spent, and sign a replacement for whoever kept it.
 
 After a blocklist re-point, a pool reads a tree the manifest does not name. To list the trees a
 pool reads, read its instance entry, whose key is `AAAAFA==`:
@@ -91,6 +93,7 @@ construction, and the deployer keeps no power over them:
 ```bash
 deployments/scripts/deploy.sh testnet --deployer DEPLOYER --admin ADMIN_ACCOUNT \
   --kdf-domain KDF_DOMAIN --asp-levels 10 --pool-levels 20 --max-deposit 1000000000 \
+  --fee FEE --min-deposit MIN_DEPOSIT \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
@@ -99,6 +102,12 @@ Replace the following:
 - `DEPLOYER`: the deployer's `stellar keys` identity.
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `KDF_DOMAIN`: the key derivation domain, which users see in the message they sign.
+- `FEE`: the pool fee every transaction pays, in the token's smallest unit.
+- `MIN_DEPOSIT`: the smallest deposit, the least a deposit can leave in notes after the pool fee,
+  in the token's smallest unit.
+
+For how to choose the pool fee and the smallest deposit, see
+[Pool fee and smallest deposit](./deploy.md#pool-fee-and-smallest-deposit).
 
 `deploy.sh` takes native XLM and classic assets, and refuses a token ID that is not the asset's own
 Stellar asset contract. For a classic asset, it warns about each power the issuer's flags give it
@@ -128,9 +137,10 @@ Every admin call is a transaction whose source is the contract's admin, so the a
 signers sign the transaction itself. The admin page builds it and carries it between signers:
 
 1. Connect Freighter with any account on the network and build the call: list writes on the
-   Allowlist and Blocklist tabs, pauses and re-points on the Pools tab, and admin transfers on the
-   Admins tab. The page reads the contract's admin from its `Admin` entry, builds the call with
-   that account as the source, valid for 24 hours, and loads it into the Admin Transaction card.
+   Allowlist and Blocklist tabs, pauses, re-points, and fee claims on the Pools tab, and admin
+   transfers on the Admins tab. The page reads the contract's admin from its `Admin` entry, builds
+   the call with that account as the source, valid for 24 hours, and loads it into the Admin
+   Transaction card.
 2. Press Copy link and send the link to the first signer.
 3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
    describes. A signer who did not expect this exact call stops here. Otherwise the signer presses
@@ -147,14 +157,14 @@ Make one admin call at a time: each uses the account's next sequence number, so 
 another is in flight can no longer land once the other does. A call also expires after its 24
 hours. The card checks its call with the network when it loads the call, on Sign and Submit, and
 when the call's time bound passes. Once the call went through, from any signer's copy, the card
-says so. Once the call can no longer land, the card empties and says why. Then, or when Submit
-reports that the network has not confirmed the transaction yet, check the contract before building
-the call again.
+says so. Once the call can no longer land, or the contract would refuse it, the card empties and
+says why. Then, or when Submit reports that the network has not confirmed the transaction yet,
+check the contract before building the call again.
 
 A call that reads an archived entry, such as an `Admin` entry nothing has extended, restores it,
 and the admin account pays for the restore within the call's fee. On testnet on 2026-10-03, an
 `insert_leaf` that restored five entries simulated to a fee of 66,214,618 stroops, about 6.6 XLM.
-The card shows the maximum fee before anyone signs.
+The card shows the maximum network fee before anyone signs.
 
 An entry that archives while signers sign makes the call fail once sent, so the page refuses to
 build a call that reads an entry with less than 25 hours left, the call's 24 hours plus an hour.
@@ -206,6 +216,41 @@ passes:
 ```bash
 stellar tx send --network testnet < tx.xdr
 ```
+
+## Claim collected fees
+
+The Pools tab's Fees column shows what each pool has collected and the pool fee it charges per
+transaction. Its Claim fees button builds a `claim_fees` call that pays the admin account the amount
+the Fees column shows as collected. That amount is what the tab read when it last loaded, so fees
+collected since then stay in the pool. The signers sign it as
+[Make an admin call](#make-an-admin-call) describes. The button stays disabled while the pool has
+collected nothing. For a pool of a classic asset, the admin account needs a trustline to that asset,
+authorized by the issuer if the asset requires authorization, before a claim can pay it.
+
+Before signing, each signer checks that the claim pays the admin account. The card's Claim line ends
+"to the admin account (Source)", and its Arguments line and the decoded transaction show the address
+the claim pays. A claim paid anywhere else sends the fees there. The pool refuses only a claim paid
+to itself, and a claim paid to another pool or to the token contract leaves the amount where nobody
+can move it.
+
+Without the page, read what the pool has collected, then build the claim:
+
+```bash
+stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet --send=no \
+  -- get_fees_total
+stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet \
+  --build-only -- claim_fees --to ADMIN_ACCOUNT --amount AMOUNT \
+| stellar tx simulate --source-account ADMIN_ACCOUNT --network testnet > tx.xdr
+```
+
+Replace the following:
+
+- `POOL`: the pool's address.
+- `ADMIN_ACCOUNT`: the admin account's address.
+- `AMOUNT`: the amount to claim in the token's smallest unit, at most what `get_fees_total`
+  prints.
+
+Then sign and send `tx.xdr` as [Sign with the CLI](#sign-with-the-cli) describes.
 
 ## Pre-sign deposit pauses
 

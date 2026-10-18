@@ -13,7 +13,8 @@ because it has no signers to check. This page explains the model; the
 | Pause and unpause deposits into a pool | Stop transfers or withdrawals |
 | Add allowlist members, add and remove blocklist entries | Remove an allowlist member except by re-pointing |
 | Re-point a pool to another tree of its tree code | Re-point to a tree of other code |
-| Propose a new admin, or cancel the proposal | Change the token, verifier, maximum deposit, policy, or GVK |
+| Claim the fees a pool has collected | Claim more than the fees collected, or any of the value in users' notes |
+| Propose a new admin, or cancel the proposal | Change the token, verifier, pool fee, smallest deposit, maximum deposit, policy, or GVK |
 | | Upgrade any contract |
 
 Every admin call needs M signatures. The admin page builds the call, and each signer reviews and
@@ -88,12 +89,12 @@ threshold.
 
 The design trusts the admin account's signers with every decision about who may use the pools.
 Admin calls take effect in the ledger they land in, with no delay and no notice to users. The code
-keeps two things from the admin: moving funds and changing contract code.
+keeps two things from the admin: the value in users' notes, and the contract code.
 
 | Case | What follows | Response |
 | --- | --- | --- |
-| Lost: fewer than M signers remain | Every setting stays as it is. Users keep transacting under the current lists, and an unused pause file can still close deposits for good. | Deploy new contracts and move users |
-| Stolen: someone else controls M signers | They can freeze users, by listing keys or re-pointing a pool to an empty allowlist, admit anyone, keep deposits closed, and transfer the admin to themselves. They can't move funds. | Warn users, deploy new contracts, and move users |
+| Lost: fewer than M signers remain | Every setting stays as it is, and nobody can claim the fees collected. Users keep transacting under the current lists, and an unused pause file can still close deposits for good. | Deploy new contracts and move users |
+| Stolen: someone else controls M signers | They can freeze users, by listing keys or re-pointing a pool to an empty allowlist, admit anyone, keep deposits closed, claim the fees collected, and transfer the admin to themselves. They can't move the value in users' notes. | Warn users, deploy new contracts, and move users |
 
 ## Procedures
 
@@ -102,6 +103,7 @@ keeps two things from the admin: moving funds and changing contract code.
 | Create the admin account | [Set up the admin account](../governance.md#set-up-the-admin-account) |
 | Watch the account and the contracts | [Watch the account and the contracts](../governance.md#watch-the-account-and-the-contracts) |
 | Sign and submit an admin call | [Make an admin call](../governance.md#make-an-admin-call) |
+| Claim the fees a pool has collected | [Claim collected fees](../governance.md#claim-collected-fees) |
 | Sign pause files | [Pre-sign deposit pauses](../governance.md#pre-sign-deposit-pauses) |
 | Hand the contracts to another account | [Transfer the admin](../governance.md#transfer-the-admin) |
 | Switch a pool to another tree | [Re-point a pool](../governance.md#re-point-a-pool) |
