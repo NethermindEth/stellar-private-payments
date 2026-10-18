@@ -154,14 +154,15 @@ async function spendEstimate(amountValue) {
     }
 }
 
-// Builds confirmation-dialog rows with the number of transactions the action
-// requires and the pool fees they pay.
-function estimateRows(estimate, pool, decimals) {
+// Builds confirmation-dialog rows with the pool fees the action pays and the
+// number of transactions it requires. Without an estimate, names the fee each
+// transaction pays.
+function estimateRows(estimate, terms) {
     const txCount = estimate?.txCount;
-    if (!txCount) return [];
+    if (!txCount) return terms.fee ? [{ label: 'Pool fee', value: `${terms.format(terms.fee)} per transaction` }] : [];
     return [
+        { label: txCount === 1 ? 'Pool fee' : 'Pool fees', value: terms.format(estimate.fees) },
         { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
-        { label: 'Fee', value: Utils.formatTokenAmount(estimate.fees, Utils.poolLabel(pool), decimals) },
     ];
 }
 
@@ -251,23 +252,54 @@ function updatePoolLabels() {
     });
 }
 
+let maxSpendCall = 0;
+let maxSpendPoolId = null;
+
 // Show the balance of the currently selected token in Move Funds, and the most
 // one transfer or withdrawal can send from it after the pool fees.
 async function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
     const maxEl = document.getElementById('move-funds-max-spend');
     if (!el || !maxEl) return;
+    const call = ++maxSpendCall;
     const poolId = App.state.selectedPoolId;
     const balance = (App.state.balances || []).find(b => b.poolContractId === poolId);
     el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
+    if (poolId !== maxSpendPoolId) maxEl.textContent = '—';
+    maxSpendPoolId = poolId;
     let maxSpend = null;
     try {
         if (balance) maxSpend = await (await ensureAppPool()).maxSpend();
     } catch {
         // Leave the placeholder when the account or the pool cannot be read.
     }
-    if (App.state.selectedPoolId !== poolId) return;
+    if (call !== maxSpendCall) return;
     maxEl.textContent = maxSpend == null ? '—' : Utils.formatPoolAmount(maxSpend, poolId);
+}
+
+// Name the pool fee and the smallest deposit under the deposit amount, once the
+// token's decimals are known so both read in token units.
+async function updateDepositLimits() {
+    const el = document.getElementById('deposit-limits');
+    if (!el) return;
+    el.textContent = '';
+    const pool = selectedPool();
+    if (pool?.decimals == null) return;
+    let info = null;
+    try {
+        info = await (await ensureAppPool()).poolInfo();
+    } catch {
+        // Leave the line empty when the pool cannot be read.
+    }
+    if (!info || selectedPool() !== pool) return;
+    const format = (amount) => Utils.formatPoolAmount(amount, pool.poolContractId);
+    const fee = BigInt(info.fee);
+    const minimum = BigInt(info.minimumDepositAmount);
+    // A pool fee or smallest deposit of zero goes unsaid.
+    el.textContent = [
+        fee ? `A ${format(fee)} pool fee is added on top.` : '',
+        minimum ? `The smallest deposit is ${format(minimum)}.` : '',
+    ].filter(Boolean).join(' ');
 }
 
 async function lookupRecipient(address, refs) {
@@ -409,6 +441,8 @@ export const Transactions = {
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
+        App.events.addEventListener('pool:config', updateDepositLimits);
+        App.events.addEventListener('pool:selected', updateDepositLimits);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success', 4000, { origin: 'advanced' });
@@ -431,11 +465,11 @@ export const Transactions = {
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
                 terms = await refusalTerms(pool, decimals);
                 await (await ensureAppPool()).checkDeposit(amount.value);
-                const { fee } = terms;
+                const { fee, format } = terms;
                 const rows = [
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
-                    { label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) },
-                    { label: 'Total', value: Utils.formatTokenAmount(amount.value + fee, Utils.poolLabel(pool), decimals) },
+                    { label: 'Amount', value: format(amount.value) },
+                    { label: 'Pool fee', value: format(fee) },
+                    { label: 'Total sent', value: format(amount.value + fee) },
                     ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const confirmed = await confirmAction({
@@ -502,9 +536,9 @@ export const Transactions = {
                     : Utils.shortAddress(noteKey);
                 const rows = [
                     { label: 'Recipient', value: recipientLabel },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
+                    { label: 'Recipient gets', value: terms.format(amount.value) },
+                    ...estimateRows(estimate, terms),
                     ...signerRows(signer),
-                    ...estimateRows(estimate, pool, decimals),
                 ];
                 const confirmed = await confirmAction({
                     title: 'Confirm transfer',
@@ -573,9 +607,9 @@ export const Transactions = {
                 const estimate = await spendEstimate(amount.value);
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
+                    { label: 'Recipient gets', value: terms.format(amount.value) },
+                    ...estimateRows(estimate, terms),
                     ...signerRows(signer),
-                    ...estimateRows(estimate, pool, decimals),
                 ];
                 const owner = App.state.wallet.address;
                 const warning = [
@@ -671,10 +705,10 @@ export const Transactions = {
                     rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
                 }
                 terms = await refusalTerms(pool, decimals);
-                rows.push({ label: 'Fee', value: Utils.formatTokenAmount(terms.fee, Utils.poolLabel(pool), decimals) });
-                rows.push(...signerRows(signer));
+                rows.push({ label: 'Pool fee', value: terms.format(terms.fee) });
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
+                rows.push(...signerRows(signer));
                 const owner = App.state.wallet.address;
                 const warning = [
                     publicAmount < 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
