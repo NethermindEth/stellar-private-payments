@@ -169,6 +169,28 @@ fn error_message(
                 })
             }
         }
+        Error::NotBalanced { gap } => {
+            let gap = i128::from(*gap);
+            amount(NoteAmount::from(gap.unsigned_abs())).map(|off| {
+                let going_out = if fee.is_zero() {
+                    "the --output values and --withdraw".to_owned()
+                } else {
+                    format!(
+                        "the --output values, --withdraw and the {} pool fee",
+                        fee.pool_fee
+                    )
+                };
+                if gap < 0 {
+                    format!(
+                        "{going_out} come to {off} more than the --input notes and --deposit; take {off} off an --output or --withdraw, add it to --deposit, or choose --input notes worth that much more"
+                    )
+                } else {
+                    format!(
+                        "the --input notes and --deposit come to {off} more than {going_out}; add {off} to an --output"
+                    )
+                }
+            })
+        }
         _ if matches!(cause.plan_error(), Some(PlanError::NoSpendableNotes))
             || (cause.max_spend() == Some(NoteAmount::ZERO) && fee.is_zero()) =>
         {
@@ -373,6 +395,33 @@ mod tests {
         assert_eq!(
             error_message(&error, &fee("0 XLM", 0), false, xlm).to_string(),
             "you have nothing to send; deposit first"
+        );
+    }
+
+    #[test]
+    fn an_unbalanced_transaction_names_its_gap_in_tokens() {
+        let short = Error::NotBalanced {
+            gap: ExtAmount::from(-2_000),
+        };
+        let over = Error::NotBalanced {
+            gap: ExtAmount::from(2_000),
+        };
+        let (with_fee, no_fee) = (fee("0.0001 XLM", 1_000), fee("0 XLM", 0));
+        assert_eq!(
+            error_message(&short, &with_fee, true, xlm).to_string(),
+            "the --output values, --withdraw and the 0.0001 XLM pool fee come to 0.0002 XLM more than the --input notes and --deposit; take 0.0002 XLM off an --output or --withdraw, add it to --deposit, or choose --input notes worth that much more"
+        );
+        assert_eq!(
+            error_message(&short, &no_fee, true, xlm).to_string(),
+            "the --output values and --withdraw come to 0.0002 XLM more than the --input notes and --deposit; take 0.0002 XLM off an --output or --withdraw, add it to --deposit, or choose --input notes worth that much more"
+        );
+        assert_eq!(
+            error_message(&over, &with_fee, true, xlm).to_string(),
+            "the --input notes and --deposit come to 0.0002 XLM more than the --output values, --withdraw and the 0.0001 XLM pool fee; add 0.0002 XLM to an --output"
+        );
+        assert_eq!(
+            error_message(&over, &no_fee, true, xlm).to_string(),
+            "the --input notes and --deposit come to 0.0002 XLM more than the --output values and --withdraw; add 0.0002 XLM to an --output"
         );
     }
 

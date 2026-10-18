@@ -120,15 +120,8 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     let notes = pool
         .notes()
         .map_err(|e| anyhow::anyhow!("list pool notes: {e}"))?;
-    let input_total = selected_input_total(&input, &notes)?;
+    check_inputs(&input, &notes)?;
     let fee = pool_fee(&pool, decimals)?;
-    validate_balance(
-        input_total,
-        &output_values,
-        deposit,
-        withdraw,
-        fee.pool_fee_base_units,
-    )?;
 
     let (output_amounts, output_note_keys, output_encryption_keys) =
         resolve_outputs(&session, &args.outputs, &output_values)?;
@@ -212,8 +205,7 @@ fn validate_activity(inputs: &[Field], deposit: NoteAmount) -> Result<()> {
     Ok(())
 }
 
-fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<NoteAmount> {
-    let mut total = NoteAmount::ZERO;
+fn check_inputs(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<()> {
     for commitment in inputs {
         let note = notes
             .iter()
@@ -222,36 +214,6 @@ fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<N
         if note.spent {
             bail!("input note {commitment} has already been spent");
         }
-        total = total
-            .checked_add(note.amount)
-            .ok_or_else(|| anyhow::anyhow!("input amount total overflow"))?;
-    }
-    Ok(total)
-}
-
-fn validate_balance(
-    input_total: NoteAmount,
-    outputs: &[NoteAmount],
-    deposit: NoteAmount,
-    withdraw: NoteAmount,
-    fee: NoteAmount,
-) -> Result<()> {
-    let output_total = outputs.iter().try_fold(NoteAmount::ZERO, |total, output| {
-        total
-            .checked_add(*output)
-            .ok_or_else(|| anyhow::anyhow!("output amount total overflow"))
-    })?;
-    let incoming = input_total
-        .checked_add(deposit)
-        .ok_or_else(|| anyhow::anyhow!("input plus deposit amount overflow"))?;
-    let outgoing = output_total
-        .checked_add(withdraw)
-        .and_then(|total| total.checked_add(fee))
-        .ok_or_else(|| anyhow::anyhow!("output plus withdrawal plus fee amount overflow"))?;
-    if incoming != outgoing {
-        bail!(
-            "transaction is not balanced: inputs ({input_total}) + deposit ({deposit}) != outputs ({output_total}) + withdrawal ({withdraw}) + fee ({fee})"
-        );
     }
     Ok(())
 }
@@ -318,20 +280,4 @@ fn external_amount(deposit: NoteAmount, withdraw: NoteAmount) -> Result<ExtAmoun
         return Ok(ExtAmount::from(amount));
     }
     Ok(ExtAmount::ZERO)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validate_balance_counts_the_fee() {
-        let (inputs, fee) = (NoteAmount::from(10), NoteAmount::from(3));
-        let zero = NoteAmount::ZERO;
-        validate_balance(inputs, &[NoteAmount::from(7)], zero, zero, fee)
-            .expect("inputs of 10 pay outputs of 7 and a fee of 3");
-        let error = validate_balance(inputs, &[inputs], zero, zero, fee)
-            .expect_err("outputs equal to the inputs leave nothing for the fee");
-        assert!(error.to_string().contains("+ fee (3)"));
-    }
 }
