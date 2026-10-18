@@ -146,8 +146,7 @@ fn register_pool_gvk(
 }
 
 /// Registers a view-only pool charging `fee` with a minimum deposit of
-/// `minimum`, a deposit cap of 1000, depth 3, and policy flags 0, the pool
-/// `mk_moving_transact_proof` expects.
+/// `minimum`, configured as `mk_moving_transact_proof` expects.
 fn register_pool_charging(env: &Env, setup: &TestSetup, fee: i128, minimum: i128) -> Address {
     register_pool_with(
         env,
@@ -4058,7 +4057,8 @@ fn pause_deposits_errors_when_admin_unset() {
     assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
 }
 
-/// A proof moving `ext_amount` with a public amount of `public_amount`.
+/// A proof moving `ext_amount` with a public amount of `public_amount`. The
+/// real verifier refuses it, so `InvalidProof` means every amount check passed.
 fn mk_paying_proof(
     env: &Env,
     pool: &PoolGvkContractClient,
@@ -4074,8 +4074,6 @@ fn mk_paying_proof(
     (proof, ext)
 }
 
-/// Asserts that a proof moving `ext_amount` with a public amount of
-/// `public_amount` gets `expected` from a pool charging a fee of 5.
 fn assert_transact_charging_five(ext_amount: i32, public_amount: i128, expected: Error) {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -4091,8 +4089,6 @@ fn assert_transact_charging_five(ext_amount: i32, public_amount: i128, expected:
     );
 }
 
-/// The real verifier refuses the mock proof, so `InvalidProof` means every
-/// amount check passed.
 #[test]
 fn transact_takes_the_fee_from_a_transfer() {
     assert_transact_charging_five(0, -5, Error::InvalidProof);
@@ -4132,8 +4128,6 @@ fn transact_refuses_an_ext_amount_outside_i128() {
     }
 }
 
-/// Registers a pool charging a fee of 5 with a minimum deposit of 10, and a
-/// proof moving `ext_amount` with a public amount of `public_amount`.
 fn mk_transact_charging_five_minimum_ten(
     env: &Env,
     setup: &TestSetup,
@@ -4176,8 +4170,6 @@ fn transact_reports_a_paused_pool_before_the_minimum() {
     );
 }
 
-/// The real verifier refuses the mock proof, so `InvalidProof` means every
-/// amount check passed.
 #[test]
 fn transact_admits_a_deposit_at_the_minimum_after_the_fee() {
     let env = test_env();
@@ -4192,16 +4184,13 @@ fn transact_admits_a_deposit_at_the_minimum_after_the_fee() {
 }
 
 /// The cap counts the fee. 1001 carries its matching public amount, so only the
-/// cap answers `WrongExtAmount`; at 1000 the real verifier refuses the mock
-/// proof, so `InvalidProof` means every amount check passed.
+/// cap answers `WrongExtAmount`.
 #[test]
 fn transact_caps_a_deposit_fee_included() {
     assert_transact_charging_five(1001, 996, Error::WrongExtAmount);
     assert_transact_charging_five(1000, 995, Error::InvalidProof);
 }
 
-/// The real verifier refuses the mock proof, so `InvalidProof` means every
-/// amount check passed.
 #[test]
 fn transact_does_not_bound_a_withdrawal_by_the_minimum() {
     let env = test_env();
@@ -4215,8 +4204,9 @@ fn transact_does_not_bound_a_withdrawal_by_the_minimum() {
     );
 }
 
-/// Registers a pool charging a fee of 5 with a minimum deposit of 1, on the
-/// accepting verifier and a real token, and deposits 50 into it.
+/// Deposits 50 into a pool charging a fee of 5 with a minimum deposit of 1, on
+/// a real token and the accepting verifier, so later calls succeed and only
+/// their amounts are under test.
 fn deposit_fifty_charging_five(
     env: &Env,
 ) -> (PoolGvkContractClient<'static>, TokenClient<'static>) {
@@ -4231,8 +4221,7 @@ fn deposit_fifty_charging_five(
     (pool, TokenClient::new(env, &setup.token))
 }
 
-/// Asserts the pool's notes total and fees total, and that its token balance
-/// is their sum.
+/// Asserts both totals, and that the pool's token balance is their sum.
 fn assert_totals(
     env: &Env,
     pool: &PoolGvkContractClient,
@@ -4250,8 +4239,6 @@ fn assert_totals(
     assert_eq!(notes.checked_add(fees), Some(token.balance(&pool.address)));
 }
 
-/// The accepting verifier skips the pairing check, so the calls succeed and
-/// only the amounts are under test.
 #[test]
 fn the_totals_follow_a_deposit_a_transfer_and_a_withdrawal() {
     let env = test_env();
@@ -4269,7 +4256,7 @@ fn the_totals_follow_a_deposit_a_transfer_and_a_withdrawal() {
 }
 
 /// The pool holds the tokens, so only the notes total can refuse the
-/// withdrawal. The accepting verifier skips the pairing check.
+/// withdrawal.
 #[test]
 fn a_withdrawal_beyond_the_notes_total_is_refused() {
     let env = test_env();
