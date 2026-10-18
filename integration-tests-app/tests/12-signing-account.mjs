@@ -109,7 +109,7 @@ export async function run(helpers) {
   await gotoMoveFlow(page, 'withdraw');
   assert((await select.inputValue()) === signer, 'the signing account did not stay on the signer account');
   await page.locator('#withdraw-recipient-select').selectOption('');
-  await page.locator('#withdraw-amount').fill('0.01');
+  await page.locator('#withdraw-amount').fill('0.0099');
   await select.selectOption(owner);
   await page.locator('#btn-withdraw').click();
   await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose a withdrawal recipient/.test(toast.message) });
