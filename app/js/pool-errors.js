@@ -5,7 +5,6 @@ const NOTHING_YET = 'You have nothing to send yet. If you just deposited, try ag
 /**
  * The sentence for a refusal the SDK gave a `code`, or null. `feeIncluded` is
  * for an amount that already holds the fee, as the Advanced form's Public deposit.
- * A pool fee of zero goes unsaid.
  */
 export function poolErrorMessage(error, { fee, format, feeIncluded = false }) {
   switch (error?.code) {

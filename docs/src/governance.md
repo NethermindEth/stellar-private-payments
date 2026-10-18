@@ -218,19 +218,19 @@ stellar tx send --network testnet < tx.xdr
 
 ## Claim collected fees
 
-The Pools tab's Fees column shows what each pool has collected and the pool fee it charges per
+The Pools tab's Fees column shows what each pool has collected and the fee it charges per
 transaction. The Claim fees button builds a `claim_fees` call that pays the admin account the amount
 the Fees column shows as collected. The button stays disabled while the pool has collected nothing.
 The amount is what the tab read when it last loaded, so fees collected since then stay in the pool.
-The signers sign it as [Make an admin call](#make-an-admin-call) describes. For a pool of a classic
-asset, the admin account needs a trustline to that asset, authorized by the issuer if the asset
-requires authorization, before a claim can pay it.
+The signers sign it as [Make an admin call](#make-an-admin-call) describes. For a classic asset, the
+admin account needs a trustline to the asset, authorized by the issuer if the asset requires
+authorization, before a claim can pay it.
 
-Before signing, each signer checks that the claim pays the admin account. The card's Claim line ends
-"to the admin account (Source)", and its Arguments line and the decoded transaction show the address
-the claim pays. A claim paid anywhere else sends the fees there. The pool refuses only a claim paid
-to itself, and a claim paid to another pool or to the token contract leaves the amount where nobody
-can move it.
+Before signing, each signer checks that the claim pays the admin account: the card's Claim line
+ends "to the admin account (Source)", and its Arguments line and the decoded transaction show the
+recipient. A claim paid elsewhere sends the fees there. The pool refuses only a claim paid to
+itself; one paid to another pool or to the token contract leaves the amount where nobody can move
+it.
 
 Without the page, read what the pool has collected, then build the claim:
 
