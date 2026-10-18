@@ -84,6 +84,19 @@ pub enum Error {
         largest_deposit: NoteAmount,
     },
 
+    /// A transaction whose inputs and deposit do not pay its outputs,
+    /// withdrawal and fee. `gap` is negative when more goes out than comes in.
+    // Names no amount: the gap can reveal a note's value.
+    #[error(
+        "transaction does not balance: {}",
+        if .gap < &ExtAmount::ZERO {
+            "the private outputs, withdrawal and pool fee exceed the input notes and deposit"
+        } else {
+            "the input notes and deposit exceed the private outputs, withdrawal and pool fee"
+        }
+    )]
+    NotBalanced { gap: ExtAmount },
+
     /// A withdrawal paid to a contract of this deployment.
     #[error(
         "cannot withdraw to a contract of this deployment, such as a pool or its token contract, because nobody could move the tokens out again; withdraw to an address outside this deployment"
