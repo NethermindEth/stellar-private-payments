@@ -19,7 +19,8 @@ export const CONTRACT_ERRORS = {
         20: 'No admin transfer is pending.',
         21: 'The contract does not run the code this pool accepts.',
         22: 'The pool holds less than this would pay out, so it refused. Tell the pool operator.',
-        23: 'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim. The pool also refuses a claim paid to itself.',
+        23: 'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim.',
+        24: 'This claim pays the pool or its token contract, not the admin account. To claim the fees, press Claim fees on the Pools tab.',
     },
     // Groth16 verifier errors 
     verifier: {
