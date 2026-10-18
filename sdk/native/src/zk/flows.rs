@@ -625,40 +625,15 @@ where
         ));
     }
 
-    // Enforce conservation: inputs + (ext_amount - fee) == outputs.
     let public_amount = ext_amount
         .checked_sub(ExtAmount::try_from(fee)?)
         .ok_or_else(|| anyhow!("ext_amount({ext_amount}) - fee({fee}) overflows"))?;
-    let inputs_sum = sum_note_amounts_inputs(&inputs)?;
-    let outputs_sum = sum_note_amounts_outputs(&outputs)?;
-
-    let balanced = if public_amount >= ExtAmount::ZERO {
-        let public_note = NoteAmount::try_from(public_amount)?;
-        let lhs = inputs_sum
-            .checked_add(public_note)
-            .ok_or_else(|| anyhow!("overflow computing note amount LHS"))?;
-        lhs == outputs_sum
-    } else {
-        let public_note = NoteAmount::try_from(
-            public_amount
-                .checked_neg()
-                .ok_or_else(|| anyhow!("public amount negation overflow"))?,
-        )?;
-        let rhs = outputs_sum
-            .checked_add(public_note)
-            .ok_or_else(|| anyhow!("overflow computing note amount RHS"))?;
-        inputs_sum == rhs
-    };
-
-    if !balanced {
-        return Err(anyhow!(
-            "not balanced: inputs({}) + ext_amount({}) != outputs({}) + fee({})",
-            inputs_sum,
-            ext_amount,
-            outputs_sum,
-            fee
-        ));
-    }
+    crate::transact::check_balance(
+        sum_note_amounts_inputs(&inputs)?,
+        outputs.iter().map(|output| output.amount),
+        ext_amount,
+        fee,
+    )?;
 
     let sender_note_pubkey_bytes = crypto::derive_public_key(&priv_key.0)?;
     let sender_note_pubkey: [u8; 32] = sender_note_pubkey_bytes
@@ -1283,16 +1258,6 @@ fn sum_note_amounts_inputs(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
     Ok(sum)
 }
 
-fn sum_note_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
-    let mut sum = NoteAmount::ZERO;
-    for o in outputs {
-        sum = sum
-            .checked_add(o.amount)
-            .ok_or_else(|| anyhow!("overflow summing output amounts"))?;
-    }
-    Ok(sum)
-}
-
 /// Parameters for a `keyOwnership` proof: the note keypair and the
 /// registration it is bound to.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1802,56 +1767,6 @@ mod tests {
     }
 
     #[test]
-    fn transfer_requires_balanced_equation() {
-        let tree_depth: u32 = 10;
-        let asp_depth: u32 = 8;
-        let smt_depth: u32 = 10;
-        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
-        let asp_depth_usize = usize::try_from(asp_depth).expect("asp_depth");
-        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
-
-        let priv_key = NotePrivateKey([1u8; 32]);
-        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
-
-        let input = TransactInputNote {
-            amount: NoteAmount::from(10),
-            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
-            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
-            merkle_path_indices: Field::ZERO,
-        };
-        let out = TransactOutput {
-            amount: NoteAmount::from(9), // unbalanced
-            blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
-            recipient_note_pubkey: None,
-            recipient_encryption_pubkey: None,
-        };
-
-        let res = transfer(
-            TransferParams {
-                priv_key,
-                encryption_pubkey,
-                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
-                pool_address: "POOL".into(),
-                token_address: "TOKEN".into(),
-                inputs: vec![input],
-                outputs: vec![out],
-                fee: NoteAmount::ZERO,
-                membership_proof: Some(zero_membership(asp_depth_usize)),
-                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
-                tree_depth,
-                asp_depth,
-                smt_depth,
-                policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-                gvk_mode: GvkMode::Off,
-                admin_view_key: None,
-            },
-            |_, _, _| Ok([0u8; 32]),
-        );
-
-        assert!(res.is_err());
-    }
-
-    #[test]
     fn withdraw_splits_change_when_exceeds_note_amount_max() {
         let tree_depth: u32 = 10;
         let asp_depth: u32 = 8;
@@ -1950,7 +1865,10 @@ mod tests {
     fn transact_refuses_outputs_that_ignore_the_fee() {
         let err = transfer_from_a_note_of_ten(10, 3).expect_err("outputs must leave the fee");
         assert!(
-            err.to_string().contains("not balanced"),
+            matches!(
+                err.downcast_ref::<crate::Error>(),
+                Some(crate::Error::NotBalanced { gap }) if *gap == ExtAmount::from(-3)
+            ),
             "unexpected error: {err}"
         );
     }

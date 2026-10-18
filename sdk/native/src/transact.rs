@@ -3,7 +3,7 @@
 use crate::{
     Error,
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
-    planner::Transact,
+    planner::{SpendableNote, Transact},
     state::{SqliteStorage, StoredPrivateKeys},
     types::{
         AspMembershipProof, AspMembershipSync, AspNonMembershipProof, BabyJubJubPoint,
@@ -218,6 +218,58 @@ impl DepositLimits {
         }
         Ok(())
     }
+}
+
+/// Refuses a transaction whose `inputs` and deposit do not pay its `outputs`,
+/// withdrawal and `fee`, or whose sums overflow.
+pub(crate) fn check_balance(
+    inputs: NoteAmount,
+    outputs: impl IntoIterator<Item = NoteAmount>,
+    ext_amount: ExtAmount,
+    fee: NoteAmount,
+) -> Result<(), Error> {
+    let public = NoteAmount::from(i128::from(ext_amount).unsigned_abs());
+    let (deposit, withdrawal) = if ext_amount < ExtAmount::ZERO {
+        (NoteAmount::ZERO, public)
+    } else {
+        (public, NoteAmount::ZERO)
+    };
+    let coming_in = inputs.checked_add(deposit).ok_or_else(too_large)?;
+    let going_out = outputs
+        .into_iter()
+        .try_fold(fee, NoteAmount::checked_add)
+        .and_then(|sum| sum.checked_add(withdrawal))
+        .ok_or_else(too_large)?;
+    if coming_in == going_out {
+        return Ok(());
+    }
+    let diff = u128::from(coming_in).abs_diff(u128::from(going_out));
+    let gap = if coming_in > going_out {
+        i128::try_from(diff).ok()
+    } else {
+        0i128.checked_sub_unsigned(diff)
+    };
+    Err(Error::NotBalanced {
+        gap: gap.map(ExtAmount::from).ok_or_else(too_large)?,
+    })
+}
+
+/// Returns the sum of the `notes` that `inputs` names, or
+/// [`Error::MembershipSync`] for an input not yet synced.
+pub(crate) fn input_total(inputs: &[Field], notes: &[SpendableNote]) -> Result<NoteAmount, Error> {
+    inputs.iter().try_fold(NoteAmount::ZERO, |sum, commitment| {
+        let note = notes
+            .iter()
+            .find(|note| note.commitment == *commitment)
+            .ok_or(Error::MembershipSync(AspMembershipSync::SyncRequired(None)))?;
+        sum.checked_add(note.amount).ok_or_else(too_large)
+    })
+}
+
+fn too_large() -> Error {
+    Error::Other(anyhow::anyhow!(
+        "the amounts are too large for one transaction"
+    ))
 }
 
 pub fn build_transact_params(
@@ -449,12 +501,12 @@ fn build_pool_input_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        DepositLimits, build_validated_pool_tree, load_user_key_material,
-        transact_request_from_step,
+        DepositLimits, build_validated_pool_tree, check_balance, input_total,
+        load_user_key_material, transact_request_from_step,
     };
     use crate::{
         Error,
-        planner::Transact,
+        planner::{SpendableNote, Transact},
         state::SqliteStorage,
         types::{
             AspMembership, AspMembershipSync, AspNonMembership, ContractsStateData, ExtAmount,
@@ -686,6 +738,84 @@ mod tests {
         assert!(matches!(
             check(u128::MAX, true),
             Err(Error::DepositsPaused { .. })
+        ));
+    }
+
+    fn balance(inputs: u128, outputs: &[u128], ext_amount: i128, fee: u128) -> Result<(), Error> {
+        check_balance(
+            NoteAmount::from(inputs),
+            outputs.iter().map(|&output| NoteAmount::from(output)),
+            ExtAmount::from(ext_amount),
+            NoteAmount::from(fee),
+        )
+    }
+
+    #[test]
+    fn a_transaction_balances_with_the_fee() {
+        balance(10, &[7, 0], 0, 3).expect("a transfer leaves the fee");
+        balance(0, &[10], 15, 5).expect("a deposit pays the fee on top");
+        balance(10, &[], -7, 3).expect("a withdrawal leaves the fee");
+    }
+
+    #[test]
+    fn an_unbalanced_transaction_names_its_gap() {
+        for (outputs, ext_amount, gap) in [(10, 0, -3), (6, 0, 1), (0, -8, -1)] {
+            let result = balance(10, &[outputs], ext_amount, 3);
+            assert!(
+                matches!(result, Err(Error::NotBalanced { gap: actual }) if actual == ExtAmount::from(gap)),
+                "outputs {outputs}, ext_amount {ext_amount}: {result:?}"
+            );
+        }
+        let message = |outputs| {
+            balance(10, &[outputs], 0, 3)
+                .expect_err("the transaction does not balance")
+                .to_string()
+        };
+        assert_eq!(
+            message(10),
+            "transaction does not balance: the private outputs, withdrawal and pool fee exceed the input notes and deposit"
+        );
+        assert_eq!(
+            message(6),
+            "transaction does not balance: the input notes and deposit exceed the private outputs, withdrawal and pool fee"
+        );
+    }
+
+    #[test]
+    fn amounts_past_their_range_are_too_large() {
+        for result in [
+            balance(u128::MAX, &[1 << 127], 1, 0),
+            balance((1 << 127) - 1, &[u128::MAX], -1, 0),
+            balance(1 << 127, &[u128::MAX], 0, 2),
+            balance(u128::MAX, &[0], 0, 0),
+            balance(0, &[u128::MAX], 0, 0),
+        ] {
+            assert!(
+                matches!(&result, Err(Error::Other(error)) if error.to_string() == "the amounts are too large for one transaction"),
+                "{result:?}"
+            );
+        }
+        let result = balance(0, &[1 << 127], 0, 0);
+        assert!(
+            matches!(result, Err(Error::NotBalanced { gap }) if gap == ExtAmount::from(i128::MIN)),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn input_total_sums_the_inputs_it_holds() {
+        let notes = [Field::ZERO, Field::ONE].map(|commitment| SpendableNote {
+            commitment,
+            amount: NoteAmount::from(4),
+        });
+        assert_eq!(
+            input_total(&[Field::ZERO, Field::ONE], &notes).expect("both inputs are held"),
+            NoteAmount::from(8)
+        );
+        let unknown = Field::from(NoteAmount::from(2));
+        assert!(matches!(
+            input_total(&[Field::ZERO, unknown], &notes),
+            Err(Error::MembershipSync(AspMembershipSync::SyncRequired(None)))
         ));
     }
 
