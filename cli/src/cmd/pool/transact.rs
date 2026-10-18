@@ -120,15 +120,8 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     let notes = pool
         .notes()
         .map_err(|e| anyhow::anyhow!("list pool notes: {e}"))?;
-    let input_total = selected_input_total(&input, &notes)?;
+    check_inputs(&input, &notes)?;
     let fee = pool_fee(&pool, decimals)?;
-    validate_balance(
-        input_total,
-        &output_values,
-        deposit,
-        withdraw,
-        fee.pool_fee_base_units,
-    )?;
 
     let (output_amounts, output_note_keys, output_encryption_keys) =
         resolve_outputs(&session, &args.outputs, &output_values)?;
@@ -206,19 +199,19 @@ fn validate_activity(inputs: &[Field], deposit: NoteAmount) -> Result<()> {
     Ok(())
 }
 
-fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<NoteAmount> {
-    let mut total = NoteAmount::ZERO;
+fn check_inputs(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<()> {
     for (index, commitment) in inputs.iter().enumerate() {
         let copy = inputs
             .iter()
             .take(index)
             .filter(|earlier| *earlier == commitment)
             .count();
-        let Some(note) = notes
+        if notes
             .iter()
             .filter(|note| note.id == *commitment && !note.spent)
             .nth(copy)
-        else {
+            .is_none()
+        {
             if copy > 0 {
                 bail!(
                     "input note {commitment} is listed twice, but only one unspent note with that commitment is owned in this pool"
@@ -228,37 +221,7 @@ fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<N
                 bail!("input note {commitment} has already been spent");
             }
             bail!("input note {commitment} is not owned in this pool");
-        };
-        total = total
-            .checked_add(note.amount)
-            .ok_or_else(|| anyhow::anyhow!("input amount total overflow"))?;
-    }
-    Ok(total)
-}
-
-fn validate_balance(
-    input_total: NoteAmount,
-    outputs: &[NoteAmount],
-    deposit: NoteAmount,
-    withdraw: NoteAmount,
-    fee: NoteAmount,
-) -> Result<()> {
-    let output_total = outputs.iter().try_fold(NoteAmount::ZERO, |total, output| {
-        total
-            .checked_add(*output)
-            .ok_or_else(|| anyhow::anyhow!("output amount total overflow"))
-    })?;
-    let incoming = input_total
-        .checked_add(deposit)
-        .ok_or_else(|| anyhow::anyhow!("input plus deposit amount overflow"))?;
-    let outgoing = output_total
-        .checked_add(withdraw)
-        .and_then(|total| total.checked_add(fee))
-        .ok_or_else(|| anyhow::anyhow!("output plus withdrawal plus fee amount overflow"))?;
-    if incoming != outgoing {
-        bail!(
-            "transaction is not balanced: inputs ({input_total}) + deposit ({deposit}) != outputs ({output_total}) + withdrawal ({withdraw}) + fee ({fee})"
-        );
+        }
     }
     Ok(())
 }
@@ -332,18 +295,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_balance_counts_the_fee() {
-        let (inputs, fee) = (NoteAmount::from(10), NoteAmount::from(3));
-        let zero = NoteAmount::ZERO;
-        validate_balance(inputs, &[NoteAmount::from(7)], zero, zero, fee)
-            .expect("inputs of 10 pay outputs of 7 and a fee of 3");
-        let error = validate_balance(inputs, &[inputs], zero, zero, fee)
-            .expect_err("outputs equal to the inputs leave nothing for the fee");
-        assert!(error.to_string().contains("+ fee (3)"));
-    }
-
-    #[test]
-    fn input_total_takes_each_unspent_copy_once() -> Result<()> {
+    fn inputs_take_each_unspent_copy_once() -> Result<()> {
         let c = Field::ONE;
         let notes =
             [(0, true), (1, false), (2, false)].map(|(leaf_index, spent)| UserNoteSummary {
@@ -358,16 +310,12 @@ mod tests {
         let s = c.to_string();
 
         assert_eq!(parse_inputs(&[s.clone(), s])?, [c, c]);
-        assert_eq!(selected_input_total(&[c], &notes)?, NoteAmount::from(5u128));
-        assert_eq!(
-            selected_input_total(&[c, c], &notes)?,
-            NoteAmount::from(10u128)
-        );
-        let err = selected_input_total(&[c, c], &notes[..2]).expect_err("one unspent copy");
+        check_inputs(&[c, c], &notes)?;
+        let err = check_inputs(&[c, c], &notes[..2]).expect_err("one unspent copy");
         assert!(err.to_string().contains("is listed twice"));
-        let err = selected_input_total(&[c, c], &notes[..1]).expect_err("only the spent copy");
+        let err = check_inputs(&[c, c], &notes[..1]).expect_err("only the spent copy");
         assert!(err.to_string().contains("has already been spent"));
-        let err = selected_input_total(&[c, Field::ZERO], &notes).expect_err("not in the wallet");
+        let err = check_inputs(&[c, Field::ZERO], &notes).expect_err("not in the wallet");
         assert!(err.to_string().contains("is not owned in this pool"));
         Ok(())
     }

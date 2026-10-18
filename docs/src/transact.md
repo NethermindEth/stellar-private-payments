@@ -14,8 +14,9 @@ input notes + deposit = private outputs + withdrawal + pool fee
 Every transaction pays the pool fee, a fixed amount set when the pool is
 deployed. `--deposit` is what leaves your account, fee included, and
 `--withdraw` is what the recipient receives. `spp transact` refuses an
-unbalanced transaction before proving, and its error names the fee in the
-token's smallest unit. The examples below assume a fee of 0.1 tokens.
+unbalanced transaction before it sends anything, and its error gives the
+difference in tokens and the flags to change. The examples below assume a fee
+of 0.1 tokens.
 
 A note worth no more than the fee leaves nothing once the fee is paid, and a
 transaction pays one fee for one note or two. Spend such a note as one of two
