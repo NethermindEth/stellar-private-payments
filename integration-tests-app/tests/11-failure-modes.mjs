@@ -169,10 +169,9 @@ export async function run(helpers) {
   await page.locator('#transfer-address').fill('');
   await waitForRecipientLookupReset(page);
 
-  // (4) Read the deployed pool's live cap and fee, and deposit a note that,
-  // with the fee on top, exceeds the cap by one stroop. The form refuses it
-  // before any confirmation. Deployment parameters can change independently
-  // of this test branch; a hard-coded amount can silently become valid.
+  // (4) Deposit a note that, with the deployed pool's live fee on top, exceeds
+  // its live cap by one stroop: the form refuses it before any confirmation. A
+  // hard-coded amount can silently become valid when deployment parameters change.
   // Mirrors app/js/ui/pool.js's getActivePoolContractId: first enabled pool.
   const poolContractId = await page.evaluate(() =>
     fetch('./deployments.json')
