@@ -176,8 +176,7 @@ impl DepositLimits {
     /// Returns [`Error::DepositsPaused`] while `pool` is paused, then
     /// [`Error::DepositAboveMaximum`] when the deposit sends more than the
     /// maximum, then [`Error::DepositBelowMinimum`] when it leaves less than
-    /// the minimum in notes after the fee. The pool checks them in this
-    /// order.
+    /// the minimum in notes after the fee, in the pool's order.
     pub(crate) fn check(&self, ext_amount: ExtAmount, pool: &str) -> Result<(), Error> {
         if ext_amount <= ExtAmount::ZERO {
             return Ok(());

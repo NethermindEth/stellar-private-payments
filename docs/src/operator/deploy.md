@@ -69,11 +69,11 @@ Replace the following:
 
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `FEE`: the pool fee every transaction pays, in the token's smallest unit. `1000000` is 0.1 XLM.
-- `MIN_DEPOSIT`: the smallest deposit, the least a deposit can leave in notes after the pool fee,
-  in the token's smallest unit. `10000000` is 1 XLM.
+- `MIN_DEPOSIT`: the least a deposit can leave in notes after the pool fee, in the token's
+  smallest unit. `10000000` is 1 XLM.
 - `KDF_DOMAIN`: a string naming your deployment, which users see in the message they sign.
 
-For how to choose the pool fee and the smallest deposit, see
+To choose the fee and the smallest deposit, see
 [Pool fee and smallest deposit](../deploy.md#pool-fee-and-smallest-deposit). For more pools, GVK
 pools, and classic assets, see [Deploying pools](../deploy.md).
 

@@ -98,34 +98,32 @@ generate` can also save the key into a client SDK wallet database via
 
 ## Pool fee and smallest deposit
 
-Every `transact` pays the pool fee. A deposit sends the fee on top of what it
-puts in notes, and a transfer or withdrawal pays it out of the notes it spends.
-The SDK spends three or more notes as a chain of transactions, one fewer than
-the notes, and each one pays the fee. `--min-deposit` applies to what a
-deposit puts in notes after the fee, which is the amount a user types in the
-app or in `spp deposit`. Withdrawals have no minimum. No entry point changes
-the pool fee or the smallest deposit after deployment. The examples below
-charge a pool fee of 0.1 XLM (1,000,000 stroops) and set a smallest deposit of
-1 XLM.
+Every `transact` pays the pool fee: a deposit sends it on top of what it puts
+in notes, and a transfer or withdrawal pays it from the notes it spends. The
+SDK spends three or more notes as a chain of transactions, one fewer than the
+notes, and each pays the fee. No entry point changes the fee or the smallest
+deposit after deployment. The examples below set a fee of 0.1 XLM (1,000,000
+stroops) and a smallest deposit of 1 XLM.
 
 When you choose the values, weigh these effects:
 
-- A note worth no more than the fee leaves nothing once the fee is paid, so
-  it is worth spending only beside a second note, when the two sum to more
-  than the fee, or beside a deposit of at least the fee plus the smallest
-  deposit. With a higher fee, more small notes, such as change, are worth
-  nothing on their own.
-- With a fee above 0 and a smallest deposit of at least 1, a call that spends
-  no notes must deposit more than the fee. With a fee of 0, the pool accepts
-  all-zero calls whatever the smallest deposit, since it applies only to
-  deposits. Such calls spend nothing and deposit nothing but still add two
-  notes to the pool's tree. With a fee above 0 and a smallest deposit of 0, a
-  call can deposit exactly the fee into two zero-value notes, so adding two
-  notes to the tree costs only the fee.
+- `--min-deposit` applies to what a deposit puts in notes after the fee, the
+  amount a user types in the app or in `spp deposit`. Withdrawals have no
+  minimum.
 - `--max-deposit` caps what a deposit sends, fee included, so the largest
-  deposit, the most one deposit puts in notes, is the maximum less the fee.
-- The fee plus the smallest deposit must not exceed `--max-deposit`. The
-  constructor refuses such a pool with `Error(Contract, #6)`.
+  deposit puts the maximum less the fee in notes. The fee plus the smallest
+  deposit must not exceed it, or the constructor fails with
+  `Error(Contract, #6)`.
+- A note worth no more than the fee is worth spending only beside a second
+  note, when the two sum to more than the fee, or beside a deposit of at least
+  the fee plus the smallest deposit. The higher the fee, the more small notes,
+  such as change, are worthless alone.
+- With a fee of 0, the pool accepts all-zero calls whatever the smallest
+  deposit, since the minimum applies only to deposits. They spend and deposit
+  nothing but add two notes to the pool's tree. With a fee above 0, a call
+  that spends no notes must deposit more than the fee when the smallest
+  deposit is at least 1, and can deposit exactly the fee into two zero-value
+  notes when it is 0.
 
 ## Template
 
@@ -200,19 +198,18 @@ deployments/scripts/deploy.sh testnet \
 
 A pool keeps two totals: the value of its unspent notes, and the fees it has
 collected and not paid out. Its token balance is their sum, plus any tokens
-sent to the pool directly, which belong to neither total and stay in the pool.
-`claim_fees` pays out of the fees collected and nothing else, so the admin can
-claim fees but never note value. It returns `Error(Contract, #23)` for a
-negative amount, an amount above the fees collected, or a claim paid to the
-pool itself. A claim needs the admin's authorization and works while deposits
-are paused. Each claim publishes a `FeesClaimed` event. For a pool of a
-classic asset, the admin account needs a trustline to that asset, authorized
-by the issuer if the asset requires authorization, before a claim can pay it.
+sent to it directly, which belong to neither total and stay in the pool. `claim_fees` pays only from the collected fees, never note value, and
+returns `Error(Contract, #23)` for a negative amount, an amount above the fees
+collected, or the pool itself as recipient. A claim needs the admin's
+authorization, works while deposits are paused, and publishes a `FeesClaimed`
+event. For a classic asset, the admin account needs a trustline to the asset,
+authorized by the issuer if the asset requires authorization, before a claim
+can pay it.
 
-An M-of-N admin account claims from the admin page or with the CLI, as the
+An M-of-N admin claims from the admin page or the CLI, as the
 [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
-describes. The following commands suit a single-key admin. They read the fees a
-pool has collected and pay 0.1 XLM of them to the admin:
+describes. A single-key admin can read a pool's collected fees and pay 0.1 XLM
+of them to itself with these commands:
 
 ```bash
 NETWORK=testnet

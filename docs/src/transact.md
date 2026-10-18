@@ -17,12 +17,11 @@ deployed. `--deposit` is what leaves your account, fee included, and
 unbalanced transaction before proving, and its error names the fee in the
 token's smallest unit. The examples below assume a fee of 0.1 tokens.
 
-A note worth no more than the fee leaves nothing once the fee is paid. A
-transaction pays one fee whether it spends one note or two, so spend such a
-note as one of two `--input` notes whose sum is above the fee, or beside a
-`--deposit` of at least the fee plus the pool's smallest deposit.
-`spp transfer` and `spp withdraw` never deposit, so they spend such a note
-only beside a second note, or not at all.
+A note worth no more than the fee leaves nothing once the fee is paid, and a
+transaction pays one fee for one note or two. Spend such a note as one of two
+`--input` notes summing to more than the fee, or beside a `--deposit` of at
+least the fee plus the pool's smallest deposit. `spp transfer` and
+`spp withdraw` never deposit, so they spend it only beside a second note.
 
 Amounts are in whole tokens, with up to as many decimal places as the pool's token defines, so `4.5` is 4.5 tokens.
 

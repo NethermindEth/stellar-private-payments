@@ -224,8 +224,8 @@ export function describeAdminCall(xdr, networkPassphrase) {
 
 /**
  * Returns the card's line for a `claim_fees` call: the amount, when `amount`
- * formats it, beside the base units Arguments and Freighter show, and whether
- * the claim pays the admin account that signs it.
+ * formats it, beside its base units, and whether it pays the admin account
+ * that signs it.
  */
 export function claimLine({ source, args: [to, claimed] }, amount) {
   const payee = to === source ? 'the admin account (Source)' : `${to}, not the admin account`;

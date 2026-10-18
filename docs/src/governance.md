@@ -6,7 +6,7 @@ account's pause files.
 
 The admin can pause deposits, switch the trees a pool reads, edit the lists, claim the fees a pool
 has collected, and hand its role to another account. It cannot move the value in users' notes:
-`claim_fees` pays out of the fees collected and nothing else, notes move only through `transact`
+`claim_fees` pays only from the fees collected, notes move only through `transact`
 against a verifier fixed at construction, and no contract has an upgrade entry point.
 
 The commands below run on `testnet`. On another network, replace `testnet` with its name.
@@ -103,11 +103,10 @@ Replace the following:
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `KDF_DOMAIN`: the key derivation domain, which users see in the message they sign.
 - `FEE`: the pool fee every transaction pays, in the token's smallest unit.
-- `MIN_DEPOSIT`: the smallest deposit, the least a deposit can leave in notes after the pool fee,
-  in the token's smallest unit.
+- `MIN_DEPOSIT`: the least a deposit can leave in notes after the pool fee, in the token's smallest
+  unit.
 
-For how to choose the pool fee and the smallest deposit, see
-[Pool fee and smallest deposit](./deploy.md#pool-fee-and-smallest-deposit).
+To choose both, see [Pool fee and smallest deposit](./deploy.md#pool-fee-and-smallest-deposit).
 
 `deploy.sh` takes native XLM and classic assets, and refuses a token ID that is not the asset's own
 Stellar asset contract. For a classic asset, it warns about each power the issuer's flags give it
@@ -219,19 +218,19 @@ stellar tx send --network testnet < tx.xdr
 
 ## Claim collected fees
 
-The Pools tab's Fees column shows what each pool has collected and the pool fee it charges per
-transaction. Its Claim fees button builds a `claim_fees` call that pays the admin account the amount
-the Fees column shows as collected. That amount is what the tab read when it last loaded, so fees
+The Pools tab's Fees column shows what each pool has collected and the fee it charges per
+transaction. Claim fees, disabled while the pool has collected nothing, builds a `claim_fees` call
+that pays the admin account the collected amount as the tab read it when it last loaded; fees
 collected since then stay in the pool. The signers sign it as
-[Make an admin call](#make-an-admin-call) describes. The button stays disabled while the pool has
-collected nothing. For a pool of a classic asset, the admin account needs a trustline to that asset,
-authorized by the issuer if the asset requires authorization, before a claim can pay it.
+[Make an admin call](#make-an-admin-call) describes. For a classic asset, the admin account needs a
+trustline to the asset, authorized by the issuer if the asset requires authorization, before a
+claim can pay it.
 
-Before signing, each signer checks that the claim pays the admin account. The card's Claim line ends
-"to the admin account (Source)", and its Arguments line and the decoded transaction show the address
-the claim pays. A claim paid anywhere else sends the fees there. The pool refuses only a claim paid
-to itself, and a claim paid to another pool or to the token contract leaves the amount where nobody
-can move it.
+Before signing, each signer checks that the claim pays the admin account: the card's Claim line
+ends "to the admin account (Source)", and its Arguments line and the decoded transaction show the
+recipient. A claim paid elsewhere sends the fees there. The pool refuses only a claim paid to
+itself; one paid to another pool or to the token contract leaves the amount where nobody can move
+it.
 
 Without the page, read what the pool has collected, then build the claim:
 

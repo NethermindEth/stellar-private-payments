@@ -41,10 +41,10 @@ The amount of a transfer and its recipient stay private. A payment that needs mo
 sender's notes takes several transactions, which the clients plan and submit in sequence.
 
 The pool fee is set when the pool is deployed. A deposit sends the amount the user names plus the
-fee. A transfer or withdrawal pays the fee out of the notes it spends, so the recipient gets the
-whole amount named. A payment that takes several transactions pays the fee once for each. The pool
-keeps two totals: the notes total, which is the value of every unspent note, and the fees collected,
-which stay in the pool until the admin claims them.
+fee. A transfer or withdrawal pays the fee from the notes it spends, so the recipient gets the whole
+amount named. A payment of several transactions pays the fee for each. The pool keeps two totals:
+the notes total, the value of every unspent note, and the fees collected, which stay in the pool
+until the admin claims them.
 
 The following sequence shows three transactions in one pool with a pool fee of 0.1 XLM:
 

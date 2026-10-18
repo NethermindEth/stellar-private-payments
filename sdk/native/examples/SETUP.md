@@ -339,16 +339,15 @@ Run order for a full demo:
 6. `withdraw` to move funds back to a public address (spends the other).
 7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
-> **Each spend pays the pool fee out of the notes it spends.** One `deposit`
-> creates one note of `SPP_AMOUNT_STROOPS` and sends the pool fee on top. A
-> spend of that same amount needs the amount plus the fee, more than the note
-> holds. The commands above therefore spend 9000000 token base units, the
-> 10000000 default less testnet's 1000000 (0.1 XLM) pool fee, so `transfer`
-> and `withdraw` each spend exactly one note. If you run `transfer` and
-> `withdraw` at the default amount instead, `transfer` spends both notes, and
-> `withdraw` then finds only the change note, prints `Skipping: requested
-> amount ... exceeds the most one spend can send after the pool fees ...`, and
-> exits 0 without demonstrating anything.
+> **Each spend pays the pool fee from the notes it spends.** One `deposit`
+> creates one note of `SPP_AMOUNT_STROOPS` and sends the fee on top, so a
+> spend of the same amount needs more than the note holds. The commands above
+> spend 9000000 token base units, the 10000000 default less testnet's 1000000
+> (0.1 XLM) pool fee, so `transfer` and `withdraw` each spend exactly one note.
+> At the default amount, `transfer` spends both notes, and `withdraw` finds
+> only the change note, prints `Skipping: requested amount ... exceeds the
+> most one spend can send after the pool fees ...`, and exits 0 without
+> demonstrating anything.
 
 > `transfer` and `withdraw` require spendable notes. If the wallet has none,
 > they print a skip message and exit 0. Run `deposit` first.

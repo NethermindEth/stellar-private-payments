@@ -95,8 +95,8 @@ serving a client built from the old manifest until the old pool's users have lef
 
 - Contract storage expires when unused. A call that reads an archived entry restores it and pays
   for the restore, which can cost several XLM.
-- A note worth the pool fee or less can't pay for a spend on its own, so it can leave the pool only
-  together with a second note or a deposit in the same transaction, as
+- A note worth the pool fee or less can't pay for a spend alone, so it leaves the pool only beside a
+  second note or a deposit in the same transaction, as
   [Pool fee and smallest deposit](../deploy.md#pool-fee-and-smallest-deposit) describes. Change and
   small transfers create such notes.
 - Browser storage can be lost, for example to antivirus software. The user signs again to recover

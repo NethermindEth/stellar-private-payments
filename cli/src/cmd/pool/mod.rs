@@ -67,8 +67,7 @@ impl PoolFee {
         self.pool_fee_base_units == NoteAmount::ZERO
     }
 
-    /// Returns `clause` built from this fee, or nothing for a pool that charges
-    /// no fee, so a zero fee goes unsaid.
+    /// Returns `clause` built from this fee, or nothing for a zero fee.
     fn clause(&self, clause: impl FnOnce(&str) -> String) -> String {
         if self.is_zero() {
             String::new()
@@ -120,11 +119,10 @@ fn map_pool_err(
     })
 }
 
-/// Describes why a pool command failed, naming amounts in token units through
-/// `amount`. A refused deposit names the smallest or largest deposit, since the
-/// fee comes on top, unless `fee_included` says the amount already holds the
-/// fee, as `spp transact`'s `--deposit` does. A failed spend names the fee each
-/// transaction pays.
+/// Describes why a pool command failed, formatting amounts with `amount`. A
+/// refused deposit names the smallest or largest deposit, as the fee comes on
+/// top, unless `fee_included` says the amount holds the fee, as for
+/// `spp transact --deposit`. A failed spend names the fee per transaction.
 fn error_message(
     error: &Error,
     fee: &PoolFee,
