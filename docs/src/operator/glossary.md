@@ -25,6 +25,7 @@ differs.
 | GVK | Global View Key: a Baby JubJub key pair fixed in a `pool-gvk` pool at construction. Every note in that pool is encrypted to the GVK public key. |
 | GVK holder | Whoever holds a GVK private key, and so can decrypt that pool's notes. The GVK holder need not be the admin. |
 | KDF domain | Key derivation function domain (`kdf_domain`): a string, fixed per deployment, inside the message users sign to derive their note key, encryption key, and ASP secret. |
+| Largest deposit | The most a deposit can leave in notes: the maximum deposit less the pool fee. |
 | Leaf | An entry in a tree. An allowlist leaf is the hash of a note public key and an ASP secret. |
 | Manifest | The file `deploy.sh` writes, `deployments/NETWORK/deployments.json`. Clients read the deployment's contract addresses from it. |
 | Maximum deposit | The most one deposit can send, pool fee included (`MaximumDepositAmount`), set at deployment. |

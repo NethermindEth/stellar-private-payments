@@ -42,9 +42,9 @@ sender's notes takes several transactions, which the clients plan and submit in 
 
 The pool fee is set when the pool is deployed. A deposit sends the pool fee on top of what it leaves
 in notes. A transfer or withdrawal pays the fee from the notes it spends, so the recipient gets the
-whole amount named. The pool keeps two totals, the notes total and the fees collected. The notes
-total is the value of every unspent note, and the fees collected stay in the pool until the admin
-claims them.
+whole amount named. A payment that takes several transactions pays the fee once for each. The pool
+keeps two totals, the notes total and the fees collected. The notes total is the value of every
+unspent note, and the fees collected stay in the pool until the admin claims them.
 
 The following sequence shows three transactions in one pool with a pool fee of 0.1 XLM:
 

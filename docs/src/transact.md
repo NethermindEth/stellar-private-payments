@@ -20,7 +20,7 @@ token's smallest unit. The examples below assume a fee of 0.1 tokens.
 A note worth no more than the fee leaves nothing once the fee is paid. A
 transaction pays one fee whether it spends one note or two, so spend such a
 note as one of two `--input` notes whose sum is above the fee, or beside a
-`--deposit` of at least the fee plus the pool's minimum deposit.
+`--deposit` of at least the fee plus the pool's smallest deposit.
 `spp transfer` and `spp withdraw` never deposit, so they spend such a note
 only beside a second note, or not at all.
 
@@ -87,7 +87,8 @@ payer.
 ## Requirements
 
 - Each `--input` must be an unspent note owned by `--account` in this pool.
-- A deposit must put at least the pool's minimum deposit in notes after the
-  fee.
+- A deposit must put at least the pool's smallest deposit in notes after the
+  pool fee.
+- A deposit must send at most the pool's maximum deposit, pool fee included.
 - A Stellar-address recipient must have registered their keys. If the registry
   is unavailable or the recipient hasn't registered, use the explicit-key form.
