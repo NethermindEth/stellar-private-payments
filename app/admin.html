@@ -285,22 +285,23 @@
             <!-- 5. Pools Tab -->
             <section id="pools" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="pools-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Deposits</p>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Deposits and fees</p>
                     <h2 id="pools-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Pools</h2>
-                    <p class="mt-2 text-sm text-slate-400">A paused pool refuses deposits. Transfers and withdrawals still work.</p>
+                    <p class="mt-2 text-sm text-slate-400">A paused pool refuses deposits. Transfers and withdrawals still work. Claim fees sends the fees collected to the admin account.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
-                    <table class="w-full min-w-[720px] text-left text-sm">
-                        <thead>
+                    <table class="block w-full text-left text-sm sm:table sm:min-w-[720px]">
+                        <thead class="hidden sm:table-header-group">
                             <tr class="text-[10px] uppercase tracking-wide text-slate-500">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Fees</th>
                                 <th class="pb-3 font-medium" scope="col">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="poolRows" class="divide-y divide-white/5"></tbody>
+                        <tbody id="poolRows" class="block divide-y divide-white/5 sm:table-row-group"></tbody>
                     </table>
                     <p id="poolsNotice" class="mt-4 text-xs text-slate-400"></p>
                 </div>
@@ -413,7 +414,7 @@
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
-                    <pre id="adminTxDescription" class="whitespace-pre-wrap break-all font-mono text-xs text-slate-300 empty:hidden"></pre>
+                    <pre id="adminTxDescription" class="whitespace-pre-wrap break-words font-mono text-xs text-slate-300 empty:hidden"></pre>
                     <p id="adminTxSignaturesLine" class="text-sm text-slate-400">Signatures: <span id="adminTxSignatures" class="font-mono text-slate-100">0</span></p>
                     <ul id="adminTxSigners" class="space-y-2 empty:hidden"></ul>
                     <p id="adminTxNotice" class="text-sm text-slate-400 empty:hidden"></p>
@@ -473,11 +474,21 @@
 
     <!-- Pool Row Template -->
     <template id="tpl-pool-row">
-        <tr>
-            <td class="pool-id py-3 pr-4 font-mono text-xs text-slate-200"></td>
-            <td class="pool-trees py-3 pr-4 whitespace-nowrap font-mono text-xs text-slate-300"></td>
-            <td class="pool-deposits py-3 pr-4 font-mono text-xs text-slate-300"></td>
-            <td class="py-3">
+        <tr class="flex flex-col gap-2 py-3 sm:table-row sm:py-0">
+            <td class="pool-id block font-mono text-xs text-slate-200 align-top sm:table-cell sm:py-3 sm:pr-4"></td>
+            <td class="pool-trees block whitespace-nowrap font-mono text-xs text-slate-300 align-top sm:table-cell sm:py-3 sm:pr-4"></td>
+            <td class="block align-top sm:table-cell sm:py-3 sm:pr-4">
+                <span class="sm:hidden text-[11px] uppercase tracking-[0.22em] text-slate-500">Deposits</span>
+                <div class="pool-deposits font-mono text-xs text-slate-300"></div>
+            </td>
+            <td class="block align-top sm:table-cell sm:py-3 sm:pr-4">
+                <span class="sm:hidden text-[11px] uppercase tracking-[0.22em] text-slate-500">Fees</span>
+                <div class="pool-fees whitespace-nowrap font-mono text-xs text-slate-300"></div>
+                <div class="pool-claim mt-2">
+                    <button type="button" class="claim-fees-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed">Claim fees</button>
+                </div>
+            </td>
+            <td class="block align-top sm:table-cell sm:py-3">
                 <div class="pool-actions flex flex-wrap items-center gap-2">
                     <button type="button" class="pause-deposits-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed">Pause deposits</button>
                     <button type="button" class="unpause-deposits-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed">Unpause deposits</button>
