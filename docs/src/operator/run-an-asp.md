@@ -70,6 +70,11 @@ Write to the blocklist through the admin page. It converts each key to the byte 
 expects; a key passed raw to `insert_leaf` through the Stellar CLI is stored reversed, and its owner
 stays unblocked.
 
+Blocking keys can also lock out a key that isn't listed: when two blocked keys share the lowest 31
+bits of a user's key, that user can't prove their key is unlisted. Removing either blocked key
+releases them. See [A key the blocklist can't
+clear](features-and-limits.md#a-key-the-blocklist-cant-clear).
+
 ## Run a compliance contract for another operator's pool
 
 A pool accepts only allowlists and blocklists of its tree code. To run one for another operator's

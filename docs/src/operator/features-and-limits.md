@@ -63,6 +63,7 @@ and the
 | Notes per transaction | Two spent, two created |
 | Transactions per pool | 524,288, filling its commitment tree of 2^20 commitments |
 | Allowlist members | 1,024 per allowlist |
+| Blocklist depth | Paths of up to 31 levels. A key that shares its lowest 31 bits with two blocked keys can't spend or deposit. |
 | Notes per disclosure receipt | One to four. A receipt stops verifying once 90 more transactions land in the pool. |
 | Contracts per manifest | 25 that clients index: the enabled pools, every allowlist, and the registry |
 | Event history | About seven days on the public testnet RPC. Older history needs a bootnode. |
@@ -89,6 +90,31 @@ flowchart LR
 The `index` in a pool's latest `new_commitment_event` is the number of slots used, less one, out
 of 1,048,576. A new `deploy.sh` run writes a manifest with only the pools it deployed, so keep
 serving a client built from the old manifest until the old pool's users have left.
+
+### A key the blocklist can't clear
+
+To spend or deposit in a pool with the blocklist policy, a client proves that its note public key
+isn't listed. The proof follows the key's lowest bits from the blocklist's root down to an empty
+slot or to a single other key, and the circuits check that path for at most 31 levels. A
+full-length path, 254 levels, would make every blocklist proof several times larger and slower to
+build.
+
+The path is longer than 31 levels only when two blocked keys share the key's lowest 31 bits. Its
+owner then can't build the proof, and the client refuses with:
+
+```text
+ASP non-membership proof has N sibling(s), but the policy SMT depth 32 proves at most 31
+```
+
+The notes the key owns stay frozen, in every pool that reads the blocklist, until one of the two
+blocked keys is removed.
+
+By chance, the odds are negligible. On purpose, it takes about 2^32 hash evaluations to make two
+keys that share a user's lowest 31 bits, and getting both of them blocked. A note public key is
+public once its owner registers it or once it's blocked.
+
+To release the user, remove either blocked key with Remove from Blocklist, which unblocks that key
+as well.
 
 ## Known gaps
 
