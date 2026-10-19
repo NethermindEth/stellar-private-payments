@@ -141,7 +141,6 @@ done
 
 rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
-mkdir -p "$WEB/dist/licenses"
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"

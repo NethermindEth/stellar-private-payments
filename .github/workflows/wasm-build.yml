@@ -130,5 +130,4 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       - name: Run wasm tests
-        run: |
-          cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib
+        run: cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib
