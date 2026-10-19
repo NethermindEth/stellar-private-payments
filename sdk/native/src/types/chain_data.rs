@@ -154,8 +154,14 @@ pub struct TransactChainContext {
     pub admin_view_key: Option<BabyJubJubPoint>,
     /// Whether the pool refuses deposits; see [`PoolInfo::deposits_paused`].
     pub deposits_paused: bool,
+    /// Fee every `transact` pays; see [`PoolInfo::fee`].
     pub fee: NoteAmount,
+    /// Smallest deposit, net of the fee; see
+    /// [`PoolInfo::minimum_deposit_amount`].
     pub minimum_deposit_amount: NoteAmount,
+    /// Most a deposit may send, fee included; see
+    /// [`PoolInfo::maximum_deposit_amount`].
+    pub maximum_deposit_amount: ExtAmount,
 }
 
 pub fn transact_chain_context_from_state(
@@ -192,6 +198,7 @@ pub fn transact_chain_context_from_state(
         deposits_paused: pool.deposits_paused,
         fee: pool.fee,
         minimum_deposit_amount: pool.minimum_deposit_amount,
+        maximum_deposit_amount: pool.maximum_deposit_amount,
     })
 }
 
@@ -370,11 +377,11 @@ pub enum ProcessedEvent {
 }
 
 #[cfg(test)]
-mod pool_info_gvk_tests {
+pub(crate) mod pool_info_gvk_tests {
     use super::*;
     use crate::types::U256;
 
-    fn pool_info_with_gvk() -> PoolInfo {
+    pub(crate) fn pool_info_with_gvk() -> PoolInfo {
         PoolInfo {
             ledger: 42,
             contract_id: "CPOOL".to_string(),

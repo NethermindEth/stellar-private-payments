@@ -4,12 +4,12 @@
 use anyhow::Result;
 use stellar_private_payments::{
     Error,
-    types::{AssetDescriptor, NoteAmount, TransferRecipient},
+    types::{AssetDescriptor, ExtAmount, NoteAmount, TransferRecipient},
 };
 
 use super::support::{
-    FEE_STROOPS, MIN_DEPOSIT_STROOPS, assert_contract_error, deploy_default, deploy_scoped,
-    deploy_with_max_deposit, session,
+    FEE_STROOPS, MIN_DEPOSIT_STROOPS, deploy_default, deploy_scoped, deploy_with_max_deposit,
+    session,
 };
 use crate::{network::LocalNetwork, pool::PoolOptions};
 
@@ -34,20 +34,35 @@ async fn deposit_basic() -> Result<()> {
     Ok(())
 }
 
-/// The pool refuses the deposit with `WrongExtAmount` (code 6), where
-/// `is_err()` also passed on a failure inside the SDK.
+/// The SDK refuses the deposit before proving and names the cap and the
+/// largest deposit, so nothing reaches the network.
 #[tokio::test]
 async fn deposit_exceeds_max_deposit() -> Result<()> {
     let session =
         session(deploy_with_max_deposit(LOW_CAP_STROOPS, &[PoolOptions::NONE]).await?).await?;
+    let funded_balance = session.account.balance(&AssetDescriptor::Native).await?;
+    let cap = ExtAmount::try_from(NoteAmount::from(LOW_CAP_STROOPS))?;
+    let largest = NoteAmount::from(LOW_CAP_STROOPS - FEE_STROOPS);
 
     // The pool caps what the deposit sends, which is the note plus the fee.
-    let err = session
+    let deposit = session
         .pool()?
         .deposit(NoteAmount::from(LOW_CAP_STROOPS - FEE_STROOPS + 1))
-        .await
-        .expect_err("a deposit whose note and fee exceed the cap must be rejected");
-    assert_contract_error(err, 6);
+        .await;
+    assert!(
+        matches!(
+            deposit,
+            Err(Error::DepositAboveMaximum { maximum, largest_deposit })
+                if maximum == cap && largest_deposit == largest
+        ),
+        "a deposit whose note and fee exceed the cap must be refused before proving: {deposit:?}"
+    );
+
+    let unchanged_balance = session.account.balance(&AssetDescriptor::Native).await?;
+    assert_eq!(
+        unchanged_balance, funded_balance,
+        "a refused deposit must not submit a transaction"
+    );
 
     Ok(())
 }
