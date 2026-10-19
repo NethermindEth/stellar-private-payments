@@ -1,12 +1,12 @@
 import { deploymentDefaults } from './network-config.js';
 import { StrKey, contract, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig, readTokenDecimals } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, claimLine, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
@@ -102,6 +102,10 @@ const state = {
   adminTxExpiry: null,
   // Pool -> the lists its policy uses. null until every pool is read.
   poolLists: null,
+  // Token -> its decimals, or null when unread, shared by the pools that hold it.
+  tokenDecimals: new Map(),
+  // Pool -> formats an amount of its token, once its row has read the decimals.
+  poolAmounts: new Map(),
   // Each with its admin's signing rule.
   pauseFiles: [],
   // The latest refreshPauseFiles; an older one landing late is dropped.
@@ -257,8 +261,9 @@ async function connect() {
       btn.disabled = false;
       btn.removeAttribute('title');
     });
-    // The card keeps Submit off until it has read the admin account.
-    renderAdminTx();
+    // The card is checked once, below: a check settled before then would be redrawn over.
+    submitAdminTxBtn.disabled = true;
+    if (adminTxXdrInput.value.trim()) adminTxNoticeEl.textContent = 'Checking this call with the network...';
 
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
@@ -359,6 +364,7 @@ function kindOf(contractId) {
 const CALL_NAMES = {
   pause_deposits: 'Pausing deposits',
   unpause_deposits: 'Unpausing deposits',
+  claim_fees: 'Claiming fees',
   update_asp_membership: 'Switching the allowlist',
   update_asp_non_membership: 'Switching the blocklist',
   insert_leaf: 'Adding the entry',
@@ -375,15 +381,17 @@ const KIND_LABELS = { pool: 'pool', 'asp-membership': 'allowlist', 'asp-non-memb
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
   // Show blocklist keys as the note public keys signers were asked about.
   const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
+  // Arguments keep the base units Freighter shows.
   return [
     `Source: ${source}`,
     `Sequence: ${sequence}`,
-    `Maximum fee: ${fee} stroops`,
+    `Maximum network fee: ${Utils.formatTokenAmount(BigInt(fee), 'XLM', 7)}`,
     `Valid until: ${new Date(validUntil * 1000).toISOString()}`,
     `Contract: ${contract} (${KIND_LABELS[kind]})`,
     `Function: ${method}`,
     `Arguments: ${JSON.stringify(args, (_, value) => (typeof value === 'bigint' ? number(value) : value))}`,
-  ].join('\n');
+    method === 'claim_fees' && claimLine({ source, args }, state.poolAmounts.get(contract)),
+  ].filter(Boolean).join('\n');
 }
 
 const SIGNED_LABELS = new Map([[true, 'signed'], [false, 'not yet'], [null, 'cannot tell: not an ed25519 key']]);
@@ -418,6 +426,7 @@ function renderAdminTx(kind) {
     const count = signatureCount(xdr, state.networkPassphrase);
     state.adminTxKind = kind ?? kindOf(call.contract);
     adminTxDescriptionEl.textContent = formatAdminCall(call, state.adminTxKind);
+    if (call.method === 'claim_fees' && call.args[0] !== call.source) warnAdminTx('This claim does not pay the admin account. Check the Claim line above, and don\'t sign it unless you expected that.');
     adminTxSignaturesEl.textContent = count;
     // setTimeout fires at once past 2^31 - 1 ms.
     const untilExpiry = call.validUntil * 1000 - Date.now() + 1000;
@@ -616,6 +625,8 @@ async function submitAdminTx() {
     showToast('Admin transaction failed. The card shows why.', 'error');
     renderAdminTx(state.adminTxKind);
     warnAdminTx(`Last submit: ${reason}`);
+    // A refused claim may have read a total another claim has since spent.
+    if (call?.method === 'claim_fees') refreshPools();
     return;
   } finally {
     setBusy(false);
@@ -623,8 +634,12 @@ async function submitAdminTx() {
     adminTxXdrInput.readOnly = false;
   }
   setStatus('Admin transaction succeeded', 'ok');
-  showToast(`${callName(call.method)}: done`, 'success');
-  await settleAdminTx(call);
+  const claimed = call.method === 'claim_fees' && state.poolAmounts.get(call.contract);
+  showToast(claimed ? 'Fees claimed' : `${callName(call.method)}: done`, 'success');
+  // The card keeps what a claim moved once the toast is gone.
+  await settleAdminTx(call, {
+    reason: claimed ? `Claimed ${claimed(call.args[1])} to ${call.args[0] === call.source ? 'the admin account' : call.args[0]}.` : '',
+  });
 }
 
 // Empties the card and re-reads the chain. Drops the check first so Build can't reuse it.
@@ -823,20 +838,35 @@ async function refreshPools() {
       if (state.pools.includes(chosen)) select.value = chosen;
     });
     listed = state.pools.length;
-    return state.pools.map((contractId) => poolRow(contractId, lists));
+    return pools.map((entry) => poolRow(entry, lists));
   });
   // One unread pool: can't tell which lists are unused.
   state.poolLists = lists.size === listed ? lists : null;
   await refreshPauseFiles();
 }
 
-// No `deposits_paused`, or unreadable: no buttons. Records the lists it uses in `lists`.
-async function poolRow(contractId, lists) {
+// No `deposits_paused`: no pause buttons. No `FeesTotal`: no Claim. Unreadable: no buttons.
+// Records the lists it uses in `lists`.
+async function poolRow(entry, lists) {
+  const contractId = entry.poolContractId;
   const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
   showAddress(row.querySelector('.pool-id'), contractId);
   const depositsEl = row.querySelector('.pool-deposits');
+  const token = entry.tokenContractId;
+  // Only the Fees cell needs it. A failed read is dropped so a refresh tries again.
+  if (!state.tokenDecimals.has(token)) {
+    state.tokenDecimals.set(token, readTokenDecimals(state.rpcUrl, token).catch(() => {
+      state.tokenDecimals.delete(token);
+      return null;
+    }));
+  }
   try {
-    const [pool, { stored }] = await Promise.all([readClient(contractId), readInstance(rpcServer(state.rpcUrl), contractId)]);
+    const [pool, { stored }, decimals, admin] = await Promise.all([
+      readClient(contractId),
+      readInstance(rpcServer(state.rpcUrl), contractId),
+      state.tokenDecimals.get(token),
+      storedAdmin(contractId),
+    ]);
     const flags = stored.get('PolicyFlags');
     const used = (allowlist) => (usesList(flags, allowlist) ? stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership') : null);
     lists.set(contractId, { allowlist: used(true), blocklist: used(false) });
@@ -849,12 +879,26 @@ async function poolRow(contractId, lists) {
       line.classList.toggle('text-slate-400', unused);
       return line;
     }));
+    const feesEl = row.querySelector('.pool-fees');
+    const claim = row.querySelector('.claim-fees-btn');
+    const fees = stored.get('FeesTotal');
+    if (fees === undefined || decimals === null) {
+      feesEl.textContent = fees === undefined ? 'no pool fee' : 'could not be read';
+      claim.parentElement.remove();
+    } else {
+      const amount = (value) => Utils.formatTokenAmount(value, Utils.poolLabel(entry), decimals);
+      state.poolAmounts.set(contractId, amount);
+      feesEl.replaceChildren(...[`${amount(fees)} collected`, `${amount(stored.get('Fee'))} per transaction`]
+        .map((text) => Object.assign(document.createElement('div'), { textContent: text })));
+      claim.disabled = fees === 0n;
+      claim.addEventListener('click', () => buildRowCall(claim, 'pool', { source: admin, contractId, method: 'claim_fees', args: { to: admin, amount: fees } }));
+    }
     if (!pool.deposits_paused) {
       depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
-      row.querySelector('.pool-actions').remove();
+      row.querySelectorAll('.pause-deposits-btn, .unpause-deposits-btn').forEach((btn) => btn.remove());
       return row;
     }
-    const [{ result }, admin] = await Promise.all([pool.deposits_paused(), storedAdmin(contractId)]);
+    const { result } = await pool.deposits_paused();
     const paused = result.unwrap();
     depositsEl.textContent = paused ? 'paused' : 'open';
     // A pause on a paused pool changes nothing but still costs a signed transaction.
@@ -866,7 +910,7 @@ async function poolRow(contractId, lists) {
     unpause.addEventListener('click', () => buildRowCall(unpause, 'pool', { source: admin, contractId, method: 'unpause_deposits' }));
   } catch (err) {
     depositsEl.textContent = `could not be read: ${err.message}`;
-    row.querySelector('.pool-actions').remove();
+    row.querySelectorAll('.pool-actions, .pool-claim').forEach((el) => el.remove());
   }
   return row;
 }
@@ -885,6 +929,11 @@ async function buildRowCall(button, kind, call) {
   } catch (err) {
     setStatus(`${callName(call.method)}: couldn't build the call`, 'error');
     showToast(`${callName(call.method)} failed: ${explainFailure(err, kind)}`, 'error');
+    if (call.method === 'claim_fees') {
+      refreshPools();
+      // The card may hold a claim the same change spent.
+      if (adminTxXdrInput.value.trim()) renderAdminTx(state.adminTxKind);
+    }
   } finally {
     Object.assign(button, { disabled, textContent });
     button.style.minWidth = '';

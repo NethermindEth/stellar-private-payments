@@ -115,8 +115,8 @@
                                     <span class="text-slate-500">Balance</span>
                                     <span id="move-funds-balance" class="font-mono font-medium text-white">—</span>
                                 </p>
-                                <p class="mt-2 flex items-baseline justify-between gap-2 text-sm" title="The most one transfer or withdrawal can send after the pool fees">
-                                    <span class="text-slate-500">Max to send</span>
+                                <p data-max-spend class="mt-2 hidden flex items-baseline justify-between gap-2 text-sm">
+                                    <span class="text-slate-500">Max to send after pool fees</span>
                                     <span id="move-funds-max-spend" class="font-mono font-medium text-white">—</span>
                                 </p>
                                 <div data-signing-account="move" class="mt-5 hidden">
@@ -158,7 +158,8 @@
                                         </div>
                                     </div>
                                     <label for="deposit-amount" class="mt-6 block text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Amount</label>
-                                    <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                    <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" aria-describedby="deposit-limits" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                    <p id="deposit-limits" class="mt-2 text-xs text-slate-400"></p>
                                     <button id="btn-deposit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
                                         <span class="btn-text">Deposit</span>
                                         <span class="btn-loading hidden"></span>
@@ -272,7 +273,7 @@
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Advanced Transact</p>
                         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Compose explicit inputs and outputs</h2>
-                        <p class="mt-2 max-w-2xl text-sm text-slate-400">Use picked note IDs as inputs, assign private outputs, and optionally add a public deposit (input) or a public withdrawal (output).</p>
+                        <p class="mt-2 max-w-2xl text-sm text-slate-400">Use selected notes as inputs, assign private outputs, and optionally enter a public deposit or public withdraw amount. <span id="advanced-pool-fee"></span></p>
 
                         <div class="mt-8 grid gap-6 xl:grid-cols-2">
                             <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
