@@ -17,7 +17,8 @@ pub struct UserNoteSummary {
 
 #[wasm_bindgen]
 impl UserNoteSummary {
-    /// Pool commitment (`0x` field hex).
+    /// Pool commitment (`0x` field hex). Copies of a commitment share it; the
+    /// pool and `leafIndex` tell them apart.
     #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
         field_hex(&self.inner.id)
