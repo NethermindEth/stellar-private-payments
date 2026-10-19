@@ -26,6 +26,7 @@ const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema_v4_processed_events.sql")),
     M::up(include_str!("schema_v5_leaves_per_tree.sql")),
     M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
+    M::up(include_str!("schema_v7_public_keys_note_key_index.sql")),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -3615,6 +3616,21 @@ mod tests {
     }
 
     #[test]
+    fn opening_a_v6_database_applies_the_v7_note_key_index_migration() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 6)?;
+        assert!(
+            !index_exists(&conn, "idx_public_keys_note_key")?,
+            "v6 must predate the index"
+        );
+
+        let storage = Storage::connect_with_connection(conn)?;
+
+        assert!(index_exists(&storage.conn, "idx_public_keys_note_key")?);
+        Ok(())
+    }
+
+    #[test]
     fn opening_a_v4_database_files_leaves_under_their_tree() -> Result<()> {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 4)?;
@@ -3674,6 +3690,21 @@ mod tests {
             .collect();
         assert_eq!(ids, vec!["evt-b".to_string()]);
         Ok(())
+    }
+
+    #[test]
+    fn migrations_are_valid() -> Result<()> {
+        MIGRATIONS.validate()?;
+        Ok(())
+    }
+
+    fn index_exists(conn: &Connection, name: &str) -> Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
