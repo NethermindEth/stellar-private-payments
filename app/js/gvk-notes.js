@@ -30,64 +30,95 @@ export function normalizedInputs(tx) {
   }));
 }
 
-/** Flat table of every note across the given tx rows — no tx-card grouping. */
-/**
- * Collapses every output/input slot across the given tx rows into one record
- * per distinct note (keyed by commitment), so a note created in one tx and
- * later spent in another shows up exactly once — not once per tx it touches.
- */
-export function collectNotes(rows) {
-  const notes = new Map();
-  let fallbackKey = 0;
+const blank = {
+  createdTxIndex: null,
+  createdLedger: null,
+  createdKind: null,
+  spentTxIndex: null,
+  spentLedger: null,
+  spentKind: null,
+  nullifier: null,
+  spentNoteId: null,
+};
+
+function groupNotes(rows) {
+  const notes = [];
+  const unspent = new Map();
 
   for (const { tx, index, kind } of rows) {
+    // Inputs before outputs: a tx cannot spend its own outputs.
+    for (const slot of normalizedInputs(tx)) {
+      const spend = {
+        spentTxIndex: index,
+        spentLedger: tx.ledger,
+        spentKind: kind,
+        nullifier: slot.nullifier,
+      };
+      // The GVK ciphertext carries no leaf index, so the oldest copy counts as the one spent.
+      const existing = unspent.get(normalizeFieldKey(slot.audited?.commitment))?.shift();
+
+      if (existing) {
+        Object.assign(existing, spend, { spentNoteId: noteRowId(index, 'input', slot.index) });
+        if (!existing.audited && slot.audited) existing.audited = slot.audited;
+        continue;
+      }
+
+      // Spent, but its creating output isn't in the given rows.
+      notes.push({
+        ...blank,
+        ...spend,
+        commitment: slot.audited?.commitment ?? null,
+        audited: slot.audited,
+        noteId: noteRowId(index, 'input', slot.index),
+      });
+    }
+
     for (const slot of normalizedOutputs(tx)) {
       const commitment = slot.audited?.commitment ?? slot.commitment ?? null;
-      const key = normalizeFieldKey(commitment) ?? `~${fallbackKey++}`;
-      notes.set(key, {
+      const note = {
+        ...blank,
         commitment,
         audited: slot.audited,
         createdTxIndex: index,
         createdLedger: tx.ledger,
         createdKind: kind,
-        spentTxIndex: null,
-        spentLedger: null,
-        spentKind: null,
-        nullifier: null,
         noteId: noteRowId(index, 'output', slot.index),
-      });
+      };
+      notes.push(note);
+      const key = normalizeFieldKey(commitment);
+      if (!key) continue;
+      if (!unspent.has(key)) unspent.set(key, []);
+      unspent.get(key).push(note);
     }
   }
 
-  for (const { tx, index, kind } of rows) {
-    for (const slot of normalizedInputs(tx)) {
-      const commitmentKey = normalizeFieldKey(slot.audited?.commitment);
-      const existing = commitmentKey ? notes.get(commitmentKey) : null;
+  return notes;
+}
 
-      if (existing) {
-        existing.spentTxIndex = index;
-        existing.spentLedger = tx.ledger;
-        existing.spentKind = kind;
-        existing.nullifier = slot.nullifier;
-        if (!existing.audited && slot.audited) existing.audited = slot.audited;
-        continue;
-      }
-
-      // Spent, but its creating output isn't in the currently visible set.
-      notes.set(commitmentKey ?? `~${fallbackKey++}`, {
-        commitment: slot.audited?.commitment ?? null,
-        audited: slot.audited,
-        createdTxIndex: null,
-        createdLedger: null,
-        createdKind: null,
-        spentTxIndex: index,
-        spentLedger: tx.ledger,
-        spentKind: kind,
-        nullifier: slot.nullifier,
-        noteId: noteRowId(index, 'input', slot.index),
-      });
+/**
+ * Collapses every output/input slot across `rows` into one record per note, so
+ * copies of a commitment are separate records and a note created in one tx and
+ * spent in another shows up once. Keeps the notes created or spent in `visible`,
+ * with the creation or spend fields of a hidden tx set to null.
+ */
+export function collectNotes(rows, visible = rows) {
+  const shown = new Set(visible.map((row) => row.index));
+  const notes = groupNotes(rows).filter((note) =>
+    note.audited && (shown.has(note.createdTxIndex) || shown.has(note.spentTxIndex)));
+  for (const note of notes) {
+    if (!shown.has(note.createdTxIndex)) {
+      Object.assign(note, { createdTxIndex: null, createdLedger: null, createdKind: null });
+    }
+    if (!shown.has(note.spentTxIndex)) {
+      Object.assign(note, { spentTxIndex: null, spentLedger: null, spentKind: null, nullifier: null });
     }
   }
+  return notes;
+}
 
-  return [...notes.values()].filter((note) => note.audited);
+/** Pairs each note's output id with the input id that spent it. */
+export function noteLinks(rows) {
+  return groupNotes(rows)
+    .filter((note) => note.spentNoteId)
+    .map((note) => [note.noteId, note.spentNoteId]);
 }

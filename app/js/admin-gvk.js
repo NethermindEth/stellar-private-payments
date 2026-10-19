@@ -12,7 +12,7 @@ import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
-import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteRowId } from './gvk-notes.js';
+import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 
@@ -356,28 +356,7 @@ function linkNotes(a, b) {
 
 function rebuildNoteLinks() {
   state.noteLinks = new Map();
-
-  /** @type {Map<string, string>} */
-  const commitmentToOutputNote = new Map();
-
-  for (const { tx, index: txIndex } of state.rows) {
-    for (const slot of normalizedOutputs(tx)) {
-      const key = normalizeFieldKey(slot.audited?.commitment ?? slot.commitment);
-      if (key) commitmentToOutputNote.set(key, noteRowId(txIndex, 'output', slot.index));
-    }
-  }
-
-  for (const { tx, index: txIndex } of state.rows) {
-    for (const slot of normalizedInputs(tx)) {
-      const commitmentKey = normalizeFieldKey(slot.audited?.commitment);
-      if (!commitmentKey || !slot.nullifier) continue;
-
-      const outputNoteId = commitmentToOutputNote.get(commitmentKey);
-      if (outputNoteId) {
-        linkNotes(outputNoteId, noteRowId(txIndex, 'input', slot.index));
-      }
-    }
-  }
+  for (const [a, b] of noteLinks(state.rows)) linkNotes(a, b);
 }
 
 function bindResultHighlights() {
@@ -1007,7 +986,7 @@ function noteStatus(note) {
 }
 
 function renderNoteTable(rows, filters) {
-  const notes = collectNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
+  const notes = collectNotes(state.rows, rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
   const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
@@ -1260,7 +1239,7 @@ function renderGraphLegend() {
 }
 
 function renderGraph(rows, containerWidth, filters) {
-  const notes = collectNotes(rows)
+  const notes = collectNotes(state.rows, rows)
     .filter((note) => noteMatchesAmountAndPk(note.audited, filters))
     .sort((a, b) => noteSortKey(a) - noteSortKey(b));
   state.graphNotes = notes;
