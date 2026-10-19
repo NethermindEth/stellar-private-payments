@@ -9,11 +9,9 @@ publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 
-# zip is used by sqlite3mc_source.rs, which build.rs includes with #[path];
-# cargo-shear does not follow #[path] modules. sqlite-wasm-rs enables the
-# WASM host adapter and encryption features for rusqlite.
+# sqlite-wasm-rs enables the WASM host adapter and encryption features for rusqlite.
 [package.metadata.cargo-shear]
-ignored = ["zip", "sqlite-wasm-rs"]
+ignored = ["sqlite-wasm-rs"]
 
 [lib]
 name = "stellar_private_payments"
@@ -93,12 +91,10 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
-reqwest = { workspace = true, features = ["blocking", "rustls"] }
-serde_json = { workspace = true, features = ["std"] }
 cc = "1"
 hex = { workspace = true }
 sha2 = { workspace = true }
-zip = { workspace = true }
+sqlite3mc-src = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }

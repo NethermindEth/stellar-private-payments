@@ -2,20 +2,12 @@ use std::{env, fs, path::PathBuf};
 
 use sha2::{Digest, Sha256};
 
-#[path = "sqlite3mc_source.rs"]
-mod sqlite3mc_source;
-mod sqlite3mc_wasm;
-
 fn main() {
-    println!("cargo:rerun-if-env-changed=SQLITE3MC_AMALGAMATION_DIR");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
-    if env::var_os("DOCS_RS").is_none() {
-        if env::var("TARGET").as_deref() == Ok("wasm32-unknown-unknown") {
-            let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-            sqlite3mc_wasm::build(&out_dir);
-        } else if env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
-            build_sqlite3mc();
-        }
+    if env::var_os("DOCS_RS").is_none()
+        && env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32")
+    {
+        build_sqlite3mc();
     }
     println!("cargo:rerun-if-changed=src/state/disclaimer.md");
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -39,16 +31,15 @@ fn main() {
 }
 
 fn build_sqlite3mc() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let source_dir = sqlite3mc_source::sources(&out_dir);
-    for name in sqlite3mc_source::SOURCE_FILES {
+    let source_dir = sqlite3mc_src::source_dir();
+    for name in [sqlite3mc_src::SOURCE_FILE, sqlite3mc_src::HEADER_FILE] {
         println!("cargo:rerun-if-changed={}", source_dir.join(name).display());
     }
 
     let mut build = cc::Build::new();
     build
-        .file(source_dir.join(sqlite3mc_source::SOURCE_FILES[0]))
-        .include(&source_dir)
+        .file(source_dir.join(sqlite3mc_src::SOURCE_FILE))
+        .include(source_dir)
         .warnings(false)
         .define("SQLITE_CORE", None)
         .define("SQLITE_DEFAULT_FOREIGN_KEYS", "1")

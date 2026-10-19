@@ -10,7 +10,7 @@ export const ProverBridge = { spawn() { return {
   async configureCircuitsBase(base, json) { configured.push({base, lock: JSON.parse(json)}); },
   async ping() {}, toHandle() { return {free() {}}; }, fork() { return this; }, free() {}
 }; }};
-export const Storage = {async open() { return {
+export const Storage = {async openEncrypted() { return {
   async toHandle() { return {free() {}}; }, fork() { return this; }
 }; }};
 export const Client = {async new(rpc, storage, prover, config) {
@@ -45,7 +45,8 @@ test('one package passes each deployment and circuit lock to its own worker', as
     const contractConfig = { network, networkPassphrase: `identity ${network}` };
     const circuitLock = { version: network, meta: {}, circuit: { 'proving_key.bin': network } };
     const circuitsBaseUrl = `https://example.test/${network}/`;
-    const client = await sdk.Client.new({rpcUrl: 'https://rpc.example', contractConfig, circuitLock, circuitsBaseUrl});
+    const keyProvider = async () => new Uint8Array(32);
+    const client = await sdk.Client.new({rpcUrl: 'https://rpc.example', contractConfig, circuitLock, circuitsBaseUrl, keyProvider});
     assert.deepEqual(client.contractConfig(), contractConfig);
     assert.deepEqual(mock.configured.at(-1), {base: circuitsBaseUrl, lock: circuitLock});
     const report = await sdk.verifySelectiveDisclosure('rpc', '{}', 'hash', {contractConfig, circuitLock, circuitsBaseUrl});
@@ -88,7 +89,11 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
   facadeSource = facadeSource
     .replace("'stellar-private-payments'", JSON.stringify(appSdkUrl))
     .replace("'stellar-private-payments/freighter'", JSON.stringify(url('export class FreighterSigner {}')))
-    .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)));
+    .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)))
+    .replace("'./storage-lock.js'", JSON.stringify(url('export async function closeAndReload() {}')))
+    .replace("'./storage-timeout.js'", JSON.stringify(url('export function startAutoLock() { return () => {}; }')))
+    .replace("'./storage-key.js'", JSON.stringify(url('export async function openPasswordStorage({ storage }) { return storage.open(); }')))
+    .replace("'./storage-password.js'", JSON.stringify(url('export async function requestStoragePassword() { return "pw"; }')));
   for (const name of ['network-config', 'app-storage']) {
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
     if (name === 'network-config') {
@@ -97,10 +102,11 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     }
     facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(moduleSource)));
   }
-  const previous = { fetch: globalThis.fetch, window: globalThis.window, document: globalThis.document };
+  const previous = { fetch: globalThis.fetch, window: globalThis.window, document: globalThis.document, sessionStorage: globalThis.sessionStorage };
   const requests = [];
-  globalThis.window = { location: { href: 'https://app.example/' }, addEventListener() {} };
-  globalThis.document = { baseURI: 'https://app.example/' };
+  globalThis.sessionStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
+  globalThis.window = { location: { href: 'https://app.example/' }, addEventListener() {}, dispatchEvent() {} };
+  globalThis.document = { baseURI: 'https://app.example/', body: { dataset: {}, style: {} } };
   globalThis.fetch = async (input) => {
     requests.push(String(input));
     if (String(input) !== 'https://app.example/deployments.json') {

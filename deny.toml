@@ -60,6 +60,7 @@ allow = [
     "TCP-wrappers",
     "Unicode-3.0",
     "Unicode-DFS-2016",
+    "Unlicense",
     "UPL-1.0",
     "W3C-20150513",
     "WTFPL",
