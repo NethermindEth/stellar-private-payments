@@ -20,12 +20,17 @@ use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use contract_types::VerificationKeyBytes;
-use pool_core::events::{
-    AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+use pool_core::{
+    events::{
+        AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+        FeesClaimed,
+    },
+    totals::{self, TotalsDataKey},
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, IntoVal,
-    InvokeError, String, Symbol, U256, Vec, contract, contracterror, contractimpl, contracttype,
+    InvokeError, String, Symbol, U256, Val, Vec, contract, contracterror, contractimpl,
+    contracttype,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{
         Address as _, Deployer as _, Events, MockAuth, MockAuthInvoke, storage::Persistent as _,
@@ -127,24 +132,67 @@ fn register_pool_gvk(
     admin_view_key: BabyJubJubPoint,
     gvk_mode: u32,
 ) -> Address {
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            wasm_hash(&setup.asp_membership_address),
-            wasm_hash(&setup.asp_non_membership_address),
-            maximum_deposit_amount,
-            levels,
-            policy_flags,
-            String::from_str(env, KDF_DOMAIN),
-            admin_view_key,
-            gvk_mode,
-        ),
+    register_pool_with(
+        env,
+        setup,
+        0,
+        0,
+        maximum_deposit_amount,
+        levels,
+        policy_flags,
+        admin_view_key,
+        gvk_mode,
     )
+}
+
+/// Registers a view-only pool charging `fee` with a minimum deposit of
+/// `minimum`, configured as `mk_moving_transact_proof` expects.
+fn register_pool_charging(env: &Env, setup: &TestSetup, fee: i128, minimum: i128) -> Address {
+    register_pool_with(
+        env,
+        setup,
+        fee,
+        minimum,
+        U256::from_u32(env, 1000),
+        3,
+        0,
+        mk_point(env, 1, 2),
+        VIEW_ONLY,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn register_pool_with(
+    env: &Env,
+    setup: &TestSetup,
+    fee: i128,
+    minimum_deposit_amount: i128,
+    maximum_deposit_amount: U256,
+    levels: u32,
+    policy_flags: u32,
+    admin_view_key: BabyJubJubPoint,
+    gvk_mode: u32,
+) -> Address {
+    // 15 arguments, past the 13 a `ConstructorArgs` tuple holds.
+    let args: Vec<Val> = soroban_sdk::vec![
+        env,
+        setup.admin.into_val(env),
+        setup.token.into_val(env),
+        setup.verifier.into_val(env),
+        setup.asp_membership_address.into_val(env),
+        setup.asp_non_membership_address.into_val(env),
+        wasm_hash(&setup.asp_membership_address).into_val(env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(env),
+        fee.into_val(env),
+        minimum_deposit_amount.into_val(env),
+        maximum_deposit_amount.into_val(env),
+        levels.into_val(env),
+        policy_flags.into_val(env),
+        String::from_str(env, KDF_DOMAIN).into_val(env),
+        admin_view_key.into_val(env),
+        gvk_mode.into_val(env),
+    ];
+    env.register(PoolGvkContract, args)
 }
 
 #[test]
@@ -749,24 +797,25 @@ fn pool_gvk_update_asp_non_membership_requires_admin() {
 fn constructor_refuses_an_allowlist_of_another_code() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin,
-            setup.token,
-            setup.verifier,
-            setup.asp_membership_address,
-            setup.asp_non_membership_address.clone(),
-            mk_bytesn32(&env, 7),
-            wasm_hash(&setup.asp_non_membership_address),
-            U256::from_u32(&env, 1000),
-            3u32,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            mk_point(&env, 1, 2),
-            VIEW_ONLY,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        setup.verifier.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        mk_bytesn32(&env, 7).into_val(&env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, 1000).into_val(&env),
+        3u32.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        mk_point(&env, 1, 2).into_val(&env),
+        VIEW_ONLY.into_val(&env),
+    ];
+    env.register(PoolGvkContract, args);
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers
@@ -778,23 +827,129 @@ fn constructor_refuses_an_allowlist_of_another_code() {
 fn constructor_refuses_a_blocklist_of_another_code() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    env.register(
-        PoolGvkContract,
-        (
-            setup.admin,
-            setup.token,
-            setup.verifier,
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address,
-            wasm_hash(&setup.asp_membership_address),
-            mk_bytesn32(&env, 7),
-            U256::from_u32(&env, 1000),
-            3u32,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            mk_point(&env, 1, 2),
-            VIEW_ONLY,
-        ),
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        setup.verifier.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        wasm_hash(&setup.asp_membership_address).into_val(&env),
+        mk_bytesn32(&env, 7).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, 1000).into_val(&env),
+        3u32.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        mk_point(&env, 1, 2).into_val(&env),
+        VIEW_ONLY.into_val(&env),
+    ];
+    env.register(PoolGvkContract, args);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, -5, 10);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_negative_minimum_deposit() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The sum is positive and within the cap, so only the sign can refuse it.
+    register_pool_charging(&env, &setup, 10, -5);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_above_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 600, 500);
+}
+
+#[test]
+fn constructor_accepts_a_fee_and_minimum_equal_to_the_maximum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_charging(&env, &setup, 500, 500);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn constructor_refuses_a_fee_and_minimum_that_overflow() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    // The cap is past `i128::MAX`, so only the overflow can refuse the sum.
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+    register_pool_with(
+        &env,
+        &setup,
+        i128::MAX,
+        1,
+        maximum,
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+}
+
+#[test]
+fn constructor_stores_the_fee_and_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 10);
+
+    env.as_contract(&pool_id, || {
+        let instance = env.storage().instance();
+        assert_eq!(instance.get::<_, i128>(&DataKey::Fee), Some(5));
+        assert_eq!(
+            instance.get::<_, i128>(&DataKey::MinimumDepositAmount),
+            Some(10)
+        );
+    });
+}
+
+/// The cross-check compares in `U256`, so a cap past `u128::MAX` constructs.
+#[test]
+fn constructor_accepts_a_maximum_above_u128() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum = U256::from_parts(&env, 0x100, 0, 0, 0);
+
+    register_pool_with(
+        &env,
+        &setup,
+        5,
+        10,
+        maximum,
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
     );
 }
 
@@ -1388,11 +1543,12 @@ fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
     assert_eq!(err, Ok(Error::WrongExtAmount));
 }
 
-/// This is the only bound on the public amount: the circuit's balance equation
-/// holds in the field, and only the outputs are range-checked. Policy flags 0
-/// keep the ASP root checks from answering `InvalidProof` first.
+/// The pool converts `ext_amount` to `i128` before it subtracts the fee, and
+/// that conversion is the only bound on a withdrawal: the circuit's balance
+/// equation holds in the field, and only the outputs are range-checked. Policy
+/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
 #[test]
-fn transact_bounds_withdrawals_below_two_to_the_248() {
+fn transact_bounds_withdrawals_to_i128() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool_gvk(
@@ -1410,22 +1566,16 @@ fn transact_bounds_withdrawals_below_two_to_the_248() {
 
     let r = bn256_modulus(&env);
     let cases = [
-        // −2^248, with the public amount it would map to without the bound.
+        // One below `i128::MIN`, with the public amount it would map to.
         (
-            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0),
-            r.sub(&U256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
+            I256::from_i128(&env, i128::MIN).sub(&I256::from_i32(&env, 1)),
+            r.sub(&U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 1)),
             Error::WrongExtAmount,
         ),
-        // −(2^248 − 1), which reaches the verifier.
+        // `i128::MIN`, which reaches the verifier.
         (
-            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 1),
-            r.sub(&U256::from_parts(
-                &env,
-                0x00FF_FFFF_FFFF_FFFF,
-                u64::MAX,
-                u64::MAX,
-                u64::MAX,
-            )),
+            I256::from_i128(&env, i128::MIN),
+            r.sub(&U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0)),
             Error::InvalidProof,
         ),
     ];
@@ -2456,25 +2606,32 @@ fn build_gvk_transact(
     let verifier_id = env.register(TestVerifier, (vk_bytes,));
 
     // Install the real pool at the reserved address, replacing the placeholder.
-    env.register_at(
-        &pool_id,
-        PoolGvkContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            verifier_id,
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            wasm_hash(&setup.asp_membership_address),
-            wasm_hash(&setup.asp_non_membership_address),
-            U256::from_u32(&env, maximum_deposit_amount),
-            levels,
-            0u32,
-            String::from_str(&env, KDF_DOMAIN),
-            admin_view_key,
-            gvk_mode,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        &env,
+        setup.admin.into_val(&env),
+        setup.token.into_val(&env),
+        verifier_id.into_val(&env),
+        setup.asp_membership_address.into_val(&env),
+        setup.asp_non_membership_address.into_val(&env),
+        wasm_hash(&setup.asp_membership_address).into_val(&env),
+        wasm_hash(&setup.asp_non_membership_address).into_val(&env),
+        0i128.into_val(&env),
+        0i128.into_val(&env),
+        U256::from_u32(&env, maximum_deposit_amount).into_val(&env),
+        levels.into_val(&env),
+        0u32.into_val(&env),
+        String::from_str(&env, KDF_DOMAIN).into_val(&env),
+        admin_view_key.into_val(&env),
+        gvk_mode.into_val(&env),
+    ];
+    env.register_at(&pool_id, PoolGvkContract, args);
+    if ext_amount < 0 {
+        // Stands for the deposit that made the note the withdrawal spends.
+        env.as_contract(&pool_id, || {
+            totals::record(&env, i128::from(ext_amount.unsigned_abs()), 0)
+                .expect("the notes total takes the credit");
+        });
+    }
     let pool = PoolGvkContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -2892,6 +3049,8 @@ fn the_configuration_lives_in_the_instance() {
         for key in [
             DataKey::Token,
             DataKey::Verifier,
+            DataKey::Fee,
+            DataKey::MinimumDepositAmount,
             DataKey::MaximumDepositAmount,
             DataKey::ASPMembership,
             DataKey::ASPNonMembership,
@@ -3725,4 +3884,364 @@ fn pause_deposits_errors_when_admin_unset() {
     });
 
     assert_eq!(pool.try_pause_deposits(), Err(Ok(Error::NotInitialized)));
+}
+
+/// A proof moving `ext_amount` with a public amount of `public_amount`. The
+/// real verifier refuses it, so `InvalidProof` means every amount check passed.
+fn mk_paying_proof(
+    env: &Env,
+    pool: &PoolGvkContractClient,
+    token: &Address,
+    ext_amount: i32,
+    public_amount: i128,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let (mut proof, ext) = mk_moving_transact_proof(env, pool, token, ext_amount, nullifier);
+    proof.public_amount =
+        pool_core::amounts::calculate_public_amount(env, I256::from_i128(env, public_amount))
+            .expect("the amount must fit the field");
+    (proof, ext)
+}
+
+fn assert_transact_charging_five(ext_amount: i32, public_amount: i128, expected: Error) {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 0);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    let (proof, ext) = mk_paying_proof(&env, &pool, &setup.token, ext_amount, public_amount, 0xF8);
+
+    assert_eq!(
+        pool.try_transact(&proof, &ext, &Address::generate(&env)),
+        Err(Ok(expected))
+    );
+}
+
+#[test]
+fn transact_takes_the_fee_from_a_transfer() {
+    assert_transact_charging_five(0, -5, Error::InvalidProof);
+}
+
+/// The all-zero call, which needs no funds, must pay the fee like any other.
+#[test]
+fn transact_refuses_a_transfer_that_skips_the_fee() {
+    assert_transact_charging_five(0, 0, Error::WrongExtAmount);
+}
+
+/// `I256::MIN` does not convert to `i128`, and `i128::MIN` minus the fee
+/// overflows it. The public amounts are what a wrapping or a saturating
+/// subtraction would give, so only the overflow check refuses them.
+#[test]
+fn transact_refuses_an_ext_amount_outside_i128() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_charging(&env, &setup, 5, 0);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+
+    for (ext_amount, public_amount) in [
+        (I256::min_value(&env), 0),
+        (I256::from_i128(&env, i128::MIN), i128::MIN.wrapping_sub(5)),
+        (I256::from_i128(&env, i128::MIN), i128::MIN),
+    ] {
+        let (mut proof, mut ext) =
+            mk_paying_proof(&env, &pool, &setup.token, 0, public_amount, 0xF9);
+        ext.ext_amount = ext_amount;
+        proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
+
+        assert_eq!(
+            pool.try_transact(&proof, &ext, &Address::generate(&env)),
+            Err(Ok(Error::WrongExtAmount))
+        );
+    }
+}
+
+fn mk_transact_charging_five_minimum_ten(
+    env: &Env,
+    setup: &TestSetup,
+    ext_amount: i32,
+    public_amount: i128,
+) -> (PoolGvkContractClient<'static>, Proof, ExtData) {
+    let pool = PoolGvkContractClient::new(env, &register_pool_charging(env, setup, 5, 10));
+    let (proof, ext) = mk_paying_proof(env, &pool, &setup.token, ext_amount, public_amount, 0xFA);
+    (pool, proof, ext)
+}
+
+/// The sender holds 13, so a check after the transfer would fail in the token
+/// instead, whose balance error (code 10) reads here as `WrongExtHash`.
+#[test]
+fn transact_refuses_a_deposit_below_the_minimum_after_the_fee() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 13);
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 14, 9);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &sender),
+        Err(Ok(Error::WrongExtAmount))
+    );
+}
+
+/// The deposit is below the minimum, so a minimum check ahead of the pause
+/// would answer `WrongExtAmount` instead.
+#[test]
+fn transact_reports_a_paused_pool_before_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 12, 7);
+    pool.pause_deposits();
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::DepositsPaused))
+    );
+}
+
+#[test]
+fn transact_admits_a_deposit_at_the_minimum_after_the_fee() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, deposit) = mk_transact_charging_five_minimum_ten(&env, &setup, 15, 10);
+
+    assert_eq!(
+        pool.try_transact(&proof, &deposit, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// The cap counts the fee. 1001 carries its matching public amount, so only the
+/// cap answers `WrongExtAmount`.
+#[test]
+fn transact_caps_a_deposit_fee_included() {
+    assert_transact_charging_five(1001, 996, Error::WrongExtAmount);
+    assert_transact_charging_five(1000, 995, Error::InvalidProof);
+}
+
+#[test]
+fn transact_does_not_bound_a_withdrawal_by_the_minimum() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let (pool, proof, withdrawal) = mk_transact_charging_five_minimum_ten(&env, &setup, -1, -6);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidProof))
+    );
+}
+
+/// Deposits 50 into a pool charging a fee of 5 with a minimum deposit of 1, on
+/// a real token and the accepting verifier, so later calls succeed and only
+/// their amounts are under test.
+fn deposit_fifty_charging_five(
+    env: &Env,
+) -> (PoolGvkContractClient<'static>, TokenClient<'static>) {
+    let mut setup = setup_test_contracts(env);
+    env.mock_all_auths();
+    let sender = Address::generate(env);
+    setup.token = register_funded_token(env, &sender, 50);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let pool = PoolGvkContractClient::new(env, &register_pool_charging(env, &setup, 5, 1));
+    let (proof, deposit) = mk_paying_proof(env, &pool, &setup.token, 50, 45, 0xFB);
+    pool.transact(&proof, &deposit, &sender);
+    (pool, TokenClient::new(env, &setup.token))
+}
+
+/// Asserts both totals, and that the pool's token balance is their sum.
+fn assert_totals(
+    env: &Env,
+    pool: &PoolGvkContractClient,
+    token: &TokenClient,
+    notes: i128,
+    fees: i128,
+) {
+    let stored_notes = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get::<_, i128>(&TotalsDataKey::NotesTotal)
+    });
+    assert_eq!(stored_notes, Some(notes));
+    assert_eq!(pool.get_fees_total(), fees);
+    assert_eq!(notes.checked_add(fees), Some(token.balance(&pool.address)));
+}
+
+#[test]
+fn the_totals_follow_a_deposit_a_transfer_and_a_withdrawal() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    assert_totals(&env, &pool, &token, 45, 5);
+
+    let (proof, transfer) = mk_paying_proof(&env, &pool, &token.address, 0, -5, 0xFC);
+    pool.transact(&proof, &transfer, &Address::generate(&env));
+    assert_totals(&env, &pool, &token, 40, 10);
+
+    let (proof, withdrawal) = mk_paying_proof(&env, &pool, &token.address, -20, -25, 0xFD);
+    pool.transact(&proof, &withdrawal, &Address::generate(&env));
+    assert_totals(&env, &pool, &token, 15, 15);
+    assert_eq!(token.balance(&withdrawal.recipient), 20);
+}
+
+/// The pool holds the tokens, so only the notes total can refuse the
+/// withdrawal.
+#[test]
+fn a_withdrawal_beyond_the_notes_total_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    StellarAssetClient::new(&env, &token.address).mint(&pool.address, &1_000);
+
+    let (proof, withdrawal) = mk_paying_proof(&env, &pool, &token.address, -41, -46, 0xFC);
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::NotesTotalExceeded))
+    );
+    assert_eq!(token.balance(&pool.address), 1_050);
+}
+
+#[test]
+fn the_admin_claims_collected_fees() {
+    use soroban_sdk::{
+        Symbol,
+        events::Event,
+        testutils::{AuthorizedFunction, AuthorizedInvocation},
+    };
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+    let admin = pool.get_admin();
+
+    pool.claim_fees(&to, &3);
+
+    assert_eq!(
+        env.auths(),
+        [(
+            admin,
+            AuthorizedInvocation {
+                function: AuthorizedFunction::Contract((
+                    pool.address.clone(),
+                    Symbol::new(&env, "claim_fees"),
+                    (to.clone(), 3i128).into_val(&env),
+                )),
+                sub_invocations: Default::default(),
+            }
+        )]
+    );
+    assert_eq!(
+        env.events().all().events().last(),
+        Some(
+            &FeesClaimed {
+                to: to.clone(),
+                amount: 3
+            }
+            .to_xdr(&env, &pool.address)
+        )
+    );
+    assert_totals(&env, &pool, &token, 45, 2);
+    assert_eq!(token.balance(&to), 3);
+}
+
+#[test]
+fn the_admin_claims_the_whole_fees_total_while_deposits_are_paused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+    pool.pause_deposits();
+
+    pool.claim_fees(&to, &5);
+
+    assert_totals(&env, &pool, &token, 45, 0);
+    assert_eq!(token.balance(&to), 5);
+}
+
+#[test]
+fn a_claim_above_the_fees_total_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &6),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_negative_claim_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &-1),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_claim_to_the_pool_itself_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&pool.address, &5),
+        Err(Ok(Error::InvalidClaimAmount))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_zero_claim_is_accepted() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &0),
+        Ok(Ok(()))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn claim_fees_requires_the_admin() {
+    let env = test_env();
+    let (pool, _) = deposit_fifty_charging_five(&env);
+    let to = Address::generate(&env);
+
+    // The recipient signs for itself, which only the admin check refuses.
+    env.mock_auths(&[MockAuth {
+        address: &to,
+        invoke: &MockAuthInvoke {
+            contract: &pool.address,
+            fn_name: "claim_fees",
+            args: (to.clone(), 3i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    pool.claim_fees(&to, &3);
+}
+
+#[test]
+fn claim_fees_errors_when_admin_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_open_pool_gvk(&env, &setup);
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.as_contract(&pool_id, || {
+        env.storage().persistent().remove(&DataKey::Admin);
+    });
+
+    assert_eq!(
+        pool.try_claim_fees(&Address::generate(&env), &0),
+        Err(Ok(Error::NotInitialized))
+    );
 }

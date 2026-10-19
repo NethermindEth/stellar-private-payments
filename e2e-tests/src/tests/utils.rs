@@ -186,6 +186,8 @@ pub struct DeployedContracts {
     pub asp_membership: Address,
     /// Address of the ASP non-membership contract
     pub asp_non_membership: Address,
+    /// Fee the pool charges on every call
+    pub fee: i128,
 }
 
 /// Returns the hash of the Wasm `contract` runs.
@@ -213,6 +215,12 @@ pub fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArg
         .deploy_contract(ContractExecutable::Wasm(wasm_hash(contract)), args)
 }
 
+/// Deploys the contracts with a pool that charges no fee and has no minimum
+/// deposit.
+pub fn deploy_contracts(env: &Env) -> DeployedContracts {
+    deploy_contracts_with_fee(env, 0, 0)
+}
+
 /// Deploy all contracts required for E2E testing
 ///
 /// Deploys and runs constructors for the Pool, ASP Membership, ASP
@@ -222,11 +230,13 @@ pub fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArg
 /// # Arguments
 ///
 /// * `env` - The Soroban environment
+/// * `fee` - Fee the pool charges on every call
+/// * `minimum` - Smallest amount a deposit may add to notes after the fee
 ///
 /// # Returns
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
-pub fn deploy_contracts(env: &Env) -> DeployedContracts {
+pub fn deploy_contracts_with_fee(env: &Env, fee: i128, minimum: i128) -> DeployedContracts {
     let admin = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
@@ -254,6 +264,8 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             asp_non_membership.clone(),
             wasm_hash(&asp_membership),
             wasm_hash(&asp_non_membership),
+            fee,
+            minimum,
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
             (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
@@ -266,6 +278,7 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
         token: token_address,
         asp_membership,
         asp_non_membership,
+        fee,
     }
 }
 
@@ -672,10 +685,11 @@ impl ProvenTransaction {
 
 /// Proves one 2-in/2-out pool transaction from the committed witness graph.
 ///
-/// The amounts must balance: `inputs + ext_amount = outputs`. A positive
-/// `ext_amount` is a deposit, a negative one a withdrawal, and zero a private
-/// transfer. `hash_ext_data` binds the hash to the pool's own address and its
-/// token, so the contracts are deployed before the proof is made.
+/// The amounts must balance: `inputs + ext_amount = outputs + fee`, with the
+/// fee from `contracts`. A positive `ext_amount` is a deposit, a negative one a
+/// withdrawal, and zero a private transfer. `hash_ext_data` binds the hash to
+/// the pool's own address and its token, so the contracts are deployed before
+/// the proof is made.
 ///
 /// `seed` varies the note material, so two transactions proven against one
 /// deployment spend different nullifiers and write different commitments.
@@ -684,8 +698,8 @@ impl ProvenTransaction {
 ///
 /// # Errors
 ///
-/// Returns an error if the witness cannot be computed or the proof cannot be
-/// generated.
+/// Returns an error if `ext_amount` minus the fee overflows `i128`, or if the
+/// witness cannot be computed or the proof cannot be generated.
 ///
 /// # Panics
 ///
@@ -758,7 +772,11 @@ pub fn prove_transaction(
         .collect::<Vec<_>>();
 
     let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
-    let public_amount = Scalar::from(ext_amount);
+    let public_amount = Scalar::from(
+        i128::from(ext_amount)
+            .checked_sub(contracts.fee)
+            .context("ext_amount minus the fee overflows i128")?,
+    );
     let result = generate_proof(
         &case,
         leaves.clone(),
@@ -797,6 +815,8 @@ pub struct SyncedRoots {
 /// the tests must insert the same leaves before they call `transact`. The
 /// function inserts the membership leaves, the non-membership overrides and the
 /// pool commitments, then checks that the pool root equals the circuit root.
+/// It also credits the pool's notes total with the input amounts, standing for
+/// the deposits that made the input notes.
 ///
 /// The last two pool leaves stay empty, so that the tree is not full and the
 /// pool accepts the two new output commitments.
@@ -813,7 +833,8 @@ pub struct SyncedRoots {
 /// # Panics
 ///
 /// Panics if the pool root does not equal the circuit root, because the
-/// on-chain verification cannot succeed in that state.
+/// on-chain verification cannot succeed in that state, or if the input amounts
+/// overflow the notes total.
 pub fn sync_contract_state(
     env: &Env,
     contracts: &DeployedContracts,
@@ -852,6 +873,16 @@ pub fn sync_contract_state(
             );
         });
     }
+
+    let deposited = case
+        .inputs
+        .iter()
+        .map(|note| scalar_to_bigint(note.amount))
+        .sum::<BigInt>();
+    env.as_contract(&contracts.pool, || {
+        let deposited = i128::try_from(&deposited).expect("input amounts fit i128");
+        pool_core::totals::record(env, deposited, 0).expect("the notes total takes the credit");
+    });
 
     let circuit_root = scalar_to_u256(env, witness.root);
     let pool_root = pool_client.get_root();

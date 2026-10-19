@@ -39,6 +39,8 @@ default.
 | `--deployer <NAME>` | Stellar identity or secret key used to deploy |
 | `--asp-levels <N>` | Merkle tree levels for asp-membership |
 | `--pool-levels <N>` | Merkle tree levels for pool |
+| `--fee <N>` | Fee every transaction pays, in the token's smallest unit |
+| `--min-deposit <N>` | Smallest amount a deposit may add to notes after the fee, in the token's smallest unit |
 | `--max-deposit <N>` | Maximum deposit amount |
 | `--kdf-domain <STRING>` | Privacy key derivation domain. Any chosen string. Shows in the message signed by users for key derivation |
 | `--policy-flags <SPEC>` | Default `<policy>` for `--pool` specs that omit one; required unless every spec includes its own |
@@ -104,6 +106,8 @@ deployments/scripts/deploy.sh <network> \
   --policy-flags <policy> \
   --asp-levels <n> \
   --pool-levels <n> \
+  --fee <n> \
+  --min-deposit <n> \
   --max-deposit <n> \
   --kdf-domain <string> \
   --pool <policy>:<gvk-mode>:<asset-spec> \
@@ -122,6 +126,8 @@ deployments/scripts/deploy.sh testnet \
   --policy-flags blocklist \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool native:$(stellar contract id asset --asset native --network testnet)
@@ -135,6 +141,8 @@ deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
@@ -149,6 +157,8 @@ deployments/scripts/deploy.sh testnet \
   --gvk-authority-pubkey-file ./admin-pub.json \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
