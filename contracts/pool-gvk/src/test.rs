@@ -2228,7 +2228,10 @@ fn build_gvk_transact(
     maximum_deposit_amount: u32,
 ) -> (Env, PoolGvkContractClient<'static>, Proof, ExtData, Address) {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
+    let mut setup = setup_test_contracts(&env);
+    setup.token = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
     let admin_view_key = mk_point(&env, 1, 2);
     let levels = 3u32;
 
@@ -2412,24 +2415,52 @@ fn transact_accepts_correct_traceable_ciphertexts_and_emits_all_events() {
 
 #[test]
 fn transact_accepts_positive_ext_amount_deposit() {
-    let (_env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE3, 50, 1000);
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE3, 50, 1000);
+    let token_addr: Address = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token set in constructor")
+    });
+    let funded = 1_000i128;
+    StellarAssetClient::new(&env, &token_addr).mint(&sender, &funded);
+    let token = TokenClient::new(&env, &token_addr);
+    assert_ne!(sender, ext.recipient);
 
     let result = pool.try_transact(&proof, &ext, &sender);
     assert!(
         result.is_ok(),
         "expected transact to succeed on the deposit path (ext_amount > 0): {result:?}"
     );
+    assert_eq!(token.balance(&sender), funded - 50);
+    assert_eq!(token.balance(&pool.address), 50);
+    assert_eq!(token.balance(&ext.recipient), 0);
+    assert!(pool.is_spent(&U256::from_u32(&env, 0xE3)));
 }
 
 #[test]
 fn transact_accepts_negative_ext_amount_withdrawal() {
-    let (_env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE4, -50, 1000);
+    let (env, pool, proof, ext, sender) = build_gvk_transact(VIEW_ONLY, 0xE4, -50, 1000);
+    let token_addr: Address = env.as_contract(&pool.address, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token set in constructor")
+    });
+    let funded = 1_000i128;
+    StellarAssetClient::new(&env, &token_addr).mint(&pool.address, &funded);
+    let token = TokenClient::new(&env, &token_addr);
+    assert_ne!(sender, ext.recipient);
 
     let result = pool.try_transact(&proof, &ext, &sender);
     assert!(
         result.is_ok(),
         "expected transact to succeed on the withdrawal path (ext_amount < 0): {result:?}"
     );
+    assert_eq!(token.balance(&pool.address), funded - 50);
+    assert_eq!(token.balance(&ext.recipient), 50);
+    assert_eq!(token.balance(&sender), 0);
+    assert!(pool.is_spent(&U256::from_u32(&env, 0xE4)));
 }
 
 #[test]
@@ -2452,8 +2483,9 @@ fn transact_rejects_deposit_over_maximum() {
     let ext = mk_ext_data(&env, Address::generate(&env), 101); // exceeds the 100 maximum
     let (asp_membership_root, asp_non_membership_root) = asp_roots(&setup);
 
-    // Mock proof, `transact` rejects the deposit before `internal_transact` is
-    // reached, so the proof itself never needs to be valid.
+    // Mock proof: `internal_transact` rejects the over-cap deposit before
+    // proof verification is reached, so the proof itself never needs to be
+    // valid.
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root: pool.get_root(),
@@ -2698,7 +2730,8 @@ fn get_asp_non_membership_root_reports_a_failing_tree_as_invalid_proof() {
     );
 }
 
-/// A verifier rejection must roll back the deposit transfer.
+/// A deposit whose proof the verifier refuses must be rejected without moving
+/// funds. Transaction validation must happen before deposit transfers.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
@@ -2774,6 +2807,146 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// An unfunded sender attempting a deposit with an invalid proof must fail with
+/// `Error::InvalidProof`, proving that transaction validation and proof
+/// verification run before token transfer is attempted.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_deposit_verification_runs_before_transfer_when_sender_unfunded() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 0);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+        VIEW_ONLY,
+    );
+
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+
+    // If transfer ran before verification, the asset contract's
+    // insufficient-balance error (code 10) would surface as
+    // `Error::WrongExtHash` (also code 10). Because verification runs first,
+    // it fails with `Error::InvalidProof`.
+    let err = pool
+        .try_transact(&proof, &deposit, &sender)
+        .expect_err("a deposit with invalid proof must be refused");
+    assert_eq!(err, Ok(Error::InvalidProof));
+
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+}
+
+/// Deposit validation failures (e.g. unknown root, wrong external data hash, or
+/// wrong public amount) must fail with their respective errors before any token
+/// transfer is attempted.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_deposit_validation_failures_do_not_transfer() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    // Unfunded sender: if transfer ran before validation, the asset contract's
+    // insufficient-balance error (code 10, colliding with `WrongExtHash`) would
+    // preempt `UnknownRoot` and `WrongExtAmount`.
+    setup.token = register_funded_token(&env, &sender, 0);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+        VIEW_ONLY,
+    );
+
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    // 1. Unknown root failure
+    proof.root = U256::from_u32(&env, 0xBAD);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::UnknownRoot)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+    // Restore root
+    proof.root = pool.get_root();
+
+    // 2. Wrong ext data hash failure
+    let orig_hash = proof.ext_data_hash.clone();
+    proof.ext_data_hash = mk_bytesn32(&env, 0xFF);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::WrongExtHash)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+    // Restore hash
+    proof.ext_data_hash = orig_hash;
+
+    // 3. Wrong public amount failure
+    proof.public_amount = U256::from_u32(&env, 999);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::WrongExtAmount)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
 }
 
 #[test]

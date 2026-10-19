@@ -2145,8 +2145,8 @@ fn test_pool_events_exact_shapes() {
 }
 
 /// Marks a nullifier as spent directly in pool storage, mirroring what a
-/// successful `transact` does in step 6. Used to reach the replay path without
-/// needing a real Groth16 proof for the first spend.
+/// successful `transact` does after verifying the proof. Used to reach the
+/// replay path without needing a real Groth16 proof for the first spend.
 fn mark_nullifier_spent(env: &Env, pool_id: &Address, nullifier: &U256) {
     env.as_contract(pool_id, || {
         env.storage()
@@ -2635,9 +2635,8 @@ fn get_asp_non_membership_root_reports_a_failing_tree_as_invalid_proof() {
     );
 }
 
-/// A deposit whose proof the verifier refuses must revert whole. `transact`
-/// moves the tokens before `internal_transact` checks anything, so the sender
-/// keeps their balance only if the failed call is rolled back.
+/// A deposit whose proof the verifier refuses must be rejected without moving
+/// funds. Transaction validation must happen before deposit transfers.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
@@ -2682,7 +2681,7 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
     assert_eq!(
         err,
         Ok(Error::InvalidProof),
-        "the deposit bound must not answer first, or the transfer is never reached"
+        "the transaction must reach verifier rejection"
     );
     assert_eq!(
         token.balance(&sender),
@@ -2694,6 +2693,194 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         0,
         "a refused deposit must not credit the pool"
     );
+}
+
+/// An unfunded sender attempting a deposit with an invalid proof must fail with
+/// `Error::InvalidProof`, proving that transaction validation and proof
+/// verification run before token transfer is attempted.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_deposit_verification_runs_before_transfer_when_sender_unfunded() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    // Sender is funded with 0 tokens:
+    setup.token = register_funded_token(&env, &sender, 0);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+    );
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+
+    // If transfer ran before verification, the asset contract's
+    // insufficient-balance error (code 10) would surface as
+    // `Error::WrongExtHash` (also code 10). Because verification runs first,
+    // it fails with `Error::InvalidProof`.
+    let err = pool
+        .try_transact(&proof, &deposit, &sender)
+        .expect_err("a deposit with invalid proof must be refused");
+    assert_eq!(err, Ok(Error::InvalidProof));
+
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+}
+
+/// Deposit validation failures (e.g. unknown root, wrong external data hash, or
+/// wrong public amount) must fail with their respective errors before any token
+/// transfer is attempted.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_deposit_validation_failures_do_not_transfer() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    // Unfunded sender: if transfer ran before validation, the asset contract's
+    // insufficient-balance error (code 10, colliding with `WrongExtHash`) would
+    // preempt `UnknownRoot` and `WrongExtAmount`.
+    setup.token = register_funded_token(&env, &sender, 0);
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let (member_root, non_member_root) = asp_roots(&setup);
+
+    let deposit_amount = 500u32;
+    let deposit = mk_ext_data(
+        &env,
+        Address::generate(&env),
+        i32::try_from(deposit_amount).expect("the deposit must fit i32"),
+    );
+    let (mut proof, _) = mk_transact_proof(
+        &env,
+        &pool,
+        &setup.token,
+        member_root,
+        non_member_root,
+        0xE6,
+    );
+    proof.ext_data_hash = compute_ext_hash(&env, &pool_id, &setup.token, &deposit);
+    proof.public_amount = U256::from_u32(&env, deposit_amount);
+
+    // 1. Unknown root failure
+    proof.root = U256::from_u32(&env, 0xBAD);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::UnknownRoot)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+    // Restore root
+    proof.root = pool.get_root();
+
+    // 2. Wrong ext data hash failure
+    let orig_hash = proof.ext_data_hash.clone();
+    proof.ext_data_hash = mk_bytesn32(&env, 0xFF);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::WrongExtHash)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+    // Restore hash
+    proof.ext_data_hash = orig_hash;
+
+    // 3. Wrong public amount failure
+    proof.public_amount = U256::from_u32(&env, 999);
+    let err = pool.try_transact(&proof, &deposit, &sender);
+    assert_eq!(err, Err(Ok(Error::WrongExtAmount)));
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&pool_id), 0);
+}
+
+#[contract]
+struct AcceptingVerifier;
+
+#[contractimpl]
+impl AcceptingVerifier {
+    pub fn verify(
+        _env: Env,
+        _proof: Groth16Proof,
+        _public_inputs: Vec<soroban_sdk::crypto::bn254::Bn254Fr>,
+    ) -> Result<bool, circom_groth16_verifier::Groth16Error> {
+        Ok(true)
+    }
+}
+
+/// A valid deposit transfers `ext_amount` from `sender` (not
+/// `ext_data.recipient`) to the pool and marks the input nullifier as spent.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_accepts_positive_ext_amount_deposit() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 1_000i128;
+    setup.token = register_funded_token(&env, &sender, funded);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let nullifier = 0xEA;
+    let (proof, deposit) = mk_moving_transact_proof(&env, &pool, &setup.token, 500, nullifier);
+    assert_ne!(sender, deposit.recipient);
+
+    assert_eq!(pool.try_transact(&proof, &deposit, &sender), Ok(Ok(())));
+    assert_eq!(token.balance(&sender), funded - 500);
+    assert_eq!(token.balance(&pool_id), 500);
+    assert_eq!(token.balance(&deposit.recipient), 0);
+    assert!(pool.is_spent(&U256::from_u32(&env, nullifier)));
+}
+
+/// A valid withdrawal transfers `|ext_amount|` from the pool to
+/// `ext_data.recipient` (not `sender`) and marks the input nullifier as spent.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_accepts_negative_ext_amount_withdrawal() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+
+    let sender = Address::generate(&env);
+    let funded = 1_000i128;
+    setup.token = register_funded_token(&env, &sender, 0);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let token = TokenClient::new(&env, &setup.token);
+
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0);
+    StellarAssetClient::new(&env, &setup.token).mint(&pool_id, &funded);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let nullifier = 0xEB;
+    let (proof, withdrawal) = mk_moving_transact_proof(&env, &pool, &setup.token, -500, nullifier);
+    assert_ne!(sender, withdrawal.recipient);
+
+    assert_eq!(pool.try_transact(&proof, &withdrawal, &sender), Ok(Ok(())));
+    assert_eq!(token.balance(&pool_id), funded - 500);
+    assert_eq!(token.balance(&withdrawal.recipient), 500);
+    assert_eq!(token.balance(&sender), 0);
+    assert!(pool.is_spent(&U256::from_u32(&env, nullifier)));
 }
 
 /// Cross-pool regression test for proof-domain binding.

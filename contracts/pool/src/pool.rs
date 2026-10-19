@@ -304,19 +304,6 @@ impl PoolContract {
         Ok(())
     }
 
-    /// Reject values outside the canonical BN254 scalar-field range.
-    ///
-    /// `Bn254Fr::from_bytes` expects field elements, so any `U256` that will be
-    /// converted into a verifier public input must be checked before
-    /// conversion.
-    fn validate_bn256_public_input(value: &U256, modulus: &U256) -> Result<(), Error> {
-        if amounts::is_canonical_bn256_public_input(value, modulus) {
-            Ok(())
-        } else {
-            Err(Error::NonCanonicalPublicInput)
-        }
-    }
-
     /// Validate every `U256` field that contributes to the verifier's public
     /// input vector. The transaction path checks `ext_data_hash` against
     /// `hash_ext_data` before proof verification, so this covers the remaining
@@ -327,18 +314,18 @@ impl PoolContract {
         policy_flags: u32,
         modulus: &U256,
     ) -> Result<(), Error> {
-        Self::validate_bn256_public_input(&proof.root, modulus)?;
-        Self::validate_bn256_public_input(&proof.public_amount, modulus)?;
-        for nullifier in proof.input_nullifiers.iter() {
-            Self::validate_bn256_public_input(&nullifier, modulus)?;
-        }
-        Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
-        Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
-        if policy::requires_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
-        }
-        if policy::requires_non_membership_proofs(policy_flags) {
-            Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
+        if !amounts::is_canonical_common_bn256_public_inputs(
+            &proof.root,
+            &proof.public_amount,
+            &proof.input_nullifiers,
+            &proof.output_commitment0,
+            &proof.output_commitment1,
+            &proof.asp_membership_root,
+            &proof.asp_non_membership_root,
+            policy_flags,
+            modulus,
+        ) {
+            return Err(Error::NonCanonicalPublicInput);
         }
 
         Ok(())
@@ -444,9 +431,10 @@ impl PoolContract {
 
     /// Executes a shielded transaction.
     ///
-    /// A deposit (`ext_amount > 0`) first moves the tokens from `sender` to the
-    /// pool. Renews the pool, its tree, and its verifier by at most a day
-    /// each.
+    /// Tokens move only after every check and the proof pass and the pool's
+    /// state is updated: a deposit pulls `ext_amount` from `sender`, a
+    /// withdrawal pays `recipient`. Renews the pool, its tree, and its
+    /// verifier by at most a day each.
     ///
     /// # Errors
     ///
@@ -469,11 +457,38 @@ impl PoolContract {
     ) -> Result<(), Error> {
         sender.require_auth();
         soroban_utils::extend_instance(env);
-        let token = Self::get_token(env)?;
-        let token_client = TokenClient::new(env, &token);
+
+        Self::internal_transact(env, proof, ext_data, &sender)
+    }
+
+    /// Process a private transaction.
+    ///
+    /// Validates the proof and all public inputs, marks nullifiers as spent,
+    /// inserts new commitments into the Merkle tree, processes token
+    /// transfers (deposits and withdrawals), and emits transaction events.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `proof` - Zero-knowledge proof and public inputs
+    /// * `ext_data` - External transaction data
+    /// * `sender` - Address of the transaction sender
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if any validation fails
+    ///
+    /// All checks, including proof verification, run before any state
+    /// change; token transfers and events come last.
+    fn internal_transact(
+        env: &Env,
+        proof: Proof,
+        ext_data: ExtData,
+        sender: &Address,
+    ) -> Result<(), Error> {
         let zero = I256::from_i32(env, 0);
 
-        // Handle deposit if ext_amount > 0
+        // 1. Deposit pause and cap check
         if ext_data.ext_amount > zero {
             if Self::deposits_paused(env)? {
                 return Err(Error::DepositsPaused);
@@ -483,48 +498,19 @@ impl PoolContract {
             if deposit_u > max {
                 return Err(Error::WrongExtAmount);
             }
-            let this = env.current_contract_address();
-            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
-            token_client.transfer(&sender, &this, &amount);
         }
 
-        Self::internal_transact(env, proof, ext_data)
-    }
-
-    /// Process a private transaction
-    ///
-    /// Validates the proof and all public inputs, marks nullifiers as spent,
-    /// processes withdrawals, and inserts new commitments into the Merkle tree.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `proof` - Zero-knowledge proof and public inputs
-    /// * `ext_data` - External transaction data
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error if any validation fails
-    ///
-    /// # Validation Steps
-    ///
-    /// 1. Verify Merkle root is in recent history
-    /// 2. Verify no nullifiers have been spent
-    /// 3. Verify external data hash matches
-    /// 4. Verify public amount calculation
-    /// 5. Verify zero-knowledge proof
-    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
-        // 1. Merkle root check
+        // 2. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
-        // 2. Nullifier checks (prevent double-spending)
+        // 3. Nullifier checks (prevent double-spending)
         for n in proof.input_nullifiers.iter() {
             if Self::is_spent(env, &n)? {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-        // 3. External data hash check, bound to this pool's address and its
+        // 4. External data hash check, bound to this pool's address and its
         // own configured token, so a hash computed for another pool or token
         // cannot match here.
         let token = Self::get_token(env)?;
@@ -533,14 +519,14 @@ impl PoolContract {
             return Err(Error::WrongExtHash);
         }
 
-        // 4. Public amount check
+        // 5. Public amount check
         let expected_public_amount =
             Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
 
-        // ASP root validation
+        // 6. ASP root validation
         let policy_flags = Self::load_policy_flags(env)?;
         if policy::requires_non_membership_proofs(policy_flags) {
             let non_member_root = Self::get_asp_non_membership_root(env)?;
@@ -561,27 +547,14 @@ impl PoolContract {
             }
         }
 
-        // 5. ZK proof verification
+        // 7. ZK proof verification
         if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
 
-        // 6. Mark nullifiers as spent
+        // 8. Mark nullifiers as spent
         for n in proof.input_nullifiers.iter() {
             let _ = Self::mark_spent(env, &n);
-            NewNullifierEvent { nullifier: n }.publish(env);
-        }
-
-        // 7. Process withdrawal if ext_amount < 0
-        let token = Self::get_token(env)?;
-        let token_client = TokenClient::new(env, &token);
-        let this = env.current_contract_address();
-        let zero = I256::from_i32(env, 0);
-
-        if ext_data.ext_amount < zero {
-            let abs = zero.sub(&ext_data.ext_amount);
-            let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
-            token_client.transfer(&this, &ext_data.recipient, &amount);
         }
 
         // 9. Insert new commitments into Merkle tree
@@ -591,7 +564,24 @@ impl PoolContract {
             proof.output_commitment1.clone(),
         )?;
 
-        // 10. Emit commitment events
+        // 10. Process token transfers
+        let token_client = TokenClient::new(env, &token);
+        let this = env.current_contract_address();
+
+        if ext_data.ext_amount > zero {
+            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
+            token_client.transfer(sender, &this, &amount);
+        } else if ext_data.ext_amount < zero {
+            let abs = zero.sub(&ext_data.ext_amount);
+            let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
+            token_client.transfer(&this, &ext_data.recipient, &amount);
+        }
+
+        // 11. Emit events
+        for n in proof.input_nullifiers.iter() {
+            NewNullifierEvent { nullifier: n }.publish(env);
+        }
+
         NewCommitmentEvent {
             commitment: proof.output_commitment0,
             index: idx_0,
