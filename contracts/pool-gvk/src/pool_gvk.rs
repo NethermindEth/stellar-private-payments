@@ -90,8 +90,10 @@ pub enum Error {
     TreeCodeMismatch = 21,
     /// A call would take the notes total below zero
     NotesTotalExceeded = 22,
-    /// A claim is negative, above the fees total, or paid to the pool
+    /// A claim is negative or above the fees collected
     InvalidClaimAmount = 23,
+    /// A withdrawal or a fee claim pays the pool or its token contract
+    InvalidPayee = 24,
 }
 
 impl From<MerkleError> for Error {
@@ -114,6 +116,7 @@ impl From<TotalsError> for Error {
             TotalsError::NotesTotalExceeded => Error::NotesTotalExceeded,
             TotalsError::Overflow => Error::Overflow,
             TotalsError::InvalidClaimAmount => Error::InvalidClaimAmount,
+            TotalsError::InvalidPayee => Error::InvalidPayee,
         }
     }
 }
@@ -558,8 +561,9 @@ impl PoolGvkContract {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidClaimAmount`] for a negative amount, one above
-    /// the fees total, or a `to` that is the pool itself.
+    /// Returns [`Error::InvalidPayee`] for a `to` that is the pool or its token
+    /// contract, and [`Error::InvalidClaimAmount`] for a negative amount or one
+    /// above the fees collected.
     ///
     /// # Panics
     ///
@@ -567,8 +571,10 @@ impl PoolGvkContract {
     /// fails.
     pub fn claim_fees(env: &Env, to: Address, amount: i128) -> Result<(), Error> {
         soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
-        totals::claim(env, &to, amount)?;
-        let token_client = TokenClient::new(env, &Self::get_token(env)?);
+        let token = Self::get_token(env)?;
+        totals::check_payee(env, &to, &token)?;
+        totals::claim(env, amount)?;
+        let token_client = TokenClient::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
         FeesClaimed { to, amount }.publish(env);
         Ok(())
@@ -963,10 +969,11 @@ impl PoolGvkContract {
     /// Returns [`Error::DepositsPaused`] for a deposit while paused, before the
     /// cap and minimum checks and any transfer, [`Error::WrongExtAmount`] for
     /// a deposit over the cap or below the pool minimum after the fee, or an
-    /// out-of-range or mismatched amount, and [`Error::InvalidProof`] for an
+    /// out-of-range or mismatched amount, [`Error::InvalidProof`] for an
     /// empty or refused proof, an ASP root the trees reject, or a failed tree
-    /// call. Every other error names the failed check or marks missing or
-    /// corrupt state.
+    /// call, and [`Error::InvalidPayee`] for a withdrawal paid to the pool or
+    /// its token contract. Every other error names the failed check or marks
+    /// missing or corrupt state.
     ///
     /// # Panics
     ///
@@ -1116,6 +1123,7 @@ impl PoolGvkContract {
         let zero = I256::from_i32(env, 0);
 
         if ext_data.ext_amount < zero {
+            totals::check_payee(env, &ext_data.recipient, &token)?;
             let abs = zero.sub(&ext_data.ext_amount);
             let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
             token_client.transfer(&this, &ext_data.recipient, &amount);

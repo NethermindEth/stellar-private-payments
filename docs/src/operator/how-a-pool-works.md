@@ -89,7 +89,9 @@ failure:
 
 The pool then records the nullifiers, updates the notes total by what the call moves into or out of
 notes, adds the pool fee to the fees collected, sends a withdrawal's tokens to the recipient, adds
-the two new commitments, and publishes one event for each nullifier and commitment.
+the two new commitments, and publishes one event for each nullifier and commitment. The pool
+refuses a withdrawal paid to itself or its token contract, and the clients refuse one paid to any
+contract the manifest lists.
 
 ## Keys
 

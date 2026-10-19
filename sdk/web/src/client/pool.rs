@@ -79,6 +79,13 @@ impl PrivatePool {
             .map_err(pool_err)
     }
 
+    /// Refuses a `transact` config the pool would refuse, without building it.
+    #[wasm_bindgen(js_name = checkTransact)]
+    pub async fn check_transact(&self, config: JsValue) -> Result<(), JsError> {
+        let step = transact_from_js(config)?;
+        self.inner().check_transact(&step).await.map_err(pool_err)
+    }
+
     /// Most one spend can send after paying the pool fee on every step, in
     /// stroops (`bigint` in JS).
     #[wasm_bindgen(js_name = maxSpend)]

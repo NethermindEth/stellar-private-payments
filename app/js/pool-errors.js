@@ -5,9 +5,26 @@ const NOTHING_YET = 'You have nothing to send yet. If you just deposited, try ag
 /**
  * The sentence for a refusal the SDK gave a `code`, or null. `feeIncluded` is
  * for an amount that already holds the fee, as the Advanced form's Public deposit.
+ * `NOT_BALANCED` needs the Advanced form's `amounts`.
  */
-export function poolErrorMessage(error, { fee, format, feeIncluded = false }) {
+export function poolErrorMessage(error, { fee, format, feeIncluded = false, amounts }) {
   switch (error?.code) {
+    case 'NOT_BALANCED': {
+      if (!amounts) return null;
+      const { inputs, deposit, outputs, withdraw } = amounts;
+      const gap = BigInt(error.gap);
+      const excess = -gap;
+      const rule = fee
+        ? `Selected notes and public deposit must add up to the private outputs, public withdraw and the ${format(fee)} pool fee.`
+        : 'Selected notes and public deposit must add up to the private outputs and public withdraw.';
+      let fix;
+      if (inputs === 0n && deposit === 0n) fix = 'Select a note or enter a public deposit.';
+      else if (gap > 0n) fix = `Add ${format(gap)} to a private output.`;
+      else if (outputs >= excess) fix = `Remove ${format(excess)} from a private output.`;
+      else if (withdraw >= excess) fix = `Lower the public withdraw by ${format(excess)}.`;
+      else fix = `Raise the public deposit by ${format(excess)}, or select more notes.`;
+      return `${rule} ${fix}`;
+    }
     case 'DEPOSIT_BELOW_MINIMUM':
       if (!feeIncluded) return `The smallest deposit is ${format(error.minimum)}.`;
       return fee

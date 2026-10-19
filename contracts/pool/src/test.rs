@@ -3765,6 +3765,74 @@ fn a_withdrawal_beyond_the_notes_total_is_refused() {
     assert_eq!(token.balance(&pool.address), 1_050);
 }
 
+fn paid_to(
+    env: &Env,
+    pool: &PoolContractClient,
+    token: &Address,
+    (mut proof, mut ext): (Proof, ExtData),
+    recipient: Address,
+) -> (Proof, ExtData) {
+    ext.recipient = recipient;
+    proof.ext_data_hash = compute_ext_hash(env, &pool.address, token, &ext);
+    (proof, ext)
+}
+
+#[test]
+fn a_withdrawal_to_the_pool_itself_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let withdrawal = mk_paying_proof(&env, &pool, &token.address, -20, -25, 0xFC);
+    let (proof, withdrawal) = paid_to(
+        &env,
+        &pool,
+        &token.address,
+        withdrawal,
+        pool.address.clone(),
+    );
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidPayee))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_withdrawal_to_the_token_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let withdrawal = mk_paying_proof(&env, &pool, &token.address, -20, -25, 0xFC);
+    let (proof, withdrawal) = paid_to(
+        &env,
+        &pool,
+        &token.address,
+        withdrawal,
+        token.address.clone(),
+    );
+
+    assert_eq!(
+        pool.try_transact(&proof, &withdrawal, &Address::generate(&env)),
+        Err(Ok(Error::InvalidPayee))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_deposit_and_a_transfer_may_name_the_pool() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+    let sender = Address::generate(&env);
+    StellarAssetClient::new(&env, &token.address).mint(&sender, &50);
+
+    let deposit = mk_paying_proof(&env, &pool, &token.address, 50, 45, 0xFC);
+    let (proof, deposit) = paid_to(&env, &pool, &token.address, deposit, pool.address.clone());
+    assert_eq!(pool.try_transact(&proof, &deposit, &sender), Ok(Ok(())));
+
+    let transfer = mk_paying_proof(&env, &pool, &token.address, 0, -5, 0xFD);
+    let (proof, transfer) = paid_to(&env, &pool, &token.address, transfer, pool.address.clone());
+    assert_eq!(pool.try_transact(&proof, &transfer, &sender), Ok(Ok(())));
+}
+
 #[test]
 fn the_admin_claims_collected_fees() {
     use soroban_sdk::{
@@ -3844,14 +3912,27 @@ fn a_negative_claim_is_refused() {
     assert_totals(&env, &pool, &token, 45, 5);
 }
 
+/// Claims above the fees, so `InvalidPayee` shows the payee check runs first.
 #[test]
 fn a_claim_to_the_pool_itself_is_refused() {
     let env = test_env();
     let (pool, token) = deposit_fifty_charging_five(&env);
 
     assert_eq!(
-        pool.try_claim_fees(&pool.address, &5),
-        Err(Ok(Error::InvalidClaimAmount))
+        pool.try_claim_fees(&pool.address, &6),
+        Err(Ok(Error::InvalidPayee))
+    );
+    assert_totals(&env, &pool, &token, 45, 5);
+}
+
+#[test]
+fn a_claim_to_the_token_is_refused() {
+    let env = test_env();
+    let (pool, token) = deposit_fifty_charging_five(&env);
+
+    assert_eq!(
+        pool.try_claim_fees(&token.address, &6),
+        Err(Ok(Error::InvalidPayee))
     );
     assert_totals(&env, &pool, &token, 45, 5);
 }
