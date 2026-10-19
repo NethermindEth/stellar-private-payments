@@ -2,9 +2,9 @@ use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD}
 use crate::types::{
     AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
     EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
-    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup,
-    UserNoteSummary, UserOperation,
+    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyOwner, NoteKeyOwnerLookup,
+    NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem, PortfolioBalance,
+    PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
@@ -488,6 +488,47 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
+    /// Every address that has ever registered one of `note_keys` in the public
+    /// key registry, with the first ledger each address registered that key.
+    ///
+    /// Owners can rotate keys and the registry does not enforce uniqueness, so
+    /// a key can map to several addresses. Rows are ordered per key by
+    /// first-registration ledger, then address; unknown keys yield no rows.
+    pub fn lookup_owners_by_note_keys(&self, note_keys: &[Field]) -> Result<Vec<NoteKeyOwner>> {
+        // `Field` binds as its 32-byte little-endian blob, the same layout the
+        // registry emits and `public_keys.note_key` stores.
+        let mut stmt = self.conn.prepare(
+            "SELECT p.owner, MIN(r.ledger)
+             FROM public_keys p
+             JOIN raw_contract_events r ON r.id = p.event_id
+             WHERE p.note_key = ?1
+             GROUP BY p.owner
+             ORDER BY 2, 1",
+        )?;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for note_key in note_keys {
+            if !seen.insert(*note_key) {
+                continue;
+            }
+            let rows = stmt.query_map(params![note_key], |row| {
+                let address: String = row.get(0)?;
+                let ledger_i64: i64 = row.get(1)?;
+                let ledger = col_u32(ledger_i64, 1)?;
+                Ok(NoteKeyOwner {
+                    note_key: *note_key,
+                    address,
+                    ledger,
+                })
+            })?;
+            for row in rows {
+                out.push(row.context("lookup_owners_by_note_keys")?);
+            }
+        }
+        Ok(out)
+    }
+
     /// List notes derived for `address` (newest first).
     pub fn list_user_notes(
         &self,
@@ -737,6 +778,23 @@ impl Storage {
 
         Ok(RecipientLookup {
             entry,
+            registry_fully_synced,
+            network_tip_ledger,
+            registry_last_fully_indexed_ledger,
+        })
+    }
+
+    pub fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        public_key_registry_contract_id: &str,
+    ) -> Result<NoteKeyOwnerLookup> {
+        let owners = self.lookup_owners_by_note_keys(note_keys)?;
+        let (registry_fully_synced, network_tip_ledger, registry_last_fully_indexed_ledger) =
+            self.registry_sync_status(public_key_registry_contract_id)?;
+
+        Ok(NoteKeyOwnerLookup {
+            owners,
             registry_fully_synced,
             network_tip_ledger,
             registry_last_fully_indexed_ledger,
