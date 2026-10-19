@@ -58,6 +58,11 @@ const state = {
   selectedPk: null,
   selectedFlow: null,
   selectedDot: null,
+  pkOwners: new Map(),
+  // PKs whose owners were read from a fully synced registry; the rest are re-queried.
+  pkOwnersSettled: new Set(),
+  ownersRetryTimer: null,
+  registrySynced: true,
   pkGraphNodes: null,
   ledgerTimeBounds: null,
   timeFilterLedgers: { from: null, to: null },
@@ -202,6 +207,17 @@ function pkCell(value) {
   const truncated = truncateHex(raw);
   if (!raw) return truncated;
   return { ...truncated, matchPk: normalizeFieldKey(raw) };
+}
+
+/** Distinct registry addresses that ever registered this PK (empty when unknown or not yet resolved). */
+function ownerAddresses(pk) {
+  return state.pkOwners.get(normalizeFieldKey(pk)) ?? [];
+}
+
+/** The registering address when exactly one address claims this PK, else null (unregistered or conflicting). */
+function ownerAddress(pk) {
+  const addresses = ownerAddresses(pk);
+  return addresses.length === 1 ? addresses[0] : null;
 }
 
 function copyToClipboard(cell, text) {
@@ -2148,6 +2164,81 @@ function queueCursorOp(fn) {
   return run;
 }
 
+const OWNERS_RETRY_MS = 5000;
+
+/**
+ * Looks up registry addresses for the audited PKs not yet settled. Owners read while the registry is still
+ * syncing are shown but not settled, since a later registration can still add a conflicting address; they are
+ * re-queried until the registry is synced. Failures leave the PK shown instead. Resolves true when any owner changed.
+ */
+async function resolvePkOwners() {
+  const pending = new Set();
+  let changed = false;
+  try {
+    for (const { tx } of state.rows) {
+      for (const note of txNotes(tx)) {
+        const pk = normalizeFieldKey(note.note?.pk);
+        if (pk && !state.pkOwnersSettled.has(pk)) pending.add(pk);
+      }
+    }
+    // Everything settled, so no owner is pending a sync.
+    if (pending.size === 0) {
+      changed = !state.registrySynced;
+      state.registrySynced = true;
+      return changed;
+    }
+
+    const queried = [...pending];
+    const lookup = await client().noteKeyOwnerLookup(queried);
+    try {
+      const found = new Map();
+      for (const owner of lookup.owners) {
+        try {
+          const pk = normalizeFieldKey(owner.noteKey);
+          const addresses = found.get(pk) ?? [];
+          if (!addresses.includes(owner.address)) addresses.push(owner.address);
+          found.set(pk, addresses);
+        } finally {
+          owner?.free?.();
+        }
+      }
+      const synced = lookup.registryFullySynced;
+      for (const pk of queried) {
+        const addresses = found.get(pk) ?? (synced ? [] : null);
+        if (addresses) {
+          if ((state.pkOwners.get(pk) ?? []).join() !== addresses.join()) changed = true;
+          state.pkOwners.set(pk, addresses);
+        }
+        if (synced) state.pkOwnersSettled.add(pk);
+      }
+      if (state.registrySynced !== synced) changed = true;
+      state.registrySynced = synced;
+    } finally {
+      lookup?.free?.();
+    }
+  } catch (err) {
+    console.warn('[global-view] registry owner lookup failed:', err);
+  }
+  if ([...pending].some((pk) => !state.pkOwnersSettled.has(pk))) scheduleOwnersRetry();
+  return changed;
+}
+
+/** Retries unsettled owners after syncing or lookup failures, even once the cursor is drained. */
+function scheduleOwnersRetry() {
+  if (state.ownersRetryTimer) return;
+  const audit = state.audit;
+  state.ownersRetryTimer = setTimeout(async () => {
+    state.ownersRetryTimer = null;
+    if (!audit || state.audit !== audit) return;
+    const changed = await resolvePkOwners();
+    if (changed && state.audit === audit) {
+      renderResults();
+      updateStatus();
+      syncActionButtons();
+    }
+  }, OWNERS_RETRY_MS);
+}
+
 async function fetchBatch(limit) {
   return queueCursorOp(async () => {
     let fetched = 0;
@@ -2160,6 +2251,7 @@ async function fetchBatch(limit) {
       pushTx(tx);
       fetched += 1;
     }
+    if (fetched > 0) await resolvePkOwners();
     return fetched;
   });
 }
@@ -2434,6 +2526,11 @@ function resetAuditState() {
     if (input) { input.value = ''; input.disabled = true; input.setCustomValidity(''); }
   }
   state.rows = [];
+  state.pkOwners = new Map();
+  state.pkOwnersSettled = new Set();
+  clearTimeout(state.ownersRetryTimer);
+  state.ownersRetryTimer = null;
+  state.registrySynced = true;
   state.poolGvkMode = null;
   state.txCounter = 0;
   state.exhausted = false;
