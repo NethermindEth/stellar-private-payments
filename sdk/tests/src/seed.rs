@@ -402,16 +402,14 @@ fn insert_user_notes(
 
         tx.execute(
             "INSERT INTO user_notes (
-                id,
                 account_id,
                 commitment_id,
                 expected_nullifier,
                 blinding,
                 amount
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO NOTHING",
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(commitment_id) DO NOTHING",
             params![
-                commitment,
                 account_id,
                 commitment_id,
                 expected_nullifier,
