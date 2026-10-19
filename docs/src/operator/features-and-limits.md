@@ -28,7 +28,7 @@ account's signers review, sign, and submit it. Its tabs:
 | Allowlist | Add members |
 | Blocklist | Add and remove keys |
 | Global View | Decrypt and export a GVK pool's notes with the GVK private key |
-| Pools | Pause and unpause deposits, check and build re-points, and make, sign, and send pause files |
+| Pools | Pause and unpause deposits, show and claim the fees collected, check and build re-points, and make, sign, and send pause files |
 | Admins | Propose, cancel, and accept admin transfers |
 
 ## CLI
@@ -61,6 +61,7 @@ and the
 | Limit | Value |
 | --- | --- |
 | Notes per transaction | Two spent, two created |
+| Deposit size | A deposit leaves between the smallest deposit and the largest deposit in notes, and sends the pool fee on top. The largest deposit is the maximum deposit less the pool fee. |
 | Transactions per pool | 524,288, filling its commitment tree of 2^20 commitments |
 | Allowlist members | 1,024 per allowlist |
 | Notes per disclosure receipt | One to four. A receipt stops verifying once 90 more transactions land in the pool. |
@@ -94,6 +95,10 @@ serving a client built from the old manifest until the old pool's users have lef
 
 - Contract storage expires when unused. A call that reads an archived entry restores it and pays
   for the restore, which can cost several XLM.
+- A note worth the pool fee or less can't pay for a spend alone, so it leaves the pool only beside a
+  second note or a deposit in the same transaction, as
+  [Pool fee and smallest deposit](../deploy.md#pool-fee-and-smallest-deposit) describes. Change and
+  small transfers create such notes.
 - Browser storage can be lost, for example to antivirus software. The user signs again to recover
   their keys, and the client rebuilds their notes from events. App settings and the record of past
   operations are lost.

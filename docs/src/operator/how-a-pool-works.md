@@ -19,7 +19,7 @@ To spend a note, its owner proves four things without revealing the note:
 - The note's commitment is in the commitment tree under one of its last 90 roots.
 - The nullifier they submit is the one derived from that note and key.
 - The amounts balance: the notes spent plus any deposit equal the notes created plus any
-  withdrawal.
+  withdrawal plus the pool fee, a fixed amount every transaction pays the pool.
 
 The pool records each nullifier it accepts, so a second spend of the same note fails. An observer
 cannot tell which commitment a nullifier belongs to.
@@ -40,25 +40,31 @@ The sender is the Stellar account that authorizes the call, and it is public in 
 The amount of a transfer and its recipient stay private. A payment that needs more than two of the
 sender's notes takes several transactions, which the clients plan and submit in sequence.
 
-The following sequence shows three transactions in one pool:
+The pool fee is set when the pool is deployed. A deposit sends the amount the user names plus the
+fee. A transfer or withdrawal pays the fee from the notes it spends, so the recipient gets the whole
+amount named. A payment of several transactions pays the fee for each. The pool keeps two totals:
+the notes total, the value of every unspent note, and the fees collected, which stay in the pool
+until the admin claims them.
+
+The following sequence shows three transactions in one pool with a pool fee of 0.1 XLM:
 
 ```mermaid
 sequenceDiagram
     actor Alice
     participant Pool
     actor Bob
-    Alice->>Pool: Deposit 10 XLM
-    Note over Pool: Public: Alice deposited 10.<br/>Stored: two nullifiers, two commitments.
+    Alice->>Pool: Deposit 10 XLM plus the 0.1 XLM pool fee
+    Note over Pool: Public: Alice paid in 10.1.<br/>Stored: two nullifiers, two commitments.
     Alice->>Pool: Transfer 4 to Bob
     Note over Pool: Public: Alice sent a transaction.<br/>Stored: two nullifiers, two commitments.
     Pool-->>Bob: Memo for the 4 XLM note
-    Bob->>Pool: Withdraw 4 XLM to Bob's account
-    Note over Pool: Public: Bob withdrew 4.<br/>Stored: two nullifiers, two commitments.
+    Bob->>Pool: Withdraw 3.9 XLM to Bob's account
+    Note over Pool: Public: Bob withdrew 3.9.<br/>Stored: two nullifiers, two commitments.
 ```
 
-An observer sees that 10 went in and 4 came out. Nothing on chain says that Bob's 4 came from
-Alice's 10. In a busy pool, Bob's withdrawal could have come from any earlier deposit. With few
-users, timing and amounts can link the two. For every value the contracts publish, see
+An observer sees that 10.1 went in and 3.9 came out. Nothing on chain says that Bob's 3.9 came
+from Alice's deposit. In a busy pool, Bob's withdrawal could have come from any earlier deposit.
+With few users, timing and amounts can link the two. For every value the contracts publish, see
 [Contract event privacy](../privacy-tradeoffs.md).
 
 ## What the pool checks
@@ -67,19 +73,23 @@ The pool runs these checks on every `transact`, in this order, and refuses the c
 failure:
 
 1. The sender authorized the call.
-2. For a deposit: deposits are not paused, the amount is at most the maximum deposit, and the
+2. For a deposit: deposits are not paused; the amount sent, pool fee included, is at most the
+   maximum deposit; what it leaves in notes after the fee is at least the smallest deposit; and the
    tokens move from the sender to the pool.
 3. The proof's root is one of the pool's last 90 roots.
 4. No nullifier has been spent.
 5. The proof commits to this call's recipient, amount, and memos, and to this pool and token, so
    nobody can reuse it elsewhere.
-6. The amount the proof commits to matches the deposit or withdrawal.
+6. The amount the proof moves into or out of notes matches the call: what a deposit sends less
+   the pool fee, what a withdrawal pays out plus the pool fee, or the pool fee alone for a
+   transfer.
 7. For a blocklist pool, the proof's blocklist root is the blocklist's current root. For an
    allowlist pool, the proof's allowlist root is one of the allowlist's last 90 roots.
 8. The verifier accepts the proof.
 
-The pool then records the nullifiers, sends a withdrawal's tokens to the recipient, adds the two
-new commitments, and publishes one event for each nullifier and commitment.
+The pool then records the nullifiers, updates the notes total by what the call moves into or out of
+notes, adds the pool fee to the fees collected, sends a withdrawal's tokens to the recipient, adds
+the two new commitments, and publishes one event for each nullifier and commitment.
 
 ## Keys
 

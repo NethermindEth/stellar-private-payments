@@ -51,13 +51,15 @@ The demo app demonstrates integration of the Stellar Private Payments [JS/TS SDK
 3. **Transfer**: User spends existing commitments and creates new ones, all done privately.  Input notes are spent, and output notes under a new public key are created.
 4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
 
+Each operation also pays the pool fee, a fixed amount set when the pool is deployed and separate from the Stellar network fee. A deposit sends the fee on top of the amount, and a withdrawal or transfer pays it out of the notes it spends.
+
 #### ASP Admin Page
 
 This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the pools and the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree, several in one call
-3. **Pause deposits, re-point pools, and pre-sign pauses** on the Pools tab
+3. **Pause deposits, re-point pools, pre-sign pauses, and claim fees** on the Pools tab
 4. **Transfer a contract's admin** in two steps on the Admins tab
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
@@ -71,13 +73,15 @@ The main transaction circuit proves:
 - Correct nullifier computation (prevents double-spending)
 - Valid Merkle proofs for input commitments
 - Correct output commitment computation
-- Balance conservation (inputs = outputs + public amount)
+- Balance conservation (inputs + public amount = outputs). The pool requires the public amount
+  to be `ext_amount - fee`: the tokens the call sends in (negative for a withdrawal) minus the
+  pool fee.
 - ASP membership and/or non-membership proofs, depending on pool policy flags
   (`none` = unrestricted; `allowlist`, `blocklist`, or `allowlist-blocklist`)
 
 #### Smart Contracts
 
-- **Pool**: Main contract handling deposits, transfers, and withdrawals
+- **Pool**: Main contract handling deposits, transfers, withdrawals, and the admin's fee claims
 - **Circom Groth16 (BN254) Verifier**: On-chain verification of ZK proofs
 - **ASP Membership**: Merkle tree of approved public keys
 - **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
