@@ -5,9 +5,9 @@ use crate::{
     planner::SpendableNote,
     state::{SqliteStorage, StoredPrivateKeys},
     types::{
-        ContractConfig, EncryptionKeyPair, EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup,
-        UserNoteSummary,
+        ContractConfig, EncryptionKeyPair, EncryptionPublicKey, Field, NoteKeyOwnerLookup,
+        NoteKeyPair, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
+        RecipientLookup, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -104,6 +104,14 @@ pub(crate) fn recipient_lookup_from_storage(
     Ok(storage.recipient_lookup(address, &config.public_key_registry)?)
 }
 
+pub(crate) fn note_key_owner_lookup_from_storage(
+    storage: &SqliteStorage,
+    note_keys: &[Field],
+    config: &ContractConfig,
+) -> Result<NoteKeyOwnerLookup, Error> {
+    Ok(storage.note_key_owner_lookup(note_keys, &config.public_key_registry)?)
+}
+
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
@@ -152,6 +160,14 @@ pub trait Storage: crate::chain::ContractDataStorage {
         address: &str,
         config: &ContractConfig,
     ) -> Result<RecipientLookup, Error>;
+
+    /// Addresses that have ever registered each of `note_keys` in the public
+    /// key registry.
+    async fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        config: &ContractConfig,
+    ) -> Result<NoteKeyOwnerLookup, Error>;
 
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error>;
 
