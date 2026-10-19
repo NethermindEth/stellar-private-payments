@@ -263,7 +263,9 @@ fn materialize_step(
 
 fn remove_spent(wallet: &mut Vec<SpendableNote>, spent: &[SpendableNote]) {
     for note in spent {
-        wallet.retain(|n| n.commitment != note.commitment);
+        if let Some(index) = wallet.iter().position(|n| n.commitment == note.commitment) {
+            wallet.remove(index);
+        }
     }
 }
 
@@ -423,5 +425,40 @@ mod tests {
             withdraw(1 << 127),
             Err(SpendSessionError::ExtAmountOverflow)
         ));
+    }
+
+    #[test]
+    fn a_plan_spends_each_copy_once() {
+        let c = note(5);
+        let d = note(7);
+        let merge = Field::from(NoteAmount::from(1u128 << 64));
+        let mut exec = SpendSession::setup(
+            vec![c.clone(), d.clone(), c.clone()],
+            NoteAmount::from(17),
+            "POOL".into(),
+            transfer_target(),
+        )
+        .expect("setup transfer");
+
+        let step = exec.step().expect("step").expect("first step");
+        assert_eq!(step.input_commitments, [d.commitment, c.commitment]);
+        exec.complete_step(&[merge, Field::ZERO])
+            .expect("complete first step");
+        assert_eq!(
+            exec.wallet,
+            [
+                c.clone(),
+                SpendableNote {
+                    commitment: merge,
+                    amount: NoteAmount::from(12),
+                },
+            ]
+        );
+
+        let step = exec.step().expect("step").expect("second step");
+        assert_eq!(step.input_commitments, [merge, c.commitment]);
+        exec.complete_step(&[Field::ZERO, Field::ZERO])
+            .expect("complete second step");
+        assert!(exec.is_done());
     }
 }

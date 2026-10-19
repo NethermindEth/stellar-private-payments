@@ -34,7 +34,7 @@ pub(crate) enum StepAction {
 /// One row in the wallet index (planner input only).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpendableNote {
-    /// Stable id (matches DB / UI note id).
+    /// Note commitment. Copies of one commitment are interchangeable.
     pub commitment: Field,
     pub amount: NoteAmount,
 }
@@ -42,7 +42,7 @@ pub struct SpendableNote {
 /// One row in the wallet index (planner step input only).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StepNote {
-    /// Stable id (matches DB / UI note id).
+    /// Note commitment. Copies of one commitment are interchangeable.
     ///
     /// If `None` then the note does not exist at the time of planning.
     pub commitment: Option<Field>,
