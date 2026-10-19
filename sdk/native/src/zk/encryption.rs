@@ -299,10 +299,9 @@ pub fn decrypt_output_note(
     recipient_privkey: &EncryptionPrivateKey,
     encrypted_output: &[u8],
 ) -> Result<Option<(NoteAmount, Field)>> {
-    let plaintext = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)?;
-    if plaintext.is_empty() {
+    let Some(plaintext) = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)? else {
         return Ok(None);
-    }
+    };
     if plaintext.len() != 48 {
         return Err(anyhow!(
             "Decrypted plaintext must be 48 bytes, got {}",
@@ -403,9 +402,9 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
 /// * `encrypted_data` - Encrypted data from on-chain event (120+ bytes)
 ///
 /// # Returns
-/// - Success: `[amount (16 bytes LE)] [blinding (32 bytes)]` = 48 bytes
-/// - Failure: Empty vec (note was not addressed to us)
-fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>> {
+/// - Success: the decrypted plaintext
+/// - `None`: the note was not addressed to us
+fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
     if private_key_bytes.len() != 32 {
         return Err(anyhow!("Private key must be 32 bytes"));
     }
@@ -441,14 +440,7 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     nonce_array.copy_from_slice(nonce_bytes);
     let nonce = Nonce::from(nonce_array);
 
-    // Decrypt
-    match cipher.decrypt(&nonce, ciphertext_with_tag) {
-        Ok(plaintext) => Ok(plaintext),
-        Err(_) => {
-            // Decryption failed - this note output is not for us
-            Ok(Vec::new()) // Return empty vec
-        }
-    }
+    Ok(cipher.decrypt(&nonce, ciphertext_with_tag).ok())
 }
 
 #[cfg(test)]
@@ -646,7 +638,9 @@ mod tests {
         let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
         assert!(encrypted.len() >= 112);
 
-        let decrypted = decrypt_note_data(priv_key, &encrypted).expect("Decryption failed");
+        let decrypted = decrypt_note_data(priv_key, &encrypted)
+            .expect("Decryption failed")
+            .expect("note should be addressed to the recipient");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -668,8 +662,7 @@ mod tests {
         let decrypted = decrypt_note_data(bob_priv, &encrypted)
             .expect("Decryption should handle failure gracefully");
 
-        // Should return empty vec on failure as per implementation
-        assert!(decrypted.is_empty());
+        assert!(decrypted.is_none());
     }
 
     #[test]
