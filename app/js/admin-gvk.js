@@ -220,6 +220,18 @@ function ownerAddress(pk) {
   return addresses.length === 1 ? addresses[0] : null;
 }
 
+/** Short address for table cells: first 6 + "…" + last 4. */
+function shortAddress(address) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/** Table cell for a note owner: the registered address, else the PK. Hover highlight stays PK-based. */
+function ownerCell(pk) {
+  const address = ownerAddress(pk);
+  if (!address) return pkCell(pk);
+  return { display: shortAddress(address), full: address, matchPk: normalizeFieldKey(pk) };
+}
+
 function copyToClipboard(cell, text) {
   navigator.clipboard?.writeText(text).then(() => {
     const original = cell.textContent;
@@ -525,7 +537,7 @@ function noteCells(audited) {
   }
   return {
     amount: formatAmount(audited.note?.amount),
-    pk: pkCell(audited.note?.pk),
+    pk: ownerCell(audited.note?.pk),
     commitment: truncateHex(audited.commitment),
   };
 }
@@ -533,7 +545,7 @@ function noteCells(audited) {
 const COLUMN_WIDTHS = {
   Note: 40,
   Amount: 96,
-  PK: 88,
+  Owner: 88,
   Commitment: 96,
   Nullifier: 96,
   Created: 130,
@@ -751,7 +763,7 @@ function renderTxCards(rows) {
 
     details.appendChild(renderSlotTable(
       'Input notes',
-      ['Note', 'Amount', 'PK', 'Commitment', 'Nullifier'],
+      ['Note', 'Amount', 'Owner', 'Commitment', 'Nullifier'],
       inputs.map((slot) => {
         const cells = noteCells(slot.audited);
         return {
@@ -769,7 +781,7 @@ function renderTxCards(rows) {
 
     details.appendChild(renderSlotTable(
       'Output notes',
-      ['Note', 'Amount', 'PK', 'Commitment'],
+      ['Note', 'Amount', 'Owner', 'Commitment'],
       outputs.map((slot) => {
         const cells = noteCells(slot.audited);
         return {
@@ -1117,7 +1129,7 @@ function noteStatus(note) {
 
 function renderNoteTable(rows, filters) {
   const notes = collectNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
-  const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
+  const headers = ['Created', 'Owner', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
   const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
@@ -1292,7 +1304,17 @@ function renderGraphDetailPanel(container, notes) {
     rows.appendChild(row);
   };
 
-  addRow('PK', cellDisplay(cells.pk));
+  const addresses = ownerAddresses(note.audited?.note?.pk);
+  addRow(
+    'Owner',
+    addresses.length === 0
+      ? 'Not registered'
+      : addresses.length === 1
+        ? addresses[0]
+        : `${addresses.length} addresses (conflicting claims)\n${addresses.join('\n')}`,
+    'break-all whitespace-pre-line',
+  );
+  addRow('PK', cellDisplay(truncateHex(note.audited?.note?.pk)));
   addRow('Amount', cellDisplay(cells.amount));
   addRow('Status', noteStatus(note));
   addRow('Commitment', note.commitment ? cellDisplay(truncateHex(note.commitment)) : '—');
@@ -1349,7 +1371,7 @@ function renderGraphLegend() {
   const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] border border-slate-300 ${extra}`);
   const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
 
-  addItem(dot('bg-cyan-400'), 'Color = note owner (PK)');
+  addItem(dot('bg-cyan-400'), 'Color = note owner');
 
   if (state.poolGvkMode === 'traceable') {
     addItem(dot('bg-cyan-400'), 'Note (creation, or only known position)');
@@ -2401,6 +2423,8 @@ function updateStatus() {
     return;
   }
 
+  const hint = state.registrySynced ? '' : ' Public key registry still syncing: some owners shown as PK.';
+
   if (state.rows.length === 0) {
     setPanelStatus('No audited transacts yet — pool may have no activity.', 'info');
     return;
@@ -2411,16 +2435,16 @@ function updateStatus() {
     const shown = Math.min(state.filteredVisibleCount, filteredRows.length);
     const more = shown < filteredRows.length ? ' — more available, click Load more.' : '';
     setPanelStatus(
-      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}`,
+      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}${hint}`,
       'ok',
     );
     return;
   }
 
   if (state.exhausted) {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.`, 'ok');
+    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.${hint}`, 'ok');
   } else {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.`, 'ok');
+    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.${hint}`, 'ok');
   }
 }
 
