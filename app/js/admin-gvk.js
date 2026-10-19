@@ -8,7 +8,7 @@ import { format } from 'd3-format';
 import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import { symbol, symbolCircle } from 'd3-shape';
-import { rpc } from '@stellar/stellar-sdk';
+import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
@@ -86,7 +86,7 @@ async function fetchLedgerTimeBounds() {
   const poolContractId = poolSelectEl?.value?.trim();
   if (!poolContractId) throw new Error('Select a pool first');
 
-  const server = new rpc.Server(rpcUrl);
+  const server = rpcServer(rpcUrl);
   const latest = await server.getLatestLedger();
   const startLedger = Math.max(1, latest.sequence - 1);
   const events = await server.getEvents({
@@ -1093,6 +1093,12 @@ function txLabel(txIndex, ledger) {
   return txIndex == null ? '—' : `tx ${txIndex} · ledger ${ledger}`;
 }
 
+/** View-only pools never decrypt inputs, so an unlinked note may still have been spent: its status is unknown, not unspent. */
+function noteStatus(note) {
+  if (note.spentTxIndex != null) return 'Spent';
+  return state.poolGvkMode === 'traceable' ? 'Unspent' : 'Unknown';
+}
+
 function renderNoteTable(rows, filters) {
   const notes = collectNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
@@ -1110,13 +1116,12 @@ function renderNoteTable(rows, filters) {
 
   for (const note of notes) {
     const cells = noteCells(note.audited);
-    const spent = note.spentTxIndex != null;
     for (const value of [
       txLabel(note.createdTxIndex, note.createdLedger),
       cells.pk,
       cells.amount,
       note.commitment ? truncateHex(note.commitment) : '—',
-      spent ? 'Spent' : 'Unspent',
+      noteStatus(note),
       txLabel(note.spentTxIndex, note.spentLedger),
       note.nullifier ? truncateHex(note.nullifier) : '—',
     ]) {
@@ -1256,7 +1261,6 @@ function renderGraphDetailPanel(container, notes) {
   panel.appendChild(rows);
 
   const cells = noteCells(note.audited);
-  const spent = note.spentTxIndex != null;
 
   const addRow = (label, value, valueClass = 'break-all') => {
     const row = el('div');
@@ -1274,7 +1278,7 @@ function renderGraphDetailPanel(container, notes) {
 
   addRow('PK', cellDisplay(cells.pk));
   addRow('Amount', cellDisplay(cells.amount));
-  addRow('Status', spent ? 'Spent' : 'Unspent');
+  addRow('Status', noteStatus(note));
   addRow('Commitment', note.commitment ? cellDisplay(truncateHex(note.commitment)) : '—');
   addTxRow('Created', note.createdTxIndex, note.createdLedger, note.createdKind);
   addTxRow('Spent', note.spentTxIndex, note.spentLedger, note.spentKind);
@@ -1330,13 +1334,20 @@ function renderGraphLegend() {
   const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
 
   addItem(dot('bg-cyan-400'), 'Color = note owner (PK)');
-  addItem(dot('bg-cyan-400'), 'Note (creation, or only known position)');
-  addItem(dot('border border-cyan-400 bg-ink-950'), 'Spend position');
-  addItem(roundedTriangleLegendIcon('fill-rose-400', false), 'Triangle up: withdraw');
-  addItem(roundedTriangleLegendIcon('fill-emerald-400', true), 'Triangle down: deposit');
-  addItem(line(), 'Held between creation & spend');
-  addItem(square(''), 'Tx output (created here)');
-  addItem(square('rotate-45'), 'Tx input (spent here)');
+
+  if (state.poolGvkMode === 'traceable') {
+    addItem(dot('bg-cyan-400'), 'Note (creation, or only known position)');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Spend position');
+    addItem(roundedTriangleLegendIcon('fill-rose-400', false), 'Triangle up: withdraw');
+    addItem(roundedTriangleLegendIcon('fill-emerald-400', true), 'Triangle down: deposit');
+    addItem(line(), 'Held between creation & spend');
+    addItem(square(''), 'Tx output (created here)');
+    addItem(square('rotate-45'), 'Tx input (spent here)');
+  } else {
+    addItem(dot('bg-cyan-400'), 'Note at its creation ledger');
+    addItem(square(''), 'Tx output (created here)');
+    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: inputs are not decryptable, so spends are not drawn and every note\'s status is unknown.'));
+  }
 
   return wrap;
 }
@@ -2246,7 +2257,7 @@ function noteToCsvRow(note) {
     note.audited?.note?.pk ?? '',
     note.audited?.note?.amount ? parseFieldAmount(note.audited.note.amount).toString() : '',
     note.commitment ?? '',
-    note.spentTxIndex != null ? 'spent' : 'unspent',
+    noteStatus(note).toLowerCase(),
     note.nullifier ?? '',
   ];
 }

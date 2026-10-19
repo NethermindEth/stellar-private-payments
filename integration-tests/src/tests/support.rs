@@ -97,6 +97,14 @@ pub async fn deploy_scoped(
         .await
 }
 
+/// Asserts that `err` carries the contract error `code`, which a refused
+/// simulation prints as `Error(Contract, #code)`.
+pub fn assert_contract_error(err: impl Into<anyhow::Error>, code: u32) {
+    let err = format!("{:#}", err.into());
+    let expected = format!("Error(Contract, #{code})");
+    assert!(err.contains(&expected), "expected {expected}, got: {err}");
+}
+
 /// Open a new wallet session against an existing deployment.
 pub async fn session(
     (config, identity): (ContractConfig, DeploymentIdentity),

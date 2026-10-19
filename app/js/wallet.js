@@ -5,23 +5,20 @@ import { validateNetwork } from './network-config.js';
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
  * signMessage, and getNetwork. The additional Freighter-only symbols imported
- * below (WatchWalletChanges, getNetworkDetails, isConnected, isAllowed,
+ * below (WatchWalletChanges, isConnected, isAllowed,
  * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
  * still Draft and defines no connect/permission-gating or watch/change API,
  * so the app relies on Freighter's extension for those capabilities.
  *
- * getNetworkDetails is used in place of the SEP-0043-standard getNetwork for
- * a different reason: the app needs the Soroban RPC URL to pick the correct
- * endpoint per network, and no field for that exists on getNetwork's
- * `{network, networkPassphrase}` result — RPC-URL discovery is out of scope
- * for SEP-0043 entirely, not a temporary Draft gap. This is the one place
- * where the app depends on a Freighter-only method with no SEP path at all;
- * see getWalletNetwork() below.
+ * Network identity comes from SEP-0043 getNetwork; the RPC endpoint comes
+ * from deployment configuration, independently of wallet settings.
+ * The app no longer needs getNetworkDetails for endpoint discovery: the
+ * deployment selects the RPC, and the wallet passphrase must match it.
  */
 import {
     WatchWalletChanges,
     getAddress,
-    getNetworkDetails,
+    getNetwork,
     isAllowed,
     isConnected,
     requestAccess,
@@ -169,22 +166,33 @@ export function startWalletWatcher(opts) {
  *
  * Useful for displaying network name and ensuring app/network alignment.
  *
- * Uses the Freighter-only getNetworkDetails rather than SEP-0043's
- * getNetwork because the app needs sorobanRpcUrl, which getNetwork has no
- * field for (see the module header for why this isn't a Draft-gap issue).
+ * Validates the wallet network against the deployment and uses the deployment
+ * RPC URL. Wallet endpoint settings do not control the app connection.
  *
- * @returns {Promise<{network: string, networkUrl: string, networkPassphrase: string, sorobanRpcUrl?: string}>}
+ * @returns {Promise<{network: string, networkPassphrase: string, sorobanRpcUrl: string}>}
  */
 export async function getWalletNetwork() {
-    const details = await getNetworkDetails();
+    const details = await getNetwork();
     if (details?.error) {
         throw normalizeWalletError(details.error, "Failed to get Freighter network details");
     }
 
-    const { network, networkUrl, networkPassphrase, sorobanRpcUrl } = details;
+    const { network, networkPassphrase } = details;
     const config = await loadDeploymentConfig();
     validateNetwork(config, networkPassphrase);
-    return { network, networkUrl, networkPassphrase, sorobanRpcUrl: sorobanRpcUrl || config.rpcUrl };
+    if (typeof config.rpcUrl !== 'string' || !config.rpcUrl.trim()) {
+        throw new Error('Deployment config is missing rpcUrl');
+    }
+    let rpcUrl;
+    try {
+        rpcUrl = new URL(config.rpcUrl);
+    } catch {
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+    }
+    if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+    }
+    return { network, networkPassphrase, sorobanRpcUrl: config.rpcUrl };
 }
 
 /**

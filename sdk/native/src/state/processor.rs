@@ -60,54 +60,13 @@ pub(crate) fn process_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ContractEvent, ContractsEventData};
-    use stellar_xdr::{self as xdr, WriteXdr};
+    use crate::{
+        state::test_events::{b64, commitment_entries, commitment_event, raw_event, symbol, u256},
+        types::{ContractEvent, ContractsEventData},
+    };
+    use stellar_xdr as xdr;
 
     const COMMITMENT: u64 = 99;
-
-    fn b64(val: &xdr::ScVal) -> String {
-        val.to_xdr_base64(xdr::Limits::none())
-            .expect("encode scval")
-    }
-
-    fn symbol(s: &str) -> xdr::ScVal {
-        xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")))
-    }
-
-    fn raw_event(id: &str, topics: &[xdr::ScVal], entries: Vec<xdr::ScMapEntry>) -> ContractEvent {
-        ContractEvent {
-            id: id.to_string(),
-            ledger: 1,
-            contract_id: "CPOOL".to_string(),
-            topics: topics.iter().map(b64).collect(),
-            value: b64(&xdr::ScVal::Map(Some(xdr::ScMap(
-                entries.try_into().expect("data map"),
-            )))),
-        }
-    }
-
-    fn commitment_event(id: &str, entries: Vec<xdr::ScMapEntry>) -> ContractEvent {
-        let commitment = xdr::ScVal::U256(xdr::UInt256Parts {
-            hi_hi: 0,
-            hi_lo: 0,
-            lo_hi: 0,
-            lo_lo: COMMITMENT,
-        });
-        raw_event(id, &[symbol("new_commitment_event"), commitment], entries)
-    }
-
-    fn commitment_entries(index: u32) -> Vec<xdr::ScMapEntry> {
-        vec![
-            xdr::ScMapEntry {
-                key: symbol("encrypted_output"),
-                val: xdr::ScVal::Bytes(xdr::ScBytes::default()),
-            },
-            xdr::ScMapEntry {
-                key: symbol("index"),
-                val: xdr::ScVal::U32(index),
-            },
-        ]
-    }
 
     fn storage_with(events: Vec<ContractEvent>) -> Result<SqliteStorage> {
         let mut storage = SqliteStorage::connect_in_memory()?;
@@ -123,9 +82,9 @@ mod tests {
     fn an_unknown_event_is_read_once() -> Result<()> {
         let mut storage = storage_with(vec![raw_event(
             "0000000000000000001-0000000000",
-            &[symbol("unknown_future_event")],
+            &[symbol("unknown_future_event")?],
             vec![],
-        )])?;
+        )?])?;
 
         assert!(process_events(&mut storage, 10)?);
         assert!(!process_events(&mut storage, 10)?);
@@ -136,9 +95,9 @@ mod tests {
     fn an_unknown_event_parses_to_none() -> Result<()> {
         let event = raw_event(
             "0000000000000000001-0000000000",
-            &[symbol("unknown_future_event")],
+            &[symbol("unknown_future_event")?],
             vec![],
-        );
+        )?;
 
         assert!(parse_event(event)?.is_none());
         Ok(())
@@ -147,8 +106,12 @@ mod tests {
     #[test]
     fn an_event_that_fails_to_parse_stops_processing() -> Result<()> {
         let mut storage = storage_with(vec![
-            commitment_event("0000000000000000001-0000000000", vec![]),
-            commitment_event("0000000000000000001-0000000001", commitment_entries(0)),
+            commitment_event("0000000000000000001-0000000000", COMMITMENT, vec![])?,
+            commitment_event(
+                "0000000000000000001-0000000001",
+                COMMITMENT,
+                commitment_entries(0)?,
+            )?,
         ])?;
 
         let err = process_events(&mut storage, 10).expect_err("bad event");
@@ -164,53 +127,32 @@ mod tests {
     }
 
     #[test]
-    fn a_nullifier_event_with_non_map_data_fails_to_parse() {
+    fn a_nullifier_event_with_non_map_data_fails_to_parse() -> Result<()> {
         let event = ContractEvent {
-            value: b64(&xdr::ScVal::U32(1)),
+            value: b64(&xdr::ScVal::U32(1))?,
             ..raw_event(
                 "0000000000000000001-0000000000",
-                &[
-                    symbol("new_nullifier_event"),
-                    xdr::ScVal::U256(xdr::UInt256Parts {
-                        hi_hi: 0,
-                        hi_lo: 0,
-                        lo_hi: 0,
-                        lo_lo: 5,
-                    }),
-                ],
+                &[symbol("new_nullifier_event")?, u256(5)],
                 vec![],
-            )
+            )?
         };
 
         let err = parse_event(event).expect_err("non-map data");
 
         assert!(err.to_string().contains("should be a map"));
+        Ok(())
     }
 
     #[test]
     fn an_unknown_event_with_non_map_data_is_read_once() -> Result<()> {
         let mut storage = storage_with(vec![ContractEvent {
-            value: b64(&xdr::ScVal::U32(1)),
+            value: b64(&xdr::ScVal::U32(1))?,
             ..raw_event(
                 "0000000000000000001-0000000000",
-                &[symbol("unknown_future_event")],
+                &[symbol("unknown_future_event")?],
                 vec![],
-            )
+            )?
         }])?;
-
-        assert!(process_events(&mut storage, 10)?);
-        assert!(!process_events(&mut storage, 10)?);
-        Ok(())
-    }
-
-    /// A repeated commitment leaves no row, so only its mark stops it being
-    /// read on every pass.
-    #[test]
-    fn a_repeated_commitment_does_not_stall_processing() -> Result<()> {
-        let mut storage = storage_with(vec![
-            commitment_event("0000000000000000001-0000000000", commitment_entries(0)),
-            commitment_event("0000000000000000001-0000000001", commitment_entries(1)),
-        ])?;
 
         assert!(process_events(&mut storage, 10)?);
         assert!(!process_events(&mut storage, 10)?);
@@ -222,23 +164,23 @@ mod tests {
         let owner = xdr::ScVal::Address(xdr::ScAddress::Account(xdr::AccountId(
             xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([7; 32])),
         )));
-        let registration = |id, key: u8| {
-            let bytes = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into().expect("key")));
+        let registration = |id, key: u8| -> Result<ContractEvent> {
+            let bytes = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into()?));
             let entries = vec![
                 xdr::ScMapEntry {
-                    key: symbol("encryption_key"),
+                    key: symbol("encryption_key")?,
                     val: bytes.clone(),
                 },
                 xdr::ScMapEntry {
-                    key: symbol("note_key"),
+                    key: symbol("note_key")?,
                     val: bytes,
                 },
             ];
-            raw_event(id, &[symbol("public_key_event"), owner.clone()], entries)
+            raw_event(id, &[symbol("public_key_event")?, owner.clone()], entries)
         };
         let mut storage = storage_with(vec![
-            registration("0000000000000000001-0000000000", 1),
-            registration("0000000000000000001-0000000001", 2),
+            registration("0000000000000000001-0000000000", 1)?,
+            registration("0000000000000000001-0000000001", 2)?,
         ])?;
 
         assert!(process_events(&mut storage, 1)?);

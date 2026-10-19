@@ -54,7 +54,7 @@ pub enum Error {
     NextIndexNotEven = 5,
     /// External amount is invalid (negative or exceeds 2^248)
     WrongExtAmount = 6,
-    /// Zero-knowledge proof verification failed or proof is empty
+    /// Zero-knowledge proof verification failed
     InvalidProof = 7,
     /// Provided Merkle root is not in the recent history
     UnknownRoot = 8,
@@ -345,10 +345,6 @@ impl PoolContract {
     /// rejection is a `Groth16Error`, so that error is translated here rather
     /// than allowed to cross the contract boundary raw.
     fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
-        // Check proof is not empty
-        if proof.proof.is_empty() {
-            return Err(Error::InvalidProof);
-        }
         let policy_flags = Self::load_policy_flags(env)?;
         let verifier = Self::get_verifier(env)?;
         soroban_utils::extend_contract(env, &verifier);
@@ -488,8 +484,8 @@ impl PoolContract {
     ) -> Result<(), Error> {
         let zero = I256::from_i32(env, 0);
 
-        // 1. Deposit pause and cap check
-        if ext_data.ext_amount > zero {
+        // 1. Deposit pause, cap, and i128 range check
+        let deposit_amount = if ext_data.ext_amount > zero {
             if Self::deposits_paused(env)? {
                 return Err(Error::DepositsPaused);
             }
@@ -498,7 +494,10 @@ impl PoolContract {
             if deposit_u > max {
                 return Err(Error::WrongExtAmount);
             }
-        }
+            Some(Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?)
+        } else {
+            None
+        };
 
         // 2. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
@@ -568,8 +567,7 @@ impl PoolContract {
         let token_client = TokenClient::new(env, &token);
         let this = env.current_contract_address();
 
-        if ext_data.ext_amount > zero {
-            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
+        if let Some(amount) = deposit_amount {
             token_client.transfer(sender, &this, &amount);
         } else if ext_data.ext_amount < zero {
             let abs = zero.sub(&ext_data.ext_amount);

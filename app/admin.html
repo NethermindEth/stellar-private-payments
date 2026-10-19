@@ -294,6 +294,7 @@
                         <thead>
                             <tr class="text-[10px] uppercase tracking-wide text-slate-500">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
+                                <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
                                 <th class="pb-3 font-medium" scope="col">Actions</th>
                             </tr>
@@ -301,6 +302,79 @@
                         <tbody id="poolRows" class="divide-y divide-white/5"></tbody>
                     </table>
                     <p id="poolsNotice" class="mt-4 text-xs text-slate-400"></p>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-white">Switch allowlist or blocklist</h3>
+                        <p class="mt-1 text-sm text-slate-400">Switch a pool to a new allowlist or blocklist. Check it first to catch mistakes before users see them.</p>
+                    </div>
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointPool">Pool</label>
+                            <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">List</label>
+                            <select id="repointKind" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                                <option value="asp-membership">Allowlist</option>
+                                <option value="asp-non-membership">Blocklist</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New contract address</label>
+                            <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                        </div>
+                        <details class="md:col-span-2">
+                            <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.22em] text-slate-400 transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
+                            <p class="mt-2 text-xs text-slate-400">Check confirms the new contract holds exactly these. One per line: allowlist entries as 0x hex, or blocklist keys as the Blocklist tab takes them.</p>
+                            <label class="sr-only" for="repointRecords">File of expected entries</label>
+                            <div class="mt-2 flex items-center gap-3">
+                                <input id="repointRecords" class="peer sr-only" type="file" />
+                                <label for="repointRecords" class="shrink-0 cursor-pointer rounded-full border border-white/10 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60">Choose file</label>
+                                <span id="repointRecordsName" class="min-w-0 truncate text-xs text-slate-400">No file chosen</span>
+                                <button id="clearRepointRecordsBtn" type="button" class="hidden shrink-0 text-xs font-medium text-slate-400 underline underline-offset-4 transition hover:text-cyan-100">Clear</button>
+                            </div>
+                        </details>
+                    </div>
+                    <ul id="repointChecks" class="space-y-1 font-mono text-xs [overflow-wrap:anywhere]"></ul>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="checkRepointBtn" type="button" disabled title="Please connect your wallet first">
+                            Check
+                        </button>
+                        <button class="flex-1 rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:saturate-0" id="buildRepointBtn" type="button" disabled>
+                            Build
+                        </button>
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-white">Pre-signed deposit pauses</h3>
+                        <p class="mt-1 text-sm text-slate-400">Sign a pause in advance. In an emergency, whoever holds the file can stop deposits at once.</p>
+                    </div>
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div class="flex-1">
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
+                            <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
+                        </div>
+                        <button class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="buildPauseAuthBtn" type="button" disabled>
+                            New pause file
+                        </button>
+                    </div>
+                    <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+                        <input id="pauseAuthFiles" class="peer sr-only" type="file" accept=".json,application/json" multiple aria-describedby="pauseAuthFilesHelp" disabled />
+                        <label for="pauseAuthFiles" class="shrink-0 cursor-pointer rounded-2xl text-center border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">Open pause files</label>
+                        <span id="pauseAuthFilesHelp" class="text-xs text-slate-400">To sign a file you were sent, or to pause with one.</span>
+                    </div>
+                    <ul id="pauseAuthFileList" class="space-y-3 empty:hidden"></ul>
+                    <ul id="pauseAuthResults" class="space-y-1 font-mono text-xs text-slate-300 empty:hidden [overflow-wrap:anywhere]"></ul>
+                    <div>
+                        <button class="w-full rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed" id="submitPauseAuthBtn" type="button" disabled>
+                            Pause deposits now
+                        </button>
+                        <p id="pauseAuthHint" class="mt-2 text-center text-xs text-slate-400 empty:hidden"></p>
+                    </div>
                 </div>
             </section>
 
@@ -400,6 +474,7 @@
     <template id="tpl-pool-row">
         <tr>
             <td class="pool-id py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="pool-trees py-3 pr-4 whitespace-nowrap font-mono text-xs text-slate-300"></td>
             <td class="pool-deposits py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="py-3">
                 <div class="pool-actions flex flex-wrap items-center gap-2">
@@ -416,6 +491,22 @@
             <span class="signer-key break-all font-mono text-xs text-slate-300"></span>
             <span class="signer-status shrink-0 text-xs"></span>
             <button type="button" class="sign-as-btn shrink-0 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/20 disabled:opacity-50 disabled:cursor-not-allowed">Sign</button>
+        </li>
+    </template>
+
+    <!-- Pause File Template -->
+    <template id="tpl-pause-file">
+        <li class="space-y-3 rounded-xl border border-white/8 bg-ink-950/60 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="pause-file-pool font-mono text-sm text-slate-100"></p>
+                <div class="flex items-center gap-2">
+                    <button type="button" class="save-pause-file-btn rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Save file</button>
+                    <button type="button" class="remove-pause-file-btn rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-400 transition hover:border-rose-500/40 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-50">Remove</button>
+                </div>
+            </div>
+            <p class="pause-file-status text-sm [overflow-wrap:anywhere]"></p>
+            <ul class="pause-file-signers space-y-2 empty:hidden"></ul>
+            <p class="pause-file-details font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]"></p>
         </li>
     </template>
 

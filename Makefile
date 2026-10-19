@@ -19,8 +19,8 @@ release: build
 .PHONY: serve
 serve: install $(if $(LOGS),sdk-web-build-debug,sdk-web-build)
 	@echo "Serving frontend with trunk$(if $(LOGS), (debug logs enabled),)..."
-	# --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
-	# it's useful for generating a different serving path
+    # --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
+    # it's useful for generating a different serving path
 	unset NO_COLOR && export PUBLIC_URL=$(PUBLIC_URL) && \
 	trunk serve --dist $(DIST_DIR) --public-url $(PUBLIC_URL) $(if $(PORT),--port $(PORT),)
 

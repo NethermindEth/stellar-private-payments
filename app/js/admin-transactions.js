@@ -32,8 +32,49 @@ const ADMIN_RENT_MARGIN = 100_000;
 /** Ledgers an entry an admin call reads must outlive its build: 24 hours of five-second ledgers, plus an hour. */
 const ADMIN_TX_LEDGERS = 18_000;
 
-/** Returns an RPC client for `rpcUrl`, allowing plain HTTP for a local network. */
-export const rpcServer = (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+export const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+export const shortAddress = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
+
+// Above the RPC's own 25 s limit, so a slow request still gets the RPC's answer.
+const RPC_TIMEOUT_MS = 30_000;
+
+/** The RPC didn't answer. Retrying is the only fix, so callers add no advice. */
+export class NoAnswer extends Error {
+  constructor(cause) {
+    super('The network didn\'t answer. Try again in a moment.', { cause });
+  }
+}
+
+// The SDK reports any failed account read as "not found". getAccount and contract.Client use this.
+class AdminRpcServer extends rpc.Server {
+  async getAccountEntry(address) {
+    const key = xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(address).xdrPublicKey() }));
+    const { entries } = await this.getLedgerEntries(key);
+    if (entries.length === 0) throw new Error(`${shortAddress(address)} isn't an account on this network. Check the address, or fund the account first.`);
+    return entries[0].val.account;
+  }
+}
+
+/** Throws NoAnswer when the RPC doesn't answer: offline, timeout, 5xx, 429, or not JSON. */
+export function rpcServer(rpcUrl) {
+  const server = new AdminRpcServer(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+  // The SDK's `timeout` constructor option is ignored.
+  server.httpClient.defaults.timeout = RPC_TIMEOUT_MS;
+  server.httpClient.interceptors.response.use(
+    (response) => {
+      // No body: a mid-stream timeout or a page that isn't the RPC.
+      if (typeof response.data !== 'object' || response.data === null) throw new NoAnswer(response);
+      return response;
+    },
+    (err) => {
+      const status = err?.response?.status;
+      if (!err?.isAxiosError || (status < 500 && status !== 429)) throw err;
+      throw new NoAnswer(err);
+    },
+  );
+  return server;
+}
 
 /** Reads the network's `max_entry_ttl`: an entry lives at most that many ledgers, counting the current one. */
 export async function maxEntryTtl(server) {
@@ -326,18 +367,44 @@ export async function submitAdminCall({ rpcUrl, networkPassphrase, xdr, server =
   if (sent.status !== 'PENDING' && landed.status === 'NOT_FOUND') {
     throw new Error(`transaction ${sent.status}: ${sent.errorResult?.result.type ?? ''} ${hostError(sent.diagnosticEvents)}`);
   }
-  throw new Error(`transaction ${sent.hash} ${landed.status}: ${landed.resultXdr?.result.type ?? ''} ${hostError(landed.diagnosticEventsXdr)}`);
+  throw landedFailure(sent.hash, landed);
 }
+
+const landedFailure = (hash, landed) => new Error(`transaction ${hash} ${landed.status}: ${landed.resultXdr?.result.type ?? ''} ${hostError(landed.diagnosticEventsXdr)}`);
+
+const SEQUENCE_USED = 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.';
+const TIME_BOUND_PASSED = 'This call has expired. Build it again.';
+
+/** Why the card's call can't land any more, or null. A co-signer may have sent it already. */
+export async function deadCall({ server, envelope, networkPassphrase, account, now, kind }) {
+  const tx = TransactionBuilder.fromXdr(envelope, networkPassphrase);
+  // Sequence number not used yet.
+  if (BigInt(account.seqNum) < BigInt(tx.sequence)) {
+    return Number(tx.timeBounds.maxTime) * 1000 <= now ? { reason: TIME_BOUND_PASSED, landed: false } : null;
+  }
+  const hash = hex(tx.hash());
+  // About two ledger closes: a load-balanced node can lag the account read.
+  const landed = await server.pollTransaction(hash, { attempts: 10 });
+  if (landed.status === 'SUCCESS') return { reason: 'This call already went through.', landed: true };
+  if (landed.status === 'FAILED') return { reason: `This call went through and failed: ${explainFailure(landedFailure(hash, landed), kind)}`, landed: false };
+  return { reason: SEQUENCE_USED, landed: false };
+}
+
+export const repointsTo = (call, { pool, method, tree, source }) => call.contract === pool
+  && call.method === method
+  && call.args[0] === tree
+  && (source === undefined || call.source === source);
 
 // Tested in order: `tx_bad_auth_extra` before `tx_bad_auth`, which also matches it.
 const NETWORK_REFUSALS = [
   [/tx_?bad_?auth_?extra/i, 'The transaction carries a signature it does not use: more than the threshold needs, one signer twice, or a key that is not a signer. Build the call again and collect the threshold\'s signatures, one from each signer.'],
   [/tx_?bad_?auth/i, 'The transaction lacks signatures. Collect more from the admin account\'s signers.'],
-  [/tx_?bad_?seq/i, 'Another admin transaction used the sequence number first. Build the call again.'],
-  [/tx_?too_?late/i, 'The transaction\'s time bound has passed. Build the call again.'],
+  [/tx_?bad_?seq/i, SEQUENCE_USED],
+  [/tx_?too_?late/i, TIME_BOUND_PASSED],
   [/TRY_AGAIN_LATER|NOT_FOUND|DUPLICATE/, 'The network has not confirmed the transaction yet. Check the contract before building the call again.'],
   [/Error\(Auth, InvalidAction\)/, 'The transaction\'s source is not the contract\'s admin.'],
   [/Error\(Budget, ExceededLimit\)/, 'The call needs more resources than one transaction allows. For a blocklist insert, add fewer keys at a time.'],
+  [/tx_?insufficient_?balance/i, 'The paying account doesn\'t have enough XLM for the fee. Add some and try again.'],
 ];
 
 /**
