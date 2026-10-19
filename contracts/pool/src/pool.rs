@@ -518,12 +518,18 @@ impl PoolContract {
             return Err(Error::WrongExtHash);
         }
 
-        // 5. Public amount check
+        // 5. Public amount and withdrawal range check
         let expected_public_amount =
             Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
+        let withdrawal_amount = if ext_data.ext_amount < zero {
+            let abs = zero.sub(&ext_data.ext_amount);
+            Some(Self::i256_to_i128_nonneg(env, &abs)?)
+        } else {
+            None
+        };
 
         // 6. ASP root validation
         let policy_flags = Self::load_policy_flags(env)?;
@@ -569,9 +575,7 @@ impl PoolContract {
 
         if let Some(amount) = deposit_amount {
             token_client.transfer(sender, &this, &amount);
-        } else if ext_data.ext_amount < zero {
-            let abs = zero.sub(&ext_data.ext_amount);
-            let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
+        } else if let Some(amount) = withdrawal_amount {
             token_client.transfer(&this, &ext_data.recipient, &amount);
         }
 

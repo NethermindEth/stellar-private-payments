@@ -1343,9 +1343,9 @@ fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
     assert_eq!(err, Ok(Error::WrongExtAmount));
 }
 
-/// This is the only bound on the public amount: the circuit's balance equation
-/// holds in the field, and only the outputs are range-checked. Policy flags 0
-/// keep the ASP root checks from answering `InvalidProof` first.
+/// Withdrawals are bounded both by `calculate_public_amount` (`< 2^248`) and by
+/// `i256_to_i128_nonneg` (`<= i128::MAX`) before proof verification. Policy
+/// flags 0 keep the ASP root checks from answering `InvalidProof` first.
 #[test]
 fn transact_bounds_withdrawals_below_two_to_the_248() {
     let env = test_env();
@@ -1357,22 +1357,24 @@ fn transact_bounds_withdrawals_below_two_to_the_248() {
 
     let r = bn256_modulus(&env);
     let cases = [
-        // −2^248, with the public amount it would map to without the bound.
+        // −2^248, refused by `calculate_public_amount`.
         (
             I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 0),
             r.sub(&U256::from_parts(&env, 0x0100_0000_0000_0000, 0, 0, 0)),
             Error::WrongExtAmount,
         ),
-        // −(2^248 − 1), which reaches the verifier.
+        // −2^127 (−i128::MAX − 1), which passes `calculate_public_amount` and
+        // is refused by `i256_to_i128_nonneg` before proof verification.
         (
-            I256::from_parts(&env, -0x0100_0000_0000_0000, 0, 0, 1),
-            r.sub(&U256::from_parts(
-                &env,
-                0x00FF_FFFF_FFFF_FFFF,
-                u64::MAX,
-                u64::MAX,
-                u64::MAX,
-            )),
+            I256::from_parts(&env, -1, u64::MAX, 0x8000_0000_0000_0000, 0),
+            r.sub(&U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0)),
+            Error::WrongExtAmount,
+        ),
+        // −(2^127 − 1) (−i128::MAX), which passes both bounds and reaches the
+        // verifier.
+        (
+            I256::from_i128(&env, -i128::MAX),
+            r.sub(&U256::from_u128(&env, i128::MAX as u128)),
             Error::InvalidProof,
         ),
     ];
