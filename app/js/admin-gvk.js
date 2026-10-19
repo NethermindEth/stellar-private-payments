@@ -620,7 +620,7 @@ function readFilters() {
     return Number.isFinite(n) ? n : null;
   };
 
-  // Comma-separated: matches a note whose PK contains ANY of the given terms.
+  // Comma-separated: matches a note whose PK or registered address contains ANY of the given terms.
   const pkTerms = (filterPkEl?.value ?? '')
     .split(',')
     .map((term) => normalizeFieldKey(term))
@@ -659,7 +659,7 @@ function noteMatchesAmount(auditedNote, filters) {
 function noteMatchesAmountAndPk(auditedNote, filters) {
   if (filters.pk) {
     const pk = normalizeFieldKey(auditedNote?.note?.pk);
-    if (!pk || !filters.pk.some((term) => pk.includes(term))) return false;
+    if (!pk || !pkMatchesTerms(pk, filters.pk)) return false;
   }
   return noteMatchesAmount(auditedNote, filters);
 }
@@ -1025,8 +1025,10 @@ function buildPkGraph(rows, filters) {
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
+/** A term matches the normalized PK or any address that registered it. */
 function pkMatchesTerms(pk, terms) {
-  return terms.some((term) => pk.includes(term));
+  const addresses = ownerAddresses(pk).map((address) => address.toLowerCase());
+  return terms.some((term) => pk.includes(term) || addresses.some((address) => address.includes(term)));
 }
 
 /**
@@ -2368,6 +2370,7 @@ function slotToCsvRow(txIndex, tx, side, slot) {
     slot.index,
     slot.audited ? parseFieldAmount(slot.audited.note?.amount).toString() : '',
     slot.audited?.note?.pk ?? '',
+    ownerAddress(slot.audited?.note?.pk) ?? '',
     slot.audited?.commitment ?? slot.commitment ?? '',
     side === 'input' ? (slot.nullifier ?? '') : '',
   ];
@@ -2375,7 +2378,7 @@ function slotToCsvRow(txIndex, tx, side, slot) {
 
 function buildNotesCsvRows() {
   // CSV keeps the legacy amount_stroops name; all amount columns contain token base units.
-  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'commitment', 'nullifier'];
+  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'owner_address', 'commitment', 'nullifier'];
   const rows = [header];
 
   for (const { tx, index } of state.rows) {
@@ -2393,6 +2396,7 @@ function noteToCsvRow(note) {
     note.spentTxIndex ?? '',
     note.spentLedger ?? '',
     note.audited?.note?.pk ?? '',
+    ownerAddress(note.audited?.note?.pk) ?? '',
     note.audited?.note?.amount ? parseFieldAmount(note.audited.note.amount).toString() : '',
     note.commitment ?? '',
     noteStatus(note).toLowerCase(),
@@ -2404,24 +2408,26 @@ function noteToCsvRow(note) {
 function buildNoteViewCsvRows() {
   const header = [
     'created_tx_index', 'created_ledger', 'spent_tx_index', 'spent_ledger',
-    'pk', 'amount_stroops', 'commitment', 'status', 'nullifier',
+    'pk', 'owner_address', 'amount_stroops', 'commitment', 'status', 'nullifier',
   ];
   return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
 }
 
 /** One row per transfer edge, plus one row per PK for its deposit/withdraw totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
 function buildPkGraphCsvRows() {
-  const header = ['kind', 'from_pk', 'to_pk', 'count', 'amount_stroops'];
+  const header = ['kind', 'from_pk', 'from_address', 'to_pk', 'to_address', 'count', 'amount_stroops'];
   const { nodes, edges } = fullPkGraph();
   const rows = [header];
+  const addressOf = (pk) => (pk ? ownerAddress(pk) ?? '' : '');
+  const pushRow = (kind, from, to, count, amount) => {
+    rows.push([kind, from, addressOf(from), to, addressOf(to), count, amount.toString()]);
+  };
 
-  for (const edge of edges) {
-    rows.push(['transfer', edge.from, edge.to, edge.count, edge.amount.toString()]);
-  }
+  for (const edge of edges) pushRow('transfer', edge.from, edge.to, edge.count, edge.amount);
   for (const node of nodes) {
-    if (node.receivedCount > 0) rows.push(['received', '', node.pk, node.receivedCount, node.received.toString()]);
-    if (node.depositCount > 0) rows.push(['deposit', '', node.pk, node.depositCount, node.deposited.toString()]);
-    if (node.withdrawCount > 0) rows.push(['withdraw', node.pk, '', node.withdrawCount, node.withdrawn.toString()]);
+    if (node.receivedCount > 0) pushRow('received', '', node.pk, node.receivedCount, node.received);
+    if (node.depositCount > 0) pushRow('deposit', '', node.pk, node.depositCount, node.deposited);
+    if (node.withdrawCount > 0) pushRow('withdraw', node.pk, '', node.withdrawCount, node.withdrawn);
   }
 
   return rows;
