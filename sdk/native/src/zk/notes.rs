@@ -25,6 +25,7 @@ pub struct DerivedUserNote {
 ///
 /// Returns `Ok(None)` if:
 /// - the ciphertext isn't for this account (decryption fails), or
+/// - the ciphertext is malformed, or
 /// - the decrypted plaintext doesn't match the on-chain commitment, or
 /// - the note is a dummy 0-amount output.
 pub fn try_decrypt_and_derive_user_note(

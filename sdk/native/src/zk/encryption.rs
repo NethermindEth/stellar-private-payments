@@ -292,7 +292,8 @@ pub fn encrypt_output_note(
 /// Decrypt output note data from on-chain storage.
 ///
 /// Returns `Ok(None)` if the ciphertext is not addressed to the given private
-/// key.
+/// key or does not hold a well-formed note. The output is chosen by whoever
+/// submits the transaction, so malformed contents must not fail the scan.
 ///
 /// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
 pub fn decrypt_output_note(
@@ -403,7 +404,7 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
 ///
 /// # Returns
 /// - Success: the decrypted plaintext
-/// - `None`: the note was not addressed to us
+/// - `None`: the data is too short or the note was not addressed to us
 fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
     if private_key_bytes.len() != 32 {
         return Err(anyhow!("Private key must be 32 bytes"));
@@ -412,7 +413,7 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) +
     // tag (16) = 120
     if encrypted_data.len() < 120 {
-        return Err(anyhow!("Encrypted data too short"));
+        return Ok(None);
     }
 
     // Extract components
@@ -697,6 +698,15 @@ mod tests {
 
         assert_eq!(got.0, amount);
         assert_eq!(got.1.to_le_bytes(), blinding.to_le_bytes());
+        Ok(())
+    }
+
+    #[test]
+    fn test_decrypt_output_note_ignores_malformed_outputs() -> Result<()> {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))?;
+
+        assert!(decrypt_output_note(&keys.private, &[]).is_ok_and(|n| n.is_none()));
+        assert!(decrypt_output_note(&keys.private, &[1, 2, 3]).is_ok_and(|n| n.is_none()));
         Ok(())
     }
 }
