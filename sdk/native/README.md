@@ -25,14 +25,12 @@ cargo test -p stellar-private-payments --lib
 cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-linux-musl
 ```
 
-Cargo needs a C compiler and `ar` (plus `musl-gcc` for musl). The build
-script downloads SQLite3MC 2.5.1 sources with a Rust HTTP client, then verifies
-their checksums and caches them. WASM builds compile the same
-pinned backend automatically with Clang and an LLVM-compatible archiver; plain `cargo build --target wasm32-unknown-unknown`
-requires no generated SQLite configuration.
-
-SQLite3MC is MIT-licensed; its required attribution is shipped in
-`SQLite3MC-LICENSE.txt`.
+Cargo needs a C compiler and `ar` (plus `musl-gcc` for musl). Native builds
+compile the pinned SQLite3MC 2.5.1 amalgamation from the `sqlite3mc-src` crate;
+WASM builds compile the same pinned backend via `sqlite-wasm-rs` (`sqlite3mc`
+feature) using Clang and an LLVM-compatible archiver. Plain
+`cargo build --target wasm32-unknown-unknown` requires no generated SQLite
+configuration.
 
 Including the backend does not encrypt a database automatically. Plaintext and
 explicit encrypted creation remain separate API choices.

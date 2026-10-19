@@ -127,7 +127,7 @@ Web Workers are used for the provided storage (SQlite OPFS) and prover implement
 
 ## Build & publish (maintainers)
 
-Every browser build includes the pinned SQLite3 Multiple Ciphers backend; plain Cargo builds compile it automatically through the SDK build script. No generated configuration or extra `--config` argument is needed. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Every persistent storage open requires a caller-owned key provider; keyless opens are rejected. The demo app obtains this key from a password dialog, using PBKDF2-SHA-256 and AES-256-GCM to unwrap a random database key. Storage unlocking does not request a wallet signature.
+Every browser build includes the pinned SQLite3 Multiple Ciphers backend compiled by `sqlite-wasm-rs` (`sqlite3mc` feature). No generated configuration or extra `--config` argument is needed. This requires Clang and an archive tool such as `llvm-ar` or `ar`. Every persistent storage open requires a caller-owned key provider; keyless opens are rejected. The demo app obtains this key from a password dialog, using PBKDF2-SHA-256 and AES-256-GCM to unwrap a random database key. Storage unlocking does not request a wallet signature.
 
 Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
