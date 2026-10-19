@@ -4,6 +4,9 @@ use soroban_sdk::{
     Address, Bytes, Env, String, contract, contractevent, contractimpl, contracttype,
 };
 
+/// Length in bytes of an X-Wing (X25519 + ML-KEM-768) HPKE encapsulation key.
+const ENCRYPTION_KEY_LEN: u32 = 1216;
+
 /// User account registration data
 ///
 /// Used for registering a user's public key to enable encrypted communication
@@ -14,7 +17,7 @@ use soroban_sdk::{
 pub struct Account {
     /// Owner address of the account
     pub owner: Address,
-    /// X25519 encryption public key for encrypting note data (32 bytes)
+    /// X-Wing (X25519 + ML-KEM-768) HPKE public key for encrypting note data
     pub encryption_key: Bytes,
     /// BN254 note public key for creating commitments (32 bytes)
     pub note_key: Bytes,
@@ -24,7 +27,8 @@ pub struct Account {
 ///
 /// This event allows other users to discover keys for sending private
 /// transfers. Two key types are required:
-/// - encryption_key: X25519 key for encrypting note data (amount, blinding)
+/// - encryption_key: X-Wing (X25519 + ML-KEM-768) HPKE key for encrypting note
+///   data (amount, blinding)
 /// - note_key: BN254 key for creating commitments in the ZK circuit
 #[contractevent]
 #[derive(Clone)]
@@ -32,7 +36,7 @@ pub struct PublicKeyEvent {
     /// Address of the account owner
     #[topic]
     pub owner: Address,
-    /// X25519 encryption public key
+    /// X-Wing (X25519 + ML-KEM-768) HPKE encryption public key
     pub encryption_key: Bytes,
     /// BN254 note public key
     pub note_key: Bytes,
@@ -82,7 +86,7 @@ impl PublicKeyRegistry {
     pub fn register(env: Env, account: Account) {
         account.owner.require_auth();
         soroban_utils::extend_instance(&env);
-        assert_eq!(account.encryption_key.len(), 32);
+        assert_eq!(account.encryption_key.len(), ENCRYPTION_KEY_LEN);
         assert_eq!(account.note_key.len(), 32);
 
         let key = DataKey::Registration(account.owner.clone());

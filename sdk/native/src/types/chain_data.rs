@@ -284,7 +284,7 @@ pub struct PublicKeyEvent {
     pub id: String,
     /// Address of the account owner
     pub owner: String,
-    /// X25519 encryption public key
+    /// Encryption public key
     pub encryption_key: EncryptionPublicKey,
     /// BN254 note public key
     pub note_key: NotePublicKey,

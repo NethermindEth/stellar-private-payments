@@ -148,7 +148,7 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //     /// Address of the account owner
 //     #[topic]
 //     pub owner: Address,
-//     /// X25519 encryption public key
+//     /// Encryption public key
 //     pub encryption_key: Bytes,
 //     /// BN254 note public key
 //     pub note_key: Bytes,

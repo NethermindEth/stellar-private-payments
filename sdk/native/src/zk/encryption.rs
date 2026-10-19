@@ -21,9 +21,13 @@
 //!                   ├── SHA-256("privacy-pool/note-key/v2" || <sig>)
 //!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
 //!                   │
-//!                   └── SHA-256("privacy-pool/encryption-key/v2" || <sig>)
-//!                              └── X25519 Encryption Keypair
+//!                   └── SHA-256("privacy-pool/encryption-key/v3" || <sig>)
+//!                              └── X-Wing (X25519 + ML-KEM-768) HPKE Keypair
 //! ```
+//! Notes are encrypted with HPKE (RFC 9180, base mode) using the hybrid X-Wing
+//! KEM, HKDF-SHA256 and ChaCha20-Poly1305, so a recipient's long-lived
+//! on-chain key stays safe against harvest-now-decrypt-later attacks by a
+//! quantum adversary as long as either X25519 or ML-KEM-768 holds.
 //! Note: the original scheme had separate signatures for spending and
 //! encryption keys. To improve UX we reduced to a single signature derivation
 //! accepting some associated risks like a user signing the message at a scam
@@ -40,10 +44,18 @@ use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
-use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use ed25519_dalek::{Signature as DalekSignature, VerifyingKey};
+use hpke::{
+    Deserializable, OpModeR, OpModeS, Serializable,
+    aead::ChaCha20Poly1305,
+    kdf::HkdfSha256,
+    kem::{Kem as _, XWing},
+    single_shot_open, single_shot_seal_with_rng,
+};
+use rand_core::{TryCryptoRng, TryRng};
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, StaticSecret};
+use std::convert::Infallible;
+use zeroize::{Zeroize, Zeroizing};
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
@@ -95,7 +107,25 @@ pub fn verify_owner_signature(
 }
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
+
 const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
+
+/// HPKE `info` binding every note ciphertext to this scheme and version.
+const NOTE_HPKE_INFO: &[u8] = b"privacy-pool/note-encryption/v2";
+
+/// Length of the HPKE encapsulated key (X-Wing ciphertext) prefixing each
+/// encrypted output.
+const ENCAPPED_KEY_LEN: usize = 1120;
+
+/// Plaintext length: `amount (16) || blinding (32)`.
+const NOTE_PLAINTEXT_LEN: usize = 48;
+
+/// ChaCha20-Poly1305 authentication tag length.
+const AEAD_TAG_LEN: usize = 16;
+
+/// Exact length of an encrypted note output:
+/// `encapsulated key (1120) || ciphertext (48) || tag (16)`.
+pub const ENCRYPTED_OUTPUT_LEN: usize = ENCAPPED_KEY_LEN + NOTE_PLAINTEXT_LEN + AEAD_TAG_LEN;
 const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v2";
 
 /// Keypairs derivation
@@ -133,55 +163,53 @@ pub fn derive_membership_blinding(
         MEMBERSHIP_BLINDING_DOMAIN,
         network_context.as_bytes(),
     );
-    let field = Fr::from_le_bytes_mod_order(&key);
+    let mut field = Fr::from_le_bytes_mod_order(&key[..]);
 
-    let mut result = [0u8; 32];
+    let mut result = Zeroizing::new([0u8; 32]);
     field
         .serialize_compressed(&mut result[..])
         .expect("Serialization failed");
-    Field::try_from_le_bytes(result)
+    field.zeroize();
+    Field::try_from_le_bytes(*result)
 }
 
-/// Encryption key derivation (X25519). Used for off-chain note
-/// encryption/decryption Derive X25519 encryption keypair deterministically
-/// from a Freighter signature.
+/// Encryption key derivation (X-Wing). Used for off-chain note
+/// encryption/decryption. Derives the X-Wing (X25519 + ML-KEM-768) HPKE keypair
+/// deterministically from a Freighter signature.
 ///
 /// This keypair is used for encrypting note data (amount, blinding) so that
-/// only the recipient can decrypt it. The encryption scheme is
-/// X25519-XSalsa20-Poly1305.
+/// only the recipient can decrypt it. The encryption scheme is HPKE base mode
+/// with X-Wing, HKDF-SHA256 and ChaCha20-Poly1305.
 ///
 /// # Derivation
 /// ```text
-/// signature (64 bytes) → SHA-256 → 32-byte seed → X25519 keypair
+/// signature (64 bytes) → SHA-256 → 32-byte ikm → HPKE DeriveKeyPair (X-Wing)
 /// ```
+/// The private key is the 32-byte X-Wing decapsulation key (a seed that
+/// expands to both the ML-KEM-768 and X25519 keys). The public key is the
+/// 1216-byte X-Wing encapsulation key.
 ///
 /// # Arguments
 /// * `signature` - Stellar Ed25519 signature from signing
 ///   [`key_derivation_message`]
-///
-/// # Returns
-/// 64 bytes: `[public_key (32), private_key (32)]`
 fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<EncryptionKeyPair> {
     let KeyDerivationSignature(signature) = signature;
     if signature.len() != 64 {
         return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
-    let seed = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
+    let ikm = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
+    // private has zeroize on drop for its internal type
+    let (private, public) = XWing::derive_keypair(&ikm[..]);
 
-    // Generate X25519 keypair from seed
-    let mut secret_bytes = [0u8; 32];
-    secret_bytes.copy_from_slice(&seed[..]);
+    let mut private_bytes = Zeroizing::new([0u8; 32]);
+    private_bytes.copy_from_slice(&private.to_bytes());
+    let public_bytes = public.to_bytes().to_vec();
 
-    let secret = StaticSecret::from(secret_bytes);
-    let public = PublicKey::from(&secret);
-
-    let keypair = EncryptionKeyPair {
-        private: EncryptionPrivateKey(secret.to_bytes()),
-        public: EncryptionPublicKey(public.to_bytes()),
-    };
-
-    Ok(keypair)
+    Ok(EncryptionKeyPair {
+        private: EncryptionPrivateKey(*private_bytes),
+        public: EncryptionPublicKey::try_from(public_bytes)?,
+    })
 }
 
 /// Derive private key (BN254 scalar) deterministically from a Freighter
@@ -212,36 +240,38 @@ fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePri
     let key = hash_signature_with_domain(signature, NOTE_KEY_DOMAIN);
 
     // Reduce to BN254 module
-    let field = Fr::from_le_bytes_mod_order(&key[..]);
+    let mut field = Fr::from_le_bytes_mod_order(&key[..]);
 
     // Serialize into bytes
-    let mut result = [0u8; 32];
+    let mut result = Zeroizing::new([0u8; 32]);
     field
         .serialize_compressed(&mut result[..])
         .expect("Serialization failed");
+    field.zeroize();
 
-    Ok(NotePrivateKey(result))
+    Ok(NotePrivateKey(*result))
 }
 
-fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> [u8; 32] {
+/// Derived key material, wiped on drop.
+fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> Zeroizing<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update(signature);
-    hasher.finalize().into()
+    Zeroizing::new(hasher.finalize().into())
 }
 
 fn hash_signature_with_domain_and_context(
     signature: &[u8],
     domain: &[u8],
     context: &[u8],
-) -> [u8; 32] {
+) -> Zeroizing<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update([0u8]);
     hasher.update(context);
     hasher.update([0u8]);
     hasher.update(signature);
-    hasher.finalize().into()
+    Zeroizing::new(hasher.finalize().into())
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -321,86 +351,140 @@ pub fn decrypt_output_note(
     Ok(Some((amount, blinding)))
 }
 
-/// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
+/// Randomness for one HPKE encapsulation, drawn from `getrandom` up front.
+///
+/// `hpke` wants an infallible `CryptoRng`, while `getrandom` can fail. Filling
+/// a small buffer first keeps failures an ordinary `Err` instead of a panic,
+/// and makes native and wasm builds use the same `getrandom` backend as the
+/// rest of this module. X-Wing base-mode encapsulation consumes 64 bytes.
+struct PrefilledRng {
+    buf: [u8; Self::LEN],
+    pos: usize,
+}
+
+impl PrefilledRng {
+    const LEN: usize = 128;
+
+    fn new() -> Result<Self> {
+        let mut buf = [0u8; Self::LEN];
+        getrandom::getrandom(&mut buf)
+            .map_err(|e| anyhow!("Failed to generate encapsulation randomness: {}", e))?;
+        Ok(Self { buf, pos: 0 })
+    }
+}
+
+impl Drop for PrefilledRng {
+    fn drop(&mut self) {
+        self.buf.zeroize();
+    }
+}
+
+impl TryRng for PrefilledRng {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+        let mut b = [0u8; 4];
+        self.try_fill_bytes(&mut b)?;
+        Ok(u32::from_le_bytes(b))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+        let mut b = [0u8; 8];
+        self.try_fill_bytes(&mut b)?;
+        Ok(u64::from_le_bytes(b))
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
+        let end = self
+            .pos
+            .checked_add(dst.len())
+            .filter(|end| *end <= Self::LEN)
+            .expect("HPKE encapsulation drew more randomness than prefilled");
+        dst.copy_from_slice(&self.buf[self.pos..end]);
+        self.pos = end;
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for PrefilledRng {}
+
+/// Encrypt note data with HPKE (RFC 9180, base mode) to a recipient's X-Wing
+/// (X25519 + ML-KEM-768) public key.
 ///
 /// When sending a note to someone, we encrypt the sensitive data (amount and
-/// blinding) with their X25519 public key. Only they can decrypt it.
+/// blinding) with their static on-chain public key. Only they can decrypt it.
+///
+/// Suite: KEM = X-Wing, KDF = HKDF-SHA256, AEAD = ChaCha20-Poly1305. The AEAD
+/// key and nonce come from the HPKE key schedule, so no nonce is transmitted.
+/// There is no `aad`: the note is bound to its commitment by the recipient
+/// re-computing the commitment from the decrypted amount and blinding.
 ///
 /// # Output Format
 /// ```text
-/// [ephemeral_pubkey (32)] [nonce (24)] [ciphertext (48) + tag (16)]
-/// Total: 120 bytes minimum
+/// [encapsulated_key (1120)] [ciphertext (48) + tag (16)]
+/// Total: 1184 bytes
 /// ```
 ///
 /// # Arguments
-/// * `recipient_pubkey_bytes` - Recipient's X25519 encryption public key (32
+/// * `recipient_pubkey_bytes` - Recipient's X-Wing encryption public key (1216
 ///   bytes)
 /// * `plaintext` - Note data: `[amount (16 bytes LE)] [blinding (32 bytes)]` =
 ///   48 bytes
 ///
 /// # Returns
-/// Encrypted data (120 bytes)
+/// Encrypted data ([`ENCRYPTED_OUTPUT_LEN`] bytes)
 fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-    if recipient_pubkey_bytes.len() != 32 {
-        return Err(anyhow!("Recipient public key must be 32 bytes"));
+    if recipient_pubkey_bytes.len() != EncryptionPublicKey::LEN {
+        return Err(anyhow!(
+            "Recipient public key must be {} bytes",
+            EncryptionPublicKey::LEN
+        ));
     }
-    if plaintext.len() != 48 {
+    if plaintext.len() != NOTE_PLAINTEXT_LEN {
         return Err(anyhow!(
             "Plaintext must be 48 bytes (16 amount + 32 blinding)"
         ));
     }
 
-    // Generate ephemeral secret key using getrandom directly
-    let mut ephemeral_bytes = [0u8; 32];
-    getrandom::getrandom(&mut ephemeral_bytes)
-        .map_err(|e| anyhow!("Failed to generate ephemeral key: {}", e))?;
+    let recipient_public = <XWing as hpke::kem::Kem>::PublicKey::from_bytes(recipient_pubkey_bytes)
+        .map_err(|e| anyhow!("Invalid recipient public key: {e}"))?;
 
-    let ephemeral_secret = StaticSecret::from(ephemeral_bytes);
-    let ephemeral_public = PublicKey::from(&ephemeral_secret);
+    let mut rng = PrefilledRng::new()?;
+    let (encapped_key, ciphertext) =
+        single_shot_seal_with_rng::<ChaCha20Poly1305, HkdfSha256, XWing>(
+            &OpModeS::Base,
+            &recipient_public,
+            NOTE_HPKE_INFO,
+            plaintext,
+            &[],
+            &mut rng,
+        )
+        .map_err(|e| anyhow!("Encryption failed: {e}"))?;
 
-    // ECDH: derive shared secret
-    let recipient_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(recipient_pubkey_bytes)
-            .map_err(|_| anyhow!("Invalid recipient public key"))?,
-    );
-    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
-
-    // Setup XSalsa20Poly1305 cipher with shared secret
-    let cipher = XSalsa20Poly1305::new(shared_secret.as_bytes().into());
-
-    // Generate random nonce (24 bytes for XSalsa20) using getrandom
-    let mut nonce_bytes = [0u8; 24];
-    getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| anyhow!("Failed to generate nonce: {}", e))?;
-    let nonce = Nonce::from(nonce_bytes);
-
-    // Encrypt plaintext
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|e| anyhow!("Encryption failed: {:?}", e))?;
-
-    // Pack: [ephemeral_pubkey (32)] [nonce (24)] [ciphertext + tag]
-    // 32 (pubkey) + 24 (nonce) = 56 bytes overhead
-    let capacity = ciphertext
-        .len()
-        .checked_add(56)
-        .expect("Integer overflow on encryption output size");
-    let mut result = Vec::with_capacity(capacity);
-    result.extend_from_slice(ephemeral_public.as_bytes());
-    result.extend_from_slice(&nonce_bytes);
+    let mut result = Vec::with_capacity(ENCRYPTED_OUTPUT_LEN);
+    result.extend_from_slice(&encapped_key.to_bytes());
     result.extend_from_slice(&ciphertext);
+    if result.len() != ENCRYPTED_OUTPUT_LEN {
+        return Err(anyhow!(
+            "Encrypted output must be {} bytes, got {}",
+            ENCRYPTED_OUTPUT_LEN,
+            result.len()
+        ));
+    }
 
     Ok(result)
 }
 
-/// Decrypt note data using X25519-XSalsa20-Poly1305.
+/// Decrypt note data with HPKE (RFC 9180, base mode) and the X-Wing private
+/// key.
 ///
 /// When scanning for notes addressed to us, we try to decrypt each encrypted
 /// output. If decryption succeeds, the note was sent to us.
 ///
 /// # Arguments
-/// * `private_key_bytes` - Our X25519 encryption private key (32 bytes)
-/// * `encrypted_data` - Encrypted data from on-chain event (120+ bytes)
+/// * `private_key_bytes` - Our X-Wing encryption private key (32 bytes)
+/// * `encrypted_data` - Encrypted data from on-chain event (exactly
+///   [`ENCRYPTED_OUTPUT_LEN`] bytes)
 ///
 /// # Returns
 /// - Success: `[amount (16 bytes LE)] [blinding (32 bytes)]` = 48 bytes
@@ -410,44 +494,32 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
         return Err(anyhow!("Private key must be 32 bytes"));
     }
 
-    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) +
-    // tag (16) = 120
-    if encrypted_data.len() < 120 {
-        return Err(anyhow!("Encrypted data too short"));
+    if encrypted_data.len() != ENCRYPTED_OUTPUT_LEN {
+        return Err(anyhow!(
+            "Encrypted data must be {} bytes, got {}",
+            ENCRYPTED_OUTPUT_LEN,
+            encrypted_data.len()
+        ));
     }
 
-    // Extract components
-    let ephemeral_pubkey = &encrypted_data[0..32];
-    let nonce_bytes = &encrypted_data[32..56];
-    let ciphertext_with_tag = &encrypted_data[56..];
+    let (encapped_key_bytes, ciphertext_with_tag) = encrypted_data.split_at(ENCAPPED_KEY_LEN);
 
-    // Setup our private key
-    let our_secret = StaticSecret::from(
-        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| anyhow!("Invalid private key"))?,
-    );
+    let our_secret = <XWing as hpke::kem::Kem>::PrivateKey::from_bytes(private_key_bytes)
+        .map_err(|e| anyhow!("Invalid private key: {e}"))?;
+    let encapped_key = <XWing as hpke::kem::Kem>::EncappedKey::from_bytes(encapped_key_bytes)
+        .map_err(|e| anyhow!("Invalid encapsulated key: {e}"))?;
 
-    // ECDH: derive shared secret
-    let ephemeral_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(ephemeral_pubkey)
-            .map_err(|_| anyhow!("Invalid ephemeral public key"))?,
-    );
-    let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
-
-    // Setup XSalsa20Poly1305 cipher
-    let cipher = XSalsa20Poly1305::new(shared_secret.as_bytes().into());
-
-    // Create nonce from bytes (convert to array first)
-    let mut nonce_array = [0u8; 24];
-    nonce_array.copy_from_slice(nonce_bytes);
-    let nonce = Nonce::from(nonce_array);
-
-    // Decrypt
-    match cipher.decrypt(&nonce, ciphertext_with_tag) {
+    match single_shot_open::<ChaCha20Poly1305, HkdfSha256, XWing>(
+        &OpModeR::Base,
+        &our_secret,
+        &encapped_key,
+        NOTE_HPKE_INFO,
+        ciphertext_with_tag,
+        &[],
+    ) {
         Ok(plaintext) => Ok(plaintext),
-        Err(_) => {
-            // Decryption failed - this note output is not for us
-            Ok(Vec::new()) // Return empty vec
-        }
+        // Decryption failed - this note output is not for us
+        Err(_) => Ok(Vec::new()),
     }
 }
 
@@ -592,7 +664,25 @@ mod tests {
         assert_eq!(keys1.private.0, keys2.private.0);
         assert_eq!(keys1.public.0, keys2.public.0);
         assert_eq!(keys1.private.0.len(), 32);
-        assert_eq!(keys1.public.0.len(), 32);
+        assert_eq!(keys1.public.0.len(), EncryptionPublicKey::LEN);
+    }
+
+    /// Regression pin (not an independent vector) of the wallet-signature to
+    /// X-Wing keypair derivation. A change here
+    /// silently orphans every note encrypted to existing registry keys, so it
+    /// must be a deliberate, versioned change (see `ENCRYPTION_KEY_DOMAIN`).
+    #[test]
+    fn test_derive_keypair_known_answer() {
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
+        let keys = derive_keypair_from_signature(&signature).expect("Derivation failed");
+        assert_eq!(
+            hex::encode(Sha256::digest(keys.private.0)),
+            "979232fcab86fa0bb1a5015669cbec3bf1317bd7b002c6b158c0b6e1932016dd"
+        );
+        assert_eq!(
+            hex::encode(Sha256::digest(keys.public.0)),
+            "26fedd66dc925ed8a979350c9d2e978e8c0a03ff41405b6d84bb1a12f20230e2"
+        );
     }
 
     #[test]
@@ -639,12 +729,13 @@ mod tests {
         // 16 bytes amount + 32 bytes blinding = 48 bytes
         let amount = [10u8; 16];
         let blinding = [20u8; 32];
-        let mut plaintext = Vec::with_capacity(40);
+        let mut plaintext = Vec::with_capacity(NOTE_PLAINTEXT_LEN);
         plaintext.extend_from_slice(&amount);
         plaintext.extend_from_slice(&blinding);
 
         let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
-        assert!(encrypted.len() >= 112);
+        assert_eq!(encrypted.len(), ENCRYPTED_OUTPUT_LEN);
+        assert_eq!(ENCRYPTED_OUTPUT_LEN, 1184);
 
         let decrypted = decrypt_note_data(priv_key, &encrypted).expect("Decryption failed");
         assert_eq!(decrypted, plaintext);
@@ -683,9 +774,55 @@ mod tests {
         let res = encrypt_note_data(pub_key, &[0u8; 39]);
         assert!(res.is_err());
 
-        // Invalid pubkey length
+        // Invalid pubkey length, including a legacy 32-byte X25519 key
         let res = encrypt_note_data(&[0u8; 31], &[0u8; 48]);
         assert!(res.is_err());
+        let res = encrypt_note_data(&[0u8; 32], &[0u8; 48]);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_rejects_wrong_ciphertext_length() {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![5u8; 64]))
+            .expect("Derivation failed");
+        // The legacy 120-byte X25519 layout and truncated or padded outputs.
+        for len in [0, 120, ENCRYPTED_OUTPUT_LEN - 1, ENCRYPTED_OUTPUT_LEN + 1] {
+            let res = decrypt_note_data(keys.private.as_ref(), &vec![0u8; len]);
+            assert!(res.is_err(), "length {len} must be rejected");
+        }
+        assert!(decrypt_note_data(&[0u8; 31], &[0u8; ENCRYPTED_OUTPUT_LEN]).is_err());
+    }
+
+    #[test]
+    fn test_tampered_ciphertext_is_not_decrypted() {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))
+            .expect("Derivation failed");
+        let plaintext = [7u8; NOTE_PLAINTEXT_LEN];
+        let encrypted = encrypt_note_data(keys.public.as_ref(), &plaintext).expect("encrypt");
+
+        // One flipped bit in the encapsulated key, the AEAD ciphertext and the
+        // tag must each yield "not for us" rather than altered plaintext.
+        for idx in [
+            0,
+            ENCAPPED_KEY_LEN - 1,
+            ENCAPPED_KEY_LEN,
+            ENCRYPTED_OUTPUT_LEN - 1,
+        ] {
+            let mut tampered = encrypted.clone();
+            tampered[idx] ^= 1;
+            let out = decrypt_note_data(keys.private.as_ref(), &tampered).expect("no hard error");
+            assert!(out.is_empty(), "tampering at byte {idx} must not decrypt");
+        }
+    }
+
+    #[test]
+    fn test_encryption_is_randomized() {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))
+            .expect("Derivation failed");
+        let plaintext = [7u8; NOTE_PLAINTEXT_LEN];
+        let a = encrypt_note_data(keys.public.as_ref(), &plaintext).expect("encrypt");
+        let b = encrypt_note_data(keys.public.as_ref(), &plaintext).expect("encrypt");
+        assert_ne!(a, b);
     }
 
     #[test]

@@ -28,7 +28,7 @@ fn register(env: &Env) -> Address {
 fn account(env: &Env, owner: Address, enc_fill: u8, note_fill: u8) -> Account {
     Account {
         owner,
-        encryption_key: Bytes::from_array(env, &[enc_fill; 32]),
+        encryption_key: Bytes::from_array(env, &[enc_fill; ENCRYPTION_KEY_LEN as usize]),
         note_key: Bytes::from_array(env, &[note_fill; 32]),
     }
 }
@@ -128,7 +128,24 @@ fn register_rejects_short_encryption_key() {
     let owner = Address::generate(&env);
     let account = Account {
         owner,
-        encryption_key: Bytes::from_slice(&env, &[0x11; 31]),
+        encryption_key: Bytes::from_slice(&env, &[0x11; ENCRYPTION_KEY_LEN as usize - 1]),
+        note_key: Bytes::from_array(&env, &[0x22; 32]),
+    };
+
+    env.mock_all_auths();
+    client.register(&account);
+}
+
+#[test]
+#[should_panic]
+fn register_rejects_long_encryption_key() {
+    let env = test_env();
+    let contract_id = register(&env);
+    let client = PublicKeyRegistryClient::new(&env, &contract_id);
+    let owner = Address::generate(&env);
+    let account = Account {
+        owner,
+        encryption_key: Bytes::from_slice(&env, &[0x11; ENCRYPTION_KEY_LEN as usize + 1]),
         note_key: Bytes::from_array(&env, &[0x22; 32]),
     };
 
@@ -145,7 +162,7 @@ fn register_rejects_short_note_key() {
     let owner = Address::generate(&env);
     let account = Account {
         owner,
-        encryption_key: Bytes::from_array(&env, &[0x11; 32]),
+        encryption_key: Bytes::from_array(&env, &[0x11; ENCRYPTION_KEY_LEN as usize]),
         note_key: Bytes::from_slice(&env, &[0x22; 31]),
     };
 

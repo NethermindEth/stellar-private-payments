@@ -223,15 +223,20 @@ mod tests {
             xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([7; 32])),
         )));
         let registration = |id, key: u8| {
-            let bytes = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into().expect("key")));
+            let note_key = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into().expect("key")));
+            let encryption_key = xdr::ScVal::Bytes(xdr::ScBytes(
+                vec![key; crate::types::EncryptionPublicKey::LEN]
+                    .try_into()
+                    .expect("key"),
+            ));
             let entries = vec![
                 xdr::ScMapEntry {
                     key: symbol("encryption_key"),
-                    val: bytes.clone(),
+                    val: encryption_key,
                 },
                 xdr::ScMapEntry {
                     key: symbol("note_key"),
-                    val: bytes,
+                    val: note_key,
                 },
             ];
             raw_event(id, &[symbol("public_key_event"), owner.clone()], entries)
@@ -247,7 +252,10 @@ mod tests {
         let entry = storage
             .lookup_public_key_by_address(&crate::chain::scval_to_address_string(&owner)?)?
             .expect("registered");
-        assert_eq!(entry.encryption_key.0, [2; 32]);
+        assert_eq!(
+            entry.encryption_key.0,
+            [2; crate::types::EncryptionPublicKey::LEN]
+        );
         Ok(())
     }
 }
