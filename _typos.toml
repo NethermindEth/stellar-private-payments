@@ -14,5 +14,4 @@ ignore-hidden = true
 extend-exclude = [
     "circuits/src/",
     "deployments/testnet/deployments.json",
-    "vendor/", # Third-party source and license notices are kept verbatim.
 ]
