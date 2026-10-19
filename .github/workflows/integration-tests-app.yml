@@ -53,7 +53,7 @@ jobs:
         run: cargo fetch --locked
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       # deployments/scripts/deploy-local.sh needs the stellar CLI to deploy
       # fresh contracts to the local quickstart container.

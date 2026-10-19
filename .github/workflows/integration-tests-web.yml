@@ -65,7 +65,7 @@ jobs:
         run: cargo clippy --target wasm32-unknown-unknown --all-targets
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0

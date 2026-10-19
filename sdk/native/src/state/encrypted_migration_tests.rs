@@ -208,7 +208,7 @@ fn browser_copy_preserves_legacy_version_and_native_encryption_migrates_it() -> 
         storage
             .conn
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-        2
+        6
     );
     assert!(
         storage

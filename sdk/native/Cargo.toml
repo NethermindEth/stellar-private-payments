@@ -39,7 +39,7 @@ futures = { workspace = true, features = ["executor"] }
 getrandom = { workspace = true }
 hex = { workspace = true }
 http = "1.5.0"
-rusqlite_migration = { version = "2.6.0", default-features = false }
+rusqlite_migration = { package = "spp-rusqlite-migration", version = "2.6.0", default-features = false }
 serde = { workspace = true }
 serde-aux = "4.7.0"
 serde_json = { workspace = true, features = ["alloc"] }

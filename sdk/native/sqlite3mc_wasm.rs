@@ -180,11 +180,11 @@ fn sqlite_wasm_source(root: &Path) -> PathBuf {
         .as_array()
         .expect("Cargo packages")
         .iter()
-        .find(|package| package["name"] == "sqlite-wasm-rs" && package["version"] == "0.5.5")
+        .find(|package| package["name"] == "sqlite-wasm-rs" && package["version"] == "0.6.1")
         .and_then(|package| package["manifest_path"].as_str())
         .map(PathBuf::from)
         .and_then(|path| path.parent().map(Path::to_path_buf))
-        .expect("locked sqlite-wasm-rs 0.5.5 source")
+        .expect("locked sqlite-wasm-rs 0.6.1 source")
 }
 
 fn tool(kind: &str, fallbacks: &[&str]) -> String {

@@ -52,7 +52,7 @@ jobs:
       - name: Install wasm build prerequisites
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+          cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       - name: Build circuit artifacts
         run: make circuits

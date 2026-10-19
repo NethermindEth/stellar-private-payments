@@ -73,7 +73,7 @@ jobs:
         run: |
           # The Rust builder reuses sqlite-wasm-rs headers/shims from the locked registry source.
           cargo fetch --locked
-          cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+          cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
           npm ci --prefix sdk/web
           make circuits
       - name: Cache verified binaryen

@@ -300,10 +300,9 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
-            directory: ".opfs-sahpool-encrypted".into(),
-            ..Default::default()
-        };
+        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfgBuilder::new()
+            .directory(".opfs-sahpool-encrypted")
+            .build();
         let mut attempt = 0;
         loop {
             match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(&cfg, true)
@@ -388,10 +387,11 @@ fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
             #[cfg(target_arch = "wasm32")]
             {
                 let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                    use sqlite_wasm_rs::vfs::VfsFilesManager;
                     Ok(p.borrow()
                         .as_ref()
                         .ok_or_else(|| anyhow!("OPFS unavailable"))?
-                        .exists("spp.encrypted.db"))
+                        .contains("spp.encrypted.db")?)
                 })?;
                 anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
             }

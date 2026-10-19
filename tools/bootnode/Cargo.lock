@@ -3881,8 +3881,9 @@ checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
 
 [[package]]
 name = "rsqlite-vfs"
-version = "0.1.1"
-source = "git+https://github.com/Spxg/sqlite-wasm-rs.git?rev=a19ef76713867eeab72482786f65e8316ced4ab8#a19ef76713867eeab72482786f65e8316ced4ab8"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353b74f9810d5b085b6c42c9d86a5f0fdb795553235cdd48753b32e3809d18a7"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -3921,30 +3922,6 @@ name = "ruint-macro"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
-
-[[package]]
-name = "rusqlite"
-version = "0.40.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
-dependencies = [
- "bitflags 2.13.2",
- "fallible-iterator 0.3.0",
- "fallible-streaming-iterator",
- "libsqlite3-sys",
- "smallvec",
- "sqlite-wasm-rs",
-]
-
-[[package]]
-name = "rusqlite_migration"
-version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03451d4dc523c0a96d9e412c574670b3f5f184c3988b77a435876be25477bbd3"
-dependencies = [
- "log",
- "rusqlite",
-]
 
 [[package]]
 name = "rustc-hash"
@@ -4531,9 +4508,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
+name = "spp-rusqlite"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8afaf2b27fc5d5c2eeb0df85dfcbfbf55f91f5b8e3a1e124773196becbc7ed1"
+dependencies = [
+ "bitflags 2.13.2",
+ "fallible-iterator 0.3.0",
+ "fallible-streaming-iterator",
+ "libsqlite3-sys",
+ "smallvec",
+ "sqlite-wasm-rs",
+]
+
+[[package]]
+name = "spp-rusqlite-migration"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c7ff526f1da67d67e0fdf08a38a274936951129e16381340d1c2bf66cee8a71"
+dependencies = [
+ "log",
+ "spp-rusqlite",
+]
+
+[[package]]
 name = "sqlite-wasm-rs"
-version = "0.5.5"
-source = "git+https://github.com/Spxg/sqlite-wasm-rs.git?rev=a19ef76713867eeab72482786f65e8316ced4ab8#a19ef76713867eeab72482786f65e8316ced4ab8"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "717e14271e332de37b8f7793913d53e2f952b3d21f96efd5880aea42a3c32d18"
 dependencies = [
  "cc",
  "js-sys",
@@ -4582,14 +4584,14 @@ dependencies = [
  "http",
  "reqwest",
  "ruint",
- "rusqlite",
- "rusqlite_migration",
  "same-file",
  "serde",
  "serde-aux",
  "serde_json",
  "sha2 0.11.0",
  "sha3",
+ "spp-rusqlite",
+ "spp-rusqlite-migration",
  "sqlite-wasm-rs",
  "stellar-strkey 0.0.18",
  "stellar-xdr",

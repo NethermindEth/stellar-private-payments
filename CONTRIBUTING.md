@@ -206,7 +206,7 @@ so you need it available on your `PATH` (typically by installing `wasm-bindgen-c
 
 ```bash
 # Install wasm-bindgen-cli (version must match `wasm-bindgen` in Cargo.lock)
-cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
 # Example: run wasm tests for the Stellar Private Payments SDK
 cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib

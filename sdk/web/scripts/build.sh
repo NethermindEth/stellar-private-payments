@@ -19,7 +19,7 @@ case "$PROFILE" in
     ;;
 esac
 
-WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
+WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.128}"
 WASM_OUT_NAME="stellar_private_payments_web"
 
 echo "==> Verifying circuit artifacts match lockfile..."
