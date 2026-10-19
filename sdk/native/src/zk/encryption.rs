@@ -313,7 +313,9 @@ pub fn decrypt_output_note(
 
     let mut blinding_le = [0u8; 32];
     blinding_le.copy_from_slice(&plaintext[16..]);
-    let blinding = Field::try_from_le_bytes(blinding_le)?;
+    let Ok(blinding) = Field::try_from_le_bytes(blinding_le) else {
+        return Ok(None);
+    };
 
     Ok(Some((amount, blinding)))
 }
@@ -723,6 +725,11 @@ mod tests {
 
         let wrong_length = seal_raw(&keys.public, &[0u8; 49]);
         assert!(decrypt_output_note(&keys.private, &wrong_length).is_ok_and(|n| n.is_none()));
+
+        let mut non_canonical_blinding = [0xffu8; 48];
+        non_canonical_blinding[..16].copy_from_slice(&5u128.to_le_bytes());
+        let non_canonical = seal_raw(&keys.public, &non_canonical_blinding);
+        assert!(decrypt_output_note(&keys.private, &non_canonical).is_ok_and(|n| n.is_none()));
         Ok(())
     }
 }
