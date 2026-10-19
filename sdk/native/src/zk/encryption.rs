@@ -304,10 +304,7 @@ pub fn decrypt_output_note(
         return Ok(None);
     };
     if plaintext.len() != 48 {
-        return Err(anyhow!(
-            "Decrypted plaintext must be 48 bytes, got {}",
-            plaintext.len()
-        ));
+        return Ok(None);
     }
 
     let mut amount_le = [0u8; 16];
@@ -701,12 +698,31 @@ mod tests {
         Ok(())
     }
 
+    /// Seals an arbitrary plaintext with the note wire format, bypassing the
+    /// 48-byte check of `encrypt_note_data`.
+    fn seal_raw(recipient: &EncryptionPublicKey, plaintext: &[u8]) -> Vec<u8> {
+        let ephemeral_secret = StaticSecret::from([11u8; 32]);
+        let ephemeral_public = PublicKey::from(&ephemeral_secret);
+        let shared = ephemeral_secret.diffie_hellman(&PublicKey::from(recipient.0));
+        let nonce_bytes = [12u8; 24];
+        let ciphertext = XSalsa20Poly1305::new(shared.as_bytes().into())
+            .encrypt(&Nonce::from(nonce_bytes), plaintext)
+            .expect("encryption failed");
+        let mut out = ephemeral_public.as_bytes().to_vec();
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        out
+    }
+
     #[test]
     fn test_decrypt_output_note_ignores_malformed_outputs() -> Result<()> {
         let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))?;
 
         assert!(decrypt_output_note(&keys.private, &[]).is_ok_and(|n| n.is_none()));
         assert!(decrypt_output_note(&keys.private, &[1, 2, 3]).is_ok_and(|n| n.is_none()));
+
+        let wrong_length = seal_raw(&keys.public, &[0u8; 49]);
+        assert!(decrypt_output_note(&keys.private, &wrong_length).is_ok_and(|n| n.is_none()));
         Ok(())
     }
 }
