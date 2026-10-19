@@ -3772,6 +3772,179 @@ mod tests {
         Ok(())
     }
 
+    const REGISTRY: &str = "CREGISTRY";
+
+    /// Store a registry event registering `note_key` for `owner` at `ledger`.
+    fn register_note_key(
+        storage: &mut Storage,
+        id: &str,
+        ledger: u32,
+        owner: &str,
+        note_key: NotePublicKey,
+    ) -> Result<()> {
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![ContractEvent {
+                id: id.to_string(),
+                ledger,
+                contract_id: REGISTRY.to_string(),
+                topics: vec!["PublicKeyEvent".to_string()],
+                value: "dummy".to_string(),
+            }],
+            cursor: id.to_string(),
+            latest_ledger: ledger,
+        })?;
+        storage.save_public_key_events_batch(&vec![PublicKeyEvent {
+            id: id.to_string(),
+            owner: owner.to_string(),
+            encryption_key: EncryptionPublicKey([9u8; 32]),
+            note_key,
+        }])
+    }
+
+    /// A note key as the registry stores it: the little-endian field bytes.
+    fn note_key_of(field: Field) -> NotePublicKey {
+        NotePublicKey(field.to_le_bytes())
+    }
+
+    fn owners_of(storage: &Storage, keys: &[Field]) -> Result<Vec<(Field, String, u32)>> {
+        Ok(storage
+            .lookup_owners_by_note_keys(keys)?
+            .into_iter()
+            .map(|o| (o.note_key, o.address, o.ledger))
+            .collect())
+    }
+
+    #[test]
+    fn note_key_lookup_returns_the_registering_address() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(11));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string(), 7)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_keeps_keys_an_owner_rotated_away_from() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let k1 = Field::from(NoteAmount::from(1));
+        let k2 = Field::from(NoteAmount::from(2));
+        register_note_key(&mut storage, "evt-k1", 10, "GALICE", note_key_of(k1))?;
+        register_note_key(&mut storage, "evt-k2", 20, "GALICE", note_key_of(k2))?;
+
+        assert_eq!(
+            owners_of(&storage, &[k1])?,
+            vec![(k1, "GALICE".to_string(), 10)]
+        );
+        assert_eq!(
+            owners_of(&storage, &[k2])?,
+            vec![(k2, "GALICE".to_string(), 20)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_reports_the_first_registration_ledger() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(3));
+        register_note_key(&mut storage, "evt-first", 10, "GALICE", note_key_of(key))?;
+        register_note_key(&mut storage, "evt-again", 30, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string(), 10)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_returns_every_owner_of_a_shared_key_by_ledger() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(4));
+        register_note_key(&mut storage, "evt-zed", 15, "GZED", note_key_of(key))?;
+        register_note_key(&mut storage, "evt-amy", 25, "GAMY", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GZED".to_string(), 15), (key, "GAMY".to_string(), 25),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_of_an_unknown_key_is_empty() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(5));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert!(owners_of(&storage, &[Field::from(NoteAmount::from(6))])?.is_empty());
+        assert!(owners_of(&storage, &[])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_matches_the_registry_little_endian_bytes() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(0x0102_0304));
+        assert_ne!(key.to_le_bytes(), key.to_be_bytes());
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string(), 7)]
+        );
+        // The same 32 bytes read as a big-endian integer are a different key.
+        let be_misread = Field::try_from_be_bytes(key.to_le_bytes())?;
+        assert!(owners_of(&storage, &[be_misread])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_ignores_duplicate_requested_keys() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let k1 = Field::from(NoteAmount::from(7));
+        let k2 = Field::from(NoteAmount::from(8));
+        register_note_key(&mut storage, "evt-k1", 10, "GALICE", note_key_of(k1))?;
+        register_note_key(&mut storage, "evt-k2", 20, "GBOB", note_key_of(k2))?;
+
+        assert_eq!(
+            owners_of(&storage, &[k2, k1, k2, k1])?,
+            vec![(k2, "GBOB".to_string(), 20), (k1, "GALICE".to_string(), 10),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_owner_lookup_reports_registry_sync_status() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(9));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        let lookup = storage.note_key_owner_lookup(&[key], REGISTRY)?;
+        assert_eq!(lookup.owners.len(), 1);
+        assert!(!lookup.registry_fully_synced);
+        assert_eq!(lookup.network_tip_ledger, 0);
+
+        storage.save_sync_progress(
+            &[crate::types::SyncMetadata {
+                contract_id: REGISTRY.to_string(),
+                cursor: "c".to_string(),
+                last_indexed_ledger: 42,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
+
+        let lookup = storage.note_key_owner_lookup(&[key], REGISTRY)?;
+        assert!(lookup.registry_fully_synced);
+        assert_eq!(lookup.network_tip_ledger, 42);
+        assert_eq!(lookup.registry_last_fully_indexed_ledger, 42);
+        Ok(())
+    }
+
     fn index_exists(conn: &Connection, name: &str) -> Result<bool> {
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
