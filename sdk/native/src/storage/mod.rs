@@ -36,9 +36,10 @@ pub(crate) fn map_build_params(
 pub(crate) fn map_private_keys(
     storage: &SqliteStorage,
     user_address: &str,
+    kdf_domain: &str,
 ) -> Result<StoredPrivateKeys, Error> {
     storage
-        .get_private_keys(user_address)?
+        .get_private_keys(user_address, kdf_domain)?
         .ok_or_else(|| Error::PrivacyKeysNotFound {
             user_address: user_address.to_string(),
         })
@@ -48,9 +49,10 @@ pub(crate) fn spendable_notes_from_storage(
     storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
+    kdf_domain: &str,
 ) -> Result<Vec<SpendableNote>, Error> {
     Ok(storage
-        .list_unspent_user_notes(pool_contract_id, user_address)?
+        .list_unspent_user_notes(pool_contract_id, user_address, kdf_domain)?
         .into_iter()
         .map(|n| SpendableNote {
             commitment: n.id,
@@ -63,24 +65,27 @@ pub(crate) fn pool_notes_from_storage(
     storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
+    kdf_domain: &str,
 ) -> Result<Vec<UserNoteSummary>, Error> {
-    Ok(storage.list_pool_user_notes(pool_contract_id, user_address)?)
+    Ok(storage.list_pool_user_notes(pool_contract_id, user_address, kdf_domain)?)
 }
 
 pub(crate) fn portfolio_balances_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
+    kdf_domain: &str,
     enabled_pools: &[PortfolioPoolEntry],
 ) -> Result<Vec<PortfolioBalance>, Error> {
-    Ok(storage.list_portfolio_balances(user_address, enabled_pools)?)
+    Ok(storage.list_portfolio_balances(user_address, kdf_domain, enabled_pools)?)
 }
 
 pub(crate) fn user_notes_from_storage(
     storage: &SqliteStorage,
     user_address: &str,
+    kdf_domain: &str,
     limit: u32,
 ) -> Result<Vec<UserNoteSummary>, Error> {
-    Ok(storage.list_user_notes(user_address, limit)?)
+    Ok(storage.list_user_notes(user_address, kdf_domain, limit)?)
 }
 
 pub(crate) fn operational_feed_from_storage(
@@ -112,23 +117,27 @@ pub trait Storage: crate::chain::ContractDataStorage {
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<SpendableNote>, Error>;
 
     async fn notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>, Error>;
 
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error>;
 
     async fn list_user_notes(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         limit: u32,
     ) -> Result<Vec<UserNoteSummary>, Error>;
 
@@ -151,27 +160,36 @@ pub trait Storage: crate::chain::ContractDataStorage {
         req: &DisclosureInputsRequest,
     ) -> Result<Vec<DisclosureInputs>, Error>;
 
-    /// Whether privacy keys are already stored for `user_address`.
-    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error>;
+    /// Whether privacy keys are already stored for `user_address` under
+    /// `kdf_domain`.
+    async fn privacy_keys_exist(&self, user_address: &str, kdf_domain: &str)
+    -> Result<bool, Error>;
 
-    /// Persist freshly derived private keys for `user_address`.
+    /// Persist freshly derived private keys for `user_address` under
+    /// `kdf_domain`.
     async fn save_private_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
         membership_blinding: &Field,
     ) -> Result<(), Error>;
 
-    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error>;
+    async fn asp_secret(&self, user_address: &str, kdf_domain: &str) -> Result<Field, Error>;
 
     async fn privacy_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error>;
 
-    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, Error> {
-        Ok(self.privacy_keys(user_address).await?.0)
+    async fn user_note_pubkey(
+        &self,
+        user_address: &str,
+        kdf_domain: &str,
+    ) -> Result<NotePublicKey, Error> {
+        Ok(self.privacy_keys(user_address, kdf_domain).await?.0)
     }
 
     async fn registered_privacy_keys(
@@ -240,7 +258,7 @@ mod tests {
         set_reveal_sensitive(false);
         let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
 
-        let err = map_private_keys(&storage, ADDRESS).expect_err("no keys are stored");
+        let err = map_private_keys(&storage, ADDRESS, "tests").expect_err("no keys are stored");
         let rendered = err.to_string();
 
         assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");

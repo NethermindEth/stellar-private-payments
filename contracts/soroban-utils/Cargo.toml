@@ -2,6 +2,7 @@
 name = "soroban-utils"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -22,6 +23,10 @@ ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+# external
+soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [lints]
 workspace = true

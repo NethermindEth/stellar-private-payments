@@ -1,6 +1,6 @@
 {
   "name": "stellar-private-payments",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Stellar Private Payments browser SDK",
   "license": "Apache-2.0",
   "type": "module",
@@ -40,6 +40,7 @@
     "check:bindgen": "node scripts/check-bindgen-types.js",
     "check:types": "tsc -p tsconfig.json",
     "check:package": "node scripts/check-sqlite3mc-package.js",
+    "test:amounts": "node --test tests/amounts.test.mjs",
     "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package"
   },
   "peerDependencies": {
@@ -51,6 +52,6 @@
     }
   },
   "devDependencies": {
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   }
 }

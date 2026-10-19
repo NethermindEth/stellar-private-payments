@@ -347,7 +347,7 @@ fn provider_failure_and_threaded_forks() -> Result<()> {
         .expect("fork thread")?;
     assert_eq!(value.as_deref(), Some(MARKER));
     assert!(!futures::executor::block_on(
-        shared_fork.privacy_keys_exist("GTESTACCOUNTWITHNOSTOREDKEYS")
+        shared_fork.privacy_keys_exist("GTESTACCOUNTWITHNOSTOREDKEYS", "test")
     )?);
     Ok(())
 }

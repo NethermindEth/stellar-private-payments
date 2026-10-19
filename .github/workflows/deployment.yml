@@ -5,6 +5,12 @@ on:
   push:
     branches: ["main"]
 
+# GitHub Pages accepts one deployment at a time; queue back-to-back merges
+# instead of failing the later deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   docs:
     permissions:
@@ -31,7 +37,9 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Install mdBook
-        run: cargo install mdbook --no-default-features
+        run: |
+          cargo install mdbook --no-default-features
+          cargo install mdbook-mermaid --version 0.17.1 --locked
 
       - name: Cache binaryen and wasm-opt output
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -69,7 +77,9 @@ jobs:
       - name: Build mdBook
         env:
           MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_url }}/docs/
-        run: mdbook build docs/
+        run: |
+          mdbook-mermaid install docs/
+          mdbook build docs/
 
       - name: Build API documentation
         run: cargo doc --no-deps --workspace --release

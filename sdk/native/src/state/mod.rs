@@ -2,6 +2,8 @@ mod disclaimer;
 pub(crate) mod events_parsers;
 mod processor;
 mod storage;
+#[cfg(test)]
+mod test_events;
 
 pub mod database_key;
 pub mod encrypted_migration;

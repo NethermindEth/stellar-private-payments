@@ -1,6 +1,9 @@
 use crate::{AppState, messages::GetEventsParams};
 use metrics::{counter, gauge};
-use std::{sync::atomic::Ordering, time::Instant};
+use std::{
+    sync::{PoisonError, atomic::Ordering},
+    time::Instant,
+};
 use tokio::time::{Duration, sleep};
 
 pub(crate) struct Indexer {
@@ -13,8 +16,13 @@ impl Indexer {
     }
 
     pub(crate) async fn run(self) {
+        let mut retry_backfill = true;
         loop {
-            match self.run_round().await {
+            let round = self.run_round().await;
+            if retry_backfill && round.is_ok() {
+                retry_backfill = self.backfill().await;
+            }
+            match round {
                 Ok(may_have_more) => {
                     if !may_have_more {
                         sleep(Duration::from_millis(self.state.cfg.indexer_sleep_ms)).await;
@@ -107,6 +115,71 @@ impl Indexer {
             .record(t0.elapsed().as_secs_f64());
 
         Ok(may_have_more)
+    }
+
+    /// Archives the events of each added allowlist the upstream still holds,
+    /// from the earliest such deployment ledger, then lets `getEvents` serve
+    /// them.
+    ///
+    /// Runs after a round, so `oldest_ledger` is the upstream's current one.
+    /// Returns whether to retry after the next round.
+    async fn backfill(&self) -> bool {
+        let oldest = self.state.oldest_ledger.load(Ordering::Relaxed);
+        let (fillable, lost): (Vec<_>, Vec<_>) = self
+            .state
+            .unarchived
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .partition(|tree| tree.deployment_ledger >= oldest);
+        if !lost.is_empty() {
+            tracing::error!(
+                oldest,
+                allowlists = ?lost,
+                "upstream no longer holds these added allowlists' events; getEvents refuses them"
+            );
+        }
+        let Some(from) = fillable.iter().map(|tree| tree.deployment_ledger).min() else {
+            return false;
+        };
+        let contract_ids: Vec<String> = fillable.into_iter().map(|tree| tree.contract_id).collect();
+        match self.archive_from(&contract_ids, from).await {
+            Ok(()) => false,
+            Err(e) => {
+                tracing::error!(error = %e, "added allowlist backfill failed");
+                true
+            }
+        }
+    }
+
+    async fn archive_from(&self, contract_ids: &[String], from: u32) -> anyhow::Result<()> {
+        let mut start_ledger = Some(from);
+        let mut cursor: Option<String> = None;
+        loop {
+            let params = GetEventsParams::for_contracts(
+                contract_ids,
+                start_ledger.take(),
+                cursor.as_deref(),
+                Some(self.state.cfg.page_size),
+            );
+            let result = self.state.upstream.get_events(params).await?;
+            self.state.storage.upsert_events(&result.events).await?;
+            if cursor.as_deref() == Some(result.cursor.as_str()) {
+                break;
+            }
+            cursor = Some(result.cursor);
+        }
+        let storage = &self.state.storage;
+        let mut archived = storage.load_indexer_state().await?.archived_allowlists;
+        archived.extend_from_slice(contract_ids);
+        storage.set_archived_allowlists(&archived).await?;
+        self.state
+            .unarchived
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|tree| !contract_ids.contains(&tree.contract_id));
+        Ok(())
     }
 
     async fn mark_archive_ready(&self) -> anyhow::Result<()> {

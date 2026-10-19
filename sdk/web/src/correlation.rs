@@ -44,8 +44,20 @@ mod tests {
     use super::*;
     use tracing_subscriber::{Registry, layer::SubscriberExt};
 
-    #[tokio::test]
-    async fn test_span_propagation_concurrency() {
+    // A plain #[test] driving its own runtime keeps the std mutex guard out
+    // of the async body (clippy::await_holding_lock).
+    #[test]
+    fn test_span_propagation_concurrency() {
+        let _guard = crate::telemetry::TEST_MUTEX
+            .lock()
+            .expect("test mutex poisoned");
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("build tokio runtime")
+            .block_on(span_propagation_concurrency());
+    }
+
+    async fn span_propagation_concurrency() {
         let subscriber = Registry::default().with(CorrelationIdLayer);
         let _guard = tracing::subscriber::set_default(subscriber);
 

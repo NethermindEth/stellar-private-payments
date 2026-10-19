@@ -168,33 +168,9 @@ there is no runtime toggle.
 **(policy, GVK mode)** combination actually used — the verifying key is baked
 into the WASM, so a pool with a different mode needs a different verifier
 contract — and one `pool-gvk` (or plain `pool`) contract per `--pool` spec.
-
-GVK mode is an optional prefix on a `--pool` spec:
-
-```
---pool [policy:][gvk-mode:]<ASSET-SPEC>
-```
-
-| `gvk-mode` | Meaning |
-|---|---|
-| `gvk-off` (default) | Deploys plain `pool`, no encryption. |
-| `gvk-viewonly` | Deploys `pool-gvk` with `GvkMode::ViewOnly`. |
-| `gvk-traceable` | Deploys `pool-gvk` with `GvkMode::Traceable`. |
-
-Any pool using `gvk-viewonly` or `gvk-traceable` requires the admin's Baby
-JubJub public key, via `--gvk-authority-pubkey '{"x":"0x..","y":"0x.."}'` or
-`--gvk-authority-pubkey-file PATH`:
-
-```bash
-deployments/scripts/deploy.sh futurenet \
-  --deployer alice \
-  --gvk-authority-pubkey-file ./admin-pub.json \
-  --pool blocklist:gvk-off:native:CB... \
-  --pool allowlist:gvk-traceable:native:CB... \
-  --asp-levels 10 \
-  --pool-levels 20 \
-  --max-deposit 1000000000
-```
+GVK mode is an optional `[policy:][gvk-mode:]` prefix on a `--pool` spec; see
+[DEPLOY.md](../../DEPLOY.md#global-view-key-gvk) for the full syntax, required
+options, and worked examples.
 
 Per-pool `gvkMode` and `gvkAuthorityPubKey` are recorded in
 `deployments/<network>/deployments.json` alongside `policyFlags`, and the

@@ -148,9 +148,9 @@ key. Use `--require-unspent` when spent notes must make the command fail.
 | Circuit | Canonical `vk_hash` |
 |---|---|
 | `selectiveDisclosure_1` | `0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2` |
-| `selectiveDisclosure_2` | `0xc057dc17d370429a81a9e0fb1a81d7e7d7dd1af8ca373639db9a651c1a8d3464` |
-| `selectiveDisclosure_3` | `0x20a0ec3d1b71c3f9978234116dd1f25c8a6711e5fcfdf37da181d6c0edf79a69` |
-| `selectiveDisclosure_4` | `0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f` |
+| `selectiveDisclosure_2` | `0x0a4def6573b3982661a2afc082f07cbd88baaa61734c612291434a771879f75e` |
+| `selectiveDisclosure_3` | `0x15b9f433d8277ed0d26a1fa7ffdb6b2c540c593e1aa30f803b4afaedaeb00ed6` |
+| `selectiveDisclosure_4` | `0x67657478aa435c5fb7248a8d447e71f69ff6e065d7dc682a17befc34d5b50ea7` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
 | `sdk/native/src/zk/disclosure/mod.rs` | `RegisteredCircuit::canonical_vk_hash` used by the CLI |
@@ -212,7 +212,7 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
 | **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
 | **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
-| **Nullifiers unspent** | No nullifier in the receipt appears in the pool's spent-nullifier history (`is_nullifier_spent`). Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers appear in the pool's spent-nullifier event history." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
+| **Nullifiers unspent** | No nullifier in the receipt is marked spent in the pool's current contract state. Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers are marked spent in the pool's contract state." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
 
 ### Interpretation
 
@@ -230,6 +230,7 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 - **Binding** — The proof is bound to the specific context hash. Changing any context field invalidates the context check.
 - **Non-transferable** — A receipt proves ownership of specific note commitments at specific roots. It cannot be replayed against different notes or a different pool.
 - **Correlation** — A multi-note receipt attests that all selected notes are controlled by the same prover for the same context. Verifiers should consider this correlation when interpreting the receipt.
+- **Distinct notes** — A proof that names the same note in two slots does not verify. With the root check, a receipt cannot count one note twice.
 - **Off-chain only** — Disclosure verification is entirely off-chain. No contract call is required beyond the root-history check, which reads public pool state.
 
 ---

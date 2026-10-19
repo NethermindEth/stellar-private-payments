@@ -206,10 +206,15 @@ mod divergent_session_tests {
                     .expect("open storage"),
             ),
             ContractConfig {
+                network_passphrase: None,
+                rpc_url: None,
+
                 network: PASSPHRASE.to_string(),
+                kdf_domain: String::new(),
                 deployer: String::new(),
                 admin: String::new(),
                 asp_membership: String::new(),
+                added_asp_memberships: Vec::new(),
                 asp_non_membership: String::new(),
                 verifiers: Default::default(),
                 public_key_registry: String::new(),

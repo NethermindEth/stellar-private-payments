@@ -43,9 +43,14 @@ export interface PoolConfigInput {
  */
 export interface ContractConfigInput {
   network: string;
+  networkPassphrase?: string;
+  rpcUrl?: string;
+  kdf_domain: string;
   deployer: string;
   admin: string;
   asp_membership: string;
+  /** ASP membership contracts deployed after `asp_membership`. */
+  added_asp_memberships?: { contractId: string; deploymentLedger: number }[];
   asp_non_membership: string;
   verifiers: Record<string, string>;
   public_key_registry: string;
@@ -107,6 +112,8 @@ export interface ClientNewOptions {
   contractConfig: ContractConfig | ContractConfigInput;
   /** Required unless `prover` is supplied (an already-configured prover skips this). */
   circuitsBaseUrl?: string;
+  /** Expected circuit fingerprints from the selected deployment; required unless prover is supplied. */
+  circuitLock?: CircuitLockInput;
   storage?: Storage;
   /** Required when storage is not supplied. */
   keyProvider?: DatabaseKeyProvider;
@@ -137,6 +144,7 @@ export interface PoolOptions {
 export interface VerifyDisclosureOptions {
   contractConfig: ContractConfig | ContractConfigInput;
   circuitsBaseUrl: string;
+  circuitLock: CircuitLockInput;
   proverWorkerUrl?: string;
 }
 
@@ -163,6 +171,7 @@ export interface Client {
     receiptJson: string,
     expectedVkHash: string,
   ): Promise<DisclosureVerificationReport>;
+  dispose(): void;
 }
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
@@ -235,4 +244,19 @@ export interface GvkTxAudit {
   ledger: number;
   outputs: GvkOutputSlot[];
   inputs: GvkSpentInput[];
+}
+
+export declare function readTokenDecimals(rpcUrl: string, tokenContract: string): Promise<number>;
+
+/** Contents of the deployment's circuits.json; supplied by the application. */
+export interface CircuitLockInput {
+  version: string;
+  meta: {
+    repository: string;
+    commit: string;
+    circom: string;
+    circomlib: string;
+    'circom-witness-rs': string;
+  };
+  [key: string]: unknown;
 }

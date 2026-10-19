@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{Address, Bytes, Env, contract, contractevent, contractimpl, contracttype};
+use soroban_sdk::{
+    Address, Bytes, Env, String, contract, contractevent, contractimpl, contracttype,
+};
 
 /// User account registration data
 ///
@@ -40,6 +42,8 @@ pub struct PublicKeyEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
     Registration(Address),
+    /// Privacy key derivation domain. Immutable.
+    KdfDomain,
 }
 
 #[contracttype]
@@ -58,9 +62,26 @@ pub struct PublicKeyRegistry;
 
 #[contractimpl]
 impl PublicKeyRegistry {
+    pub fn __constructor(env: Env, kdf_domain: String) {
+        env.storage()
+            .instance()
+            .set(&DataKey::KdfDomain, &kdf_domain);
+    }
+
+    /// Get the deployment's privacy key derivation domain.
+    pub fn get_kdf_domain(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::KdfDomain)
+            .expect("constructor sets the kdf domain")
+    }
+
     /// Register a user's public encryption and note keys.
+    ///
+    /// Renews the registry by at most a day.
     pub fn register(env: Env, account: Account) {
         account.owner.require_auth();
+        soroban_utils::extend_instance(&env);
         assert_eq!(account.encryption_key.len(), 32);
         assert_eq!(account.note_key.len(), 32);
 

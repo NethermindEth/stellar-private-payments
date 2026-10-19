@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use stellar_private_payments::types::{NoteAmount, TransferRecipient};
 
-use super::support::{deploy_default, session};
+use super::support::{assert_contract_error, deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
@@ -73,6 +73,38 @@ async fn transfer_via_keys() -> Result<()> {
 }
 
 #[tokio::test]
+async fn transfer_multi_tx() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    recipient.account.register_public_keys().await?;
+    let pool = sender.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+
+    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
+    let estimate = pool.estimate(total).await?;
+    assert_eq!(
+        estimate.tx_count, 2,
+        "combining 3 notes with a 2-input circuit should take 2 transactions"
+    );
+
+    let results = pool.transfer(recipient.wallet.address(), total).await?;
+    assert_eq!(results.len(), 2);
+
+    let sender_balance = pool.balance().await?;
+    assert_eq!(sender_balance, NoteAmount::ZERO);
+
+    let recipient_balance = recipient.pool()?.balance().await?;
+    assert_eq!(recipient_balance, total);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn transfer_insufficient_balance() -> Result<()> {
     let deployment = deploy_default().await?;
     let sender = session(deployment.clone()).await?;
@@ -125,6 +157,8 @@ async fn transfer_unregistered_recipient() -> Result<()> {
     Ok(())
 }
 
+/// Once the first spend is in a ledger, the pool refuses the second with
+/// `AlreadySpentNullifier` (code 9), not just any failure up to confirm.
 #[tokio::test]
 async fn transfer_double_spend() -> Result<()> {
     let deployment = deploy_default().await?;
@@ -160,20 +194,11 @@ async fn transfer_double_spend() -> Result<()> {
     let hash_a = pool.submit(signed_a).await?;
     pool.confirm(&hash_a).await?;
 
-    let rejected = match pool.simulate(&mut prepared_b).await {
-        Err(_) => true,
-        Ok(()) => {
-            let signed_b = pool.sign(&prepared_b).await?;
-            match pool.submit(signed_b).await {
-                Err(_) => true,
-                Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
-            }
-        }
-    };
-    assert!(
-        rejected,
-        "spending the same note a second time must be rejected on-chain"
-    );
+    let err = pool
+        .simulate(&mut prepared_b)
+        .await
+        .expect_err("spending the same note a second time must be rejected on-chain");
+    assert_contract_error(err, 9);
 
     Ok(())
 }

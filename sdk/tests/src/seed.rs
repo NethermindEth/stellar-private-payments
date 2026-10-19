@@ -43,6 +43,7 @@ fn open_connection(path: &Path) -> Result<rusqlite::Connection> {
 pub const POOL_MERKLE_LEVELS: u32 = 20;
 pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 pub const TEST_NETWORK: &str = "test";
+pub const TEST_KDF_DOMAIN: &str = "tests";
 const TEST_LEDGER: u32 = 1;
 
 fn test_derivation_signature() -> KeyDerivationSignature {
@@ -86,6 +87,7 @@ pub fn seed_prove_wallet(
 
     storage.save_encryption_and_note_keypairs(
         user_address,
+        TEST_KDF_DOMAIN,
         &note_keypair,
         &encryption_keypair,
         &membership_blinding,
@@ -354,6 +356,7 @@ fn chain_snapshot_from_storage(
         policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
         gvk_mode: GvkMode::Off,
         admin_view_key: None,
+        deposits_paused: false,
     })
 }
 

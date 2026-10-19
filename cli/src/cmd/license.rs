@@ -73,8 +73,8 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Locate the directory holding the license/notice texts. Mirrors
-/// `default_circuits_dir` in `artifacts.rs`: debug builds read the repository's
+/// Locate the directory holding the license/notice texts.
+/// Debug builds read the repository's
 /// `dist/`; release builds read the installed data dir.
 fn resolve_dist_dir(config: &CliConfig) -> Result<PathBuf> {
     let bundle = if cfg!(debug_assertions) {

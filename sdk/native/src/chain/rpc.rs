@@ -18,9 +18,13 @@ use stellar_xdr::{
 use super::{soroban_encode::BASE_FEE, tx_assemble::build_invoke_contract_tx_envelope};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
-const MAX_CONTRACT_IDS_PER_FILTER: usize = 5;
+/// Maximum number of contract IDs the RPC's `getEvents` method accepts in one
+/// filter.
+pub const MAX_CONTRACT_IDS_PER_FILTER: usize = 5;
 const MAX_FILTERS_PER_REQUEST: usize = 5;
-const MAX_FILTER_CONTRACT_IDS: usize = MAX_CONTRACT_IDS_PER_FILTER * MAX_FILTERS_PER_REQUEST;
+/// Maximum number of contract IDs one `getEvents` request can filter, across
+/// all of its filters.
+pub const MAX_FILTER_CONTRACT_IDS: usize = MAX_CONTRACT_IDS_PER_FILTER * MAX_FILTERS_PER_REQUEST;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -32,6 +36,8 @@ pub enum Error {
     JsonRpc { code: i64, message: String },
     #[error("bootnode retention handoff - continue on main RPC from ledger {from_ledger}")]
     RetentionHandoff { from_ledger: u32 },
+    #[error("bootnode not ready: {0}")]
+    BootnodeNotReady(String),
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -57,6 +63,8 @@ pub enum Error {
         contract_id: String,
         missing_keys: Vec<String>,
     },
+    #[error("contract simulation failed: {0}")]
+    Simulation(String),
     #[error("RPC request timed out")]
     Timeout,
     #[error("too many contract IDs for a single event filter: {0} (max {MAX_FILTER_CONTRACT_IDS})")]
@@ -86,6 +94,7 @@ struct JsonRpcErrorResponse {
 }
 
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
+const BOOTNODE_NOT_READY_CODE: i64 = -32_004;
 
 /// The name a contract's instance entry is reported under.
 ///
@@ -105,6 +114,9 @@ fn map_json_rpc_error(err: JsonRpcErrorResponse) -> Error {
         && let Some(from_ledger) = retention_handoff_from_data(err.data)
     {
         return Error::RetentionHandoff { from_ledger };
+    }
+    if err.code == BOOTNODE_NOT_READY_CODE {
+        return Error::BootnodeNotReady(err.message);
     }
     Error::JsonRpc {
         code: err.code,
@@ -723,35 +735,67 @@ impl Client {
         }
     }
 
+    async fn read_contract(
+        &self,
+        contract_id: &str,
+        source: &str,
+        method: &str,
+        args: Vec<xdr::ScVal>,
+    ) -> Result<xdr::ScVal, Error> {
+        let tx = build_invoke_contract_tx_envelope(
+            source,
+            xdr::SequenceNumber(0),
+            BASE_FEE,
+            contract_id,
+            method,
+            args,
+            Vec::new(),
+        )
+        .map_err(|e| Error::UnexpectedScVal(e.to_string()))?;
+        let sim = self.simulate_transaction(&tx).await?;
+        if let Some(error) = sim.error {
+            return Err(Error::Simulation(error));
+        }
+        let result = sim
+            .result
+            .or_else(|| sim.results.into_iter().next())
+            .ok_or_else(|| {
+                Error::UnexpectedScVal("simulateTransaction returned no results".into())
+            })?;
+        let value = result
+            .retval
+            .or(result.xdr)
+            .ok_or_else(|| Error::UnexpectedScVal("simulateTransaction missing retval".into()))?;
+        Ok(xdr::ScVal::from_xdr_base64(&value, Limits::none())?)
+    }
+
+    pub async fn get_token_decimals(&self, contract_id: &str, source: &str) -> Result<u32, Error> {
+        match self
+            .read_contract(contract_id, source, "decimals", Vec::new())
+            .await?
+        {
+            xdr::ScVal::U32(decimals) => Ok(decimals),
+            _ => Err(Error::UnexpectedScVal(
+                "expected decimals() to return u32".into(),
+            )),
+        }
+    }
+
     /// Balance of `address` reported by the SEP-41 token contract
     /// `contract_id`. Returns 0 if `address` has no balance.
     pub async fn get_token_balance(&self, contract_id: &str, address: &str) -> Result<u128, Error> {
         let arg = address
             .parse()
             .map_err(|_| Error::UnexpectedScVal(format!("invalid address: {address}")))?;
-        let tx = build_invoke_contract_tx_envelope(
-            address,
-            xdr::SequenceNumber(0),
-            BASE_FEE,
-            contract_id,
-            "balance",
-            vec![xdr::ScVal::Address(arg)],
-            Vec::new(),
-        )
-        .map_err(|e| Error::UnexpectedScVal(e.to_string()))?;
-
-        let sim = self.simulate_transaction(&tx).await?;
-        let op_result = sim
-            .result
-            .or_else(|| sim.results.into_iter().next())
-            .ok_or_else(|| {
-                Error::UnexpectedScVal("simulateTransaction returned no results".into())
-            })?;
-        let retval_b64 = op_result
-            .retval
-            .or(op_result.xdr)
-            .ok_or_else(|| Error::UnexpectedScVal("simulateTransaction missing retval".into()))?;
-        match xdr::ScVal::from_xdr_base64(&retval_b64, Limits::none())? {
+        match self
+            .read_contract(
+                contract_id,
+                address,
+                "balance",
+                vec![xdr::ScVal::Address(arg)],
+            )
+            .await?
+        {
             xdr::ScVal::I128(parts) => {
                 let value = i128::from(&parts);
                 u128::try_from(value).map_err(|_| {
@@ -840,6 +884,105 @@ mod tests {
         Client::new("https://example.org").expect("client")
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn token_decimals_reads_sep41_and_rejects_bad_responses() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::body_partial_json};
+        let source = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        for (response, expected) in [
+            (
+                json!({"results": [{"xdr": xdr::ScVal::U32(6).to_xdr_base64(Limits::none()).expect("xdr")}]}),
+                Some(6),
+            ),
+            (
+                json!({"result": {"retval": xdr::ScVal::U32(0).to_xdr_base64(Limits::none()).expect("xdr")}}),
+                Some(0),
+            ),
+            (
+                json!({"results": [{"xdr": xdr::ScVal::I32(7).to_xdr_base64(Limits::none()).expect("xdr")}]}),
+                None,
+            ),
+            (json!({"error": "contract failure"}), None),
+            (json!({"results": []}), None),
+            (json!({"results": [{}]}), None),
+            (json!({"results": [{"xdr": "invalid"}]}), None),
+        ] {
+            let server = MockServer::start().await;
+            let mut response = response;
+            response["latestLedger"] = json!(123);
+            Mock::given(body_partial_json(json!({"method": "simulateTransaction"})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": 1, "result": response,
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let result = Client::new(&server.uri())
+                .expect("client")
+                .get_token_decimals(TEST_CONTRACT_ID, source)
+                .await;
+            match expected {
+                Some(expected) => assert_eq!(result.expect("decimals"), expected),
+                None => assert!(result.is_err()),
+            }
+            let requests = server.received_requests().await.expect("requests");
+            let body: serde_json::Value = serde_json::from_slice(&requests[0].body).expect("json");
+            let tx = xdr::TransactionEnvelope::from_xdr_base64(
+                body["params"]["transaction"].as_str().expect("transaction"),
+                Limits::none(),
+            )
+            .expect("envelope");
+            let xdr::TransactionEnvelope::Tx(tx) = tx else {
+                panic!("v1 transaction")
+            };
+            let xdr::OperationBody::InvokeHostFunction(op) = &tx.tx.operations[0].body else {
+                panic!("invoke")
+            };
+            let xdr::HostFunction::InvokeContract(args) = &op.host_function else {
+                panic!("contract")
+            };
+            assert_eq!(args.function_name.to_string(), "decimals");
+            assert!(args.args.is_empty());
+            assert_eq!(
+                args.contract_address,
+                TEST_CONTRACT_ID.parse().expect("address")
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn token_balance_checks_simulation_errors_before_reading_result() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+        let source = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        let value = xdr::ScVal::I128(xdr::Int128Parts {
+            hi: 0,
+            lo: 9_007_199_254_740_993,
+        })
+        .to_xdr_base64(Limits::none())
+        .expect("xdr");
+        for error in [None, Some("contract failure")] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": {"latestLedger": 123, "error": error, "results": [{"xdr": value}]},
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let result = Client::new(&server.uri())
+                .expect("client")
+                .get_token_balance(TEST_CONTRACT_ID, source)
+                .await;
+            if error.is_some() {
+                assert!(matches!(result, Err(Error::Simulation(_))));
+            } else {
+                assert_eq!(result.expect("balance"), 9_007_199_254_740_993);
+            }
+        }
+    }
+
     #[test]
     fn parse_retention_handoff_error() {
         let err = map_json_rpc_error(JsonRpcErrorResponse {
@@ -852,6 +995,19 @@ mod tests {
             Error::RetentionHandoff {
                 from_ledger: 2_913_600
             }
+        ));
+    }
+
+    #[test]
+    fn parse_bootnode_not_ready_error() {
+        let err = map_json_rpc_error(JsonRpcErrorResponse {
+            code: BOOTNODE_NOT_READY_CODE,
+            message: "bootnode warming up; retry later".into(),
+            data: None,
+        });
+        assert!(matches!(
+            err,
+            Error::BootnodeNotReady(message) if message == "bootnode warming up; retry later"
         ));
     }
 

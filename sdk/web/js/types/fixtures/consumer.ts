@@ -12,6 +12,7 @@ import {
 
 declare const rpcUrl: string;
 declare const keyProvider: import('../api-types.js').DatabaseKeyProvider;
+declare const circuitLock: import('../api-types.js').CircuitLockInput;
 declare const signer: import('../signer.js').WalletSigner;
 
 async function typedConsumer(config: ContractConfig) {
@@ -23,6 +24,7 @@ async function typedConsumer(config: ContractConfig) {
     storage,
     contractConfig: config,
     circuitsBaseUrl: 'https://example.test/circuits/',
+    circuitLock,
   });
 
   const cfg: ContractConfig = client.contractConfig();

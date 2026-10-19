@@ -11,9 +11,10 @@
 //! The entry count is the size of the footprint the host recorded: every
 //! contract data and code key the call touched, present or absent, plus the
 //! authorizer's nonce entry and the entry of the authorizing address itself.
-//! Every native test contract shares one placeholder code entry, so a live
-//! deployment adds one code entry per distinct Wasm beyond the first, which is
-//! two for a pool call that reaches the verifier and one association set.
+//! A native test contract's code entry joins the footprint only when the call
+//! extends that contract's lifetime. A live call reads the code of every
+//! contract it invokes, so on a network those entries are in the footprint
+//! either way.
 //!
 //! The `Entries` and `Disk entries` columns count different things and are
 //! billed differently. Live Soroban state is held in memory, so reading it
@@ -41,13 +42,14 @@
 
 use super::utils::{
     ASP_MEMBERSHIP_LEVELS, LEVELS, deploy_contracts, prove_transaction, sync_contract_state,
-    test_env,
+    test_env, wasm_hash,
 };
 use anyhow::Result;
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use contract_types::Groth16Proof;
 use pool::{ExtData, PoolContract, PoolContractClient, hash_ext_data, policy};
+use pool_core::merkle_with_history::MerkleDataKey;
 use pool_gvk::{
     PoolGvkContract, PoolGvkContractClient,
     gvk::{self, BabyJubJubPoint, GvkCiphertext},
@@ -55,11 +57,12 @@ use pool_gvk::{
 use public_key_registry::{Account, PublicKeyRegistry, PublicKeyRegistryClient};
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
-    Address, Bytes, Env, I256, U256, Vec, contract, contractimpl,
-    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::{Address as _, Ledger as _},
+    Address, Bytes, Env, I256, U256, Vec,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    testutils::{Address as _, Deployer as _, Ledger as _, storage::Persistent as _},
     token::StellarAssetClient,
 };
+use soroban_utils::{MAX_EXTENSION_LEDGERS, utils::AcceptingVerifier};
 
 /// Mainnet's `min_persistent_ttl`, in ledgers (120 days).
 const MIN_PERSISTENT_TTL: u32 = 2_073_600;
@@ -100,25 +103,6 @@ const FUNDING: i128 = 1_000_000;
 
 /// Deposit and withdrawal amount of the measured calls.
 const AMOUNT: i32 = 100;
-
-/// A verifier that accepts every proof, so a measured `transact` reaches the
-/// storage writes without a proving key.
-///
-/// The pairing check it skips is the one host cost a real verifier adds; the
-/// real-proof row measures that separately.
-#[contract]
-struct AcceptingVerifier;
-
-#[contractimpl]
-impl AcceptingVerifier {
-    pub fn verify(
-        _env: Env,
-        _proof: Groth16Proof,
-        _public_inputs: Vec<Bn254Fr>,
-    ) -> Result<bool, contract_types::Groth16Error> {
-        Ok(true)
-    }
-}
 
 /// What the host metered for one invocation.
 struct Row {
@@ -229,6 +213,8 @@ impl PoolFixture {
         let token = env
             .register_stellar_asset_contract_v2(Address::generate(&env))
             .address();
+        // The pairing check this verifier skips is the one host cost a real
+        // verifier adds; the real-proof row measures that separately.
         let verifier = env.register(AcceptingVerifier, ());
         let asp_membership = env.register(ASPMembership, (admin.clone(), MEMBERSHIP_LEVELS));
         let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
@@ -240,9 +226,12 @@ impl PoolFixture {
                 verifier.clone(),
                 asp_membership.clone(),
                 asp_non_membership.clone(),
+                wasm_hash(&asp_membership),
+                wasm_hash(&asp_non_membership),
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
+                soroban_sdk::String::from_str(&env, "tests"),
             ),
         );
         let mint = StellarAssetClient::new(&env, &token);
@@ -318,9 +307,12 @@ fn gvk_transact_row() -> Row {
             base.verifier.clone(),
             base.asp_membership.clone(),
             base.asp_non_membership.clone(),
+            wasm_hash(&base.asp_membership),
+            wasm_hash(&base.asp_non_membership),
             U256::from_u32(env, 1_000_000),
             POOL_LEVELS,
             policy::BLOCKLIST_BIT,
+            soroban_sdk::String::from_str(env, "tests"),
             view_key,
             gvk::VIEW_ONLY,
         ),
@@ -362,8 +354,9 @@ fn membership_insert_row() -> Row {
     measure(&env, "asp-membership insert_leaf, first leaf")
 }
 
-/// Inserts eight keys, then measures the ninth insert and one delete.
-fn non_membership_rows() -> [Row; 2] {
+/// Inserts eight keys, then measures the ninth insert, one delete, and, with
+/// the deleted key back, three keys inserted in one call.
+fn non_membership_rows() -> [Row; 3] {
     let env = mainnet_env();
     let admin = Address::generate(&env);
     let id = env.register(ASPNonMembership, (admin,));
@@ -375,12 +368,22 @@ fn non_membership_rows() -> [Row; 2] {
     let insert = measure(&env, "asp-non-membership insert_leaf, ninth key");
     client.delete_leaf(&U256::from_u32(&env, 3));
     let delete = measure(&env, "asp-non-membership delete_leaf, one of nine");
-    [insert, delete]
+    client.insert_leaf(&U256::from_u32(&env, 3), &U256::from_u32(&env, 1));
+    let entries = [10, 11, 12].map(|key| (U256::from_u32(&env, key), U256::from_u32(&env, 1)));
+    client.insert_leaves(&Vec::from_array(&env, entries));
+    let batch = measure(
+        &env,
+        "asp-non-membership insert_leaves, three keys into nine",
+    );
+    [insert, delete, batch]
 }
 
 fn registry_row() -> Row {
     let env = mainnet_env();
-    let id = env.register(PublicKeyRegistry, ());
+    let id = env.register(
+        PublicKeyRegistry,
+        (soroban_sdk::String::from_str(&env, "tests"),),
+    );
     let owner = Address::generate(&env);
     PublicKeyRegistryClient::new(&env, &id).register(&Account {
         owner,
@@ -426,18 +429,19 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
-    "pool transact, transfer, blocklist, fresh tree" => 9, 4, 4444, 4, 530_972_009;
-    "pool transact, withdrawal, blocklist, fresh tree" => 12, 6, 4892, 4, 530_972_009;
-    "pool transact, transfer, root one transaction old" => 9, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 11, 4, 4444, 4, 530_972_009;
-    "pool transact, transfer, membership root one insert old" => 11, 4, 4444, 4, 530_972_009;
+    "pool transact, deposit, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, blocklist, fresh tree" => 11, 4, 4444, 2, 530_841_344;
+    "pool transact, withdrawal, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
+    "pool transact, transfer, root one transaction old" => 11, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 4, 4444, 2, 530_841_344;
+    "pool transact, transfer, membership root one insert old" => 14, 4, 4444, 2, 530_841_344;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 9, 4, 4444, 4, 530_972_185;
+    "pool-gvk transact, transfer, view-only" => 11, 4, 4444, 2, 530_841_344;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
-    "public-key-registry register, first registration" => 4, 2, 332, 1, 539_135_740;
+    "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
+    "public-key-registry register, first registration" => 5, 2, 332, 1, 539_135_740;
 };
 
 /// Checks every measured row against [`EXPECTED`], in both directions.
@@ -594,8 +598,48 @@ fn every_entry_point_reports_its_pinned_entry_counts() {
     assert_same_footprint(&rows, both_row, stale_member_row);
 }
 
+/// Ledgers the renewal test lets pass before its `transact`: 100 days, enough
+/// for mainnet's 120-day entries to fall below the 30-day target.
+const IDLE_LEDGERS: u32 = 1_728_000;
+
+/// After an idle stretch, a `transact` renews the entries it reads by a day
+/// each.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_transact_renews_its_entries_by_a_day() {
+    let fixture = PoolFixture::new(policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT);
+    let env = &fixture.env;
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence().saturating_add(IDLE_LEDGERS));
+    let ttls = || {
+        let instance = |id: &Address| env.deployer().get_contract_instance_ttl(id);
+        let code = |id: &Address| env.deployer().get_contract_code_ttl(id);
+        [
+            instance(&fixture.pool),
+            code(&fixture.pool),
+            env.as_contract(&fixture.pool, || {
+                env.storage().persistent().get_ttl(&MerkleDataKey::State)
+            }),
+            code(&fixture.verifier),
+            instance(&fixture.verifier),
+            instance(&fixture.asp_membership),
+            instance(&fixture.asp_non_membership),
+        ]
+    };
+    // Building the proof reads the blocklist's root, which renews it too.
+    let (proof, ext) = fixture.proof(fixture.client().get_root(), 1, 0);
+    let before = ttls();
+
+    fixture.client().transact(&proof, &ext, &fixture.sender);
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
+    );
+}
+
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (11, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (14, 4);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

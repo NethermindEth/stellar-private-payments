@@ -8,7 +8,7 @@ repository = "https://github.com/bytecodealliance/wasmtime"
 readme = "README.md"
 keywords = ["fuzz", "test"]
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.94.0"
 
 [dependencies]
 # external

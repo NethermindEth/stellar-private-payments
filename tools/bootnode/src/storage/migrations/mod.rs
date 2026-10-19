@@ -6,6 +6,8 @@ use std::collections::HashSet;
 const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("001_initial.sql")),
     (2, include_str!("002_event_archive.sql")),
+    (3, include_str!("003_archived_allowlists.sql")),
+    (4, include_str!("004_events_by_contract.sql")),
 ];
 
 pub async fn migrate(client: &mut Client) -> Result<()> {

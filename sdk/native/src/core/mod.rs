@@ -106,3 +106,34 @@ impl PoolCore {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ContractConfig, NoteOwnerAddress, SignerAddress};
+
+    /// The deposit step converts its amount to an `ext_amount` before anything
+    /// is proved, and `i128::MAX` is the largest amount that converts.
+    #[test]
+    fn deposit_above_i128_is_refused_before_proving() {
+        let core = PoolCore {
+            config: PrivatePoolConfig {
+                contract_config: ContractConfig::default(),
+                pool_contract_id: "CPOOL".into(),
+                user_address: NoteOwnerAddress::new("GUSER"),
+                signer_address: SignerAddress::new("GUSER"),
+            },
+        };
+        let step = |amount: u128| {
+            core.deposit_transact_step(
+                NotePublicKey([1; 32]),
+                EncryptionPublicKey([2; 32]),
+                NoteAmount::from(amount),
+            )
+        };
+
+        let at_max = step(i128::MAX.unsigned_abs()).expect("i128::MAX converts");
+        assert_eq!(at_max.ext_amount, ExtAmount::MAX);
+        assert!(matches!(step(1 << 127), Err(Error::Other(_))));
+    }
+}

@@ -381,4 +381,47 @@ mod tests {
         assert_eq!(steps, 2);
         assert!(exec.is_done());
     }
+
+    #[test]
+    fn complete_step_after_completion() {
+        let mut exec = SpendSession::setup(
+            vec![note(10)],
+            NoteAmount::from(10),
+            "POOL".into(),
+            transfer_target(),
+        )
+        .expect("setup transfer");
+        exec.complete_step(&[Field::ZERO, Field::ZERO])
+            .expect("complete the only step");
+
+        assert!(matches!(
+            exec.complete_step(&[Field::ZERO, Field::ZERO]),
+            Err(SpendSessionError::Complete)
+        ));
+    }
+
+    #[test]
+    fn withdraw_of_a_note_above_i128() {
+        let withdraw = |amount: u128| {
+            SpendSession::setup(
+                vec![note(amount)],
+                NoteAmount::from(amount),
+                "POOL".into(),
+                SpendTarget::withdraw(
+                    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".into(),
+                ),
+            )
+            .expect("setup withdraw")
+            .step()
+        };
+
+        let at_max = withdraw(i128::MAX.unsigned_abs())
+            .expect("i128::MAX converts")
+            .expect("one step");
+        assert_eq!(at_max.ext_amount, ExtAmount::from(-i128::MAX));
+        assert!(matches!(
+            withdraw(1 << 127),
+            Err(SpendSessionError::ExtAmountOverflow)
+        ));
+    }
 }

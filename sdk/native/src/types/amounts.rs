@@ -53,6 +53,33 @@ pub const BN254_PRIME: U256 = U256([
     0x30644e72e131a029,
 ]);
 
+fn parse_decimal_amount(raw: &str, decimals: u32) -> Result<(bool, u128)> {
+    let raw = raw.trim();
+    let (negative, digits) = match raw.as_bytes().first() {
+        Some(b'-') => (true, &raw[1..]),
+        Some(b'+') => (false, &raw[1..]),
+        _ => (false, raw),
+    };
+    if !digits.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return Err(anyhow!("invalid decimal amount"));
+    }
+    let value =
+        bigdecimal::BigDecimal::from_str(digits).map_err(|_| anyhow!("invalid decimal amount"))?;
+    let (coefficient, scale) = value.into_bigint_and_scale();
+    let padding = i64::from(decimals)
+        .checked_sub(scale)
+        .and_then(|padding| u32::try_from(padding).ok())
+        .ok_or_else(|| anyhow!("too many decimal places (max {decimals})"))?;
+    let mut amount = u128::try_from(coefficient).map_err(|_| anyhow!("amount is too large"))?;
+    if amount != 0 {
+        amount = 10u128
+            .checked_pow(padding)
+            .and_then(|scale| amount.checked_mul(scale))
+            .ok_or_else(|| anyhow!("amount is too large"))?;
+    }
+    Ok((negative, amount))
+}
+
 /// Amount that appears inside encrypted notes.
 ///
 /// This is always non-negative and is currently constrained to what fits in the
@@ -68,6 +95,15 @@ impl NoteAmount {
     pub const ONE: NoteAmount = NoteAmount(1);
     /// Zero amount.
     pub const ZERO: NoteAmount = NoteAmount(0);
+
+    /// Parse token units exactly, rejecting excess precision and overflow.
+    pub fn from_decimal(raw: &str, decimals: u32) -> Result<Self> {
+        let (negative, amount) = parse_decimal_amount(raw, decimals)?;
+        if negative && amount != 0 {
+            return Err(anyhow!("amount must be non-negative"));
+        }
+        Ok(Self(amount))
+    }
 
     /// Returns true if this amount is zero.
     pub const fn is_zero(self) -> bool {
@@ -205,6 +241,21 @@ impl ExtAmount {
     pub const ONE: ExtAmount = ExtAmount(1);
     /// Zero amount.
     pub const ZERO: ExtAmount = ExtAmount(0);
+
+    /// Parse signed token units exactly, rejecting excess precision and
+    /// overflow.
+    pub fn from_decimal(raw: &str, decimals: u32) -> Result<Self> {
+        let (negative, amount) = parse_decimal_amount(raw, decimals)?;
+        if negative && amount == i128::MIN.unsigned_abs() {
+            return Ok(Self(i128::MIN));
+        }
+        let amount = i128::try_from(amount).map_err(|_| anyhow!("amount is too large"))?;
+        Ok(Self(if negative {
+            amount.checked_neg().expect("non-negative i128")
+        } else {
+            amount
+        }))
+    }
 
     /// Returns true if this amount is zero.
     pub const fn is_zero(self) -> bool {
@@ -559,6 +610,65 @@ impl SubAssign for Field {
 mod tests {
     use super::*;
     use anyhow::Result;
+
+    #[test]
+    fn decimal_token_precision() -> Result<()> {
+        for (raw, decimals, expected) in [
+            ("12", 0, 12),
+            ("12.", 0, 12),
+            (".5", 6, 500_000),
+            (" +12.3456789 ", 7, 123_456_789),
+            ("1", 18, 1_000_000_000_000_000_000),
+            ("0.00000001", 8, 1),
+            ("-0.00", 2, 0),
+            ("0.000000000000000000000000000000000000001", 39, 1),
+            ("0", u32::MAX, 0),
+        ] {
+            assert_eq!(
+                NoteAmount::from_decimal(raw, decimals)?,
+                NoteAmount(expected)
+            );
+        }
+        assert_eq!(ExtAmount::from_decimal("-.5", 6)?, ExtAmount(-500_000));
+        assert_eq!("12".parse::<NoteAmount>()?, NoteAmount(12));
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_rejects_invalid_input_and_precision() {
+        for raw in [
+            "", " ", ".", "+", "-", "+.", "-.", "1.2.3", "1e3", "1,2", "1_000", "1 2", "١", "NaN",
+        ] {
+            assert!(NoteAmount::from_decimal(raw, 7).is_err(), "{raw:?}");
+            assert!(ExtAmount::from_decimal(raw, 7).is_err(), "{raw:?}");
+        }
+        for (raw, decimals) in [("1.0", 0), ("0.00000001", 7), ("1.000", 2)] {
+            assert!(NoteAmount::from_decimal(raw, decimals).is_err());
+        }
+        assert!(NoteAmount::from_decimal("-0.1", 1).is_err());
+        assert!(NoteAmount::from_decimal("1", u32::MAX).is_err());
+    }
+
+    #[test]
+    fn decimal_amount_boundaries() -> Result<()> {
+        let max = u128::MAX.to_string();
+        assert_eq!(NoteAmount::from_decimal(&max, 0)?, NoteAmount::MAX);
+        let scaled = format!("{}.{}", &max[..32], &max[32..]);
+        assert_eq!(NoteAmount::from_decimal(&scaled, 7)?, NoteAmount::MAX);
+        assert!(NoteAmount::from_decimal("340282366920938463463374607431768211456", 0).is_err());
+        assert!(NoteAmount::from_decimal(&max, 1).is_err());
+        assert_eq!(
+            ExtAmount::from_decimal(&i128::MAX.to_string(), 0)?,
+            ExtAmount::MAX
+        );
+        assert_eq!(
+            ExtAmount::from_decimal(&i128::MIN.to_string(), 0)?,
+            ExtAmount(i128::MIN)
+        );
+        assert!(ExtAmount::from_decimal("170141183460469231731687303715884105728", 0).is_err());
+        assert!(ExtAmount::from_decimal("-170141183460469231731687303715884105729", 0).is_err());
+        Ok(())
+    }
 
     #[test]
     fn note_amount_serde_roundtrip() -> Result<()> {

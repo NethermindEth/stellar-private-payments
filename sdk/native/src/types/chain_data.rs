@@ -54,6 +54,10 @@ pub struct PoolInfo {
     pub merkle_current_root_index: Option<u32>,
     pub merkle_next_index: String, //num_bigint::BigUint,
     pub maximum_deposit_amount: ExtAmount,
+    /// Whether the pool refuses deposits. `false` for a pool deployed before
+    /// the flag existed, which cannot be paused.
+    #[serde(default)]
+    pub deposits_paused: bool,
     pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
@@ -142,6 +146,8 @@ pub struct TransactChainContext {
     pub policy_flags: PolicyFlags,
     pub gvk_mode: GvkMode,
     pub admin_view_key: Option<BabyJubJubPoint>,
+    /// Whether the pool refuses deposits; see [`PoolInfo::deposits_paused`].
+    pub deposits_paused: bool,
 }
 
 pub fn transact_chain_context_from_state(
@@ -175,6 +181,7 @@ pub fn transact_chain_context_from_state(
         policy_flags: pool.policy_flags,
         gvk_mode: GvkMode::from_on_chain_value(pool.gvk_mode)?,
         admin_view_key: pool.admin_view_key,
+        deposits_paused: pool.deposits_paused,
     })
 }
 
@@ -371,6 +378,7 @@ mod pool_info_gvk_tests {
             merkle_current_root_index: Some(3),
             merkle_next_index: "6".to_string(),
             maximum_deposit_amount: ExtAmount::from(1_000i128),
+            deposits_paused: false,
             merkle_root: Some(Field(U256::from(7))),
             merkle_capacity: 1_048_576,
             total_commitments: "6".to_string(),
@@ -438,5 +446,40 @@ mod pool_info_gvk_tests {
         let decoded: PoolInfo = serde_json::from_value(value).expect("decode non-GVK PoolInfo");
         assert!(decoded.admin_view_key.is_none());
         assert!(decoded.gvk_mode.is_none());
+    }
+
+    #[test]
+    fn pool_info_round_trips_with_deposits_paused_set() {
+        let pool = PoolInfo {
+            deposits_paused: true,
+            ..pool_info_with_gvk()
+        };
+        let encoded = serde_json::to_string(&pool).expect("serialize PoolInfo");
+        let decoded: PoolInfo = serde_json::from_str(&encoded).expect("decode PoolInfo");
+
+        assert!(decoded.deposits_paused);
+    }
+
+    /// State serialized before the deposit flag existed must still decode, as
+    /// an open pool.
+    #[test]
+    fn pool_info_without_the_field_still_decodes() {
+        let mut value = serde_json::to_value(PoolInfo {
+            deposits_paused: true,
+            ..pool_info_with_gvk()
+        })
+        .expect("serialize PoolInfo to value");
+        let object = value
+            .as_object_mut()
+            .expect("PoolInfo serializes as object");
+        assert!(
+            object.remove("depositsPaused").is_some(),
+            "field was present"
+        );
+
+        let decoded: PoolInfo =
+            serde_json::from_value(value).expect("decode PoolInfo without the flag");
+
+        assert!(!decoded.deposits_paused);
     }
 }

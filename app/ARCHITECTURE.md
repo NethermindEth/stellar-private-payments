@@ -52,7 +52,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 **Main thread (WASM)**
 
 - Entry: `init()` from `stellar-private-payments` (wasm-bindgen module init).
-- `Client::new` forks a `Storage` handle and holds RPC URL + optional bootnode; wallet binding happens at `account`.
+- `Client::new` forks a `Storage` handle and holds the deployment configuration, RPC URL, optional bootnode, and prover bridge. The JS constructor configures that prover with the artifact base URL and circuit lock; each prover worker is bound to one lock. Wallet binding happens at `account`.
 - `Client::backgroundSync` spawns the native SDK `BackgroundSync` loop (`wasm_bindgen_futures::spawn_local`).
 
 **Indexer (client SDK + web SDK)**
@@ -68,10 +68,10 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 
-**`Client` (WASM, wasm-bindgen API)**
+**`Client` (JS facade over the WASM API)**
 
-- Constructed by `Client.new({ rpcUrl, storage, proverWorkerUrl?, bootnodeUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
-- Spawns the prover worker at `Client.new`. Routes storage through `StorageBridge`.
+- Constructed by `Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl, circuitLock })` — wraps native SDK `Client` plus worker bridges; no wallet yet. `contractConfig` is required. `circuitLock` is the parsed, trusted `circuits.json` containing expected artifact hashes; `circuitsBaseUrl` locates those artifacts. Optional settings include `proverWorkerUrl` and `bootnodeUrl`.
+- Spawns and configures the prover worker at `Client.new`, unless a pre-configured `prover` is supplied. With that prover, `circuitsBaseUrl` and `circuitLock` may be omitted. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `backgroundSync`.
   - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
@@ -91,7 +91,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Per-pool session: client SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
 - **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
 - Exports: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
-- Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
+- Amounts are **token base units** as JavaScript `bigint` (same units as Rust `NoteAmount`).
 - Proving, signing, and submit run inside this session; returns tx hashes to JS.
 
 **`StorageBridge` (WASM main thread)**
@@ -186,11 +186,13 @@ App-only persistence on top of `Storage.call`: explorer settings, bootnode confi
 
 **`app/js/wallet.js`**
 
-Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Freighter-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. The network-URL call (`getNetworkDetails` for `sorobanRpcUrl`) is a separate, permanent exception rather than a Draft gap: SEP-0043's `getNetwork` has no RPC-URL field at all, standard or Draft, so there is no SEP path to migrate to.
+Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Freighter-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. Network identity is read through SEP-0043 `getNetwork` and checked against the selected deployment. The RPC URL comes exclusively from deployment configuration, independently of Freighter endpoint settings.
 
 **Build (Trunk)**
 
 `Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/freighter.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/freighter` as external packages via import maps in `index.html`.
+
+`SPP_NETWORK` (default `testnet`) selects `deployments/<network>/deployments.json` for staging. Trunk calls `deployments/scripts/bundle-app.sh`, which stages the deployment and uses the esbuild `app-circuit-lock` alias to embed that deployment's circuit lock in the app bundles. `wasm-facade.js` imports `app-circuit-lock` and passes it, together with the deployment configuration and artifact base URL, to the SDK for client creation and walletless disclosure verification. The app does not fetch `circuits.json` at runtime. Expected hashes are pinned to the app build, so this still requires trusting the app and its delivery.
 
 Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
 
@@ -198,7 +200,7 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 Keys are derived deterministically from Freighter wallet signatures:
 
-1. The app calls `account.derivePrivacyKeys()` explicitly (during onboarding); the wallet signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`) using SEP-53.
+1. The app calls `account.derivePrivacyKeys()` explicitly (during onboarding); the wallet signs `key_derivation_message(kdf_domain)` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v2] (<kdf_domain>)"`, with `kdf_domain` from `deployments.json`) using SEP-53.
 2. `Account::derive_privacy_keys` calls `verify_owner_signature` to strictly verify the 64-byte Ed25519 signature against the note owner's Stellar `G...` public key before trusting it. The signed digest is `SHA256("Stellar Signed Message:\n" + message)`, using UTF-8 bytes and a newline after the colon. Verification refuses signatures from another key, signatures over another message, invalid lengths or addresses, and small-order owner keys or signature `R` points.
 3. It then derives the BN254 note identity keypair and the X25519 encryption keypair from the verified signature using domain-separated hashes, plus the ASP membership blinding using the network context (main thread on web, not inside the storage worker).
 4. Derived keys are sent to storage and persisted in SQLite; the signature is not persisted. Verification failure stops derivation before any privacy keys are derived or saved.

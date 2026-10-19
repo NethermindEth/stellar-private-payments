@@ -4,7 +4,7 @@
 use anyhow::Result;
 use stellar_private_payments::types::NoteAmount;
 
-use super::support::{deploy_default, session};
+use super::support::{assert_contract_error, deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
@@ -22,6 +22,32 @@ async fn withdraw_basic() -> Result<()> {
         .await?;
     let balance_after_withdraw = pool.balance().await?;
     assert_eq!(balance_after_withdraw, NoteAmount::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn withdraw_multi_tx() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+
+    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
+    let estimate = pool.estimate(total).await?;
+    assert_eq!(
+        estimate.tx_count, 2,
+        "combining 3 notes with a 2-input circuit should take 2 transactions"
+    );
+
+    let results = pool.withdraw(total, session.wallet.address()).await?;
+    assert_eq!(results.len(), 2);
+
+    let balance = pool.balance().await?;
+    assert_eq!(balance, NoteAmount::ZERO);
 
     Ok(())
 }
@@ -65,6 +91,8 @@ async fn withdraw_malformed_address() -> Result<()> {
     Ok(())
 }
 
+/// Once the first spend is in a ledger, the pool refuses the second with
+/// `AlreadySpentNullifier` (code 9), not just any failure up to confirm.
 #[tokio::test]
 async fn withdraw_double_spend() -> Result<()> {
     let session = session(deploy_default().await?).await?;
@@ -92,20 +120,11 @@ async fn withdraw_double_spend() -> Result<()> {
     let hash_a = pool.submit(signed_a).await?;
     pool.confirm(&hash_a).await?;
 
-    let rejected = match pool.simulate(&mut prepared_b).await {
-        Err(_) => true,
-        Ok(()) => {
-            let signed_b = pool.sign(&prepared_b).await?;
-            match pool.submit(signed_b).await {
-                Err(_) => true,
-                Ok(hash_b) => pool.confirm(&hash_b).await.is_err(),
-            }
-        }
-    };
-    assert!(
-        rejected,
-        "spending the same note a second time must be rejected on-chain"
-    );
+    let err = pool
+        .simulate(&mut prepared_b)
+        .await
+        .expect_err("spending the same note a second time must be rejected on-chain");
+    assert_contract_error(err, 9);
 
     Ok(())
 }

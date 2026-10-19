@@ -117,14 +117,18 @@ mod tests {
     }
 
     #[allow(clippy::arithmetic_side_effects)]
+    fn distinct_notes(n_notes: usize) -> Vec<DisclosureNote> {
+        (0..n_notes)
+            .map(|i| sample_note(7 + i * 5, 4242 + i as u64, 5151 + i as u64, 17 + i as u64))
+            .collect()
+    }
+
     fn run_valid_note_test(n_notes: usize) -> Result<()> {
         let circuit = format!("selectiveDisclosure_{n_notes}");
         let (wasm, r1cs) = load_artifacts(&circuit).expect("Cannot find {circuit} artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let notes: Vec<DisclosureNote> = (0..n_notes)
-            .map(|i| sample_note(7 + i * 5, 4242 + i as u64, 5151 + i as u64, 17 + i as u64))
-            .collect();
+        let notes = distinct_notes(n_notes);
         let mut leaves = sample_leaves(&notes);
         let inputs = build_inputs(&notes, &mut leaves, Scalar::from(EXT_CONTEXT_HASH))?;
         let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)
@@ -155,6 +159,66 @@ mod tests {
     #[ignore]
     fn test_selective_disclosure_valid_4_notes() -> Result<()> {
         run_valid_note_test(4)
+    }
+
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_repeated_note_test(n_notes: usize) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts(&format!("selectiveDisclosure_{n_notes}"))?;
+        let keys = generate_keys(&wasm, &r1cs)?;
+
+        for i in 0..n_notes {
+            for j in i + 1..n_notes {
+                let mut notes = distinct_notes(n_notes);
+                notes[j] = notes[i].clone();
+                let mut leaves = sample_leaves(&notes);
+                let inputs = build_inputs(&notes, &mut leaves, Scalar::from(EXT_CONTEXT_HASH))?;
+
+                assert!(
+                    !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+                    "slot {j} repeating slot {i} verified on {n_notes} notes"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_2_repeated_note_fails() -> Result<()> {
+        run_repeated_note_test(2)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_3_repeated_note_fails() -> Result<()> {
+        run_repeated_note_test(3)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_4_repeated_note_fails() -> Result<()> {
+        run_repeated_note_test(4)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_2_same_commitment_at_two_leaves_verifies() -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_2")?;
+        let keys = generate_keys(&wasm, &r1cs)?;
+
+        let notes = [
+            sample_note(7, 4242, 5151, 17),
+            sample_note(12, 4242, 5151, 17),
+        ];
+        let mut leaves = sample_leaves(&notes);
+        // The first pass fills both leaves, so the second proves both slots
+        // under one root.
+        build_inputs(&notes, &mut leaves, Scalar::from(EXT_CONTEXT_HASH))?;
+        let inputs = build_inputs(&notes, &mut leaves, Scalar::from(EXT_CONTEXT_HASH))?;
+
+        let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)?;
+        assert!(res.verified, "one commitment at two leaves did not verify");
+        Ok(())
     }
 
     #[test]

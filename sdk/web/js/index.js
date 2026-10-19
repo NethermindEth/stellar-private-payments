@@ -1,6 +1,8 @@
 import init, {
   Client as WasmClient,
   DisclosureRequest,
+  readTokenDecimals,
+  parseTokenAmount as wasmParseTokenAmount,
   Storage as WasmStorage,
   ProverBridge,
   WalletSigner as WasmWalletSigner,
@@ -26,6 +28,15 @@ export const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
  * instead of leaking forever.
  */
 const telemetryFinalizer = new FinalizationRegistry((telemetrySinks) => telemetrySinks.free());
+
+/** Parse token units exactly into bigint base units. */
+function parseTokenAmount(value, decimals) {
+  if (typeof value !== 'string') throw new TypeError('Amount must be a string');
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 0xffff_ffff) {
+    throw new RangeError('Decimals must be a u32 integer');
+  }
+  return wasmParseTokenAmount(value, decimals);
+}
 
 function requireField(value, name) {
   if (value === undefined || value === null) {
@@ -143,6 +154,7 @@ function wrapClient(wasmClient, telemetrySinks) {
  */
 async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
+  const lockJson = options.prover ? undefined : JSON.stringify(requireField(options.circuitLock, 'circuitLock'));
 
   const storage =
     options.storage ??
@@ -160,8 +172,13 @@ async function newClient(options) {
       throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
     }
     prover = ProverBridge.spawn(resolvedProverWorkerUrl);
-    await prover.configureCircuitsBase(circuitsBaseUrl);
-    await prover.ping();
+    try {
+      await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
+      await prover.ping();
+    } catch (error) {
+      prover.free();
+      throw error;
+    }
   }
   const proverHandle = prover.toHandle();
   const storageHandle = await storage.toHandle();
@@ -189,11 +206,12 @@ async function newClient(options) {
 async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options) {
   const contractConfig = requireField(options?.contractConfig, 'contractConfig');
   const circuitsBaseUrl = requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
+  const lockJson = JSON.stringify(requireField(options?.circuitLock, 'circuitLock'));
   const resolvedProverWorkerUrl = options?.proverWorkerUrl ?? proverWorkerUrl;
 
   const prover = ProverBridge.spawn(resolvedProverWorkerUrl);
   try {
-    await prover.configureCircuitsBase(circuitsBaseUrl);
+    await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
     await prover.ping();
     const proverHandle = prover.toHandle();
     try {
@@ -212,7 +230,7 @@ export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage 
 export const Client = {
   new: newClient,
 };
-export { DisclosureRequest, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

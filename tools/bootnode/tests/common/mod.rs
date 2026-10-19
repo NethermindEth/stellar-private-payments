@@ -53,8 +53,11 @@ pub fn contract_ids() -> Vec<String> {
 
 pub fn fixture_deployment(start_ledger: u32) -> DeploymentSpec {
     DeploymentSpec {
+        network_passphrase: "fixture".into(),
         contract_ids: contract_ids(),
         min_deployment_ledger: start_ledger,
+        deployment_id: deployment_storage_id(&contract_ids(), start_ledger, "fixture"),
+        added_allowlists: Vec::new(),
     }
 }
 
@@ -62,6 +65,7 @@ pub fn test_storage(start_ledger: u32) -> Arc<InMemory> {
     Arc::new(InMemory::with_deployment_id(deployment_storage_id(
         &contract_ids(),
         start_ledger,
+        "fixture",
     )))
 }
 
@@ -136,7 +140,7 @@ pub async fn spawn_bootnode(
 
 fn random_event_id(ledger: u32) -> String {
     let mut bytes = [0u8; 8];
-    getrandom::getrandom(&mut bytes).expect("random event id");
+    getrandom::fill(&mut bytes).expect("random event id");
     let suffix = u64::from_le_bytes(bytes);
     format!("event-{ledger:010}-{suffix:016x}")
 }

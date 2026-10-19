@@ -12,6 +12,8 @@ import { startAutoLock } from './storage-timeout.js';
 
 import init, {
   Client,
+  parseTokenAmount,
+  readTokenDecimals as sdkReadTokenDecimals,
   DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
@@ -23,11 +25,14 @@ import init, {
 } from 'stellar-private-payments';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 
+import { deploymentDefaults, networkPresentation } from './network-config.js';
 import { AppStorage } from './app-storage.js';
 import { openPasswordStorage } from './storage-key.js';
 import { requestStoragePassword } from './storage-password.js';
+// Trunk bundles the selected deployment's trusted fingerprints into the app.
+import circuitLock from 'app-circuit-lock';
 
-export { DisclosureRequest };
+export { DisclosureRequest, parseTokenAmount };
 
 const DEPLOYMENT_CONFIG_URL = new URL('./deployments.json', document.baseURI).href;
 const CIRCUITS_BASE_URL = new URL(
@@ -95,7 +100,13 @@ export async function loadDeploymentConfig() {
                         `failed to load deployment config from ${DEPLOYMENT_CONFIG_URL}`,
                     );
                 }
-                return res.json();
+                const config = await res.json();
+                Object.assign(deploymentDefaults, {
+                    network: config.network,
+                    rpcUrl: config.rpcUrl,
+                    ...networkPresentation(config),
+                });
+                return config;
             })
             .catch((err) => {
                 deploymentConfigPromise = null;
@@ -186,6 +197,7 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
         bootnodeUrl: bootnodeUrl ?? undefined,
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock,
     });
     return wrapSdkClient(sdk);
 }
@@ -343,6 +355,7 @@ export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkH
     return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
         contractConfig,
         circuitsBaseUrl: circuitsBaseUrl(),
+        circuitLock,
     });
 }
 
@@ -374,4 +387,9 @@ export async function dumpTelemetryLogs() {
 /** Whether the WASM build supports debug/trace logging and sensitive reveal. */
 export function debugLogsEnabled() {
     return sdkDebugLogsEnabled();
+}
+
+export async function readTokenDecimals(rpcUrl, tokenContract) {
+    await ensureWasmInit();
+    return sdkReadTokenDecimals(rpcUrl, tokenContract);
 }

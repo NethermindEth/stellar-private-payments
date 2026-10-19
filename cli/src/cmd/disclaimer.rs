@@ -16,7 +16,7 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     let accepted = match &config.account {
         Some(_) => {
             let account = config.require_account()?;
-            let mut storage = config.open_storage()?;
+            let storage = config.open_storage()?;
             Some(storage.get_disclaimer_state(&account.address)?.accepted)
         }
         None => None,

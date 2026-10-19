@@ -1,8 +1,8 @@
 # STELLAR PRIVATE PAYMENTS - PROOF OF CONCEPT DEMO
 https://github.com/NethermindEth/stellar-private-payments | Apache 2.0 | Copyright 2025 Stellar Development Foundation
 
-## TESTNET ONLY - NO REAL VALUE
-This demo operates exclusively on the Stellar Testnet. All tokens used (including Test XLM) have no monetary value, cannot be exchanged for fiat currency or any other asset, and are not issued on receipt of funds. Testnet state is subject to periodic resets; no balances or transaction history will persist.
+## NETWORK AND ASSET VALUE
+The hosted demo uses the Stellar Testnet. Other deployments of this software may use different networks. Confirm the network and deployment before using the software. On test networks, tokens (including Test XLM) have no monetary value and state may be reset. On mainnet, assets may have real value and transactions may be irreversible. Selecting mainnet does not make this proof of concept suitable for production use.
 
 ## TECHNICAL PROOF OF CONCEPT ONLY
 This demo is provided for evaluation and research purposes only. Nothing in this demo constitutes the provision of any regulated financial service, financial promotion, or investment advice. Neither the Stellar Development Foundation ("SDF") nor Nethermind is acting as a money transmitter, custodian, or financial adviser in connection with this demo. The privacy features in this demo are not designed to circumvent any applicable legal or regulatory obligations, including those arising under anti-money laundering, counter-terrorism financing, or sanctions laws. This demo should not be considered a promotion of any future system, product, or service.
@@ -22,7 +22,7 @@ You agree to defend, indemnify, and hold harmless SDF, Nethermind, and their res
 By using this demo, you represent and warrant that you: (i) are 18 years of age or older; (ii) are not located in, under the control of, or a resident of any country to which the United States has embargoed goods or services, including Cuba, Iran, North Korea, or Russian-controlled areas of Ukraine; (iii) are not identified as a Specially Designated National by OFAC or placed on the U.S. Department of Commerce's Denied Persons List; and (iv) will comply with all applicable laws in your use of this demo.
 
 ## DATA AND PRIVACY
-This demo does not knowingly collect, store, or process personal data. Any data entered may be recorded on the Stellar Testnet and visible to third parties.
+This demo does not knowingly collect, store, or process personal data. Any data entered may be recorded on the selected Stellar network and visible to third parties.
 
 ## GOVERNING LAW
 This disclaimer will be governed by the laws of the State of California, without regard to its conflict of laws provisions. Any legal action arising out of this disclaimer shall be brought exclusively in courts sitting in the City and County of San Francisco, California, or in the federal court for the Northern District of California.

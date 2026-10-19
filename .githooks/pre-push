@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+# Validate declarations without compiling the additional MSRV build matrix.
+bash scripts/msrv.sh
+
 echo "⚠️ Some tests are ignored because they take a long time"
 echo "⚠️ you can run them with ('make circuits TESTS=1 && cargo test -p circuits -- --ignored') "
 

@@ -304,6 +304,11 @@ impl PoolInfo {
         self.inner.maximum_deposit_amount.to_string()
     }
 
+    #[wasm_bindgen(getter, js_name = depositsPaused)]
+    pub fn deposits_paused(&self) -> bool {
+        self.inner.deposits_paused
+    }
+
     #[wasm_bindgen(getter, js_name = merkleRoot)]
     pub fn merkle_root(&self) -> Option<String> {
         self.inner.merkle_root.as_ref().map(field_hex)

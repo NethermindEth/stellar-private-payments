@@ -12,7 +12,7 @@
 //! them back verbatim. Nothing here describes the storage layout, so the layout
 //! can only be described in one place: the contracts.
 
-use super::utils::test_env;
+use super::utils::{test_env, wasm_hash};
 use anyhow::Result;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
@@ -77,9 +77,12 @@ fn deploy() -> Deployment {
             verifier.clone(),
             asp_membership.clone(),
             asp_non_membership.clone(),
+            wasm_hash(&asp_membership),
+            wasm_hash(&asp_non_membership),
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+            soroban_sdk::String::from_str(&env, "tests"),
         ),
     );
     Deployment {
@@ -145,10 +148,14 @@ fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolConfig
         gvk_authority_pub_key: None,
     };
     let config = ContractConfig {
+        network_passphrase: None,
+        rpc_url: None,
         network: uri.to_string(),
+        kdf_domain: "tests".to_string(),
         deployer: strkey(&deployment.admin),
         admin: strkey(&deployment.admin),
         asp_membership: strkey(&deployment.asp_membership),
+        added_asp_memberships: Vec::new(),
         asp_non_membership: strkey(&deployment.asp_non_membership),
         verifiers: [("AB".to_string(), strkey(&deployment.verifier))]
             .into_iter()
@@ -224,5 +231,27 @@ async fn the_reader_derives_the_root_the_contract_reports() -> Result<()> {
     let mut expected = [0u8; 32];
     contract_root.to_be_bytes().copy_into_slice(&mut expected);
     assert_eq!(root.to_be_bytes(), expected);
+    Ok(())
+}
+
+/// A pool whose admin paused deposits must read as paused.
+#[tokio::test]
+async fn the_reader_sees_a_paused_pool() -> Result<()> {
+    let deployment = deploy();
+    pool::PoolContractClient::new(&deployment.env, &deployment.pool).pause_deposits();
+
+    let server = rpc_serving(ledger_entries_as_rpc_results(&deployment.env)).await;
+    let (config, pool) = config_for(&deployment, &server.uri());
+    let fetcher = StateFetcher::new(Client::new(&server.uri())?, config)?;
+
+    let data = fetcher
+        .contracts_data_for_pool(&pool.pool_contract_id)
+        .await?;
+    let info = data
+        .pools
+        .first()
+        .unwrap_or_else(|| panic!("expected the pool to be reported"));
+
+    assert!(info.deposits_paused);
     Ok(())
 }

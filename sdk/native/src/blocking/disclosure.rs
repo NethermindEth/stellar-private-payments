@@ -18,6 +18,8 @@ pub fn verify_disclosure_receipt(
     prover: &ProverHandle,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
+    expected_pool: Option<&str>,
+    expected_authority: Option<&str>,
 ) -> Result<DisclosureVerificationReport, Error> {
     let rpc = RpcClient::new(rpc_url.as_ref()).context("rpc error")?;
     let fetcher = StateFetcher::new(rpc, contract_config).context("state fetcher error")?;
@@ -26,5 +28,7 @@ pub fn verify_disclosure_receipt(
         prover,
         receipt,
         expected_vk_hash,
+        expected_pool,
+        expected_authority,
     ))
 }
