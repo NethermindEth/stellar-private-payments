@@ -13,16 +13,16 @@ use crate::{
     storage::NoteKeyPair,
     types::{
         ContractConfig, ContractsEventData, EncryptionKeyPair, EncryptionPublicKey, Field,
-        GvkAuthoritySetting, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
+        GvkAuthoritySetting, NoteKeyOwnerLookup, NotePublicKey, OperationalFeedItem,
+        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
 
 use super::{
-    Storage, map_build_params, map_private_keys, operational_feed_from_storage,
-    pool_notes_from_storage, portfolio_balances_from_storage, recipient_lookup_from_storage,
-    spendable_notes_from_storage, user_notes_from_storage,
+    Storage, map_build_params, map_private_keys, note_key_owner_lookup_from_storage,
+    operational_feed_from_storage, pool_notes_from_storage, portfolio_balances_from_storage,
+    recipient_lookup_from_storage, spendable_notes_from_storage, user_notes_from_storage,
 };
 use crate::{
     core::process_local_state,
@@ -184,6 +184,14 @@ impl Storage for LocalStorage {
         config: &ContractConfig,
     ) -> Result<RecipientLookup, Error> {
         recipient_lookup_from_storage(&self.storage(), address, config)
+    }
+
+    async fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        config: &ContractConfig,
+    ) -> Result<NoteKeyOwnerLookup, Error> {
+        note_key_owner_lookup_from_storage(&self.storage(), note_keys, config)
     }
 
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {

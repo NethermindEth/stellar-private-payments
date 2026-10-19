@@ -1,6 +1,9 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{
+    ContractConfig, Field, NoteKeyOwnerLookup, NoteOwnerAddress, OperationalFeedItem,
+    RecipientLookup,
+};
 
 use crate::{
     BackgroundSync, Error, ProverHandle, SignerHandle, StorageHandle, chain::StateFetcher,
@@ -70,6 +73,11 @@ impl Client {
 
     pub fn recipient_lookup(&self, address: impl AsRef<str>) -> Result<RecipientLookup, Error> {
         block_on(self.inner.recipient_lookup(address))
+    }
+
+    /// Blocking mirror of [`crate::Client::note_key_owner_lookup`].
+    pub fn note_key_owner_lookup(&self, note_keys: &[Field]) -> Result<NoteKeyOwnerLookup, Error> {
+        block_on(self.inner.note_key_owner_lookup(note_keys))
     }
 
     /// Blocking mirror of [`crate::Client::account`]; the same
