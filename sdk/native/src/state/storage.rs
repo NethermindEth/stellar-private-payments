@@ -704,12 +704,12 @@ impl Storage {
         Ok(balances)
     }
 
-    pub fn recipient_lookup(
+    /// Registry sync status as `(fully_synced, network_tip_ledger,
+    /// registry_last_fully_indexed_ledger)`.
+    fn registry_sync_status(
         &self,
-        address: &str,
         public_key_registry_contract_id: &str,
-    ) -> Result<RecipientLookup> {
-        let entry = self.lookup_public_key_by_address(address, public_key_registry_contract_id)?;
+    ) -> Result<(bool, u32, u32)> {
         let registry_last_fully_indexed_ledger = self
             .get_sync_metadata()?
             .into_iter()
@@ -717,11 +717,27 @@ impl Storage {
             .map(|meta| meta.last_fully_indexed_ledger)
             .unwrap_or_default();
         let network_tip_ledger = self.network_tip_ledger()?;
+        let fully_synced =
+            network_tip_ledger > 0 && registry_last_fully_indexed_ledger >= network_tip_ledger;
+        Ok((
+            fully_synced,
+            network_tip_ledger,
+            registry_last_fully_indexed_ledger,
+        ))
+    }
+
+    pub fn recipient_lookup(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<RecipientLookup> {
+        let entry = self.lookup_public_key_by_address(address, public_key_registry_contract_id)?;
+        let (registry_fully_synced, network_tip_ledger, registry_last_fully_indexed_ledger) =
+            self.registry_sync_status(public_key_registry_contract_id)?;
 
         Ok(RecipientLookup {
             entry,
-            registry_fully_synced: network_tip_ledger > 0
-                && registry_last_fully_indexed_ledger >= network_tip_ledger,
+            registry_fully_synced,
             network_tip_ledger,
             registry_last_fully_indexed_ledger,
         })
