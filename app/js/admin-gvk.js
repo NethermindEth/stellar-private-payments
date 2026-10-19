@@ -232,6 +232,24 @@ function ownerCell(pk) {
   return { display: shortAddress(address), full: address, matchPk: normalizeFieldKey(pk) };
 }
 
+/** Owner label for narrow, fixed-width spots (e.g. the PK graph's lane column): "G123…WXYZ", else the short PK. */
+function ownerLabel(pk) {
+  const address = ownerAddress(pk);
+  return address ? `${address.slice(0, 4)}…${address.slice(-4)}` : shortPkLabel(pk);
+}
+
+/** Tooltip text for an owner: address plus PK when registered, else the PK. */
+function ownerTitle(pk) {
+  const address = ownerAddress(pk);
+  return address ? `${address}\nPK ${pk}` : String(pk);
+}
+
+/** Short owner form for inline lists: truncated address, else the truncated PK. */
+function ownerShort(pk) {
+  const address = ownerAddress(pk);
+  return address ? shortAddress(address) : truncateHex(pk).display;
+}
+
 function copyToClipboard(cell, text) {
   navigator.clipboard?.writeText(text).then(() => {
     const original = cell.textContent;
@@ -1661,15 +1679,15 @@ function renderPkGraphLegend() {
   const line = (extra) => el('span', `inline-block h-2.5 w-0.5 shrink-0 ${extra}`);
   const triangle = roundedTriangleLegendIcon;
 
-  addItem(bar('bg-white/15'), 'Row: a public key (PK); x-axis: ledger (time)');
+  addItem(bar('bg-white/15'), 'Row: a note owner (registered address, else PK); x-axis: ledger (time)');
 
   if (state.poolGvkMode === 'traceable') {
     addItem(line('bg-cyan-400/70'), 'Vertical arrow: transfer');
-    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that PK');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that owner');
     addItem(triangle('fill-rose-400', false), 'Triangle up: withdraw');
     addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
   } else {
-    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that PK');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that owner');
     legend.appendChild(el('div', 'text-slate-500', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
   }
 
@@ -1687,13 +1705,19 @@ function pkGraphDetailAmountRow(label, amount, count) {
   return row;
 }
 
+/** Click-to-copy detail row: the registered address (when unique) above the PK. */
 function pkGraphDetailPkRow(label, pk) {
   const row = el('div');
   row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
-  const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', pk);
-  value.title = `${pk} (click to copy)`;
-  value.addEventListener('click', () => copyToClipboard(value, pk));
-  row.appendChild(value);
+  const addValue = (text) => {
+    const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', text);
+    value.title = `${text} (click to copy)`;
+    value.addEventListener('click', () => copyToClipboard(value, text));
+    row.appendChild(value);
+  };
+  const address = ownerAddress(pk);
+  if (address) addValue(address);
+  addValue(pk);
   return row;
 }
 
@@ -1781,7 +1805,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const node = nodes.find((n) => n.pk === state.selectedPk);
 
   if (!node) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect a PK, or an arrow to inspect a transfer. Use ← → to step through PKs.'));
+    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect an owner, or an arrow to inspect a transfer. Use ← → to step through owners.'));
     container.appendChild(panel);
     return;
   }
@@ -1789,7 +1813,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const header = el('div', 'shrink-0 space-y-3');
   panel.appendChild(header);
 
-  header.appendChild(pkGraphDetailPkRow('PK', node.pk));
+  header.appendChild(pkGraphDetailPkRow('Owner', node.pk));
   if (selectedDot) header.appendChild(pkGraphDetailSelectedDotRow(selectedDot));
   header.appendChild(pkGraphDetailBalanceRow(fullNodeByPk?.get(node.pk) ?? node));
 
@@ -1816,7 +1840,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
       list.appendChild(el(
         'div',
         'flex items-center justify-between gap-2 font-mono text-slate-300',
-        `${outgoing ? '→' : '←'} ${truncateHex(other).display} · ${formatTokenAmount(edge.amount)} (${edge.count})`,
+        `${outgoing ? '→' : '←'} ${ownerShort(other)} · ${formatTokenAmount(edge.amount)} (${edge.count})`,
       ));
     }
     transfersBox.appendChild(list);
@@ -1917,7 +1941,7 @@ function renderPkGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (orderedPks.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No public keys to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No owners to plot.'));
     renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
     return;
   }
@@ -2037,10 +2061,10 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('fill', (pk) => colorForPk(pk))
     .style('cursor', 'pointer')
     .style('user-select', 'none')
-    .text((pk) => shortPkLabel(pk))
+    .text((pk) => ownerLabel(pk))
     .on('click', (_event, pk) => selectPkGraphNode(pk))
     .append('title')
-    .text((pk) => pk);
+    .text((pk) => ownerTitle(pk));
 
   const svg = select(plotScrollX).append('svg')
     .attr('width', plotWidth)
@@ -2127,7 +2151,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
 
   flowGroups.append('title')
-    .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${truncateHex(g.flow.fromPk).display} → ${truncateHex(g.flow.toPk).display}\n${formatTokenAmount(g.flow.amount)}`);
+    .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${ownerShort(g.flow.fromPk)} → ${ownerShort(g.flow.toPk)}\n${formatTokenAmount(g.flow.amount)}`);
 
   // Circle for a transfer touch; rounded triangle up = withdraw, down = deposit.
   const circlePathD = symbol().type(symbolCircle).size(Math.PI * DOT_RADIUS * DOT_RADIUS)();
@@ -2161,7 +2185,7 @@ function renderPkGraph(rows, containerWidth, filters) {
           : d.received > 0n
             ? `Received ${formatTokenAmount(d.received)} (origin unknown)`
             : null;
-      return [d.pk, `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
+      return [ownerTitle(d.pk), `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
     });
 
   renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
