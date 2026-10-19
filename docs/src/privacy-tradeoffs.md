@@ -22,8 +22,15 @@ The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's 
 | Event Name | Contract Crate | Topics (Indexed) | Data (Payload) | Privacy & Correlation Classification |
 |---|---|---|---|---|
 | `NewCommitmentEvent` | `pool` | `[Symbol("NewCommitmentEvent"), commitment: U256]` | `index: u32`, `encrypted_output: Bytes` | **Public Data / Correlatable**: Commitment is a blinded Poseidon hash; encrypted output uses fresh OS CSPRNG nonces per note. Correlatable with public transaction args (`ExtData`). |
-| `NewNullifierEvent` | `pool` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | *empty* | **Pseudonymous / One-Time Use**: Unlinks spent note from new commitments, but nullifier reuse would break privacy. |
+| `NewNullifierEvent` | `pool` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | *empty* | **Pseudonymous / One-Time Use**: Unlinks spent note from new commitments, but nullifier reuse would break privacy. A [disclosure receipt](./disclosure.md) carries its notes' nullifiers, so whoever holds it can spot when they are spent. |
 | `LeafAddedEvent` | `asp-membership` | `[Symbol("LeafAdded")]` | `leaf: U256`, `index: u64`, `root: U256` | **Public Protocol Data**: Blinded membership commitment `poseidon2_hash2(note_pubkey, blinding, 1)`. |
 | `LeafInsertedEvent` | `asp-non-membership` | `[Symbol("LeafInserted")]` | `key: U256`, `value: U256`, `root: U256` | **Transparency Property / Correlatable**: In ASP blocklist management, `key` is the unblinded note public key. Public blocklist key transparency allows users to verify non-membership. |
 | `LeafDeletedEvent` | `asp-non-membership` | `[Symbol("LeafDeleted")]` | `key: U256`, `root: U256` | **Transparency Property**: Key removed from blocklist. |
 | `PublicKeyEvent` | `public-key-registry` | `[Symbol("PublicKeyEvent"), owner: Address]` | `encryption_key: Bytes`, `note_key: Bytes` | **Opt-In Public Directory**: Binds public Stellar address to note/encryption public keys for recipient discovery. |
+
+## 4. Unchecked Note Ciphertexts
+
+The proof binds each output commitment, but not the `encrypted_output` the sender attaches to it in `NewCommitmentEvent`. The pool stores whatever bytes the sender supplies, so a ciphertext can claim an amount its commitment doesn't hold, or be unreadable.
+
+* **Readers Must Recheck**: The SDK recomputes the commitment from the decrypted amount and blinding and the recipient's note public key, and ignores a note that doesn't match. Indexers, wallets, and exchanges that decrypt `encrypted_output` themselves must do the same before crediting a note.
+* **GVK Pools**: The proof checks the GVK holder's copy of each note, but not the recipient's `encrypted_output`. A note the GVK holder can audit may still be unreadable by its recipient.
