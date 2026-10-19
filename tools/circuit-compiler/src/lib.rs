@@ -449,14 +449,16 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
 
 /// Resolve an include path to an absolute file path
 ///
-/// Handles both relative paths (starting with `./` or `../`) and library paths
-/// by searching in the provided search directories.
+/// Mirrors Circom's lookup order: the directory of the including file is tried
+/// first, then each of the provided search directories. This applies to every
+/// include, so `include "abc.circom"` resolves next to the current file just
+/// like `include "./abc.circom"`.
 ///
 /// # Arguments
 ///
 /// * `include_path` - The include path string from the Circom file
 /// * `current_dir` - Directory of the file containing the include statement
-/// * `search_dirs` - List of directories to search for non-relative includes
+/// * `search_dirs` - List of directories to search after `current_dir`
 ///
 /// # Returns
 ///
@@ -467,19 +469,12 @@ fn resolve_include_path(
     current_dir: &Path,
     search_dirs: &[PathBuf],
 ) -> Result<Option<PathBuf>> {
-    // Relative paths
-    if include_path.starts_with("./") || include_path.starts_with("../") {
-        let path = current_dir.join(include_path);
-        if path.exists() {
+    let candidate_dirs =
+        std::iter::once(current_dir).chain(search_dirs.iter().map(PathBuf::as_path));
+    for dir in candidate_dirs {
+        let path = dir.join(include_path);
+        if path.is_file() {
             return Ok(Some(path.canonicalize()?));
-        }
-    } else {
-        // Search in library directories
-        for dir in search_dirs {
-            let path = dir.join(include_path);
-            if path.exists() {
-                return Ok(Some(path.canonicalize()?));
-            }
         }
     }
 
