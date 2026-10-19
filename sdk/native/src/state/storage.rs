@@ -938,6 +938,8 @@ impl Storage {
     /// lookup on the disclosure input-building path. The transact path must
     /// keep using [`Self::get_unspent_user_notes_by_commitments`], which
     /// excludes spent notes.
+    ///
+    /// Among copies, prefers the lowest by leaf index with no saved nullifier.
     pub fn get_user_note_by_commitment(
         &self,
         pool_contract_id: &str,
@@ -945,7 +947,7 @@ impl Storage {
         kdf_domain: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
@@ -956,8 +958,10 @@ impl Storage {
                AND c.address = ?1
                AND pc.commitment = ?3
                AND a.kdf_domain = ?4
-             LIMIT 1",
-        )?;
+             ORDER BY {SAVED_NULLIFIER}, pc.leaf_index
+             LIMIT 1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let row = stmt
             .query_row(
@@ -3405,6 +3409,21 @@ mod tests {
             }],
         )?;
         assert_eq!(balances[0].amount, NoteAmount::from(5));
+        Ok(())
+    }
+
+    #[test]
+    fn disclosure_prefers_an_unspent_copy() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[0, 1])?;
+        scan_notes(&mut storage)?;
+        save_spend(&mut storage, 0)?;
+
+        let note = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &c)?;
+        assert_eq!(note.map(|(_, _, leaf)| leaf), Some(1));
+        storage.reconcile_nullifiers(100)?;
+        let note = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &c)?;
+        assert_eq!(note.map(|(_, _, leaf)| leaf), Some(1));
         Ok(())
     }
 
