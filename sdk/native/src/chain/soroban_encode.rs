@@ -309,6 +309,17 @@ mod tests {
     }
 
     #[test]
+    fn proof_of_the_wrong_length_is_refused() {
+        for len in [0, 255, 257] {
+            let err = groth16_proof_to_scval(&vec![0u8; len]).expect_err("not 256 bytes");
+            assert_eq!(
+                err.to_string(),
+                format!("proof_uncompressed must be 256 bytes, got {len}")
+            );
+        }
+    }
+
+    #[test]
     fn pool_ext_data_encoding_matches_contracttype_xdr() {
         let env = Env::default();
         let recipient = Address::from_str(&env, TEST_ACCOUNT);
