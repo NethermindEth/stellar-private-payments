@@ -1,6 +1,6 @@
 use super::{
     BabyJubJubPoint, EncryptionPublicKey, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode,
-    NotePublicKey, PolicyFlags,
+    NoteAmount, NotePublicKey, PolicyFlags,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +58,12 @@ pub struct PoolInfo {
     /// the flag existed, which cannot be paused.
     #[serde(default)]
     pub deposits_paused: bool,
+    /// Fee every `transact` pays, out of its deposit or the notes it spends.
+    #[serde(default)]
+    pub fee: NoteAmount,
+    /// Smallest deposit the pool accepts, net of the fee.
+    #[serde(default)]
+    pub minimum_deposit_amount: NoteAmount,
     pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
@@ -148,6 +154,8 @@ pub struct TransactChainContext {
     pub admin_view_key: Option<BabyJubJubPoint>,
     /// Whether the pool refuses deposits; see [`PoolInfo::deposits_paused`].
     pub deposits_paused: bool,
+    pub fee: NoteAmount,
+    pub minimum_deposit_amount: NoteAmount,
 }
 
 pub fn transact_chain_context_from_state(
@@ -182,6 +190,8 @@ pub fn transact_chain_context_from_state(
         gvk_mode: GvkMode::from_on_chain_value(pool.gvk_mode)?,
         admin_view_key: pool.admin_view_key,
         deposits_paused: pool.deposits_paused,
+        fee: pool.fee,
+        minimum_deposit_amount: pool.minimum_deposit_amount,
     })
 }
 
@@ -379,6 +389,8 @@ mod pool_info_gvk_tests {
             merkle_next_index: "6".to_string(),
             maximum_deposit_amount: ExtAmount::from(1_000i128),
             deposits_paused: false,
+            fee: NoteAmount::ZERO,
+            minimum_deposit_amount: NoteAmount::ZERO,
             merkle_root: Some(Field(U256::from(7))),
             merkle_capacity: 1_048_576,
             total_commitments: "6".to_string(),

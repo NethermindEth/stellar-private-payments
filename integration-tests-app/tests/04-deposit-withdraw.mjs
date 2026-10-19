@@ -1,5 +1,6 @@
-// Deposit 0.01 XLM, then withdraw 0.01 XLM to the connected wallet.
-// The test waits for indexer progress and note readiness before withdrawal.
+// Deposit 0.01 XLM, then withdraw 0.0099 XLM to the connected wallet, which
+// with the 0.0001 XLM pool fee spends one whole 0.01 note. The test waits for
+// indexer progress and note readiness before withdrawal.
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
@@ -45,9 +46,14 @@ export async function run(helpers) {
   await gotoMoveFunds(page);
   await gotoMoveFlow(page, 'withdraw');
 
+  const maxSpend = page.locator('#move-funds-max-spend');
+  await maxSpend.filter({ hasText: /^0\.0099 XLM$/ }).waitFor({ timeout: 60_000 }).catch(() => {});
+  const maxSpendText = await maxSpend.innerText();
+  assert(maxSpendText === '0.0099 XLM', `Max to send shows ${maxSpendText}, not one 0.01 note less the fee`);
+
   const withdrawResult = await withdraw(helpers, {
     logTag,
-    amount: '0.01',
+    amount: '0.0099',
     rpcUrl,
     // Allow the SDK to synchronize the deposited note before planning.
     progressTimeoutMs: 180000,

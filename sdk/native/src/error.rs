@@ -1,7 +1,7 @@
 use crate::{
     chain::IndexerError,
     planner::{PlanError, SpendSessionError},
-    types::{AspMembershipSync, Sensitive},
+    types::{AspMembershipSync, NoteAmount, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -69,6 +69,11 @@ pub enum Error {
     /// A deposit into a paused pool, refused before proving.
     #[error("deposits into pool {pool} are paused")]
     DepositsPaused { pool: String },
+
+    /// A deposit leaves less than the pool's minimum in notes once the fee is
+    /// paid.
+    #[error("deposit is below the pool minimum of {minimum} base units after the fee")]
+    DepositBelowMinimum { minimum: NoteAmount },
 
     /// An untyped failure.
     ///

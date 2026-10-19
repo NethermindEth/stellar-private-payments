@@ -8,9 +8,10 @@
 //! progress, or a caller that wants to persist/retry individual steps.
 //!
 //! To produce a plan with more than one transaction, this example deposits
-//! four separate notes and then withdraws all of them: a withdrawal that
-//! spends several notes may need to merge them across multiple on-chain
-//! transactions before the final payout.
+//! four separate notes and then withdraws the most one spend can send from
+//! them: a withdrawal that spends several notes may need to merge them across
+//! multiple on-chain transactions before the final payout, and each of those
+//! transactions pays the pool fee.
 //!
 //! This example builds real zero-knowledge proofs and submits transactions to
 //! the Stellar testnet, so it is slower than the read-only examples. Make
@@ -58,7 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => return Err(e.into()),
     };
     let note_amount = common::amount()?;
-    common::require_funded_for_pool(&account, &pool_config, total_amount(note_amount));
+    let fee = pool.fee()?;
+    common::require_funded_for_pool(&account, &pool_config, total_amount(note_amount, fee)?);
 
     println!("Pool:      {}", pool_config.pool_contract_id);
     println!("Asset:     {}", pool_config.token_label());
@@ -98,9 +100,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("(Using self-withdrawal; funds will return to the wallet's public address.)");
     }
 
+    let amount = pool.max_spend(fee)?;
     println!();
-    println!("Preparing withdrawal plan for the full balance ({total} stroops)...");
-    let mut plan = pool.prepare_withdraw(&notes, NoteAmount::from(total), &recipient)?;
+    println!("Preparing withdrawal plan for the most one spend can send ({amount} stroops)...");
+    let mut plan = pool.prepare_withdraw(&notes, amount, &recipient, fee)?;
     print_plan_cursor(&plan);
 
     println!();
@@ -147,8 +150,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn total_amount(note_amount: NoteAmount) -> NoteAmount {
-    NoteAmount::from(u128::from(note_amount).saturating_mul(u128::from(NOTE_COUNT)))
+/// Returns what the deposits send: each note plus the pool fee.
+fn total_amount(note_amount: NoteAmount, fee: NoteAmount) -> Result<NoteAmount, &'static str> {
+    note_amount
+        .checked_add(fee)
+        .and_then(|sent| u128::from(sent).checked_mul(u128::from(NOTE_COUNT)))
+        .map(NoteAmount::from)
+        .ok_or("the deposits overflow the token amount")
 }
 
 fn print_plan_cursor(plan: &PreparedTransactionPlan) {

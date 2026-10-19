@@ -34,6 +34,7 @@ pub struct TransactRequest {
     pub token_address: String,
     pub ext_recipient: String,
     pub ext_amount: ExtAmount,
+    pub fee: NoteAmount,
     pub aspmem_root: Field,
     pub aspmem_contract_id: String,
     pub aspmem_ledger: u32,
@@ -101,8 +102,9 @@ pub(crate) fn transact_request_from_step(
     kdf_domain: &str,
     pool_address: &str,
     chain: &TransactChainContext,
-) -> TransactRequest {
-    TransactRequest {
+) -> Result<TransactRequest, Error> {
+    ensure_deposit_meets_minimum(step, chain)?;
+    Ok(TransactRequest {
         user_address: user_address.to_string(),
         kdf_domain: kdf_domain.to_string(),
         pool_root: Some(chain.pool_root),
@@ -111,6 +113,7 @@ pub(crate) fn transact_request_from_step(
         token_address: chain.token_contract_id.clone(),
         ext_recipient: step.ext_recipient.clone(),
         ext_amount: step.ext_amount,
+        fee: chain.fee,
         aspmem_root: chain.asp_membership_root,
         aspmem_contract_id: chain.asp_membership_contract_id.clone(),
         aspmem_ledger: chain.asp_membership_ledger,
@@ -125,7 +128,25 @@ pub(crate) fn transact_request_from_step(
         policy_flags: chain.policy_flags,
         gvk_mode: chain.gvk_mode,
         admin_view_key: chain.admin_view_key.clone(),
+    })
+}
+
+/// Refuses a deposit that leaves less than the pool minimum in notes once the
+/// fee is paid, so it fails before a proof is built.
+fn ensure_deposit_meets_minimum(
+    step: &Transact,
+    chain: &TransactChainContext,
+) -> Result<(), Error> {
+    if step.ext_amount <= ExtAmount::ZERO {
+        return Ok(());
     }
+    let net = NoteAmount::try_from(step.ext_amount)?.checked_sub(chain.fee);
+    if net.is_none_or(|net| net < chain.minimum_deposit_amount) {
+        return Err(Error::DepositBelowMinimum {
+            minimum: chain.minimum_deposit_amount,
+        });
+    }
+    Ok(())
 }
 
 pub fn build_transact_params(
@@ -192,6 +213,7 @@ pub fn build_transact_params(
         token_address: req.token_address.clone(),
         ext_recipient: req.ext_recipient.clone(),
         ext_amount: req.ext_amount,
+        fee: req.fee,
         inputs,
         outputs,
         membership_proof,
@@ -355,10 +377,18 @@ fn build_pool_input_note(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_validated_pool_tree, load_user_key_material};
+    use super::{
+        TransactRequest, build_validated_pool_tree, load_user_key_material,
+        transact_request_from_step,
+    };
     use crate::{
+        Error,
+        planner::Transact,
         state::SqliteStorage,
-        types::{AspMembershipSync, Field, lock_reveal_flag, set_reveal_sensitive},
+        types::{
+            AspMembershipSync, ExtAmount, Field, GvkMode, NoteAmount, PolicyFlags,
+            TransactChainContext, lock_reveal_flag, set_reveal_sensitive,
+        },
         zk::merkle::MerklePrefixTree,
     };
 
@@ -388,6 +418,62 @@ mod tests {
         };
         assert!(err.to_string().starts_with("pool root mismatch"), "{err}");
         Ok(())
+    }
+
+    /// Builds the request for a step with `ext_amount` on a pool with fee 5 and
+    /// minimum 10.
+    fn request(ext_amount: i128) -> Result<TransactRequest, Error> {
+        let step = Transact::new(
+            Vec::new(),
+            [NoteAmount::ZERO; 2],
+            ExtAmount::from(ext_amount),
+            "POOL".into(),
+            [None, None],
+            [None, None],
+        );
+        let chain = TransactChainContext {
+            pool_root: Field::ZERO,
+            pool_next_index: 0,
+            pool_merkle_levels: 10,
+            token_contract_id: "TOKEN".into(),
+            asp_membership_levels: 10,
+            asp_membership_root: Field::ZERO,
+            asp_membership_contract_id: "ASP".into(),
+            asp_membership_ledger: 0,
+            non_membership_proof: None,
+            policy_flags: PolicyFlags::EMPTY,
+            gvk_mode: GvkMode::Off,
+            admin_view_key: None,
+            deposits_paused: false,
+            fee: NoteAmount::from(5),
+            minimum_deposit_amount: NoteAmount::from(10),
+        };
+        transact_request_from_step(&step, ADDRESS, "tests", "POOL", &chain)
+    }
+
+    /// A deposit of 14 leaves 9 in notes after the fee of 5, and one of 3 does
+    /// not cover the fee.
+    #[test]
+    fn a_deposit_below_the_minimum_is_refused_before_proving() {
+        for ext_amount in [14, 3] {
+            assert!(
+                matches!(
+                    request(ext_amount),
+                    Err(Error::DepositBelowMinimum { minimum }) if minimum == NoteAmount::from(10)
+                ),
+                "a deposit of {ext_amount} must be refused"
+            );
+        }
+    }
+
+    /// A deposit of 15 leaves exactly the minimum, and spends are not bounded
+    /// by it.
+    #[test]
+    fn a_deposit_at_the_minimum_a_transfer_and_a_withdrawal_pass() {
+        for ext_amount in [15, 0, -1] {
+            let req = request(ext_amount).expect("the minimum admits this step");
+            assert_eq!(req.fee, NoteAmount::from(5));
+        }
     }
 
     #[test]

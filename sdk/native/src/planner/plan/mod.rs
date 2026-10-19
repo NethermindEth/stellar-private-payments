@@ -3,7 +3,9 @@
 mod combination;
 mod error;
 
-pub(crate) use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
+pub(crate) use combination::{
+    CombinationResult, TRANSACTION_LIMIT, fees, find_combination, step_count,
+};
 pub use error::PlanError;
 
 use crate::types::{Field, NoteAmount, Sensitive, correlation_id_or_new};
@@ -103,10 +105,12 @@ fn combo_tier(combo: &CombinationResult) -> &'static str {
     }
 }
 
-/// Build a plan from unspent notes and a target spend amount.
+/// Builds a plan from unspent notes and a target spend amount, paying `fee` on
+/// every step.
 #[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount), note_count = notes.len()))]
 pub(crate) fn plan(
     amount: NoteAmount,
+    fee: NoteAmount,
     notes: &[SpendableNote],
 ) -> std::result::Result<TransactionPlan, PlanError> {
     if notes.is_empty() {
@@ -114,7 +118,7 @@ pub(crate) fn plan(
     }
 
     let values: Vec<NoteAmount> = notes.iter().map(|n| n.amount).collect();
-    let combo = find_combination(&values, amount)?;
+    let combo = find_combination(&values, amount, fee)?;
     tracing::debug!(
         combo_tier = combo_tier(&combo),
         "transaction plan combination result"
@@ -151,7 +155,7 @@ pub(crate) fn plan(
         }
     }
 
-    let n_steps = indices.len().saturating_sub(1).max(1);
+    let n_steps = step_count(indices.len());
     let mut steps = Vec::with_capacity(n_steps);
     let note0 = StepNote::from_spendable(notes[indices[0]].clone());
     if indices.len() == 1 {
@@ -173,7 +177,9 @@ pub(crate) fn plan(
             let Some(next_sum) = sum.checked_add(current_note.amount) else {
                 return Err(PlanError::InputAmountOverflow);
             };
-            sum = next_sum;
+            sum = next_sum
+                .checked_sub(fee)
+                .ok_or_else(|| PlanError::internal("consolidate: output below the fee"))?;
             let action = StepAction::Consolidate { output: sum };
             let step = PlannedStep {
                 inputs: (prev_note, Some(current_note)),
@@ -192,6 +198,32 @@ pub(crate) fn plan(
     }
 
     TransactionPlan::assemble(steps).ok_or(PlanError::InvalidPlan)
+}
+
+/// Returns the most one spend from `notes` can send after paying `fee` on every
+/// step.
+///
+/// The spend takes notes largest first, always the first two, since one step
+/// costs one fee for one input or two. It takes each further note while that
+/// note is above the fee, up to [`TRANSACTION_LIMIT`] notes. It returns zero
+/// when the fees take the whole total.
+pub(crate) fn max_spend(notes: &[SpendableNote], fee: NoteAmount) -> Result<NoteAmount, PlanError> {
+    let mut amounts: Vec<NoteAmount> = notes.iter().map(|n| n.amount).collect();
+    amounts.sort_unstable_by(|a, b| b.cmp(a));
+    let picked = amounts
+        .iter()
+        .enumerate()
+        .take_while(|&(i, &amount)| i < 2 || amount > fee)
+        .take(TRANSACTION_LIMIT)
+        .count();
+    let total = amounts
+        .iter()
+        .take(picked)
+        .try_fold(NoteAmount::ZERO, |sum, &amount| sum.checked_add(amount))
+        .ok_or(PlanError::InputAmountOverflow)?;
+    Ok(total
+        .checked_sub(fees(step_count(picked), fee)?)
+        .unwrap_or(NoteAmount::ZERO))
 }
 
 impl StepNote {
@@ -418,15 +450,16 @@ mod tests {
 
     #[test]
     fn plan_no_spendable_notes() {
-        let err = plan(goal_amount(10), &[]).expect_err("empty notes should not plan");
+        let err =
+            plan(goal_amount(10), NoteAmount::ZERO, &[]).expect_err("empty notes should not plan");
         assert!(matches!(err, PlanError::NoSpendableNotes));
     }
 
     #[test]
     fn plan_no_combination() {
         let notes = vec![note(1), note(2), note(3)];
-        let err =
-            plan(goal_amount(100), &notes).expect_err("goal above wallet sum should not plan");
+        let err = plan(goal_amount(100), NoteAmount::ZERO, &notes)
+            .expect_err("goal above wallet sum should not plan");
         assert!(matches!(err, PlanError::NoCombination));
     }
 
@@ -434,27 +467,31 @@ mod tests {
     fn plan_step_count_scales_with_note_count() {
         let notes_1 = vec![note(10)];
         assert_step_count(
-            &plan(goal_amount(10), &notes_1).expect("plan should succeed"),
+            &plan(goal_amount(10), NoteAmount::ZERO, &notes_1).expect("plan should succeed"),
             1,
         );
 
         let notes_2 = vec![note(4), note(6), note(20)];
         assert_step_count(
-            &plan(goal_amount(10), &notes_2).expect("plan should succeed"),
+            &plan(goal_amount(10), NoteAmount::ZERO, &notes_2).expect("plan should succeed"),
             1,
         );
 
         let notes_3 = vec![note(2), note(3), note(5)];
         assert_step_count(
-            &plan(goal_amount(10), &notes_3).expect("plan should succeed"),
+            &plan(goal_amount(10), NoteAmount::ZERO, &notes_3).expect("plan should succeed"),
             2,
         );
     }
 
     #[test]
     fn plan_consolidate_final() {
-        let plan =
-            plan(goal_amount(10), &[note(2), note(3), note(5)]).expect("plan should succeed");
+        let plan = plan(
+            goal_amount(10),
+            NoteAmount::ZERO,
+            &[note(2), note(3), note(5)],
+        )
+        .expect("plan should succeed");
         assert_step_count(&plan, 2);
         assert!(matches!(
             step_at(&plan, 0).action,
@@ -465,8 +502,12 @@ mod tests {
 
     #[test]
     fn plan_consolidate_consolidate_final() {
-        let plan = plan(goal_amount(10), &[note(1), note(3), note(1), note(5)])
-            .expect("plan should succeed");
+        let plan = plan(
+            goal_amount(10),
+            NoteAmount::ZERO,
+            &[note(1), note(3), note(1), note(5)],
+        )
+        .expect("plan should succeed");
         assert_step_count(&plan, 3);
         assert!(matches!(
             step_at(&plan, 0).action,
@@ -483,7 +524,7 @@ mod tests {
     fn plan_two_exact_0() {
         let send = 10;
         let notes = vec![note(4), note(6), note(10)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 1);
         assert_final_outputs(plan.final_step(), send, None);
         assert_balance(balance(&notes), &plan);
@@ -493,7 +534,7 @@ mod tests {
     fn plan_two_exact_1() {
         let send = 10;
         let notes = vec![note(4), note(6), note(20)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 1);
         assert_final_outputs(plan.final_step(), send, None);
         assert_balance(balance(&notes), &plan);
@@ -503,7 +544,7 @@ mod tests {
     fn plan_two_overshoot() {
         let send = 10;
         let notes = vec![note(1), note(2), note(5), note(6)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 1);
         assert_final_outputs(plan.final_step(), send, Some(1));
         assert_balance(balance(&notes), &plan);
@@ -513,7 +554,7 @@ mod tests {
     fn plan_one_overshoot() {
         let send = 10;
         let notes = vec![note(15)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 1);
         assert!(step_at(&plan, 0).inputs.1.is_none());
         assert_final_outputs(plan.final_step(), send, Some(5));
@@ -524,7 +565,7 @@ mod tests {
     fn plan_one_exact() {
         let send = 10;
         let notes = vec![note(3), note(6), note(10)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_eq!(step_at(&plan, 0).inputs.0.amount, NoteAmount::from(10));
         assert!(step_at(&plan, 0).inputs.1.is_none());
         assert_final_outputs(plan.final_step(), send, None);
@@ -535,7 +576,7 @@ mod tests {
     fn plan_k_3_exact_0() {
         let send = 10;
         let notes = vec![note(2), note(3), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 2);
         assert_balance(balance(&notes), &plan);
         assert_consolidate_output(step_at(&plan, 0), 8);
@@ -546,7 +587,7 @@ mod tests {
     fn plan_k_3_overshoot_0() {
         let send = 10;
         let notes = vec![note(2), note(3), note(6)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 2);
         assert_consolidate_output(step_at(&plan, 0), 9);
         assert_final_outputs(plan.final_step(), send, Some(1));
@@ -557,7 +598,7 @@ mod tests {
     fn plan_k_3_exact_1() {
         let send = 10;
         let notes = vec![note(1), note(2), note(3), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 2);
         assert_balance(balance(&notes), &plan);
         assert_final_outputs(plan.final_step(), send, None);
@@ -567,7 +608,7 @@ mod tests {
     fn plan_k_3_overshoot_1() {
         let send = 10;
         let notes = vec![note(2), note(2), note(4), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 2);
         assert_final_outputs(plan.final_step(), send, Some(1));
         assert_balance(balance(&notes), &plan);
@@ -577,7 +618,7 @@ mod tests {
     fn plan_k_4_exact_0() {
         let send = 10;
         let notes = vec![note(1), note(1), note(3), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 3);
         assert_balance(balance(&notes), &plan);
         assert_final_outputs(plan.final_step(), send, None);
@@ -587,7 +628,7 @@ mod tests {
     fn plan_k_4_overshoot_0() {
         let send = 10;
         let notes = vec![note(2), note(2), note(2), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 3);
         assert_final_outputs(plan.final_step(), send, Some(1));
         assert_balance(balance(&notes), &plan);
@@ -597,7 +638,7 @@ mod tests {
     fn plan_k_4_exact_1() {
         let send = 10;
         let notes = vec![note(1), note(1), note(1), note(3), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 3);
         assert_balance(balance(&notes), &plan);
         assert_final_outputs(plan.final_step(), send, None);
@@ -607,7 +648,7 @@ mod tests {
     fn plan_k_4_overshoot_1() {
         let send = 10;
         let notes = vec![note(2), note(2), note(2), note(2), note(5)];
-        let plan = plan(goal_amount(send), &notes).expect("plan should succeed");
+        let plan = plan(goal_amount(send), NoteAmount::ZERO, &notes).expect("plan should succeed");
         assert_step_count(&plan, 3);
         assert_final_outputs(plan.final_step(), send, Some(1));
         assert_balance(balance(&notes), &plan);
@@ -623,7 +664,8 @@ mod tests {
     #[test]
     fn resolve_final() {
         let wallet = vec![committed_note(7, 101)];
-        let tx_plan = plan(NoteAmount::from(7), &wallet).expect("plan should succeed");
+        let tx_plan =
+            plan(NoteAmount::from(7), NoteAmount::ZERO, &wallet).expect("plan should succeed");
         let step = tx_plan.into_iter().next().expect("one step");
         let inputs = step.resolve(&wallet).expect("resolve should succeed");
         assert_eq!(inputs.len(), 1);
@@ -638,7 +680,8 @@ mod tests {
             committed_note(3, 102),
             committed_note(5, 103),
         ];
-        let tx_plan = plan(goal_amount(spend), &wallet).expect("plan should succeed");
+        let tx_plan =
+            plan(goal_amount(spend), NoteAmount::ZERO, &wallet).expect("plan should succeed");
         assert_step_count(&tx_plan, 2);
 
         let mut steps = tx_plan.into_iter();
@@ -688,5 +731,53 @@ mod tests {
         };
         assert_eq!(outputs.0, spend.into(), "final output is spend amount");
         assert!(outputs.1.is_none(), "no change");
+    }
+
+    /// Each merge output is its inputs minus the fee: 5 + 3 - 1 = 7, then
+    /// 7 + 2 - 1 = 8.
+    #[test]
+    fn plan_consolidates_net_of_the_fee() {
+        let plan = plan(
+            NoteAmount::from(8),
+            NoteAmount::ONE,
+            &[note(2), note(3), note(5)],
+        )
+        .expect("plan should succeed");
+        assert_step_count(&plan, 2);
+        assert_consolidate_output(step_at(&plan, 0), 7);
+        assert_final_outputs(plan.final_step(), 8, None);
+    }
+
+    #[test]
+    fn max_spend_is_exactly_reachable() {
+        let tens = [10; 12];
+        let wallets: [(&[u128], u128, u128); 7] = [
+            (&[10], 1, 9),
+            (&[10, 1], 1, 10),
+            (&[10, 5, 1], 2, 13),
+            (&[6, 5, 4, 1], 1, 13),
+            (&tens, 1, 91),
+            (&[], 1, 0),
+            (&[1], 1, 0),
+        ];
+        for (amounts, fee, expected) in wallets {
+            let notes: Vec<SpendableNote> = amounts.iter().copied().map(note).collect();
+            let fee = NoteAmount::from(fee);
+            let max = max_spend(&notes, fee).expect("max_spend");
+            assert_eq!(max, NoteAmount::from(expected), "{amounts:?} at fee {fee}");
+            if !max.is_zero() {
+                plan(max, fee, &notes).expect("max_spend should plan");
+            }
+            let one_more = max.checked_add(NoteAmount::ONE).expect("test amount");
+            assert!(
+                matches!(
+                    plan(one_more, fee, &notes),
+                    Err(PlanError::NoCombination
+                        | PlanError::TooManyNotes { .. }
+                        | PlanError::NoSpendableNotes)
+                ),
+                "{amounts:?} at fee {fee} plans above max_spend"
+            );
+        }
     }
 }

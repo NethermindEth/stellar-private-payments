@@ -1,7 +1,8 @@
 use super::{
     conversions::{
         field_to_scval_u256, scval_to_address_string, scval_to_baby_jub_jub_point, scval_to_bool,
-        scval_to_policy_flags, scval_to_tree_state, scval_to_u32, scval_to_u64, scval_to_u256,
+        scval_to_i128, scval_to_policy_flags, scval_to_tree_state, scval_to_u32, scval_to_u64,
+        scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest},
     soroban_encode::BASE_FEE,
@@ -14,8 +15,8 @@ use stellar_xdr::{self as xdr, ReadXdr};
 
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
-    ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NotePublicKey,
-    PoolInfo, SMT_DEPTH, TransactChainContext, transact_chain_context_from_state,
+    ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NoteAmount,
+    NotePublicKey, PoolInfo, SMT_DEPTH, TransactChainContext, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -120,6 +121,18 @@ impl StateFetcher {
             .map(scval_to_bool)
             .transpose()?
             .unwrap_or(false))
+    }
+
+    /// Reads the fee and the minimum deposit out of a pool's fetched state.
+    fn fee_fields_from_pool_state(
+        pool_state: &HashMap<String, xdr::ScVal>,
+    ) -> Result<(NoteAmount, NoteAmount)> {
+        // Pools deployed before the fee store neither key and charge nothing.
+        let read = |key: &str| -> Result<NoteAmount> {
+            let value = pool_state.get(key).map(scval_to_i128).transpose()?;
+            NoteAmount::try_from(ExtAmount::from(value.unwrap_or(0)))
+        };
+        Ok((read("Fee")?, read("MinimumDepositAmount")?))
     }
 
     /// Cross-checks a pool's configured GVK settings against what the chain
@@ -379,6 +392,7 @@ impl StateFetcher {
         let merkle_next_index = tree.next_index;
         let maximum_deposit_amount =
             Self::maximum_deposit_from_pool_state(pool_state, &pool.pool_contract_id)?;
+        let (fee, minimum_deposit_amount) = Self::fee_fields_from_pool_state(pool_state)?;
         let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
         Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
 
@@ -416,6 +430,8 @@ impl StateFetcher {
             merkle_next_index: merkle_next_index.to_string(),
             maximum_deposit_amount,
             deposits_paused: Self::deposits_paused_from_state(pool_state)?,
+            fee,
+            minimum_deposit_amount,
             merkle_root,
             merkle_capacity,
             total_commitments: merkle_next_index.to_string(),
@@ -942,6 +958,26 @@ mod tests {
             read(U256::from(i128::MAX - 1)),
             ExtAmount::from(i128::MAX - 1)
         );
+    }
+
+    #[test]
+    fn a_pool_without_fee_keys_reads_as_free() {
+        let pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let fields = StateFetcher::fee_fields_from_pool_state(&pool_state).expect("no fee keys");
+
+        assert_eq!(fields, (NoteAmount::ZERO, NoteAmount::ZERO));
+    }
+
+    #[test]
+    fn the_fee_and_the_minimum_are_read_from_the_instance() {
+        let mut pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+        pool_state.insert("Fee".to_string(), xdr::ScVal::from(5i128));
+        pool_state.insert("MinimumDepositAmount".to_string(), xdr::ScVal::from(10i128));
+
+        let fields = StateFetcher::fee_fields_from_pool_state(&pool_state).expect("fee keys");
+
+        assert_eq!(fields, (NoteAmount::from(5u128), NoteAmount::from(10u128)));
     }
 
     fn pool_entry(
