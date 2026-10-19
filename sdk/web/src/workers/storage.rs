@@ -24,9 +24,9 @@ use stellar_private_payments::{
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
         AspMembershipSync, ContractConfig, ContractsEventData, EncryptionKeyPair,
-        EncryptionPublicKey, Field, NoteKeyPair, NotePublicKey, OperationalFeedItem,
-        PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive, SyncMetadata,
-        UserNoteSummary, UserOperation,
+        EncryptionPublicKey, Field, NoteKeyOwnerLookup, NoteKeyPair, NotePublicKey,
+        OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup, Sensitive,
+        SyncMetadata, UserNoteSummary, UserOperation,
     },
     zk::{crypto::asp_membership_leaf, flows::TransactParams},
 };
@@ -169,6 +169,10 @@ pub(crate) enum StorageWorkerRequest {
         address: Address,
         public_key_registry_contract_id: String,
     },
+    NoteKeyOwnerLookup {
+        note_keys: Vec<Field>,
+        public_key_registry_contract_id: String,
+    },
     OperationalFeed {
         limit: u32,
         asp_membership_contract_id: String,
@@ -206,6 +210,7 @@ pub(crate) enum StorageWorkerResponse {
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),
     RecipientLookup(RecipientLookup),
+    NoteKeyOwnerLookup(NoteKeyOwnerLookup),
     OperationalFeed(Vec<OperationalFeedItem>),
     AspMembershipSync(AspMembershipSync),
     DisclosureNotes(Vec<DisclosureInputs>),
@@ -851,6 +856,19 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             )?;
             StorageWorkerResponse::RecipientLookup(lookup)
         }
+        StorageWorkerRequest::NoteKeyOwnerLookup {
+            note_keys,
+            public_key_registry_contract_id,
+        } => {
+            tracing::trace!(
+                "[{WORKER_NAME}] lookup registered owners of {} note key(s)",
+                note_keys.len()
+            );
+            let lookup = with_storage!(s =>
+                s.note_key_owner_lookup(&note_keys, &public_key_registry_contract_id)?
+            )?;
+            StorageWorkerResponse::NoteKeyOwnerLookup(lookup)
+        }
         StorageWorkerRequest::OperationalFeed {
             limit,
             asp_membership_contract_id,
@@ -1412,6 +1430,29 @@ impl Storage for StorageBridge {
             Ok(StorageWorkerResponse::RecipientLookup(lookup)) => Ok(lookup),
             Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response looking up recipient: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        config: &ContractConfig,
+    ) -> Result<NoteKeyOwnerLookup, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::NoteKeyOwnerLookup {
+                    note_keys: note_keys.to_vec(),
+                    public_key_registry_contract_id: config.public_key_registry.clone(),
+                },
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::NoteKeyOwnerLookup(lookup)) => Ok(lookup),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response looking up note key owners: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e)),
         }
