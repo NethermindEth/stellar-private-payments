@@ -27,3 +27,10 @@ The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's 
 | `LeafInsertedEvent` | `asp-non-membership` | `[Symbol("LeafInserted")]` | `key: U256`, `value: U256`, `root: U256` | **Transparency Property / Correlatable**: In ASP blocklist management, `key` is the unblinded note public key. Public blocklist key transparency allows users to verify non-membership. |
 | `LeafDeletedEvent` | `asp-non-membership` | `[Symbol("LeafDeleted")]` | `key: U256`, `root: U256` | **Transparency Property**: Key removed from blocklist. |
 | `PublicKeyEvent` | `public-key-registry` | `[Symbol("PublicKeyEvent"), owner: Address]` | `encryption_key: Bytes`, `note_key: Bytes` | **Opt-In Public Directory**: Binds public Stellar address to note/encryption public keys for recipient discovery. |
+
+## 4. Unchecked Note Ciphertexts
+
+The proof binds each output commitment, but not the `encrypted_output` attached to it in `NewCommitmentEvent`. A ciphertext can claim an amount its commitment doesn't hold, or be unreadable. This is intentional: it's cheaper and faster than proving each ciphertext matches its note.
+
+* **Readers Must Recheck**: The SDK recomputes the commitment from the decrypted note and ignores notes that don't match. Indexers, wallets, and exchanges that decrypt `encrypted_output` themselves must do the same before crediting a note.
+* **GVK Pools**: The proof checks the GVK holder's copy of each note, not the recipient's. A note the GVK holder can audit may still be unreadable by its recipient.
