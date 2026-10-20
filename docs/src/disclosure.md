@@ -139,6 +139,11 @@ for root and nullifier status.
 spp disclosure verify receipt.json --pool C<pool-contract-address>
 ```
 
+The command fails if the receipt names another network or a pool other than
+`--pool`. Add `--authority 0x<identity-payload>` to also check the authority.
+It doesn't check the purpose or the nonce: read those from the receipt's
+`context`.
+
 Use `--expected-vk-hash 0x…` together with alternate artifacts supplied through
 `--circuits-dir` when verifying against a deliberately different disclosure
 key. Use `--require-unspent` when spent notes must make the command fail.
@@ -198,7 +203,7 @@ Send a fresh nonce with each request and accept each nonce once. Anyone holding 
 | Result | Meaning | Action |
 |---|---|---|
 | Proof green, Context red | The proof is mathematically valid, but the context was tampered with after generation. | Reject the receipt and ask the owner to regenerate it with the correct context. |
-| Proof green, Context green, Root red | The proof and context are intact, but the receipt is stale (root rolled out of history) or points to the wrong pool. | Ask the owner to generate a fresh receipt against the current pool root. |
+| Proof green, Context green, Root red | The proof and context are intact, but a root isn't in the history of the pool the receipt names: the receipt is stale, or wasn't made against that pool. | Ask the owner to generate a fresh receipt against the current pool root. |
 | Proof red | The proof is forged, corrupted, or verified against the wrong key. | Reject the receipt and confirm the expected VK hash. |
 | Proof, Context, Root green; Unspent amber | The receipt is cryptographically sound, but at least one disclosed note has since been spent. | A policy decision, not a validity failure. Accept if you only needed proof of past ownership; request a fresh receipt if current holdings matter. |
 | Any check "could not be completed" | Network or RPC failure prevented that check. | Retry; do not treat inconclusive checks as passes. |
@@ -213,14 +218,14 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 |---|---|---|---|
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
 | **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. It doesn't show the receipt is meant for you. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
-| **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
+| **Root fresh** | Every Merkle root in the receipt is still present in the on-chain root history (`is_known_root`) of the pool the receipt names. | "Every root in the receipt is still in the pool's on-chain root history." | A root rolled out of history, or was never that pool's root. |
 | **Nullifiers unspent** | No nullifier in the receipt is marked spent in the pool's current contract state. Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers are marked spent in the pool's contract state." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
 
 ### Interpretation
 
 - **All four green** → The receipt is fully verified. A green badge is shown. Trust it once its context matches your request.
 - **Proof green, Context red** → The proof is mathematically valid but the context was tampered with. Do not trust the authority/purpose claims.
-- **Proof green, Context green, Root red** → The proof and context are intact but the pool state has moved on and the root is no longer in history. The receipt is outdated.
+- **Proof green, Context green, Root red** → The proof and context are intact, but a root isn't in the named pool's history. The receipt is outdated, or wasn't made against that pool.
 - **Proof, Context, Root green; Unspent amber** → The receipt is cryptographically valid and the notes were owned when it was issued, but at least one has since been spent.
 - **Any single check inconclusive due to network error** → The check renders as "could not be completed", never as a pass. Retry or verify under better network conditions.
 
