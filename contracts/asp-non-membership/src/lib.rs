@@ -21,6 +21,11 @@
 //! from: <https://www.newswise.com/pdf_docs/170903654855378_1-s2.0-S2096720923000519-main.pdf>
 //! We still present this implementation, as it allows making the decision to
 //! switch to IPFS-based storage later if needed.
+//!
+//! The policy circuits only prove paths of up to 31 levels, and this tree
+//! doesn't enforce that limit: a key whose lowest 31 bits match two blocked
+//! keys can't prove non-membership until one of them is deleted. See
+//! [A key the blocklist can't clear](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/operator/features-and-limits.md#a-key-the-blocklist-cant-clear).
 
 #![no_std]
 use soroban_sdk::{
