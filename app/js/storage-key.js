@@ -15,7 +15,12 @@ export async function openWalletStorage({ locks = globalThis.navigator?.locks, .
 
 async function openLockedWalletStorage({ storage, getAddress, signMessage, verifySignature, confirmAccount, hasExistingStorage,
     records = localStorage, origin = location.origin, crypto = globalThis.crypto }) {
-    let record = JSON.parse(records.getItem(RECORD_KEY) || 'null');
+    let record;
+    try {
+        record = JSON.parse(records.getItem(RECORD_KEY) || 'null');
+    } catch (cause) {
+        throw new Error('Invalid storage key metadata. Restore the original metadata to unlock storage.', { cause });
+    }
     const fresh = !record;
     if (fresh) {
         if (hasExistingStorage && await hasExistingStorage()) {
@@ -24,10 +29,17 @@ async function openLockedWalletStorage({ storage, getAddress, signMessage, verif
         record = { version: 1, address: await getAddress(), origin,
             salt: encode(crypto.getRandomValues(new Uint8Array(32))), pending: true };
     }
-    if (record?.version !== 1 || record.origin !== origin || typeof record.address !== 'string' || !record.address ||
-        typeof record.salt !== 'string' || decode(record.salt).length !== 32 ||
-        (!fresh && (typeof record.iv !== 'string' || decode(record.iv).length !== 12 ||
-        typeof record.envelope !== 'string' || decode(record.envelope).length !== 48))) {
+    let validMetadata = false;
+    try {
+        validMetadata = record?.version === 1 && record.origin === origin &&
+            typeof record.address === 'string' && !!record.address &&
+            typeof record.salt === 'string' && decode(record.salt).length === 32 &&
+            (fresh || (typeof record.iv === 'string' && decode(record.iv).length === 12 &&
+            typeof record.envelope === 'string' && decode(record.envelope).length === 48));
+    } catch {
+        validMetadata = false;
+    }
+    if (!validMetadata) {
         throw new Error('Invalid storage key metadata. Restore the original metadata to unlock storage.');
     }
     if (confirmAccount) {

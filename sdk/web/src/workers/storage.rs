@@ -352,7 +352,7 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
     }
 
     // SAH installation replaces the default VFS. Attach MC's codec wrapper only
-    // after it exists, including plaintext mode on an MC-enabled worker.
+    // after it exists, before opening encrypted storage.
     #[cfg(target_arch = "wasm32")]
     #[allow(unsafe_code)]
     {
@@ -360,7 +360,10 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
         // owns the wrapper until all connections close and pause destroys it.
         let rc = unsafe { sqlite_wasm_rs::sqlite3mc_vfs_create(c"opfs-sahpool".as_ptr(), 1) };
         if rc != sqlite_wasm_rs::SQLITE_OK {
-            return Err(JsError::new("Failed to register encrypted OPFS storage"));
+            let msg = "Failed to register encrypted OPFS storage".to_string();
+            tracing::error!(rc, "[{WORKER_NAME}] failed to register SQLite3MC OPFS VFS");
+            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+            return Err(JsError::new(&msg));
         }
     }
 
@@ -1037,7 +1040,7 @@ impl StorageBridge {
         Ok(())
     }
 
-    /// New handle to the same storage worker (shared `spp.db`).
+    /// New handle to the same storage worker (shared `spp.encrypted.db`).
     #[wasm_bindgen(js_name = fork)]
     pub fn fork_js(&self) -> StorageBridge {
         self.clone()

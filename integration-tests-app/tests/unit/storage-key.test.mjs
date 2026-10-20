@@ -108,16 +108,21 @@ test('unsupported wallet record versions are preserved and rejected before signi
 });
 
 test('damaged key metadata and origin changes are rejected before signing', async () => {
-  for (const patch of [{ salt: 'AA==' }, { iv: 'AA==' }, { envelope: 'AA==' }, { origin: 'https://other.test' }]) {
+  for (const patch of [{ salt: 'AA==' }, { iv: 'AA==' }, { envelope: 'AA==' }, { salt: '!' }, { iv: '!' }, { envelope: '!' }, { origin: 'https://other.test' }]) {
     const f = fixture();
     await openWalletStorage(f.options);
     const name = 'poolstellar_encrypted_storage_v1';
     const damaged = JSON.stringify({ ...JSON.parse(f.values.get(name)), ...patch });
     f.values.set(name, damaged);
-    await assert.rejects(openWalletStorage(f.options));
+    await assert.rejects(openWalletStorage(f.options), /Invalid storage key metadata/);
     assert.equal(f.values.get(name), damaged);
     assert.equal(f.signedAddresses.length, 2);
   }
+  const f = fixture();
+  f.values.set('poolstellar_encrypted_storage_v1', '{corrupt-json');
+  await assert.rejects(openWalletStorage(f.options), /Invalid storage key metadata/);
+  assert.equal(f.values.get('poolstellar_encrypted_storage_v1'), '{corrupt-json');
+  assert.equal(f.signedAddresses.length, 0);
 });
 
 test('a different reported signer cannot open existing storage', async () => {
