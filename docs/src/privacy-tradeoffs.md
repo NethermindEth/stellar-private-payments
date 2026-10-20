@@ -16,6 +16,7 @@ The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's 
 
 * **Purpose**: Allows senders to resolve a recipient's keys on-chain without out-of-band communication.
 * **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band.
+* **Blocklist Lookups**: Before each transaction in a blocklist pool, the client asks the RPC for its note key's blocklist path. The request doesn't carry the user's address, but an RPC that also relays the transaction can link the two by timing or IP.
 
 ## 3. Event Privacy Classification Summary
 

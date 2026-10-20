@@ -453,7 +453,6 @@ impl StateFetcher {
         note_pubkey: &NotePublicKey,
         non_membership_root: Field,
         smt_depth: usize,
-        source_account: &str,
     ) -> Result<AspNonMembershipProof> {
         if smt_depth == 0 {
             return Err(anyhow!("smt_depth must be > 0"));
@@ -475,7 +474,8 @@ impl StateFetcher {
             });
         }
 
-        let tx = Self::build_find_key_simulation_tx(asp_non_membership, source_account, key)?;
+        let tx =
+            Self::build_find_key_simulation_tx(asp_non_membership, &self.config.deployer, key)?;
         let retval = self.simulate_single_retval(&tx).await?;
         Self::nonmembership_proof_from_find_result(&retval, key, non_membership_root, smt_depth)
     }
@@ -530,7 +530,6 @@ impl StateFetcher {
         &self,
         pool_contract_id: &str,
         note_pubkey: &NotePublicKey,
-        user_address: &str,
     ) -> Result<TransactChainContext> {
         let data = self.contracts_data_for_pool(pool_contract_id).await?;
         let policy_flags = data
@@ -556,7 +555,6 @@ impl StateFetcher {
                     note_pubkey,
                     data.asp_non_membership.root,
                     SMT_DEPTH as usize,
-                    user_address,
                 )
                 .await?,
             )

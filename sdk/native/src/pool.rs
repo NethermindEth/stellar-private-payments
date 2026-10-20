@@ -456,11 +456,7 @@ impl PrivatePool {
             )
             .await?;
         self.fetcher
-            .transact_chain_context(
-                &self.config.pool_contract_id,
-                &note_pub,
-                self.config.user_address.as_str(),
-            )
+            .transact_chain_context(&self.config.pool_contract_id, &note_pub)
             .await
             .context("fetch chain context")
             .map_err(Into::into)
