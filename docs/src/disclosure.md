@@ -72,7 +72,7 @@ Note owners generate receipts through the **Disclosure** view in the main app, r
    - **Authority label** — human-readable name of the requesting party.
    - **Authority identity payload** — an arbitrary `0x`-prefixed hex payload the authority can use to identify the request.
    - **Purpose** — describes why the disclosure is being made.
-   - **Context nonce** — an anti-replay nonce. The "Random" button generates a fresh field-element nonce via `crypto.getRandomValues()`.
+   - **Context nonce** — the nonce the authority sent. If it sent none, the "Random" button generates a field-element nonce via `crypto.getRandomValues()`.
 5. Click **Generate Disclosure Receipt**.
 6. Wait for the progress indicator to advance through sync, witness construction, and proving.
 7. Download the receipt JSON.
@@ -124,7 +124,7 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 ### Steps
 1. Scroll to the **Verify Disclosure Receipt** section (or open `/#disclosure?verify=1`).
 2. Upload the receipt JSON via the file picker, or paste it into the textarea and click **Load Receipt**.
-3. Review the receipt context summary to confirm *what* is being attested.
+3. Review the receipt context summary to confirm *what* is being attested and *for whom*: the pool address, authority identity payload, purpose, and nonce must match your request.
 4. Confirm the **Expected VK hash** field. It defaults to the canonical hash published in this documentation and in `deployments/testnet/circuit_keys/README.md`. Authorities who pin a different key can click **Override** and paste their own hash.
 5. Click **Verify Receipt**.
 
@@ -170,7 +170,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
    - **Authority label** — e.g. the company or regulator name.
    - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.
    - **Purpose** — e.g. `kyc-review`, `aml-check`.
-   - **Context nonce** — use the **Random** button for a fresh anti-replay nonce.
+   - **Context nonce** — the nonce the authority sent, or the **Random** button if it sent none.
 5. Click **Generate Disclosure Receipt** and wait for the proof to finish.
 6. Download or copy the receipt JSON and send it to the authority.
 
@@ -178,18 +178,20 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 ### For authorities: verifying a receipt walletlessly
 
+Send a fresh nonce with each request and accept each nonce once. Anyone holding a receipt can present it, so the nonce is what ties it to your request.
+
 1. Open `/#disclosure?verify=1` (or click the **Disclosure** tab in the main app header, then scroll to Verify).
 2. No wallet is required. The page connects to a public Testnet RPC automatically when you click Verify.
 3. Upload the receipt JSON or paste it into the import area and click **Load Receipt**.
 4. Confirm the **Expected VK hash** field matches the canonical hash for the receipt's `circuit.name`. If you pin a different disclosure key, click **Override** and enter your hash.
-5. Review the receipt context summary to ensure it describes the attestation you requested.
+5. Check the receipt context summary against your request: the pool address, your identity payload, the purpose, and the nonce you sent. The checks below don't compare it with your request.
 6. Click **Verify Receipt**.
 7. Read the four independent checks:
    - **Proof valid** — the cryptography is correct.
    - **Context valid** — the authority/purpose/nonce context was not altered.
    - **Root fresh** — the note's root is still in the pool's on-chain history.
    - **Nullifiers unspent** — none of the disclosed notes have been spent since the receipt was issued.
-8. Trust the receipt **only when all four checks are green** and the **Fully verified** badge appears.
+8. Trust the receipt **only when all four checks are green**, the **Fully verified** badge appears, and the context matches your request.
 
 ### Interpreting partial failures
 
