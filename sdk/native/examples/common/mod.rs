@@ -141,8 +141,9 @@ pub fn load_contract_config() -> Result<ContractConfig, String> {
 /// Open the encrypted SQLite wallet from `SPP_WALLET_PATH` or the default file.
 ///
 /// Unlocks via `SPP_STORAGE_ACCOUNT` (`stellar keys`) when set, or via
-/// `STELLAR_SECRET_KEY` when present (matching wallets created by `spp onboard`),
-/// falling back to a deterministic example key for secretless read-only examples.
+/// `STELLAR_SECRET_KEY` when present (matching wallets created by `spp
+/// onboard`), falling back to a deterministic example key for secretless
+/// read-only examples.
 pub fn open_storage() -> Result<LocalStorage, String> {
     use std::path::Path;
     use stellar_private_payments::{
