@@ -138,10 +138,57 @@ pub fn load_contract_config() -> Result<ContractConfig, String> {
     serde_json::from_str(&contents).map_err(|e| format!("parse deployment config from {path}: {e}"))
 }
 
-/// Open the SQLite wallet from `SPP_WALLET_PATH` or the default file.
+/// Open the encrypted SQLite wallet from `SPP_WALLET_PATH` or the default file.
+///
+/// Unlocks via `SPP_STORAGE_ACCOUNT` (`stellar keys`) when set, or via
+/// `STELLAR_SECRET_KEY` when present (matching wallets created by `spp onboard`),
+/// falling back to a deterministic example key for secretless read-only examples.
 pub fn open_storage() -> Result<LocalStorage, String> {
+    use std::path::Path;
+    use stellar_private_payments::{
+        state::{
+            database_key::{DatabaseKey, OpenPurpose},
+            native_wallet,
+        },
+        types::KeyDerivationSignature,
+        zk::encryption::sep53_payload,
+    };
+
     let path = env_or("SPP_WALLET_PATH", default_wallet_path());
-    LocalStorage::open(&path).map_err(|e| format!("open wallet at {path}: {e}"))
+    let db_path = Path::new(&path);
+    let storage_account = env_or("SPP_STORAGE_ACCOUNT", "");
+    if !storage_account.is_empty() {
+        let key = native_wallet::unlock_with_stellar(db_path, &storage_account, None)
+            .map_err(|e| format!("unlock wallet at {path} with {storage_account}: {e}"))?;
+        return LocalStorage::open_with_key(&path, &key)
+            .map_err(|e| format!("open wallet at {path}: {e}"));
+    }
+
+    let secret = env_or("STELLAR_SECRET_KEY", "");
+    if !secret.is_empty() {
+        let signer = StellarSigner::from_secret(&secret)
+            .map_err(|e| format!("invalid STELLAR_SECRET_KEY: {e}"))?;
+        let address = signer.public_key().to_string();
+        let key = native_wallet::unlock_with(db_path, &address, &mut |message| {
+            let sig = signer.sign(&sep53_payload(message));
+            Ok(KeyDerivationSignature(sig.as_bytes().to_vec()))
+        })
+        .map_err(|e| format!("unlock wallet at {path}: {e}"))?;
+        return LocalStorage::open_with_key(&path, &key)
+            .map_err(|e| format!("open wallet at {path}: {e}"));
+    }
+
+    let exists = std::fs::metadata(db_path).is_ok_and(|m| m.len() > 0);
+    LocalStorage::open_encrypted(
+        &path,
+        DatabaseKey::new([0x45; 32]),
+        if exists {
+            OpenPurpose::OpenExisting
+        } else {
+            OpenPurpose::CreateNew
+        },
+    )
+    .map_err(|e| format!("open wallet at {path}: {e}"))
 }
 
 /// Select the pool to use: `SPP_POOL_CONTRACT_ID`, or the first enabled pool.

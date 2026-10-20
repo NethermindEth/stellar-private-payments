@@ -107,8 +107,9 @@ the checked-in testnet deployment explicitly with
 `--deployment deployments/testnet`; the CLI has no embedded deployment fallback.
 
 ```bash
-# Onboard Alice's wallet. The default data dir writes the SQLite wallet to
-# ~/.local/share/stellar-private-payments/spp.db.
+# Onboard Alice's wallet. The default data dir writes the encrypted SQLite
+# wallet and its key envelope to ~/.local/share/stellar-private-payments/spp.db
+# (and spp.db.key).
 cargo run --release -p stellar-private-payments-cli -- \
   --deployment deployments/testnet onboard \
   --account alice --accept --register
@@ -123,16 +124,19 @@ cargo run --release -p stellar-private-payments-cli -- \
 
 What `spp onboard` does:
 
-1. Accepts the disclaimer.
-2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v2] (<kdf_domain>)`
+1. Unlocks or initializes the encrypted SQLite database (`spp.db`) and its
+   wallet key envelope (`spp.db.key`) using `--storage-account` (defaulting to
+   `--account`) via `stellar message sign`.
+2. Accepts the disclaimer.
+3. When privacy keys are missing, signs `Privacy Pool Key Derivation [v2] (<kdf_domain>)`
    via `stellar message sign` using the account alias (the Stellar secret key
    never enters the `spp` process).
-3. Strictly verifies the SEP-53 signature against the account's own public key,
+4. Strictly verifies the SEP-53 signature against the account's own public key,
    then derives and stores the privacy note/encryption keys and ASP blinding.
    An invalid signature or one made by another account aborts onboarding
    without saving privacy keys. Existing keys skip signing, verification, and
    derivation.
-4. Optionally registers the public keys on-chain so other accounts can transfer
+5. Optionally registers the public keys on-chain so other accounts can transfer
    to this address without knowing the raw keys.
 
 > The `spp` CLI and the examples use different default wallet paths. The `spp`

@@ -9,7 +9,7 @@ Zero-knowledge proof generation for private Stellar payments. This application a
 - Real-time synchronization with on-chain state
 - Freighter wallet integration for Stellar transactions
 - Client-side Groth16 proof generation via WebAssembly
-- Local state management with Sqlite
+- Encrypted local state in SQLite (OPFS), unlocked via Freighter
 - Note encryption/decryption
 - Simulation of ASP providers for testing (`/admin.html`)
 

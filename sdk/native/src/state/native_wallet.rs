@@ -63,7 +63,8 @@ fn secret(
     Ok(Zeroizing::new(hex::encode(key.as_ref())))
 }
 
-fn unlock_with(
+/// Unlock or initialize storage with a caller-supplied SEP-53 signing function.
+pub fn unlock_with(
     database: &Path,
     address: &str,
     sign: &mut impl FnMut(&str) -> Result<KeyDerivationSignature>,
