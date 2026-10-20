@@ -488,8 +488,8 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
-    /// Every address that has ever registered one of `note_keys` in the public
-    /// key registry, with the first ledger each address registered that key.
+    /// Maps every address that has registered a key in `note_keys` to the first ledger where that
+    /// registration occurred
     ///
     /// Owners can rotate keys and the registry does not enforce uniqueness, so
     /// a key can map to several addresses. Rows are ordered per key by
