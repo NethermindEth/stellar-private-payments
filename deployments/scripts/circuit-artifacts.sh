@@ -4,10 +4,14 @@
 # VERSION=major.minor  SETUP=local|ceremony
 set -eu
 
+case "${SPP_NETWORK:-testnet}" in
+  *[!a-zA-Z0-9_-]*) echo "invalid SPP_NETWORK" >&2; exit 1 ;;
+esac
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ARTIFACTS="${CIRCUIT_ARTIFACTS_DIR:-$ROOT/target/circuits-artifacts}"
-KEYS="$ROOT/deployments/testnet/circuit_keys"
-LOCK="$ROOT/deployments/testnet/circuits.json"
+KEYS="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuit_keys"
+LOCK="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuits.json"
 CRATE_LOCK="$ROOT/sdk/native/circuits.json"
 GITHUB_REPO="NethermindEth/stellar-private-payments"
 KINDS="r1cs graph.bin proving_key.bin"
@@ -146,7 +150,7 @@ write_lock() {
   else
     version="$(normalize_version "$version")"
   fi
-  witness="$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)"
+  witness="$(sed -n 's/^circom-witness-rs = { version = "=\{0,1\}\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)"
   [ -n "$witness" ] || { echo "could not read circom-witness-rs version from Cargo.toml" >&2; exit 1; }
   commit="$(git -C "$ROOT" rev-parse HEAD)"
   is_git_commit "$commit" || { echo "could not read git commit at $ROOT" >&2; exit 1; }
@@ -178,14 +182,14 @@ write_lock() {
     printf '%s' "$circuits"
     printf '\n}\n'
   } >"$LOCK"
-  cp "$LOCK" "$CRATE_LOCK"
+  if [ "${SPP_NETWORK:-testnet}" = testnet ]; then cp "$LOCK" "$CRATE_LOCK"; fi
   echo "wrote $LOCK and $CRATE_LOCK (version $version)"
 }
 
 verify_lock() {
   [ -f "$LOCK" ] || { echo "missing $LOCK" >&2; exit 1; }
   [ -f "$CRATE_LOCK" ] || { echo "missing $CRATE_LOCK" >&2; exit 1; }
-  if [ "$(sha256_file "$LOCK")" != "$(sha256_file "$CRATE_LOCK")" ]; then
+  if [ "${SPP_NETWORK:-testnet}" = testnet ] && [ "$(sha256_file "$LOCK")" != "$(sha256_file "$CRATE_LOCK")" ]; then
     echo "$CRATE_LOCK does not match $LOCK" >&2
     echo "run: make circuits-lock" >&2
     exit 1
@@ -195,7 +199,7 @@ verify_lock() {
   check_meta repository "$GITHUB_REPO" || failed=1
   check_meta circom "$(trim_file "$ROOT/circuits/circom.lock")" || failed=1
   check_meta circomlib "$(trim_file "$ROOT/circuits/circomlib.lock")" || failed=1
-  check_meta circom-witness-rs "$(sed -n 's/^circom-witness-rs = { version = "\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
+  check_meta circom-witness-rs "$(sed -n 's/^circom-witness-rs = { version = "=\{0,1\}\([^"]*\)".*/\1/p' "$ROOT/Cargo.toml" | head -1)" || failed=1
   commit="$(json_field meta commit)"
   if ! is_git_commit "$commit"; then
     echo "missing or invalid meta.commit in $LOCK" >&2

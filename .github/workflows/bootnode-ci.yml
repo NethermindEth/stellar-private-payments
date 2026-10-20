@@ -5,11 +5,15 @@ on:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
+      - "deployments/**"
+      - "sdk/native/**"
       - ".github/workflows/bootnode-ci.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "tools/bootnode/**"
+      - "deployments/**"
+      - "sdk/native/**"
       - ".github/workflows/bootnode-ci.yml"
 
 concurrency:

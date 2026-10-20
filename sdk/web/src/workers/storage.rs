@@ -61,6 +61,7 @@ impl Drop for DatabaseKeyTransport {
 }
 
 type Address = String;
+type KdfDomain = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,7 +125,7 @@ pub(crate) enum StorageWorkerRequest {
     },
     ClearIndexingCursors,
     ClampLastFullyIndexedLedger(u32),
-    SavePrivateKeys(Address, NoteKeyPair, EncryptionKeyPair, Field),
+    SavePrivateKeys(Address, KdfDomain, NoteKeyPair, EncryptionKeyPair, Field),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     GetSetting(String),
@@ -132,11 +133,12 @@ pub(crate) enum StorageWorkerRequest {
         key: String,
         value_json: String,
     },
-    PrivacyKeys(Address),
-    AspSecret(Address),
-    UserNotes(Address, u32),
+    PrivacyKeys(Address, KdfDomain),
+    AspSecret(Address, KdfDomain),
+    UserNotes(Address, KdfDomain, u32),
     PortfolioBalances {
         address: Address,
+        kdf_domain: KdfDomain,
         enabled_pools: Vec<PortfolioPoolEntry>,
     },
     RecordOperation {
@@ -155,10 +157,12 @@ pub(crate) enum StorageWorkerRequest {
     },
     UnspentUserNotes {
         user_address: Address,
+        kdf_domain: KdfDomain,
         pool_contract_id: Address,
     },
     PoolUserNotes {
         user_address: Address,
+        kdf_domain: KdfDomain,
         pool_contract_id: Address,
     },
     RecipientLookup {
@@ -310,10 +314,9 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg {
-            directory: directory.clone(),
-            ..Default::default()
-        };
+        let cfg = sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfgBuilder::new()
+            .directory(directory)
+            .build();
         let mut attempt = 0;
         loop {
             match sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(&cfg, true)
@@ -399,19 +402,20 @@ fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
             let purpose = {
                 let mut purpose = purpose;
                 let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
+                    use sqlite_wasm_rs::vfs::VfsFilesManager;
                     let pool = p.borrow();
                     let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
-                    let exists = pool.exists("spp.encrypted.db");
+                    let exists = pool.contains("spp.encrypted.db")?;
                     if exists && encrypted_database_is_empty()? {
                         // The pool owns exclusive OPFS handles and no database
                         // connection is open yet. Only a zero-byte main file
                         // without recovery sidecars is safe to recreate.
                         anyhow::ensure!(
-                            !pool.exists("spp.encrypted.db-journal")
-                                && !pool.exists("spp.encrypted.db-wal"),
+                            !pool.contains("spp.encrypted.db-journal")?
+                                && !pool.contains("spp.encrypted.db-wal")?,
                             "empty database has recovery files; existing data has been preserved"
                         );
-                        pool.delete_db("spp.encrypted.db")?;
+                        pool.remove("spp.encrypted.db")?;
                         purpose =
                             stellar_private_payments::state::database_key::OpenPurpose::CreateNew;
                         return Ok(false);
@@ -652,6 +656,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::SavePrivateKeys(
             address,
+            kdf_domain,
             note_keypair,
             encryption_keypair,
             membership_blinding,
@@ -660,7 +665,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 "[{WORKER_NAME}] saving private keys for the account {}",
                 Sensitive(&address)
             );
-            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
+            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &kdf_domain, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
                 Sensitive(&address)
@@ -700,12 +705,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::PrivacyKeys(address) => {
+        StorageWorkerRequest::PrivacyKeys(address, kdf_domain) => {
             tracing::trace!(
                 "[{WORKER_NAME}] fetch privacy keys for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address, &kdf_domain)?)?;
             if opt.is_some() {
                 tracing::trace!(
                     "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
@@ -726,22 +731,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 },
             }))
         }
-        StorageWorkerRequest::AspSecret(address) => {
+        StorageWorkerRequest::AspSecret(address, kdf_domain) => {
             tracing::trace!(
                 "[{WORKER_NAME}] fetch ASP secret for the account {}",
                 Sensitive(&address)
             );
-            let opt = with_storage!(s => s.get_private_keys(&address)?)?;
+            let opt = with_storage!(s => s.get_private_keys(&address, &kdf_domain)?)?;
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
         }
-        StorageWorkerRequest::UserNotes(address, limit) => {
+        StorageWorkerRequest::UserNotes(address, kdf_domain, limit) => {
             tracing::trace!(
                 "[{WORKER_NAME}] list user notes for the account {}",
                 Sensitive(&address)
             );
-            let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
+            let list = with_storage!(s => s.list_user_notes(&address, &kdf_domain, limit)?)?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {}",
                 list.len(),
@@ -751,13 +756,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::PortfolioBalances {
             address,
+            kdf_domain,
             enabled_pools,
         } => {
             tracing::trace!(
                 "[{WORKER_NAME}] list portfolio balances for the account {}",
                 Sensitive(&address)
             );
-            let list = with_storage!(s => s.list_portfolio_balances(&address, &enabled_pools)?)?;
+            let list = with_storage!(s => s.list_portfolio_balances(&address, &kdf_domain, &enabled_pools)?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }
         StorageWorkerRequest::RecordOperation {
@@ -790,6 +796,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::UnspentUserNotes {
             user_address,
+            kdf_domain,
             pool_contract_id,
         } => {
             tracing::trace!(
@@ -797,7 +804,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&user_address)
             );
             let list = with_storage!(s =>
-                s.list_unspent_user_notes(&pool_contract_id, &user_address)?
+                s.list_unspent_user_notes(&pool_contract_id, &user_address, &kdf_domain)?
             )?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} unspent notes for the account {}",
@@ -808,6 +815,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::PoolUserNotes {
             user_address,
+            kdf_domain,
             pool_contract_id,
         } => {
             tracing::trace!(
@@ -815,7 +823,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Sensitive(&user_address)
             );
             let list = with_storage!(s =>
-                s.list_pool_user_notes(&pool_contract_id, &user_address)?
+                s.list_pool_user_notes(&pool_contract_id, &user_address, &kdf_domain)?
             )?;
             tracing::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {}",
@@ -1246,11 +1254,13 @@ impl Storage for StorageBridge {
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<SpendableNote>, Error> {
         match self
             .call(
                 StorageWorkerRequest::UnspentUserNotes {
                     user_address: user_address.to_string(),
+                    kdf_domain: kdf_domain.to_string(),
                     pool_contract_id: pool_contract_id.to_string(),
                 },
                 5_000,
@@ -1275,11 +1285,13 @@ impl Storage for StorageBridge {
         &self,
         pool_contract_id: &str,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>, Error> {
         match self
             .call(
                 StorageWorkerRequest::PoolUserNotes {
                     user_address: user_address.to_string(),
+                    kdf_domain: kdf_domain.to_string(),
                     pool_contract_id: pool_contract_id.to_string(),
                 },
                 5_000,
@@ -1297,12 +1309,14 @@ impl Storage for StorageBridge {
     async fn list_portfolio_balances(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>, Error> {
         match self
             .call(
                 StorageWorkerRequest::PortfolioBalances {
                     address: user_address.to_string(),
+                    kdf_domain: kdf_domain.to_string(),
                     enabled_pools: enabled_pools.to_vec(),
                 },
                 5_000,
@@ -1320,11 +1334,16 @@ impl Storage for StorageBridge {
     async fn list_user_notes(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         limit: u32,
     ) -> Result<Vec<UserNoteSummary>, Error> {
         match self
             .call(
-                StorageWorkerRequest::UserNotes(user_address.to_string(), limit),
+                StorageWorkerRequest::UserNotes(
+                    user_address.to_string(),
+                    kdf_domain.to_string(),
+                    limit,
+                ),
                 5_000,
             )
             .await
@@ -1419,10 +1438,14 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn privacy_keys_exist(&self, user_address: &str) -> Result<bool, Error> {
+    async fn privacy_keys_exist(
+        &self,
+        user_address: &str,
+        kdf_domain: &str,
+    ) -> Result<bool, Error> {
         match self
             .call(
-                StorageWorkerRequest::PrivacyKeys(user_address.to_string()),
+                StorageWorkerRequest::PrivacyKeys(user_address.to_string(), kdf_domain.to_string()),
                 1_000,
             )
             .await
@@ -1438,6 +1461,7 @@ impl Storage for StorageBridge {
     async fn save_private_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
         membership_blinding: &Field,
@@ -1446,6 +1470,7 @@ impl Storage for StorageBridge {
             .call(
                 StorageWorkerRequest::SavePrivateKeys(
                     user_address.to_string(),
+                    kdf_domain.to_string(),
                     note_keypair.clone(),
                     encryption_keypair.clone(),
                     *membership_blinding,
@@ -1462,10 +1487,10 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
+    async fn asp_secret(&self, user_address: &str, kdf_domain: &str) -> Result<Field, Error> {
         match self
             .call(
-                StorageWorkerRequest::AspSecret(user_address.to_string()),
+                StorageWorkerRequest::AspSecret(user_address.to_string(), kdf_domain.to_string()),
                 1_000,
             )
             .await
@@ -1485,10 +1510,11 @@ impl Storage for StorageBridge {
     async fn privacy_keys(
         &self,
         user_address: &str,
+        kdf_domain: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         match self
             .call(
-                StorageWorkerRequest::PrivacyKeys(user_address.to_string()),
+                StorageWorkerRequest::PrivacyKeys(user_address.to_string(), kdf_domain.to_string()),
                 1_000,
             )
             .await
@@ -1506,8 +1532,12 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, Error> {
-        Ok(self.privacy_keys(user_address).await?.0)
+    async fn user_note_pubkey(
+        &self,
+        user_address: &str,
+        kdf_domain: &str,
+    ) -> Result<NotePublicKey, Error> {
+        Ok(self.privacy_keys(user_address, kdf_domain).await?.0)
     }
 
     async fn registered_privacy_keys(

@@ -6,8 +6,10 @@ use ark_groth16::{Groth16, Proof};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use contract_types::PROOF_SIZE;
-use soroban_sdk::{Bytes, BytesN, Env, Vec};
-use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark};
+use soroban_sdk::{Bytes, BytesN, Env, U256, Vec};
+use soroban_utils::{
+    constants::bn256_modulus, g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark,
+};
 
 /// Simple circuit that exposes eleven public inputs (as many as a tx circuit).
 ///
@@ -149,6 +151,47 @@ fn rejects_wrong_public_input_length() {
 
     let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, short_inputs);
     assert!(matches!(result, Err(Groth16Error::MalformedPublicInputs)));
+}
+
+#[test]
+fn rejects_a_changed_public_input() {
+    let env = test_env();
+    let (vk_bytes, proof, mut public_inputs, _) = build_test(&env);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
+    public_inputs.set(1, fr_from_ark(&env, ArkFr::from(34u64)));
+
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, public_inputs);
+
+    assert_eq!(result, Err(Groth16Error::InvalidProof));
+}
+
+/// All-zero bytes encode the point at infinity, so each point decodes and the
+/// pairing fails.
+#[test]
+fn rejects_an_all_zero_proof() {
+    let env = test_env();
+    let (vk_bytes, _, public_inputs, _) = build_test(&env);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
+    let proof = Groth16Proof {
+        a: G1Affine::from_array(&env, &[0u8; 64]),
+        b: G2Affine::from_array(&env, &[0u8; 128]),
+        c: G1Affine::from_array(&env, &[0u8; 64]),
+    };
+
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, public_inputs);
+
+    assert_eq!(result, Err(Groth16Error::InvalidProof));
+}
+
+/// `Bn254Fr` reduces modulo r when it is built, so the verifier reads `x + r`
+/// as `x`. Callers must refuse non-canonical inputs, as the pool's
+/// `validate_bn256_public_inputs` does.
+#[test]
+fn bn254fr_reduces_a_value_above_the_field_modulus() {
+    let env = test_env();
+    let x = U256::from_u32(&env, 33);
+
+    assert_eq!(Bn254Fr::from_u256(x.add(&bn256_modulus(&env))).to_u256(), x);
 }
 
 #[test]

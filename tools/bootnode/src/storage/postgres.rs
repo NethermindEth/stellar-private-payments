@@ -141,7 +141,7 @@ impl Storage for Postgres {
             .query_one(
                 &format!(
                     r#"
-SELECT last_upstream_cursor, ledger_tip, oldest_ledger, archive_ready
+SELECT last_upstream_cursor, ledger_tip, oldest_ledger, archive_ready, archived_allowlists
 FROM {STATE} WHERE deployment_id = $1
 "#
                 ),
@@ -153,6 +153,7 @@ FROM {STATE} WHERE deployment_id = $1
         let ledger_tip: i32 = row.get(1);
         let oldest_ledger: i32 = row.get(2);
         let archive_ready: bool = row.get(3);
+        let archived_allowlists: Vec<String> = row.get(4);
 
         Ok(IndexerState {
             last_upstream_cursor,
@@ -160,6 +161,7 @@ FROM {STATE} WHERE deployment_id = $1
             oldest_ledger: u32::try_from(oldest_ledger.max(0))
                 .context("oldest_ledger exceeds u32")?,
             archive_ready,
+            archived_allowlists,
         })
     }
 
@@ -243,6 +245,25 @@ FROM {STATE} WHERE deployment_id = $1
         Ok(())
     }
 
+    async fn set_archived_allowlists(&self, contract_ids: &[String]) -> Result<()> {
+        let client = self.pool.get().await?;
+        let updated = client
+            .execute(
+                &format!(
+                    "UPDATE {STATE} SET archived_allowlists = $1, updated_at = now() WHERE deployment_id = $2"
+                ),
+                &[&contract_ids, &self.deployment_id()],
+            )
+            .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
+        Ok(())
+    }
+
     async fn upsert_events(&self, events: &[Event]) -> Result<()> {
         if events.is_empty() {
             return Ok(());
@@ -258,6 +279,7 @@ FROM {STATE} WHERE deployment_id = $1
 
     async fn page_events_ledger(
         &self,
+        contract_ids: &[String],
         start_ledger: u32,
         cutoff_ledger: u32,
         limit: u32,
@@ -277,11 +299,18 @@ SELECT payload FROM {EVENTS}
 WHERE deployment_id = $1
   AND ledger >= $2
   AND ledger < $3
+  AND payload->>'contractId' = ANY($5)
 ORDER BY ledger, id
 LIMIT $4
 "#
                 ),
-                &[&self.deployment_id(), &start_ledger, &cutoff, &limit],
+                &[
+                    &self.deployment_id(),
+                    &start_ledger,
+                    &cutoff,
+                    &limit,
+                    &contract_ids,
+                ],
             )
             .await?;
 
@@ -295,6 +324,7 @@ LIMIT $4
 
     async fn page_events_cursor(
         &self,
+        contract_ids: &[String],
         after_event_id: &str,
         cutoff_ledger: u32,
         limit: u32,
@@ -320,12 +350,19 @@ LEFT JOIN LATERAL (
   WHERE deployment_id = $1
     AND ledger < $3
     AND (ledger > c.ledger OR (ledger = c.ledger AND id > $2))
+    AND payload->>'contractId' = ANY($5)
   ORDER BY ledger, id
   LIMIT $4
 ) e ON true
 "#
                 ),
-                &[&self.deployment_id(), &after_event_id, &cutoff, &limit],
+                &[
+                    &self.deployment_id(),
+                    &after_event_id,
+                    &cutoff,
+                    &limit,
+                    &contract_ids,
+                ],
             )
             .await?;
 

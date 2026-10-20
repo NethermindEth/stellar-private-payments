@@ -19,12 +19,13 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::{ExtData, PoolContract, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec as SorobanVec,
+    Address, Bytes, BytesN, ConstructorArgs, ContractExecutable, Env, Executable, I256, U256,
+    Vec as SorobanVec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
 use stellar_private_payments::{
-    types::PolicyFlags,
+    types::{PolicyFlags, SMT_DEPTH},
     zk::{prover::Prover, witness::WitnessCalculator},
 };
 
@@ -46,7 +47,7 @@ pub const N_NON_PROOFS: usize = 1;
 pub const ASP_MEMBERSHIP_LEVELS: usize = 10;
 
 /// Number of levels in the ASP non-membership sparse Merkle tree
-pub const SMT_LEVELS: usize = 10;
+pub const SMT_LEVELS: usize = SMT_DEPTH as usize;
 
 /// Leaves seeded into the pool and ASP membership trees before a case runs.
 ///
@@ -187,6 +188,31 @@ pub struct DeployedContracts {
     pub asp_non_membership: Address,
 }
 
+/// Returns the hash of the Wasm `contract` runs.
+///
+/// # Panics
+///
+/// Panics if `contract` is not a deployed Wasm contract.
+pub fn wasm_hash(contract: &Address) -> BytesN<32> {
+    match contract.executable() {
+        Some(Executable::Wasm(hash)) => hash,
+        other => panic!("expected a Wasm contract, found {other:?}"),
+    }
+}
+
+/// Deploys a contract running `contract`'s code; a natively registered contract
+/// fails a pool's code check.
+///
+/// # Panics
+///
+/// Panics if `contract` is not a deployed Wasm contract or the deployer's
+/// authorization is not mocked.
+pub fn deploy_same_code(env: &Env, contract: &Address, args: impl ConstructorArgs) -> Address {
+    env.deployer()
+        .with_address(Address::generate(env), [0u8; 32])
+        .deploy_contract(ContractExecutable::Wasm(wasm_hash(contract)), args)
+}
+
 /// Deploy all contracts required for E2E testing
 ///
 /// Deploys and runs constructors for the Pool, ASP Membership, ASP
@@ -226,9 +252,12 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             verifier_address.clone(),
             asp_membership.clone(),
             asp_non_membership.clone(),
+            wasm_hash(&asp_membership),
+            wasm_hash(&asp_non_membership),
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
             (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
+            soroban_sdk::String::from_str(env, "tests"),
         ),
     );
 
@@ -796,16 +825,8 @@ pub fn sync_contract_state(
     let asp_membership_client = ASPMembershipClient::new(env, &contracts.asp_membership);
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &contracts.asp_non_membership);
 
-    // Membership tree: rebuild the frozen leaves the proof used.
-    let mut memb_leaves = membership_trees[0].leaves.clone();
-    for (i, tree) in membership_trees.iter().enumerate().take(case.inputs.len()) {
-        memb_leaves[tree.index] = poseidon2_hash2(
-            witness.public_keys[i],
-            tree.blinding,
-            Some(Scalar::from(1u64)),
-        );
-    }
-    for leaf in &memb_leaves {
+    // Membership tree: insert the frozen leaves the proof used.
+    for leaf in &membership_leaves(membership_trees, witness, case.inputs.len()) {
         asp_membership_client.insert_leaf(&scalar_to_u256(env, *leaf));
     }
 
@@ -844,6 +865,30 @@ pub fn sync_contract_state(
         asp_membership_root: asp_membership_client.get_root(),
         asp_non_membership_root: asp_non_membership_client.get_root(),
     }
+}
+
+/// Returns the allowlist leaves a proof was made against: the frozen prefix of
+/// `trees`, with the leaf of each of the first `inputs` public keys at its
+/// tree's index.
+///
+/// # Panics
+///
+/// Panics if `trees` is empty, if `witness` holds fewer than `inputs` public
+/// keys, or if a tree's index is outside the prefix.
+pub fn membership_leaves(
+    trees: &[MembershipTreeProof],
+    witness: &TransactionWitness,
+    inputs: usize,
+) -> Vec<Scalar> {
+    let mut leaves = trees[0].leaves.clone();
+    for (i, tree) in trees.iter().enumerate().take(inputs) {
+        leaves[tree.index] = poseidon2_hash2(
+            witness.public_keys[i],
+            tree.blinding,
+            Some(Scalar::from(1u64)),
+        );
+    }
+    leaves
 }
 
 /// Convert a non-negative `BigInt` into a Soroban `U256`

@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct TransactRequest {
     pub user_address: String,
+    pub kdf_domain: String,
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,
     pub pool_address: String,
@@ -97,11 +98,13 @@ pub enum BuildTransactParams {
 pub(crate) fn transact_request_from_step(
     step: &Transact,
     user_address: &str,
+    kdf_domain: &str,
     pool_address: &str,
     chain: &TransactChainContext,
 ) -> TransactRequest {
     TransactRequest {
         user_address: user_address.to_string(),
+        kdf_domain: kdf_domain.to_string(),
         pool_root: Some(chain.pool_root),
         pool_next_index: chain.pool_next_index,
         pool_address: pool_address.to_string(),
@@ -136,7 +139,7 @@ pub fn build_transact_params(
     }
 
     let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
-        load_user_key_material(storage, &req.user_address)?;
+        load_user_key_material(storage, &req.user_address, &req.kdf_domain)?;
 
     let membership_proof = if req.policy_flags.requires_membership_proofs() {
         match build_membership_proof(
@@ -159,15 +162,7 @@ pub fn build_transact_params(
         .pool_root
         .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
 
-    let inputs = match build_pool_inputs(
-        storage,
-        &req.user_address,
-        &req.pool_address,
-        req.pool_next_index,
-        req.tree_depth,
-        pool_root,
-        &req.input_commitments,
-    )? {
+    let inputs = match build_pool_inputs(storage, req, pool_root)? {
         Ok(inputs) => inputs,
         Err(status) => return Ok(BuildTransactParams::MembershipSync(status)),
     };
@@ -213,6 +208,7 @@ pub fn build_transact_params(
 pub(crate) fn load_user_key_material(
     storage: &SqliteStorage,
     user_address: &str,
+    kdf_domain: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field), Error> {
     let StoredPrivateKeys {
         note_keypair: NoteKeyPair {
@@ -223,7 +219,7 @@ pub(crate) fn load_user_key_material(
             public: enc_pub, ..
         },
         membership_blinding,
-    } = crate::storage::map_private_keys(storage, user_address)?;
+    } = crate::storage::map_private_keys(storage, user_address, kdf_domain)?;
 
     Ok((private, note_pub, enc_pub, membership_blinding))
 }
@@ -270,32 +266,32 @@ fn build_membership_proof(
 
 fn build_pool_inputs(
     storage: &SqliteStorage,
-    user_address: &str,
-    pool_address: &str,
-    pool_next_index: u32,
-    tree_depth: u32,
+    req: &TransactRequest,
     expected_pool_root: Field,
-    input_commitments: &[Field],
 ) -> Result<Result<Vec<TransactInputNote>, AspMembershipSync>> {
-    if input_commitments.is_empty() {
+    if req.input_commitments.is_empty() {
         return Ok(Ok(Vec::new()));
     }
 
     let tree = match build_validated_pool_tree(
         storage,
-        pool_address,
-        pool_next_index,
-        tree_depth,
+        &req.pool_address,
+        req.pool_next_index,
+        req.tree_depth,
         expected_pool_root,
     )? {
         Ok(tree) => tree,
         Err(status) => return Ok(Err(status)),
     };
 
-    let mut out = Vec::with_capacity(input_commitments.len());
-    for commitment in input_commitments {
-        let Some((amount, blinding, leaf_index)) =
-            storage.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?
+    let mut out = Vec::with_capacity(req.input_commitments.len());
+    for commitment in &req.input_commitments {
+        let Some((amount, blinding, leaf_index)) = storage.get_unspent_user_note_by_commitment(
+            &req.pool_address,
+            &req.user_address,
+            &req.kdf_domain,
+            commitment,
+        )?
         else {
             tracing::info!(
                 commitment = ?crate::types::Sensitive(commitment),
@@ -359,13 +355,40 @@ fn build_pool_input_note(
 
 #[cfg(test)]
 mod tests {
-    use super::load_user_key_material;
+    use super::{build_validated_pool_tree, load_user_key_material};
     use crate::{
         state::SqliteStorage,
-        types::{lock_reveal_flag, set_reveal_sensitive},
+        types::{AspMembershipSync, Field, lock_reveal_flag, set_reveal_sensitive},
+        zk::merkle::MerklePrefixTree,
     };
 
     const ADDRESS: &str = "GTESTACCOUNTWITHNOSTOREDKEYS";
+    const LEVELS: u32 = 2;
+
+    /// An empty local tree has the expected root, so only the leaf count can
+    /// refuse it.
+    #[test]
+    fn pool_tree_behind_the_chain_requires_sync() -> anyhow::Result<()> {
+        let storage = SqliteStorage::connect_in_memory()?;
+        let empty_root = MerklePrefixTree::new(LEVELS, &[])?.into_built().root()?;
+
+        let tree = build_validated_pool_tree(&storage, "CPOOL", 2, LEVELS, empty_root)?;
+        assert!(matches!(tree, Err(AspMembershipSync::SyncRequired(None))));
+        Ok(())
+    }
+
+    /// An empty local tree matches a chain with no leaves, so only the root can
+    /// refuse it.
+    #[test]
+    fn pool_tree_with_a_wrong_root_is_refused() -> anyhow::Result<()> {
+        let storage = SqliteStorage::connect_in_memory()?;
+
+        let Err(err) = build_validated_pool_tree(&storage, "CPOOL", 0, LEVELS, Field::ZERO) else {
+            panic!("a wrong root must be refused");
+        };
+        assert!(err.to_string().starts_with("pool root mismatch"), "{err}");
+        Ok(())
+    }
 
     #[test]
     fn missing_user_keys_error_redacts_the_address() {
@@ -373,7 +396,8 @@ mod tests {
         set_reveal_sensitive(false);
         let storage = SqliteStorage::connect_in_memory().expect("in-memory storage");
 
-        let err = load_user_key_material(&storage, ADDRESS).expect_err("no keys are stored");
+        let err =
+            load_user_key_material(&storage, ADDRESS, "tests").expect_err("no keys are stored");
         let rendered = format!("{err:#}");
 
         assert!(!rendered.contains(ADDRESS), "address leaked: {rendered}");

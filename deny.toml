@@ -28,8 +28,7 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 ignore = [
-    "RUSTSEC-2026-0097", # https://github.com/NethermindEth/stellar-private-payments/issues/161, shouldn't affect smart contracts
-    "RUSTSEC-2026-0186", # memmap2, will update with wasmer
+    "RUSTSEC-2026-0344", # ruzstd via wasmer's object 0.39; newer wasmer needs arbitrary ^1.4, blocked by soroban-sdk's ~1.3.0 pin. Tracked by a warning in dependency-audit.yml
 ]
 unmaintained = "workspace"
 
@@ -61,6 +60,7 @@ allow = [
     "TCP-wrappers",
     "Unicode-3.0",
     "Unicode-DFS-2016",
+    "Unlicense",
     "UPL-1.0",
     "W3C-20150513",
     "WTFPL",
@@ -94,8 +94,6 @@ unused = 'warn'
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-    # SQLite WASM SAH fixes, pinned to an exact revision in Cargo.toml.
-    "https://github.com/Spxg/sqlite-wasm-rs.git",
     "https://github.com/wasmerio/wasmer"
 ]
 

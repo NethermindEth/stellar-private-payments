@@ -70,9 +70,7 @@ impl HttpServer {
             .route("/metrics", get(metrics))
             .route(
                 "/",
-                post(handle_rpc).layer(GovernorLayer {
-                    config: Arc::new(governor_conf),
-                }),
+                post(handle_rpc).layer(GovernorLayer::new(governor_conf)),
             )
             .with_state(RpcState {
                 app: state.clone(),

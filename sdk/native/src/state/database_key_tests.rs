@@ -124,7 +124,7 @@ fn encrypted_create_reopen_preserves_schema_and_hides_contents() -> Result<()> {
     let conn = open(&f.db(), &key, OpenPurpose::OpenExisting)?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-        2
+        6
     );
     assert_eq!(
         conn.pragma_query_value(None, "temp_store", |r| r.get::<_, i64>(0))?,
@@ -347,7 +347,7 @@ fn provider_failure_and_threaded_forks() -> Result<()> {
         .expect("fork thread")?;
     assert_eq!(value.as_deref(), Some(MARKER));
     assert!(!futures::executor::block_on(
-        shared_fork.privacy_keys_exist("GTESTACCOUNTWITHNOSTOREDKEYS")
+        shared_fork.privacy_keys_exist("GTESTACCOUNTWITHNOSTOREDKEYS", "test")
     )?);
     Ok(())
 }

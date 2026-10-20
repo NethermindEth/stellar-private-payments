@@ -15,7 +15,7 @@ use stellar_xdr::{self as xdr, ReadXdr};
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
     ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NotePublicKey,
-    PoolInfo, SMT_DEPTH, TransactChainContext, U256, transact_chain_context_from_state,
+    PoolInfo, SMT_DEPTH, TransactChainContext, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -83,24 +83,17 @@ pub struct PreparedSorobanTx {
 }
 
 impl StateFetcher {
-    fn u256_to_i128_checked(v: U256, what: &'static str) -> Result<i128> {
-        let be = v.to_big_endian();
-
-        // Must fit into 128 bits to be representable as i128.
-        if be[..16].iter().any(|&b| b != 0) {
-            return Err(anyhow!("{what} does not fit into i128"));
-        }
-
-        let mut low_bytes = [0u8; 16];
-        low_bytes.copy_from_slice(&be[16..]);
-        let low = u128::from_be_bytes(low_bytes);
-
-        if low > i128::MAX as u128 {
-            return Err(anyhow!("{what} does not fit into i128"));
-        }
-
-        let value = i128::try_from(low).map_err(|_| anyhow!("{what} does not fit into i128"))?;
-        Ok(value)
+    /// Reads a pool's deposit cap, saturated at `i128::MAX`.
+    ///
+    /// The pool checks a deposit against the stored `U256` cap and then
+    /// converts the deposit to `i128`, so no cap above `i128::MAX` admits a
+    /// larger deposit.
+    fn maximum_deposit_from_pool_state(
+        pool_state: &HashMap<String, xdr::ScVal>,
+        pool_id: &str,
+    ) -> Result<ExtAmount> {
+        let cap = scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", pool_id)?)?;
+        Ok(ExtAmount::from(i128::try_from(cap).unwrap_or(i128::MAX)))
     }
 
     /// Reads the Global View Key storage keys out of a pool's fetched state,
@@ -115,6 +108,18 @@ impl StateFetcher {
             .transpose()?;
         let gvk_mode = pool_state.get("GvkMode").map(scval_to_u32).transpose()?;
         Ok((admin_view_key, gvk_mode))
+    }
+
+    /// Reads a pool's deposit flag from its fetched state.
+    ///
+    /// Pools deployed before the flag cannot be paused, so a missing key reads
+    /// as `false`.
+    fn deposits_paused_from_state(pool_state: &HashMap<String, xdr::ScVal>) -> Result<bool> {
+        Ok(pool_state
+            .get("DepositsPaused")
+            .map(scval_to_bool)
+            .transpose()?
+            .unwrap_or(false))
     }
 
     /// Cross-checks a pool's configured GVK settings against what the chain
@@ -202,45 +207,70 @@ impl StateFetcher {
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
         let enabled_pools: Vec<&crate::types::PoolConfigEntry> =
             self.config.pools.iter().filter(|p| p.enabled).collect();
-        self.contracts_data(&enabled_pools).await
+        self.contracts_data(
+            &enabled_pools,
+            &self.config.asp_membership,
+            &self.config.asp_non_membership,
+        )
+        .await
     }
 
+    /// Returns the state of an enabled pool and of the two trees it reads.
+    ///
+    /// Reads the tree IDs from the pool, not the manifest, since the admin can
+    /// re-point it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pool is not an enabled deployment, an RPC read
+    /// fails, or a stored value does not decode.
     pub async fn contracts_data_for_pool(
         &self,
         pool_contract_id: &str,
     ) -> Result<ContractsStateData> {
         let enabled_pool = self.enabled_pool_for(pool_contract_id)?;
-        self.contracts_data(&[enabled_pool]).await
+        let (bulk_state, ledger) = self
+            .client
+            .get_contract_data_bulk(&[Self::pool_request(enabled_pool)])
+            .await?;
+        let pool_state = bulk_state
+            .get(pool_contract_id)
+            .ok_or_else(|| anyhow!("missing pool state for {pool_contract_id}"))?;
+        let pool = Self::pool_info(enabled_pool, pool_state, ledger)?;
+        let mut data = self
+            .contracts_data(&[], &pool.asp_membership, &pool.asp_non_membership)
+            .await?;
+        data.pools.push(pool);
+        Ok(data)
     }
 
     pub async fn asp_state(&self) -> Result<ContractsStateData> {
-        self.contracts_data(&[]).await
+        self.contracts_data(
+            &[],
+            &self.config.asp_membership,
+            &self.config.asp_non_membership,
+        )
+        .await
     }
 
     async fn contracts_data(
         &self,
         enabled_pools: &[&crate::types::PoolConfigEntry],
+        asp_membership_id: &str,
+        asp_non_membership_id: &str,
     ) -> Result<ContractsStateData> {
         let mut requests = Vec::with_capacity(enabled_pools.len().wrapping_add(2));
         for pool in enabled_pools.iter() {
-            requests.push(ContractDataBulkRequest {
-                contract_id: &pool.pool_contract_id,
-                // The administrator and the tree state are the only entries
-                // a pool keeps under their own ledger keys. Everything else,
-                // including the `AdminViewKey` and `GvkMode` that only
-                // `contracts/pool-gvk` writes, rides the instance entry and
-                // arrives with it.
-                enum_keys: vec!["Admin", "State"],
-            });
+            requests.push(Self::pool_request(pool));
         }
 
         requests.push(ContractDataBulkRequest {
-            contract_id: self.config.asp_membership.as_str(),
+            contract_id: asp_membership_id,
             enum_keys: vec!["Admin", "NextIndex"],
         });
 
         requests.push(ContractDataBulkRequest {
-            contract_id: self.config.asp_non_membership.as_str(),
+            contract_id: asp_non_membership_id,
             enum_keys: vec!["Admin"],
         });
 
@@ -252,84 +282,9 @@ impl StateFetcher {
             let pool_state = bulk_state
                 .get(&pool.pool_contract_id)
                 .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
-
-            // The counter and the ring share one entry, so the root read here
-            // is the one the counter names.
-            let tree =
-                scval_to_tree_state(get_state!(pool_state, "State", pool.pool_contract_id)?)?;
-            let merkle_current_root_index = root_slot(tree.next_index, tree.roots.len())?;
-            let merkle_root = tree
-                .roots
-                .get(usize::try_from(merkle_current_root_index)?)
-                .cloned()
-                .map(Field::try_from_u256)
-                .transpose()?;
-
-            let merkle_levels =
-                scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
-            let merkle_capacity = 2u64.pow(merkle_levels);
-            let merkle_next_index = tree.next_index;
-            let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
-                pool_state,
-                "MaximumDepositAmount",
-                pool.pool_contract_id
-            )?)?;
-            let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
-                maximum_deposit_amount_u256,
-                "maximum_deposit_amount",
-            )?);
-            let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
-            Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
-
-            let pool_info = PoolInfo {
-                ledger: base_latest_ledger,
-                contract_id: pool.pool_contract_id.clone(),
-                contract_type: "Privacy Pool".to_string(),
-                admin: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Admin",
-                    pool.pool_contract_id
-                )?)?,
-                token: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Token",
-                    pool.pool_contract_id
-                )?)?,
-                verifier: scval_to_address_string(get_state!(
-                    pool_state,
-                    "Verifier",
-                    pool.pool_contract_id
-                )?)?,
-                asp_membership: scval_to_address_string(get_state!(
-                    pool_state,
-                    "ASPMembership",
-                    pool.pool_contract_id
-                )?)?,
-                asp_non_membership: scval_to_address_string(get_state!(
-                    pool_state,
-                    "ASPNonMembership",
-                    pool.pool_contract_id
-                )?)?,
-                merkle_levels,
-                merkle_current_root_index: Some(merkle_current_root_index),
-                merkle_next_index: merkle_next_index.to_string(),
-                maximum_deposit_amount,
-                merkle_root,
-                merkle_capacity,
-                total_commitments: merkle_next_index.to_string(),
-                policy_flags: scval_to_policy_flags(get_state!(
-                    pool_state,
-                    "PolicyFlags",
-                    pool.pool_contract_id
-                )?)?,
-                admin_view_key: gvk_admin_view_key,
-                gvk_mode,
-            };
-
-            out.push(pool_info);
+            out.push(Self::pool_info(pool, pool_state, base_latest_ledger)?);
         }
 
-        let asp_membership_id = &self.config.asp_membership;
         let asp_membership_state = bulk_state
             .get(asp_membership_id)
             .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
@@ -362,7 +317,6 @@ impl StateFetcher {
             used_slots: asp_mem_next_index.to_string(),
         };
 
-        let asp_non_membership_id = &self.config.asp_non_membership;
         let asp_non_membership_state = bulk_state.get(asp_non_membership_id).ok_or_else(|| {
             anyhow!("missing asp non-membership state for {asp_non_membership_id}")
         })?;
@@ -392,16 +346,110 @@ impl StateFetcher {
         })
     }
 
+    /// Returns the request for the entries of `pool` that
+    /// [`Self::pool_info`] decodes.
+    fn pool_request(pool: &crate::types::PoolConfigEntry) -> ContractDataBulkRequest<'_> {
+        ContractDataBulkRequest {
+            contract_id: &pool.pool_contract_id,
+            // Only the admin and the tree state have their own ledger keys.
+            // Everything else, `pool-gvk`'s keys included, rides the instance.
+            enum_keys: vec!["Admin", "State"],
+        }
+    }
+
+    /// Decodes the state of `pool` from its entries, read at `ledger`.
+    fn pool_info(
+        pool: &crate::types::PoolConfigEntry,
+        pool_state: &HashMap<String, xdr::ScVal>,
+        ledger: u32,
+    ) -> Result<PoolInfo> {
+        // The counter and the ring share one entry, so the root read here
+        // is the one the counter names.
+        let tree = scval_to_tree_state(get_state!(pool_state, "State", pool.pool_contract_id)?)?;
+        let merkle_current_root_index = root_slot(tree.next_index, tree.roots.len())?;
+        let merkle_root = tree
+            .roots
+            .get(usize::try_from(merkle_current_root_index)?)
+            .cloned()
+            .map(Field::try_from_u256)
+            .transpose()?;
+
+        let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
+        let merkle_capacity = 2u64.pow(merkle_levels);
+        let merkle_next_index = tree.next_index;
+        let maximum_deposit_amount =
+            Self::maximum_deposit_from_pool_state(pool_state, &pool.pool_contract_id)?;
+        let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
+        Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
+
+        Ok(PoolInfo {
+            ledger,
+            contract_id: pool.pool_contract_id.clone(),
+            contract_type: "Privacy Pool".to_string(),
+            admin: scval_to_address_string(get_state!(
+                pool_state,
+                "Admin",
+                pool.pool_contract_id
+            )?)?,
+            token: scval_to_address_string(get_state!(
+                pool_state,
+                "Token",
+                pool.pool_contract_id
+            )?)?,
+            verifier: scval_to_address_string(get_state!(
+                pool_state,
+                "Verifier",
+                pool.pool_contract_id
+            )?)?,
+            asp_membership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPMembership",
+                pool.pool_contract_id
+            )?)?,
+            asp_non_membership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPNonMembership",
+                pool.pool_contract_id
+            )?)?,
+            merkle_levels,
+            merkle_current_root_index: Some(merkle_current_root_index),
+            merkle_next_index: merkle_next_index.to_string(),
+            maximum_deposit_amount,
+            deposits_paused: Self::deposits_paused_from_state(pool_state)?,
+            merkle_root,
+            merkle_capacity,
+            total_commitments: merkle_next_index.to_string(),
+            policy_flags: scval_to_policy_flags(get_state!(
+                pool_state,
+                "PolicyFlags",
+                pool.pool_contract_id
+            )?)?,
+            admin_view_key: gvk_admin_view_key,
+            gvk_mode,
+        })
+    }
+
     /// Builds ASP SMT non-membership proof data by querying the on-chain SMT
     /// via `simulateTransaction`.
+    ///
+    /// `asp_non_membership` is the blocklist the pool reads, as
+    /// [`PoolInfo::asp_non_membership`] reports it.
     ///
     /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof
     ///   padded to `smt_depth`
     /// - otherwise calls `asp_non_membership.find_key(key)`, pads shorter
-    ///   sibling paths to `smt_depth`, and rejects paths deeper than the
-    ///   configured policy SMT depth
+    ///   sibling paths to `smt_depth`, and rejects paths of `smt_depth` or more
+    ///   siblings, which the circuit cannot prove
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `smt_depth` is 0, the note key is not a field
+    /// element, the `find_key` simulation fails or returns a result that does
+    /// not decode, the note key is in the tree, or the returned path has
+    /// `smt_depth` or more siblings.
     pub async fn get_nonmembership_proof(
         &self,
+        asp_non_membership: &str,
         note_pubkey: &NotePublicKey,
         non_membership_root: Field,
         smt_depth: usize,
@@ -427,11 +475,7 @@ impl StateFetcher {
             });
         }
 
-        let tx = Self::build_find_key_simulation_tx(
-            &self.config.asp_non_membership,
-            source_account,
-            key,
-        )?;
+        let tx = Self::build_find_key_simulation_tx(asp_non_membership, source_account, key)?;
         let retval = self.simulate_single_retval(&tx).await?;
         Self::nonmembership_proof_from_find_result(&retval, key, non_membership_root, smt_depth)
     }
@@ -450,12 +494,14 @@ impl StateFetcher {
             ));
         }
 
+        // The circuit requires the last sibling slot to be zero.
         let mut siblings = parsed.siblings;
-        if siblings.len() > smt_depth {
+        if siblings.len() >= smt_depth {
             return Err(anyhow!(
-                "ASP non-membership proof has {} sibling(s), but the configured policy SMT depth is {}",
+                "ASP non-membership proof has {} sibling(s), but the policy SMT depth {} proves at most {}",
                 siblings.len(),
-                smt_depth
+                smt_depth,
+                smt_depth.saturating_sub(1)
             ));
         }
 
@@ -473,6 +519,13 @@ impl StateFetcher {
     }
 
     /// Pool + ASP chain anchors for a single `transact` prove step.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if [`Self::contracts_data_for_pool`] fails, the pool
+    /// needs membership proofs and the manifest does not name its allowlist,
+    /// the blocklist simulation fails or finds the note key, or the pool's
+    /// state has no Merkle root or an unknown GVK mode.
     pub async fn transact_chain_context(
         &self,
         pool_contract_id: &str,
@@ -485,9 +538,21 @@ impl StateFetcher {
             .first()
             .map(|pool| pool.policy_flags)
             .ok_or_else(|| anyhow!("pool data not fetched for {pool_contract_id}"))?;
+        let asp_membership = &data.asp_membership.contract_id;
+        if policy_flags.requires_membership_proofs()
+            && !self
+                .config
+                .indexed_contracts()
+                .any(|(contract_id, _)| contract_id == asp_membership)
+        {
+            return Err(anyhow!(
+                "pool {pool_contract_id} reads the allowlist {asp_membership}, which the deployment manifest does not name: add it to added_asp_memberships with its deployment ledger"
+            ));
+        }
         let non_membership_proof = if policy_flags.requires_non_membership_proofs() {
             Some(
                 self.get_nonmembership_proof(
+                    &data.asp_non_membership.contract_id,
                     note_pubkey,
                     data.asp_non_membership.root,
                     SMT_DEPTH as usize,
@@ -530,7 +595,7 @@ impl StateFetcher {
     /// `simulateTransaction` endpoint. Unlike scanning `NewNullifierEvent`
     /// contract events, this reads current contract state, so it is bounded
     /// neither by the RPC's event retention window nor by per-request ledger
-    /// scan limits.
+    /// scan limits. Archived nullifier entries still read as spent.
     ///
     /// # Arguments
     /// * `pool_contract_id` - Contract id of the enabled pool to query.
@@ -703,6 +768,7 @@ impl StateFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::U256;
 
     /// A pool inserts two leaves per call, so the ring advances one slot every
     /// two leaves and wraps after as many calls as the ring has slots. The
@@ -760,9 +826,24 @@ mod tests {
                 .expect_err("over-depth parsed FindResult must be rejected");
 
         assert!(
-            err.to_string().contains("ASP non-membership proof has 3 sibling(s), but the configured policy SMT depth is 2"),
+            err.to_string().contains(
+                "ASP non-membership proof has 3 sibling(s), but the policy SMT depth 2 proves at most 1"
+            ),
             "{err:#}"
         );
+    }
+
+    #[test]
+    fn non_membership_proof_requires_empty_last_sibling_slot() {
+        let full = find_result_scval(false, vec![field(1), field(2), field(3)]);
+        StateFetcher::nonmembership_proof_from_find_result(&full, field(9), field(10), 3)
+            .expect_err("a path filling every sibling slot must be rejected");
+
+        let deepest = find_result_scval(false, vec![field(1), field(2)]);
+        let proof =
+            StateFetcher::nonmembership_proof_from_find_result(&deepest, field(9), field(10), 3)
+                .expect("a path one level short of the depth must be accepted");
+        assert_eq!(proof.siblings, vec![field(1), field(2), Field::ZERO]);
     }
 
     fn baby_jub_jub_point_scval(x: Field, y: Field) -> xdr::ScVal {
@@ -810,6 +891,57 @@ mod tests {
             })
         );
         assert_eq!(gvk_mode, Some(2));
+    }
+
+    #[test]
+    fn deposits_paused_is_false_for_a_pool_deployed_before_the_flag() {
+        let pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let paused = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect("no DepositsPaused key present");
+
+        assert!(!paused);
+    }
+
+    #[test]
+    fn deposits_paused_is_read_from_a_pool_that_stores_it() {
+        let pool_state = HashMap::from([("DepositsPaused".to_string(), xdr::ScVal::Bool(true))]);
+
+        let paused = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect("DepositsPaused key present");
+
+        assert!(paused);
+    }
+
+    #[test]
+    fn a_deposits_paused_entry_that_is_not_a_bool_is_rejected() {
+        let pool_state = HashMap::from([("DepositsPaused".to_string(), xdr::ScVal::U32(1))]);
+
+        let err = StateFetcher::deposits_paused_from_state(&pool_state)
+            .expect_err("DepositsPaused must be a bool");
+
+        assert!(err.to_string().contains("Unexpected ScVal"), "{err}");
+    }
+
+    /// The pool never takes a deposit above `i128::MAX`, so a larger cap reads
+    /// as `i128::MAX` instead of failing the whole pool read. A smaller cap
+    /// reads unchanged.
+    #[test]
+    fn maximum_deposit_saturates_at_i128_max() {
+        let read = |cap: U256| {
+            let pool_state = HashMap::from([(
+                "MaximumDepositAmount".to_string(),
+                field_to_scval_u256(Field(cap)),
+            )]);
+            StateFetcher::maximum_deposit_from_pool_state(&pool_state, "CPOOL").expect("cap reads")
+        };
+
+        assert_eq!(read(U256::from(1u128 << 127)), ExtAmount::MAX);
+        assert_eq!(read(U256::MAX), ExtAmount::MAX);
+        assert_eq!(
+            read(U256::from(i128::MAX - 1)),
+            ExtAmount::from(i128::MAX - 1)
+        );
     }
 
     fn pool_entry(

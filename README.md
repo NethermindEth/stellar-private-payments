@@ -19,6 +19,8 @@ A privacy-preserving payment system for the Stellar network using zero-knowledge
 
 The system incorporates **Association Set Provider (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
 
+To run your own pool or ASP, start with the [operator manual](docs/src/operator/README.md).
+
 ## Features
 
 - **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
@@ -51,12 +53,16 @@ The demo app demonstrates integration of the Stellar Private Payments [JS/TS SDK
 
 #### ASP Admin Page
 
-This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
+This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the pools and the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
-2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
+2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree, several in one call
+3. **Pause deposits, re-point pools, and pre-sign pauses** on the Pools tab
+4. **Transfer a contract's admin** in two steps on the Admins tab
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
+
+Every admin call is a transaction from the contract's admin account. When the connected Freighter account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin Transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
 
 #### Zero-Knowledge Circuits
 
@@ -110,6 +116,49 @@ curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh |
 ```
 
 CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/native).
+
+## Deploying pools
+
+Deploy a private pool tailored to your own asset, compliance policy, and privacy
+needs. See [DEPLOY.md](DEPLOY.md) for details.
+
+### Selecting a network
+
+The CLI and bootnode use runtime deployment configuration, so the same binary
+can serve different networks without rebuilding:
+
+```bash
+cargo build --release -p stellar-private-payments-cli
+./target/release/spp --deployment deployments/testnet config show
+
+cargo build --release --manifest-path tools/bootnode/Cargo.toml
+# Required when starting the bootnode, alongside database and HTTP/TLS settings:
+export BOOTNODE_DEPLOYMENT=/absolute/path/to/deployments.json
+```
+
+The CLI accepts a deployment directory or JSON file through `--deployment`, a
+saved config setting, or a file provisioned in its data directory. There is no
+embedded deployment fallback. Proof operations additionally need the deployment's
+`circuits.json` and matching circuit artifacts. The Rust SDK and NPM package also
+accept deployment configuration and circuit fingerprints at runtime.
+
+For the website, `SPP_NETWORK=testnet trunk build --release` selects the deployment
+to bundle. Downstream deployers supply their configuration, contracts, and matching
+circuit artifacts. CI generates a temporary local-network configuration to test
+build selection without deploying contracts or starting localnet.
+
+The deployment configuration records the network's public identity string
+(`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks
+Freighter's identity, the CLI checks its Stellar CLI network configuration, and
+the bootnode checks the upstream RPC's identity against that passphrase. Display
+names, explorer defaults, and test-network disclaimers also come from the config.
+
+**Bootnode upgrade:** storage identifiers now use `v2`, separating history by
+network and contract IDs. Existing `v1` history must be re-synced; this does not
+change contracts or balances on the blockchain.
+
+See [Deployment configuration and networks](docs/src/multi-network.md) for configuration fields,
+Docker builds, connection overrides, and control over retaining old bootnode data.
 
 ## Limitations
 

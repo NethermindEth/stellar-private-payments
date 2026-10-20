@@ -12,10 +12,11 @@ members = [
     "tools/circuit-compiler",
     "tools/gvkey-gen",
 ]
-exclude = ["tools/bootnode", "integration-tests", "integration-tests-web"]
+exclude = ["integration-tests", "integration-tests-web", "tools/bootnode"]
 resolver = "3"
 
 [workspace.package]
+rust-version = "1.95.0"
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/NethermindEth/stellar-private-transactions"
@@ -23,7 +24,20 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+# workspace
+asp-membership = { path = "contracts/asp-membership" }
+asp-non-membership = { path = "contracts/asp-non-membership" }
+circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circuit-keys = { path = "circuit-keys" }
+circuits = { path = "circuits", default-features = false }
+contract-types = { path = "contracts/types" }
+pool = { path = "contracts/pool" }
+pool-core = { path = "contracts/pool-core" }
+pool-gvk = { path = "contracts/pool-gvk" }
+public-key-registry = { path = "contracts/public-key-registry" }
+soroban-utils = { path = "contracts/soroban-utils" }
+stellar-private-payments = { path = "sdk/native", version = "0.2.0" }
+
 # external
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] }
@@ -35,16 +49,10 @@ ark-relations = { version = "0.6.0", default-features = false }
 ark-serialize = { version = "0.6.0", default-features = false }
 ark-snark = { version = "0.6.0", default-features = false }
 ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
-# workspace
-asp-membership = { path = "contracts/asp-membership" }
-asp-non-membership = { path = "contracts/asp-non-membership" }
-async-trait = { version = "0.1.91", default-features = false }
-base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-circom-witness-rs = { version = "0.3.0", default-features = false }
-circuit-keys = { path = "circuit-keys" }
-circuits = { path = "circuits", default-features = false }
-clap = { version = "4.6.3", default-features = false, features = [
+async-trait = { version = "0.1.92", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+circom-witness-rs = { version = "=0.3.0", default-features = false }
+clap = { version = "4.6.7", default-features = false, features = [
     "std",
     "color",
     "help",
@@ -55,8 +63,8 @@ clap = { version = "4.6.3", default-features = false, features = [
     "env",
 ] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
-contract-types = { path = "contracts/types" }
-futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+futures = { version = "0.3.34", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
@@ -64,41 +72,34 @@ hex = { version = "0.4", default-features = false, features = ["alloc"] }
 js-sys = "0.3"
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.8", default-features = false, features = ["serde"] }
-num-integer = { version = "0.1.46", default-features = false }
-pool = { path = "contracts/pool" }
-pool-core = { path = "contracts/pool-core" }
-pool-gvk = { path = "contracts/pool-gvk" }
-public-key-registry = { path = "contracts/public-key-registry" }
+num-integer = { version = "0.1.47", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 ruint = { version = "1.20", default-features = false, features = ["num-bigint"] } # match circom-witness-rs
-rusqlite = { version = "0.40.1", default-features = false, features = ["ffi-sqlite-wasm-rs"] }
+rusqlite = { package = "spp-rusqlite", version = "0.40.2", default-features = false, features = ["ffi-sqlite-wasm-rs"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
-soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] }
-soroban-utils = { path = "contracts/soroban-utils" }
-sqlite-wasm-rs = { version = "0.5.5", default-features = false, features = ["sqlite3mc", "wasm-bindgen"] }
-# Pin the upstream SAH recovery fix; its later 0.3 API needs a coordinated rusqlite upgrade.
-sqlite-wasm-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8", default-features = false, features = ["sahpool"] }
-stellar-private-payments = { path = "sdk/native", version = "0.1.0" }
+soroban-sdk = { version = "28", default-features = false, features = ["hazmat"] }
+sqlite-wasm-rs = { version = "0.6.1", default-features = false, features = ["sqlite3mc", "wasm-bindgen"] }
+sqlite-wasm-vfs = { version = "0.3.0", default-features = false, features = ["sahpool"] }
+sqlite3mc-src = { version = "=205.1.0", default-features = false }
+stellar-xdr = { version = "28.0.0", default-features = false, features = ["serde", "base64", "std", "alloc"] }
 taceo-poseidon2 = { version = "0.3", default-features = false, features = ["bn254", "t2", "t3", "t4"] }
 thiserror = { version = "2", default-features = false }
-time = { version = "0.3.54", default-features = false, features = ["formatting", "std"] }
-stellar-xdr = { version = "27.0.0", default-features = false, features = ["serde", "base64", "std", "alloc"] }
+time = { version = "0.3.55", default-features = false, features = ["formatting", "std"] }
 tokio = { version = "1", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }
 tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 uint = { version = "0.10", default-features = false }
-wasm-bindgen = { version = "=0.2.126", default-features = false, features = ["serde-serialize"] }
+wasm-bindgen = { version = "=0.2.128", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
 web-time = "1"
 wiremock = "0.6"
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 missing_docs = "allow"
@@ -137,6 +138,3 @@ opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
-# The upstream SAH fix depends on matching VFS interfaces from this commit.
-rsqlite-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }
-sqlite-wasm-rs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }

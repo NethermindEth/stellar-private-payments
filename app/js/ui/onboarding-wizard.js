@@ -11,7 +11,7 @@ import {
 } from './push-notifications.js';
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
-const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
+import { deploymentDefaults } from '../network-config.js';
 const STEP_ORDER = ['disclaimer', 'retention', 'storage', 'keys', 'explorer', 'registration'];
 
 function hasStorageManager() {
@@ -271,7 +271,9 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage.getPrivacyKeys(address).catch(() => null);
+    const storedPublicKeys = await storage
+        .getPrivacyKeys(address, client().contractConfig().kdf_domain)
+        .catch(() => null);
     const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
@@ -329,7 +331,7 @@ export async function runOnboardingWizard({
                 encryptionKeypair: { publicKey: storedPublicKeys.encryptionKeypair.public },
             }
             : null,
-        explorerBaseUrl: explorerSetting?.baseUrl || DEFAULT_EXPLORER_BASE_URL,
+        explorerBaseUrl: explorerSetting?.baseUrl || deploymentDefaults.explorerUrl,
         bootnode: bootnodeSetting || { enabled: false, url: '' },
         registered: !!registryLookup?.entry,
     };
@@ -630,14 +632,14 @@ export async function runOnboardingWizard({
                 const later = makeButton({
                     text: 'Use default',
                     variant: 'ghost',
-                    onClick: () => persistExplorer(later, DEFAULT_EXPLORER_BASE_URL),
+                    onClick: () => persistExplorer(later, deploymentDefaults.explorerUrl),
                 });
                 const save = makeButton({
                     text: 'Save explorer',
                     variant: 'primary',
                     onClick: () => persistExplorer(
                         save,
-                        document.getElementById('wizard-explorer-url')?.value?.trim() || DEFAULT_EXPLORER_BASE_URL,
+                        document.getElementById('wizard-explorer-url')?.value?.trim() || deploymentDefaults.explorerUrl,
                     ),
                 });
                 renderActions([later, save]);

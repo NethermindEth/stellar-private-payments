@@ -27,6 +27,7 @@ export const Dashboard = {
         App.events.addEventListener('wallet:ready', () => {
             this.start();
         });
+        App.events.addEventListener('pool:config', () => this.renderBalances());
         App.events.addEventListener('wallet:disconnected', () => {
             this.stop();
             this.clear();
@@ -141,7 +142,7 @@ export const Dashboard = {
             const top = el('div', 'flex items-center justify-between gap-3');
             top.appendChild(el('span', 'text-sm font-medium text-white', op.opType));
             const sign = op.direction === 'out' ? '−' : op.direction === 'in' ? '+' : '';
-            const amountText = op.amount != null ? `${sign}${Utils.formatTokenAmount(op.amount, label)}` : '';
+            const amountText = op.amount != null ? `${sign}${Utils.formatPoolAmount(op.amount, poolId)}` : '';
             top.appendChild(el('span', `font-mono text-sm ${op.direction === 'out' ? 'text-rose-200' : 'text-cyan-100'}`, amountText));
             row.appendChild(top);
 

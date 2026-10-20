@@ -124,7 +124,7 @@ fn failed_migration_preserves_plaintext_and_retries_with_saved_record() -> Resul
         "INSERT INTO app_settings (key, value) VALUES ('test', ?1)",
         ["\"preserved\""],
     )?;
-    legacy.pragma_update(None, "user_version", 2)?;
+    legacy.pragma_update(None, "user_version", 1)?;
     drop(legacy);
     // Simulate a filesystem failure before the staging database can be created.
     fs::create_dir(f.0.join("spp.db.encrypting"))?;

@@ -1,7 +1,8 @@
 [package]
 name = "integration-tests-web"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2024"
+rust-version = "1.95.0"
 repository = "https://github.com/NethermindEth/stellar-private-transactions"
 license = "Apache-2.0"
 publish = false
@@ -9,7 +10,7 @@ description = "Browser end-to-end tests for the web client, against a local Stel
 
 [dependencies]
 # workspace
-stellar-private-payments = { path = "../sdk/native", version = "0.1.0" }
+stellar-private-payments = { path = "../sdk/native", version = "0.2.0" }
 stellar-private-payments-web = { path = "../sdk/web", version = "0.1.0" }
 
 # external
@@ -21,7 +22,7 @@ rand = { version = "0.8", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 stellar-strkey = "0.0.18"
-wasm-bindgen = { version = "=0.2.126", default-features = false, features = ["serde-serialize"] }
+wasm-bindgen = { version = "=0.2.128", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
 
@@ -42,6 +43,3 @@ unwrap_used = "deny"
 
 [patch.crates-io]
 cranelift-control = { path = "../vendor/cranelift-control" }
-# The upstream SAH fix depends on matching VFS interfaces from this commit.
-rsqlite-vfs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }
-sqlite-wasm-rs = { git = "https://github.com/Spxg/sqlite-wasm-rs.git", rev = "a19ef76713867eeab72482786f65e8316ced4ab8" }

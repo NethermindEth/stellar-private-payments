@@ -530,12 +530,16 @@ pub fn is_telemetry_initialized() -> bool {
         .is_some()
 }
 
+/// Serializes tests that touch tracing's process-global state: the global
+/// subscriber, the LOG_LEVEL static, and the callsite interest cache that
+/// `set_log_level` rebuilds. A level change in one test would otherwise
+/// disable spans another test is creating in parallel.
+#[cfg(test)]
+pub(crate) static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Serializes tests that touch the process-global LOG_LEVEL static.
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn span_table_evicts_entry_on_span_close() {

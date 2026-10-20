@@ -13,13 +13,18 @@ use url::Url;
 #[derive(Debug, Parser)]
 #[command(name = "bootnode", version, about)]
 struct Cli {
+    /// Required deployment directory (containing deployments.json) or JSON
+    /// file.
+    #[arg(long, env = "BOOTNODE_DEPLOYMENT")]
+    deployment: PathBuf,
+
     /// Bind address for the main HTTPS listener.
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
     bind: SocketAddr,
 
     /// Upstream Stellar RPC endpoint used by the background indexer.
     #[arg(long, env = "BOOTNODE_UPSTREAM_RPC_URL")]
-    upstream_rpc_url: Url,
+    upstream_rpc_url: Option<Url>,
 
     /// Postgres connection string.
     #[arg(long, env = "DATABASE_URL")]
@@ -151,14 +156,18 @@ impl Cli {
         Ok(())
     }
 
-    fn into_config(self) -> Config {
-        let tls = match (self.insecure_http, self.domain, self.acme_email) {
+    fn config(&self, upstream_rpc_url: Url) -> Config {
+        let tls = match (
+            self.insecure_http,
+            self.domain.clone(),
+            self.acme_email.clone(),
+        ) {
             (true, ..) => None,
             (false, Some(domain), Some(acme_email)) => Some(TlsConfig {
                 domain,
                 acme_email,
-                acme_cache_dir: self.acme_cache_dir,
-                acme_directory_url: self.acme_directory_url,
+                acme_cache_dir: self.acme_cache_dir.clone(),
+                acme_directory_url: self.acme_directory_url.clone(),
             }),
             (false, ..) => {
                 unreachable!(
@@ -169,8 +178,8 @@ impl Cli {
 
         let otel = if self.otel_enabled {
             Some(OtelConfig {
-                otlp_endpoint: self.otel_otlp_endpoint,
-                service_name: self.otel_service_name,
+                otlp_endpoint: self.otel_otlp_endpoint.clone(),
+                service_name: self.otel_service_name.clone(),
                 sample_ratio: self.otel_sample_ratio,
             })
         } else {
@@ -179,7 +188,7 @@ impl Cli {
 
         Config {
             bind: self.bind,
-            upstream_rpc_url: self.upstream_rpc_url,
+            upstream_rpc_url,
             dev: self.dev,
             tls,
             redirect_days: self.redirect_days,
@@ -195,8 +204,7 @@ impl Cli {
         }
     }
 
-    async fn open_storage(&self) -> Result<Arc<dyn Storage>> {
-        let deployment_id = current_deployment_storage_id()?;
+    async fn open_storage(&self, deployment_id: String) -> Result<Arc<dyn Storage>> {
         let backend = Postgres::connect(
             &self.database_url,
             self.db_max_connections as usize,
@@ -214,14 +222,29 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
 
-    let storage = cli.open_storage().await?;
-    let cfg = cli.into_config();
-
+    let deployment = bootnode::read_deployment(&cli.deployment)?;
+    let spec = bootnode::DeploymentSpec::from_config(&deployment)?;
+    let upstream_rpc_url = match cli.upstream_rpc_url.clone() {
+        Some(url) => url,
+        None => bootnode::default_upstream_rpc_url(&deployment)?,
+    };
+    let cfg = cli.config(upstream_rpc_url.clone());
     let _otel = otel::init_telemetry(&cfg)?;
+    tokio::select! {
+        result = bootnode::wait_for_upstream_network(upstream_rpc_url, &deployment) => result?,
+        result = tokio::signal::ctrl_c() => {
+            result?;
+            tracing::info!("received ctrl-c while waiting for upstream, shutting down");
+            return Ok(());
+        }
+    }
+    let storage = cli
+        .open_storage(current_deployment_storage_id(&deployment)?)
+        .await?;
     metrics::init_metrics()?;
     let prom_handle = metrics::install_prometheus_recorder()?;
 
-    Bootnode::setup(cfg, storage, prom_handle)
+    Bootnode::setup_with_deployment(cfg, storage, prom_handle, spec)
         .await?
         .serve()
         .await

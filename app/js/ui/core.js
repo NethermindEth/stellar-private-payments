@@ -3,9 +3,10 @@
  */
 
 import { StrKey } from '@stellar/stellar-sdk';
+import { formatAmount } from './notes-view.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 
-const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
+import { deploymentDefaults } from '../network-config.js';
 
 export const App = {
     state: {
@@ -46,7 +47,7 @@ export const App = {
             registryLookup: null,
         },
         settings: {
-            explorerBaseUrl: DEFAULT_EXPLORER_BASE_URL,
+            explorerBaseUrl: deploymentDefaults.explorerUrl,
             bootnode: {
                 enabled: false,
                 url: '',
@@ -62,7 +63,7 @@ export const App = {
 };
 
 export const Utils = {
-    defaultExplorerBaseUrl: DEFAULT_EXPLORER_BASE_URL,
+    get defaultExplorerBaseUrl() { return deploymentDefaults.explorerUrl; },
 
     truncateHex(hex, start = 8, end = 8) {
         if (!hex || hex.length <= start + end + 3) return hex;
@@ -90,50 +91,43 @@ export const Utils = {
         return App.state.pools.find(pool => pool.poolContractId === App.state.selectedPoolId) || App.state.pools[0] || null;
     },
 
-    formatTokenAmount(amount, symbol = 'XLM', decimals = 7) {
-        try {
-            let value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
-            const negative = value < 0n;
-            if (negative) value = -value;
-            const abs = value.toString().padStart(decimals + 1, '0');
-            const intPart = abs.slice(0, -decimals);
-            const frac = abs.slice(-decimals).replace(/0+$/, '');
-            const out = frac ? `${intPart}.${frac}` : intPart;
-            return `${negative ? '-' : ''}${out} ${symbol}`;
-        } catch {
-            return `0 ${symbol}`;
-        }
+    formatPoolAmount(amount, poolId) {
+        const pool = App.state.pools.find(pool => pool.poolContractId === poolId);
+        if (pool?.decimals == null) return `${amount} base units`;
+        return this.formatTokenAmount(amount, this.poolLabel(pool), pool.decimals);
     },
+
+    formatTokenAmount: formatAmount,
 
     explorerBaseUrl() {
         const configured = App.state.settings.explorerBaseUrl;
-        if (!configured) return DEFAULT_EXPLORER_BASE_URL;
+        if (!configured) return deploymentDefaults.explorerUrl;
         try {
             const protocol = new URL(configured).protocol;
-            return (protocol === 'http:' || protocol === 'https:') ? configured : DEFAULT_EXPLORER_BASE_URL;
+            return (protocol === 'http:' || protocol === 'https:') ? configured : deploymentDefaults.explorerUrl;
         } catch {
-            return DEFAULT_EXPLORER_BASE_URL;
+            return deploymentDefaults.explorerUrl;
         }
     },
 
     explorerTxUrl(hash) {
-        if (!/^[0-9a-f]{64}$/i.test(hash)) return '#';
+        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash)) return '#';
         return `${this.explorerBaseUrl()}/tx/${hash}`;
     },
 
     explorerLedgerUrl(ledger) {
-        if (!/^\d+$/.test(String(ledger))) return '#';
+        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger))) return '#';
         return `${this.explorerBaseUrl()}/ledger/${ledger}`;
     },
 
     explorerAddressUrl(address) {
-        if (!StrKey.isValidEd25519PublicKey(address)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address)) return '#';
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
     explorerContractUrl(contractId) {
-        if (!StrKey.isValidContract(contractId)) return '#';
-        return `${this.explorerBaseUrl()}/contract/${contractId}`;
+        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return '#';
+        return `${this.explorerBaseUrl()}/contract/${encodeURIComponent(contractId)}`;
     },
 
     explorerContractStorageUrl(contractId) {

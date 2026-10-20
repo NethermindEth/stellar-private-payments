@@ -6,11 +6,12 @@ use ark_ff::{BigInteger, PrimeField};
 use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, U256, Vec,
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    Address, Bytes, Env, IntoVal, InvokeError, U256, Vec,
+    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
     vec,
     xdr::ToXdr,
 };
+use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus};
 use taceo_poseidon2::bn254::t2;
 
 fn tree_state(env: &Env, contract_id: &Address) -> TreeState {
@@ -228,12 +229,9 @@ fn test_insert_leaf_requires_admin() {
     client.insert_leaf(&leaf);
 }
 
-/// This test is skipped under Miri because the panic formatting path triggers
-/// undefined behavior in the `ethnum` crate's unsafe formatting code.
-/// See: https://github.com/nlordell/ethnum-rs/issues/34
+/// A bare `should_panic` also passed when the fifth insert failed with any
+/// other error.
 #[test]
-#[cfg_attr(miri, ignore)]
-#[should_panic]
 fn test_insert_leaf_merkle_tree_full() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -249,9 +247,31 @@ fn test_insert_leaf_merkle_tree_full() {
         client.insert_leaf(&leaf);
     }
 
-    // Try to insert one more leaf, which should fail as the tree is full
     let leaf5 = U256::from_u32(&env, 5u32);
-    client.insert_leaf(&leaf5);
+    assert!(matches!(
+        client.try_insert_leaf(&leaf5),
+        Err(Ok(Error::MerkleTreeFull))
+    ));
+}
+
+/// The host reduces Poseidon2 inputs modulo `r`, so only the hash's range
+/// check stops a leaf of `r` hashing as 0. The control `r − 1` inserts.
+#[test]
+fn insert_leaf_refuses_a_leaf_at_the_field_modulus() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let r = bn256_modulus(&env);
+
+    assert!(matches!(
+        client.try_insert_leaf(&r),
+        Err(Err(InvokeError::Abort))
+    ));
+
+    client.insert_leaf(&r.sub(&U256::from_u32(&env, 1)));
+    assert_eq!(next_index(&env, &contract_id), 1);
 }
 
 #[test]
@@ -274,6 +294,7 @@ fn test_update_admin() {
     // Update admin (using mock_all_auths to authorize the update)
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     // Verify admin was updated in storage
     let stored_admin_after: Address = env.as_contract(&contract_id, || {
@@ -314,6 +335,7 @@ fn test_new_admin_can_insert_after_update() {
     env.mock_all_auths();
     // Update admin
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     // Verify the new admin can insert a leaf (using mock_all_auths to
     // authorize)
@@ -359,6 +381,7 @@ fn test_old_admin_cannot_insert_after_update() {
 
     env.mock_all_auths();
     client.update_admin(&new_admin);
+    client.accept_admin();
 
     let leaf = U256::from_u32(&env, 100u32);
     env.mock_auths(&[MockAuth {
@@ -371,6 +394,142 @@ fn test_old_admin_cannot_insert_after_update() {
         },
     }]);
     client.insert_leaf(&leaf);
+}
+
+#[test]
+fn test_old_admin_can_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    let leaf = U256::from_u32(&env, 100u32);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (leaf.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&leaf);
+
+    assert_eq!(next_index(&env, &contract_id), 1);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_new_admin_cannot_insert_before_acceptance() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    let leaf = U256::from_u32(&env, 100u32);
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "insert_leaf",
+            args: (leaf.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.insert_leaf(&leaf);
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_accept_admin_requires_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.update_admin(&Address::generate(&env));
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "accept_admin",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.accept_admin();
+}
+
+#[test]
+fn test_accept_admin_without_a_pending_admin_is_refused() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+#[test]
+fn test_cancel_admin_transfer_clears_the_pending_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+
+    client.cancel_admin_transfer();
+
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.try_accept_admin(), Err(Ok(Error::NoPendingAdmin)));
+}
+
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
+#[test]
+#[cfg_attr(miri, ignore)]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_cancel_admin_transfer_requires_the_admin() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let new_admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.update_admin(&new_admin);
+
+    env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "cancel_admin_transfer",
+            args: ().into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.cancel_admin_transfer();
 }
 
 #[test]
@@ -896,4 +1055,27 @@ fn only_the_last_ninety_roots_are_known_after_two_laps() {
         let known = client.is_known_root(&root);
         assert_eq!(known, i >= lap as usize, "root of insertion {}", i + 1);
     }
+}
+
+#[test]
+fn test_is_known_root_renews_the_instance_and_the_tree() {
+    let env = test_env();
+    let contract_id = env.register(ASPMembership, (Address::generate(&env), 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let ttls = || {
+        [
+            env.deployer().get_contract_instance_ttl(&contract_id),
+            env.as_contract(&contract_id, || {
+                env.storage().persistent().get_ttl(&DataKey::State)
+            }),
+        ]
+    };
+    let before = ttls();
+
+    client.is_known_root(&client.get_root());
+
+    assert_eq!(
+        ttls(),
+        before.map(|ttl| ttl.saturating_add(MAX_EXTENSION_LEDGERS))
+    );
 }

@@ -1,3 +1,5 @@
+import { refreshTokenDecimals } from '../token-metadata.js';
+import { deploymentDefaults } from '../network-config.js';
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
@@ -30,17 +32,6 @@ async function refreshPublicIdentity() {
 }
 
 import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
-
-// Public, well-known Stellar network passphrases, keyed by the network name
-// deployments.json's `network` field uses. Lets the connected wallet be
-// checked against the network this app was actually deployed against,
-// rather than string-matching the RPC URL for "testnet".
-const NETWORK_PASSPHRASES = {
-    testnet: 'Test SDF Network ; September 2015',
-    futurenet: 'Test SDF Future Network ; October 2022',
-    mainnet: 'Public Global Stellar Network ; September 2015',
-    local: 'Standalone Network ; February 2017',
-};
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 let revealedAspSecret = null;
@@ -126,7 +117,7 @@ function setActiveView(view) {
     if (view === 'disclosure' && !disclosureLoaded) {
         disclosureLoaded = true;
         import('../disclosure.js').then(m => {
-            if (m.initDisclosure) m.initDisclosure();
+            if (m.initDisclosure) return m.initDisclosure();
         }).catch(err => {
             console.error('Failed to load disclosure.js', err);
             disclosureLoaded = false;
@@ -176,6 +167,13 @@ async function bootnodeCheck(rpcUrl) {
 async function loadRuntimeState() {
     const config = client().contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
+    const pools = App.state.pools;
+    const sdk = client();
+    const account = sdk.account();
+    void refreshTokenDecimals(pools, account,
+        () => App.state.wallet.connected && isRuntimeReady() && client() === sdk && App.state.pools === pools,
+        () => App.events.dispatchEvent(new CustomEvent('pool:config')),
+    );
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
     poolSelects.forEach(select => {
@@ -220,7 +218,7 @@ function renderWallet() {
     walletText.classList.toggle('hidden', !connected);
     walletBtn?.classList.toggle('hidden', connected);
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
-    document.getElementById('network-name').textContent = App.state.wallet.network?.toUpperCase() || 'NETWORK';
+    document.getElementById('network-name').textContent = (deploymentDefaults.displayName || deploymentDefaults.network || 'NETWORK').toUpperCase();
     renderSyncStatus();
 }
 
@@ -497,12 +495,6 @@ export const Wallet = {
                 const address = owner ?? rememberedNoteOwner() ?? activeAddress;
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
                 const rpcUrl = sorobanRpcUrl || '';
-
-                const deploymentConfig = await loadDeploymentConfig();
-                const expectedPassphrase = NETWORK_PASSPHRASES[deploymentConfig.network];
-                if (!expectedPassphrase || networkPassphrase !== expectedPassphrase) {
-                    throw new Error(`This app is deployed on ${deploymentConfig.network}; switch your wallet's network to match.`);
-                }
 
                 App.state.wallet.connected = true;
                 App.state.wallet.address = address;

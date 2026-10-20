@@ -7,16 +7,12 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const web = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const root = resolve(web, '../..');
 const required = new Set([
   'package.json', 'js/index.js', 'js/types/api-types.d.ts',
   'dist/stellar_private_payments_web.js', 'dist/stellar_private_payments_web_bg.wasm',
   'dist/workers/storage-worker-module.js', 'dist/workers/storage-worker-module_bg.wasm',
-  'dist/licenses/SQLite3MC.txt', 'dist/licenses/sqlite-wasm-vfs-LICENSE.txt',
   'dist/circuits/NOTICE.txt', 'dist/circuits/source-bundle.tar.gz',
 ]);
-const notice = readFileSync(join(root, 'vendor/sqlite3mc-NOTICE.txt'));
-const vfsNotice = readFileSync(join(root, 'vendor/sqlite-wasm-vfs-LICENSE.txt'));
 
 function npmPack(...args) {
   const result = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', ...args], {
@@ -39,8 +35,6 @@ function verifyNames(names) {
 }
 
 function verify(read) {
-  if (!read('dist/licenses/SQLite3MC.txt').equals(notice)) throw new Error('SQLite3MC notice differs from reviewed notice');
-  if (!read('dist/licenses/sqlite-wasm-vfs-LICENSE.txt').equals(vfsNotice)) throw new Error('VFS notice differs from reviewed notice');
   const bindings = read('dist/stellar_private_payments_web.js').toString();
   for (const method of ['static openEncrypted(']) {
     if (!bindings.includes(method)) throw new Error(`WASM bindings lack ${method}`);

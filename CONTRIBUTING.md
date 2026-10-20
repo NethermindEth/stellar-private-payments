@@ -83,7 +83,7 @@ stellar-private-payments/
 
 ## Prerequisites
 
-- [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
+- [**Rust**](https://www.rust-lang.org/tools/install): the supported minimum is declared in `workspace.package.rust-version` in `Cargo.toml`; `rust-toolchain.toml` selects the development and release compiler.
 - [**Circom**](https://github.com/iden3/circom) **2.2.3** for circuit / graph builds (`circuits/circom.lock`; same tag as the Rust circom crates in `circuits/Cargo.toml`).
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
@@ -91,9 +91,97 @@ stellar-private-payments/
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
-- SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
+- [**jq**](https://jqlang.github.io/jq/) for the MSRV and release scripts.
+- C compiler and archiver (`cc` / `ar`, plus `clang` for `wasm32-unknown-unknown` builds) to compile the vendored SQLite3MC amalgamation.
 - [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
 - [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
+- **macOS only:** Homebrew LLVM (`brew install llvm`) provides clang for WebAssembly builds.
+  `make sdk-web-build`, `make serve`, `make build`, and `npm run build --prefix sdk/web` select it
+  automatically when installed, unless `CC_wasm32-unknown-unknown`, `CC_wasm32_unknown_unknown`,
+  `TARGET_CC`, or `CC` already selects a compiler.
+- **macOS only:** `llvm-ar` for `wasm32-unknown-unknown` builds (`rustup component add llvm-tools`). Apple's `ar`
+  silently drops wasm objects from archives, which breaks the SQLite build with undefined `sqlite3_*` symbols at link
+  time. `make serve` / `make build` / `npm run build --prefix sdk/web` use the active Rust toolchain's `llvm-ar`
+  automatically unless `AR_wasm32_unknown_unknown`, `TARGET_AR`, or `AR` is already set.
+
+For direct WebAssembly builds or the WASM tests below, select the compiler and archiver explicitly in your terminal:
+
+```bash
+# macOS only; run from the repository root to use the pinned Rust toolchain.
+brew install llvm
+export CC_wasm32_unknown_unknown="$(brew --prefix llvm)/bin/clang"
+rustup component add llvm-tools
+export AR_wasm32_unknown_unknown="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-ar"
+cargo build -p stellar-private-payments-web --release --target wasm32-unknown-unknown
+```
+
+To keep it across terminals, put that path (`echo "$AR_wasm32_unknown_unknown"`) under `[env]` in your user-level
+`~/.cargo/config.toml` instead, and update it when `rust-toolchain.toml` moves to a new Rust version.
+
+The target-specific setting above also overrides a global `AR=ar` or `TARGET_AR=ar`. If those settings select
+Apple's archiver, the browser build script preserves them and the SQLite link error can recur; use the export
+above to select `llvm-ar` for WebAssembly. Linux builds keep their existing archiver selection and do not
+require this component.
+
+## Rust version support
+
+All first-party Rust packages share the minimum supported Rust version (MSRV)
+declared in the root `Cargo.toml`. Workspace members inherit it; excluded packages
+declare the same version explicitly. `bash scripts/msrv.sh` uses stable Cargo and
+`jq` to check the resolved declarations and workspace inheritance. The root field
+uses the canonical `rust-version = "X.Y.Z"` layout in `[workspace.package]`.
+Independent packages are listed explicitly in the checker; add new independent
+first-party packages there. Untracked scratch projects are not part of the policy.
+Vendored dependencies retain their own requirements and are checked by the actual
+MSRV builds; do not raise their requirements merely to match the development pin.
+
+The baseline is Rust 1.95.0, matching the requirement declared by
+`rusqlite_migration` (`spp-rusqlite-migration`) in the locked SDK dependency graph. The vendored
+`cranelift-control` retains upstream 0.133.0's Rust 1.94.0 requirement.
+
+The development/release compiler in `rust-toolchain.toml` may be newer. Updating
+that pin does not raise the MSRV. Keep the minimum until a language feature,
+dependency update, correctness fix, or maintenance need justifies an increase.
+Explain increases in the PR and release notes, and prefer a planned release
+boundary over a routine patch release. Update the workspace declaration and the
+excluded packages together. Older compiler support branches are not promised.
+
+The MSRV workflow runs on every PR, including source-only changes. Configure its
+three locked build checks as required in branch protection. Run
+its checks locally with the minimum toolchain installed:
+
+```sh
+rustup toolchain install "$(bash scripts/msrv.sh)" --profile minimal
+bash scripts/check-msrv.sh native
+bash scripts/check-msrv.sh browser
+bash scripts/check-msrv.sh contracts
+bash scripts/check-msrv.sh consumer
+```
+
+The scripts explicitly select the minimum compiler, independently of the local
+toolchain pin. Locked checks cover native workspace targets, the SDK's optional
+native `parallel` feature, browser WASM and workers, all deployable contracts,
+bootnode tests, and compilation of the excluded integration suites. Browser and
+contract checks install their Rust targets. The consumer check resolves fresh
+dependencies for the packaged SDK outside the workspace; it intentionally does
+not reuse the repository lockfile. Dependency updates must preserve both forms
+of compatibility. Fresh consumer resolution runs separately on dependency-related
+PRs, relevant pushes to main, or manual dispatch. It is not a required PR check:
+upstream releases must not block unrelated PRs. Run it manually before releasing
+or when investigating dependency changes.
+
+The contract check requires Stellar CLI 28.1.0 (the version installed by CI),
+which performs the Soroban SDK's required contract post-processing.
+
+The MSRV gate builds native test targets but leaves circuit-dependent test
+execution, browser execution, and local-network integration execution to their
+existing workflows. It covers native Linux and the two WASM targets; release CI
+provides the additional platform coverage. Formatting, Miri, coverage, and
+external tool installation can use separate toolchains.
+
+Circuit-specific witness graph regeneration (`circuit-compiler/witness-graph`)
+requires Circom and generated C++ inputs and is outside this MSRV guarantee;
+use the pinned development toolchain for that operation.
 
 ## Building and testing crates
 
@@ -110,6 +198,15 @@ This patch remains for **circuits / ceremony** builds that still use ark-circom 
 The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
 committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
 
+`rusqlite` and `rusqlite_migration` are temporarily consumed via the published
+[`spp-rusqlite`](https://crates.io/crates/spp-rusqlite) (`0.40.2`) and
+[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates
+(aliased via `package = "..."` in `Cargo.toml`) so `stellar-private-payments` can be published
+to crates.io with `sqlite-wasm-rs 0.6` (`sqlite3mc`) support from upstream
+[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906). Once upstream `rusqlite`
+and `rusqlite_migration` publish releases containing that change, switch the workspace back to the
+official `rusqlite` and `rusqlite_migration` crates.
+
 ### Running WASM tests
 
 Some crates include unit tests intended to run under `wasm32-unknown-unknown` via `wasm-bindgen-test`.
@@ -118,7 +215,7 @@ so you need it available on your `PATH` (typically by installing `wasm-bindgen-c
 
 ```bash
 # Install wasm-bindgen-cli (version must match `wasm-bindgen` in Cargo.lock)
-cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
 # Example: run wasm tests for the Stellar Private Payments SDK
 cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib
@@ -158,90 +255,9 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 ```
 
 ### Deploying Contracts
-You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a Stellar network.
 
-See `./deployments/scripts/deploy.sh --help` for all options.
-
-Each pool has **ASP policy flags** (`none`, `allowlist`, `blocklist`, or `allowlist-blocklist`) fixed at deploy time. The flags select which transact circuit/VK the pool's verifier embeds. A single deployment can include **multiple pools with different policies**; the script deploys one verifier contract per flag combination used and wires the matching verifier into each pool constructor.
-
-Pool specs accept an optional per-pool prefix:
-
-- `none:native:<TOKEN_CONTRACT_ID>`
-- `allowlist:contract:<TOKEN_CONTRACT_ID>`
-- `blocklist:native:<TOKEN_CONTRACT_ID>`
-- `allowlist-blocklist:contract:<TOKEN_CONTRACT_ID>`
-
-Or pass `--policy-flags` as the default when specs omit the prefix.
-
-For testnet blocklist-only pools, pass `--policy-flags blocklist` (or prefix each `--pool` with `blocklist:`) and omit `--vk-file` to use the committed key at `deployments/testnet/circuit_keys/policy_tx_2_2_B_vk.json`.
-
-Mixed-policy example:
-
-```sh
-./deployments/scripts/deploy.sh testnet \
-  --deployer <identity> \
-  --asp-levels 10 \
-  --pool-levels 20 \
-  --max-deposit 1000000000 \
-  --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
-  --pool allowlist-blocklist:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
-```
-
-For testnet purposes
-(https://www.circle.com/eurc#how-to-start-using-eurc, you can use https://faucet.circle.com/ to fund your account (but first add an asset and a trustline in your wallet))
-
-```sh
-./deployments/scripts/deploy.sh testnet \
-  --deployer <identity> \
-  --policy-flags blocklist \
-  --asp-levels 10 \
-  --pool-levels 20 \
-  --max-deposit 1000000000 \
-  --pool native:$(stellar contract id asset --asset native --network testnet) \
-  --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
-```
-
-Allowlist + blocklist pool:
-
-```sh
-./deployments/scripts/deploy.sh testnet \
-  --deployer <identity> \
-  --policy-flags allowlist-blocklist \
-  --asp-levels 10 \
-  --pool-levels 20 \
-  --max-deposit 1000000000 \
-  --pool native:$(stellar contract id asset --asset native --network testnet)
-```
-
-#### Deploying with a Global View Key (GVK)
-
-A Global View Key lets the pool admin decrypt and view notes (view-only:
-outputs; traceable: inputs and outputs) — see [Global View
-Key](docs/src/global_view_key.md) for the full scheme. A pool spec's
-`[policy:][gvk-mode:]` prefix accepts `gvk-off` (default), `gvk-viewonly`, or
-`gvk-traceable`, and needs the admin's Baby JubJub public key via
-`--gvk-authority-pubkey-file`. `tools/gvkey-gen` is an optional helper that
-generates and validates one such key, e.g.:
-
-```sh
-cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
-```
-
-Back up `admin-d.json` — the private key cannot be recovered. `gvkey-gen
-generate` can also save the key into a client SDK wallet database via
-`--db PATH`. Multiple pools, mixing a plain pool with a GVK-traceable one, in
-one deployment:
-
-```sh
-./deployments/scripts/deploy.sh testnet \
-  --deployer <identity> \
-  --gvk-authority-pubkey-file ./admin-pub.json \
-  --asp-levels 10 \
-  --pool-levels 20 \
-  --max-deposit 1000000000 \
-  --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
-  --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
-```
+See [DEPLOY.md](DEPLOY.md) for the `deployments/scripts/deploy.sh` pool spec
+syntax, options, and worked examples (including Global View Key deployments).
 
 ### End-to-End Tests
 

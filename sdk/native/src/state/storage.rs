@@ -20,6 +20,10 @@ pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema.sql")),
     M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
+    M::up(include_str!("schema_v3_account_kdf_domain.sql")).foreign_key_check(),
+    M::up(include_str!("schema_v4_processed_events.sql")),
+    M::up(include_str!("schema_v5_leaves_per_tree.sql")),
+    M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -112,6 +116,8 @@ impl Storage {
     }
 
     pub(super) fn connect_with_connection(mut conn: Connection) -> Result<Self> {
+        // Table rebuilds in migrations must not cascade into dependent tables.
+        conn.pragma_update(None, "foreign_keys", "OFF")?;
         MIGRATIONS.to_latest(&mut conn)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self { conn })
@@ -248,7 +254,11 @@ impl Storage {
             .unwrap_or_default())
     }
 
-    pub fn get_private_keys(&self, address: &str) -> Result<Option<StoredPrivateKeys>> {
+    pub fn get_private_keys(
+        &self,
+        address: &str,
+        kdf_domain: &str,
+    ) -> Result<Option<StoredPrivateKeys>> {
         self.conn
             .query_row(
                 "SELECT
@@ -259,10 +269,8 @@ impl Storage {
                 membership_blinding
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
-                WHERE accounts.address = ?1
-                ORDER BY keypairs.id DESC
-                LIMIT 1",
-                params![address],
+                WHERE accounts.address = ?1 AND accounts.kdf_domain = ?2",
+                params![address, kdf_domain],
                 |row| {
                     let enc_priv: EncryptionPrivateKey = row.get(0)?;
                     let enc_pub: EncryptionPublicKey = row.get(1)?;
@@ -290,6 +298,7 @@ impl Storage {
     pub fn save_encryption_and_note_keypairs(
         &mut self,
         account_address: &str,
+        kdf_domain: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
         membership_blinding: &Field,
@@ -299,7 +308,7 @@ impl Storage {
             .transaction()
             .context("failed to start transaction")?;
 
-        let account_id = Self::get_or_create_account(&tx, account_address)?;
+        let account_id = Self::get_or_create_account(&tx, account_address, kdf_domain)?;
 
         tx.execute(
             "INSERT INTO keypairs (
@@ -309,7 +318,13 @@ impl Storage {
                 note_public_key,
                 membership_blinding,
                 account_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(account_id) DO UPDATE SET
+                encryption_private_key = excluded.encryption_private_key,
+                encryption_public_key = excluded.encryption_public_key,
+                note_private_key = excluded.note_private_key,
+                note_public_key = excluded.note_public_key,
+                membership_blinding = excluded.membership_blinding",
             params![
                 &encryption_keypair.private,
                 &encryption_keypair.public,
@@ -328,26 +343,19 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_disclaimer_state(&mut self, address: &str) -> Result<DisclaimerState> {
-        let tx = self
+    pub fn get_disclaimer_state(&self, address: &str) -> Result<DisclaimerState> {
+        let accepted: Option<i64> = self
             .conn
-            .transaction()
-            .context("failed to start transaction")?;
-        let account_id = Self::get_or_create_account(&tx, address)?;
-
-        let accepted: Option<i64> = tx
             .query_row(
                 "SELECT 1
                  FROM disclaimer_acceptances
-                 WHERE account_id = ?1 AND disclaimer_hash = ?2
+                 WHERE address = ?1 AND disclaimer_hash = ?2
                  LIMIT 1",
-                params![account_id, CURRENT_DISCLAIMER_HASH_HEX],
+                params![address, CURRENT_DISCLAIMER_HASH_HEX],
                 |row| row.get(0),
             )
             .optional()
             .context("failed to query disclaimer acceptance")?;
-
-        tx.commit().context("failed to commit transaction")?;
 
         Ok(DisclaimerState {
             disclaimer_text_md: CURRENT_DISCLAIMER_TEXT_MD.to_string(),
@@ -365,20 +373,13 @@ impl Storage {
             anyhow::bail!("Disclaimer hash mismatch. Please refresh and try again.");
         }
 
-        let tx = self
-            .conn
-            .transaction()
-            .context("failed to start transaction")?;
-        let account_id = Self::get_or_create_account(&tx, address)?;
-
-        tx.execute(
-            "INSERT OR IGNORE INTO disclaimer_acceptances (account_id, disclaimer_hash)
-             VALUES (?1, ?2)",
-            params![account_id, disclaimer_hash_hex],
-        )
-        .context("failed to insert disclaimer acceptance")?;
-
-        tx.commit().context("failed to commit transaction")?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO disclaimer_acceptances (address, disclaimer_hash)
+                 VALUES (?1, ?2)",
+                params![address, disclaimer_hash_hex],
+            )
+            .context("failed to insert disclaimer acceptance")?;
         Ok(())
     }
 
@@ -441,17 +442,21 @@ impl Storage {
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts
-    fn get_or_create_account(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
+    fn get_or_create_account(
+        tx: &rusqlite::Transaction,
+        address: &str,
+        kdf_domain: &str,
+    ) -> Result<i64> {
         tx.execute(
-            "INSERT OR IGNORE INTO accounts (address) VALUES (?1)",
-            params![address],
+            "INSERT OR IGNORE INTO accounts (address, kdf_domain) VALUES (?1, ?2)",
+            params![address, kdf_domain],
         )
         .context("failed to insert account")?;
 
         let id: i64 = tx
             .query_row(
-                "SELECT id FROM accounts WHERE address = ?1",
-                params![address],
+                "SELECT id FROM accounts WHERE address = ?1 AND kdf_domain = ?2",
+                params![address, kdf_domain],
                 |row| row.get(0),
             )
             .context("failed to fetch account id")?;
@@ -480,14 +485,12 @@ impl Storage {
     ) -> Result<Option<crate::types::PublicKeyEntry>> {
         self.conn
             .query_row(
-                "SELECT owner, encryption_key, note_key, ledger
-                 FROM (
-                    SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
-                    FROM public_keys p
-                    JOIN raw_contract_events r ON r.id = p.event_id
-                    WHERE p.owner = ?1
-                    GROUP BY p.owner
-                 )",
+                "SELECT p.owner, p.encryption_key, p.note_key, r.ledger
+                 FROM public_keys p
+                 JOIN raw_contract_events r ON r.id = p.event_id
+                 WHERE p.owner = ?1
+                 ORDER BY r.ledger DESC, r.id DESC
+                 LIMIT 1",
                 params![address],
                 map_public_key_entry,
             )
@@ -496,7 +499,12 @@ impl Storage {
     }
 
     /// List notes derived for `address` (newest first).
-    pub fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
+    pub fn list_user_notes(
+        &self,
+        address: &str,
+        kdf_domain: &str,
+        limit: u32,
+    ) -> Result<Vec<UserNoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
                 n.id,
@@ -511,12 +519,12 @@ impl Storage {
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1
+             WHERE a.address = ?1 AND a.kdf_domain = ?2
              ORDER BY r.ledger DESC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
 
-        let rows = stmt.query_map(params![address, limit], |row| {
+        let rows = stmt.query_map(params![address, kdf_domain, limit], |row| {
             let id: Field = row.get(0)?;
             let pool_contract_id: String = row.get(1)?;
             let amount: NoteAmount = row.get(2)?;
@@ -551,6 +559,7 @@ impl Storage {
         &self,
         pool_contract_id: &str,
         address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
@@ -565,11 +574,11 @@ impl Storage {
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND pool.address = ?2
+             WHERE a.address = ?1 AND pool.address = ?2 AND a.kdf_domain = ?3
              ORDER BY r.ledger DESC",
         )?;
 
-        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
+        let rows = stmt.query_map(params![address, pool_contract_id, kdf_domain], |row| {
             let id: Field = row.get(0)?;
             let amount: NoteAmount = row.get(1)?;
             let leaf_index_i64: i64 = row.get(2)?;
@@ -602,6 +611,7 @@ impl Storage {
         &self,
         pool_contract_id: &str,
         address: &str,
+        kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
@@ -616,11 +626,14 @@ impl Storage {
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND pool.address = ?2 AND n.nullifier_id IS NULL
+             WHERE a.address = ?1
+               AND pool.address = ?2
+               AND a.kdf_domain = ?3
+               AND n.nullifier_id IS NULL
              ORDER BY r.ledger DESC",
         )?;
 
-        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
+        let rows = stmt.query_map(params![address, pool_contract_id, kdf_domain], |row| {
             let id: Field = row.get(0)?;
             let pool_contract_id: String = row.get(1)?;
             let amount: NoteAmount = row.get(2)?;
@@ -651,6 +664,7 @@ impl Storage {
     pub fn list_portfolio_balances(
         &self,
         address: &str,
+        kdf_domain: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>> {
         let mut stmt = self.conn.prepare(
@@ -660,11 +674,11 @@ impl Storage {
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND n.nullifier_id IS NULL
+             WHERE a.address = ?1 AND a.kdf_domain = ?2 AND n.nullifier_id IS NULL
              ORDER BY pool.address",
         )?;
 
-        let rows = stmt.query_map(params![address], |row| {
+        let rows = stmt.query_map(params![address, kdf_domain], |row| {
             let pool_contract_id: String = row.get(0)?;
             let amount: NoteAmount = row.get(1)?;
             Ok((pool_contract_id, amount))
@@ -874,6 +888,7 @@ impl Storage {
         &self,
         pool_contract_id: &str,
         account_address: &str,
+        kdf_domain: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
         let mut stmt = self.conn.prepare(
@@ -886,13 +901,14 @@ impl Storage {
              WHERE a.address = ?2
                AND c.address = ?1
                AND pc.commitment = ?3
+               AND a.kdf_domain = ?4
                AND n.nullifier_id IS NULL
              LIMIT 1",
         )?;
 
         let row = stmt
             .query_row(
-                params![pool_contract_id, account_address, commitment],
+                params![pool_contract_id, account_address, commitment, kdf_domain],
                 |row| {
                     let amount: NoteAmount = row.get(0)?;
                     let blinding: Field = row.get(1)?;
@@ -920,6 +936,7 @@ impl Storage {
         &self,
         pool_contract_id: &str,
         account_address: &str,
+        kdf_domain: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
         let mut stmt = self.conn.prepare(
@@ -932,12 +949,13 @@ impl Storage {
              WHERE a.address = ?2
                AND c.address = ?1
                AND pc.commitment = ?3
+               AND a.kdf_domain = ?4
              LIMIT 1",
         )?;
 
         let row = stmt
             .query_row(
-                params![pool_contract_id, account_address, commitment],
+                params![pool_contract_id, account_address, commitment, kdf_domain],
                 |row| {
                     let amount: NoteAmount = row.get(0)?;
                     let blinding: Field = row.get(1)?;
@@ -959,7 +977,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_nullifiers (nullifier, event_id, gvk_ciphertext)
                     VALUES (?1, ?2, ?3)
-                    ON CONFLICT(nullifier) DO NOTHING",
+                    ON CONFLICT(event_id) DO NOTHING",
             )?;
 
             for event in events {
@@ -981,7 +999,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
                     VALUES (?1, ?2, ?3, ?4, ?5)
-                    ON CONFLICT(commitment) DO NOTHING",
+                    ON CONFLICT(event_id) DO NOTHING",
             )?;
 
             for event in events {
@@ -1132,9 +1150,9 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
-                    VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(leaf_index) DO NOTHING",
+                "INSERT INTO asp_membership_leaves (contract_id, leaf_index, leaf, root, event_id)
+                    VALUES ((SELECT contract_id FROM raw_contract_events WHERE id = ?4), ?1, ?2, ?3, ?4)
+                    ON CONFLICT(contract_id, leaf_index) DO NOTHING",
             )?;
 
             for event in events {
@@ -1313,6 +1331,29 @@ impl Storage {
         Ok(leaves)
     }
 
+    /// Marks events so [`Self::get_unprocessed_events`] skips them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction cannot be opened or an insert
+    /// fails.
+    pub fn save_processed_event_ids(&mut self, ids: &[String]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO processed_events (event_id)
+                    VALUES (?1)
+                    ON CONFLICT(event_id) DO NOTHING",
+            )?;
+
+            for id in ids {
+                stmt.execute(params![id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Unprocessed raw events fetch
     pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
         let mut stmt = self.conn.prepare(
@@ -1323,10 +1364,12 @@ impl Storage {
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
                 LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+                LEFT JOIN processed_events pe ON r.id = pe.event_id
                 WHERE pc.event_id IS NULL
                 AND p.event_id IS NULL
                 AND n.event_id IS NULL
                 AND l.event_id IS NULL
+                AND pe.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
         )?;
@@ -1351,7 +1394,7 @@ impl Storage {
         Ok(events)
     }
 
-    fn get_accounts_with_latest_keypairs(&self) -> Result<Vec<AccountKeys>> {
+    fn get_accounts_with_keypairs(&self) -> Result<Vec<AccountKeys>> {
         let mut stmt = self.conn.prepare(
             "SELECT
                 a.id,
@@ -1361,13 +1404,7 @@ impl Storage {
                 k.note_public_key,
                 k.membership_blinding
              FROM accounts a
-             JOIN (
-                SELECT account_id, MAX(id) AS max_id
-                FROM keypairs
-                WHERE account_id IS NOT NULL
-                GROUP BY account_id
-             ) latest ON latest.account_id = a.id
-             JOIN keypairs k ON k.id = latest.max_id
+             JOIN keypairs k ON k.account_id = a.id
              ORDER BY a.id ASC",
         )?;
 
@@ -1412,7 +1449,7 @@ impl Storage {
     ) -> Result<bool> {
         const ACCOUNT_CHUNK: u32 = 4;
 
-        let accounts = self.get_accounts_with_latest_keypairs()?;
+        let accounts = self.get_accounts_with_keypairs()?;
         if accounts.is_empty() || total_limit == 0 {
             return Ok(false);
         }
@@ -1830,6 +1867,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        state::test_events,
         types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount},
         zk::{crypto, encryption},
     };
@@ -1844,6 +1882,16 @@ mod tests {
         }
     }
 
+    fn commitment_event(id: &str, commitment: Field, index: u32) -> NewCommitmentEvent {
+        NewCommitmentEvent {
+            id: id.to_string(),
+            commitment,
+            index,
+            encrypted_output: vec![],
+            gvk_ciphertext: None,
+        }
+    }
+
     #[test]
     fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
@@ -1855,6 +1903,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2080,7 +2129,7 @@ mod tests {
     }
 
     #[test]
-    fn get_private_keys_returns_latest_keypair() -> Result<()> {
+    fn saving_keys_again_replaces_them() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
 
         let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
@@ -2096,19 +2145,21 @@ mod tests {
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair_1,
             &enc_keypair_1,
             &membership_blinding_1,
         )?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair_2,
             &enc_keypair_2,
             &membership_blinding_2,
         )?;
 
         let keys = storage
-            .get_private_keys("GTESTACCOUNT")?
+            .get_private_keys("GTESTACCOUNT", "tests")?
             .expect("expected keypairs to exist");
         assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
         assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
@@ -2116,6 +2167,167 @@ mod tests {
             keys.membership_blinding.to_le_bytes(),
             membership_blinding_2.to_le_bytes()
         );
+
+        Ok(())
+    }
+
+    fn keys_for(seed: u8) -> Result<(NoteKeyPair, EncryptionKeyPair, Field)> {
+        let signature = KeyDerivationSignature(vec![seed; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+        Ok((note_keypair, enc_keypair, membership_blinding))
+    }
+
+    #[test]
+    fn keys_are_scoped_to_kdf_domain() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let (note_a, enc_a, blinding_a) = keys_for(1)?;
+        let (note_b, enc_b, blinding_b) = keys_for(3)?;
+
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "a",
+            &note_a,
+            &enc_a,
+            &blinding_a,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "b",
+            &note_b,
+            &enc_b,
+            &blinding_b,
+        )?;
+
+        let keys_a = storage
+            .get_private_keys("GTESTACCOUNT", "a")?
+            .expect("keys for domain a");
+        let keys_b = storage
+            .get_private_keys("GTESTACCOUNT", "b")?
+            .expect("keys for domain b");
+        assert_eq!(keys_a.note_keypair.public.0, note_a.public.0);
+        assert_eq!(keys_b.note_keypair.public.0, note_b.public.0);
+        assert!(storage.get_private_keys("GTESTACCOUNT", "c")?.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn scan_attributes_notes_to_the_decrypting_kdf_domain() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let (note_a, enc_a, blinding_a) = keys_for(1)?;
+        let (note_b, enc_b, blinding_b) = keys_for(3)?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "a",
+            &note_a,
+            &enc_a,
+            &blinding_a,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "b",
+            &note_b,
+            &enc_b,
+            &blinding_b,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let blinding = Field::try_from_le_bytes([7; 32].map(|b| b & 0x0f))?;
+        let commitment = Field::try_from_le_bytes(
+            crypto::compute_commitment(
+                &Field::from(amount).to_le_bytes(),
+                note_b.public.as_ref(),
+                &blinding.to_le_bytes(),
+            )?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("commitment: expected 32 bytes"))?,
+        )?;
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 0,
+            encrypted_output: encryption::encrypt_output_note(&enc_b.public, amount, &blinding)?,
+            gvk_ciphertext: None,
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+
+        assert!(storage.list_user_notes("GTESTACCOUNT", "a", 10)?.is_empty());
+        assert_eq!(storage.list_user_notes("GTESTACCOUNT", "b", 10)?.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn kdf_domain_migration_drops_account_data() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 2)?;
+        conn.execute_batch(
+            "INSERT INTO accounts (id, address) VALUES (1, 'GTESTACCOUNT');
+             INSERT INTO disclaimer_acceptances (account_id, disclaimer_hash) VALUES (1, 'hash');",
+        )?;
+        let (note_keypair, enc_keypair, membership_blinding) = keys_for(1)?;
+        conn.execute(
+            "INSERT INTO keypairs (
+                encryption_private_key, encryption_public_key, note_private_key,
+                note_public_key, membership_blinding, account_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+            params![
+                &enc_keypair.private,
+                &enc_keypair.public,
+                &note_keypair.private,
+                &note_keypair.public,
+                &membership_blinding,
+            ],
+        )?;
+
+        let mut storage = Storage::connect_with_connection(conn)?;
+
+        assert!(storage.get_private_keys("GTESTACCOUNT", "tests")?.is_none());
+        let rows: i64 = storage.conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM accounts) + (SELECT COUNT(*) FROM keypairs)",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(rows, 0);
+        let accepted: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM disclaimer_acceptances WHERE address = 'GTESTACCOUNT'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(accepted, 1);
+
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "tests",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+        assert!(storage.get_private_keys("GTESTACCOUNT", "tests")?.is_some());
 
         Ok(())
     }
@@ -2131,12 +2343,14 @@ mod tests {
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
         )?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2412,6 +2626,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2467,8 +2682,12 @@ mod tests {
         };
         assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
 
-        let result =
-            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage.get_unspent_user_note_by_commitment(
+            "CPOOL",
+            "GTESTACCOUNT",
+            "tests",
+            &commitment,
+        )?;
         assert!(result.is_some());
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2488,6 +2707,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2571,8 +2791,12 @@ mod tests {
         }])?;
         storage.reconcile_nullifiers(100)?;
 
-        let result =
-            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result = storage.get_unspent_user_note_by_commitment(
+            "CPOOL",
+            "GTESTACCOUNT",
+            "tests",
+            &commitment,
+        )?;
         assert!(result.is_none(), "spent note should not be returned");
 
         Ok(())
@@ -2588,6 +2812,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2643,6 +2868,7 @@ mod tests {
         let result = storage.get_unspent_user_note_by_commitment(
             "CPOOL",
             "GTESTACCOUNT",
+            "tests",
             &wrong_commitment,
         )?;
         assert!(result.is_none(), "wrong commitment should not match");
@@ -2660,6 +2886,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2715,7 +2942,8 @@ mod tests {
         };
         assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
 
-        let result = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result =
+            storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &commitment)?;
         assert!(result.is_some());
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2735,6 +2963,7 @@ mod tests {
         let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
+            "tests",
             &note_keypair,
             &enc_keypair,
             &membership_blinding,
@@ -2822,12 +3051,13 @@ mod tests {
         // returns it.
         assert!(
             storage
-                .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?
+                .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &commitment)?
                 .is_none(),
             "sanity: note is spent"
         );
 
-        let result = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        let result =
+            storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &commitment)?;
         assert!(result.is_some(), "spent note should still be returned");
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -2924,6 +3154,235 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn ordered_leaves_keep_a_repeated_commitment() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = Field::try_from_le_bytes([1u8; 32])?;
+        let d = Field::try_from_le_bytes([2u8; 32])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                dummy_event("evt-0"),
+                dummy_event("evt-1"),
+                dummy_event("evt-2"),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            commitment_event("evt-0", c, 0),
+            commitment_event("evt-1", c, 1),
+            commitment_event("evt-2", d, 2),
+        ])?;
+
+        assert_eq!(
+            storage.get_pool_commitment_leaves_ordered("CPOOL")?,
+            [c, c, d]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resaving_a_commitment_event_changes_nothing() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = commitment_event("evt-0", Field::try_from_le_bytes([1u8; 32])?, 0);
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-0"), dummy_event("evt-1")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            first.clone(),
+            commitment_event("evt-1", Field::try_from_le_bytes([2u8; 32])?, 1),
+        ])?;
+        storage.save_commitment_events_batch(&vec![first])?;
+
+        let rows: Vec<(i64, i64)> = storage
+            .conn
+            .prepare("SELECT id, leaf_index FROM pool_commitments ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(rows, [(1, 0), (2, 1)]);
+        Ok(())
+    }
+
+    #[test]
+    fn nullifier_repeated_across_pools_keeps_both_rows() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let n = Field::try_from_le_bytes([1u8; 32])?;
+        let spent = |id: &str| NewNullifierEvent {
+            id: id.to_string(),
+            nullifier: n,
+            gvk_ciphertext: None,
+        };
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                dummy_event("evt-0"),
+                ContractEvent {
+                    contract_id: "CPOOL2".to_string(),
+                    ..dummy_event("evt-1")
+                },
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_nullifier_events_batch(&vec![spent("evt-0"), spent("evt-1")])?;
+        storage.save_nullifier_events_batch(&vec![spent("evt-0")])?;
+
+        assert!(storage.get_unprocessed_events(10)?.is_empty());
+        let rows: Vec<(i64, String)> = storage
+            .conn
+            .prepare("SELECT id, event_id FROM pool_nullifiers ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(rows, [(1, "evt-0".to_string()), (2, "evt-1".to_string())]);
+        Ok(())
+    }
+
+    #[test]
+    fn dropped_repeated_commitment_heals_after_migration() -> Result<()> {
+        let c = Field(crate::types::U256::from(1));
+        let d = Field(crate::types::U256::from(2));
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 5)?;
+        let mut v5 = Storage { conn };
+        v5.save_events_batch(&ContractsEventData {
+            events: vec![
+                test_events::commitment_event("evt-0", 1, test_events::commitment_entries(0)?)?,
+                test_events::commitment_event("evt-1", 1, test_events::commitment_entries(1)?)?,
+                test_events::commitment_event("evt-2", 2, test_events::commitment_entries(2)?)?,
+                dummy_event("evt-3"),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        // The unique constraint dropped `evt-1`, which repeats `c`, and the
+        // processor marked it anyway. The rows carry ids 7, 3, and 5, so a
+        // rebuild that renumbers them breaks the spent note's links to `evt-2`
+        // and `evt-3`.
+        v5.conn.execute(
+            "INSERT INTO pool_commitments
+                (id, commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
+             VALUES (7, ?1, 0, x'', 'evt-0', NULL), (3, ?2, 2, x'', 'evt-2', 'ct')",
+            params![c, d],
+        )?;
+        v5.conn.execute_batch(
+            "INSERT INTO pool_nullifiers (id, nullifier, event_id, gvk_ciphertext)
+                 VALUES (5, zeroblob(32), 'evt-3', 'nct');
+             INSERT INTO accounts (id, address, kdf_domain) VALUES (1, 'GUSER', 'tests');",
+        )?;
+        v5.conn.execute(
+            "INSERT INTO user_notes (
+                id, account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
+             ) VALUES (?1, 1, 3, 5, zeroblob(32), zeroblob(32), '1')",
+            params![d],
+        )?;
+        v5.save_processed_event_ids(&["evt-0", "evt-1", "evt-2", "evt-3"].map(String::from))?;
+
+        let mut storage = Storage::connect_with_connection(v5.conn)?;
+        let commitments: Vec<(i64, i64, Option<String>)> = storage
+            .conn
+            .prepare("SELECT id, leaf_index, gvk_ciphertext FROM pool_commitments ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(commitments, [(3, 2, Some("ct".to_string())), (7, 0, None)]);
+        let nullifier: (i64, Option<String>) = storage.conn.query_row(
+            "SELECT id, gvk_ciphertext FROM pool_nullifiers",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(nullifier, (5, Some("nct".to_string())));
+        let note = storage.get_user_note_by_commitment("CPOOL", "GUSER", "tests", &d)?;
+        assert_eq!(note.map(|(_, _, leaf_index)| leaf_index), Some(2));
+
+        crate::state::processor::process_events(&mut storage, 10)?;
+        assert!(storage.get_unprocessed_events(10)?.is_empty());
+        assert_eq!(
+            storage.get_pool_commitment_leaves_ordered("CPOOL")?,
+            [c, c, d]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dropped_repeated_nullifier_heals_after_migration() -> Result<()> {
+        let n = Field(crate::types::U256::from(5));
+        let d = Field(crate::types::U256::from(2));
+        let in_pool2 = |event: ContractEvent| ContractEvent {
+            contract_id: "CPOOL2".to_string(),
+            ..event
+        };
+        let spent = |id| {
+            test_events::raw_event(
+                id,
+                &[
+                    test_events::symbol("new_nullifier_event")?,
+                    test_events::u256(5),
+                ],
+                vec![],
+            )
+        };
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 5)?;
+        let mut v5 = Storage { conn };
+        v5.save_events_batch(&ContractsEventData {
+            events: vec![
+                spent("evt-0")?,
+                in_pool2(spent("evt-1")?),
+                in_pool2(test_events::commitment_event(
+                    "evt-2",
+                    2,
+                    test_events::commitment_entries(0)?,
+                )?),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        // The unique key dropped `evt-1`, which repeats `n` in a second pool,
+        // and the processor marked it anyway.
+        v5.conn.execute(
+            "INSERT INTO pool_nullifiers (id, nullifier, event_id, gvk_ciphertext)
+             VALUES (1, ?1, 'evt-0', NULL)",
+            params![n],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO pool_commitments
+                (id, commitment, leaf_index, encrypted_output, event_id, gvk_ciphertext)
+             VALUES (1, ?1, 0, x'', 'evt-2', NULL)",
+            params![d],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO accounts (id, address, kdf_domain) VALUES (1, 'GUSER', 'tests')",
+            [],
+        )?;
+        v5.conn.execute(
+            "INSERT INTO user_notes (
+                id, account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
+             ) VALUES (?1, 1, 1, NULL, ?2, zeroblob(32), '1')",
+            params![d, n],
+        )?;
+        v5.save_processed_event_ids(&["evt-0", "evt-1", "evt-2"].map(String::from))?;
+
+        let mut storage = Storage::connect_with_connection(v5.conn)?;
+        crate::state::processor::process_events(&mut storage, 10)?;
+        storage.reconcile_nullifiers(10)?;
+
+        let rows: Vec<(i64, String)> = storage
+            .conn
+            .prepare("SELECT id, event_id FROM pool_nullifiers ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(rows, [(1, "evt-0".to_string()), (2, "evt-1".to_string())]);
+        let spent_by: Option<i64> =
+            storage
+                .conn
+                .query_row("SELECT nullifier_id FROM user_notes", [], |row| row.get(0))?;
+        assert_eq!(spent_by, Some(2));
+        Ok(())
+    }
+
     #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
@@ -2978,7 +3437,7 @@ mod tests {
         }])?;
 
         storage.conn.execute(
-            "INSERT INTO accounts (address) VALUES (?1)",
+            "INSERT INTO accounts (address, kdf_domain) VALUES (?1, 'tests')",
             params!["GUSER"],
         )?;
         let account_id: i64 = storage.conn.query_row(
@@ -3005,7 +3464,7 @@ mod tests {
                 NoteAmount::from(99u128).to_string(),
             ],
         )?;
-        let notes = storage.list_pool_user_notes("CPOOL", "GUSER")?;
+        let notes = storage.list_pool_user_notes("CPOOL", "GUSER", "tests")?;
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].gvk_ciphertext.as_ref(), Some(&ct));
 
@@ -3026,5 +3485,161 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
         Ok(())
+    }
+
+    #[test]
+    fn processed_event_ids_are_not_returned_as_unprocessed() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-marked"), dummy_event("evt-other")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+
+        storage.save_processed_event_ids(&["evt-marked".to_string()])?;
+
+        let ids: Vec<String> = storage
+            .get_unprocessed_events(10)?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, vec!["evt-other".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn opening_a_v3_database_applies_the_processed_events_migration() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 3)?;
+        assert!(
+            !table_exists(&conn, "processed_events")?,
+            "v3 must predate the table"
+        );
+
+        let storage = Storage::connect_with_connection(conn)?;
+
+        assert!(table_exists(&storage.conn, "processed_events")?);
+        Ok(())
+    }
+
+    fn two_allowlist_events() -> ContractsEventData {
+        ContractsEventData {
+            events: vec![
+                ContractEvent {
+                    contract_id: "CASP1".to_string(),
+                    ..dummy_event("evt-a")
+                },
+                ContractEvent {
+                    contract_id: "CASP2".to_string(),
+                    ..dummy_event("evt-b")
+                },
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        }
+    }
+
+    #[test]
+    fn two_allowlists_keep_their_own_leaf_zero() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let leaf_a = Field::try_from_le_bytes([1u8; 32])?;
+        let leaf_b = Field::try_from_le_bytes([2u8; 32])?;
+        storage.save_events_batch(&two_allowlist_events())?;
+
+        storage.save_leaf_added_events_batch(&vec![
+            LeafAddedEvent {
+                id: "evt-a".to_string(),
+                leaf: leaf_a,
+                index: 0,
+                root: leaf_a,
+            },
+            LeafAddedEvent {
+                id: "evt-b".to_string(),
+                leaf: leaf_b,
+                index: 0,
+                root: leaf_b,
+            },
+        ])?;
+
+        assert_eq!(
+            storage.get_all_asp_membership_leaves_ordered("CASP1")?,
+            vec![leaf_a]
+        );
+        assert_eq!(
+            storage.get_all_asp_membership_leaves_ordered("CASP2")?,
+            vec![leaf_b]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn opening_a_v4_database_files_leaves_under_their_tree() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 4)?;
+        let mut v4 = Storage { conn };
+        v4.save_events_batch(&two_allowlist_events())?;
+        v4.conn.execute(
+            "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+                VALUES (0, ?1, ?1, 'evt-a'), (1, ?2, ?2, 'evt-b')",
+            params![
+                Field::try_from_le_bytes([1u8; 32])?,
+                Field::try_from_le_bytes([2u8; 32])?
+            ],
+        )?;
+
+        let storage = Storage::connect_with_connection(v4.conn)?;
+
+        let rows = storage
+            .conn
+            .prepare(
+                "SELECT c.address, l.leaf_index
+                 FROM asp_membership_leaves l
+                 JOIN contracts c ON c.contract_id = l.contract_id
+                 ORDER BY l.leaf_index",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, u32)>, _>>()?;
+        assert_eq!(
+            rows,
+            vec![("CASP1".to_string(), 0), ("CASP2".to_string(), 1)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_dropped_before_the_migration_is_replayed() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 4)?;
+        let mut v4 = Storage { conn };
+        v4.save_events_batch(&two_allowlist_events())?;
+        v4.conn.execute(
+            "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+                VALUES (0, ?1, ?1, 'evt-a'), (0, ?2, ?2, 'evt-b')
+                ON CONFLICT(leaf_index) DO NOTHING",
+            params![
+                Field::try_from_le_bytes([1u8; 32])?,
+                Field::try_from_le_bytes([2u8; 32])?
+            ],
+        )?;
+        v4.save_processed_event_ids(&["evt-a".to_string(), "evt-b".to_string()])?;
+
+        let storage = Storage::connect_with_connection(v4.conn)?;
+
+        let ids: Vec<String> = storage
+            .get_unprocessed_events(10)?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, vec!["evt-b".to_string()]);
+        Ok(())
+    }
+
+    fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 }

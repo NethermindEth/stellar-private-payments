@@ -4,6 +4,7 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use stellar_strkey::{Unredacted, ed25519};
 
 /// Generated in-process and funded via friendbot; not persisted anywhere.
+#[derive(Clone)]
 pub struct TestKeypair {
     signing_key: SigningKey,
 }
@@ -11,7 +12,7 @@ pub struct TestKeypair {
 impl TestKeypair {
     pub fn generate() -> Self {
         Self {
-            signing_key: SigningKey::generate(&mut rand::thread_rng()),
+            signing_key: SigningKey::generate(&mut rand::rng()),
         }
     }
 

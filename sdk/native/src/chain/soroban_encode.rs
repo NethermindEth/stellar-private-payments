@@ -235,7 +235,10 @@ mod tests {
     /// Registers a trivial contract just to obtain a registered contract
     /// `Address` to stand in for a pool or token.
     fn register_dummy_contract(env: &Env) -> Address {
-        env.register(PublicKeyRegistry, ())
+        env.register(
+            PublicKeyRegistry,
+            (soroban_sdk::String::from_str(env, "tests"),),
+        )
     }
 
     /// Converts a Soroban `Address` to the strkey string form
@@ -303,6 +306,17 @@ mod tests {
         let expected = on_chain.to_xdr(&env);
         let ours = scval_xdr(&groth16_proof_to_scval(&uncompressed).expect("encode"));
         assert_eq!(ours, soroban_xdr_to_vec(expected));
+    }
+
+    #[test]
+    fn proof_of_the_wrong_length_is_refused() {
+        for len in [0, 255, 257] {
+            let err = groth16_proof_to_scval(&vec![0u8; len]).expect_err("not 256 bytes");
+            assert_eq!(
+                err.to_string(),
+                format!("proof_uncompressed must be 256 bytes, got {len}")
+            );
+        }
     }
 
     #[test]

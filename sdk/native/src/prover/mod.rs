@@ -112,6 +112,15 @@ impl ProverEngine {
             notes,
             ext_context_hash,
         })?;
+        let public_inputs = DisclosurePublicInputs {
+            roots,
+            note_commitments,
+            ext_context_hash: artifacts.ext_context_hash,
+            nullifiers: artifacts.nullifiers,
+            amounts: artifacts.amounts,
+        };
+        public_inputs.validate(note_count)?;
+
         let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
         let witness_bytes = self
             .witness
@@ -125,13 +134,7 @@ impl ProverEngine {
             version: DISCLOSURE_RECEIPT_VERSION,
             circuit: circuit.receipt_metadata(&vk_hash),
             context,
-            public_inputs: DisclosurePublicInputs {
-                roots,
-                note_commitments,
-                ext_context_hash,
-                nullifiers: artifacts.nullifiers,
-                amounts: artifacts.amounts,
-            },
+            public_inputs,
             proof_compressed_hex: format!("0x{}", hex::encode(proved.proof_compressed)),
             issued_at: crate::zk::disclosure::current_issued_at()?,
         })

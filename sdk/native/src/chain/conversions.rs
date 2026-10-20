@@ -347,6 +347,17 @@ pub(crate) struct ParsedContractEvent {
     pub values: HashMap<String, xdr::ScVal>,
 }
 
+/// Returns an event's name, the symbol in its first topic.
+pub(crate) fn event_name(topics: &[String]) -> Result<String, Error> {
+    let first = topics.first().ok_or(xdr::Error::Invalid)?;
+    match xdr::ScVal::from_xdr_base64(first, xdr::Limits::none())? {
+        xdr::ScVal::Symbol(sym) => Ok(sym.to_utf8_string()?),
+        _ => Err(Error::UnexpectedScVal(
+            "the first topic of an event should be a symbol".into(),
+        )),
+    }
+}
+
 pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
     let ContractEvent {
         id,
@@ -356,21 +367,12 @@ pub(crate) fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContrac
         value,
     } = event;
 
-    let mut iter = topics.iter();
-    let first = iter.next().ok_or(xdr::Error::Invalid)?;
-
-    let topics: Vec<xdr::ScVal> = iter
+    let name = event_name(&topics)?;
+    let topics: Vec<xdr::ScVal> = topics
+        .iter()
+        .skip(1)
         .map(|s| xdr::ScVal::from_xdr_base64(s, xdr::Limits::none()))
         .collect::<Result<_, _>>()?;
-
-    let name = match xdr::ScVal::from_xdr_base64(first, xdr::Limits::none())? {
-        xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
-        _ => {
-            return Err(Error::UnexpectedScVal(
-                "the first topic of an event should be a symbol".into(),
-            ));
-        }
-    };
 
     let data = xdr::ScVal::from_xdr_base64(value, xdr::Limits::none())?;
 

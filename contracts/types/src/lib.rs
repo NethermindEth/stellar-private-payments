@@ -48,13 +48,6 @@ pub struct Groth16Proof {
     pub c: Bn254G1Affine,
 }
 
-impl Groth16Proof {
-    /// Returns true if any of the embedded points is empty.
-    pub fn is_empty(&self) -> bool {
-        self.a.to_bytes().is_empty() || self.b.to_bytes().is_empty() || self.c.to_bytes().is_empty()
-    }
-}
-
 /// Size of a single BN254 field element in bytes.
 pub const FIELD_ELEMENT_SIZE: u32 = 32;
 

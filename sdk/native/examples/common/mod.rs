@@ -14,7 +14,7 @@
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
-//! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
+//! | `SPP_AMOUNT_STROOPS` | `10000000` token base units | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
 //! Four prerequisite classes print a skip message and exit with code 0: a
@@ -32,7 +32,8 @@
 use std::path::PathBuf;
 
 use stellar_private_payments::{
-    CircuitStore, Error, LocalProver, LocalSigner, LocalStorage, ProverHandle, SignerHandle,
+    CircuitStore, Error, LocalProver, LocalSigner, LocalStorage, ProverHandle, RetentionGap,
+    SignerHandle,
     blocking::{Account, Client, PrivatePool},
     chain::LocalSigner as StellarSigner,
     types::{
@@ -162,7 +163,9 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 /// Downloads the hashed GitHub release there when needed.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let stem = pool.circuit_stem();
-    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"));
+    let lock = stellar_private_payments::circuit_lock(include_str!("../../circuits.json"))
+        .map_err(|e| e.to_string())?;
+    let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"), lock);
     store
         .ensure_blocking()
         .map_err(|e| format!("circuit artifacts: {e}"))?;
@@ -273,7 +276,7 @@ pub fn require_onboarded(account: &Account) -> Result<(), String> {
 /// history, and the default bootnode handoff can be stale. This detector is
 /// used by examples to turn the failure into a graceful skip message.
 pub fn is_retention_gap_error(e: &Error) -> bool {
-    matches!(e, Error::RetentionGap(_))
+    matches!(e, Error::RetentionGap(gap) if !matches!(gap, RetentionGap::BootnodeNotReady(_)))
 }
 
 /// Print the retention-gap skip message and exit 0.
@@ -292,7 +295,8 @@ pub fn skip_on_retention_gap(e: &Error) -> ! {
     std::process::exit(0);
 }
 
-/// Parse `SPP_AMOUNT_STROOPS` as a [`NoteAmount`] (default: 1 XLM).
+/// Parse `SPP_AMOUNT_STROOPS` as a [`NoteAmount`] (default: 10000000 token base
+/// units).
 pub fn amount() -> Result<NoteAmount, String> {
     let raw = env_or("SPP_AMOUNT_STROOPS", "10000000");
     let stroops: u128 = raw

@@ -37,4 +37,7 @@ jobs:
       platforms: "linux/arm64"
       context: .
       dockerfile_path: ./tools/bootnode/Dockerfile
+      # Refresh runtime OS security updates on each run; retain the Rust build cache.
+      docker_build_args: |
+        OS_UPDATE_REV=${{ github.run_id }}-${{ github.run_attempt }}
       push: ${{ github.event_name != 'pull_request' }}

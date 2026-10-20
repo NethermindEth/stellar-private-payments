@@ -68,9 +68,9 @@ disclosure receipts only.
 | Circuit | `vk_hash` |
 |---|---|
 | `selectiveDisclosure_1` | `0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2` |
-| `selectiveDisclosure_2` | `0xc057dc17d370429a81a9e0fb1a81d7e7d7dd1af8ca373639db9a651c1a8d3464` |
-| `selectiveDisclosure_3` | `0x20a0ec3d1b71c3f9978234116dd1f25c8a6711e5fcfdf37da181d6c0edf79a69` |
-| `selectiveDisclosure_4` | `0x53dd821a22db9919d05f6175505291d2c44c94477ec0b92cb06da399f6f56d6f` |
+| `selectiveDisclosure_2` | `0x0a4def6573b3982661a2afc082f07cbd88baaa61734c612291434a771879f75e` |
+| `selectiveDisclosure_3` | `0x15b9f433d8277ed0d26a1fa7ffdb6b2c540c593e1aa30f803b4afaedaeb00ed6` |
+| `selectiveDisclosure_4` | `0x67657478aa435c5fb7248a8d447e71f69ff6e065d7dc682a17befc34d5b50ea7` |
 
 Each hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`) for that circuit, not the SHA-256 of the JSON file. The same values are pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`.
 

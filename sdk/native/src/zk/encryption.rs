@@ -16,12 +16,12 @@
 //! ```text
 //! Freighter Wallet (Ed25519)
 //!        │
-//!        └── signMessage("Privacy Pool Key Derivation [v2]")
+//!        └── signMessage("Privacy Pool Key Derivation [v2] (<kdf_domain>)")
 //!                   │
-//!                   ├── SHA-256("privacy-pool/note-key/v2" || sig)
+//!                   ├── SHA-256("privacy-pool/note-key/v2" || <sig>)
 //!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
 //!                   │
-//!                   └── SHA-256("privacy-pool/encryption-key/v2" || sig)
+//!                   └── SHA-256("privacy-pool/encryption-key/v2" || <sig>)
 //!                              └── X25519 Encryption Keypair
 //! ```
 //! Note: the original scheme had separate signatures for spending and
@@ -49,7 +49,11 @@ use x25519_dalek::{PublicKey, StaticSecret};
 // These MUST remain constant for backwards compatibility.
 
 /// Message signed to derive both privacy keypairs.
-pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
+///
+/// `kdf_domain` is trimmed, so stray whitespace does not derive other keys.
+pub fn key_derivation_message(kdf_domain: &str) -> String {
+    format!("Privacy Pool Key Derivation [v2] ({})", kdf_domain.trim())
+}
 
 /// Prefix a SEP-53 wallet puts in front of a message before hashing it.
 const SEP53_MESSAGE_PREFIX: &str = "Stellar Signed Message:\n";
@@ -90,9 +94,9 @@ pub fn verify_owner_signature(
         .map_err(|_| anyhow!("the key-derivation signature was not made by the note owner's key"))
 }
 
-const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
-const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
-const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v1";
+const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
+const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
+const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v2";
 
 /// Keypairs derivation
 pub fn derive_encryption_and_note_keypairs(
@@ -153,7 +157,7 @@ pub fn derive_membership_blinding(
 ///
 /// # Arguments
 /// * `signature` - Stellar Ed25519 signature from signing
-///   `KEY_DERIVATION_MESSAGE`
+///   [`key_derivation_message`]
 ///
 /// # Returns
 /// 64 bytes: `[public_key (32), private_key (32)]`
@@ -193,7 +197,7 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
 ///
 /// # Arguments
 /// * `signature` - Stellar Ed25519 signature from signing
-///   `KEY_DERIVATION_MESSAGE`
+///   [`key_derivation_message`]
 ///
 /// # Returns
 /// 32 bytes: Note private key (BN254 scalar, little-endian)
@@ -470,6 +474,26 @@ mod owner_signature_tests {
         (key, address)
     }
 
+    fn message() -> String {
+        key_derivation_message("tests")
+    }
+
+    #[test]
+    fn key_derivation_message_is_fixed() {
+        assert_eq!(
+            key_derivation_message("tests"),
+            "Privacy Pool Key Derivation [v2] (tests)"
+        );
+    }
+
+    #[test]
+    fn key_derivation_message_trims_domain() {
+        assert_eq!(
+            key_derivation_message(" tests\n"),
+            key_derivation_message("tests")
+        );
+    }
+
     fn sign(key: &SigningKey, message: &str) -> KeyDerivationSignature {
         let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
         KeyDerivationSignature(key.sign(&digest).to_bytes().to_vec())
@@ -485,8 +509,8 @@ mod owner_signature_tests {
     #[test]
     fn the_owners_own_signature_verifies() {
         let (owner, address) = account(1);
-        let signature = sign(&owner, KEY_DERIVATION_MESSAGE);
-        verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature)
+        let signature = sign(&owner, &message());
+        verify_owner_signature(&address, &message(), &signature)
             .expect("the owner signing for itself must verify");
     }
 
@@ -496,10 +520,8 @@ mod owner_signature_tests {
     fn a_signature_by_another_account_is_refused() {
         let (_, owner_address) = account(1);
         let (other, _) = account(2);
-        let signature = sign(&other, KEY_DERIVATION_MESSAGE);
-        assert!(
-            verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
-        );
+        let signature = sign(&other, &message());
+        assert!(verify_owner_signature(&owner_address, &message(), &signature).is_err());
     }
 
     /// The identity point is a valid encoding of a small-order key. Anyone can
@@ -515,33 +537,29 @@ mod owner_signature_tests {
         let mut forged = vec![0u8; 64];
         forged[..32].copy_from_slice(&identity);
         let signature = KeyDerivationSignature(forged);
-        assert!(
-            verify_owner_signature(&owner_address, KEY_DERIVATION_MESSAGE, &signature).is_err()
-        );
+        assert!(verify_owner_signature(&owner_address, &message(), &signature).is_err());
     }
 
     #[test]
     fn a_signature_of_the_wrong_length_is_refused() {
         let (owner, address) = account(1);
-        let mut signature = sign(&owner, KEY_DERIVATION_MESSAGE);
+        let mut signature = sign(&owner, &message());
         signature.0.pop();
-        assert!(verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature).is_err());
+        assert!(verify_owner_signature(&address, &message(), &signature).is_err());
     }
 
     #[test]
     fn an_owner_that_is_not_an_account_address_is_refused() {
         let (owner, _) = account(1);
-        let signature = sign(&owner, KEY_DERIVATION_MESSAGE);
-        assert!(
-            verify_owner_signature("not-an-address", KEY_DERIVATION_MESSAGE, &signature).is_err()
-        );
+        let signature = sign(&owner, &message());
+        assert!(verify_owner_signature("not-an-address", &message(), &signature).is_err());
     }
 
     #[test]
     fn a_signature_over_another_message_is_refused() {
         let (owner, address) = account(1);
         let signature = sign(&owner, "some other message");
-        assert!(verify_owner_signature(&address, KEY_DERIVATION_MESSAGE, &signature).is_err());
+        assert!(verify_owner_signature(&address, &message(), &signature).is_err());
     }
 
     /// The error reaches a UI toast, where wallet cancellations are recognised
@@ -550,14 +568,11 @@ mod owner_signature_tests {
     fn the_refusal_does_not_read_as_a_wallet_cancellation() {
         let (_, owner_address) = account(1);
         let (other, _) = account(2);
-        let rendered = verify_owner_signature(
-            &owner_address,
-            KEY_DERIVATION_MESSAGE,
-            &sign(&other, KEY_DERIVATION_MESSAGE),
-        )
-        .expect_err("a foreign signature must be refused")
-        .to_string()
-        .to_ascii_lowercase();
+        let rendered =
+            verify_owner_signature(&owner_address, &message(), &sign(&other, &message()))
+                .expect_err("a foreign signature must be refused")
+                .to_string()
+                .to_ascii_lowercase();
         for word in ["rejected", "denied", "cancelled", "canceled"] {
             assert!(!rendered.contains(word), "{word:?} in: {rendered}");
         }

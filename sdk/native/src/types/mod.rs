@@ -25,16 +25,33 @@ pub use policy_tx::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const SMT_DEPTH: u32 = 10;
+/// Sibling count of the ASP non-membership circuit. The last sibling must be
+/// zero, so paths of at most `SMT_DEPTH - 1` levels are provable.
+pub const SMT_DEPTH: u32 = 32;
 
 // deployments/<network>/deployments.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct ContractConfig {
     pub network: String,
+    #[serde(
+        default,
+        rename = "networkPassphrase",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub network_passphrase: Option<String>,
+    #[serde(default, rename = "rpcUrl", skip_serializing_if = "Option::is_none")]
+    pub rpc_url: Option<String>,
+    /// Privacy key derivation domain.
+    pub kdf_domain: String,
     pub deployer: String,
     pub admin: String,
     /// Address of ASP membership deployed contract
     pub asp_membership: String,
+    /// ASP membership contracts added after `asp_membership`, with their
+    /// deployment ledgers.
+    #[serde(default)]
+    pub added_asp_memberships: Vec<TreeConfigEntry>,
     /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
     /// Groth16 verifier contracts keyed by policy circuit suffix (`""`, `A`,
@@ -68,6 +85,17 @@ pub struct PoolConfigEntry {
     /// not verified. `None` when `gvk_mode` is [`GvkMode::Off`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gvk_authority_pub_key: Option<BabyJubJubPoint>,
+}
+
+/// A tree contract and the ledger it was deployed at.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeConfigEntry {
+    /// Address of the deployed tree contract.
+    pub contract_id: String,
+    /// Ledger at or just before the tree's deployment; the indexer replays from
+    /// here.
+    pub deployment_ledger: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,6 +374,19 @@ impl From<&PoolConfigEntry> for PortfolioPoolEntry {
 }
 
 impl ContractConfig {
+    /// Reject missing identity metadata and connections to another network.
+    pub fn validate_network(&self, passphrase: &str) -> Result<()> {
+        let expected = self
+            .network_passphrase
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("deployment config is missing networkPassphrase"))?;
+        if expected != passphrase {
+            return Err(anyhow!("network passphrase mismatch for {}", self.network));
+        }
+        Ok(())
+    }
+
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
         self.pools.iter().filter(|p| p.enabled)
     }
@@ -355,19 +396,39 @@ impl ContractConfig {
         self.enabled_pools().map(PortfolioPoolEntry::from).collect()
     }
 
-    /// Contract IDs for enabled pools and ASP membership.
-    pub fn all_contract_ids(&self) -> Vec<String> {
+    /// Returns the contracts the indexer reads, with the deployment ledger of
+    /// enabled pools and added allowlists, and `None` for `asp_membership` and
+    /// the public key registry.
+    pub(crate) fn indexed_contracts(&self) -> impl Iterator<Item = (&str, Option<u32>)> {
         self.enabled_pools()
-            .map(|p| p.pool_contract_id.clone())
-            .chain(std::iter::once(self.asp_membership.clone()))
-            .chain(std::iter::once(self.public_key_registry.clone()))
+            .map(|p| (p.pool_contract_id.as_str(), Some(p.deployment_ledger)))
+            .chain([(self.asp_membership.as_str(), None)])
+            .chain(
+                self.added_asp_memberships
+                    .iter()
+                    .map(|tree| (tree.contract_id.as_str(), Some(tree.deployment_ledger))),
+            )
+            .chain([(self.public_key_registry.as_str(), None)])
+    }
+
+    /// Returns the contract IDs of enabled pools, every ASP membership
+    /// contract, and the public key registry.
+    pub fn all_contract_ids(&self) -> Vec<String> {
+        self.indexed_contracts()
+            .map(|(contract_id, _)| contract_id.to_owned())
             .collect()
     }
 
-    /// Earliest deployment ledger among enabled pools.
+    /// Returns the earliest deployment ledger among enabled pools and added ASP
+    /// membership contracts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no pool is enabled and no ASP membership contract
+    /// was added.
     pub fn min_deployment_ledger(&self) -> Result<u32> {
-        self.enabled_pools()
-            .map(|p| p.deployment_ledger)
+        self.indexed_contracts()
+            .filter_map(|(_, deployment_ledger)| deployment_ledger)
             .min()
             .ok_or_else(|| anyhow!("at least one pool should be enabled"))
     }
@@ -662,6 +723,93 @@ mod pool_config_gvk_tests {
         assert_eq!(parsed.gvk_mode, pool.gvk_mode);
         assert_eq!(parsed.gvk_authority_pub_key, pool.gvk_authority_pub_key);
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod network_config_tests {
+    use super::ContractConfig;
+    fn legacy() -> ContractConfig {
+        serde_json::from_str(r#"{"network":"custom","kdf_domain":"tests","deployer":"","admin":"","asp_membership":"","asp_non_membership":"","verifiers":{},"public_key_registry":"","pools":[]}"#).expect("valid config fixture")
+    }
+    #[test]
+    fn old_schema_loads_but_cannot_skip_network_validation() {
+        let config = legacy();
+        assert!(config.network_passphrase.is_none());
+        assert!(config.validate_network("anything").is_err());
+    }
+    #[test]
+    fn network_identity_uses_passphrase_not_name() {
+        let mut config = legacy();
+        config.network_passphrase = Some("custom passphrase".into());
+        config.rpc_url = Some("http://localhost:8000/rpc".into());
+        assert!(config.validate_network("custom passphrase").is_ok());
+        assert!(config.validate_network("different").is_err());
+        let value = serde_json::to_value(&config).expect("valid config fixture");
+        assert_eq!(value["networkPassphrase"], "custom passphrase");
+        let parsed: ContractConfig = serde_json::from_value(value).expect("valid config fixture");
+        assert_eq!(parsed.rpc_url, config.rpc_url);
+    }
+}
+
+#[cfg(test)]
+mod contract_config_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A pool deployed at ledger 100, and ASP membership contracts added at
+    /// ledgers 300 and 80.
+    fn config() -> Result<ContractConfig> {
+        Ok(serde_json::from_value(json!({
+            "network": "test",
+            "kdf_domain": "tests",
+            "deployer": "GDEPLOYER",
+            "admin": "GADMIN",
+            "asp_membership": "CMEMBERSHIP",
+            "added_asp_memberships": [
+                {"contractId": "CADDED_A", "deploymentLedger": 300},
+                {"contractId": "CADDED_B", "deploymentLedger": 80},
+            ],
+            "asp_non_membership": "CNONMEMBERSHIP",
+            "verifiers": {},
+            "public_key_registry": "CREGISTRY",
+            "pools": [{
+                "poolContractId": "CPOOL",
+                "tokenContractId": "CTOKEN",
+                "deploymentLedger": 100,
+                "enabled": true,
+                "asset": {"kind": "native"},
+                "policyFlags": ["allowlist"],
+            }],
+        }))?)
+    }
+
+    #[test]
+    fn all_contract_ids_names_every_added_allowlist() -> Result<()> {
+        assert_eq!(
+            config()?.all_contract_ids(),
+            ["CPOOL", "CMEMBERSHIP", "CADDED_A", "CADDED_B", "CREGISTRY"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn min_deployment_ledger_counts_added_allowlists() -> Result<()> {
+        assert_eq!(config()?.min_deployment_ledger()?, 80);
+        Ok(())
+    }
+
+    #[test]
+    fn a_manifest_without_added_allowlists_still_parses() -> Result<()> {
+        let mut manifest = serde_json::to_value(config()?)?;
+        let object = manifest
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("ContractConfig serializes as an object"))?;
+        assert!(object.remove("added_asp_memberships").is_some());
+
+        let config: ContractConfig = serde_json::from_value(manifest)?;
+        assert!(config.added_asp_memberships.is_empty());
         Ok(())
     }
 }

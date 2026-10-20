@@ -102,15 +102,21 @@ variables.
 The examples require the local SQLite wallet to contain derived privacy keys.
 Use the `spp` CLI to onboard each account. From the repository root:
 
+The CLI requires a runtime deployment configuration. The commands below select
+the checked-in testnet deployment explicitly with
+`--deployment deployments/testnet`; the CLI has no embedded deployment fallback.
+
 ```bash
 # Onboard Alice's wallet. The default data dir writes the SQLite wallet to
 # ~/.local/share/stellar-private-payments/spp.db.
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account alice --accept --register
 
 # Onboard Bob's wallet into a separate database so the examples can use it as a
 # recipient without overwriting Alice's wallet.
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account bob --accept --register \
   --data-dir ./spp-bob-wallet
 ```
@@ -118,7 +124,7 @@ cargo run --release -p stellar-private-payments-cli -- onboard \
 What `spp onboard` does:
 
 1. Accepts the disclaimer.
-2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v1]`
+2. When privacy keys are missing, signs `Privacy Pool Key Derivation [v2] (<kdf_domain>)`
    via `stellar message sign` using the account alias (the Stellar secret key
    never enters the `spp` process).
 3. Strictly verifies the SEP-53 signature against the account's own public key,
@@ -140,7 +146,8 @@ For unattended or CI setups, pass the bootnode and explorer URLs explicitly so
 `spp onboard` does not prompt:
 
 ```bash
-cargo run --release -p stellar-private-payments-cli -- onboard \
+cargo run --release -p stellar-private-payments-cli -- \
+  --deployment deployments/testnet onboard \
   --account alice --accept --register \
   --bootnode-url http://127.0.0.1:8080 \
   --explorer-url https://stellar.expert/explorer/testnet
@@ -171,11 +178,14 @@ curl http://127.0.0.1:8080/healthz
 
 ### Cargo
 
+Run from the repository root:
+
 ```bash
 cargo build --manifest-path tools/bootnode/Cargo.toml
 export DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/bootnode'
 # Start Postgres first, then:
 ./tools/bootnode/target/debug/bootnode \
+  --deployment deployments/testnet \
   --dev --insecure-http --bind 127.0.0.1:8080 \
   --upstream-rpc-url https://soroban-testnet.stellar.org \
   --database-url "$DATABASE_URL"
@@ -249,11 +259,15 @@ required by most examples; everything else has a sensible default.
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
+| `SPP_AMOUNT_STROOPS` | `10000000` token base units | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
 | `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw`/`plan` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw` and `plan`** |
 | `SPP_REGISTER` | unset | `account_pool` (set to `1` to call `register_public_keys`) |
+
+`SPP_AMOUNT_STROOPS` is a legacy variable name: its value is in the selected
+pool token's base units. The human-readable amount depends on that token's
+decimals; `10000000` base units equals 1 token only when decimals are 7.
 
 > `SPP_BOOTNODE_URL` is read directly by the examples and overrides the default
 > public bootnode. Every example that opens a client reads it, not just `sync`.
@@ -299,15 +313,15 @@ cargo run --release --example sync
 # Transaction-count estimation.
 cargo run --release --example estimate
 
-# Deposit 1 XLM into the pool (proving + submission).
+# Deposit SPP_AMOUNT_STROOPS token base units into the selected pool (default: 10000000).
 cargo run --release --example deposit
 
 # Private transfer to Bob's registered address.
 SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 
-# Withdraw 1 XLM back to the wallet's public address. `env -u` clears the
-# recipient exported for `transfer` above, which `withdraw` would otherwise
-# use as the withdrawal destination.
+# Withdraw the configured token amount to the wallet's public address.
+# `env -u` clears the recipient exported for `transfer` above, which
+# `withdraw` would otherwise use as the withdrawal destination.
 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
 
 # Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
@@ -326,8 +340,8 @@ Run order for a full demo:
 7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
 > **Each spend consumes a note.** With the default `SPP_AMOUNT_STROOPS`
-> (1 XLM), one `deposit` creates exactly one 1-XLM note, and `transfer` and
-> `withdraw` each consume one. A single `deposit` therefore leaves nothing for
+> (10000000 token base units), one `deposit` creates exactly one note of that
+> amount, and `transfer` and `withdraw` each consume one. A single `deposit` therefore leaves nothing for
 > `withdraw`, which then prints `Skipping: no spendable notes in the selected
 > pool.` and exits 0 — a pass that demonstrated nothing. Run `deposit` once per
 > spend you intend to make, or re-run it before `withdraw`.
@@ -368,7 +382,9 @@ Skipping: wallet at ./spp-example-wallet.sqlite does not contain privacy keys ..
 Onboard the wallet first (e.g. with the `spp` CLI) and re-run.
 ```
 
-Run `spp onboard --account <alias> --accept` for the account you are using.
+From the repository root, run
+`spp --deployment deployments/testnet onboard --account <alias> --accept`
+for the account you are using.
 
 ### Missing circuit artifacts
 
@@ -405,13 +421,14 @@ state. To actually run them you need one of:
 - A full-history `SPP_RPC_URL`.
 - A fresh contract deployment, which resets the 7-day clock.
 
-Retrying later does **not** help: the window moves forward, not back.
+Retrying later does **not** help: the window moves forward, not back. Except
+for `RetentionGap::BootnodeNotReady`: retry once the bootnode is ready.
 
 An already-synced wallet is unaffected, because it syncs incrementally and never
 needs the missing history. This is specifically a first-run problem.
 
 > **Implementation note for maintainers:** `common::is_retention_gap_error`
-> matches on `Error::RetentionGap(_)`.
+> matches on `Error::RetentionGap(_)`, except `RetentionGap::BootnodeNotReady`.
 
 ### Insufficient funds
 

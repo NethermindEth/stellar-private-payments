@@ -2,6 +2,7 @@
 name = "e2e-tests"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
 publish = false
@@ -24,7 +25,7 @@ pool = { workspace = true }
 pool-core = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
-soroban-env-host = "=27.0.1"
+soroban-env-host = "=28.0.2"
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Shared deps
 soroban-utils = { workspace = true, features = ["testutils"] }
