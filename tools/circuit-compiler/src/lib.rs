@@ -52,6 +52,9 @@ const POLICY_GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
     "policy_tx_2_2_AB_gvk_T",
 ];
 
+/// Public key registry proof of note key ownership.
+const KEY_OWNERSHIP_CIRCUIT: &str = "keyOwnership";
+
 fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bool {
     groth16_key_circuits.iter().any(|stem| stem == name)
 }
@@ -75,6 +78,7 @@ fn groth16_key_circuits() -> Vec<String> {
             .iter()
             .map(|stem| (*stem).to_owned()),
     );
+    circuits.push(KEY_OWNERSHIP_CIRCUIT.to_owned());
     circuits
 }
 
