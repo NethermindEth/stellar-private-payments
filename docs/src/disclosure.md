@@ -210,13 +210,13 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 | Check | What it means | Pass wording | Failure meaning |
 |---|---|---|---|
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
-| **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
+| **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. It doesn't show the receipt is meant for you. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
 | **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
 | **Nullifiers unspent** | No nullifier in the receipt is marked spent in the pool's current contract state. Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers are marked spent in the pool's contract state." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
 
 ### Interpretation
 
-- **All four green** → The receipt is fully verified and trustworthy. A green badge is shown.
+- **All four green** → The receipt is fully verified. A green badge is shown. Trust it once its context matches your request.
 - **Proof green, Context red** → The proof is mathematically valid but the context was tampered with. Do not trust the authority/purpose claims.
 - **Proof green, Context green, Root red** → The proof and context are intact but the pool state has moved on and the root is no longer in history. The receipt is outdated.
 - **Proof, Context, Root green; Unspent amber** → The receipt is cryptographically valid and the notes were owned when it was issued, but at least one has since been spent.
@@ -228,7 +228,7 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 
 - **No secret exposure** — The receipt contains only public commitments, roots, and context. The note's spending key, blinding factor, and Merkle path remain secret.
 - **Binding** — The proof is bound to the specific context hash. Changing any context field invalidates the context check.
-- **Non-transferable** — A receipt proves ownership of specific note commitments at specific roots. It cannot be replayed against different notes or a different pool.
+- **Bound to its context, not its holder** — A receipt can't be changed to name other notes, another pool, or another context. Anyone holding it can still present it, so check that the context names you and carries the nonce you sent.
 - **Correlation** — A multi-note receipt attests that all selected notes are controlled by the same prover for the same context. Verifiers should consider this correlation when interpreting the receipt.
 - **Distinct notes** — A proof that names the same note in two slots does not verify. With the root check, a receipt cannot count one note twice.
 - **Off-chain only** — Disclosure verification is entirely off-chain. No contract call is required beyond the root-history check, which reads public pool state.
