@@ -109,7 +109,7 @@ fn generate_with(
             let account = args.storage_account.as_deref().ok_or_else(|| {
                 anyhow!("--db requires --storage-account <ALIAS> (or SPP_STORAGE_ACCOUNT)")
             })?;
-            let storage = open_storage_with(
+            let (owner_lock, storage) = open_storage_with(
                 path,
                 account,
                 args.stellar_config_dir.as_deref(),
@@ -121,7 +121,7 @@ fn generate_with(
                     path.display()
                 );
             }
-            Some((path, storage))
+            Some((path, owner_lock, storage))
         }
         None => None,
     };
@@ -140,7 +140,7 @@ fn generate_with(
         );
     }
 
-    if let Some((path, storage)) = storage {
+    if let Some((path, _owner_lock, storage)) = storage {
         storage.set_gvk_authority_setting(&setting)?;
         eprintln!("saved GVK authority setting to {}", path.display());
     }
@@ -174,7 +174,7 @@ fn show_with(
     args: ShowArgs,
     mut unlock: impl FnMut(&std::path::Path, &str, Option<&std::path::Path>) -> Result<DatabaseKey>,
 ) -> Result<GvkAuthoritySetting> {
-    let storage = open_storage_with(
+    let (_owner_lock, storage) = open_storage_with(
         &args.db,
         &args.storage_account,
         args.stellar_config_dir.as_deref(),
@@ -207,12 +207,38 @@ fn write_private_file(path: &std::path::Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+fn lock_storage_owner(path: &std::path::Path) -> Result<std::fs::File> {
+    let absolute = std::path::absolute(path)?;
+    if let Some(parent) = absolute.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create directory {}", parent.display()))?;
+    }
+    let mut owner_path = absolute.into_os_string();
+    owner_path.push(".owner");
+    let owner_path = PathBuf::from(owner_path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let owner = opts
+        .open(&owner_path)
+        .with_context(|| format!("open storage lock {}", owner_path.display()))?;
+    owner
+        .try_lock()
+        .context("storage database is in use by another process")?;
+    Ok(owner)
+}
+
 fn open_storage_with(
     path: &std::path::Path,
     storage_account: &str,
     stellar_config_dir: Option<&std::path::Path>,
     unlock: &mut impl FnMut(&std::path::Path, &str, Option<&std::path::Path>) -> Result<DatabaseKey>,
-) -> Result<LocalStorage> {
+) -> Result<(std::fs::File, LocalStorage)> {
+    let owner_lock = lock_storage_owner(path)?;
     let is_new = !path.exists();
     let key = unlock(path, storage_account, stellar_config_dir)
         .with_context(|| format!("unlock wallet database at {}", path.display()))?;
@@ -226,7 +252,7 @@ fn open_storage_with(
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .with_context(|| format!("set permissions on {}", path.display()))?;
     }
-    Ok(storage)
+    Ok((owner_lock, storage))
 }
 
 #[cfg(test)]

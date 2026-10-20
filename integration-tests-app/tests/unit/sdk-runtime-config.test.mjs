@@ -99,7 +99,7 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     .replace("'./storage-account-dialog.js'", JSON.stringify(url('export async function confirmStorageAccount() {}')))
     .replace("'./storage-signature.js'", JSON.stringify(url('export async function verifyStorageSignature() {}')))
     .replace("'./private-signers.js'", JSON.stringify(url('export async function migratePrivateSigners() {}')))
-    .replace("'./storage-backup.js'", JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function acquireStorageLease() { return async () => {}; }')))
+    .replace("'./storage-backup.js'", JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function hasLegacyPlaintextStorage() { return false; } export async function removeLegacyPlaintextStorage() {} export async function acquireStorageLease() { return async () => {}; }')))
     .replace("'./wallet.js'", JSON.stringify(url('export async function getWalletAddress() {} export async function signWalletMessage() {} export function startWalletWatcher() {}')));
   for (const name of ['network-config', 'app-storage']) {
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
