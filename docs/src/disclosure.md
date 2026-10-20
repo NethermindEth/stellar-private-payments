@@ -49,7 +49,7 @@ A receipt is a JSON object with the following schema:
 | `context` | Human-readable authority, purpose, and nonce bound into `extContextHash`. |
 | `publicInputs` | Values the proof commits to: the Merkle roots, the note commitments, the hashed context, note nullifiers, and disclosed amounts. |
 | `proofCompressedHex` | A 128-byte compressed Groth16 proof (BN254) encoded as `0x`-prefixed hex. |
-| `issuedAt` | ISO-8601 timestamp when the receipt was created. |
+| `issuedAt` | ISO-8601 timestamp the generating client wrote. No check covers it, so anyone can edit it: rely on the nonce for freshness. Informational only. |
 
 The `extContextHash` is a SHA-256 hash of all context fields (network, pool address, authority label, identity payload, purpose, nonce) reduced modulo the BN254 prime. Any change to any context field invalidates the context check while leaving the cryptographic proof intact.
 
