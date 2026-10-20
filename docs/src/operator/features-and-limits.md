@@ -69,6 +69,14 @@ and the
 | Event history | About seven days on the public testnet RPC. Older history needs a bootnode. |
 | Contract upgrades | None. A fix means new contracts. |
 
+Some limits are build parameters. Changing one means rebuilding and redeploying:
+
+- Commitment tree depth (20): new keys for every circuit, and new pools.
+- Allowlist depth (10) and blocklist depth (31): new transaction keys, and new pools. A deeper
+  allowlist also needs new allowlists.
+- Notes per disclosure receipt (4): new disclosure keys only. Nothing on chain changes.
+- Root history (90): a contract constant. New pools and allowlists, no new keys.
+
 ### A full pool
 
 Warning: once a pool's commitment tree is full, the pool refuses every transaction with

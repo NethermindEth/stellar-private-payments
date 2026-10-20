@@ -22,7 +22,7 @@ The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's 
 | Event Name | Contract Crate | Topics (Indexed) | Data (Payload) | Privacy & Correlation Classification |
 |---|---|---|---|---|
 | `NewCommitmentEvent` | `pool` | `[Symbol("NewCommitmentEvent"), commitment: U256]` | `index: u32`, `encrypted_output: Bytes` | **Public Data / Correlatable**: Commitment is a blinded Poseidon hash; encrypted output uses fresh OS CSPRNG nonces per note. Correlatable with public transaction args (`ExtData`). |
-| `NewNullifierEvent` | `pool` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | *empty* | **Pseudonymous / One-Time Use**: Unlinks spent note from new commitments, but nullifier reuse would break privacy. |
+| `NewNullifierEvent` | `pool` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | *empty* | **Pseudonymous / One-Time Use**: Unlinks spent note from new commitments, but nullifier reuse would break privacy. A [disclosure receipt](./disclosure.md) carries its notes' nullifiers, so its holder can see when they are spent. |
 | `LeafAddedEvent` | `asp-membership` | `[Symbol("LeafAdded")]` | `leaf: U256`, `index: u64`, `root: U256` | **Public Protocol Data**: Blinded membership commitment `poseidon2_hash2(note_pubkey, blinding, 1)`. |
 | `LeafInsertedEvent` | `asp-non-membership` | `[Symbol("LeafInserted")]` | `key: U256`, `value: U256`, `root: U256` | **Transparency Property / Correlatable**: In ASP blocklist management, `key` is the unblinded note public key. Public blocklist key transparency allows users to verify non-membership. |
 | `LeafDeletedEvent` | `asp-non-membership` | `[Symbol("LeafDeleted")]` | `key: U256`, `root: U256` | **Transparency Property**: Key removed from blocklist. |

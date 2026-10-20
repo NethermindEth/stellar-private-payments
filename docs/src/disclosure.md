@@ -1,6 +1,6 @@
 # Selective Disclosure
 
-Selective disclosure lets a privacy-pool note owner prove ownership of one or more unspent notes to a third-party authority without revealing the notes' secret spending keys or linking the proof to any other transaction.
+Selective disclosure lets a privacy-pool note owner prove ownership of one or more unspent notes to a third-party authority without revealing the notes' secret spending keys. The receipt includes each note's nullifier, so whoever holds it can see when the notes are spent. See [Receipt Security Properties](#receipt-security-properties).
 
 The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash for the circuit named in the receipt.
 
@@ -237,6 +237,7 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 - **Binding** — The proof is bound to the specific context hash. Changing any context field invalidates the context check.
 - **Bound to its context, not its holder** — A receipt can't be changed to name other notes, another pool, or another context. Anyone holding it can still present it, so check that the context names you and carries the nonce you sent.
 - **Correlation** — A multi-note receipt attests that all selected notes are controlled by the same prover for the same context. Verifiers should consider this correlation when interpreting the receipt.
+- **Spend visibility** — The receipt carries each disclosed note's nullifier, which the pool publishes when the note is spent. Whoever holds the receipt can tell when, and in which transaction, each note is spent.
 - **Distinct notes** — A proof that names the same note in two slots does not verify. With the root check, a receipt cannot count one note twice.
 - **Off-chain only** — Disclosure verification is entirely off-chain. No contract call is required beyond the root-history check, which reads public pool state.
 
