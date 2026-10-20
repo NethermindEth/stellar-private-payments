@@ -16,24 +16,13 @@ cargo add stellar-private-payments
 
 ## Building
 
-All SDK and CLI builds require the pinned SQLite3 Multiple Ciphers backend.
-From the repository root, use:
+Native builds compile the SQLite3MC 2.5.1 amalgamation from `sqlite3mc-src` using a C compiler and `ar` (plus `musl-gcc` for `musl` targets). WASM builds compile the same SQLite3MC release through `sqlite-wasm-rs` (`sqlite3mc` feature) using Clang and an LLVM-compatible archiver.
 
 ```sh
 cargo build -p stellar-private-payments-cli --release
 cargo test -p stellar-private-payments --lib
 cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-linux-musl
 ```
-
-Cargo needs a C compiler and `ar` (plus `musl-gcc` for musl). Native builds
-compile the pinned SQLite3MC 2.5.1 amalgamation from the `sqlite3mc-src` crate;
-WASM builds compile the same pinned backend via `sqlite-wasm-rs` (`sqlite3mc`
-feature) using Clang and an LLVM-compatible archiver. Plain
-`cargo build --target wasm32-unknown-unknown` requires no generated SQLite
-configuration.
-
-Including the backend does not encrypt a database automatically. Plaintext and
-explicit encrypted creation remain separate API choices.
 
 ## Quick start
 
@@ -168,57 +157,37 @@ See [`../web/README.md`](../web/README.md). JS method names align with Rust wher
 
 ## Mandatory storage encryption
 
-All persistent SDK storage requires a 32-byte database key. Use
-`LocalStorage::open_encrypted`, `LocalStorage::open_with_key_provider`, or
-`SqliteStorage::connect_encrypted`. Keyless `open`, `connect`, `connect_file`,
-and `connect_existing_plaintext` calls return an error without opening or
-creating a file. In-memory storage remains available for transient computation.
+Persistent SDK storage requires a 32-byte key via `LocalStorage::open_encrypted`,
+`LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`.
+Keyless `open`, `connect`, `connect_file`, and `connect_existing_plaintext` calls
+return an error without opening or creating a file; in-memory storage remains
+available for transient work.
 
-The CLI unlocks storage with a Stellar CLI identity: pass `--storage-account <alias>`
-or set `SPP_STORAGE_ACCOUNT` (also available as `defaults.storage_account` in the
-TOML config). It defaults to `--account`, independently of `--sign-as`. Commands
-without an account, such as `spp config show`, need an explicit storage identity.
-The signing key remains managed by `stellar keys`, including its secure store.
+The CLI unlocks `spp.db` with a Stellar CLI identity (`--storage-account <alias>`,
+`SPP_STORAGE_ACCOUNT`, or `defaults.storage_account` in TOML). It defaults to
+`--account`, independently of `--sign-as`; accountless commands such as
+`spp config show` require an explicit storage identity. On first use, the CLI
+requests two matching signatures over a dedicated storage message to confirm the
+signer is deterministic, derives a wrapping key with HKDF-SHA-256, and seals a
+random database key with XSalsa20-Poly1305 in `spp.db.key`. Subsequent runs need
+one signature and cache the key for that command. Pre-existing plaintext
+databases are encrypted in place on first open. Back up and restore `spp.db`
+and `spp.db.key` together; wrong identities, invalid signatures, or corrupted
+key records fail without modifying existing files.
 
-On first use, two matching signatures of a dedicated storage message confirm that
-unlocking is reproducible. HKDF-SHA-256 derives a wrapping key from the signature;
-XSalsa20-Poly1305 seals a random database key. Later commands require one signature,
-with the key cached for the command. These messages do not authorize transactions
-and are separate from privacy-key derivation. The public signing context and sealed
-key live in `spp.db.key`; back it up together with `spp.db`. Existing plaintext
-databases are encrypted before use. Wrong identities or signatures preserve files.
+For browser storage and backups, see [`../web/README.md`](../web/README.md#encrypted-backups-and-recovery).
 
 ### CLI storage threat model
 
-Storage encryption protects a copied database and its `.key` file when the attacker
-cannot use the enrolled signing identity. There is no independent storage password:
-anyone who obtains that identity's private key, or can make it sign the storage
-unlock message, can unwrap the database key and read the copied database.
-
-If a Stellar CLI identity is stored as a plaintext secret in a configuration file,
-an attacker who can read that file together with `spp.db` and `spp.db.key` can decrypt
-the data. Encrypting the database does not provide a separate security boundary
-against that level of filesystem access. An OS secure store or supported hardware
-signer can protect the signing key, subject to its own access and approval controls.
-Encryption also does not protect decrypted data from a compromised running process.
-
-Each CLI invocation that opens storage invokes the Stellar CLI to sign the unlock
-message. Depending on the identity's setup, this can require a secure-store or
-hardware-wallet approval on each invocation. The unlocked key is cached only for
-that command. This dependence on the wallet's security and availability is the
-intentional tradeoff of wallet-based storage unlocking.
-
-### Existing storage
-
-The CLI encrypts existing plaintext databases before use. Encrypted databases need
-their matching wallet key record; restore `spp.db` and `spp.db.key` together from
-backup. Invalid key records are rejected without replacing existing files.
-
-Browser storage uses a wallet-wrapped random database key through Freighter.
-See the [browser backup and recovery instructions](../web/README.md#encrypted-backups-and-recovery).
-The E2E setup uses the first provisioned Stellar identity to unlock its isolated database.
-
-SDK callers supply a key or key provider; keyless callers fail closed.
+Encryption protects a copied `spp.db` and `spp.db.key` only while an attacker
+cannot sign the storage-unlock message with the enrolled identity. There is no
+separate storage password. If that Stellar CLI identity is stored as a plaintext
+secret on the same filesystem, anyone who can read that file alongside `spp.db`
+and `spp.db.key` can unwrap the database key. Keeping the signing key in an OS
+secure store or hardware wallet provides an actual boundary at rest, at the cost
+of a signer approval prompt whenever a CLI command opens storage. As with any
+at-rest encryption, decrypted data in a running process is not protected if the
+process itself is compromised.
 
 ### Token amounts
 

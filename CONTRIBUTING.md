@@ -92,7 +92,7 @@ stellar-private-payments/
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
 - [**jq**](https://jqlang.github.io/jq/) for the MSRV and release scripts.
-- C compiler and archiver (`cc` / `ar`, plus `clang` for `wasm32-unknown-unknown` builds) to compile the vendored SQLite3MC amalgamation.
+- C compiler and archiver (`cc` and `ar`, plus `clang` for `wasm32-unknown-unknown` builds) to compile SQLite3MC from source.
 - [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
 - [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
 - **macOS only:** Homebrew LLVM (`brew install llvm`) provides clang for WebAssembly builds.
@@ -198,14 +198,13 @@ This patch remains for **circuits / ceremony** builds that still use ark-circom 
 The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
 committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
 
-`rusqlite` and `rusqlite_migration` are temporarily consumed via the published
+The workspace also aliases `rusqlite` and `rusqlite_migration` to the published
 [`spp-rusqlite`](https://crates.io/crates/spp-rusqlite) (`0.40.2`) and
-[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates
-(aliased via `package = "..."` in `Cargo.toml`) so `stellar-private-payments` can be published
-to crates.io with `sqlite-wasm-rs 0.6` (`sqlite3mc`) support from upstream
-[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906). Once upstream `rusqlite`
-and `rusqlite_migration` publish releases containing that change, switch the workspace back to the
-official `rusqlite` and `rusqlite_migration` crates.
+[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates. These
+carry `sqlite-wasm-rs 0.6` (`sqlite3mc`) support from
+[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906) so `stellar-private-payments`
+can publish to crates.io before upstream cuts a release. Drop the aliases once upstream releases
+include that change.
 
 ### Running WASM tests
 

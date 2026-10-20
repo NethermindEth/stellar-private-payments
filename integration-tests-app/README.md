@@ -314,4 +314,4 @@ concurrent runs at the same restored copy (Chrome's profile storage is
 single-writer). `scripts/run-e2e.sh` does this automatically and cleans up
 afterward.
 
-Browser storage uses dedicated Freighter message approvals: two matching signatures on first enrollment and one on later unlocks. The runner handles these before onboarding. No separate storage password is used. Freighter itself still has its own extension password.
+Unlocking browser storage requires Freighter message approval—two matching signatures when enrolling a new database and one on subsequent opens—which the runner handles automatically before onboarding.
