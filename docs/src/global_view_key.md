@@ -134,6 +134,14 @@ by the round-trip tests.
   constant blinding) make their ciphertexts publicly recomputable, letting an
   observer identify which slots are dummies and fingerprint the transaction's
   real arity. Every note fed to an encryptor must carry fresh random blinding.
+- **Keystream lanes.** The KDF uses one width-4 Poseidon2 permutation as a
+  sponge with rate 3 and capacity 1: it absorbs `(S.x, S.y)` under the `0x06`
+  tag and squeezes `out[0..2]` as the pads, keeping `out[3]` hidden. Other call
+  sites read one lane because they hash, this one generates a stream. Getting
+  `S` back from known pads means inverting the permutation with one lane
+  unknown, and the generic bound for a one-element (254-bit) capacity is about
+  2^127. Each note has its own `S`, since `r` binds the note, `nonce`, and
+  `idx`, so known pads for one note reveal nothing about another.
 
 ---
 
