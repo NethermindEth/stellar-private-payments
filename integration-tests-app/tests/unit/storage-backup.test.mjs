@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webcrypto } from 'node:crypto';
-import { DEFAULT_DIRECTORY, STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage } from '../../../app/js/storage-backup.js';
+import { DEFAULT_DIRECTORY, LEGACY_DIRECTORY, STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage, hasLegacyPlaintextStorage, removeLegacyPlaintextStorage } from '../../../app/js/storage-backup.js';
 import { openWalletStorage } from '../../../app/js/storage-key.js';
 
 class Directory {
@@ -106,16 +106,30 @@ test('missing envelope never enrolls over surviving encrypted data', async () =>
   }), { code: 'storage-recovery-required' });
 });
 
-test('reset deletes encrypted generations and legacy signer lists, preserving unrelated origin data', async () => {
+test('reset deletes encrypted generations, legacy plaintext OPFS storage, and legacy signer lists, preserving unrelated origin data', async () => {
   const { root, store } = await fixture();
   await root.getDirectoryHandle(`${DEFAULT_DIRECTORY}-${webcrypto.randomUUID()}`, { create: true });
+  const legacyDir = await root.getDirectoryHandle(LEGACY_DIRECTORY, { create: true });
+  await legacyDir.getFileHandle('spp.db', { create: true });
   await root.getDirectoryHandle('unrelated', { create: true });
   store.setItem('poolstellar_signers:owner', '[]');
   store.setItem('explorer', 'keep');
+  assert.equal(await hasLegacyPlaintextStorage(root), true);
   await resetStorage({ root, records: store });
   assert.equal(store.getItem(STORAGE_RECORD_KEY), null);
   assert.equal(store.getItem('poolstellar_signers:owner'), null);
   assert.equal(store.getItem('explorer'), 'keep');
   assert.deepEqual([...root.children.keys()], ['unrelated']);
   assert.equal(await hasEncryptedStorage(root), false);
+  assert.equal(await hasLegacyPlaintextStorage(root), false);
+});
+
+test('removeLegacyPlaintextStorage deletes only legacy plaintext OPFS directory', async () => {
+  const { root } = await fixture();
+  const legacyDir = await root.getDirectoryHandle(LEGACY_DIRECTORY, { create: true });
+  await legacyDir.getFileHandle('spp.db', { create: true });
+  assert.equal(await hasLegacyPlaintextStorage(root), true);
+  await removeLegacyPlaintextStorage(root);
+  assert.equal(await hasLegacyPlaintextStorage(root), false);
+  assert.equal(await hasEncryptedStorage(root), true);
 });

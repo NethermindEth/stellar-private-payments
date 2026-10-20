@@ -182,7 +182,7 @@ The app's **Local storage backup and recovery** controls export the encrypted OP
 
 Importing requires locked storage and a backup from the same origin (`scheme`, `host`, and `port`). The app stages the files in a new OPFS directory, prompts the enrolled wallet to unlock it, and verifies SQLite integrity and foreign keys before switching the active envelope and directory in a single `localStorage` write. Failed imports leave current storage unchanged, and restored backups replace local state as of export time without merging later changes.
 
-If encrypted OPFS files exist without their `localStorage` key envelope, the wallet signature alone cannot recover the random database key; the app halts enrollment so the user can import a backup or reset storage. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) deletes this origin's encrypted OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds.
+If encrypted OPFS files exist without their `localStorage` key envelope, the wallet signature alone cannot recover the random database key; the app halts enrollment so the user can import a backup or reset storage. When legacy unencrypted browser storage (`.opfs-sahpool`) from an earlier version is present on disk, the app surfaces a notice and offers to delete it. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) deletes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds.
 
 To run the isolated browser backup test after building the SDK:
 

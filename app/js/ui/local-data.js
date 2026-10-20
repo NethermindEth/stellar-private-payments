@@ -1,4 +1,4 @@
-import { ensureStorage, isStorageUnlocked, lockStorage, manageStorageBackup, STORAGE_STATE_EVENT } from '../wasm-facade.js';
+import { checkLegacyPlaintextStorage, deleteLegacyStorage, ensureStorage, isStorageUnlocked, lockStorage, manageStorageBackup, STORAGE_STATE_EVENT } from '../wasm-facade.js';
 import { autoLockMinutes, setAutoLockMinutes } from '../storage-timeout.js';
 import { rememberedNoteOwner } from '../account-session.js';
 import { getConnectedAddress } from '../wallet.js';
@@ -24,6 +24,10 @@ export const LocalData = {
             document.getElementById('storage-export').disabled = busy || !unlocked;
             document.getElementById('storage-import').disabled = busy || unlocked;
             document.getElementById('storage-reset').disabled = busy || unlocked;
+            const legacyNotice = document.getElementById('storage-legacy-notice');
+            if (legacyNotice) legacyNotice.hidden = document.body.dataset.legacyStorage !== 'present';
+            const deleteLegacy = document.getElementById('storage-delete-legacy');
+            if (deleteLegacy) deleteLegacy.disabled = busy;
             if (document.body.dataset.storageRecovery === 'required') {
                 document.getElementById('storage-recovery-message').textContent = 'Your encrypted data is still here, but its unlocking record is missing. Import a matching backup, or reset local storage to start again. The wallet signature alone cannot recover the missing key.';
             }
@@ -50,6 +54,16 @@ export const LocalData = {
         };
         window.addEventListener(STORAGE_STATE_EVENT, render);
         render();
+        void checkLegacyPlaintextStorage().catch(() => {});
+        document.getElementById('storage-delete-legacy')?.addEventListener('click', async () => {
+            if (!window.confirm('Permanently delete legacy unencrypted browser storage (.opfs-sahpool)? Make sure you do not need any unmigrated local operation history or settings from the older version.')) return;
+            try {
+                await deleteLegacyStorage();
+                Toast.show('Deleted legacy unencrypted browser storage.', 'info');
+            } catch (error) {
+                Toast.show(`Could not delete legacy storage: ${error.message}`, 'error');
+            }
+        });
         button.addEventListener('click', async () => {
             if (isStorageUnlocked()) {
                 await lockStorage();

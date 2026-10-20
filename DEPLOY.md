@@ -91,8 +91,8 @@ cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
 ```
 
 **Back up `admin-d.json` — the private key cannot be recovered.** `gvkey-gen
-generate` can also save the key into a client SDK wallet database via
-`--db PATH`.
+generate` can also save the key into an encrypted client SDK wallet database via
+`--db PATH --storage-account <identity>`.
 
 ## Template
 

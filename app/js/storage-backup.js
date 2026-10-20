@@ -1,6 +1,7 @@
 /** Encrypted OPFS backups. Import validates an isolated copy before committing its pointer. */
 export const STORAGE_RECORD_KEY = 'poolstellar_encrypted_storage_v1';
 export const DEFAULT_DIRECTORY = '.opfs-sahpool-encrypted';
+export const LEGACY_DIRECTORY = '.opfs-sahpool';
 const PREFIX = `${DEFAULT_DIRECTORY}-`;
 const LIMIT = 256 * 1024 * 1024;
 const FORMAT = 'spp-encrypted-storage-backup';
@@ -19,6 +20,21 @@ export async function hasEncryptedStorage(root) {
         }
     }
     return false;
+}
+
+export async function hasLegacyPlaintextStorage(root) {
+    for await (const [name, handle] of root.entries()) {
+        if (handle.kind === 'directory' && name === LEGACY_DIRECTORY) {
+            for await (const _entry of handle.entries()) return true;
+        }
+    }
+    return false;
+}
+
+export async function removeLegacyPlaintextStorage(root) {
+    await root.removeEntry(LEGACY_DIRECTORY, { recursive: true }).catch(error => {
+        if (error?.name !== 'NotFoundError') throw error;
+    });
 }
 
 /** A writable lease conflicts with another worker's sync access handle. */
@@ -117,7 +133,7 @@ export async function importStorageBackup({ backup, root, validate, records = lo
 export async function resetStorage({ root, records = localStorage }) {
     const directories = [];
     for await (const [name, handle] of root.entries()) {
-        if (handle.kind === 'directory' && validDirectory(name)) directories.push(name);
+        if (handle.kind === 'directory' && (validDirectory(name) || name === LEGACY_DIRECTORY)) directories.push(name);
     }
     for (const name of directories) await root.removeEntry(name, { recursive: true });
     records.removeItem(STORAGE_RECORD_KEY);

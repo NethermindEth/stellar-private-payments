@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{ArgAction, Parser, Subcommand};
 use stellar_private_payments::{
     LocalStorage,
+    state::{database_key::DatabaseKey, native_wallet},
     types::{BabyJubJubPoint, GvkAuthoritySetting},
     zk::gvk::validate_global_view_public_key,
 };
@@ -39,6 +40,12 @@ struct GenerateArgs {
     /// this path.
     #[arg(long = "db")]
     db: Option<PathBuf>,
+    /// Stellar CLI identity (`stellar keys`) that unlocks `--db`.
+    #[arg(long = "storage-account", env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: Option<String>,
+    /// Config directory for the `stellar` CLI (passed as `--config-dir`).
+    #[arg(long = "stellar-config-dir")]
+    stellar_config_dir: Option<PathBuf>,
     /// Overwrite an existing output file or database authority setting.
     #[arg(long = "force", action = ArgAction::SetTrue)]
     force: bool,
@@ -57,6 +64,12 @@ struct ShowArgs {
     /// Wallet database to read the saved authority setting from.
     #[arg(long = "db")]
     db: PathBuf,
+    /// Stellar CLI identity (`stellar keys`) that unlocks `--db`.
+    #[arg(long = "storage-account", env = "SPP_STORAGE_ACCOUNT")]
+    storage_account: String,
+    /// Config directory for the `stellar` CLI (passed as `--config-dir`).
+    #[arg(long = "stellar-config-dir")]
+    stellar_config_dir: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -68,19 +81,54 @@ fn main() -> Result<()> {
 }
 
 fn generate(args: GenerateArgs) -> Result<()> {
-    let setting = GvkAuthoritySetting::generate().context("generate GVK authority keypair")?;
+    generate_with(args, |path, account, config_dir| {
+        native_wallet::unlock_with_stellar(path, account, config_dir)
+    })
+}
 
+fn generate_with(
+    args: GenerateArgs,
+    mut unlock: impl FnMut(&std::path::Path, &str, Option<&std::path::Path>) -> Result<DatabaseKey>,
+) -> Result<()> {
     if args.out_file.is_none() && args.db.is_none() {
         bail!("generate requires --out-file, --db, or both");
     }
 
-    if let Some(path) = &args.out_file {
-        if path.exists() && !args.force {
-            bail!(
-                "refusing to overwrite existing file `{}`; pass --force",
-                path.display()
-            );
+    if let Some(path) = &args.out_file
+        && path.exists()
+        && !args.force
+    {
+        bail!(
+            "refusing to overwrite existing file `{}`; pass --force",
+            path.display()
+        );
+    }
+
+    let storage = match &args.db {
+        Some(path) => {
+            let account = args.storage_account.as_deref().ok_or_else(|| {
+                anyhow!("--db requires --storage-account <ALIAS> (or SPP_STORAGE_ACCOUNT)")
+            })?;
+            let storage = open_storage_with(
+                path,
+                account,
+                args.stellar_config_dir.as_deref(),
+                &mut unlock,
+            )?;
+            if storage.get_gvk_authority_setting()?.is_some() && !args.force {
+                bail!(
+                    "wallet database `{}` already has a saved GVK authority setting; pass --force to overwrite",
+                    path.display()
+                );
+            }
+            Some((path, storage))
         }
+        None => None,
+    };
+
+    let setting = GvkAuthoritySetting::generate().context("generate GVK authority keypair")?;
+
+    if let Some(path) = &args.out_file {
         write_private_file(
             path,
             &format!("{}\n", serde_json::to_string_pretty(&setting)?),
@@ -92,14 +140,7 @@ fn generate(args: GenerateArgs) -> Result<()> {
         );
     }
 
-    if let Some(path) = &args.db {
-        let storage = open_storage(path)?;
-        if storage.get_gvk_authority_setting()?.is_some() && !args.force {
-            bail!(
-                "wallet database `{}` already has a saved GVK authority setting; pass --force to overwrite",
-                path.display()
-            );
-        }
+    if let Some((path, storage)) = storage {
         storage.set_gvk_authority_setting(&setting)?;
         eprintln!("saved GVK authority setting to {}", path.display());
     }
@@ -122,13 +163,28 @@ fn validate(args: ValidateArgs) -> Result<()> {
 }
 
 fn show(args: ShowArgs) -> Result<()> {
-    let storage = open_storage(&args.db)?;
+    let setting = show_with(args, |path, account, config_dir| {
+        native_wallet::unlock_with_stellar(path, account, config_dir)
+    })?;
+    println!("{}", serde_json::to_string_pretty(&setting.public_key)?);
+    Ok(())
+}
+
+fn show_with(
+    args: ShowArgs,
+    mut unlock: impl FnMut(&std::path::Path, &str, Option<&std::path::Path>) -> Result<DatabaseKey>,
+) -> Result<GvkAuthoritySetting> {
+    let storage = open_storage_with(
+        &args.db,
+        &args.storage_account,
+        args.stellar_config_dir.as_deref(),
+        &mut unlock,
+    )?;
     let setting = storage
         .get_gvk_authority_setting()?
         .ok_or_else(|| anyhow!("no GVK authority setting saved in {}", args.db.display()))?;
     setting.validate_consistency()?;
-    println!("{}", serde_json::to_string_pretty(&setting.public_key)?);
-    Ok(())
+    Ok(setting)
 }
 
 fn write_private_file(path: &std::path::Path, contents: &str) -> Result<()> {
@@ -151,9 +207,16 @@ fn write_private_file(path: &std::path::Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-fn open_storage(path: &std::path::Path) -> Result<LocalStorage> {
+fn open_storage_with(
+    path: &std::path::Path,
+    storage_account: &str,
+    stellar_config_dir: Option<&std::path::Path>,
+    unlock: &mut impl FnMut(&std::path::Path, &str, Option<&std::path::Path>) -> Result<DatabaseKey>,
+) -> Result<LocalStorage> {
     let is_new = !path.exists();
-    let storage = LocalStorage::open(&path.to_string_lossy())
+    let key = unlock(path, storage_account, stellar_config_dir)
+        .with_context(|| format!("unlock wallet database at {}", path.display()))?;
+    let storage = LocalStorage::open_with_key(&path.to_string_lossy(), &key)
         .with_context(|| format!("open wallet database at {}", path.display()))?;
     // New sqlite files default to a world-readable mode; harden like
     // `write_private_file`.
@@ -164,4 +227,133 @@ fn open_storage(path: &std::path::Path) -> Result<LocalStorage> {
             .with_context(|| format!("set permissions on {}", path.display()))?;
     }
     Ok(storage)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use stellar_private_payments::state::database_key::OpenPurpose;
+
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Result<Self> {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "gvkey-gen-test-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir)?;
+            Ok(Self(dir))
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_unlock(
+        path: &std::path::Path,
+        _account: &str,
+        _config_dir: Option<&std::path::Path>,
+    ) -> Result<DatabaseKey> {
+        let exists = std::fs::metadata(path).is_ok_and(|m| m.len() > 0);
+        drop(LocalStorage::open_encrypted(
+            &path.to_string_lossy(),
+            DatabaseKey::new([0x42; 32]),
+            if exists {
+                OpenPurpose::OpenExisting
+            } else {
+                OpenPurpose::CreateNew
+            },
+        )?);
+        Ok(DatabaseKey::new([0x42; 32]))
+    }
+
+    #[test]
+    fn generate_and_show_round_trip_encrypted_db() -> Result<()> {
+        let temp = TempDir::new()?;
+        let db = temp.0.join("wallet.db");
+        let out_file = temp.0.join("admin-d.json");
+
+        generate_with(
+            GenerateArgs {
+                out_file: Some(out_file.clone()),
+                db: Some(db.clone()),
+                storage_account: Some("alice".into()),
+                stellar_config_dir: None,
+                force: false,
+            },
+            test_unlock,
+        )?;
+
+        let shown = show_with(
+            ShowArgs {
+                db: db.clone(),
+                storage_account: "alice".into(),
+                stellar_config_dir: None,
+            },
+            test_unlock,
+        )?;
+        let written: GvkAuthoritySetting =
+            serde_json::from_str(&std::fs::read_to_string(&out_file)?)?;
+        assert_eq!(shown.public_key, written.public_key);
+        Ok(())
+    }
+
+    #[test]
+    fn db_failure_does_not_leave_partial_out_file() -> Result<()> {
+        let temp = TempDir::new()?;
+        let db = temp.0.join("wallet.db");
+        let first_out = temp.0.join("first.json");
+        let second_out = temp.0.join("second.json");
+
+        assert!(
+            generate_with(
+                GenerateArgs {
+                    out_file: Some(first_out.clone()),
+                    db: Some(db.clone()),
+                    storage_account: None,
+                    stellar_config_dir: None,
+                    force: false,
+                },
+                test_unlock,
+            )
+            .is_err()
+        );
+        assert!(!first_out.exists());
+
+        generate_with(
+            GenerateArgs {
+                out_file: None,
+                db: Some(db.clone()),
+                storage_account: Some("alice".into()),
+                stellar_config_dir: None,
+                force: false,
+            },
+            test_unlock,
+        )?;
+
+        assert!(
+            generate_with(
+                GenerateArgs {
+                    out_file: Some(second_out.clone()),
+                    db: Some(db),
+                    storage_account: Some("alice".into()),
+                    stellar_config_dir: None,
+                    force: false,
+                },
+                test_unlock,
+            )
+            .is_err()
+        );
+        assert!(!second_out.exists());
+        Ok(())
+    }
 }
