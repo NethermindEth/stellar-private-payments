@@ -813,7 +813,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod registration_tests {
     use super::*;
     use soroban_sdk::{
