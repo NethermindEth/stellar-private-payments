@@ -41,9 +41,13 @@ use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
-use ed25519_dalek::{Signature as DalekSignature, VerifyingKey};
-use sha2::{Digest, Sha256};
+use ed25519_dalek::{
+    Signature as DalekSignature, VerifyingKey,
+    hazmat::{ExpandedSecretKey, raw_sign},
+};
+use sha2::{Digest, Sha256, Sha512};
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::{Zeroize, Zeroizing};
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
@@ -242,6 +246,81 @@ fn hash_signature_with_domain_and_context(
     hasher.update([0u8]);
     hasher.update(signature);
     hasher.finalize().into()
+}
+
+/// Tag of the registry's encryption key challenge. Matches the registry's
+/// `ENCRYPTION_KEY_TAG`.
+const REGISTRY_ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
+/// Domain of the Ed25519 nonce prefix derived from the X25519 secret.
+const ENCRYPTION_SIGNING_NONCE_DOMAIN: &[u8] = b"privacy-pool/encryption-key/nonce/v1";
+
+/// Message the owner signs (SEP-53) to register keys with `registry`.
+///
+/// Byte-identical to the registry's `registration_message`. `encryption_key`
+/// is the Edwards encoding from [`encryption_edwards_key`].
+pub fn registration_message(
+    registry: &str,
+    owner: &str,
+    note_key: &NotePublicKey,
+    encryption_key: &[u8; 32],
+) -> String {
+    format!(
+        "Privacy Pool Key Registration [v1]\nRegistry: {registry}\nAccount: {owner}\nNote key: \
+         0x{}\nEncryption key: 0x{}",
+        hex::encode(note_key.0),
+        hex::encode(encryption_key),
+    )
+}
+
+/// SEP-53 digest `D` of a registration message, which the owner signature,
+/// the encryption key signature and the `keyOwnership` proof all cover.
+pub fn registration_digest(message: &str) -> [u8; 32] {
+    Sha256::digest(sep53_payload(message)).into()
+}
+
+/// The `keyOwnership` circuit's `registrationHash`: `D` read big-endian and
+/// reduced mod r, as the registry does.
+pub fn registration_hash(digest: &[u8; 32]) -> Field {
+    let mut le = *digest;
+    le.reverse();
+    Field::from_le_bytes_mod_order(le)
+}
+
+/// Ed25519 signing key of the X25519 secret.
+///
+/// The scalar is the clamped X25519 secret, so the verifying key is the
+/// Edwards form of the X25519 public key. The nonce prefix is derived from the
+/// secret under its own domain.
+fn encryption_signing_key(secret: &EncryptionPrivateKey) -> ExpandedSecretKey {
+    let mut prefix: [u8; 64] = Sha512::new()
+        .chain_update(ENCRYPTION_SIGNING_NONCE_DOMAIN)
+        .chain_update(secret.0)
+        .finalize()
+        .into();
+    let mut bytes = Zeroizing::new([0u8; 64]);
+    bytes[..32].copy_from_slice(&secret.0);
+    bytes[32..].copy_from_slice(&prefix[..32]);
+    prefix.zeroize();
+    ExpandedSecretKey::from_bytes(&bytes)
+}
+
+/// Edwards encoding of the X25519 public key of `secret`, the form the
+/// registry stores.
+pub fn encryption_edwards_key(secret: &EncryptionPrivateKey) -> [u8; 32] {
+    VerifyingKey::from(&encryption_signing_key(secret)).to_bytes()
+}
+
+/// The registry's proof that the registrant holds the X25519 secret: an
+/// Ed25519 signature over `sha256(REGISTRY_ENCRYPTION_KEY_TAG || digest)`.
+pub fn sign_encryption_key_ownership(secret: &EncryptionPrivateKey, digest: &[u8; 32]) -> [u8; 64] {
+    let signing_key = encryption_signing_key(secret);
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let challenge: [u8; 32] = Sha256::new()
+        .chain_update(REGISTRY_ENCRYPTION_KEY_TAG)
+        .chain_update(digest)
+        .finalize()
+        .into();
+    raw_sign::<Sha512>(&signing_key, &challenge, &verifying_key).to_bytes()
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -731,5 +810,129 @@ mod tests {
         let non_canonical = seal_raw(&keys.public, &non_canonical_blinding);
         assert!(decrypt_output_note(&keys.private, &non_canonical).is_ok_and(|n| n.is_none()));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+    use soroban_sdk::{
+        Address, Bytes, BytesN, Env, crypto::bn254::Bn254Fr, testutils::Address as _,
+    };
+
+    const OWNER: &str = "GABAGOLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    fn strkey(address: &Address) -> String {
+        let strkey = address.to_string();
+        let mut bytes = vec![0u8; strkey.len() as usize];
+        strkey.copy_into_slice(&mut bytes);
+        String::from_utf8(bytes).expect("strkeys are ASCII")
+    }
+
+    /// Keys from the real derivation, for a few wallet signatures.
+    fn derived_encryption_keys() -> Vec<EncryptionKeyPair> {
+        (0u8..16)
+            .map(|seed| {
+                derive_keypair_from_signature(&KeyDerivationSignature(vec![seed; 64]))
+                    .expect("64-byte signature")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn registration_message_and_hash_match_the_registry() {
+        let env = Env::default();
+        let registry = Address::generate(&env);
+        let note_key = NotePublicKey([0x11; 32]);
+        let encryption_key = encryption_edwards_key(&derived_encryption_keys()[0].private);
+        let account = public_key_registry::Account {
+            owner: Address::from_str(&env, OWNER),
+            encryption_key: Bytes::from_array(&env, &encryption_key),
+            note_key: Bytes::from_array(&env, &note_key.0),
+        };
+
+        let message = registration_message(&strkey(&registry), OWNER, &note_key, &encryption_key);
+        let on_chain = public_key_registry::registration_message(&env, &registry, &account);
+        assert_eq!(on_chain.to_alloc_vec(), message.as_bytes());
+
+        let digest = registration_digest(&message);
+        assert_eq!(
+            public_key_registry::registration_digest(&env, &on_chain).to_array(),
+            digest
+        );
+        assert_eq!(
+            REGISTRY_ENCRYPTION_KEY_TAG,
+            public_key_registry::ENCRYPTION_KEY_TAG
+        );
+
+        // [0xff; 32] is above r, so it checks the reduction as well.
+        for digest in [digest, [0xff; 32]] {
+            let on_chain = Bn254Fr::from_bytes(BytesN::from_array(&env, &digest));
+            assert_eq!(
+                registration_hash(&digest).to_be_bytes(),
+                on_chain.to_bytes().to_array()
+            );
+        }
+    }
+
+    #[test]
+    fn edwards_key_is_the_x25519_public_key() {
+        for keys in derived_encryption_keys() {
+            let edwards = VerifyingKey::from_bytes(&encryption_edwards_key(&keys.private))
+                .expect("a valid point");
+            assert_eq!(edwards.to_montgomery().to_bytes(), keys.public.0);
+        }
+    }
+
+    /// The registry compares key bytes, so a device on a newer SDK must
+    /// produce the same encoding.
+    #[test]
+    fn edwards_key_encoding_is_pinned() {
+        let secret = EncryptionPrivateKey([0x42; 32]);
+        assert_eq!(
+            hex::encode(encryption_edwards_key(&secret)),
+            "ef75b20e7540e3dff77404193652ba2bd13df99c1508eee1515e27ae25f28076"
+        );
+    }
+
+    #[test]
+    fn encryption_key_signature_verifies_strictly_over_the_tagged_challenge() {
+        let keys = &derived_encryption_keys()[1];
+        let digest = [0x5a; 32];
+        let signature =
+            DalekSignature::from_bytes(&sign_encryption_key_ownership(&keys.private, &digest));
+        let key = VerifyingKey::from_bytes(&encryption_edwards_key(&keys.private))
+            .expect("a valid point");
+        let challenge = |digest: &[u8; 32]| -> [u8; 32] {
+            Sha256::digest(
+                [
+                    b"privacy-pool/registry/encryption-key/v1".as_slice(),
+                    digest,
+                ]
+                .concat(),
+            )
+            .into()
+        };
+
+        assert!(key.verify_strict(&challenge(&digest), &signature).is_ok());
+        assert!(
+            key.verify_strict(&challenge(&[0x5b; 32]), &signature)
+                .is_err()
+        );
+        assert!(key.verify_strict(&digest, &signature).is_err());
+    }
+
+    #[test]
+    fn encryption_key_signature_is_deterministic() {
+        let keys = &derived_encryption_keys()[2];
+        let first = sign_encryption_key_ownership(&keys.private, &[0x5a; 32]);
+        assert_eq!(
+            first,
+            sign_encryption_key_ownership(&keys.private, &[0x5a; 32])
+        );
+        assert_ne!(
+            first,
+            sign_encryption_key_ownership(&keys.private, &[0x5b; 32])
+        );
     }
 }
