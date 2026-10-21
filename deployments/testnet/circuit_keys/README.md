@@ -9,6 +9,7 @@ This directory contains the Groth16 key material used by the testnet deployment.
 - `policy_tx_2_2_gvk_{V,T}` — GVK-enabled unrestricted pools (`GvkMode::ViewOnly` / `GvkMode::Traceable`; `V` / `T`).
 - `policy_tx_2_2_{A,B,AB}_gvk_{V,T}` — GVK-enabled pools for each ASP policy variant.
 - `selectiveDisclosure_{1,2,3,4}_*` — off-chain selective-disclosure receipt circuits.
+- `keyOwnership` — note key ownership proofs for the public key registry.
 
 ## Witness graphs (`*.graph.bin`)
 
@@ -22,7 +23,7 @@ the Rust circom crates used for R1CS), and graph generation requires a C++
 toolchain.
 
 Committed for all production stems: `policy_tx_2_2`, `policy_tx_2_2_{A,B,AB}`,
-`policy_tx_2_2_*_gvk_*`, and `selectiveDisclosure_{1..4}`.
+`policy_tx_2_2_*_gvk_*`, `selectiveDisclosure_{1..4}`, and `keyOwnership`.
 
 Policy entry points (`policy_tx_2_2*.circom`) compose a shared base transact circuit
 (`policyTransaction.circom`) with optional ASP modules (`aspMembership.circom`,
@@ -75,6 +76,14 @@ disclosure receipts only.
 Each hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`) for that circuit, not the SHA-256 of the JSON file. The same values are pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`.
 
 **Operational note:** Disclosure proof verification is entirely off-chain. Rotating any `selectiveDisclosure_N` key requires rebuilding the web app and updating the pinned `vk_hash` in the UI/docs; it does **not** require a pool contract redeploy.
+
+## Key ownership circuit (`keyOwnership`)
+
+Proves knowledge of the private key behind a registered note public key.
+Public inputs, in order: `publicKey`, `registrationHash`.
+
+**Provenance caveat:** The `keyOwnership` key pair was also **locally
+generated** (not produced by a trusted ceremony).
 
 ## Trusted ceremonies (historical)
 

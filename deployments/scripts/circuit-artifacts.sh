@@ -33,6 +33,7 @@ selectiveDisclosure_1
 selectiveDisclosure_2
 selectiveDisclosure_3
 selectiveDisclosure_4
+keyOwnership
 "
 
 file_for() {
