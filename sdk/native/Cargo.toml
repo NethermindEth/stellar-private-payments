@@ -73,6 +73,8 @@ hkdf = "0.13"
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.12", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
+# `in_gecko` tells `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`
+# instead of running `pkg-config` or linking system `-lsqlite3`.
 rusqlite = { workspace = true, features = ["in_gecko"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }

@@ -93,9 +93,6 @@ unused = 'warn'
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = [
-    "https://github.com/wasmerio/wasmer"
-]
 
 [sources.allow-org]
 github = ["NethermindEth"]

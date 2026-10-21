@@ -40,6 +40,3 @@ cast_sign_loss = "deny"
 needless_return = "deny"
 panicking_overflow_checks = "deny"
 unwrap_used = "deny"
-
-[patch.crates-io]
-cranelift-control = { path = "../vendor/cranelift-control" }
