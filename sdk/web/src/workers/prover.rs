@@ -18,15 +18,19 @@ use stellar_private_payments::{
     transact::PreparedProverTx,
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
-        DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
-        SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT,
-        SELECTIVE_DISCLOSURE_2_LEVELS, SELECTIVE_DISCLOSURE_2_N_NOTES,
-        SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
-        SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT,
-        SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
+        DisclosureReceipt, KEY_OWNERSHIP_CIRCUIT, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES,
+        SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_2_LEVELS,
+        SELECTIVE_DISCLOSURE_2_N_NOTES, SELECTIVE_DISCLOSURE_3_CIRCUIT,
+        SELECTIVE_DISCLOSURE_3_LEVELS, SELECTIVE_DISCLOSURE_3_N_NOTES,
+        SELECTIVE_DISCLOSURE_4_CIRCUIT, SELECTIVE_DISCLOSURE_4_LEVELS,
+        SELECTIVE_DISCLOSURE_4_N_NOTES,
     },
     zk::{
-        flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
+        flows::{
+            DisclosureNote, KeyOwnershipParams, SelectiveDisclosureParams, TransactParams,
+            selective_disclosure,
+        },
         prover::Prover as Groth16Prover,
         witness::WitnessCalculator,
     },
@@ -43,6 +47,7 @@ pub(crate) enum ProverWorkerRequest {
     Transact(TransactParams),
     Disclosure(disclosure::DisclosureProveParams),
     VerifyDisclosureProof(DisclosureReceipt, String),
+    KeyOwnership(KeyOwnershipParams),
     ConfigureCircuitsBase(String, String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
@@ -57,6 +62,7 @@ pub(crate) enum ProverWorkerResponse {
     TransactPrepared(PreparedProverTx),
     Disclosure(DisclosureReceipt),
     DisclosureProofVerified(bool),
+    KeyOwnershipProof(Vec<u8>),
     Logs(String),
 }
 
@@ -79,6 +85,7 @@ thread_local! {
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
+    static KEY_OWNERSHIP_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
 }
 
 fn circuit_err(error: Error) -> JsError {
@@ -228,6 +235,26 @@ async fn ensure_transact_prover(stem: &str) -> Result<(), JsError> {
 
     TRANSACT_PROVERS.with(|cell| {
         cell.borrow_mut().insert(stem.to_owned(), engine);
+    });
+
+    Ok(())
+}
+
+async fn ensure_key_ownership_prover() -> Result<(), JsError> {
+    if KEY_OWNERSHIP_PROVER.with(|s| s.borrow().is_some()) {
+        return Ok(());
+    }
+
+    let (graph_bytes, r1cs_bytes) = try_join!(
+        fetch_circuit_artifact(KEY_OWNERSHIP_CIRCUIT, "graph.bin"),
+        fetch_circuit_artifact(KEY_OWNERSHIP_CIRCUIT, "r1cs")
+    )?;
+
+    // A `ProverEngine` like the transact circuits, so it shares their builder.
+    let engine = build_transact_prover(KEY_OWNERSHIP_CIRCUIT, &graph_bytes, &r1cs_bytes).await?;
+
+    KEY_OWNERSHIP_PROVER.with(|cell| {
+        *cell.borrow_mut() = Some(engine);
     });
 
     Ok(())
@@ -469,6 +496,19 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::DisclosureProofVerified(proof_verified)
         }
+        ProverWorkerRequest::KeyOwnership(params) => {
+            tracing::debug!("[{WORKER_NAME}] key ownership");
+            ensure_key_ownership_prover()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let proof = KEY_OWNERSHIP_PROVER.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("key ownership prover is not initialized"))?
+                    .prove_key_ownership(params)
+            })?;
+            ProverWorkerResponse::KeyOwnershipProof(proof)
+        }
     };
     Ok(resp)
 }
@@ -638,6 +678,19 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::DisclosureProofVerified(v)) => Ok(v),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected prover worker response: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn prove_key_ownership(&self, params: KeyOwnershipParams) -> Result<Vec<u8>, Error> {
+        match self
+            .call(ProverWorkerRequest::KeyOwnership(params), PROVE_TIMEOUT_MS)
+            .await
+        {
+            Ok(ProverWorkerResponse::KeyOwnershipProof(proof)) => Ok(proof),
             Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected prover worker response: {other:?}"
             ))),
