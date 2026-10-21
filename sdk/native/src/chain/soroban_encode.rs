@@ -235,9 +235,10 @@ mod tests {
     /// Registers a trivial contract just to obtain a registered contract
     /// `Address` to stand in for a pool or token.
     fn register_dummy_contract(env: &Env) -> Address {
+        let verifier = <Address as soroban_sdk::testutils::Address>::generate(env);
         env.register(
             PublicKeyRegistry,
-            (soroban_sdk::String::from_str(env, "tests"),),
+            (soroban_sdk::String::from_str(env, "tests"), verifier),
         )
     }
 
