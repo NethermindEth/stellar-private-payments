@@ -172,25 +172,25 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Mandatory storage encryption
 
-`Storage.open` and `Storage.openEncrypted` require a `keyProvider` before starting the storage worker; `createNew: true` initializes a new encrypted database, while `createNew: false` opens an existing one. All tables—including synced chain state and settings—live inside that encrypted SQLite database, with no plaintext fallback or automatic migration.
+`Storage.open` and `Storage.openEncrypted` require a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
 
-In the web app, `keyProvider` unwraps a random 32-byte key stored in `localStorage` using `HKDF-SHA-256` and `AES-256-GCM` from a verified Freighter signature in a dedicated storage domain (two matching signatures on enrollment, one on subsequent unlocks). Locking closes the storage worker and reloads the page to clear decrypted memory, either manually or after the configurable inactivity timeout.
+In the web app, `keyProvider` seals a random 32-byte database key in `localStorage` under `AES-256-GCM`, using a wrapping key derived via `HKDF-SHA-256` from a verified Freighter signature in a dedicated storage domain. Enrolling a new database requests two signatures over the unlock message to confirm the wallet signs deterministically before sealing the key; later opens need one signature. When the user locks storage manually or the inactivity timer expires, the app closes the storage worker and reloads the page so decrypted state in WASM and JavaScript memory is discarded.
 
 ### Encrypted backups and recovery
 
-The app's **Local storage backup and recovery** controls export the encrypted OPFS files together with the wallet key envelope (up to 256 MiB). Exporting requires unlocked storage, closes the worker for a consistent snapshot, and reloads into the locked state. Because the backup contains only ciphertext and the wrapped key envelope, restoring it still requires the original unlocking wallet account.
+Because the database key is random and only its wrapped envelope lives in `localStorage`, the OPFS database files and the `localStorage` envelope depend on each other. The app's **Local storage backup and recovery** controls package both together into a single backup archive (up to 256 MiB). Exporting requires unlocked storage so the app can close the worker cleanly for a consistent snapshot, after which the tab reloads into the locked state. The archive holds only ciphertext and the wrapped key envelope, so restoring it still requires signing with the original unlocking wallet account.
 
-Importing requires locked storage and a backup from the same origin (`scheme`, `host`, and `port`). The app stages the files in a new OPFS directory, prompts the enrolled wallet to unlock it, and verifies SQLite integrity and foreign keys before switching the active envelope and directory in a single `localStorage` write. Failed imports leave current storage unchanged, and restored backups replace local state as of export time without merging later changes.
+Importing runs while storage is locked and accepts backups from the same origin (`scheme`, `host`, and `port`). Rather than overwriting the live database in place, the app stages the archive into a fresh OPFS directory, asks the enrolled wallet to unlock it, and runs SQLite integrity and foreign-key checks against the staged files. Only after those checks pass does a single `localStorage` write switch the active envelope and directory pointer; if anything fails along the way, the existing storage remains untouched. Restoring a backup replaces local state with the snapshot from export time and does not merge later local changes.
 
-If encrypted OPFS files exist without their `localStorage` key envelope, the wallet signature alone cannot recover the random database key; the app halts enrollment so the user can import a backup or reset storage. When legacy unencrypted browser storage (`.opfs-sahpool`) from an earlier version is present on disk, the app surfaces a notice and offers to delete it. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) deletes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds.
+If `localStorage` is cleared while encrypted OPFS files remain on disk, signing again with Freighter cannot reconstruct the lost random key. In that state, the app stops before enrollment so the user can either import a backup or wipe local storage cleanly. Separately, if an unencrypted `.opfs-sahpool` directory from an earlier build is still on disk, the app warns that legacy plaintext files are present and offers to remove them. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) removes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds.
 
-To run the isolated browser backup test after building the SDK:
+To run the browser backup round-trip test after building the SDK:
 
 ```sh
 node integration-tests-app/scripts/test-storage-backup.mjs
 ```
 
-It uses ephemeral signing keys and a temporary Chromium profile (`E2E_CHROMIUM_PATH` overrides the browser binary) without a Stellar network.
+The test drives a temporary Chromium profile with ephemeral signing keys (`E2E_CHROMIUM_PATH` overrides the browser binary) and does not need a Stellar network.
 
 ### Token amounts
 

@@ -157,40 +157,17 @@ See [`../web/README.md`](../web/README.md). JS method names align with Rust wher
 
 ## Mandatory storage encryption
 
-Persistent SDK storage requires a 32-byte `DatabaseKey` via
-`LocalStorage::open_encrypted`, `LocalStorage::open_with_key`,
-`LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`
-(with `state::native_wallet::unlock_with_stellar` and `unlock_with` handling
-wallet-sealed key envelopes and in-place plaintext migration). Keyless `open`,
-`connect`, `connect_file`, and `connect_existing_plaintext` calls return an
-error without opening or creating a file; in-memory storage remains available
-for transient work.
+Every persistent SQLite database is encrypted with SQLite3MC under a 32-byte `DatabaseKey`. Callers open storage through `LocalStorage::open_encrypted`, `LocalStorage::open_with_key`, `LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`, while `state::native_wallet::unlock_with_stellar` and `unlock_with` manage wallet-sealed key envelopes and migrate legacy plaintext files in place. The keyless `open`, `connect`, `connect_file`, and `connect_existing_plaintext` entry points reject persistent paths without touching the filesystem; in-memory storage remains available for transient work.
 
-The CLI unlocks `spp.db` with a Stellar CLI identity (`--storage-account <alias>`,
-`SPP_STORAGE_ACCOUNT`, or `defaults.storage_account` in TOML). It defaults to
-`--account`, independently of `--sign-as`; accountless commands such as
-`spp config show` require an explicit storage identity. On first use, the CLI
-requests two matching signatures over a dedicated storage message to confirm the
-signer is deterministic, derives a wrapping key with HKDF-SHA-256, and seals a
-random database key with XSalsa20-Poly1305 in `spp.db.key`. Subsequent runs need
-one signature and cache the key for that command. Pre-existing plaintext
-databases are encrypted in place on first open. Back up and restore `spp.db`
-and `spp.db.key` together; wrong identities, invalid signatures, or corrupted
-key records fail without modifying existing files.
+On the command line, the CLI unlocks `spp.db` with a Stellar CLI identity (`--storage-account <alias>`, `SPP_STORAGE_ACCOUNT`, or `defaults.storage_account` in TOML). That identity defaults to `--account` rather than `--sign-as`, so changing the transaction payer does not switch which key unlocks local storage. Commands that take no `--account`, such as `spp config show`, require `--storage-account` (or its env/config equivalent) explicitly.
+
+When initializing a database, the CLI asks the storage identity to sign a dedicated unlock message twice and checks that both signatures match before trusting the signer to be deterministic. It then derives a wrapping key from that signature with HKDF-SHA-256 and seals a random 32-byte database key with XSalsa20-Poly1305 in `spp.db.key`. Later runs request a single signature and reuse the unlocked key for the rest of the command. If `spp.db` is still an older plaintext database, the first open encrypts it in place. Because `spp.db.key` holds the wrapped random key, `spp.db` and `spp.db.key` must be backed up and restored together; a mismatched identity, invalid signature, or damaged key record aborts before modifying either file.
 
 For browser storage and backups, see [`../web/README.md`](../web/README.md#encrypted-backups-and-recovery).
 
 ### CLI storage threat model
 
-Encryption protects a copied `spp.db` and `spp.db.key` only while an attacker
-cannot sign the storage-unlock message with the enrolled identity. There is no
-separate storage password. If that Stellar CLI identity is stored as a plaintext
-secret on the same filesystem, anyone who can read that file alongside `spp.db`
-and `spp.db.key` can unwrap the database key. Keeping the signing key in an OS
-secure store or hardware wallet provides an actual boundary at rest, at the cost
-of a signer approval prompt whenever a CLI command opens storage. As with any
-at-rest encryption, decrypted data in a running process is not protected if the
-process itself is compromised.
+Encrypting `spp.db` under `spp.db.key` helps against a copied data directory only if an attacker cannot also sign the storage-unlock message with the enrolled identity. There is no separate storage password. If the Stellar CLI keeps that identity's secret key as an unencrypted file on the same disk, anyone who can read `spp.db` and `spp.db.key` can usually read the signing key too and unwrap the database. An OS secure store or hardware wallet is what puts a real boundary between the database files and the key that unlocks them, with the trade-off that each CLI invocation opening storage may prompt for signer approval. Once a command unlocks the database, plaintext state lives in process memory for the duration of that run.
 
 ### Token amounts
 
