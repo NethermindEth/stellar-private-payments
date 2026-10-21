@@ -1,7 +1,8 @@
 use super::{
     conversions::{
         field_to_scval_u256, scval_to_address_string, scval_to_baby_jub_jub_point, scval_to_bool,
-        scval_to_policy_flags, scval_to_tree_state, scval_to_u32, scval_to_u64, scval_to_u256,
+        scval_to_policy_flags, scval_to_string, scval_to_tree_state, scval_to_u32, scval_to_u64,
+        scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest},
     soroban_encode::BASE_FEE,
@@ -618,6 +619,22 @@ impl StateFetcher {
         )?;
         let retval = self.simulate_single_retval(&tx).await?;
         Ok(scval_to_bool(&retval)?)
+    }
+
+    /// Reads the key derivation domain the public key registry was deployed
+    /// with.
+    pub async fn registry_kdf_domain(&self) -> Result<String> {
+        let tx = build_invoke_contract_tx_envelope(
+            &self.config.deployer,
+            xdr::SequenceNumber(0),
+            BASE_FEE,
+            &self.config.public_key_registry,
+            "get_kdf_domain",
+            Vec::new(),
+            Vec::new(),
+        )?;
+        let retval = self.simulate_single_retval(&tx).await?;
+        Ok(scval_to_string(&retval)?)
     }
 
     async fn simulate_single_retval(&self, tx: &xdr::TransactionEnvelope) -> Result<xdr::ScVal> {

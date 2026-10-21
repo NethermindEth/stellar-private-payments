@@ -5,7 +5,10 @@
 //! cost (deserializing the proving key, compiling the circuit WASM). Any
 //! attempt to actually prove returns an error rather than silently misbehaving.
 
-use crate::{types::DisclosureReceipt, zk::flows::TransactParams};
+use crate::{
+    types::DisclosureReceipt,
+    zk::flows::{KeyOwnershipParams, TransactParams},
+};
 
 use crate::{disclosure::DisclosureProveParams, error::Error, transact::PreparedProverTx};
 
@@ -35,6 +38,10 @@ impl Prover for NoopProver {
         _receipt: &DisclosureReceipt,
         _expected_vk_hash: &str,
     ) -> Result<bool, Error> {
+        Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
+    }
+
+    async fn prove_key_ownership(&self, _params: KeyOwnershipParams) -> Result<Vec<u8>, Error> {
         Err(Error::Other(anyhow::anyhow!(READ_ONLY)))
     }
 }

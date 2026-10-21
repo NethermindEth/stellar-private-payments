@@ -1,6 +1,9 @@
 //! Off-chain Soroban `ScVal` encoding for pool contract calls.
 
-use crate::types::{BabyJubJubPoint, ExtData, Field, GlobalViewKeyCiphertext};
+use crate::{
+    registration::RegistrationProof,
+    types::{BabyJubJubPoint, ExtData, Field, GlobalViewKeyCiphertext},
+};
 use anyhow::{Result, anyhow};
 use stellar_xdr::{self as xdr, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal};
 
@@ -187,6 +190,21 @@ pub fn pool_ext_data_to_scval(ext: &ExtData) -> Result<ScVal> {
     ])
 }
 
+/// Encodes the registry's `KeyOwnershipProof` for `register`.
+pub fn registration_proof_to_scval(proof: &RegistrationProof) -> Result<ScVal> {
+    sorted_map(vec![
+        map_entry(
+            "encryption_key_signature",
+            bytes_to_scval(proof.encryption_key_signature)?,
+        )?,
+        map_entry(
+            "note_key_proof",
+            groth16_proof_to_scval(&proof.note_key_proof)?,
+        )?,
+        map_entry("owner_signature", bytes_to_scval(proof.owner_signature)?)?,
+    ])
+}
+
 /// Encodes a public-key registration `Account` for `register`.
 pub fn register_account_to_scval(
     owner: &str,
@@ -209,7 +227,7 @@ mod tests {
     use contract_types::Groth16Proof;
     use pool::{ExtData as PoolExtData, Proof, hash_ext_data};
     use pool_gvk::{Proof as PoolGvkProof, gvk::GvkCiphertext};
-    use public_key_registry::{Account, PublicKeyRegistry};
+    use public_key_registry::{Account, KeyOwnershipProof, PublicKeyRegistry};
     use soroban_sdk::{
         Address, Bytes, BytesN, Env, I256, U256 as SorobanU256, Vec,
         crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -435,6 +453,28 @@ mod tests {
                 soroban_bytes32(&encryption_key),
                 soroban_bytes32(&note_key),
             )
+            .expect("encode"),
+        );
+        assert_eq!(ours, soroban_xdr_to_vec(expected));
+    }
+
+    #[test]
+    fn registration_proof_encoding_matches_contracttype_xdr() {
+        let env = Env::default();
+        let note_key_proof = mk_mock_groth16_proof(&env);
+        let on_chain = KeyOwnershipProof {
+            note_key_proof: note_key_proof.clone(),
+            encryption_key_signature: BytesN::from_array(&env, &[0x02; 64]),
+            owner_signature: BytesN::from_array(&env, &[0x03; 64]),
+        };
+        let expected = on_chain.to_xdr(&env);
+
+        let ours = scval_xdr(
+            &registration_proof_to_scval(&RegistrationProof {
+                note_key_proof: proof_uncompressed_from_contract(&note_key_proof),
+                encryption_key_signature: [0x02; 64],
+                owner_signature: [0x03; 64],
+            })
             .expect("encode"),
         );
         assert_eq!(ours, soroban_xdr_to_vec(expected));

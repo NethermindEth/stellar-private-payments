@@ -28,6 +28,7 @@ use crate::{
     core::process_local_state,
     disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
     error::Error,
+    registration::{RegistrationInputs, RegistrationRequest, build_registration_inputs},
     transact::TransactRequest,
 };
 
@@ -169,6 +170,13 @@ impl Storage for LocalStorage {
             &self.storage(),
             req,
         ))
+    }
+
+    async fn build_registration_inputs(
+        &self,
+        req: &RegistrationRequest,
+    ) -> Result<RegistrationInputs, Error> {
+        build_registration_inputs(&self.storage(), req)
     }
 
     async fn privacy_keys_exist(

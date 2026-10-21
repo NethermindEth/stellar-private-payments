@@ -1,6 +1,9 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
-use crate::types::{ExtData, NoteOwnerAddress, SignerAddress};
+use crate::{
+    registration::RegistrationProof,
+    types::{ExtData, NoteOwnerAddress, SignerAddress},
+};
 use anyhow::{Result, anyhow, bail, ensure};
 use stellar_xdr::{self as xdr};
 
@@ -8,7 +11,7 @@ use super::{
     contract_state::{OnchainProofPublicInputs, PreparedSorobanTx, StateFetcher},
     soroban_encode::{
         BASE_FEE, pool_ext_data_to_scval, pool_gvk_proof_to_scval, pool_proof_to_scval,
-        register_account_to_scval,
+        register_account_to_scval, registration_proof_to_scval,
     },
     tx_assemble::{build_invoke_contract_tx_envelope, invoke_contract_args},
 };
@@ -113,14 +116,18 @@ impl StateFetcher {
     /// they do differ the simulation returns an auth entry for `owner`, and
     /// the wallet must collect that signature in addition to `payer`'s
     /// signature on the envelope.
+    ///
+    /// `encryption_key` is the Edwards encoding the registry stores.
     pub async fn prepare_register(
         &self,
         owner: &NoteOwnerAddress,
         payer: &SignerAddress,
         note_key: [u8; 32],
         encryption_key: [u8; 32],
+        proof: &RegistrationProof,
     ) -> Result<PreparedSorobanTx> {
         let account_scval = register_account_to_scval(owner.as_str(), encryption_key, note_key)?;
+        let proof_scval = registration_proof_to_scval(proof)?;
 
         let payer = payer.as_str();
         let seq = self.account_sequence(payer).await?;
@@ -130,7 +137,7 @@ impl StateFetcher {
             BASE_FEE,
             &self.contract_config().public_key_registry,
             "register",
-            vec![account_scval],
+            vec![account_scval, proof_scval],
             Vec::new(),
         )?;
 
@@ -425,8 +432,13 @@ mod tests {
         let fetcher = StateFetcher::new(RpcClient::new(&server.uri()).expect("rpc client"), config)
             .expect("state fetcher");
 
+        let proof = RegistrationProof {
+            note_key_proof: vec![0x01; 256],
+            encryption_key_signature: [0x02; 64],
+            owner_signature: [0x03; 64],
+        };
         let prepared = fetcher
-            .prepare_register(&owner, &payer, [0xAB; 32], [0xEE; 32])
+            .prepare_register(&owner, &payer, [0xAB; 32], [0xEE; 32], &proof)
             .await
             .expect("prepare register");
 
@@ -474,11 +486,15 @@ mod tests {
             panic!("expected contract invoke");
         };
         assert_eq!(args.function_name.to_string(), "register");
-        assert_eq!(args.args.len(), 1);
+        assert_eq!(args.args.len(), 2);
         assert_eq!(
             owner_of_register_arg(&args.args[0]),
             owner.as_str().parse::<xdr::ScAddress>().expect("address"),
             "the registry key must be the owner, not the payer",
+        );
+        assert_eq!(
+            args.args[1],
+            registration_proof_to_scval(&proof).expect("proof scval")
         );
     }
 

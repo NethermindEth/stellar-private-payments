@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Mutex};
 use anyhow::Context;
 
 use crate::{
-    types::{CircuitStem, DisclosureReceipt},
-    zk::flows::TransactParams,
+    types::{CircuitStem, DisclosureReceipt, KEY_OWNERSHIP_CIRCUIT},
+    zk::flows::{KeyOwnershipParams, TransactParams},
 };
 
 use super::{Prover, ProverEngine};
@@ -18,14 +18,15 @@ use crate::{
     types::ProverArtifacts,
 };
 
-/// In-process Groth16 prover for pool transact and selective-disclosure
-/// circuits.
+/// In-process Groth16 prover for pool transact, selective-disclosure and
+/// key ownership circuits.
 ///
 /// Transact engines are keyed by [`CircuitStem`]. Disclosure engines are keyed
 /// by their registered circuit name.
 pub struct LocalProver {
     transact: Mutex<HashMap<CircuitStem, ProverEngine>>,
     disclosure: Mutex<HashMap<&'static str, ProverEngine>>,
+    key_ownership: Mutex<Option<ProverEngine>>,
 }
 
 impl LocalProver {
@@ -93,6 +94,25 @@ impl LocalProver {
         Ok(Self {
             transact: Mutex::new(transact),
             disclosure: Mutex::new(disclosure),
+            key_ownership: Mutex::new(None),
+        })
+    }
+
+    /// A prover for the `keyOwnership` circuit only, which is all that
+    /// registering keys needs.
+    pub fn from_key_ownership_artifacts(artifacts: &ProverArtifacts) -> Result<Self, Error> {
+        Ok(Self {
+            transact: Mutex::new(HashMap::new()),
+            disclosure: Mutex::new(HashMap::new()),
+            key_ownership: Mutex::new(Some(key_ownership_engine(artifacts)?)),
+        })
+    }
+
+    /// Adds the `keyOwnership` circuit, so this prover can also register keys.
+    pub fn with_key_ownership_artifacts(self, artifacts: &ProverArtifacts) -> Result<Self, Error> {
+        Ok(Self {
+            key_ownership: Mutex::new(Some(key_ownership_engine(artifacts)?)),
+            ..self
         })
     }
 
@@ -109,6 +129,15 @@ impl LocalProver {
             .context("prove")
             .map_err(Into::into)
     }
+}
+
+fn key_ownership_engine(artifacts: &ProverArtifacts) -> Result<ProverEngine, Error> {
+    Ok(ProverEngine::new(
+        &artifacts.proving_key,
+        &artifacts.circuit_graph,
+        &artifacts.circuit_r1cs,
+    )
+    .with_context(|| format!("init prover for {KEY_OWNERSHIP_CIRCUIT}"))?)
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
@@ -159,6 +188,21 @@ impl Prover for LocalProver {
         engine
             .verify_disclosure(receipt, expected_vk_hash)
             .context("verify disclosure proof")
+            .map_err(Into::into)
+    }
+
+    async fn prove_key_ownership(&self, params: KeyOwnershipParams) -> Result<Vec<u8>, Error> {
+        self.key_ownership
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other(anyhow::anyhow!(
+                    "no prover configured for {KEY_OWNERSHIP_CIRCUIT}"
+                ))
+            })?
+            .prove_key_ownership(params)
+            .context("prove key ownership")
             .map_err(Into::into)
     }
 }

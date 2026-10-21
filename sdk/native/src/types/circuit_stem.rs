@@ -6,6 +6,9 @@ use core::{fmt, str::FromStr};
 
 const GVK_STEM_SUFFIX: &str = "_gvk_";
 
+/// Circuit that proves ownership of a note key to the public key registry.
+pub const KEY_OWNERSHIP_CIRCUIT: &str = "keyOwnership";
+
 /// Identifies a circuit artifact.
 ///
 /// Combines [`PolicyFlags`] with [`GvkMode`]. Non-GVK pools use plain

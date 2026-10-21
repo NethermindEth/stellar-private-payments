@@ -139,7 +139,7 @@ mod store {
 
     use super::{CircuitLockfile, Error};
     use crate::types::{
-        CircuitStem, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        CircuitStem, KEY_OWNERSHIP_CIRCUIT, ProverArtifacts, SELECTIVE_DISCLOSURE_1_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
         SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
@@ -222,6 +222,10 @@ mod store {
                 .copied()
                 .map(|stem| self.artifacts(stem).map(|artifacts| (stem, artifacts)))
                 .collect()
+        }
+
+        pub fn key_ownership_artifacts(&self) -> Result<ProverArtifacts, Error> {
+            self.artifacts(KEY_OWNERSHIP_CIRCUIT)
         }
 
         fn ready(&self, lock: &CircuitLockfile) -> bool {
@@ -312,8 +316,9 @@ pub use store::CircuitStore;
 mod tests {
     use super::*;
     use crate::types::{
-        CircuitStem, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_2_CIRCUIT,
-        SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_4_CIRCUIT,
+        CircuitStem, KEY_OWNERSHIP_CIRCUIT, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_3_CIRCUIT,
+        SELECTIVE_DISCLOSURE_4_CIRCUIT,
     };
 
     const DISCLOSURE_STEMS: [&str; 4] = [
@@ -324,7 +329,7 @@ mod tests {
     ];
 
     #[test]
-    fn lockfile_covers_transact_and_disclosure() {
+    fn lockfile_covers_transact_disclosure_and_key_ownership() {
         let lock = circuit_lock(include_str!("../circuits.json")).expect("parse test lock");
         assert!(!lock.version.is_empty());
         for stem in CircuitStem::all_transact_stems() {
@@ -334,6 +339,7 @@ mod tests {
         for stem in DISCLOSURE_STEMS {
             assert!(lock.circuits.contains_key(stem), "missing {stem}");
         }
+        assert!(lock.circuits.contains_key(KEY_OWNERSHIP_CIRCUIT));
     }
     #[test]
     fn one_sdk_accepts_distinct_runtime_locks_without_weakening_hash_checks() {

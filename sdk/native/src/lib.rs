@@ -55,6 +55,7 @@ pub mod network_defaults;
 pub mod plan;
 pub mod planner;
 pub mod prover;
+pub mod registration;
 pub mod state;
 pub mod transact;
 pub mod types;

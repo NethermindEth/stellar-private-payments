@@ -10,8 +10,8 @@ use crate::{
     chain::hash_ext_data_offchain,
     zk::{
         flows::{
-            DisclosureNote, SelectiveDisclosureParams, TransactArtifacts, TransactParams,
-            selective_disclosure, transact,
+            DisclosureNote, KeyOwnershipParams, SelectiveDisclosureParams, TransactArtifacts,
+            TransactParams, key_ownership, selective_disclosure, transact,
         },
         prover::Prover as Groth16Prover,
         witness::WitnessCalculator,
@@ -149,6 +149,39 @@ impl ProverEngine {
         crate::zk::disclosure::verify_receipt_proof(receipt, &vk_bytes, expected_vk_hash)
     }
 
+    /// Proves the `keyOwnership` circuit and returns the uncompressed proof
+    /// (256 bytes, the registry's `Groth16Proof` encoding).
+    pub fn prove_key_ownership(&self, params: KeyOwnershipParams) -> Result<Vec<u8>> {
+        let circuit_inputs_json = serde_json::to_string(&key_ownership(&params)?)?;
+        let witness_bytes = self
+            .witness
+            .compute_witness(&circuit_inputs_json)
+            .context("key ownership witness calculation failed")?;
+
+        let public_inputs = self.prover.extract_public_inputs(&witness_bytes)?;
+        let expected = [
+            params.note_public_key.0,
+            params.registration_hash.to_le_bytes(),
+        ]
+        .concat();
+        if public_inputs != expected {
+            anyhow::bail!("key ownership public inputs are not [publicKey, registrationHash]");
+        }
+
+        let proof_compressed = self.prover.prove_bytes(&witness_bytes)?;
+        if !self.prover.verify(&proof_compressed, &public_inputs)? {
+            anyhow::bail!("key ownership proof verification failed");
+        }
+        let proof_uncompressed = self.prover.proof_bytes_to_uncompressed(&proof_compressed)?;
+        if proof_uncompressed.len() != 256 {
+            anyhow::bail!(
+                "unexpected uncompressed proof length: {}",
+                proof_uncompressed.len()
+            );
+        }
+        Ok(proof_uncompressed)
+    }
+
     fn prove(&self, artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
         let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
         let ext_data = artifacts.ext_data.clone();
@@ -213,6 +246,14 @@ pub trait Prover {
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<bool, Error>;
+
+    /// Proves ownership of a note key for the public key registry and returns
+    /// the uncompressed proof (256 bytes).
+    async fn prove_key_ownership(&self, _params: KeyOwnershipParams) -> Result<Vec<u8>, Error> {
+        Err(Error::Other(anyhow::anyhow!(
+            "this prover cannot prove note key ownership"
+        )))
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

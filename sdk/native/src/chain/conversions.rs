@@ -179,6 +179,14 @@ pub(crate) fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     }
 }
 
+pub(crate) fn scval_to_string(val: &xdr::ScVal) -> Result<String, Error> {
+    if let xdr::ScVal::String(s) = val {
+        String::from_utf8(s.0.to_vec()).map_err(|e| Error::UnexpectedScVal(e.to_string()))
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
 /// Decode pool ASP policy flags from contract storage.
 pub(crate) fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFlags, Error> {
     if let xdr::ScVal::U32(bits) = val {

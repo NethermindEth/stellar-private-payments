@@ -820,7 +820,7 @@ mod registration_tests {
         Address, Bytes, BytesN, Env, crypto::bn254::Bn254Fr, testutils::Address as _,
     };
 
-    const OWNER: &str = "GABAGOLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const OWNER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPP4V";
 
     fn strkey(address: &Address) -> String {
         let strkey = address.to_string();

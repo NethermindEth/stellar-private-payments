@@ -62,7 +62,8 @@ mod tests {
     use super::*;
     use crate::{
         state::test_events::{b64, commitment_entries, commitment_event, raw_event, symbol, u256},
-        types::{ContractEvent, ContractsEventData},
+        types::{ContractEvent, ContractsEventData, EncryptionPrivateKey},
+        zk::encryption::encryption_edwards_key,
     };
     use stellar_xdr as xdr;
 
@@ -159,37 +160,86 @@ mod tests {
         Ok(())
     }
 
+    fn owner(seed: u8) -> xdr::ScVal {
+        xdr::ScVal::Address(xdr::ScAddress::Account(xdr::AccountId(
+            xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([seed; 32])),
+        )))
+    }
+
+    fn registered_key(storage: &SqliteStorage, owner_seed: u8) -> Result<Option<[u8; 32]>> {
+        let address = crate::chain::scval_to_address_string(&owner(owner_seed))?;
+        Ok(storage
+            .lookup_public_key_by_address(&address)?
+            .map(|entry| entry.encryption_key.0))
+    }
+
+    /// A registration event as the registry emits it, with `encryption_key`
+    /// as given.
+    fn registration(id: &str, owner_seed: u8, encryption_key: [u8; 32]) -> Result<ContractEvent> {
+        let bytes = |b: Vec<u8>| -> Result<xdr::ScVal> {
+            Ok(xdr::ScVal::Bytes(xdr::ScBytes(b.try_into()?)))
+        };
+        let entries = vec![
+            xdr::ScMapEntry {
+                key: symbol("encryption_key")?,
+                val: bytes(encryption_key.to_vec())?,
+            },
+            xdr::ScMapEntry {
+                key: symbol("note_key")?,
+                val: bytes(vec![owner_seed; 32])?,
+            },
+        ];
+        raw_event(
+            id,
+            &[symbol("public_key_event")?, owner(owner_seed)],
+            entries,
+        )
+    }
+
+    fn edwards_key(secret: u8) -> [u8; 32] {
+        encryption_edwards_key(&EncryptionPrivateKey([secret; 32]))
+    }
+
+    fn x25519_key(secret: u8) -> [u8; 32] {
+        x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from([secret; 32])).to_bytes()
+    }
+
     #[test]
     fn a_same_ledger_re_registration_resolves_to_the_later_key() -> Result<()> {
-        let owner = xdr::ScVal::Address(xdr::ScAddress::Account(xdr::AccountId(
-            xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([7; 32])),
-        )));
-        let registration = |id, key: u8| -> Result<ContractEvent> {
-            let bytes = xdr::ScVal::Bytes(xdr::ScBytes(vec![key; 32].try_into()?));
-            let entries = vec![
-                xdr::ScMapEntry {
-                    key: symbol("encryption_key")?,
-                    val: bytes.clone(),
-                },
-                xdr::ScMapEntry {
-                    key: symbol("note_key")?,
-                    val: bytes,
-                },
-            ];
-            raw_event(id, &[symbol("public_key_event")?, owner.clone()], entries)
-        };
         let mut storage = storage_with(vec![
-            registration("0000000000000000001-0000000000", 1)?,
-            registration("0000000000000000001-0000000001", 2)?,
+            registration("0000000000000000001-0000000000", 7, edwards_key(1))?,
+            registration("0000000000000000001-0000000001", 7, edwards_key(2))?,
         ])?;
 
         assert!(process_events(&mut storage, 1)?);
         assert!(process_events(&mut storage, 1)?);
 
-        let entry = storage
-            .lookup_public_key_by_address(&crate::chain::scval_to_address_string(&owner)?)?
-            .expect("registered");
-        assert_eq!(entry.encryption_key.0, [2; 32]);
+        assert_eq!(registered_key(&storage, 7)?, Some(x25519_key(2)));
+        Ok(())
+    }
+
+    /// An encoding that is not a curve point is skipped, and the events after
+    /// it are still processed.
+    #[test]
+    fn a_registration_whose_key_is_not_a_point_is_skipped() -> Result<()> {
+        let not_a_point = (2u8..)
+            .map(|y| {
+                let mut key = [0u8; 32];
+                key[0] = y;
+                key
+            })
+            .find(|key| ed25519_dalek::VerifyingKey::from_bytes(key).is_err())
+            .expect("some y is not on the curve");
+        let mut storage = storage_with(vec![
+            registration("0000000000000000001-0000000000", 7, not_a_point)?,
+            registration("0000000000000000002-0000000000", 8, edwards_key(1))?,
+        ])?;
+
+        assert!(process_events(&mut storage, 10)?);
+        assert!(!process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, 7)?, None);
+        assert_eq!(registered_key(&storage, 8)?, Some(x25519_key(1)));
         Ok(())
     }
 }

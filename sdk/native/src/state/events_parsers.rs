@@ -5,11 +5,13 @@ use crate::{
         scval_to_optional_global_view_key_ciphertext, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     types::{
-        ContractEvent, Field, LeafAddedEvent, LeafDeletedEvent, LeafInsertedEvent,
-        LeafUpdatedEvent, NewCommitmentEvent, NewNullifierEvent, ProcessedEvent, PublicKeyEvent,
+        ContractEvent, EncryptionPublicKey, Field, LeafAddedEvent, LeafDeletedEvent,
+        LeafInsertedEvent, LeafUpdatedEvent, NewCommitmentEvent, NewNullifierEvent, ProcessedEvent,
+        PublicKeyEvent,
     },
 };
 use anyhow::{Result, anyhow};
+use ed25519_dalek::VerifyingKey;
 
 /// Field name emitted by `contracts/pool-gvk`'s pool events, carrying the
 /// admin-decryptable ciphertext of the note.
@@ -36,9 +38,10 @@ pub fn parse_event(event: ContractEvent) -> Result<Option<ProcessedEvent>> {
             ProcessedEvent::Commitment(parse_new_commitment_event(parsed()?)?)
         }
         // Public keys registry contracts/public-key-registry/src/lib.rs
-        "public_key_event" | "PublicKeyEvent" => {
-            ProcessedEvent::PublicKey(parse_public_key_event(parsed()?)?)
-        }
+        "public_key_event" | "PublicKeyEvent" => match parse_public_key_event(parsed()?)? {
+            Some(ev) => ProcessedEvent::PublicKey(ev),
+            None => return Ok(None),
+        },
         // ASP membership events contracts/asp-membership
         "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed()?)?),
         // ASP non-membership events contracts/asp-non-membership
@@ -148,12 +151,17 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //     /// Address of the account owner
 //     #[topic]
 //     pub owner: Address,
-//     /// X25519 encryption public key
+//     /// Edwards encoding of the X25519 encryption public key
 //     pub encryption_key: Bytes,
 //     /// BN254 note public key
 //     pub note_key: Bytes,
 // }
-fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent> {
+//
+// The encryption key is stored in its X25519 form. An encoding that is not a
+// curve point is skipped rather than failed, so it can't stop the processing
+// of later events; the registry only accepts keys that signed, which are
+// points.
+fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKeyEvent>> {
     let ParsedContractEvent {
         id,
         name,
@@ -168,17 +176,23 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent>
     let encryption_key_scval = values
         .get("encryption_key")
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have an encryption_key value"))?;
-    let encryption_key = scval_to_bytes(encryption_key_scval)?.try_into()?;
+    let edwards: [u8; 32] = scval_to_bytes(encryption_key_scval)?
+        .try_into()
+        .map_err(|_| anyhow!("event `{name}` id {id}: encryption_key is not 32 bytes"))?;
     let note_key_scval = values
         .get("note_key")
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have an note_key value"))?;
     let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
-    Ok(PublicKeyEvent {
+    let Ok(encryption_key) = VerifyingKey::from_bytes(&edwards) else {
+        tracing::warn!(%id, "skipping a registration whose encryption key is not a curve point");
+        return Ok(None);
+    };
+    Ok(Some(PublicKeyEvent {
         id,
         owner,
-        encryption_key,
+        encryption_key: EncryptionPublicKey(encryption_key.to_montgomery().to_bytes()),
         note_key,
-    })
+    }))
 }
 
 // Event emitted when a new leaf is added to the Merkle tree
