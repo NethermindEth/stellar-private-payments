@@ -59,14 +59,6 @@ pub enum OpenPurpose {
     OpenExisting,
 }
 
-#[async_trait::async_trait(?Send)]
-pub trait DatabaseKeyProvider {
-    /// Return the same recoverable key for subsequent opens of this database.
-    /// Wrapping and unlocking belong to the provider; SQLite only receives the
-    /// random database key.
-    async fn acquire(&self, database_id: &str, purpose: OpenPurpose) -> Result<DatabaseKey>;
-}
-
 #[allow(unsafe_code)]
 unsafe extern "C" {
     fn sqlite3_key(db: *mut rusqlite::ffi::sqlite3, key: *const c_void, len: c_int) -> c_int;

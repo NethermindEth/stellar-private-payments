@@ -68,19 +68,6 @@ impl LocalStorage {
         })
     }
 
-    /// Open encrypted storage after acquiring its key. Provider failure leaves
-    /// the database untouched; forks retain a zeroizing shared key until
-    /// closed.
-    pub async fn open_with_key_provider(
-        storage_path: &str,
-        database_id: &str,
-        purpose: crate::state::database_key::OpenPurpose,
-        provider: &(impl crate::state::database_key::DatabaseKeyProvider + ?Sized),
-    ) -> Result<Self, Error> {
-        let key = provider.acquire(database_id, purpose).await?;
-        Self::open_encrypted(storage_path, key, purpose)
-    }
-
     pub fn storage(&self) -> MutexGuard<'_, SqliteStorage> {
         self.db.lock().expect("storage lock poisoned")
     }
