@@ -1252,6 +1252,7 @@ dependencies = [
  "ark-circom",
  "ark-ff 0.6.0",
  "ark-groth16",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",

@@ -1,8 +1,9 @@
 use super::general::scalar_to_bigint;
 use anyhow::{Context, Result, anyhow};
 use ark_bn254::{Bn254, Fr};
-use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
+use ark_circom::{CircomBuilder, CircomCircuit, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
@@ -293,6 +294,37 @@ pub fn load_keys(pk_path: impl AsRef<Path>) -> Result<CircuitKeys> {
     Ok(CircuitKeys { pk, vk, pvk })
 }
 
+/// Builds a Circom circuit populated with the witness computed from `inputs`.
+///
+/// The witness is indexed by R1CS wire (no wire mapping), so callers can
+/// tamper with individual wires before synthesizing constraints.
+pub fn build_circuit(
+    wasm_path: impl AsRef<Path>,
+    r1cs_path: impl AsRef<Path>,
+    inputs: &Inputs,
+) -> Result<CircomCircuit<Fr>> {
+    let cfg = CircomConfig::<Fr>::new(wasm_path.as_ref(), r1cs_path.as_ref())
+        .map_err(|e| anyhow!("CircomConfig error: {e}"))?;
+
+    let mut builder = CircomBuilder::new(cfg);
+
+    for (signal, value) in inputs.iter() {
+        push_value(&mut builder, signal, value);
+    }
+
+    builder.build().map_err(|e| anyhow!("build failed: {e}"))
+}
+
+/// Returns whether the circuit's witness satisfies every R1CS constraint.
+pub fn r1cs_satisfied(circuit: CircomCircuit<Fr>) -> Result<bool> {
+    let cs = ConstraintSystem::<Fr>::new_ref();
+    circuit
+        .generate_constraints(cs.clone())
+        .map_err(|e| anyhow!("generate_constraints failed: {e}"))?;
+    cs.is_satisfied()
+        .map_err(|e| anyhow!("is_satisfied failed: {e}"))
+}
+
 /// Proves and verifies a Circom circuit using precomputed Groth16 keys.
 /// This is the preferred function when repeated proofs must be generated.
 ///
@@ -309,16 +341,7 @@ pub fn prove_and_verify_with_keys(
     inputs: &Inputs,
     keys: &CircuitKeys,
 ) -> Result<CircomResult> {
-    let cfg = CircomConfig::<Fr>::new(wasm_path.as_ref(), r1cs_path.as_ref())
-        .map_err(|e| anyhow!("CircomConfig error: {e}"))?;
-
-    let mut builder = CircomBuilder::new(cfg);
-
-    for (signal, value) in inputs.iter() {
-        push_value(&mut builder, signal, value);
-    }
-
-    let circuit = builder.build().map_err(|e| anyhow!("build failed: {e}"))?;
+    let circuit = build_circuit(wasm_path, r1cs_path, inputs)?;
 
     let mut rng = thread_rng();
 

@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys},
+        circom_tester::{
+            Inputs, build_circuit, generate_keys, prove_and_verify_with_keys, r1cs_satisfied,
+        },
         general::load_artifacts,
         keypair::derive_public_key,
     };
@@ -10,12 +12,12 @@ mod tests {
     use ark_circom::CircomReduction;
     use ark_groth16::Groth16;
     use ark_snark::SNARK;
-    use std::{
-        panic::{self, AssertUnwindSafe},
-        path::Path,
-    };
 
     const CIRCUIT: &str = "keyOwnership";
+
+    // Circom wire layout: constant one, outputs, public inputs, private inputs.
+    const PUBLIC_KEY_WIRE: usize = 1;
+    const PRIVATE_KEY_WIRE: usize = 3;
 
     fn inputs(private_key: Scalar, public_key: Scalar, registration_hash: Scalar) -> Inputs {
         let mut inputs = Inputs::new();
@@ -23,18 +25,6 @@ mod tests {
         inputs.set("registrationHash", registration_hash);
         inputs.set("privateKey", private_key);
         inputs
-    }
-
-    fn proof_verifies(
-        wasm: impl AsRef<Path>,
-        r1cs: impl AsRef<Path>,
-        inputs: &Inputs,
-        keys: &CircuitKeys,
-    ) -> bool {
-        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-            prove_and_verify_with_keys(wasm.as_ref(), r1cs.as_ref(), inputs, keys)
-        }));
-        matches!(outcome, Ok(Ok(ref res)) if res.verified)
     }
 
     #[test]
@@ -59,15 +49,29 @@ mod tests {
     #[ignore]
     fn test_key_ownership_wrong_private_key_fails() -> Result<()> {
         let (wasm, r1cs) = load_artifacts(CIRCUIT)?;
-        let keys = generate_keys(&wasm, &r1cs)?;
 
-        let pk = derive_public_key(Scalar::from(7u64));
-        assert!(!proof_verifies(
-            &wasm,
-            &r1cs,
-            &inputs(Scalar::from(8u64), pk, Scalar::from(1u64)),
-            &keys,
-        ));
+        let real_pk = derive_public_key(Scalar::from(7u64));
+        let wrong_sk = Scalar::from(8u64);
+        let wrong_pk = derive_public_key(wrong_sk);
+        let hash = Scalar::from(1u64);
+
+        // Compute an honest witness for the wrong key and swap in the real public key afterwards.
+        let mut circuit = build_circuit(&wasm, &r1cs, &inputs(wrong_sk, wrong_pk, hash))?;
+        assert!(r1cs_satisfied(circuit.clone())?);
+
+        let witness = circuit
+            .witness
+            .as_mut()
+            .ok_or_else(|| anyhow!("missing witness"))?;
+        assert_eq!(witness[PRIVATE_KEY_WIRE], wrong_sk);
+        assert_eq!(witness[PUBLIC_KEY_WIRE], wrong_pk);
+        witness[PUBLIC_KEY_WIRE] = real_pk;
+
+        assert_eq!(circuit.get_public_inputs(), Some(vec![real_pk, hash]));
+        assert!(
+            !r1cs_satisfied(circuit)?,
+            "R1CS accepted a private key that does not derive the public key"
+        );
         Ok(())
     }
 
