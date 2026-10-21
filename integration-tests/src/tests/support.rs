@@ -163,8 +163,13 @@ async fn build_session(
                 .with_context(|| format!("unregistered disclosure circuit: {name}"))
         })
         .collect::<Result<Vec<_>>>()?;
+    let key_ownership_artifacts = store
+        .key_ownership_artifacts()
+        .context("load key ownership circuit artifacts")?;
     let prover = LocalProver::from_all_artifacts(&circuit_artifacts, &disclosure_artifacts)
         .context("init local prover")?
+        .with_key_ownership_artifacts(&key_ownership_artifacts)
+        .context("init key ownership prover")?
         .into();
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;

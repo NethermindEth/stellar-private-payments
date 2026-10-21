@@ -21,7 +21,7 @@ soroban-sdk.workspace = true
 
 [dev-dependencies]
 # external
-ed25519-dalek = { version = "3.0", default-features = false }
+ed25519-dalek.workspace = true
 sha2.workspace = true
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
