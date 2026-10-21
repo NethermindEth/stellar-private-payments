@@ -27,21 +27,21 @@ test('a missing or off gvkMode adds no view key control', () => {
 test('an open pool with a view key shows both controls', () => {
   const open = pool(fakeId('CBOPEN'), [], 'traceable');
   assert.deepEqual(poolControls(open), ['open', 'traceable']);
-  assert.equal(poolSelectLabel(open, [open, BLOCKLIST]), 'XLM · Open · Traceable · CBOPEN...AAAA');
+  assert.equal(poolSelectLabel(open, [open, BLOCKLIST]), 'XLM · CBOPEN...AAAA · Open · Traceable');
 });
 
 test('a pool alone on its asset still shows its controls and short ID', () => {
-  assert.deepEqual(labels([TRACEABLE]), ['XLM · Blocklist · Traceable · CCIVQD...GWFL']);
+  assert.deepEqual(labels([TRACEABLE]), ['XLM · CCIVQD...GWFL · Blocklist · Traceable']);
   const usdc = pool(fakeId('CBUSDC'), [], 'off', { kind: 'classic', code: 'USDC' });
-  assert.deepEqual(labels([BLOCKLIST, usdc]), ['XLM · Blocklist · CA73PE...C6DQ', 'USDC · Open · CBUSDC...AAAA']);
+  assert.deepEqual(labels([BLOCKLIST, usdc]), ['XLM · CA73PE...C6DQ · Blocklist', 'USDC · CBUSDC...AAAA · Open']);
 });
 
 test('pools sharing an asset show their controls and short ID', () => {
   const pools = [BLOCKLIST, TRACEABLE, VIEW_ONLY];
   assert.deepEqual(labels(pools), [
-    'XLM · Blocklist · CA73PE...C6DQ',
-    'XLM · Blocklist · Traceable · CCIVQD...GWFL',
-    'XLM · Blocklist · View-only · CCMYN7...FMIG',
+    'XLM · CA73PE...C6DQ · Blocklist',
+    'XLM · CCIVQD...GWFL · Blocklist · Traceable',
+    'XLM · CCMYN7...FMIG · Blocklist · View-only',
   ]);
 });
 
@@ -53,24 +53,24 @@ test('labels name open, allowlist, blocklist and both lists', () => {
     pool(fakeId('CABOTH'), ['blocklist', 'allowlist'], 'off'),
   ];
   assert.deepEqual(labels(pools), [
-    'XLM · Open · CAOPEN...AAAA',
-    'XLM · Allowlist · CAALLO...AAAA',
-    'XLM · Blocklist · CABLOC...AAAA',
-    'XLM · Allowlist · Blocklist · CABOTH...AAAA',
+    'XLM · CAOPEN...AAAA · Open',
+    'XLM · CAALLO...AAAA · Allowlist',
+    'XLM · CABLOC...AAAA · Blocklist',
+    'XLM · CABOTH...AAAA · Allowlist · Blocklist',
   ]);
 });
 
 test('pools with the same asset and controls differ by ID', () => {
   const twin = pool(fakeId('CDTWIN'), ['blocklist'], 'off');
-  assert.deepEqual(labels([BLOCKLIST, twin]), ['XLM · Blocklist · CA73PE...C6DQ', 'XLM · Blocklist · CDTWIN...AAAA']);
+  assert.deepEqual(labels([BLOCKLIST, twin]), ['XLM · CA73PE...C6DQ · Blocklist', 'XLM · CDTWIN...AAAA · Blocklist']);
 });
 
 test('short labels that still collide fall back to full IDs', () => {
   const first = pool(fakeId('CCIVQD', 'GWFL', 'A'), ['blocklist'], 'off');
   const second = pool(fakeId('CCIVQD', 'GWFL', 'B'), ['blocklist'], 'off');
   assert.deepEqual(labels([first, second, TRACEABLE]), [
-    `XLM · Blocklist · ${first.poolContractId}`,
-    `XLM · Blocklist · ${second.poolContractId}`,
-    'XLM · Blocklist · Traceable · CCIVQD...GWFL',
+    `XLM · ${first.poolContractId} · Blocklist`,
+    `XLM · ${second.poolContractId} · Blocklist`,
+    'XLM · CCIVQD...GWFL · Blocklist · Traceable',
   ]);
 });

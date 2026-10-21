@@ -26,14 +26,14 @@ function detailedLabel(
 ) {
     return [
         Utils.poolLabel(pool),
-        ...poolControls(pool).map((control) => CONTROL_LABELS[control]),
         id,
+        ...poolControls(pool).map((control) => CONTROL_LABELS[control]),
     ].join(" · ");
 }
 
 /**
  * Construct the pool label. The label is composed of:
- * Token · [flags] · address
+ * Token · address · [flags]
  * If two pools have the same short address, the full address is used instead
  */
 export function poolSelectLabel(pool, pools) {
