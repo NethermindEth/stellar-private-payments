@@ -45,6 +45,8 @@ CIRCUIT_ARTIFACTS=(
   selectiveDisclosure_3.r1cs
   selectiveDisclosure_4.graph.bin
   selectiveDisclosure_4.r1cs
+  keyOwnership.graph.bin
+  keyOwnership.r1cs
 )
 
 # Allow other scripts to source this file just to read the CIRCUIT_ARTIFACTS array.
@@ -92,6 +94,7 @@ KEYS=(
   selectiveDisclosure_2_proving_key.bin
   selectiveDisclosure_3_proving_key.bin
   selectiveDisclosure_4_proving_key.bin
+  keyOwnership_proving_key.bin
 )
 
 for name in "${KEYS[@]}"; do
