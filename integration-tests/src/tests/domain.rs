@@ -59,8 +59,7 @@ async fn transfer_cross_domain() -> Result<()> {
     let recipient_b = recipient_a
         .fork(with_kdf_domain(config, OTHER_DOMAIN))
         .await?;
-    // The registry only takes keys of its own domain, so the sender is given
-    // the other domain's keys directly.
+    // The registry only takes keys of its own domain.
     let (note_key, encryption_key) = recipient_b.account.privacy_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
@@ -105,10 +104,7 @@ async fn register_from_another_domain_is_refused() -> Result<()> {
         .await
         .expect_err("the registry was deployed for another domain");
 
-    assert!(
-        matches!(err, Error::KdfDomainMismatch { .. }),
-        "{err:?}"
-    );
+    assert!(matches!(err, Error::KdfDomainMismatch { .. }), "{err:?}");
     assert!(!session_a.account.is_registered().await?);
     Ok(())
 }

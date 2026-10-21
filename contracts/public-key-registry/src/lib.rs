@@ -104,8 +104,7 @@ pub trait CircomGroth16VerifierInterface {
     ) -> Result<bool, Groth16Error>;
 }
 
-/// Domain tag for the encryption key signature, so it can't also be read as a
-/// SEP-53 signature by an account whose key is the same Edwards point.
+/// Domain tag of the challenge the encryption key signs.
 pub const ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
 
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
@@ -123,7 +122,7 @@ const ED25519_FIELD_MODULUS: [u8; 32] = [
 /// Registry: <registry strkey>
 /// Account: <owner strkey>
 /// Note key: 0x<hex of the 32 note_key bytes>
-/// Encryption key: 0x<hex of the 32 encryption_key bytes>
+/// Encryption key (Ed25519): 0x<hex of the 32 encryption_key bytes>
 /// ```
 pub fn registration_message(env: &Env, registry: &Address, account: &Account) -> Bytes {
     let mut message = Bytes::from_slice(env, b"Privacy Pool Key Registration [v1]\nRegistry: ");
@@ -132,7 +131,7 @@ pub fn registration_message(env: &Env, registry: &Address, account: &Account) ->
     message.append(&account.owner.to_string().to_bytes());
     message.extend_from_slice(b"\nNote key: ");
     append_hex(&mut message, &account.note_key);
-    message.extend_from_slice(b"\nEncryption key: ");
+    message.extend_from_slice(b"\nEncryption key (Ed25519): ");
     append_hex(&mut message, &account.encryption_key);
     message
 }
@@ -281,7 +280,7 @@ impl PublicKeyRegistry {
         let verifier = Self::get_verifier(env.clone());
         soroban_utils::extend_contract(env, &verifier);
         let public_inputs = vec![env, note_key, registration_hash];
-        
+
         match CircomGroth16VerifierClient::new(env, &verifier).try_verify(proof, &public_inputs) {
             Ok(Ok(true)) => Ok(()),
             _ => Err(Error::InvalidProof),

@@ -266,7 +266,7 @@ pub fn registration_message(
 ) -> String {
     format!(
         "Privacy Pool Key Registration [v1]\nRegistry: {registry}\nAccount: {owner}\nNote key: \
-         0x{}\nEncryption key: 0x{}",
+         0x{}\nEncryption key (Ed25519): 0x{}",
         hex::encode(note_key.0),
         hex::encode(encryption_key),
     )
@@ -884,8 +884,7 @@ mod registration_tests {
         }
     }
 
-    /// The registry compares key bytes, so a device on a newer SDK must
-    /// produce the same encoding.
+    /// Write-once compares key bytes, so the encoding must not change.
     #[test]
     fn edwards_key_encoding_is_pinned() {
         let secret = EncryptionPrivateKey([0x42; 32]);

@@ -98,8 +98,7 @@ impl LocalProver {
         })
     }
 
-    /// A prover for the `keyOwnership` circuit only, which is all that
-    /// registering keys needs.
+    /// A prover for the `keyOwnership` circuit only.
     pub fn from_key_ownership_artifacts(artifacts: &ProverArtifacts) -> Result<Self, Error> {
         Ok(Self {
             transact: Mutex::new(HashMap::new()),
@@ -108,7 +107,7 @@ impl LocalProver {
         })
     }
 
-    /// Adds the `keyOwnership` circuit, so this prover can also register keys.
+    /// Adds the `keyOwnership` circuit.
     pub fn with_key_ownership_artifacts(self, artifacts: &ProverArtifacts) -> Result<Self, Error> {
         Ok(Self {
             key_ownership: Mutex::new(Some(key_ownership_engine(artifacts)?)),

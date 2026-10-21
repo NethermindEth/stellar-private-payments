@@ -278,9 +278,7 @@ impl Account {
             .prove_key_ownership(inputs.key_ownership.clone())
             .await?;
         let owner_signature = self.signer.sign_message(&inputs.message).await?;
-        // As in `derive_privacy_keys`: the registry checks the signature
-        // against the owner's master key, so refuse one from any other key
-        // before submitting.
+        // Refuse a signature from another key before submitting.
         crate::zk::encryption::verify_owner_signature(
             self.user_address.as_str(),
             &inputs.message,
@@ -683,7 +681,7 @@ mod register_public_keys_tests {
         .expect("open account")
     }
 
-    /// Checked first: the account has no keys stored, and nothing is signed.
+    /// The domain is checked before the keys are read or anything is signed.
     #[tokio::test]
     async fn a_registry_for_another_kdf_domain_is_refused() {
         let rpc = registry_rpc("other-domain").await;

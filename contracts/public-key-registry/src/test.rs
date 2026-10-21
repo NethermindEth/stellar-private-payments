@@ -108,8 +108,7 @@ impl Setup {
 }
 
 /// An account holder: the owner's master key, the encryption key and the note
-/// key. Any Ed25519 key serves as the encryption key here; deriving it from
-/// the X25519 secret is the SDK's concern.
+/// key.
 struct Registrant {
     owner: SigningKey,
     encryption: SigningKey,
@@ -175,12 +174,11 @@ fn hex(bytes: &Bytes) -> StdString {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-// The message, digest and challenge below are built without the contract's
-// own helpers, so a test fails if those helpers drift from this format.
+// Built without the contract's helpers, so the tests pin the format.
 
 fn expected_message(registry: &Address, account: &Account) -> StdString {
     format!(
-        "Privacy Pool Key Registration [v1]\nRegistry: {}\nAccount: {}\nNote key: 0x{}\nEncryption key: 0x{}",
+        "Privacy Pool Key Registration [v1]\nRegistry: {}\nAccount: {}\nNote key: 0x{}\nEncryption key (Ed25519): 0x{}",
         strkey(registry),
         strkey(&account.owner),
         hex(&account.note_key),

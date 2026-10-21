@@ -166,16 +166,28 @@ mod tests {
         )))
     }
 
-    fn registered_key(storage: &SqliteStorage, owner_seed: u8) -> Result<Option<[u8; 32]>> {
+    const REGISTRY: &str = "CREGISTRY";
+    const OLD_REGISTRY: &str = "COLDREGISTRY";
+
+    fn registered_key(
+        storage: &SqliteStorage,
+        registry: &str,
+        owner_seed: u8,
+    ) -> Result<Option<[u8; 32]>> {
         let address = crate::chain::scval_to_address_string(&owner(owner_seed))?;
         Ok(storage
-            .lookup_public_key_by_address(&address)?
+            .lookup_public_key_by_address(&address, registry)?
             .map(|entry| entry.encryption_key.0))
     }
 
-    /// A registration event as the registry emits it, with `encryption_key`
-    /// as given.
-    fn registration(id: &str, owner_seed: u8, encryption_key: [u8; 32]) -> Result<ContractEvent> {
+    /// A registration event as `registry` emits it, with `encryption_key` as
+    /// given.
+    fn registration(
+        id: &str,
+        registry: &str,
+        owner_seed: u8,
+        encryption_key: [u8; 32],
+    ) -> Result<ContractEvent> {
         let bytes = |b: Vec<u8>| -> Result<xdr::ScVal> {
             Ok(xdr::ScVal::Bytes(xdr::ScBytes(b.try_into()?)))
         };
@@ -189,11 +201,14 @@ mod tests {
                 val: bytes(vec![owner_seed; 32])?,
             },
         ];
-        raw_event(
-            id,
-            &[symbol("public_key_event")?, owner(owner_seed)],
-            entries,
-        )
+        Ok(ContractEvent {
+            contract_id: registry.to_string(),
+            ..raw_event(
+                id,
+                &[symbol("public_key_event")?, owner(owner_seed)],
+                entries,
+            )?
+        })
     }
 
     fn edwards_key(secret: u8) -> [u8; 32] {
@@ -207,14 +222,24 @@ mod tests {
     #[test]
     fn a_same_ledger_re_registration_resolves_to_the_later_key() -> Result<()> {
         let mut storage = storage_with(vec![
-            registration("0000000000000000001-0000000000", 7, edwards_key(1))?,
-            registration("0000000000000000001-0000000001", 7, edwards_key(2))?,
+            registration(
+                "0000000000000000001-0000000000",
+                REGISTRY,
+                7,
+                edwards_key(1),
+            )?,
+            registration(
+                "0000000000000000001-0000000001",
+                REGISTRY,
+                7,
+                edwards_key(2),
+            )?,
         ])?;
 
         assert!(process_events(&mut storage, 1)?);
         assert!(process_events(&mut storage, 1)?);
 
-        assert_eq!(registered_key(&storage, 7)?, Some(x25519_key(2)));
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(2)));
         Ok(())
     }
 
@@ -231,15 +256,56 @@ mod tests {
             .find(|key| ed25519_dalek::VerifyingKey::from_bytes(key).is_err())
             .expect("some y is not on the curve");
         let mut storage = storage_with(vec![
-            registration("0000000000000000001-0000000000", 7, not_a_point)?,
-            registration("0000000000000000002-0000000000", 8, edwards_key(1))?,
+            registration("0000000000000000001-0000000000", REGISTRY, 7, not_a_point)?,
+            registration(
+                "0000000000000000002-0000000000",
+                REGISTRY,
+                8,
+                edwards_key(1),
+            )?,
         ])?;
 
         assert!(process_events(&mut storage, 10)?);
         assert!(!process_events(&mut storage, 10)?);
 
-        assert_eq!(registered_key(&storage, 7)?, None);
-        assert_eq!(registered_key(&storage, 8)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
+        assert_eq!(registered_key(&storage, REGISTRY, 8)?, Some(x25519_key(1)));
+        Ok(())
+    }
+
+    /// Entries from another registry, such as one a deployment replaced, are
+    /// never returned, even when they are newer.
+    #[test]
+    fn lookups_only_read_the_given_registry() -> Result<()> {
+        let mut storage = storage_with(vec![
+            registration(
+                "0000000000000000001-0000000000",
+                REGISTRY,
+                7,
+                edwards_key(1),
+            )?,
+            registration(
+                "0000000000000000002-0000000000",
+                OLD_REGISTRY,
+                7,
+                edwards_key(2),
+            )?,
+            registration(
+                "0000000000000000003-0000000000",
+                OLD_REGISTRY,
+                8,
+                edwards_key(3),
+            )?,
+        ])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 8)?, None);
+        assert_eq!(
+            registered_key(&storage, OLD_REGISTRY, 8)?,
+            Some(x25519_key(3))
+        );
         Ok(())
     }
 }

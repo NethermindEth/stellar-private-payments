@@ -157,10 +157,8 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //     pub note_key: Bytes,
 // }
 //
-// The encryption key is stored in its X25519 form. An encoding that is not a
-// curve point is skipped rather than failed, so it can't stop the processing
-// of later events; the registry only accepts keys that signed, which are
-// points.
+// The encryption key is stored in its X25519 form. A key that is not a curve
+// point skips the event, since a parse error stops all later processing.
 fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKeyEvent>> {
     let ParsedContractEvent {
         id,

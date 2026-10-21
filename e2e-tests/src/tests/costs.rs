@@ -468,10 +468,8 @@ const EXPECTED: &[Pinned] = expected! {
     "public-key-registry register, first registration" => 6, 2, 340, 1, 547_430_136;
 };
 
-/// Rows that read entries from disk, and how many.
-///
-/// An account authorizer's entry is a classic entry, so reading it is a disk
-/// read. The registry's owner must be an account.
+/// Rows that read entries from disk, and how many. An account authorizer's
+/// entry is a classic entry.
 const DISK_READS: &[(&str, u32)] = &[("public-key-registry register, first registration", 1)];
 
 /// Checks every measured row against [`EXPECTED`], in both directions.

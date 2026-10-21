@@ -687,6 +687,8 @@ wasm_hash() {
 
 ASP_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_MEMBERSHIP_WASM")"
 ASP_NON_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_NON_MEMBERSHIP_WASM")"
+REGISTRY_VERIFIER_WASM_HASH=""
+[[ "$SKIP_INIT" == "true" ]] || REGISTRY_VERIFIER_WASM_HASH="$(wasm_hash "$REGISTRY_VERIFIER_WASM")"
 
 deploy_contract() {
   local name="$1"
@@ -902,7 +904,7 @@ pools_json+="]"
 
 registry_verifier_json=""
 [[ -z "$REGISTRY_VERIFIER_ID" ]] \
-  || registry_verifier_json=",\"public_key_registry_verifier\":\"$REGISTRY_VERIFIER_ID\""
+  || registry_verifier_json=",\"public_key_registry_verifier\":\"$REGISTRY_VERIFIER_ID\",\"public_key_registry_verifier_wasm_hash\":\"$REGISTRY_VERIFIER_WASM_HASH\""
 
 DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\"${registry_verifier_json},\"pools\":$pools_json}"
 

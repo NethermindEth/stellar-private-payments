@@ -93,8 +93,7 @@ impl ClientSession {
         })
     }
 
-    /// As [`Self::new`], over a client that can only prove key ownership,
-    /// which is all registration needs.
+    /// As [`Self::new`], over a client that can only prove key ownership.
     pub fn new_registration(
         config: &CliConfig,
         owner: &Account,

@@ -32,8 +32,10 @@ Checks:
   - The manifest names at most 25 contracts for clients to index: its enabled
     pools, its allowlists, and the public key registry.
   - The public key registry stores the manifest's KDF domain and its
-    public_key_registry_verifier. A manifest without that field, from before
-    the registry had a verifier, skips this check with a notice.
+    public_key_registry_verifier, which runs the code whose hash is
+    public_key_registry_verifier_wasm_hash: deploy.sh's build of
+    circuit_keys/keyOwnership_vk.json. A manifest without these fields, from
+    before the registry had a verifier, skips these checks with a notice.
   - Every pool's token is its asset's own Stellar asset contract. A pool whose
     asset is a contract token fails. A classic asset's issuer prints as a notice
     listing each power its flags give it over the pool's balance.
@@ -164,6 +166,15 @@ else
   check "$REGISTRY" get_verifier "$REGISTRY_VERIFIER" "$(registry_get get_verifier)"
   check "$REGISTRY" get_kdf_domain "$(jq -r '.kdf_domain' "$MANIFEST")" \
     "$(registry_get get_kdf_domain)"
+  VERIFIER_HASH="$(jq -r '.public_key_registry_verifier_wasm_hash // empty' "$MANIFEST")"
+  if [[ -z "$VERIFIER_HASH" ]]; then
+    step "no public_key_registry_verifier_wasm_hash in $MANIFEST, skipping the verifier code check"
+  else
+    # AAAAFA== is the key of the contract's instance entry, which names its code.
+    check "$REGISTRY_VERIFIER" "code hash" "$VERIFIER_HASH" \
+      "$(read_entry "$REGISTRY_VERIFIER" AAAAFA== | jq -r '.contract_instance.executable.wasm // "none"' \
+        || echo unreadable)"
+  fi
 fi
 
 HASHES="$(jq -c 'select(has("asp_membership_wasm_hash") or has("asp_non_membership_wasm_hash"))

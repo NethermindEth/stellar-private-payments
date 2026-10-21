@@ -227,11 +227,11 @@ impl Storage for LocalStorage {
     async fn registered_privacy_keys(
         &self,
         address: &str,
-        _public_key_registry_contract_id: &str,
+        public_key_registry_contract_id: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         let entry = self
             .storage()
-            .lookup_public_key_by_address(address)
+            .lookup_public_key_by_address(address, public_key_registry_contract_id)
             .context("lookup recipient")?
             .ok_or_else(|| {
                 Error::Other(anyhow::anyhow!(

@@ -250,7 +250,6 @@ async fn ensure_key_ownership_prover() -> Result<(), JsError> {
         fetch_circuit_artifact(KEY_OWNERSHIP_CIRCUIT, "r1cs")
     )?;
 
-    // A `ProverEngine` like the transact circuits, so it shares their builder.
     let engine = build_transact_prover(KEY_OWNERSHIP_CIRCUIT, &graph_bytes, &r1cs_bytes).await?;
 
     KEY_OWNERSHIP_PROVER.with(|cell| {

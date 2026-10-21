@@ -273,9 +273,6 @@ export function getFriendlyErrorMessage(error, operationType = 'Transaction') {
 
 /**
  * Gets a user-friendly message for a failed public key registration.
- *
- * Registry error codes are checked before the generic patterns, which would
- * report any of them as a failed simulation.
  * @param {Error|string|unknown} error - The error object
  * @returns {string} Message suitable for displaying to the user
  */
@@ -284,8 +281,7 @@ export function getRegistrationErrorMessage(error) {
         return 'Registration cancelled.';
     }
     const rawMessage = getErrorMessage(error);
-    // The first host error is the one that failed the call; the event log after
-    // it may hold others, such as the verifier's.
+    // Only the first host error failed the call; the event log may hold others.
     const hostError = rawMessage.match(/Error\((\w+),\s*#?(\w+)\)/);
     if (hostError?.[1] === 'Contract') {
         const registryMessage = CONTRACT_ERRORS.registry[parseInt(hostError[2], 10)];

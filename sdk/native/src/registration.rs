@@ -26,9 +26,7 @@ pub struct RegistrationRequest {
 }
 
 /// Everything a registration needs except the owner's signature and the
-/// proof itself.
-///
-/// Built where the keys are stored, so the encryption secret stays there.
+/// proof itself, built where the keys are stored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationInputs {
