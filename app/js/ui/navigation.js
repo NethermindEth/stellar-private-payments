@@ -1,5 +1,6 @@
 import { refreshTokenDecimals } from '../token-metadata.js';
 import { deploymentDefaults } from '../network-config.js';
+import { poolSelectLabel } from '../pool-policy.js';
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
@@ -154,13 +155,14 @@ async function loadRuntimeState() {
         () => App.events.dispatchEvent(new CustomEvent('pool:config')),
     );
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
+    const labels = pools.map(pool => poolSelectLabel(pool, pools));
     const poolSelects = document.querySelectorAll('[data-pool-select]');
     poolSelects.forEach(select => {
         select.replaceChildren();
-        App.state.pools.forEach(pool => {
+        pools.forEach((pool, index) => {
             const option = document.createElement('option');
             option.value = pool.poolContractId;
-            option.textContent = Utils.poolLabel(pool);
+            option.textContent = labels[index];
             select.appendChild(option);
         });
         select.value = App.state.selectedPoolId || '';
