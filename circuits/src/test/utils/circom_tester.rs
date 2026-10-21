@@ -1,5 +1,5 @@
 use super::general::scalar_to_bigint;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomCircuit, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
@@ -316,7 +316,13 @@ pub fn build_circuit(
 }
 
 /// Returns whether the circuit's witness satisfies every R1CS constraint.
+///
+/// Fails on a circuit without a witness, such as the one from
+/// `CircomBuilder::setup()`, which assigns one to every wire.
 pub fn r1cs_satisfied(circuit: CircomCircuit<Fr>) -> Result<bool> {
+    if circuit.witness.is_none() {
+        bail!("circuit has no witness; build it with build_circuit");
+    }
     let cs = ConstraintSystem::<Fr>::new_ref();
     circuit
         .generate_constraints(cs.clone())
