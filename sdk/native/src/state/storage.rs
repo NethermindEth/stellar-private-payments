@@ -2020,6 +2020,94 @@ mod tests {
         Ok(())
     }
 
+    /// Outputs too short to be ciphertexts are skipped and do not stop the scan
+    #[test]
+    fn scan_commitments_skips_malformed_encrypted_outputs() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "tests",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let blinding = Field::from(NoteAmount::from(7));
+        let commitment_le: [u8; 32] = crypto::compute_commitment(
+            &Field::from(amount).to_le_bytes(),
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                dummy_event("evt-empty"),
+                dummy_event("evt-short"),
+                dummy_event("evt-real"),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            commitment_event("evt-empty", Field::from(NoteAmount::from(1)), 0),
+            NewCommitmentEvent {
+                encrypted_output: vec![1, 2, 3],
+                ..commitment_event("evt-short", Field::from(NoteAmount::from(2)), 1)
+            },
+            NewCommitmentEvent {
+                encrypted_output: encryption::encrypt_output_note(
+                    &enc_keypair.public,
+                    amount,
+                    &blinding,
+                )?,
+                ..commitment_event("evt-real", commitment, 2)
+            },
+        ])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+
+        let note_commitment_ids: Vec<i64> = storage
+            .conn
+            .prepare("SELECT commitment_id FROM user_notes")?
+            .query_map([], |row| row.get(0))?
+            .collect::<core::result::Result<_, _>>()?;
+        let (max_commitment_id, scanned): (i64, i64) = storage.conn.query_row(
+            "SELECT (SELECT MAX(id) FROM pool_commitments), last_commitment_id
+             FROM account_commitment_scan",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(note_commitment_ids, vec![max_commitment_id]);
+        assert_eq!(scanned, max_commitment_id);
+
+        Ok(())
+    }
+
     #[test]
     fn sync_metadata_tracks_progress_and_caught_up_tip() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;

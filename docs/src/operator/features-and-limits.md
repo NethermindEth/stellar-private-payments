@@ -63,10 +63,19 @@ and the
 | Notes per transaction | Two spent, two created |
 | Transactions per pool | 524,288, filling its commitment tree of 2^20 commitments |
 | Allowlist members | 1,024 per allowlist |
+| Blocklist depth | 31 levels. A key that shares its lowest 31 bits with two blocked keys can't spend or deposit. |
 | Notes per disclosure receipt | One to four. A receipt stops verifying once 90 more transactions land in the pool. |
 | Contracts per manifest | 25 that clients index: the enabled pools, every allowlist, and the registry |
 | Event history | About seven days on the public testnet RPC. Older history needs a bootnode. |
 | Contract upgrades | None. A fix means new contracts. |
+
+Some limits are build parameters. Changing one means rebuilding and redeploying:
+
+- Commitment tree depth (20): new keys for every circuit, and new pools.
+- Allowlist depth (10) and blocklist depth (31): new transaction keys, and new pools. A deeper
+  allowlist also needs new allowlists.
+- Notes per disclosure receipt (4): new disclosure keys only. Nothing on chain changes.
+- Root history (90): a contract constant. New pools and allowlists, no new keys.
 
 ### A full pool
 
@@ -89,6 +98,23 @@ flowchart LR
 The `index` in a pool's latest `new_commitment_event` is the number of slots used, less one, out
 of 1,048,576. A new `deploy.sh` run writes a manifest with only the pools it deployed, so keep
 serving a client built from the old manifest until the old pool's users have left.
+
+### A key the blocklist can't clear
+
+The circuits check blocklist paths of up to 31 levels. If two blocked keys share the lowest 31
+bits of a user's key, the user can't prove their key is unlisted, and the client fails with:
+
+```text
+ASP non-membership proof has N sibling(s), but the policy SMT depth 32 proves at most 31
+```
+
+The user's funds are safe but frozen until you remove one of the two blocked keys, which unblocks
+that key too. With 100,000 blocked keys, about one key in a billion is affected. Forcing it takes
+about 2^32 hashes and getting both keys blocked.
+
+More levels make this rarer and harder to force, but slow down proving. All 254 levels would make
+the blocklist circuits several times larger. The depth is fixed in the circuits, so changing it
+means new circuits, keys, and pools.
 
 ## Known gaps
 

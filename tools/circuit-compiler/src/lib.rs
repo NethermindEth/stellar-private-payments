@@ -52,6 +52,9 @@ const POLICY_GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
     "policy_tx_2_2_AB_gvk_T",
 ];
 
+/// Public key registry proof of note key ownership.
+const KEY_OWNERSHIP_CIRCUIT: &str = "keyOwnership";
+
 fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bool {
     groth16_key_circuits.iter().any(|stem| stem == name)
 }
@@ -75,6 +78,7 @@ fn groth16_key_circuits() -> Vec<String> {
             .iter()
             .map(|stem| (*stem).to_owned()),
     );
+    circuits.push(KEY_OWNERSHIP_CIRCUIT.to_owned());
     circuits
 }
 
@@ -416,7 +420,7 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
     ];
 
     // Regex for Circom includes
-    let include_pattern = Regex::new(r#"^\s*include\s+["']([^"']+)["']"#)?;
+    let include_pattern = Regex::new(r#"(?m)^\s*include\s+["']([^"']+)["']"#)?;
 
     while let Some(current_file) = to_process.pop() {
         if !visited.insert(current_file.clone()) {
@@ -449,14 +453,16 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
 
 /// Resolve an include path to an absolute file path
 ///
-/// Handles both relative paths (starting with `./` or `../`) and library paths
-/// by searching in the provided search directories.
+/// Mirrors Circom's lookup order: the directory of the including file is tried
+/// first, then each of the provided search directories. This applies to every
+/// include, so `include "abc.circom"` resolves next to the current file just
+/// like `include "./abc.circom"`.
 ///
 /// # Arguments
 ///
 /// * `include_path` - The include path string from the Circom file
 /// * `current_dir` - Directory of the file containing the include statement
-/// * `search_dirs` - List of directories to search for non-relative includes
+/// * `search_dirs` - List of directories to search after `current_dir`
 ///
 /// # Returns
 ///
@@ -467,19 +473,12 @@ fn resolve_include_path(
     current_dir: &Path,
     search_dirs: &[PathBuf],
 ) -> Result<Option<PathBuf>> {
-    // Relative paths
-    if include_path.starts_with("./") || include_path.starts_with("../") {
-        let path = current_dir.join(include_path);
-        if path.exists() {
+    let candidate_dirs =
+        std::iter::once(current_dir).chain(search_dirs.iter().map(PathBuf::as_path));
+    for dir in candidate_dirs {
+        let path = dir.join(include_path);
+        if path.is_file() {
             return Ok(Some(path.canonicalize()?));
-        }
-    } else {
-        // Search in library directories
-        for dir in search_dirs {
-            let path = dir.join(include_path);
-            if path.exists() {
-                return Ok(Some(path.canonicalize()?));
-            }
         }
     }
 

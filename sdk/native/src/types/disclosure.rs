@@ -57,7 +57,8 @@ pub struct DisclosureReceipt {
     pub public_inputs: DisclosurePublicInputs,
     /// Compressed Groth16 proof encoded as `0x`-prefixed lowercase hex.
     pub proof_compressed_hex: String,
-    /// Issuance timestamp string.
+    /// Issuance timestamp string. Informational only. Neither the proof nor the
+    /// context hash binds it.
     pub issued_at: String,
 }
 

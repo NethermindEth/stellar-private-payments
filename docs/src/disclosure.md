@@ -1,6 +1,6 @@
 # Selective Disclosure
 
-Selective disclosure lets a privacy-pool note owner prove ownership of one or more unspent notes to a third-party authority without revealing the notes' secret spending keys or linking the proof to any other transaction.
+Selective disclosure lets a privacy-pool note owner prove ownership of one or more unspent notes to a third-party authority without revealing the notes' secret spending keys. The receipt includes each note's nullifier, so whoever holds it can see when the notes are spent. See [Receipt Security Properties](#receipt-security-properties).
 
 The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash for the circuit named in the receipt.
 
@@ -49,7 +49,7 @@ A receipt is a JSON object with the following schema:
 | `context` | Human-readable authority, purpose, and nonce bound into `extContextHash`. |
 | `publicInputs` | Values the proof commits to: the Merkle roots, the note commitments, the hashed context, note nullifiers, and disclosed amounts. |
 | `proofCompressedHex` | A 128-byte compressed Groth16 proof (BN254) encoded as `0x`-prefixed hex. |
-| `issuedAt` | ISO-8601 timestamp when the receipt was created. |
+| `issuedAt` | ISO-8601 timestamp the generating client wrote. No check covers it, so anyone can edit it: rely on the nonce for freshness. Informational only. |
 
 The `extContextHash` is a SHA-256 hash of all context fields (network, pool address, authority label, identity payload, purpose, nonce) reduced modulo the BN254 prime. Any change to any context field invalidates the context check while leaving the cryptographic proof intact.
 
@@ -72,7 +72,7 @@ Note owners generate receipts through the **Disclosure** view in the main app, r
    - **Authority label** — human-readable name of the requesting party.
    - **Authority identity payload** — an arbitrary `0x`-prefixed hex payload the authority can use to identify the request.
    - **Purpose** — describes why the disclosure is being made.
-   - **Context nonce** — an anti-replay nonce. The "Random" button generates a fresh field-element nonce via `crypto.getRandomValues()`.
+   - **Context nonce** — the nonce the authority sent. If it sent none, the "Random" button generates a field-element nonce via `crypto.getRandomValues()`.
 5. Click **Generate Disclosure Receipt**.
 6. Wait for the progress indicator to advance through sync, witness construction, and proving.
 7. Download the receipt JSON.
@@ -124,7 +124,7 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 ### Steps
 1. Scroll to the **Verify Disclosure Receipt** section (or open `/#disclosure?verify=1`).
 2. Upload the receipt JSON via the file picker, or paste it into the textarea and click **Load Receipt**.
-3. Review the receipt context summary to confirm *what* is being attested.
+3. Review the receipt context summary to confirm *what* is being attested and *for whom*: the pool address, authority identity payload, purpose, and nonce must match your request.
 4. Confirm the **Expected VK hash** field. It defaults to the canonical hash published in this documentation and in `deployments/testnet/circuit_keys/README.md`. Authorities who pin a different key can click **Override** and paste their own hash.
 5. Click **Verify Receipt**.
 
@@ -136,8 +136,13 @@ matching bundled circuit artifacts, and queries the configured Stellar network
 for root and nullifier status.
 
 ```bash
-spp disclosure verify receipt.json
+spp disclosure verify receipt.json --pool C<pool-contract-address>
 ```
+
+The command fails if the receipt names another network or a pool other than
+`--pool`. Add `--authority 0x<identity-payload>` to also check the authority.
+It doesn't check the purpose or the nonce: read those from the receipt's
+`context`.
 
 Use `--expected-vk-hash 0x…` together with alternate artifacts supplied through
 `--circuits-dir` when verifying against a deliberately different disclosure
@@ -170,7 +175,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
    - **Authority label** — e.g. the company or regulator name.
    - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.
    - **Purpose** — e.g. `kyc-review`, `aml-check`.
-   - **Context nonce** — use the **Random** button for a fresh anti-replay nonce.
+   - **Context nonce** — the nonce the authority sent, or the **Random** button if it sent none.
 5. Click **Generate Disclosure Receipt** and wait for the proof to finish.
 6. Download or copy the receipt JSON and send it to the authority.
 
@@ -178,25 +183,27 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 ### For authorities: verifying a receipt walletlessly
 
+Send a fresh nonce with each request and accept each nonce once. Anyone holding a receipt can present it, so the nonce is what ties it to your request.
+
 1. Open `/#disclosure?verify=1` (or click the **Disclosure** tab in the main app header, then scroll to Verify).
 2. No wallet is required. The page connects to a public Testnet RPC automatically when you click Verify.
 3. Upload the receipt JSON or paste it into the import area and click **Load Receipt**.
 4. Confirm the **Expected VK hash** field matches the canonical hash for the receipt's `circuit.name`. If you pin a different disclosure key, click **Override** and enter your hash.
-5. Review the receipt context summary to ensure it describes the attestation you requested.
+5. Check the receipt context summary against your request: the pool address, your identity payload, the purpose, and the nonce you sent. The checks below don't compare it with your request.
 6. Click **Verify Receipt**.
 7. Read the four independent checks:
    - **Proof valid** — the cryptography is correct.
    - **Context valid** — the authority/purpose/nonce context was not altered.
    - **Root fresh** — the note's root is still in the pool's on-chain history.
    - **Nullifiers unspent** — none of the disclosed notes have been spent since the receipt was issued.
-8. Trust the receipt **only when all four checks are green** and the **Fully verified** badge appears.
+8. Trust the receipt **only when all four checks are green**, the **Fully verified** badge appears, and the context matches your request.
 
 ### Interpreting partial failures
 
 | Result | Meaning | Action |
 |---|---|---|
 | Proof green, Context red | The proof is mathematically valid, but the context was tampered with after generation. | Reject the receipt and ask the owner to regenerate it with the correct context. |
-| Proof green, Context green, Root red | The proof and context are intact, but the receipt is stale (root rolled out of history) or points to the wrong pool. | Ask the owner to generate a fresh receipt against the current pool root. |
+| Proof green, Context green, Root red | The proof and context are intact, but a root isn't in the history of the pool the receipt names: the receipt is stale, or wasn't made against that pool. | Ask the owner to generate a fresh receipt against the current pool root. |
 | Proof red | The proof is forged, corrupted, or verified against the wrong key. | Reject the receipt and confirm the expected VK hash. |
 | Proof, Context, Root green; Unspent amber | The receipt is cryptographically sound, but at least one disclosed note has since been spent. | A policy decision, not a validity failure. Accept if you only needed proof of past ownership; request a fresh receipt if current holdings matter. |
 | Any check "could not be completed" | Network or RPC failure prevented that check. | Retry; do not treat inconclusive checks as passes. |
@@ -210,15 +217,15 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 | Check | What it means | Pass wording | Failure meaning |
 |---|---|---|---|
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
-| **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
-| **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
+| **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. It doesn't show the receipt is meant for you. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
+| **Root fresh** | Every Merkle root in the receipt is still present in the on-chain root history (`is_known_root`) of the pool the receipt names. | "Every root in the receipt is still in the pool's on-chain root history." | A root rolled out of history, or was never that pool's root. |
 | **Nullifiers unspent** | No nullifier in the receipt is marked spent in the pool's current contract state. Reported alongside `spentNullifierIndices`, naming which notes were spent. | "None of the disclosed nullifiers are marked spent in the pool's contract state." | At least one disclosed note has been spent since issuance. Rendered amber rather than red - the proof remains valid. |
 
 ### Interpretation
 
-- **All four green** → The receipt is fully verified and trustworthy. A green badge is shown.
+- **All four green** → The receipt is fully verified. A green badge is shown. Trust it once its context matches your request.
 - **Proof green, Context red** → The proof is mathematically valid but the context was tampered with. Do not trust the authority/purpose claims.
-- **Proof green, Context green, Root red** → The proof and context are intact but the pool state has moved on and the root is no longer in history. The receipt is outdated.
+- **Proof green, Context green, Root red** → The proof and context are intact, but a root isn't in the named pool's history. The receipt is outdated, or wasn't made against that pool.
 - **Proof, Context, Root green; Unspent amber** → The receipt is cryptographically valid and the notes were owned when it was issued, but at least one has since been spent.
 - **Any single check inconclusive due to network error** → The check renders as "could not be completed", never as a pass. Retry or verify under better network conditions.
 
@@ -228,8 +235,9 @@ A receipt is trustworthy **only when all four checks pass**. Each check can fail
 
 - **No secret exposure** — The receipt contains only public commitments, roots, and context. The note's spending key, blinding factor, and Merkle path remain secret.
 - **Binding** — The proof is bound to the specific context hash. Changing any context field invalidates the context check.
-- **Non-transferable** — A receipt proves ownership of specific note commitments at specific roots. It cannot be replayed against different notes or a different pool.
+- **Bound to its context, not its holder** — A receipt can't be changed to name other notes, another pool, or another context. Anyone holding it can still present it, so check that the context names you and carries the nonce you sent.
 - **Correlation** — A multi-note receipt attests that all selected notes are controlled by the same prover for the same context. Verifiers should consider this correlation when interpreting the receipt.
+- **Spend visibility** — The receipt carries each disclosed note's nullifier, which the pool publishes when the note is spent. Whoever holds the receipt can tell when, and in which transaction, each note is spent.
 - **Distinct notes** — A proof that names the same note in two slots does not verify. With the root check, a receipt cannot count one note twice.
 - **Off-chain only** — Disclosure verification is entirely off-chain. No contract call is required beyond the root-history check, which reads public pool state.
 

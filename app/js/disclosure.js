@@ -1196,7 +1196,7 @@ export function mountVerify(container) {
       { label: 'Authority', value: r.context.authorityLabel },
       { label: 'Purpose', value: r.context.purpose },
       { label: 'Nonce', value: r.context.contextNonce },
-      { label: 'Issued at', value: r.issuedAt },
+      { label: 'Issued at (unverified)', value: r.issuedAt },
       { label: 'Circuit', value: r.circuit.name },
       { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
       { label: 'Disclosed amount', value: amountSummary },

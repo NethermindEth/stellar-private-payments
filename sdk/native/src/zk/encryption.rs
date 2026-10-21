@@ -292,22 +292,19 @@ pub fn encrypt_output_note(
 /// Decrypt output note data from on-chain storage.
 ///
 /// Returns `Ok(None)` if the ciphertext is not addressed to the given private
-/// key.
+/// key or does not hold a well-formed note. The output is chosen by whoever
+/// submits the transaction, so malformed contents must not fail the scan.
 ///
 /// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
 pub fn decrypt_output_note(
     recipient_privkey: &EncryptionPrivateKey,
     encrypted_output: &[u8],
 ) -> Result<Option<(NoteAmount, Field)>> {
-    let plaintext = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)?;
-    if plaintext.is_empty() {
+    let Some(plaintext) = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)? else {
         return Ok(None);
-    }
+    };
     if plaintext.len() != 48 {
-        return Err(anyhow!(
-            "Decrypted plaintext must be 48 bytes, got {}",
-            plaintext.len()
-        ));
+        return Ok(None);
     }
 
     let mut amount_le = [0u8; 16];
@@ -316,7 +313,9 @@ pub fn decrypt_output_note(
 
     let mut blinding_le = [0u8; 32];
     blinding_le.copy_from_slice(&plaintext[16..]);
-    let blinding = Field::try_from_le_bytes(blinding_le)?;
+    let Ok(blinding) = Field::try_from_le_bytes(blinding_le) else {
+        return Ok(None);
+    };
 
     Ok(Some((amount, blinding)))
 }
@@ -403,9 +402,9 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
 /// * `encrypted_data` - Encrypted data from on-chain event (120+ bytes)
 ///
 /// # Returns
-/// - Success: `[amount (16 bytes LE)] [blinding (32 bytes)]` = 48 bytes
-/// - Failure: Empty vec (note was not addressed to us)
-fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>> {
+/// - Success: the decrypted plaintext
+/// - `None`: the data is too short or the note was not addressed to us
+fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
     if private_key_bytes.len() != 32 {
         return Err(anyhow!("Private key must be 32 bytes"));
     }
@@ -413,7 +412,7 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) +
     // tag (16) = 120
     if encrypted_data.len() < 120 {
-        return Err(anyhow!("Encrypted data too short"));
+        return Ok(None);
     }
 
     // Extract components
@@ -441,14 +440,7 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     nonce_array.copy_from_slice(nonce_bytes);
     let nonce = Nonce::from(nonce_array);
 
-    // Decrypt
-    match cipher.decrypt(&nonce, ciphertext_with_tag) {
-        Ok(plaintext) => Ok(plaintext),
-        Err(_) => {
-            // Decryption failed - this note output is not for us
-            Ok(Vec::new()) // Return empty vec
-        }
-    }
+    Ok(cipher.decrypt(&nonce, ciphertext_with_tag).ok())
 }
 
 #[cfg(test)]
@@ -646,7 +638,9 @@ mod tests {
         let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
         assert!(encrypted.len() >= 112);
 
-        let decrypted = decrypt_note_data(priv_key, &encrypted).expect("Decryption failed");
+        let decrypted = decrypt_note_data(priv_key, &encrypted)
+            .expect("Decryption failed")
+            .expect("note should be addressed to the recipient");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -668,8 +662,7 @@ mod tests {
         let decrypted = decrypt_note_data(bob_priv, &encrypted)
             .expect("Decryption should handle failure gracefully");
 
-        // Should return empty vec on failure as per implementation
-        assert!(decrypted.is_empty());
+        assert!(decrypted.is_none());
     }
 
     #[test]
@@ -704,6 +697,39 @@ mod tests {
 
         assert_eq!(got.0, amount);
         assert_eq!(got.1.to_le_bytes(), blinding.to_le_bytes());
+        Ok(())
+    }
+
+    /// Seals an arbitrary plaintext with the note wire format, bypassing the
+    /// 48-byte check of `encrypt_note_data`.
+    fn seal_raw(recipient: &EncryptionPublicKey, plaintext: &[u8]) -> Vec<u8> {
+        let ephemeral_secret = StaticSecret::from([11u8; 32]);
+        let ephemeral_public = PublicKey::from(&ephemeral_secret);
+        let shared = ephemeral_secret.diffie_hellman(&PublicKey::from(recipient.0));
+        let nonce_bytes = [12u8; 24];
+        let ciphertext = XSalsa20Poly1305::new(shared.as_bytes().into())
+            .encrypt(&Nonce::from(nonce_bytes), plaintext)
+            .expect("encryption failed");
+        let mut out = ephemeral_public.as_bytes().to_vec();
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        out
+    }
+
+    #[test]
+    fn test_decrypt_output_note_ignores_malformed_outputs() -> Result<()> {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))?;
+
+        assert!(decrypt_output_note(&keys.private, &[]).is_ok_and(|n| n.is_none()));
+        assert!(decrypt_output_note(&keys.private, &[1, 2, 3]).is_ok_and(|n| n.is_none()));
+
+        let wrong_length = seal_raw(&keys.public, &[0u8; 49]);
+        assert!(decrypt_output_note(&keys.private, &wrong_length).is_ok_and(|n| n.is_none()));
+
+        let mut non_canonical_blinding = [0xffu8; 48];
+        non_canonical_blinding[..16].copy_from_slice(&5u128.to_le_bytes());
+        let non_canonical = seal_raw(&keys.public, &non_canonical_blinding);
+        assert!(decrypt_output_note(&keys.private, &non_canonical).is_ok_and(|n| n.is_none()));
         Ok(())
     }
 }

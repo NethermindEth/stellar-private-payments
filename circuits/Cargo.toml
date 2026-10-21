@@ -13,6 +13,7 @@ std = [
     "anyhow",
     "ark-circom",
     "ark-groth16",
+    "ark-relations",
     "ark-serialize",
     "ark-snark",
     "ark-std",
@@ -32,6 +33,7 @@ taceo-poseidon2 = { workspace = true }
 anyhow = { workspace = true, optional = true }
 ark-circom = { workspace = true, optional = true }
 ark-groth16 = { workspace = true, optional = true }
+ark-relations = { workspace = true, optional = true }
 ark-serialize = { workspace = true, optional = true }
 ark-snark = { workspace = true, optional = true }
 ark-std = { workspace = true, optional = true }

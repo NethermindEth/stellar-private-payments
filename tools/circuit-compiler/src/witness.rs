@@ -27,6 +27,7 @@ const WITNESS_GRAPH_CIRCUITS: &[&str] = &[
     "selectiveDisclosure_2",
     "selectiveDisclosure_3",
     "selectiveDisclosure_4",
+    "keyOwnership",
 ];
 
 fn check_circom_version(circuits_dir: &Path) -> Result<()> {
