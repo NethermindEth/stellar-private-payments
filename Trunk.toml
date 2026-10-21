@@ -39,8 +39,7 @@ fi
 PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
 WASM_PROFILE_KEY="$WASM_PROFILE:${SPP_NETWORK:-testnet}"
 LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
-if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE_KEY" ] || \
-   ! grep -q 'static openEncrypted(' sdk/web/dist/stellar_private_payments_web.js; then
+if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE_KEY" ]; then
     echo "trunk: building stellar-private-payments-web (WASM_PROFILE=$WASM_PROFILE)..."
     npm run build --prefix sdk/web
     echo "$WASM_PROFILE_KEY" > "$PROFILE_MARKER"

@@ -8,7 +8,7 @@ esac
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
-CIRCUITS_OUT="${CIRCUIT_ARTIFACTS_DIR:-$ROOT/target/circuits-artifacts}"
+CIRCUITS_OUT="$ROOT/target/circuits-artifacts"
 KEYS_DIR="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuit_keys"
 DIST="$WEB/dist"
 

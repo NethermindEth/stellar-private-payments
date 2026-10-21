@@ -101,7 +101,7 @@ ctx.load = async () => {
   await ctx.request("POST", `/session/${ctx.sid}/url`, { url: origin });
   await ctx.js("window.sdk=await import('/js/index.js');await sdk.default();return true;");
 };
-ctx.encrypted = async (create = false, supplied = ctx.key) => ctx.js("const supplied=Uint8Array.from(arguments[0]);try{window.storage=await sdk.Storage.openEncrypted({createNew:arguments[1],keyProvider:async(id,purpose)=>{if(id!=='spp.encrypted.db'||purpose!==(arguments[1]?'create':'open'))throw Error('provider context');return supplied;}});return true;}finally{supplied.fill(0);}", [Array.from(supplied), create]);
+ctx.encrypted = async (create = false, supplied = ctx.key) => ctx.js("const supplied=Uint8Array.from(arguments[0]);try{window.storage=await sdk.Storage.open({createNew:arguments[1],keyProvider:async(id,purpose)=>{if(id!=='spp.encrypted.db'||purpose!==(arguments[1]?'create':'open'))throw Error('provider context');return supplied;}});return true;}finally{supplied.fill(0);}", [Array.from(supplied), create]);
 ctx.close = async () => ctx.js("await storage.close();storage.free();window.storage=null;return true;");
 ctx.snapshot = async () => ctx.js("const root=await navigator.storage.getDirectory();const result=[];async function walk(d,path){for await(const [name,h] of d.entries()){if(h.kind==='directory'){result.push({path:path+name+'/',kind:'directory'});await walk(h,path+name+'/');}else{const bytes=new Uint8Array(await(await h.getFile()).arrayBuffer());const hash=await crypto.subtle.digest('SHA-256',bytes);result.push({path:path+name,bytes:bytes.length,sha256:Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,'0')).join(''),protected:new TextDecoder().decode(bytes).includes(argumentsMarker)});}}}const argumentsMarker=arguments[0];await walk(root,'');return result.sort((a,b)=>a.path.localeCompare(b.path));", [ctx.marker]);
 
@@ -163,7 +163,7 @@ try {
       assert.deepEqual(await ctx.snapshot(), before, `${label} modified OPFS`);
       ctx.checks.push(`${label} rejects without modifying OPFS`);
     }
-    assert(await ctx.js("try{await sdk.Storage.openEncrypted({keyProvider:async()=>{throw Error('provider unavailable');}});return false;}catch{return true;}"));
+    assert(await ctx.js("try{await sdk.Storage.open({keyProvider:async()=>{throw Error('provider unavailable');}});return false;}catch{return true;}"));
     assert.deepEqual(await ctx.snapshot(), before);
     ctx.checks.push("provider failure leaves OPFS unchanged");
     await ctx.load(); await ctx.encrypted();

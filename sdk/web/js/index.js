@@ -46,15 +46,10 @@ function requireField(value, name) {
 }
 
 /**
- * Open encrypted worker-backed persistence with a required key provider.
+ * Open encrypted worker-backed persistence with a required key provider,
  * then pass the instance (or a fork) to {@link Client.new}.
  */
 async function openStorage(options) {
-  return openEncryptedStorage(options);
-}
-
-/** Open encrypted storage using a caller-owned key provider. */
-async function openEncryptedStorage(options) {
   const provider = requireField(options?.keyProvider, 'keyProvider');
   if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
   const createNew = options.createNew === true;
@@ -226,7 +221,7 @@ async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, op
   }
 }
 
-export const Storage = { open: openStorage, openEncrypted: openEncryptedStorage };
+export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
 };

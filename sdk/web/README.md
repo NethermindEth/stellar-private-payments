@@ -172,7 +172,7 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Mandatory storage encryption
 
-`Storage.open` and `Storage.openEncrypted` require a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
+`Storage.open` requires a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
 
 In the web app, `keyProvider` seals a random 32-byte database key in `localStorage` under `AES-256-GCM`, using a wrapping key derived via `HKDF-SHA-256` from a verified Freighter signature in a dedicated storage domain. Enrolling a new database requests two signatures over the unlock message to confirm the wallet signs deterministically before sealing the key; later opens need one signature. When the user locks storage manually or the inactivity timer expires, the app closes the storage worker and reloads the page so decrypted state in WASM and JavaScript memory is discarded.
 

@@ -86,8 +86,6 @@ export type DatabaseKeyProvider = (
   purpose: 'create' | 'open',
 ) => Uint8Array | Promise<Uint8Array>;
 
-export type EncryptedStorageOpenOptions = StorageOpenOptions;
-
 /**
  * Worker-backed local persistence (`spp.encrypted.db` on OPFS).
  *
@@ -96,7 +94,7 @@ export type EncryptedStorageOpenOptions = StorageOpenOptions;
  */
 export interface Storage {
   fork(): Storage;
-  /** Releases the database for this handle and all forks. Reopen with Storage.open/openEncrypted. */
+  /** Releases the database for this handle and all forks. Reopen with Storage.open. */
   close(): Promise<void>;
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
@@ -104,7 +102,6 @@ export interface Storage {
 /** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
   open(options: StorageOpenOptions): Promise<Storage>;
-  openEncrypted(options: EncryptedStorageOpenOptions): Promise<Storage>;
 };
 
 /** Options for {@link Client.new}. */

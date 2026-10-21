@@ -106,7 +106,6 @@ pub(crate) struct AdminASPRequest {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum StorageWorkerRequest {
-    OpenPlaintext,
     OpenEncrypted {
         key: DatabaseKeyTransport,
         create_new: bool,
@@ -223,12 +222,10 @@ enum InitState {
     Failed(String),
 }
 
-enum OpenRequest {
-    Encrypted {
-        key: stellar_private_payments::state::database_key::DatabaseKey,
-        purpose: stellar_private_payments::state::database_key::OpenPurpose,
-        directory: String,
-    },
+struct OpenRequest {
+    key: stellar_private_payments::state::database_key::DatabaseKey,
+    purpose: stellar_private_payments::state::database_key::OpenPurpose,
+    directory: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -300,7 +297,7 @@ const OPFS_LOCK_RETRY_ATTEMPTS: u32 = 10;
 const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 
 async fn init(opening: OpenRequest) -> Result<(), JsError> {
-    let OpenRequest::Encrypted { ref directory, .. } = opening;
+    let directory = &opening.directory;
     if directory != ".opfs-sahpool-encrypted"
         && !directory
             .strip_prefix(".opfs-sahpool-encrypted-")
@@ -399,38 +396,41 @@ async fn init(opening: OpenRequest) -> Result<(), JsError> {
 
 /// Open the database `opening` asks for, once the OPFS pool is installed.
 fn open_database(opening: OpenRequest) -> anyhow::Result<SqliteStorage> {
-    match opening {
-        OpenRequest::Encrypted { key, purpose, .. } => {
-            #[cfg(target_arch = "wasm32")]
-            let purpose = {
-                let mut purpose = purpose;
-                let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
-                    use sqlite_wasm_rs::vfs::VfsFilesManager;
-                    let pool = p.borrow();
-                    let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
-                    let exists = pool.contains("spp.encrypted.db")?;
-                    if exists && encrypted_database_is_empty()? {
-                        // The pool owns exclusive OPFS handles and no database
-                        // connection is open yet. Only a zero-byte main file
-                        // without recovery sidecars is safe to recreate.
-                        anyhow::ensure!(
-                            !pool.contains("spp.encrypted.db-journal")?
-                                && !pool.contains("spp.encrypted.db-wal")?,
-                            "empty database has recovery files; existing data has been preserved"
-                        );
-                        pool.remove("spp.encrypted.db")?;
-                        purpose =
-                            stellar_private_payments::state::database_key::OpenPurpose::CreateNew;
-                        return Ok(false);
-                    }
-                    Ok(exists)
-                })?;
-                anyhow::ensure!(exists == matches!(purpose, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting), "database create/open purpose does not match existing file");
-                purpose
-            };
-            SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
-        }
-    }
+    let OpenRequest { key, purpose, .. } = opening;
+    #[cfg(target_arch = "wasm32")]
+    let purpose = {
+        let mut purpose = purpose;
+        let exists = SAH_POOL.with(|p| -> anyhow::Result<bool> {
+            use sqlite_wasm_rs::vfs::VfsFilesManager;
+            let pool = p.borrow();
+            let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
+            let exists = pool.contains("spp.encrypted.db")?;
+            if exists && encrypted_database_is_empty()? {
+                // The pool owns exclusive OPFS handles and no database
+                // connection is open yet. Only a zero-byte main file
+                // without recovery sidecars is safe to recreate.
+                anyhow::ensure!(
+                    !pool.contains("spp.encrypted.db-journal")?
+                        && !pool.contains("spp.encrypted.db-wal")?,
+                    "empty database has recovery files; existing data has been preserved"
+                );
+                pool.remove("spp.encrypted.db")?;
+                purpose = stellar_private_payments::state::database_key::OpenPurpose::CreateNew;
+                return Ok(false);
+            }
+            Ok(exists)
+        })?;
+        anyhow::ensure!(
+            exists
+                == matches!(
+                    purpose,
+                    stellar_private_payments::state::database_key::OpenPurpose::OpenExisting
+                ),
+            "database create/open purpose does not match existing file"
+        );
+        purpose
+    };
+    SqliteStorage::connect_encrypted("spp.encrypted.db", &key, purpose)
 }
 
 /// Read the logical main-file size without reading schema or copying its data.
@@ -553,9 +553,6 @@ pub(crate) async fn StorageWorker(
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
-        StorageWorkerRequest::OpenPlaintext => {
-            anyhow::bail!("storage encryption is mandatory; an encryption key is required")
-        }
         StorageWorkerRequest::OpenEncrypted {
             key,
             create_new,
@@ -566,7 +563,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let mut owned = DatabaseKey::new([0; 32]);
             owned.copy_from_slice(&key.0);
             drop(key);
-            return open_requested(OpenRequest::Encrypted {
+            return open_requested(OpenRequest {
                 key: owned,
                 directory: directory.unwrap_or_else(|| ".opfs-sahpool-encrypted".into()),
                 purpose: if create_new {
@@ -1019,19 +1016,6 @@ impl StorageBridge {
         .await
     }
 
-    #[wasm_bindgen(js_name = openEncrypted)]
-    pub async fn open_encrypted(
-        worker_url: String,
-        key: Vec<u8>,
-        create_new: bool,
-    ) -> Result<StorageBridge, JsError> {
-        let key = DatabaseKeyTransport(key);
-        if key.0.len() != 32 {
-            return Err(JsError::new("database key must contain 32 bytes"));
-        }
-        Self::open_internal(worker_url, key, create_new, None).await
-    }
-
     /// Close encrypted storage and all forks before releasing OPFS handles.
     pub async fn close(&self) -> Result<(), JsError> {
         self.call(StorageWorkerRequest::Pause, STORAGE_OPEN_PING_TIMEOUT_MS)
@@ -1080,6 +1064,19 @@ impl StorageBridge {
 impl StorageBridge {
     pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
         Self { bridge }
+    }
+
+    /// Open encrypted worker-backed storage directly from Rust.
+    pub async fn open_encrypted(
+        worker_url: String,
+        key: Vec<u8>,
+        create_new: bool,
+    ) -> Result<StorageBridge, JsError> {
+        let key = DatabaseKeyTransport(key);
+        if key.0.len() != 32 {
+            return Err(JsError::new("database key must contain 32 bytes"));
+        }
+        Self::open_internal(worker_url, key, create_new, None).await
     }
 
     async fn open_internal(
@@ -1629,11 +1626,15 @@ mod tests {
     use wasm_bindgen_test::*;
 
     #[wasm_bindgen_test]
-    async fn plaintext_worker_request_is_rejected_while_storage_stays_locked() {
-        let error = router(StorageWorkerRequest::OpenPlaintext)
-            .await
-            .expect_err("plaintext storage must not open");
-        assert!(error.to_string().contains("encryption is mandatory"));
+    async fn invalid_key_worker_request_is_rejected_while_storage_stays_locked() {
+        let error = router(StorageWorkerRequest::OpenEncrypted {
+            key: DatabaseKeyTransport(vec![0; 31]),
+            create_new: true,
+            directory: None,
+        })
+        .await
+        .expect_err("short database key must not open storage");
+        assert!(error.to_string().contains("32 bytes"));
         STORAGE.with(|storage| assert!(storage.borrow().is_none()));
         INIT_STATE.with(|state| assert!(matches!(*state.borrow(), InitState::Locked)));
     }

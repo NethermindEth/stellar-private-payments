@@ -12,8 +12,6 @@ export const ProverBridge = { spawn() { return {
 }; }};
 export const Storage = {async open() { return {
   async toHandle() { return {free() {}}; }, fork() { return this; }
-}; }, async openEncrypted() { return {
-  async toHandle() { return {free() {}}; }, fork() { return this; }
 }; }};
 export const Client = {async new(rpc, storage, prover, config) {
   clients.push(config);

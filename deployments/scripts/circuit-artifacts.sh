@@ -9,7 +9,7 @@ case "${SPP_NETWORK:-testnet}" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ARTIFACTS="${CIRCUIT_ARTIFACTS_DIR:-$ROOT/target/circuits-artifacts}"
+ARTIFACTS="$ROOT/target/circuits-artifacts"
 KEYS="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuit_keys"
 LOCK="$ROOT/deployments/${SPP_NETWORK:-testnet}/circuits.json"
 CRATE_LOCK="$ROOT/sdk/native/circuits.json"
