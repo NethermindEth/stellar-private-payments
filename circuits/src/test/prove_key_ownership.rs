@@ -55,7 +55,8 @@ mod tests {
         let wrong_pk = derive_public_key(wrong_sk);
         let hash = Scalar::from(1u64);
 
-        // Compute an honest witness for the wrong key and swap in the real public key afterwards.
+        // Compute an honest witness for the wrong key and swap in the real
+        // public key afterwards.
         let mut circuit = build_circuit(&wasm, &r1cs, &inputs(wrong_sk, wrong_pk, hash))?;
         assert!(r1cs_satisfied(circuit.clone())?);
 
