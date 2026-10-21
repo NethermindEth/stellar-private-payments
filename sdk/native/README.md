@@ -157,7 +157,7 @@ See [`../web/README.md`](../web/README.md). JS method names align with Rust wher
 
 ## Mandatory storage encryption
 
-Every persistent SQLite database is encrypted with SQLite3MC under a 32-byte `DatabaseKey`. Callers open storage through `LocalStorage::open_encrypted`, `LocalStorage::open_with_key`, `LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`, while `state::native_wallet::unlock_with_stellar` and `unlock_with` manage wallet-sealed key envelopes and migrate legacy plaintext files in place. The keyless `open`, `connect`, `connect_file`, and `connect_existing_plaintext` entry points reject persistent paths without touching the filesystem; in-memory storage remains available for transient work.
+Every persistent SQLite database is encrypted with SQLite3MC under a 32-byte `DatabaseKey`. Callers open storage through `LocalStorage::open_encrypted`, `LocalStorage::open_with_key`, `LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`, while `state::native_wallet::unlock_with_stellar` and `unlock_with` manage wallet-sealed key envelopes and migrate legacy plaintext files in place. In-memory storage (`SqliteStorage::connect_in_memory`) remains available for transient work.
 
 On the command line, the CLI unlocks `spp.db` with a Stellar CLI identity (`--storage-account <alias>`, `SPP_STORAGE_ACCOUNT`, or `defaults.storage_account` in TOML). That identity defaults to `--account` rather than `--sign-as`, so changing the transaction payer does not switch which key unlocks local storage. Commands that take no `--account`, such as `spp config show`, require `--storage-account` (or its env/config equivalent) explicitly.
 

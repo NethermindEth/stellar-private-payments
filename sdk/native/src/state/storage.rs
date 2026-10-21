@@ -96,21 +96,6 @@ impl Storage {
         Self::connect_with_connection(super::database_key::reopen(path.as_ref(), key)?)
     }
 
-    /// Keyless persistent storage is unsupported. Use `connect_encrypted`.
-    pub fn connect_existing_plaintext(_path: impl AsRef<Path>) -> Result<Self> {
-        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
-    }
-
-    /// Keyless persistent storage is unsupported. Use `connect_encrypted`.
-    pub fn connect() -> Result<Self> {
-        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
-    }
-
-    /// Keyless persistent storage is unsupported. No file is opened or created.
-    pub fn connect_file(_path: impl AsRef<Path>) -> Result<Self> {
-        anyhow::bail!("storage encryption is mandatory; an encryption key is required")
-    }
-
     pub fn connect_in_memory() -> Result<Self> {
         Self::connect_with_connection(Connection::open_in_memory()?)
     }

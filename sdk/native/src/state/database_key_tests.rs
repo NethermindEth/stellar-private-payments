@@ -191,8 +191,6 @@ fn wrong_or_missing_key_preserves_clean_and_hot_database() -> Result<()> {
             .is_err()
         );
         assert_eq!(before, snapshot(&f.db())?);
-        assert!(SqliteStorage::connect_file(f.db()).is_err());
-        assert_eq!(before, snapshot(&f.db())?);
         let recovered = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
         assert_eq!(
             recovered.get_setting_json::<String>("large-0")?,
@@ -398,24 +396,17 @@ fn corrupt_ciphertext_is_rejected_without_changes() -> Result<()> {
 }
 
 #[test]
-fn keyless_opens_reject_new_and_plaintext_files_without_changes() -> Result<()> {
+fn encrypted_open_rejects_plaintext_files_without_changes() -> Result<()> {
     let key = DatabaseKey::generate()?;
     assert_eq!(format!("{key:?}"), "DatabaseKey([REDACTED])");
     assert_ne!(*key, [0; 32]);
     let f = Fixture::new()?;
-    assert!(SqliteStorage::connect_file(f.db()).is_err());
-    assert!(SqliteStorage::connect_existing_plaintext(f.db()).is_err());
-    assert!(LocalStorage::open(f.db().to_str().expect("UTF-8 path")).is_err());
-    assert!(!f.db().exists());
     let conn = rusqlite::Connection::open(f.db())?;
     conn.execute_batch(
         "CREATE TABLE legacy(value TEXT); INSERT INTO legacy VALUES ('preserved');",
     )?;
     drop(conn);
     let before = snapshot(&f.db())?;
-    assert!(SqliteStorage::connect_file(f.db()).is_err());
-    assert!(SqliteStorage::connect_existing_plaintext(f.db()).is_err());
-    assert!(LocalStorage::open(f.db().to_str().expect("UTF-8 path")).is_err());
     assert!(SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting).is_err());
     assert_eq!(before, snapshot(&f.db())?);
     Ok(())
