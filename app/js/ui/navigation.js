@@ -9,6 +9,7 @@ import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
+import { getRegistrationErrorMessage } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { rememberedSigners } from '../signing-account.js';
 import { accountSession, forgetNoteOwner, rememberNoteOwner, rememberedNoteOwner } from '../account-session.js';
@@ -668,7 +669,7 @@ export const Wallet = {
             });
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
-            Toast.show(error?.message || 'Registration failed', 'error');
+            Toast.show(getRegistrationErrorMessage(error), 'error');
             if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },
