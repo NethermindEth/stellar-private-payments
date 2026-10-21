@@ -157,11 +157,14 @@ See [`../web/README.md`](../web/README.md). JS method names align with Rust wher
 
 ## Mandatory storage encryption
 
-Persistent SDK storage requires a 32-byte key via `LocalStorage::open_encrypted`,
-`LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`.
-Keyless `open`, `connect`, `connect_file`, and `connect_existing_plaintext` calls
-return an error without opening or creating a file; in-memory storage remains
-available for transient work.
+Persistent SDK storage requires a 32-byte `DatabaseKey` via
+`LocalStorage::open_encrypted`, `LocalStorage::open_with_key`,
+`LocalStorage::open_with_key_provider`, or `SqliteStorage::connect_encrypted`
+(with `state::native_wallet::unlock_with_stellar` and `unlock_with` handling
+wallet-sealed key envelopes and in-place plaintext migration). Keyless `open`,
+`connect`, `connect_file`, and `connect_existing_plaintext` calls return an
+error without opening or creating a file; in-memory storage remains available
+for transient work.
 
 The CLI unlocks `spp.db` with a Stellar CLI identity (`--storage-account <alias>`,
 `SPP_STORAGE_ACCOUNT`, or `defaults.storage_account` in TOML). It defaults to

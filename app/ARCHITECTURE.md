@@ -16,7 +16,7 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 **Storage**
 
-Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
+Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database file (`spp.encrypted.db`) lives on OPFS behind the storage worker; the CLI stores `spp.db` alongside `spp.db.key` in its data directory.
 
 Persistent databases are encrypted with SQLite3MC using a random 32-byte key. SDK callers supply that key (or a key provider) when opening storage. In the web app and CLI, the key is sealed under a dedicated wallet signature—Freighter in the browser, or a Stellar CLI identity (`--storage-account`, defaulting to `--account`) on the command line—separate from privacy-key derivation and transaction signing. Only the public signing context and encrypted key envelope are persisted; there is no password unlock path.
 
@@ -68,7 +68,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Storage` (WASM, wasm-bindgen API)**
 
-- Spawns the storage worker once per page (`Storage.open({ workerUrl?, keyProvider, createNew? })`).
+- Spawns the storage worker once per page (`Storage.open({ workerUrl?, keyProvider, createNew?, directory? })`).
 - `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
 - `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 

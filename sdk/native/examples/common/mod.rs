@@ -12,10 +12,11 @@
 //! | `SPP_NETWORK_PASSPHRASE` | derived from `network` in deployments.json | account/pool/transact examples |
 //! | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 //! | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
+//! | `SPP_STORAGE_ACCOUNT` | unset | optional `stellar keys` alias to unlock `SPP_WALLET_PATH` |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` token base units | estimate/transact examples |
-//! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
+//! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples (also unlocks `spp`-created wallets when `SPP_STORAGE_ACCOUNT` is unset) |
 //!
 //! Four prerequisite classes print a skip message and exit with code 0: a
 //! missing `STELLAR_SECRET_KEY` ([`require_env`]), a wallet without privacy

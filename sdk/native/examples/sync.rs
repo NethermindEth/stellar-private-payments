@@ -11,6 +11,8 @@
 //!   SPP_RPC_URL          default: https://soroban-testnet.stellar.org
 //!   SPP_BOOTNODE_URL     default: https://bootnode.dev-nethermind.xyz
 //!   SPP_WALLET_PATH      default: ./spp-example-wallet.sqlite
+//!   SPP_STORAGE_ACCOUNT  optional `stellar keys` alias for wallet unlock
+//!   STELLAR_SECRET_KEY   optional secret key for wallet unlock
 //!   SPP_DEPLOYMENT_JSON  default: deployments/testnet/deployments.json
 //!
 //! # Known limitation

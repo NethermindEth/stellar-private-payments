@@ -5,7 +5,7 @@
 //! local wallet database under the `gvk_authority` app setting.
 //!
 //! Run:
-//!   cargo run --release --example gvk_audit
+//!   cargo run --release --example gvk-audit
 //!
 //! With no GVK pool in deployment config, the example still generates (or
 //! loads) the authority key and prints the public key JSON for `deploy.sh
@@ -15,12 +15,14 @@
 //!   SPP_RPC_URL              default: https://soroban-testnet.stellar.org
 //!   SPP_BOOTNODE_URL         default: https://bootnode.dev-nethermind.xyz
 //!   SPP_WALLET_PATH          default: ./spp-example-wallet.sqlite
+//!   SPP_STORAGE_ACCOUNT      optional `stellar keys` alias for wallet unlock
+//!   STELLAR_SECRET_KEY       optional secret key for wallet unlock
 //!   SPP_DEPLOYMENT_JSON      default: deployments/testnet/deployments.json
 //!   SPP_POOL_CONTRACT_ID     optional; must be a pool-gvk deployment when set
 //!
-//! Each note is printed on one line (amount, commitment, pk). Traceable inputs
-//! traceable pools, tx kind (deposit / transfer / withdraw) is shown when
-//! inputs are visible; view-only pools omit it.
+//! Each note is printed on one line (amount, commitment, pk). For traceable
+//! pools, tx kind (deposit / transfer / withdraw) is shown when inputs are
+//! visible; view-only pools omit it.
 
 mod common;
 

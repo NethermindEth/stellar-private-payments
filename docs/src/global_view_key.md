@@ -12,9 +12,10 @@ are cheap) with Poseidon2 as the KDF. This avoids the foreign-field arithmetic
 that verifying an off-circuit X25519 ciphertext would require.
 
 > **Scope**: This page documents the circuits, the cryptographic scheme, the
-> `pool-gvk` contract, deployment, and the SDK admin audit API. There is no
-> CLI or app UI for GVK yet — audit is a Rust library call only. The Rust
-> reference used by circuit tests lives in
+> `pool-gvk` contract, deployment, and the SDK admin audit API. In the web app,
+> the admin page (`/admin.html`) provides a **Global View** tab to decrypt and
+> export notes as CSV; there is no `spp` CLI subcommand for GVK audit yet. The
+> Rust reference used by circuit tests lives in
 > `circuits/src/test/utils/global_view_key.rs`.
 
 ---
@@ -223,8 +224,9 @@ while let Some(tx) = audit.next_tx().await? {
   `None` for a dummy input, a `VIEW_ONLY` pool (inputs carry no ciphertext),
   or a decrypt/verify failure.
 
-This is a Rust library API only — there is no `spp` CLI subcommand or app
-view for GVK audit yet.
+The admin page (`/admin.html`) exposes this audit view in the browser under its
+**Global View** tab (with CSV export); there is no `spp` CLI subcommand for GVK
+audit yet.
 
 ---
 

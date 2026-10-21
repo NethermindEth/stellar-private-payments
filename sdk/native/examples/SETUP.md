@@ -258,7 +258,8 @@ required by most examples; everything else has a sensible default.
 
 | Variable | Default | Required by |
 | --- | --- | --- |
-| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
+| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw`, `plan` (also unlocks wallets created by `spp onboard` when `SPP_STORAGE_ACCOUNT` is unset) |
+| `SPP_STORAGE_ACCOUNT` | unset | optional `stellar keys` alias used to unlock an encrypted `SPP_WALLET_PATH` database when `STELLAR_SECRET_KEY` is unset or differs from the storage identity |
 | `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
@@ -272,6 +273,14 @@ required by most examples; everything else has a sensible default.
 `SPP_AMOUNT_STROOPS` is a legacy variable name: its value is in the selected
 pool token's base units. The human-readable amount depends on that token's
 decimals; `10000000` base units equals 1 token only when decimals are 7.
+
+> **Wallet encryption and `sync` / `gvk-audit`:** `common::open_storage`
+> unlocks `SPP_WALLET_PATH` via `SPP_STORAGE_ACCOUNT` first, then
+> `STELLAR_SECRET_KEY`, and falls back to a fixed example key only when neither
+> is set. If you point `SPP_WALLET_PATH` at a database created by `spp onboard`,
+> keep `STELLAR_SECRET_KEY` (or `SPP_STORAGE_ACCOUNT`) exported even when
+> running `sync` or `gvk-audit`; without one of them, the fallback example key
+> cannot unlock the CLI-enrolled database.
 
 > `SPP_BOOTNODE_URL` is read directly by the examples and overrides the default
 > public bootnode. Every example that opens a client reads it, not just `sync`.

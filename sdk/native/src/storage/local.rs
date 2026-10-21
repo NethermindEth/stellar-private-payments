@@ -39,8 +39,9 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
-    /// Keyless persistent storage is unsupported. Use `open_encrypted` or
-    /// `open_with_key_provider`. No file is opened or created.
+    /// Keyless persistent storage is unsupported. Use `open_encrypted`,
+    /// `open_with_key`, or `open_with_key_provider`. No file is opened or
+    /// created.
     pub fn open(_storage_path: &str) -> Result<Self, Error> {
         Err(
             anyhow::anyhow!("storage encryption is mandatory; an encryption key is required")
