@@ -32,4 +32,5 @@ test('copies are told apart by leaf', () => {
 test('copies in two pools are told apart by pool', () => {
   assert.equal(sameNote(c3, { ...c3, poolContractId: 'other' }), false);
   assert.equal(disclosedCopy(notes, otherC5), otherC5);
+  assert.deepEqual(preselectNotes(notes, [c], 'other'), [otherC5]);
 });

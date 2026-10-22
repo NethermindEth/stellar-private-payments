@@ -391,12 +391,12 @@ export const Shell = {
         });
 
         App.events.addEventListener('dashboard:view-receipt', (event) => {
-            const { noteId } = event.detail;
-            window.history.replaceState(null, '', `#disclosure?commitment=${encodeURIComponent(noteId)}`);
+            const { noteId, poolId } = event.detail;
+            window.history.replaceState(null, '', `#disclosure?commitment=${encodeURIComponent(noteId)}&pool=${encodeURIComponent(poolId)}`);
             setActiveView('disclosure');
             // Give the disclosure view a moment to load if it hasn't already
             setTimeout(() => {
-                App.events.dispatchEvent(new CustomEvent('disclosure:select-note', { detail: { noteId } }));
+                App.events.dispatchEvent(new CustomEvent('disclosure:select-note', { detail: { noteId, poolId } }));
             }, 50);
         });
 
