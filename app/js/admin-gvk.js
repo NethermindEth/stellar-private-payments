@@ -11,7 +11,7 @@ import { symbol, symbolCircle } from 'd3-shape';
 import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
-import { client, getCurrentRpcUrl, parseTokenAmount } from './wasm-facade.js';
+import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 
@@ -2547,6 +2547,16 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     updateStatus();
   });
 
+  let panelReady = false;
+  async function ensurePanelReady(options) {
+    await ensureCryptoReady(options);
+    if (!panelReady) {
+      await populatePools();
+      await loadStoredAuthorityKey();
+      panelReady = true;
+    }
+  }
+
   auditBtnEl?.addEventListener('click', async () => {
     const originalText = auditBtnEl.textContent;
     try {
@@ -2554,7 +2564,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       loadMoreBtnEl.disabled = true;
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
-      await ensureCryptoReady();
+      await ensurePanelReady({ unlock: true });
       await startAudit({ reset: true });
       await applyFiltersAndRender();
     } catch (err) {
@@ -2622,11 +2632,18 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     }
   });
 
+  bindResultHighlights();
+  window.addEventListener(STORAGE_STATE_EVENT, () => {
+    if (isStorageUnlocked() && !panelReady) {
+      void ensurePanelReady().catch(() => {});
+    }
+  });
+  if (storageWasLocked() && !isStorageUnlocked()) {
+    setPanelStatus('Local data is locked. Use Unlock to continue.', 'info');
+    return;
+  }
   try {
-    await ensureCryptoReady();
-    bindResultHighlights();
-    await populatePools();
-    await loadStoredAuthorityKey();
+    await ensurePanelReady();
   } catch (err) {
     console.warn('[global-view] init failed:', err);
     setPanelStatus('Global View unavailable until the app runtime is ready.', 'error');

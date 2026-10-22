@@ -668,6 +668,7 @@ export const Wallet = {
             const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
+            await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
             await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',

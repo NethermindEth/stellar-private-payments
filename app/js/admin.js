@@ -1,6 +1,7 @@
 import { deploymentDefaults } from './network-config.js';
 import { StrKey, contract, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig, isStorageUnlocked, lockStorage, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
+import { explorerPreference } from './public-settings.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -16,6 +17,7 @@ const statusEl = document.getElementById('status');
 const networkChip = document.getElementById('networkChip');
 const syncDot = document.getElementById('sync-dot');
 const walletChip = document.getElementById('walletChip');
+const storageLockBtn = document.getElementById('storage-lock-btn');
 const connectBtn = document.getElementById('connectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
 
@@ -190,12 +192,14 @@ function ensureWalletConnected() {
   }
 }
 
-async function ensureCryptoReady() {
+async function ensureCryptoReady({ unlock = false } = {}) {
   if (!state.cryptoReady) {
     setStatus('Loading app...', 'info');
     const { sorobanRpcUrl, ...network } = await getWalletNetwork();
     try {
-      const storage = await ensureStorage();
+      const storage = await ensureStorage({ unlock });
+      const explorerSetting = await storage.getExplorerSetting().catch(() => null);
+      App.state.settings.explorerBaseUrl = explorerPreference() || explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
       if (await bootnodeRequired(sorobanRpcUrl)) {
         if (!(await storage.getStoredBootnodeUrl())) {
           throw new Error('RPC_SYNC_GAP: bootnode required');
@@ -216,6 +220,15 @@ async function ensureCryptoReady() {
 // Block explorer links
 // -----------------------------
 async function loadExplorerSetting() {
+  const preferred = explorerPreference();
+  if (preferred) {
+    App.state.settings.explorerBaseUrl = preferred;
+    return;
+  }
+  if (!isStorageUnlocked()) {
+    App.state.settings.explorerBaseUrl = Utils.defaultExplorerBaseUrl;
+    return;
+  }
   try {
     const storage = await ensureStorage();
     const explorerSetting = await storage.getExplorerSetting();
@@ -305,9 +318,10 @@ function disconnect() {
   showToast('Wallet disconnected', 'info');
 }
 
-async function refreshState() {
+async function refreshState({ unlock = false } = {}) {
   try {
     setStatus('Loading contract state...', 'info');
+    await ensureCryptoReady({ unlock });
     const appState = await client().aspState();
     const membershipState = appState.aspMembership;
     const nonMembershipState = appState.aspNonMembership;
@@ -696,7 +710,7 @@ async function insertMembershipLeaf() {
     addToAllowlistBtn.textContent = 'Processing...';
 
     setStatus('Building the allowlist insert...', 'info');
-    await ensureCryptoReady();
+    await ensureCryptoReady({ unlock: true });
 
     const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
@@ -1501,6 +1515,35 @@ tabBtns.forEach(btn => {
 // -----------------------------
 // Event Listeners & Init
 // -----------------------------
+function renderStorageLockBtn() {
+  if (!storageLockBtn) return;
+  const unlocked = isStorageUnlocked();
+  storageLockBtn.textContent = unlocked ? 'Lock' : 'Unlock';
+  storageLockBtn.title = unlocked ? 'Lock local data' : 'Unlock local data';
+  storageLockBtn.dataset.state = unlocked ? 'unlocked' : 'locked';
+  storageLockBtn.disabled = ['unlocking', 'locking'].includes(document.body.dataset.storageState);
+}
+window.addEventListener(STORAGE_STATE_EVENT, renderStorageLockBtn);
+renderStorageLockBtn();
+
+storageLockBtn?.addEventListener('click', async () => {
+  if (isStorageUnlocked()) {
+    await lockStorage();
+    return;
+  }
+  try {
+    await ensureCryptoReady({ unlock: true });
+    await refreshState();
+    setStatus('Ready', 'ok');
+  } catch (error) {
+    if (error?.code === 'unlock-cancelled') return;
+    setStatus('Unlock failed', 'error');
+    if (!isDbLockedError(error?.message)) {
+      showToast(error?.message || 'Could not unlock local data.', 'error');
+    }
+  }
+});
+
 connectBtn.addEventListener('click', () => {
   if (state.address) {
     disconnect();
@@ -1512,7 +1555,7 @@ connectBtn.addEventListener('click', () => {
 refreshBtn.addEventListener('click', () => {
   if (state.repoint?.lines) resetRepoint();
   if (!state.busy) renderAdminTx(state.adminTxKind);
-  refreshState();
+  refreshState({ unlock: true });
 });
 
 addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
@@ -1571,6 +1614,20 @@ nonMembershipContractInput?.addEventListener('input', () => {
 async function init() {
   setStatus('Initializing...', 'info');
   await loadExplorerSetting();
+  if (storageWasLocked() && !isStorageUnlocked()) {
+    await refreshPools();
+    await refreshAdmins();
+    await initGvkAuditPanel({
+      ensureCryptoReady,
+      showToast,
+      getWalletAccount: () =>
+        state.address
+          ? { userAddress: state.address, networkPassphrase: state.networkPassphrase }
+          : null,
+    });
+    setStatus('Local data is locked. Use Unlock to continue.', 'info');
+    return;
+  }
   await ensureCryptoReady();
   await refreshState();
   await initGvkAuditPanel({

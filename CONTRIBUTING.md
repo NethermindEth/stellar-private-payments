@@ -200,11 +200,13 @@ committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
 
 The workspace also aliases `rusqlite` and `rusqlite_migration` to the published
 [`spp-rusqlite`](https://crates.io/crates/spp-rusqlite) (`0.40.2`) and
-[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates. These
-carry `sqlite-wasm-rs 0.6` (`sqlite3mc`) support from
-[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906) so `stellar-private-payments`
-can publish to crates.io before upstream cuts a release. Drop the aliases once upstream releases
-include that change.
+[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates.
+`spp-rusqlite` is published from upstream `rusqlite` `main` at commit `b6476751` (which includes
+[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906) for `sqlite-wasm-rs 0.6`
+`sqlite3mc` support plus post-`0.40.2` changes on `main`) so `stellar-private-payments` can publish
+to crates.io before upstream cuts a release. Because `cargo audit` and `cargo deny` match RustSec
+advisories by crate name, check `rusqlite` and `rusqlite_migration` advisories manually until
+upstream releases include that change and the aliases are dropped.
 
 ### Running WASM tests
 

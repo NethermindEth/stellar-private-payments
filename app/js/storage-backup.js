@@ -37,12 +37,15 @@ export async function removeLegacyPlaintextStorage(root) {
     });
 }
 
+const activeLeases = new WeakMap();
+
 /** A writable lease conflicts with another worker's sync access handle. */
 export async function acquireStorageLease(root) {
     const leases = [];
     const release = async () => {
-        for (const stream of leases.splice(0)) await stream.abort();
+        for (const stream of leases.splice(0)) await stream.abort().catch(() => {});
     };
+    activeLeases.set(root, release);
     try {
         for await (const [name, handle] of root.entries()) {
             if (handle.kind !== 'directory' || !validDirectory(name)) continue;
@@ -125,6 +128,12 @@ export async function importStorageBackup({ backup, root, validate, records = lo
         // Never remove the previous database before this commit succeeds.
         records.setItem(STORAGE_RECORD_KEY, JSON.stringify(record));
         committed = true;
+        await activeLeases.get(root)?.();
+        const obsolete = [];
+        for await (const [name, handle] of root.entries()) {
+            if (handle.kind === 'directory' && validDirectory(name) && name !== directory) obsolete.push(name);
+        }
+        for (const name of obsolete) await root.removeEntry(name, { recursive: true }).catch(() => {});
     } finally {
         if (!committed) await root.removeEntry(directory, { recursive: true }).catch(() => {});
     }

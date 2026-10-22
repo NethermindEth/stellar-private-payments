@@ -311,6 +311,7 @@ pub fn encrypt_in_place(
     drop(migrated);
     std::fs::File::open(&staging)?.sync_all()?;
     std::fs::rename(&staging, &path)?;
+    #[cfg(unix)]
     if let Some(directory) = path.parent() {
         std::fs::File::open(directory)?.sync_all()?;
     }

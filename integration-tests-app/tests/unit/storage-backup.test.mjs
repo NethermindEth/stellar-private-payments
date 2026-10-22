@@ -54,6 +54,7 @@ test('encrypted backup round trips opaque bytes and commits envelope plus direct
   assert.deepEqual(backup.files[0].bytes, new Uint8Array([0, 255, 1, 128]));
   await importStorageBackup({ backup, root, records: store, crypto: webcrypto, validate: async record => {
     assert.equal(store.getItem(STORAGE_RECORD_KEY), original);
+    assert.equal(await root.getDirectoryHandle(DEFAULT_DIRECTORY), directory);
     assert.notEqual(record.directory, DEFAULT_DIRECTORY);
     const stage = await root.getDirectoryHandle(record.directory);
     const opaque = await stage.getDirectoryHandle('.opaque');
@@ -62,7 +63,7 @@ test('encrypted backup round trips opaque bytes and commits envelope plus direct
   const imported = JSON.parse(store.getItem(STORAGE_RECORD_KEY));
   assert.notEqual(imported.directory, DEFAULT_DIRECTORY);
   assert.equal(imported.envelope, 'wrapped');
-  assert.equal(await root.getDirectoryHandle(DEFAULT_DIRECTORY), directory);
+  assert.deepEqual([...root.children.keys()], [imported.directory]);
 });
 
 test('failed validation or envelope persistence preserves current storage and removes staging', async () => {

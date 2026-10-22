@@ -12,6 +12,7 @@ import {
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 import { deploymentDefaults } from '../network-config.js';
+import { explorerPreference, saveExplorerPreference } from '../public-settings.js';
 const STEP_ORDER = ['disclaimer', 'retention', 'storage', 'keys', 'explorer', 'registration'];
 
 function hasStorageManager() {
@@ -331,7 +332,7 @@ export async function runOnboardingWizard({
                 encryptionKeypair: { publicKey: storedPublicKeys.encryptionKeypair.public },
             }
             : null,
-        explorerBaseUrl: explorerSetting?.baseUrl || deploymentDefaults.explorerUrl,
+        explorerBaseUrl: explorerPreference() || explorerSetting?.baseUrl || deploymentDefaults.explorerUrl,
         bootnode: bootnodeSetting || { enabled: false, url: '' },
         registered: !!registryLookup?.entry,
     };
@@ -618,6 +619,7 @@ export async function runOnboardingWizard({
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
+                    saveExplorerPreference(baseUrl);
                     await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();

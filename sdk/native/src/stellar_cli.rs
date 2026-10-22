@@ -75,9 +75,9 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<Zeroizing<String>> 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
-            "`{bin} {}` failed: {:?}",
+            "`{bin} {}` failed: {}",
             args.first().map(String::as_str).unwrap_or(""),
-            Sensitive(stderr.trim())
+            stderr.trim()
         );
     }
     let stdout = Zeroizing::new(
