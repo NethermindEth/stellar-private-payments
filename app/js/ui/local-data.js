@@ -44,7 +44,7 @@ export const LocalData = {
             const busy = ['unlocking', 'locking'].includes(document.body.dataset.storageState);
             document.getElementById('storage-export').disabled = busy;
             document.getElementById('storage-import').disabled = busy;
-            document.getElementById('storage-reset').disabled = busy || unlocked;
+            document.getElementById('storage-reset').disabled = busy;
             const legacyNotice = document.getElementById('storage-legacy-notice');
             if (legacyNotice) legacyNotice.hidden = document.body.dataset.legacyStorage !== 'present';
             const deleteLegacy = document.getElementById('storage-delete-legacy');
@@ -134,8 +134,12 @@ export const LocalData = {
         });
         document.getElementById('storage-reset').addEventListener('click', async () => {
             if (window.prompt('This permanently deletes encrypted local data, including private notes, history and settings, plus local encrypted backup copies. It does not move on-chain funds. Data without an external backup may be unrecoverable. Close other app tabs first. Type DELETE to reset.') !== 'DELETE') return;
+            const wasUnlocked = isStorageUnlocked();
             try { await manageStorageBackup('reset'); window.location.reload(); }
-            catch (error) { Toast.show(`Could not reset local storage: ${error.message}. Close other app tabs and try again.`, 'error'); }
+            catch (error) {
+                Toast.show(`Could not reset local storage: ${error.message}. Close other app tabs and try again.`, 'error');
+                if (wasUnlocked && !isStorageUnlocked()) setTimeout(() => window.location.reload(), 3000);
+            }
         });
         select.addEventListener('change', async () => {
             if (!isStorageUnlocked() || savingTimeout) { render(); return; }

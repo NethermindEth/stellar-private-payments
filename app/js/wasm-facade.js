@@ -289,9 +289,8 @@ export async function deleteLegacyStorage() {
 
 export async function manageStorageBackup(action, text) {
     if (storageOpening || storageLocking) throw new Error('Wait for the current storage operation to finish.');
-    // Export and import close open storage themselves; reset still needs an explicit lock.
+    // Each action closes open storage itself before touching its files.
     const wasUnlocked = isStorageUnlocked();
-    if (action === 'reset' && wasUnlocked) throw new Error('Lock local storage before resetting it.');
     const backup = action === 'import' ? parseBackup(text) : null;
     if (!['export', 'import', 'reset'].includes(action)) throw new Error('Unknown storage action.');
     storageLocking = true;
@@ -321,7 +320,10 @@ export async function manageStorageBackup(action, text) {
                 // Release the handles so deletion is possible. The Web Lock
                 // still prevents app tabs from starting an open during reset.
                 await release();
-                return resetStorage({ root });
+                await resetStorage({ root });
+                // Nothing is left to unlock; the next connect creates new storage.
+                sessionStorage.removeItem(LOCKED_SESSION_KEY);
+                return;
             }
             try { await importStorageBackup({ backup, root, validate: async record => {
                 let value = JSON.stringify(record);
