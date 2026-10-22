@@ -40,7 +40,7 @@ cmd_start() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   step "starting $CONTAINER_NAME on port $PORT"
   docker run -d --name "$CONTAINER_NAME" -p "$PORT:$PORT" \
-    stellar/quickstart:testing \
+    stellar/quickstart:v678-b1525.1-testing \
     --local --enable rpc,horizon --limits unlimited >/dev/null \
     || die "failed to start stellar/quickstart"
 
