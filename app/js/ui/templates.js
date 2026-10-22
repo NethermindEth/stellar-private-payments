@@ -87,7 +87,7 @@ export const Templates = {
         if (disclose) {
             disclose.addEventListener('click', (e) => {
                 e.preventDefault();
-                App.events.dispatchEvent(new CustomEvent('dashboard:view-receipt', { detail: { noteId: note.id } }));
+                App.events.dispatchEvent(new CustomEvent('dashboard:view-receipt', { detail: { noteId: note.id, poolId: note.poolContractId } }));
             });
         }
         return row;

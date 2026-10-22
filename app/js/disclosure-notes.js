@@ -21,9 +21,10 @@ export function disclosedCopy(notes, note) {
     .sort((a, b) => a.spent - b.spent || a.leafIndex - b.leafIndex)[0];
 }
 
-export function preselectNotes(notes, commitments) {
+export function preselectNotes(notes, commitments, poolId) {
   return [...new Set(commitments.map(normalizeCommitment))]
-    .map((commitment) => notes.find((n) => normalizeCommitment(n.id) === commitment))
+    .map((commitment) => notes.find((n) =>
+      normalizeCommitment(n.id) === commitment && (!poolId || n.poolContractId === poolId)))
     .filter(Boolean)
     .map((note) => disclosedCopy(notes, note))
     .slice(0, 4);
