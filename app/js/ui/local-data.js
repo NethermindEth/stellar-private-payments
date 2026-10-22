@@ -7,7 +7,28 @@ import { Toast } from './core.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 
+// Set across the reload that follows an import, so the restored storage unlocks next.
+const UNLOCK_AFTER_IMPORT_KEY = 'spp.unlockAfterImport';
+
+async function unlock() {
+    try {
+        await ensureStorage({ unlock: true });
+        if (rememberedNoteOwner() && await getConnectedAddress()) await Wallet.connect({ auto: true });
+    } catch (error) {
+        if (error?.code === 'unlock-cancelled') return;
+        if (isDbLockedError(String(error))) showDbLockedModal(String(error));
+        else Toast.show(error?.message || 'Could not unlock local data.', 'error');
+    }
+}
+
 export const LocalData = {
+    /** Prompt for the unlock signature once the page has reloaded after an import. */
+    async resumeAfterImport() {
+        if (sessionStorage.getItem(UNLOCK_AFTER_IMPORT_KEY) !== 'true') return;
+        sessionStorage.removeItem(UNLOCK_AFTER_IMPORT_KEY);
+        if (!isStorageUnlocked()) await unlock();
+    },
+
     init() {
         let warnedAboutSigners = false;
         window.addEventListener(SIGNER_MIGRATION_WARNING_EVENT, event => {
@@ -69,14 +90,7 @@ export const LocalData = {
                 await lockStorage();
                 return;
             }
-            try {
-                await ensureStorage({ unlock: true });
-                if (rememberedNoteOwner() && await getConnectedAddress()) await Wallet.connect({ auto: true });
-            } catch (error) {
-                if (error?.code === 'unlock-cancelled') return;
-                if (isDbLockedError(String(error))) showDbLockedModal(String(error));
-                else Toast.show(error?.message || 'Could not unlock local data.', 'error');
-            }
+            await unlock();
         });
         const fileInput = document.getElementById('storage-backup-file');
         document.getElementById('storage-import').addEventListener('click', () => fileInput.click());
@@ -89,6 +103,7 @@ export const LocalData = {
             const wasUnlocked = isStorageUnlocked();
             try {
                 await manageStorageBackup('import', await file.text());
+                sessionStorage.setItem(UNLOCK_AFTER_IMPORT_KEY, 'true');
                 window.location.reload();
             } catch (error) {
                 if (error?.code !== 'unlock-cancelled') Toast.show(error.message, 'error');

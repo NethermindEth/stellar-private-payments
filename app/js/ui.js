@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // one, connecting would take Freighter's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
     if (rememberedNoteOwner() && await getConnectedAddress()) {
-        Wallet.connect({ auto: true }).catch(() => {});
+        await Wallet.connect({ auto: true }).catch(() => {});
     }
+    // After the wallet reconnects, so the unlock can finish connecting it.
+    await LocalData.resumeAfterImport();
 });
