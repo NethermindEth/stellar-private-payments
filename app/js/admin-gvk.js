@@ -58,6 +58,11 @@ const state = {
   selectedPk: null,
   selectedFlow: null,
   selectedDot: null,
+  pkOwners: new Map(),
+  // PKs whose owners were read from a fully synced registry; the rest are re-queried.
+  pkOwnersSettled: new Set(),
+  ownersRetryTimer: null,
+  registrySynced: true,
   pkGraphNodes: null,
   ledgerTimeBounds: null,
   timeFilterLedgers: { from: null, to: null },
@@ -202,6 +207,47 @@ function pkCell(value) {
   const truncated = truncateHex(raw);
   if (!raw) return truncated;
   return { ...truncated, matchPk: normalizeFieldKey(raw) };
+}
+
+/** Distinct registry addresses that ever registered this PK (empty when unknown or not yet resolved). */
+function ownerAddresses(pk) {
+  return state.pkOwners.get(normalizeFieldKey(pk)) ?? [];
+}
+
+/** The registering address when exactly one address claims this PK, else null (unregistered or conflicting). */
+function ownerAddress(pk) {
+  const addresses = ownerAddresses(pk);
+  return addresses.length === 1 ? addresses[0] : null;
+}
+
+/** Short address for table cells: first 6 + "…" + last 4. */
+function shortAddress(address) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/** Table cell for a note owner: the registered address, else the PK. Hover highlight stays PK-based. */
+function ownerCell(pk) {
+  const address = ownerAddress(pk);
+  if (!address) return pkCell(pk);
+  return { display: shortAddress(address), full: address, matchPk: normalizeFieldKey(pk) };
+}
+
+/** Owner label for narrow, fixed-width spots (e.g. the PK graph's lane column): "G123…WXYZ", else the short PK. */
+function ownerLabel(pk) {
+  const address = ownerAddress(pk);
+  return address ? `${address.slice(0, 4)}…${address.slice(-4)}` : shortPkLabel(pk);
+}
+
+/** Tooltip text for an owner: address plus PK when registered, else the PK. */
+function ownerTitle(pk) {
+  const address = ownerAddress(pk);
+  return address ? `${address}\nPK ${pk}` : String(pk);
+}
+
+/** Short owner form for inline lists: truncated address, else the truncated PK. */
+function ownerShort(pk) {
+  const address = ownerAddress(pk);
+  return address ? shortAddress(address) : truncateHex(pk).display;
 }
 
 function copyToClipboard(cell, text) {
@@ -509,7 +555,7 @@ function noteCells(audited) {
   }
   return {
     amount: formatAmount(audited.note?.amount),
-    pk: pkCell(audited.note?.pk),
+    pk: ownerCell(audited.note?.pk),
     commitment: truncateHex(audited.commitment),
   };
 }
@@ -517,7 +563,7 @@ function noteCells(audited) {
 const COLUMN_WIDTHS = {
   Note: 40,
   Amount: 96,
-  PK: 88,
+  Owner: 88,
   Commitment: 96,
   Nullifier: 96,
   Created: 130,
@@ -574,7 +620,7 @@ function readFilters() {
     return Number.isFinite(n) ? n : null;
   };
 
-  // Comma-separated: matches a note whose PK contains ANY of the given terms.
+  // Comma-separated: matches a note whose PK or registered address contains ANY of the given terms.
   const pkTerms = (filterPkEl?.value ?? '')
     .split(',')
     .map((term) => normalizeFieldKey(term))
@@ -613,7 +659,7 @@ function noteMatchesAmount(auditedNote, filters) {
 function noteMatchesAmountAndPk(auditedNote, filters) {
   if (filters.pk) {
     const pk = normalizeFieldKey(auditedNote?.note?.pk);
-    if (!pk || !filters.pk.some((term) => pk.includes(term))) return false;
+    if (!pk || !pkMatchesTerms(pk, filters.pk)) return false;
   }
   return noteMatchesAmount(auditedNote, filters);
 }
@@ -735,7 +781,7 @@ function renderTxCards(rows) {
 
     details.appendChild(renderSlotTable(
       'Input notes',
-      ['Note', 'Amount', 'PK', 'Commitment', 'Nullifier'],
+      ['Note', 'Amount', 'Owner', 'Commitment', 'Nullifier'],
       inputs.map((slot) => {
         const cells = noteCells(slot.audited);
         return {
@@ -753,7 +799,7 @@ function renderTxCards(rows) {
 
     details.appendChild(renderSlotTable(
       'Output notes',
-      ['Note', 'Amount', 'PK', 'Commitment'],
+      ['Note', 'Amount', 'Owner', 'Commitment'],
       outputs.map((slot) => {
         const cells = noteCells(slot.audited);
         return {
@@ -979,8 +1025,10 @@ function buildPkGraph(rows, filters) {
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
+/** A term matches the normalized PK or any address that registered it. */
 function pkMatchesTerms(pk, terms) {
-  return terms.some((term) => pk.includes(term));
+  const addresses = ownerAddresses(pk).map((address) => address.toLowerCase());
+  return terms.some((term) => pk.includes(term) || addresses.some((address) => address.includes(term)));
 }
 
 /**
@@ -1101,7 +1149,7 @@ function noteStatus(note) {
 
 function renderNoteTable(rows, filters) {
   const notes = collectNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
-  const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
+  const headers = ['Created', 'Owner', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
   const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
@@ -1276,7 +1324,17 @@ function renderGraphDetailPanel(container, notes) {
     rows.appendChild(row);
   };
 
-  addRow('PK', cellDisplay(cells.pk));
+  const addresses = ownerAddresses(note.audited?.note?.pk);
+  addRow(
+    'Owner',
+    addresses.length === 0
+      ? 'Not registered'
+      : addresses.length === 1
+        ? addresses[0]
+        : `${addresses.length} addresses (conflicting claims)\n${addresses.join('\n')}`,
+    'break-all whitespace-pre-line',
+  );
+  addRow('PK', cellDisplay(truncateHex(note.audited?.note?.pk)));
   addRow('Amount', cellDisplay(cells.amount));
   addRow('Status', noteStatus(note));
   addRow('Commitment', note.commitment ? cellDisplay(truncateHex(note.commitment)) : '—');
@@ -1333,7 +1391,7 @@ function renderGraphLegend() {
   const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] border border-slate-300 ${extra}`);
   const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
 
-  addItem(dot('bg-cyan-400'), 'Color = note owner (PK)');
+  addItem(dot('bg-cyan-400'), 'Color = note owner');
 
   if (state.poolGvkMode === 'traceable') {
     addItem(dot('bg-cyan-400'), 'Note (creation, or only known position)');
@@ -1623,15 +1681,15 @@ function renderPkGraphLegend() {
   const line = (extra) => el('span', `inline-block h-2.5 w-0.5 shrink-0 ${extra}`);
   const triangle = roundedTriangleLegendIcon;
 
-  addItem(bar('bg-white/15'), 'Row: a public key (PK); x-axis: ledger (time)');
+  addItem(bar('bg-white/15'), 'Row: a note owner (registered address, else PK); x-axis: ledger (time)');
 
   if (state.poolGvkMode === 'traceable') {
     addItem(line('bg-cyan-400/70'), 'Vertical arrow: transfer');
-    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that PK');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a transfer with that owner');
     addItem(triangle('fill-rose-400', false), 'Triangle up: withdraw');
     addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
   } else {
-    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that PK');
+    addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that owner');
     legend.appendChild(el('div', 'text-slate-500', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
   }
 
@@ -1649,13 +1707,19 @@ function pkGraphDetailAmountRow(label, amount, count) {
   return row;
 }
 
+/** Click-to-copy detail row: the registered address (when unique) above the PK. */
 function pkGraphDetailPkRow(label, pk) {
   const row = el('div');
   row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
-  const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', pk);
-  value.title = `${pk} (click to copy)`;
-  value.addEventListener('click', () => copyToClipboard(value, pk));
-  row.appendChild(value);
+  const addValue = (text) => {
+    const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', text);
+    value.title = `${text} (click to copy)`;
+    value.addEventListener('click', () => copyToClipboard(value, text));
+    row.appendChild(value);
+  };
+  const address = ownerAddress(pk);
+  if (address) addValue(address);
+  addValue(pk);
   return row;
 }
 
@@ -1743,7 +1807,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const node = nodes.find((n) => n.pk === state.selectedPk);
 
   if (!node) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect a PK, or an arrow to inspect a transfer. Use ← → to step through PKs.'));
+    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect an owner, or an arrow to inspect a transfer. Use ← → to step through owners.'));
     container.appendChild(panel);
     return;
   }
@@ -1751,7 +1815,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const header = el('div', 'shrink-0 space-y-3');
   panel.appendChild(header);
 
-  header.appendChild(pkGraphDetailPkRow('PK', node.pk));
+  header.appendChild(pkGraphDetailPkRow('Owner', node.pk));
   if (selectedDot) header.appendChild(pkGraphDetailSelectedDotRow(selectedDot));
   header.appendChild(pkGraphDetailBalanceRow(fullNodeByPk?.get(node.pk) ?? node));
 
@@ -1778,7 +1842,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
       list.appendChild(el(
         'div',
         'flex items-center justify-between gap-2 font-mono text-slate-300',
-        `${outgoing ? '→' : '←'} ${truncateHex(other).display} · ${formatTokenAmount(edge.amount)} (${edge.count})`,
+        `${outgoing ? '→' : '←'} ${ownerShort(other)} · ${formatTokenAmount(edge.amount)} (${edge.count})`,
       ));
     }
     transfersBox.appendChild(list);
@@ -1879,7 +1943,7 @@ function renderPkGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (orderedPks.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No public keys to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No owners to plot.'));
     renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
     return;
   }
@@ -1999,10 +2063,10 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('fill', (pk) => colorForPk(pk))
     .style('cursor', 'pointer')
     .style('user-select', 'none')
-    .text((pk) => shortPkLabel(pk))
+    .text((pk) => ownerLabel(pk))
     .on('click', (_event, pk) => selectPkGraphNode(pk))
     .append('title')
-    .text((pk) => pk);
+    .text((pk) => ownerTitle(pk));
 
   const svg = select(plotScrollX).append('svg')
     .attr('width', plotWidth)
@@ -2089,7 +2153,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
 
   flowGroups.append('title')
-    .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${truncateHex(g.flow.fromPk).display} → ${truncateHex(g.flow.toPk).display}\n${formatTokenAmount(g.flow.amount)}`);
+    .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${ownerShort(g.flow.fromPk)} → ${ownerShort(g.flow.toPk)}\n${formatTokenAmount(g.flow.amount)}`);
 
   // Circle for a transfer touch; rounded triangle up = withdraw, down = deposit.
   const circlePathD = symbol().type(symbolCircle).size(Math.PI * DOT_RADIUS * DOT_RADIUS)();
@@ -2123,7 +2187,7 @@ function renderPkGraph(rows, containerWidth, filters) {
           : d.received > 0n
             ? `Received ${formatTokenAmount(d.received)} (origin unknown)`
             : null;
-      return [d.pk, `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
+      return [ownerTitle(d.pk), `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
     });
 
   renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
@@ -2148,6 +2212,81 @@ function queueCursorOp(fn) {
   return run;
 }
 
+const OWNERS_RETRY_MS = 5000;
+
+/**
+ * Looks up registry addresses for the audited PKs not yet settled. Owners read while the registry is still
+ * syncing are shown but not settled, since a later registration can still add a conflicting address; they are
+ * re-queried until the registry is synced. Failures leave the PK shown instead. Resolves true when any owner changed.
+ */
+async function resolvePkOwners() {
+  const pending = new Set();
+  let changed = false;
+  try {
+    for (const { tx } of state.rows) {
+      for (const note of txNotes(tx)) {
+        const pk = normalizeFieldKey(note.note?.pk);
+        if (pk && !state.pkOwnersSettled.has(pk)) pending.add(pk);
+      }
+    }
+    // Everything settled, so no owner is pending a sync.
+    if (pending.size === 0) {
+      changed = !state.registrySynced;
+      state.registrySynced = true;
+      return changed;
+    }
+
+    const queried = [...pending];
+    const lookup = await client().noteKeyOwnerLookup(queried);
+    try {
+      const found = new Map();
+      for (const owner of lookup.owners) {
+        try {
+          const pk = normalizeFieldKey(owner.noteKey);
+          const addresses = found.get(pk) ?? [];
+          if (!addresses.includes(owner.address)) addresses.push(owner.address);
+          found.set(pk, addresses);
+        } finally {
+          owner?.free?.();
+        }
+      }
+      const synced = lookup.registryFullySynced;
+      for (const pk of queried) {
+        const addresses = found.get(pk) ?? (synced ? [] : null);
+        if (addresses) {
+          if ((state.pkOwners.get(pk) ?? []).join() !== addresses.join()) changed = true;
+          state.pkOwners.set(pk, addresses);
+        }
+        if (synced) state.pkOwnersSettled.add(pk);
+      }
+      if (state.registrySynced !== synced) changed = true;
+      state.registrySynced = synced;
+    } finally {
+      lookup?.free?.();
+    }
+  } catch (err) {
+    console.warn('[global-view] registry owner lookup failed:', err);
+  }
+  if ([...pending].some((pk) => !state.pkOwnersSettled.has(pk))) scheduleOwnersRetry();
+  return changed;
+}
+
+/** Retries unsettled owners after syncing or lookup failures, even once the cursor is drained. */
+function scheduleOwnersRetry() {
+  if (state.ownersRetryTimer) return;
+  const audit = state.audit;
+  state.ownersRetryTimer = setTimeout(async () => {
+    state.ownersRetryTimer = null;
+    if (!audit || state.audit !== audit) return;
+    const changed = await resolvePkOwners();
+    if (changed && state.audit === audit) {
+      renderResults();
+      updateStatus();
+      syncActionButtons();
+    }
+  }, OWNERS_RETRY_MS);
+}
+
 async function fetchBatch(limit) {
   return queueCursorOp(async () => {
     let fetched = 0;
@@ -2160,6 +2299,7 @@ async function fetchBatch(limit) {
       pushTx(tx);
       fetched += 1;
     }
+    if (fetched > 0) await resolvePkOwners();
     return fetched;
   });
 }
@@ -2230,6 +2370,7 @@ function slotToCsvRow(txIndex, tx, side, slot) {
     slot.index,
     slot.audited ? parseFieldAmount(slot.audited.note?.amount).toString() : '',
     slot.audited?.note?.pk ?? '',
+    ownerAddress(slot.audited?.note?.pk) ?? '',
     slot.audited?.commitment ?? slot.commitment ?? '',
     side === 'input' ? (slot.nullifier ?? '') : '',
   ];
@@ -2237,7 +2378,7 @@ function slotToCsvRow(txIndex, tx, side, slot) {
 
 function buildNotesCsvRows() {
   // CSV keeps the legacy amount_stroops name; all amount columns contain token base units.
-  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'commitment', 'nullifier'];
+  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'owner_address', 'commitment', 'nullifier'];
   const rows = [header];
 
   for (const { tx, index } of state.rows) {
@@ -2255,6 +2396,7 @@ function noteToCsvRow(note) {
     note.spentTxIndex ?? '',
     note.spentLedger ?? '',
     note.audited?.note?.pk ?? '',
+    ownerAddress(note.audited?.note?.pk) ?? '',
     note.audited?.note?.amount ? parseFieldAmount(note.audited.note.amount).toString() : '',
     note.commitment ?? '',
     noteStatus(note).toLowerCase(),
@@ -2266,24 +2408,26 @@ function noteToCsvRow(note) {
 function buildNoteViewCsvRows() {
   const header = [
     'created_tx_index', 'created_ledger', 'spent_tx_index', 'spent_ledger',
-    'pk', 'amount_stroops', 'commitment', 'status', 'nullifier',
+    'pk', 'owner_address', 'amount_stroops', 'commitment', 'status', 'nullifier',
   ];
   return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
 }
 
 /** One row per transfer edge, plus one row per PK for its deposit/withdraw totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
 function buildPkGraphCsvRows() {
-  const header = ['kind', 'from_pk', 'to_pk', 'count', 'amount_stroops'];
+  const header = ['kind', 'from_pk', 'from_address', 'to_pk', 'to_address', 'count', 'amount_stroops'];
   const { nodes, edges } = fullPkGraph();
   const rows = [header];
+  const addressOf = (pk) => (pk ? ownerAddress(pk) ?? '' : '');
+  const pushRow = (kind, from, to, count, amount) => {
+    rows.push([kind, from, addressOf(from), to, addressOf(to), count, amount.toString()]);
+  };
 
-  for (const edge of edges) {
-    rows.push(['transfer', edge.from, edge.to, edge.count, edge.amount.toString()]);
-  }
+  for (const edge of edges) pushRow('transfer', edge.from, edge.to, edge.count, edge.amount);
   for (const node of nodes) {
-    if (node.receivedCount > 0) rows.push(['received', '', node.pk, node.receivedCount, node.received.toString()]);
-    if (node.depositCount > 0) rows.push(['deposit', '', node.pk, node.depositCount, node.deposited.toString()]);
-    if (node.withdrawCount > 0) rows.push(['withdraw', node.pk, '', node.withdrawCount, node.withdrawn.toString()]);
+    if (node.receivedCount > 0) pushRow('received', '', node.pk, node.receivedCount, node.received);
+    if (node.depositCount > 0) pushRow('deposit', '', node.pk, node.depositCount, node.deposited);
+    if (node.withdrawCount > 0) pushRow('withdraw', node.pk, '', node.withdrawCount, node.withdrawn);
   }
 
   return rows;
@@ -2309,6 +2453,8 @@ function updateStatus() {
     return;
   }
 
+  const hint = state.registrySynced ? '' : ' Public key registry still syncing: some owners shown as PK.';
+
   if (state.rows.length === 0) {
     setPanelStatus('No audited transacts yet — pool may have no activity.', 'info');
     return;
@@ -2319,16 +2465,16 @@ function updateStatus() {
     const shown = Math.min(state.filteredVisibleCount, filteredRows.length);
     const more = shown < filteredRows.length ? ' — more available, click Load more.' : '';
     setPanelStatus(
-      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}`,
+      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}${hint}`,
       'ok',
     );
     return;
   }
 
   if (state.exhausted) {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.`, 'ok');
+    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.${hint}`, 'ok');
   } else {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.`, 'ok');
+    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.${hint}`, 'ok');
   }
 }
 
@@ -2434,6 +2580,11 @@ function resetAuditState() {
     if (input) { input.value = ''; input.disabled = true; input.setCustomValidity(''); }
   }
   state.rows = [];
+  state.pkOwners = new Map();
+  state.pkOwnersSettled = new Set();
+  clearTimeout(state.ownersRetryTimer);
+  state.ownersRetryTimer = null;
+  state.registrySynced = true;
   state.poolGvkMode = null;
   state.txCounter = 0;
   state.exhausted = false;
