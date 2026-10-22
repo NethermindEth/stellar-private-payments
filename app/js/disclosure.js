@@ -174,7 +174,7 @@ async function loadNotes() {
     // Apply query-param preselection if present
     const query = parseQueryParams();
     if (query.commitments && query.commitments.length > 0) {
-      const matches = preselectNotes(state.notes, query.commitments);
+      const matches = preselectNotes(state.notes, query.commitments, query.pool);
       if (matches.length > 0) {
         state.selectedNotes = matches;
       } else {
@@ -204,6 +204,7 @@ function parseQueryParams() {
   const commitments = hashParams.getAll('commitment').concat(searchParams.getAll('commitment')).filter(Boolean);
   return {
     commitments: commitments.length > 0 ? commitments : null,
+    pool: hashParams.get('pool') || searchParams.get('pool'),
     verify: hashParams.get('verify') === '1' || searchParams.get('verify') === '1' || hashParams.get('verify') === 'true' || searchParams.get('verify') === 'true',
   };
 }
@@ -1478,8 +1479,8 @@ export async function initDisclosure() {
     if (generateContainer) mountGenerate(generateContainer);
   });
   App.events.addEventListener('disclosure:select-note', (event) => {
-    const { noteId } = event.detail;
-    const matches = preselectNotes(state.notes, [noteId]);
+    const { noteId, poolId } = event.detail;
+    const matches = preselectNotes(state.notes, [noteId], poolId);
     if (matches.length > 0) {
       state.selectedNotes = matches;
       if (generateContainer) mountGenerate(generateContainer);
