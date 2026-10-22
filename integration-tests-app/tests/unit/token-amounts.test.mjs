@@ -15,7 +15,7 @@ test('wallet formatting uses pool precision, including zero decimals', () => {
   assert.equal(Utils.formatTokenAmount(1n, 'TINY', 0xffff_ffff), '1e-4294967295 TINY');
 });
 
-test('shared disclosure formatter never assumes seven decimals', async () => {
+test('shared note rows use pool precision and carry their pool id', async () => {
   const { formatAmount, createNoteRow } = await import('../../../app/js/ui/notes-view.js');
   assert.equal(formatAmount(100_000_000n, 'TOKEN', 8), '1 TOKEN');
   assert.equal(formatAmount(100_000_000n, 'TOKEN'), '100000000 base units');
@@ -35,6 +35,7 @@ test('shared disclosure formatter never assumes seven decimals', async () => {
     const text = node => [node.textContent, ...node.children.map(text)].filter(Boolean).join(' ');
     assert.match(text(createNoteRow(note, { symbol: 'TOKEN', decimals: 8, showBadge: false })), /1 TOKEN/);
     assert.match(text(createNoteRow(note, { symbol: 'TOKEN', showBadge: false })), /100000000 base units/);
+    assert.equal(createNoteRow({ ...note, poolContractId: 'P' }, { showBadge: false }).dataset.poolId, 'P');
   } finally {
     globalThis.document = previous;
     globalThis.Node = previousNode;

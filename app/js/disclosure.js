@@ -1461,7 +1461,8 @@ export async function initDisclosure() {
 
   App.events.addEventListener('disclosure:metadata', () => {
     generateContainer?.querySelectorAll('[data-note-id]').forEach(row => {
-      const note = state.notes.find(note => note.id === row.dataset.noteId);
+      const note = state.notes.find(note =>
+        note.id === row.dataset.noteId && note.poolContractId === row.dataset.poolId);
       const label = row.querySelector('[data-note-amount]');
       if (note && label) {
         label.textContent = formatAmount(note.amount, tokenLabelForPool(note.poolContractId), poolDecimals(note.poolContractId));
