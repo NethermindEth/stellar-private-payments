@@ -73,5 +73,6 @@ payer.
 ## Requirements
 
 - Each `--input` must be an unspent note owned by `--account` in this pool.
+  Listing a commitment twice takes two such notes.
 - A Stellar-address recipient must have registered their keys. If the registry
   is unavailable or the recipient hasn't registered, use the explicit-key form.
