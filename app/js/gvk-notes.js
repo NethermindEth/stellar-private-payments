@@ -54,7 +54,8 @@ function groupNotes(rows) {
         spentKind: kind,
         nullifier: slot.nullifier,
       };
-      // The GVK ciphertext carries no leaf index, so the oldest copy counts as the one spent.
+      // The GVK ciphertext carries no leaf index, so guess the oldest unspent copy:
+      // the SDK spends a wallet's oldest copy first.
       const existing = unspent.get(normalizeFieldKey(slot.audited?.commitment))?.shift();
 
       if (existing) {

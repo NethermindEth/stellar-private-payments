@@ -139,8 +139,8 @@ async fn run_audit(
             tx.inputs.len(),
         );
         // Matched before this tx's outputs are queued: a tx cannot spend its
-        // own outputs. The GVK ciphertext carries no leaf index, so a
-        // spend takes the oldest unspent copy.
+        // own outputs. The GVK ciphertext carries no leaf index, so guess the
+        // oldest unspent copy: the SDK spends a wallet's oldest copy first.
         let spent_from: Vec<Option<NoteOrigin>> = tx
             .inputs
             .iter()
