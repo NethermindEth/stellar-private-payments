@@ -15,6 +15,9 @@ test('public explorer preference persists without database access and rejects cr
     for (const url of ['javascript:alert(1)', 'https://user:secret@example.org', 'https://example.org/?token=secret']) {
         assert.throws(() => saveExplorerPreference(url, storage));
     }
+    // A network without a default explorer saves no preference.
+    saveExplorerPreference('', storage);
+    assert.equal(explorerPreference(storage), null);
 });
 test('legacy signer associations are removed only after encrypted persistence succeeds', async () => {
     const legacy = records();

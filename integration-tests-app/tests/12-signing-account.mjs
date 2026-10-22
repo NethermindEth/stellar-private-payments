@@ -9,6 +9,7 @@ import { waitForSyncedLedger } from '../src/indexer.mjs';
 import { deposit, withdraw, waitForToast } from '../src/moveFunds.mjs';
 import { gotoAdvanced, gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
+import { waitForCondition } from '../src/waits.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { RPC_URL, createAccount, fund } from '../src/testAccount.mjs';
 import { importAdditionalAccount, selectFreighterAccount } from '../src/wallet.mjs';
@@ -70,7 +71,14 @@ export async function run(helpers) {
   await select.selectOption('__other__');
   await page.getByTestId('signing-account-input').fill(signer);
   await page.getByTestId('signing-account-use').click();
-  assert((await select.inputValue()) === signer, 'the signer account was not selected to sign and pay');
+  // The picker switches once the signer list is saved to encrypted storage.
+  await waitForCondition({
+    operation: 'signing-account:use',
+    timeoutMs: 10_000,
+    intervalMs: 100,
+    observe: async () => ({ selected: await select.inputValue() }),
+    isReady: ({ selected }) => selected === signer,
+  });
 
   // A previous selection of the signer must not affect deposits: the owner
   // signs and pays.
