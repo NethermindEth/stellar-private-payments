@@ -207,7 +207,9 @@ fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<N
             .nth(copy)
         else {
             if copy > 0 {
-                bail!("input commitment is repeated: {commitment}");
+                bail!(
+                    "input note {commitment} is listed twice, but only one unspent note with that commitment is owned in this pool"
+                );
             }
             if notes.iter().any(|note| note.id == *commitment) {
                 bail!("input note {commitment} has already been spent");
@@ -336,10 +338,10 @@ mod tests {
             NoteAmount::from(10u128)
         );
         let err = selected_input_total(&[c, c], &notes[..2]).expect_err("one unspent copy");
-        assert!(err.to_string().contains("input commitment is repeated"));
-        let err = selected_input_total(&[c], &notes[..1]).expect_err("only the spent copy");
+        assert!(err.to_string().contains("is listed twice"));
+        let err = selected_input_total(&[c, c], &notes[..1]).expect_err("only the spent copy");
         assert!(err.to_string().contains("has already been spent"));
-        let err = selected_input_total(&[Field::ZERO], &notes).expect_err("not in the wallet");
+        let err = selected_input_total(&[c, Field::ZERO], &notes).expect_err("not in the wallet");
         assert!(err.to_string().contains("is not owned in this pool"));
         Ok(())
     }
