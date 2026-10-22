@@ -1911,9 +1911,14 @@ mod tests {
 
     use super::*;
     use crate::{
+        planner::Transact,
         state::test_events,
-        types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount},
-        zk::{crypto, encryption},
+        transact::{BuildTransactParams, build_transact_params, transact_request_from_step},
+        types::{
+            AspMembershipSync, ContractEvent, ContractsEventData, ExtAmount, GvkMode,
+            KeyDerivationSignature, NoteAmount, PolicyFlags, TransactChainContext,
+        },
+        zk::{crypto, encryption, merkle::MerklePrefixTree},
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -3506,6 +3511,57 @@ mod tests {
             .map(|note| note.map(|(_, _, leaf)| leaf))
             .collect();
         assert_eq!(leaves, [Some(0), Some(2), None]);
+        Ok(())
+    }
+
+    /// Two unspent copies listed twice build. With one spent, the repeat fails
+    /// at once, while an input with no copy at all still waits for sync.
+    #[test]
+    fn a_repeated_input_past_its_last_copy_fails_at_once() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[0, 1])?;
+        scan_notes(&mut storage)?;
+        let chain = TransactChainContext {
+            pool_root: MerklePrefixTree::new(2, &[c, c])?.into_built().root()?,
+            pool_next_index: 2,
+            pool_merkle_levels: 2,
+            token_contract_id: String::new(),
+            asp_membership_levels: 0,
+            asp_membership_root: Field::ZERO,
+            asp_membership_contract_id: String::new(),
+            asp_membership_ledger: 0,
+            non_membership_proof: None,
+            policy_flags: PolicyFlags::default(),
+            gvk_mode: GvkMode::Off,
+            admin_view_key: None,
+            deposits_paused: false,
+        };
+        let step = Transact::new(
+            vec![c, c],
+            [NoteAmount::ZERO; 2],
+            ExtAmount::ZERO,
+            String::new(),
+            [None, None],
+            [None, None],
+        );
+        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain);
+        assert!(matches!(
+            build_transact_params(&storage, &req)?,
+            BuildTransactParams::Ready(params) if params.inputs.len() == 2
+        ));
+        save_spend(&mut storage, 1)?;
+
+        let Err(err) = build_transact_params(&storage, &req) else {
+            panic!("one unspent copy listed twice must fail");
+        };
+        assert!(err.to_string().contains("is listed twice"), "{err}");
+        for inputs in [vec![c, Field::ONE], vec![Field::ONE, Field::ONE]] {
+            req.input_commitments = inputs;
+            assert!(matches!(
+                build_transact_params(&storage, &req)?,
+                BuildTransactParams::MembershipSync(AspMembershipSync::SyncRequired(None))
+            ));
+        }
         Ok(())
     }
 
