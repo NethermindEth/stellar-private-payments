@@ -250,6 +250,7 @@ impl BackgroundSync {
         );
 
         let mut indexer = None;
+        let mut consecutive_failures: u32 = 0;
         while !self.is_stopped() {
             if indexer.is_none() {
                 match open_indexer(
@@ -271,17 +272,32 @@ impl BackgroundSync {
                             RetentionGap::SyncGap | RetentionGap::BootnodeFailed(_),
                         ),
                     ) => return Err(e),
-                    Err(e) => tracing::warn!(
-                        "background sync could not open the indexer, retrying: {e:#}"
-                    ),
+                    Err(e) => {
+                        consecutive_failures = consecutive_failures.saturating_add(1);
+                        if consecutive_failures.is_power_of_two() {
+                            tracing::warn!(
+                                consecutive_failures,
+                                "background sync could not open the indexer, retrying: {e:#}"
+                            );
+                        }
+                    }
                 }
             }
-            if let Some(opened) = &indexer
-                && let Err(e) = catch_up_loop(opened, &self.storage, Some(self.stop.as_ref())).await
-            {
-                tracing::error!("background sync fetch failed: {e:#}");
-                if matches!(e, Error::Rpc(RpcError::RpcSyncGap(_))) {
-                    indexer = None;
+            if let Some(opened) = &indexer {
+                match catch_up_loop(opened, &self.storage, Some(self.stop.as_ref())).await {
+                    Ok(()) => consecutive_failures = 0,
+                    Err(e) => {
+                        consecutive_failures = consecutive_failures.saturating_add(1);
+                        if consecutive_failures.is_power_of_two() {
+                            tracing::error!(
+                                consecutive_failures,
+                                "background sync failed, retrying: {e:#}"
+                            );
+                        }
+                        if matches!(e, Error::Rpc(RpcError::RpcSyncGap(_))) {
+                            indexer = None;
+                        }
+                    }
                 }
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
@@ -1144,6 +1160,90 @@ mod tests {
         .expect("stop ends the wait");
 
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// Open and fetch failures share one count; a good round resets it.
+    #[tokio::test]
+    async fn background_sync_logs_failures_at_doubling_counts() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        struct Alerts(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Alerts {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                let level = event.metadata().level();
+                if *level <= tracing::Level::WARN {
+                    let mut count = String::from("-");
+                    event.record(
+                        &mut |field: &tracing::field::Field, value: &dyn std::fmt::Debug| {
+                            if field.name() == "consecutive_failures" {
+                                count = format!("{value:?}");
+                            }
+                        },
+                    );
+                    self.0
+                        .lock()
+                        .expect("lock poisoned")
+                        .push(format!("{level} {count}"));
+                }
+            }
+        }
+
+        let error = json_rpc_error(-32_603, "upstream timeout");
+        let page = get_events_page("main-cursor", json!([]), 3_000_000);
+        let rpc = MockServer::start().await;
+        mount_get_events(
+            &rpc,
+            vec![
+                error.clone(),
+                error.clone(),
+                error.clone(),
+                page.clone(),
+                error.clone(),
+                page.clone(),
+                page,
+                error,
+            ],
+        )
+        .await;
+        let storage = temp_storage("doubling-logs");
+        let sync = background_sync(&rpc, &storage, None);
+        let kick = sync.kick.clone();
+        let stop = sync.stop_handle();
+        let alerts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(Alerts(alerts.clone())),
+        );
+        // Without it, `has_just_one` in tracing-core caches interest
+        // from whichever test thread hits a callsite first.
+        let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+
+        // 7 calls to the good round, then 9 failed fetches; next log at 16.
+        let fail_nine_fetches = async {
+            while get_events_calls(&rpc).await < 16 {
+                kick.kick();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            stop.request();
+        };
+        let (result, ()) = tokio::time::timeout(
+            Duration::from_secs(4),
+            futures::future::join(sync.run(), fail_nine_fetches),
+        )
+        .await
+        .expect("background sync did not reach nine failed fetches");
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            *alerts.lock().expect("lock poisoned"),
+            [
+                "WARN 1", "WARN 2", "ERROR 4", "ERROR 1", "ERROR 2", "ERROR 4", "ERROR 8"
+            ]
+        );
     }
 
     /// Inline sync returns a transient bootnode error at once.
