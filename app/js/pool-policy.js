@@ -28,7 +28,7 @@ export const POOL_CONTROLS = {
         label: "View-only",
         tag: "Admin view key · view-only",
         explanation:
-            "Notes are encrypted with the pool's admin view key, revealing only the owner public key and amount to key holders.",
+            "Notes are encrypted with the pool's admin view key, revealing only the owner public key and the amount.",
         impact: "Privacy: the admin view key holder can read every new note.",
     },
     traceable: {
