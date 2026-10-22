@@ -88,7 +88,7 @@ export function parseBackup(text, origin = location.origin) {
 export async function exportStorageBackup({ root, records = localStorage }) {
     const record = JSON.parse(records.getItem(STORAGE_RECORD_KEY) || 'null');
     const directory = record?.directory ?? DEFAULT_DIRECTORY;
-    if (!record || record.pending !== false || !validDirectory(directory)) throw new Error('Unlock local storage before exporting a backup.');
+    if (!record || record.pending !== false || !validDirectory(directory)) throw new Error('There is no encrypted local storage to back up yet.');
     const files = [];
     let size = 0;
     async function collect(handle, prefix = '') {

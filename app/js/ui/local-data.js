@@ -21,8 +21,8 @@ export const LocalData = {
         const render = () => {
             const unlocked = isStorageUnlocked();
             const busy = ['unlocking', 'locking'].includes(document.body.dataset.storageState);
-            document.getElementById('storage-export').disabled = busy || !unlocked;
-            document.getElementById('storage-import').disabled = busy || unlocked;
+            document.getElementById('storage-export').disabled = busy;
+            document.getElementById('storage-import').disabled = busy;
             document.getElementById('storage-reset').disabled = busy || unlocked;
             const legacyNotice = document.getElementById('storage-legacy-notice');
             if (legacyNotice) legacyNotice.hidden = document.body.dataset.legacyStorage !== 'present';
@@ -86,12 +86,18 @@ export const LocalData = {
             if (!file) return;
             if (file.size > 384 * 1024 * 1024) { Toast.show('Backup is too large.', 'error'); return; }
             if (!window.confirm('Restore this encrypted backup? It will become your active local storage after the original wallet account unlocks it and validation succeeds. Changes made since the backup will not appear in the restored data.')) return;
+            const wasUnlocked = isStorageUnlocked();
             try {
                 await manageStorageBackup('import', await file.text());
                 window.location.reload();
-            } catch (error) { if (error?.code !== 'unlock-cancelled') Toast.show(error.message, 'error'); }
+            } catch (error) {
+                if (error?.code !== 'unlock-cancelled') Toast.show(error.message, 'error');
+                // Import locked open storage; clear decrypted application state.
+                if (wasUnlocked && !isStorageUnlocked()) setTimeout(() => window.location.reload(), 3000);
+            }
         });
         document.getElementById('storage-export').addEventListener('click', async () => {
+            const wasUnlocked = isStorageUnlocked();
             try {
                 const text = await manageStorageBackup('export');
                 const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
@@ -101,11 +107,14 @@ export const LocalData = {
                 document.body.append(link);
                 link.click();
                 link.remove();
-                setTimeout(() => { URL.revokeObjectURL(url); window.location.reload(); }, 1000);
+                setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                    // Export locked open storage; clear decrypted application state.
+                    if (wasUnlocked) window.location.reload();
+                }, 1000);
             } catch (error) {
                 Toast.show(error.message, 'error');
-                // Clear decrypted application state even when exporting fails.
-                setTimeout(() => window.location.reload(), 3000);
+                if (wasUnlocked && !isStorageUnlocked()) setTimeout(() => window.location.reload(), 3000);
             }
         });
         document.getElementById('storage-reset').addEventListener('click', async () => {

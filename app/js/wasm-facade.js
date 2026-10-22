@@ -289,19 +289,19 @@ export async function deleteLegacyStorage() {
 
 export async function manageStorageBackup(action, text) {
     if (storageOpening || storageLocking) throw new Error('Wait for the current storage operation to finish.');
-    if (action === 'export' ? !isStorageUnlocked() : isStorageUnlocked()) {
-        throw new Error(action === 'export' ? 'Unlock local storage to export a backup.' : 'Lock local storage before importing or resetting it.');
-    }
+    // Export and import close open storage themselves; reset still needs an explicit lock.
+    const wasUnlocked = isStorageUnlocked();
+    if (action === 'reset' && wasUnlocked) throw new Error('Lock local storage before resetting it.');
     const backup = action === 'import' ? parseBackup(text) : null;
     if (!['export', 'import', 'reset'].includes(action)) throw new Error('Unknown storage action.');
     storageLocking = true;
-    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    if (wasUnlocked || action !== 'export') sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
     setStorageState('locking');
     try {
         await ensureWasmInit();
         return await navigator.locks.request(STORAGE_RECORD_KEY, { mode: 'exclusive' }, async () => {
             const root = await navigator.storage.getDirectory();
-            if (action === 'export') {
+            if (wasUnlocked) {
                 stopAutoLock?.();
                 stopAutoLock = null;
                 clearAutoLockSetting();
@@ -310,6 +310,8 @@ export async function manageStorageBackup(action, text) {
                 storageHandle = null;
                 appStorageInstance = null;
                 await handle.close();
+            }
+            if (action === 'export') {
                 const release = await acquireStorageLease(root);
                 try { return await exportStorageBackup({ root }); }
                 finally { await release(); }

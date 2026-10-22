@@ -518,7 +518,7 @@
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5" aria-labelledby="storage-backup-title">
                 <h2 id="storage-backup-title" class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Local storage backup and recovery</h2>
-                <p id="storage-recovery-message" role="status" class="mt-2 text-sm text-slate-300">Backups remain encrypted and require the original unlocking account. Export locks local data. Lock before importing or resetting.</p>
+                <p id="storage-recovery-message" role="status" class="mt-2 text-sm text-slate-300">Backups remain encrypted and require the original unlocking account. Exporting or importing while unlocked locks local data. Lock before resetting.</p>
                 <div id="storage-legacy-notice" data-testid="storage-legacy-notice" hidden class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">
                     <span>Unencrypted browser data from an earlier version (<code class="font-mono text-xs">.opfs-sahpool</code>) is still stored on disk. Derived keys and notes can be recovered via Freighter, while older local settings and history are not migrated automatically.</span>
                     <button id="storage-delete-legacy" type="button" class="rounded-xl border border-amber-300/30 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-300/10 disabled:opacity-40">Delete legacy unencrypted data</button>
