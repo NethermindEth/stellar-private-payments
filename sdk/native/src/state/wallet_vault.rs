@@ -14,7 +14,7 @@ use super::database_key::DatabaseKey;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WalletContext {
+pub(super) struct WalletContext {
     pub version: u32,
     pub address: String,
     pub origin: String,
@@ -89,7 +89,12 @@ pub(super) fn validate_context(context: &WalletContext) -> Result<()> {
 
 /// Persist the first wallet envelope before creating the database. Never
 /// replace an existing record: a retry must unlock and reuse its key.
-pub fn create(path: &Path, key: &DatabaseKey, context: WalletContext, secret: &str) -> Result<()> {
+pub(super) fn create(
+    path: &Path,
+    key: &DatabaseKey,
+    context: WalletContext,
+    secret: &str,
+) -> Result<()> {
     validate_context(&context)?;
     let record = WalletRecord {
         context,
@@ -147,7 +152,7 @@ fn read_optional_record(path: &Path) -> Result<Option<String>> {
         .optional()?)
 }
 
-pub fn context(path: &Path) -> Result<Option<WalletContext>> {
+pub(super) fn context(path: &Path) -> Result<Option<WalletContext>> {
     Ok(read(path)?.map(|record| record.context))
 }
 
@@ -159,7 +164,7 @@ fn validate_secret(secret: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<DatabaseKey> {
+pub(super) fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<DatabaseKey> {
     validate_secret(secret)?;
     let record = read(path)?.ok_or_else(|| anyhow!("wallet unlocking is not enabled"))?;
     ensure!(
@@ -169,7 +174,7 @@ pub fn unlock(path: &Path, context: &WalletContext, secret: &str) -> Result<Data
     record.sealed.open(secret)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

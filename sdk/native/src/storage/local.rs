@@ -77,7 +77,7 @@ impl LocalStorage {
     }
 
     /// Open an independent connection, retaining the key for encrypted storage.
-    pub fn fork(&self) -> Result<Self, Error> {
+    pub(crate) fn fork_local(&self) -> Result<Self, Error> {
         let db = SqliteStorage::reopen_encrypted(&self.path, &self.database_key)
             .context("fork encrypted storage")?;
         Ok(Self {
@@ -125,7 +125,7 @@ impl ContractDataStorage for LocalStorage {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Storage for LocalStorage {
     fn fork(&self) -> Result<crate::storage::StorageHandle, Error> {
-        let forked = LocalStorage::fork(self)?;
+        let forked = self.fork_local()?;
         Ok(crate::storage::StorageHandle::from(forked))
     }
 

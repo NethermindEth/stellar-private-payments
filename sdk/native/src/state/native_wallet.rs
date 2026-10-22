@@ -21,7 +21,7 @@ use crate::{types::KeyDerivationSignature, zk::encryption::verify_owner_signatur
 
 const ORIGIN: &str = "spp://native-storage";
 
-pub fn record_path(database: &Path) -> PathBuf {
+fn record_path(database: &Path) -> PathBuf {
     let mut path = database.as_os_str().to_owned();
     path.push(".key");
     path.into()

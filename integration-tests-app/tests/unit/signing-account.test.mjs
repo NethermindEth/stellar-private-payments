@@ -5,7 +5,6 @@ import {
   activeSuggestion,
   addSigner,
   chosenSigner,
-  rememberedSigners,
   removeSigner,
   signingPrivacyWarning,
   withdrawalLinksAccounts,
@@ -81,31 +80,6 @@ test('an unfunded signer is named, not reported as a connection failure', () => 
   for (const message of ['network error: connection reset', 'Failed to fetch', 'NetworkError when attempting to fetch resource.']) {
     assert.match(getTransactionErrorMessage(new Error(message), 'Withdraw'), /^Network error\./);
   }
-});
-
-function memoryStorage() {
-  const items = new Map();
-  return {
-    getItem: (key) => (items.has(key) ? items.get(key) : null),
-    setItem: (key, value) => items.set(key, String(value)),
-  };
-}
-
-test('legacy signing lists can be read per owner for encrypted migration', () => {
-  const storage = memoryStorage();
-  storage.setItem(`poolstellar_signers:${OWNER}`, JSON.stringify([SIGNER, STRANGER]));
-  assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER, STRANGER]);
-  assert.deepEqual(rememberedSigners(SIGNER, storage), []);
-  assert.deepEqual(rememberedSigners(null, storage), []);
-});
-
-test('a tampered or unreadable list remembers only distinct accounts other than the owner', () => {
-  const storage = memoryStorage();
-  storage.setItem(`poolstellar_signers:${OWNER}`, JSON.stringify([SIGNER, OWNER, 7, SIGNER]));
-  assert.deepEqual(rememberedSigners(OWNER, storage), [SIGNER]);
-  storage.setItem(`poolstellar_signers:${OWNER}`, '{not json');
-  assert.deepEqual(rememberedSigners(OWNER, storage), []);
-  assert.deepEqual(rememberedSigners(OWNER, { getItem: () => { throw new Error('blocked'); } }), []);
 });
 
 test('removing an account keeps the others in order', () => {

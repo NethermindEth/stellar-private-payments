@@ -1,15 +1,15 @@
-//! Moving an existing plaintext database into encrypted storage.
+//! Moving an existing native plaintext database into encrypted storage.
 //!
 //! [`copy_plaintext`] copies schema and rows into an empty encrypted
 //! connection and checks the copy against the source before committing it.
-//! Natively, [`encrypt_in_place`] wraps it: the copy goes into a new file that
-//! then replaces the plaintext database with a rename.
+//! [`encrypt_in_place`] wraps it: the copy goes into a new file that then
+//! replaces the plaintext database with a rename.
 
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, params_from_iter, types::ValueRef};
 use sha2::{Digest, Sha256};
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 #[path = "encrypted_migration_tests.rs"]
 mod tests;
 
@@ -60,26 +60,10 @@ fn tables(conn: &Connection) -> Result<Vec<(String, bool)>> {
     Ok(result)
 }
 
-pub(super) fn check_integrity(conn: &Connection) -> Result<()> {
-    let mut statement = conn.prepare("PRAGMA integrity_check")?;
-    let messages = statement
-        .query_map([], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    ensure!(messages == ["ok"], "database integrity check failed");
-    ensure!(
-        conn.prepare("PRAGMA foreign_key_check")?
-            .query([])?
-            .next()?
-            .is_none(),
-        "database foreign key check failed"
-    );
-    Ok(())
-}
-
 /// A digest of the schema, every typed value (including rowids) and the
 /// version headers, used to check that a copy matches its source.
 fn fingerprint(conn: &Connection) -> Result<String> {
-    check_integrity(conn)?;
+    super::storage::check_integrity(conn)?;
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(&schema(conn)?)?);
     for pragma in ["user_version", "application_id"] {
@@ -137,7 +121,7 @@ fn fingerprint(conn: &Connection) -> Result<String> {
 /// Both connections must be owned exclusively and outside transactions. Rows
 /// are copied as SQL values, never as pages, and the copy must match the
 /// source before it is committed. The source is only read.
-pub fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> Result<()> {
+fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> Result<()> {
     ensure!(
         schema(destination)?.is_empty(),
         "migration destination is not empty"
@@ -212,25 +196,22 @@ pub fn copy_plaintext(source: &mut Connection, destination: &mut Connection) -> 
         tx.commit()?;
     }
     source.commit()?;
-    check_integrity(destination)
+    super::storage::check_integrity(destination)
 }
 
-/// Copy the plaintext database at `source`, opened through the SQLite VFS
-/// `source_vfs` (or the default one), into a new encrypted database at
+/// Copy the plaintext database at `source` into a new encrypted database at
 /// `destination`, which must not exist yet.
-pub fn copy_into_encrypted(
+fn copy_into_encrypted(
     source: &std::path::Path,
-    source_vfs: Option<&str>,
     destination: &std::path::Path,
     key: &super::database_key::DatabaseKey,
 ) -> Result<()> {
     use rusqlite::OpenFlags;
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     // Opening normally rolls back a hot journal a crash may have left.
-    let mut source = match source_vfs {
-        Some(vfs) => Connection::open_with_flags_and_vfs(source, flags, vfs)?,
-        None => Connection::open_with_flags(source, flags)?,
-    };
+    let mut source = Connection::open_with_flags(
+        source,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
     let mut destination = super::database_key::open(
         destination,
         key,
@@ -239,29 +220,9 @@ pub fn copy_into_encrypted(
     copy_plaintext(&mut source, &mut destination)
 }
 
-/// Whether the encrypted database at `path` has any tables. A copy commits
-/// schema and rows together, so a database without tables, or without any
-/// pages at all, holds an interrupted copy or creation and can be replaced.
-pub fn has_tables(path: &std::path::Path, key: &super::database_key::DatabaseKey) -> Result<bool> {
-    use rusqlite::OpenFlags;
-    #[cfg(not(target_arch = "wasm32"))]
-    let absolute = std::path::absolute(path)?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let path = absolute.as_path();
-    // Not database_key::open, which refuses a database without pages.
-    let conn = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    super::database_key::configure(&conn, key)?;
-    let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
-    Ok(pages > 0 && !schema(&conn)?.is_empty())
-}
-
 /// Whether the file at `path` is an unencrypted SQLite database. Encrypted
 /// databases do not start with SQLite's plaintext header.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn is_plaintext_file(path: &std::path::Path) -> Result<bool> {
+pub(super) fn is_plaintext_file(path: &std::path::Path) -> Result<bool> {
     use std::io::Read;
     let mut header = [0u8; 16];
     let mut file = match std::fs::File::open(path) {
@@ -279,8 +240,7 @@ pub fn is_plaintext_file(path: &std::path::Path) -> Result<bool> {
 /// interruption leaves only a partial copy, which the next attempt discards.
 /// Write the database's key record before calling this, so the
 /// encrypted database is never left without one.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn encrypt_in_place(
+pub(super) fn encrypt_in_place(
     path: &std::path::Path,
     key: &super::database_key::DatabaseKey,
 ) -> Result<()> {
@@ -301,13 +261,13 @@ pub fn encrypt_in_place(
             result => result?,
         }
     }
-    copy_into_encrypted(&path, None, &staging, key)?;
+    copy_into_encrypted(&path, &staging, key)?;
     let migrated = super::Storage::connect_encrypted(
         &staging,
         key,
         super::database_key::OpenPurpose::OpenExisting,
     )?;
-    check_integrity(&migrated.conn)?;
+    super::storage::check_integrity(&migrated.conn)?;
     drop(migrated);
     std::fs::File::open(&staging)?.sync_all()?;
     std::fs::rename(&staging, &path)?;

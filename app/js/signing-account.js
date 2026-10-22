@@ -83,28 +83,3 @@ export function signingPrivacyWarning({ owner, signer }) {
         ? 'Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy.'
         : '';
 }
-
-const SIGNERS_KEY_PREFIX = 'poolstellar_signers:';
-
-/**
- * The accounts the user added to sign for `owner`, kept across sessions.
- *
- * Kept per owner, since an account added to sign for one owner may be the
- * owner itself under another.
- *
- * @param {string | null} owner - The note owner.
- * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
- * @returns {string[]}
- */
-export function rememberedSigners(owner, storage = globalThis.localStorage) {
-    if (!owner) return [];
-    try {
-        const stored = JSON.parse(storage?.getItem(SIGNERS_KEY_PREFIX + owner) ?? '[]');
-        if (!Array.isArray(stored)) return [];
-        return stored.reduce((signers, address) => (
-            typeof address === 'string' ? addSigner(signers, address, owner) : signers
-        ), []);
-    } catch {
-        return [];
-    }
-}

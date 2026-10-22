@@ -6,7 +6,7 @@ use crate::types::{
     OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup,
     UserNoteSummary, UserOperation,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
 use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
@@ -75,7 +75,7 @@ impl Storage {
     /// Validate every database page and foreign-key relationship after
     /// restoring a backup.
     pub fn check_integrity(&self) -> Result<()> {
-        super::encrypted_migration::check_integrity(&self.conn)
+        check_integrity(&self.conn)
     }
 
     /// Open encrypted storage with an explicit key and create/open policy.
@@ -1830,6 +1830,22 @@ fn optional_gvk_ciphertext_col(
             rusqlite::Error::InvalidParameterName(format!("gvk_ciphertext[{idx}]: {e:#}"))
         }),
     }
+}
+
+pub(super) fn check_integrity(conn: &Connection) -> Result<()> {
+    let mut statement = conn.prepare("PRAGMA integrity_check")?;
+    let messages = statement
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ensure!(messages == ["ok"], "database integrity check failed");
+    ensure!(
+        conn.prepare("PRAGMA foreign_key_check")?
+            .query([])?
+            .next()?
+            .is_none(),
+        "database foreign key check failed"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

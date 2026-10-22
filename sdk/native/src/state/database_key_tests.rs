@@ -307,7 +307,7 @@ fn threaded_forks_retain_shared_key() -> Result<()> {
     storage
         .storage_mut()
         .set_setting_json("protected", &MARKER)?;
-    let fork = storage.fork()?;
+    let fork = storage.fork_local()?;
     let shared_fork = StorageTrait::fork(&storage)?;
     drop(storage);
     let value = std::thread::spawn(move || fork.storage().get_setting_json::<String>("protected"))
@@ -327,7 +327,7 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
     let path = path.to_str().expect("UTF-8 temp directory");
     let key = DatabaseKey::generate()?;
     let storage = LocalStorage::open_encrypted(path, key, OpenPurpose::CreateNew)?;
-    let writer = storage.fork()?;
+    let writer = storage.fork_local()?;
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let writing = done.clone();
     let handle = std::thread::spawn(move || -> Result<()> {
@@ -340,7 +340,7 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
         }
         Ok(())
     });
-    let forked = (0..300).try_for_each(|_| storage.fork().map(drop));
+    let forked = (0..300).try_for_each(|_| storage.fork_local().map(drop));
     done.store(true, std::sync::atomic::Ordering::Relaxed);
     handle.join().expect("writer thread")?;
     forked?;

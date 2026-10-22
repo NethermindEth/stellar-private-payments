@@ -131,31 +131,19 @@ fn refuses_databases_that_are_not_plaintext() -> Result<()> {
 }
 
 #[test]
-fn an_interrupted_copy_is_recognised_and_can_be_redone() -> Result<()> {
+fn copy_matches_source_and_never_overwrites() -> Result<()> {
     let f = Fixture::new()?;
     seed_plaintext(&f.db())?;
     let before = fingerprint(&Connection::open(f.db())?)?;
     let encrypted = f.0.join("spp.encrypted.db");
     let key = DatabaseKey::generate()?;
 
-    // An interrupted copy leaves an encrypted database without pages.
-    drop(super::super::database_key::open(
-        &encrypted,
-        &key,
-        OpenPurpose::CreateNew,
-    )?);
-    assert!(!has_tables(&encrypted, &key)?);
-
-    fs::remove_file(&encrypted)?;
-    copy_into_encrypted(&f.db(), None, &encrypted, &key)?;
-    assert!(has_tables(&encrypted, &key)?);
-    assert!(has_tables(&encrypted, &DatabaseKey::generate()?).is_err());
+    copy_into_encrypted(&f.db(), &encrypted, &key)?;
     let conn = super::super::database_key::open(&encrypted, &key, OpenPurpose::OpenExisting)?;
     assert_eq!(fingerprint(&conn)?, before);
     drop(conn);
 
-    // A copy never overwrites an existing database.
-    assert!(copy_into_encrypted(&f.db(), None, &encrypted, &key).is_err());
+    assert!(copy_into_encrypted(&f.db(), &encrypted, &key).is_err());
     Ok(())
 }
 
@@ -179,7 +167,7 @@ fn migrates_analyzed_database_without_copying_optimizer_statistics() -> Result<(
 }
 
 #[test]
-fn browser_copy_preserves_legacy_version_and_native_encryption_migrates_it() -> Result<()> {
+fn copy_preserves_legacy_version_and_encryption_migrates_it() -> Result<()> {
     let f = Fixture::new()?;
     let source = Connection::open(f.db())?;
     source.execute_batch(include_str!("schema.sql"))?;
@@ -190,8 +178,8 @@ fn browser_copy_preserves_legacy_version_and_native_encryption_migrates_it() -> 
     )?;
     drop(source);
     let key = DatabaseKey::generate()?;
-    let copied = f.0.join("browser-copy.db");
-    copy_into_encrypted(&f.db(), None, &copied, &key)?;
+    let copied = f.0.join("copy.db");
+    copy_into_encrypted(&f.db(), &copied, &key)?;
     let conn = super::super::database_key::open(&copied, &key, OpenPurpose::OpenExisting)?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
