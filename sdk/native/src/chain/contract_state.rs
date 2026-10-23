@@ -5,13 +5,11 @@ use super::{
         scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest},
-    soroban_encode::BASE_FEE,
-    tx_assemble::build_invoke_contract_tx_envelope,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use stellar_xdr::{self as xdr, ReadXdr};
+use stellar_xdr as xdr;
 
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
@@ -475,9 +473,15 @@ impl StateFetcher {
             });
         }
 
-        let tx =
-            Self::build_find_key_simulation_tx(asp_non_membership, &self.config.deployer, key)?;
-        let retval = self.simulate_single_retval(&tx).await?;
+        let retval = self
+            .client
+            .read_contract(
+                asp_non_membership,
+                &self.config.deployer,
+                "find_key",
+                vec![field_to_scval_u256(key)],
+            )
+            .await?;
         Self::nonmembership_proof_from_find_result(&retval, key, non_membership_root, smt_depth)
     }
 
@@ -579,12 +583,15 @@ impl StateFetcher {
     /// simulation fails, or the contract returns a non-boolean value.
     pub async fn is_pool_known_root(&self, pool_contract_id: &str, root: Field) -> Result<bool> {
         let pool = self.enabled_pool_for(pool_contract_id)?;
-        let tx = Self::build_is_known_root_simulation_tx(
-            &pool.pool_contract_id,
-            &self.config.deployer,
-            root,
-        )?;
-        let retval = self.simulate_single_retval(&tx).await?;
+        let retval = self
+            .client
+            .read_contract(
+                &pool.pool_contract_id,
+                &self.config.deployer,
+                "is_known_root",
+                vec![field_to_scval_u256(root)],
+            )
+            .await?;
         Ok(scval_to_bool(&retval)?)
     }
 
@@ -612,12 +619,15 @@ impl StateFetcher {
         nullifier: Field,
     ) -> Result<bool> {
         let pool = self.enabled_pool_for(pool_contract_id)?;
-        let tx = Self::build_is_spent_simulation_tx(
-            &pool.pool_contract_id,
-            &self.config.deployer,
-            nullifier,
-        )?;
-        let retval = self.simulate_single_retval(&tx).await?;
+        let retval = self
+            .client
+            .read_contract(
+                &pool.pool_contract_id,
+                &self.config.deployer,
+                "is_spent",
+                vec![field_to_scval_u256(nullifier)],
+            )
+            .await?;
         Ok(scval_to_bool(&retval)?)
     }
 
@@ -634,76 +644,6 @@ impl StateFetcher {
             )
             .await?;
         Ok(scval_to_string(&retval)?)
-    }
-
-    async fn simulate_single_retval(&self, tx: &xdr::TransactionEnvelope) -> Result<xdr::ScVal> {
-        let sim = self.client.simulate_transaction(tx).await?;
-
-        let op_result = sim
-            .result
-            .or_else(|| sim.results.into_iter().next())
-            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
-
-        // Newer RPC servers return read-only results in `xdr` instead of the
-        // legacy `retval` field. Try `retval` first for backwards
-        // compatibility.
-        let retval_b64 = op_result
-            .retval
-            .or(op_result.xdr)
-            .ok_or_else(|| anyhow!("simulateTransaction missing retval and xdr"))?;
-
-        Ok(xdr::ScVal::from_xdr_base64(
-            &retval_b64,
-            xdr::Limits::none(),
-        )?)
-    }
-
-    fn build_find_key_simulation_tx(
-        contract_id: &str,
-        source_account: &str,
-        key: Field,
-    ) -> Result<xdr::TransactionEnvelope> {
-        build_invoke_contract_tx_envelope(
-            source_account,
-            xdr::SequenceNumber(0),
-            BASE_FEE,
-            contract_id,
-            "find_key",
-            vec![field_to_scval_u256(key)],
-            Vec::new(),
-        )
-    }
-
-    fn build_is_known_root_simulation_tx(
-        contract_id: &str,
-        source_account: &str,
-        root: Field,
-    ) -> Result<xdr::TransactionEnvelope> {
-        build_invoke_contract_tx_envelope(
-            source_account,
-            xdr::SequenceNumber(0),
-            BASE_FEE,
-            contract_id,
-            "is_known_root",
-            vec![field_to_scval_u256(root)],
-            Vec::new(),
-        )
-    }
-
-    fn build_is_spent_simulation_tx(
-        contract_id: &str,
-        source_account: &str,
-        nullifier: Field,
-    ) -> Result<xdr::TransactionEnvelope> {
-        build_invoke_contract_tx_envelope(
-            source_account,
-            xdr::SequenceNumber(0),
-            BASE_FEE,
-            contract_id,
-            "is_spent",
-            vec![field_to_scval_u256(nullifier)],
-            Vec::new(),
-        )
     }
 
     fn parse_find_result(val: &xdr::ScVal) -> Result<ParsedFindResult> {
