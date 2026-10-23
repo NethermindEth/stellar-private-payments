@@ -189,14 +189,15 @@ pub fn transact_chain_context_from_state(
 #[serde(rename_all = "camelCase")]
 pub struct ContractEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
     pub ledger: u32,
     // StrKey representation of the contract address that emitted this event.
     pub contract_id: String,
-    // The ScVals containing the topics this event was emitted with (as a base64 string).
+    // The ScVals containing the topics this event was emitted with (as a base64
+    // string).
     pub topics: Vec<String>,
     // The data emitted by the event (an ScVal, serialized as a base64 string).
     pub value: String,
@@ -243,8 +244,8 @@ pub enum AspMembershipSync {
 #[serde(rename_all = "camelCase")]
 pub struct NewNullifierEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     /// The nullifier that was spent (BN254 field element).
     pub nullifier: Field,
@@ -259,8 +260,8 @@ pub struct NewNullifierEvent {
 #[serde(rename_all = "camelCase")]
 pub struct NewCommitmentEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     /// The commitment hash added to the tree (BN254 field element).
     pub commitment: Field,
@@ -279,8 +280,8 @@ pub struct NewCommitmentEvent {
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     /// Address of the account owner
     pub owner: String,
@@ -295,8 +296,8 @@ pub struct PublicKeyEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafAddedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     /// The leaf value that was inserted (BN254 field element).
     pub leaf: Field,
@@ -311,8 +312,8 @@ pub struct LeafAddedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafInsertedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     pub key: Field,
     pub value: Field,
@@ -325,8 +326,8 @@ pub struct LeafInsertedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafUpdatedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     pub key: Field,
     pub old_value: Field,
@@ -339,8 +340,8 @@ pub struct LeafUpdatedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafDeletedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     pub key: Field,
     pub root: Field,

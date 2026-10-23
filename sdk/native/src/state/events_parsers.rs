@@ -30,7 +30,8 @@ pub fn parse_event(event: ContractEvent) -> Result<Option<ProcessedEvent>> {
     let name = event_name(&event.topics)?;
     let parsed = || parse_event_metadata(event);
     let ev = match name.as_str() {
-        // Pool events contracts/pool/src/pool.rs (pool-gvk adds `gvk_ciphertext`)
+        // Pool events contracts/pool/src/pool.rs (pool-gvk adds
+        // `gvk_ciphertext`)
         "new_nullifier_event" | "NewNullifierEvent" => {
             ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed()?)?)
         }

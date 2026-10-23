@@ -340,8 +340,8 @@ pub fn scval_to_optional_global_view_key_ciphertext(
 #[derive(Debug)]
 pub(crate) struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
     #[allow(dead_code)]
