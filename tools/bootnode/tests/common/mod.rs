@@ -98,6 +98,16 @@ pub async fn wait_listening(client: &reqwest::Client, base: &str) {
     panic!("server not listening");
 }
 
+pub async fn wait_for(condition: impl Fn() -> bool) {
+    for _ in 0..100 {
+        if condition() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("condition not reached");
+}
+
 pub async fn post_get_events(
     client: &reqwest::Client,
     base: &str,

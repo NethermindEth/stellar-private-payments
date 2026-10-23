@@ -517,6 +517,13 @@ async fn get_events_eventless() {
     assert!(handoff.result.is_none());
     let err = handoff.error.expect("expected retention handoff");
     assert_eq!(err.code, i64::from(RETENTION_HANDOFF_CODE));
+    assert_eq!(
+        err.data,
+        Some(json!({
+            "reason": "retention_threshold",
+            "fromLedger": HANDOFF_FROM_LEDGER,
+        }))
+    );
 }
 
 #[tokio::test]

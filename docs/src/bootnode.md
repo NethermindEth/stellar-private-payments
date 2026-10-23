@@ -6,7 +6,7 @@ The **bootnode** is a narrow, public service that:
 
 - Implements only `getEvents` and `getLatestLedger` (JSON-RPC compatible request/response shape).
 - Caches historical contract events from the deployment ledger onward in Postgres.
-- Serves paginated `getEvents` for the requested contracts' events with `ledger < tip − 5 days`.
+- Serves paginated `getEvents` for the requested contracts' events with `ledger < archived tip − 5 days`.
 - Once a request enters the retention window (`startLedger` or cursor at/after the cutoff), returns a JSON-RPC **handoff** error (`-32002`) with `fromLedger` so the app indexer continues on the user's configured main RPC.
 
 The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC usage for transaction submission / contract state reads is separate. The bootnode does not redirect HTTP clients; handoff is signaled in the JSON-RPC response.
@@ -17,7 +17,7 @@ The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC
 
 | Code | Meaning | Client action |
 |------|---------|---------------|
-| `-32004` | **Not ready** — ledger tip unknown, pre-cutoff archive not ready, an added allowlist not fetched yet, or a contract the bootnode does not follow. | Retry with backoff. |
+| `-32004` | **Not ready** — archived tip unknown, pre-cutoff archive not ready, an added allowlist not fetched yet, or a contract the bootnode does not follow. | Retry with backoff. |
 | `-32002` | **Retention handoff** — the requested range is within the retention window. | Stop using the bootnode and continue `getEvents` on the wallet's main RPC from `error.data.fromLedger`. |
 
 Handoff response shape:
