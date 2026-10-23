@@ -3,7 +3,10 @@
 //! they were sent to.
 
 use anyhow::Result;
-use stellar_private_payments::types::{ContractConfig, NoteAmount};
+use stellar_private_payments::{
+    Error,
+    types::{ContractConfig, NoteAmount, TransferRecipient},
+};
 
 use super::support::{deploy_default, session};
 
@@ -56,14 +59,18 @@ async fn transfer_cross_domain() -> Result<()> {
     let recipient_b = recipient_a
         .fork(with_kdf_domain(config, OTHER_DOMAIN))
         .await?;
-    recipient_b.account.register_public_keys().await?;
+    // The registry only takes keys of its own domain.
+    let (note_key, encryption_key) = recipient_b.account.privacy_keys().await?;
 
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
     let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
     sender.pool()?.deposit(deposit_amount).await?;
     sender
         .pool()?
-        .transfer(recipient_b.wallet.address(), transfer_amount)
+        .transfer(
+            TransferRecipient::keys(note_key, encryption_key),
+            transfer_amount,
+        )
         .await?;
 
     let sender_notes = sender.account.user_notes(10).await?;
@@ -79,5 +86,25 @@ async fn transfer_cross_domain() -> Result<()> {
     assert_eq!(recipient_notes[0].amount, transfer_amount);
     assert!(recipient_a.account.user_notes(10).await?.is_empty());
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn register_from_another_domain_is_refused() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let config = deployment.0.clone();
+    let session_a = session(deployment).await?;
+    let session_b = session_a
+        .fork(with_kdf_domain(config, OTHER_DOMAIN))
+        .await?;
+
+    let err = session_b
+        .account
+        .register_public_keys()
+        .await
+        .expect_err("the registry was deployed for another domain");
+
+    assert!(matches!(err, Error::KdfDomainMismatch { .. }), "{err:?}");
+    assert!(!session_a.account.is_registered().await?);
     Ok(())
 }

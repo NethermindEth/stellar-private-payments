@@ -64,6 +64,7 @@ clap = { version = "4.6.7", default-features = false, features = [
 ] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+ed25519-dalek = { version = "3.0", default-features = false }
 futures = { version = "0.3.34", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }

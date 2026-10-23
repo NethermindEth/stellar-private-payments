@@ -464,19 +464,23 @@ impl Storage {
         Ok(id)
     }
 
+    /// The latest keys `address` registered with the registry at
+    /// `public_key_registry_contract_id`.
     pub fn lookup_public_key_by_address(
         &self,
         address: &str,
+        public_key_registry_contract_id: &str,
     ) -> Result<Option<crate::types::PublicKeyEntry>> {
         self.conn
             .query_row(
                 "SELECT p.owner, p.encryption_key, p.note_key, r.ledger
                  FROM public_keys p
                  JOIN raw_contract_events r ON r.id = p.event_id
-                 WHERE p.owner = ?1
+                 JOIN contracts c ON c.contract_id = r.contract_id
+                 WHERE p.owner = ?1 AND c.address = ?2
                  ORDER BY r.ledger DESC, r.id DESC
                  LIMIT 1",
-                params![address],
+                params![address, public_key_registry_contract_id],
                 map_public_key_entry,
             )
             .optional()
@@ -704,7 +708,7 @@ impl Storage {
         address: &str,
         public_key_registry_contract_id: &str,
     ) -> Result<RecipientLookup> {
-        let entry = self.lookup_public_key_by_address(address)?;
+        let entry = self.lookup_public_key_by_address(address, public_key_registry_contract_id)?;
         let registry_last_fully_indexed_ledger = self
             .get_sync_metadata()?
             .into_iter()

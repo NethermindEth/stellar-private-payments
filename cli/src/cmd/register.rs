@@ -38,8 +38,8 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
 }
 
 /// Register the account's privacy keys on-chain. Returns the transaction hash.
-/// Registration is idempotent on-chain (re-registering just updates the stored
-/// keys), so no local pre-check is required.
+/// Registration is write-once on-chain: the same keys again change nothing,
+/// and different keys are refused, so no local pre-check is required.
 pub fn register_account(
     config: &CliConfig,
     account: &crate::account::Account,
@@ -49,7 +49,8 @@ pub fn register_account(
         "Preparing address registration for {}",
         stellar_private_payments::types::Sensitive(&account.address)
     );
-    let result = ClientSession::new(config, account, network, true)?.register_public_keys()?;
+    let result =
+        ClientSession::new_registration(config, account, network)?.register_public_keys()?;
     log::info!("Registration confirmed: {}", result.tx_hash);
     Ok(result.tx_hash)
 }

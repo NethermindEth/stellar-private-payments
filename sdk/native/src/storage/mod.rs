@@ -15,6 +15,7 @@ use crate::{
 use crate::{
     disclosure::{DisclosureInputs, DisclosureInputsRequest},
     error::Error,
+    registration::{RegistrationInputs, RegistrationRequest},
     transact::{BuildTransactParams, TransactRequest},
 };
 
@@ -159,6 +160,11 @@ pub trait Storage: crate::chain::ContractDataStorage {
         &self,
         req: &DisclosureInputsRequest,
     ) -> Result<Vec<DisclosureInputs>, Error>;
+
+    async fn build_registration_inputs(
+        &self,
+        req: &RegistrationRequest,
+    ) -> Result<RegistrationInputs, Error>;
 
     /// Whether privacy keys are already stored for `user_address` under
     /// `kdf_domain`.

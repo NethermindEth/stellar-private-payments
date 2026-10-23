@@ -38,7 +38,7 @@ rm -f "$PKG_ROOT"/../target/integration-tests-deploy-*.lock "$PKG_ROOT"/../targe
 
 step "starting $CONTAINER_NAME on port $PORT"
 docker run -d --name "$CONTAINER_NAME" -p "$PORT:$PORT" \
-  stellar/quickstart:testing \
+  stellar/quickstart:v678-b1525.1-testing \
   --local --enable rpc,horizon --limits unlimited >/dev/null \
   || die "failed to start stellar/quickstart"
 

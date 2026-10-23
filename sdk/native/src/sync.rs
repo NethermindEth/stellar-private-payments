@@ -456,7 +456,8 @@ async fn bootnode_catch_up(
             return Ok(());
         }
         match catch_up_loop(&bootnode_indexer, storage, stop).await {
-            // Caught up to bootnode tip (or stopped): wait, then poll for handoff.
+            // Caught up to bootnode tip (or stopped): wait, then poll for
+            // handoff.
             Ok(()) => {
                 consecutive_failures = 0;
                 if stop.is_some_and(|s| s.load(Ordering::Acquire)) {

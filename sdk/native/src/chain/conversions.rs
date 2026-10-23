@@ -179,6 +179,15 @@ pub(crate) fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     }
 }
 
+pub(crate) fn scval_to_string(val: &xdr::ScVal) -> Result<String, Error> {
+    if let xdr::ScVal::String(s) = val {
+        s.to_utf8_string()
+            .map_err(|e| Error::UnexpectedScVal(e.to_string()))
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
 /// Decode pool ASP policy flags from contract storage.
 pub(crate) fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<crate::types::PolicyFlags, Error> {
     if let xdr::ScVal::U32(bits) = val {
@@ -331,8 +340,8 @@ pub fn scval_to_optional_global_view_key_ciphertext(
 #[derive(Debug)]
 pub(crate) struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
-    // hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event
+    // index, separated by a hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
     #[allow(dead_code)]

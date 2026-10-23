@@ -34,6 +34,15 @@ export const CONTRACT_ERRORS = {
     aspMembership: {
         6: 'No admin transfer is pending.',
     },
+    // Public key registry errors
+    registry: {
+        1: 'The keys to register are malformed.',
+        2: 'Only an account address can register keys.',
+        3: 'The note key is not in its canonical form.',
+        4: 'The encryption key is not in its canonical form.',
+        5: 'This address is already registered with different keys, and a registration can\'t be changed.',
+        6: 'The registry rejected the proof that you hold your note key.',
+    },
 };
 
 /**
@@ -262,6 +271,35 @@ export function getFriendlyErrorMessage(error, operationType = 'Transaction') {
     
     // Return the original message with the operation type prefix
     return `${operationType} failed: ${rawMessage}`;
+}
+
+/**
+ * Gets a user-friendly message for a failed public key registration.
+ * @param {Error|string|unknown} error - The error object
+ * @returns {string} Message suitable for displaying to the user
+ */
+export function getRegistrationErrorMessage(error) {
+    if (isUserCancelledError(error)) {
+        return 'Registration cancelled.';
+    }
+    const rawMessage = getErrorMessage(error);
+    // Only the first host error failed the call; the event log may hold others.
+    const hostError = rawMessage.match(/Error\((\w+),\s*#?(\w+)\)/);
+    if (hostError?.[1] === 'Contract') {
+        const registryMessage = CONTRACT_ERRORS.registry[parseInt(hostError[2], 10)];
+        if (registryMessage) return registryMessage;
+    }
+    // ed25519_verify traps with this when a signature doesn't verify.
+    if (hostError?.[1] === 'Crypto' && hostError[2] === 'InvalidInput') {
+        return 'The registry rejected a signature. Sign the registration message with the account you are registering.';
+    }
+    if (rawMessage.includes('public key registry uses key derivation domain')) {
+        return 'The address book was deployed for other keys than this app uses. Reload the page. If that does not help, the operator has not published a matching deployment yet.';
+    }
+    if (rawMessage.includes('registration message was not signed by the owner')) {
+        return 'The registration message was signed by another account. Sign it with the account you are registering.';
+    }
+    return getFriendlyErrorMessage(error, 'Registration');
 }
 
 /**

@@ -19,6 +19,7 @@ use stellar_private_payments::{
     },
     gvk::GvkEvent,
     planner::SpendableNote,
+    registration::{RegistrationInputs, RegistrationRequest, build_registration_inputs},
     state::{SqliteStorage, process_local_state_batch},
     transact::{BuildTransactParams, TransactRequest, build_transact_params},
     types::{
@@ -175,6 +176,7 @@ pub(crate) enum StorageWorkerRequest {
     },
     DisclosureInputs(DisclosureInputsRequest),
     Transact(TransactRequest),
+    Registration(RegistrationRequest),
     DeriveASPleaf(AdminASPRequest),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
@@ -208,6 +210,7 @@ pub(crate) enum StorageWorkerResponse {
     AspMembershipSync(AspMembershipSync),
     DisclosureNotes(Vec<DisclosureInputs>),
     TransactParams(TransactParams),
+    RegistrationInputs(RegistrationInputs),
     DeriveASPleaf(Field),
     Logs(String),
     PoolGvkEvents(Vec<GvkEvent>),
@@ -901,6 +904,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 }
             })?
         }
+        StorageWorkerRequest::Registration(req) => {
+            tracing::trace!(
+                "[{WORKER_NAME}] build registration inputs for {}",
+                Sensitive(&req.user_address)
+            );
+            let inputs = with_storage!(s => build_registration_inputs(s, &req)?)?;
+            StorageWorkerResponse::RegistrationInputs(inputs)
+        }
         StorageWorkerRequest::ListPoolGvkEvents {
             pool_contract_id,
             after,
@@ -1433,6 +1444,22 @@ impl Storage for StorageBridge {
             }
             Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response building disclosure inputs: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn build_registration_inputs(
+        &self,
+        req: &RegistrationRequest,
+    ) -> Result<RegistrationInputs, Error> {
+        match self
+            .call(StorageWorkerRequest::Registration(req.clone()), 5_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::RegistrationInputs(inputs)) => Ok(inputs),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response building registration inputs: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e)),
         }

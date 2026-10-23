@@ -10,6 +10,7 @@ use crate::chain::{Limits, ReadXdr, RpcError, StateFetcher, TransactionEnvelope,
 use crate::{
     Error, PrivatePool, ProverHandle, SignerHandle, StorageHandle,
     chain::RpcClient,
+    registration::{RegistrationProof, RegistrationRequest},
     sync::{SyncHandle, catch_up, confirm_tx},
     types::{PrivatePoolConfig, TransactionResult},
 };
@@ -235,30 +236,82 @@ impl Account {
 
     /// Register this account's public keys on the deployment-wide registry.
     ///
+    /// Proves ownership of both keys, and asks the signer for a SEP-53
+    /// signature of the registration message before the transaction itself.
+    ///
     /// # Errors
     /// Returns [`Error::SignerIsNotNoteOwner`] on a delegated session. The
     /// registry entry is the owner's, so simulation returns an auth entry
     /// keyed to the owner; the payer's wallet is only asked to sign for its
     /// own account and has nothing to put there. Checked before the call so a
     /// delegated session stops here rather than at an unfillable auth entry.
+    ///
+    /// Returns [`Error::KdfDomainMismatch`] if the registry was deployed for
+    /// another key derivation domain than this session's config.
     pub async fn register_public_keys(&self) -> Result<TransactionResult, Error> {
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
-        let (note_pk, enc_pk) = self
-            .storage()
-            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
-            .await?;
-
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .context("state fetcher")?;
+        let registry_kdf_domain = fetcher
+            .registry_kdf_domain()
+            .await
+            .context("read the registry's key derivation domain")?;
+        // Keys derive from the trimmed domain.
+        if registry_kdf_domain.trim() != self.contract_config.kdf_domain.trim() {
+            return Err(Error::KdfDomainMismatch {
+                registry: registry_kdf_domain,
+                config: self.contract_config.kdf_domain.clone(),
+            });
+        }
+
+        let inputs = self
+            .storage()
+            .build_registration_inputs(&RegistrationRequest {
+                user_address: self.user_address.as_str().to_string(),
+                kdf_domain: self.contract_config.kdf_domain.clone(),
+                public_key_registry: self.contract_config.public_key_registry.clone(),
+            })
+            .await?;
+        let note_key_proof = self
+            .prover
+            .prove_key_ownership(inputs.key_ownership.clone())
+            .await?;
+        let owner_signature = self.signer.sign_message(&inputs.message).await?;
+        // Refuse a signature from another key before submitting.
+        crate::zk::encryption::verify_owner_signature(
+            self.user_address.as_str(),
+            &inputs.message,
+            &owner_signature,
+        )
+        .map_err(|_| {
+            Error::Other(anyhow::anyhow!(
+                "the registration message was not signed by the owner's key"
+            ))
+        })?;
+        let proof = RegistrationProof {
+            note_key_proof,
+            encryption_key_signature: inputs
+                .encryption_key_signature
+                .as_slice()
+                .try_into()
+                .context("encryption key signature must be 64 bytes")?,
+            owner_signature: owner_signature
+                .0
+                .as_slice()
+                .try_into()
+                .context("owner signature must be 64 bytes")?,
+        };
+
         let prepared = fetcher
             // The owner is the registration; the signer only pays for it.
             // Both are the owner here, per the check above.
             .prepare_register(
                 &self.user_address,
                 &self.signer_address,
-                note_pk.0,
-                enc_pk.0,
+                inputs.note_key.0,
+                inputs.encryption_key,
+                &proof,
             )
             .await
             .context("prepare register")?;
@@ -533,5 +586,131 @@ mod derive_privacy_keys_tests {
             .privacy_keys()
             .await
             .expect_err("nothing must be persisted under DELEGATE after a refused signature");
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod register_public_keys_tests {
+    use super::*;
+    use crate::{Client, LocalStorage, types::KeyDerivationSignature};
+    use serde_json::json;
+    use stellar_xdr::{Limits, ScString, ScVal, WriteXdr};
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_string_contains, method},
+    };
+
+    const OWNER: &str = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+    const REGISTRY: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+
+    /// A signer that must not be asked for anything.
+    struct UnusedSigner;
+
+    #[async_trait::async_trait]
+    impl crate::Signer for UnusedSigner {
+        fn signer_address(&self) -> SignerAddress {
+            SignerAddress::new(OWNER)
+        }
+
+        async fn sign_transaction(
+            &self,
+            _prepared: &crate::PreparedTransaction,
+        ) -> Result<crate::types::SignedTransaction, Error> {
+            panic!("nothing must be signed");
+        }
+
+        async fn sign_message(&self, _message: &str) -> Result<KeyDerivationSignature, Error> {
+            panic!("nothing must be signed");
+        }
+    }
+
+    /// An RPC whose registry reports `kdf_domain`.
+    async fn registry_rpc(kdf_domain: &str) -> MockServer {
+        let retval = ScVal::String(ScString(kdf_domain.try_into().expect("domain")))
+            .to_xdr_base64(Limits::none())
+            .expect("xdr");
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("simulateTransaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "latestLedger": 1,
+                    "results": [{ "auth": [], "xdr": retval }],
+                },
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn account(rpc_url: &str, kdf_domain: &str) -> Account {
+        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let db = std::env::temp_dir().join(format!(
+            "spp-register-public-keys-{}-{}.sqlite",
+            std::process::id(),
+            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&db);
+        Client::init_readonly(
+            rpc_url,
+            StorageHandle::from(
+                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+            ),
+            ContractConfig {
+                network_passphrase: None,
+                rpc_url: None,
+                network: "Test SDF Network ; September 2015".to_string(),
+                kdf_domain: kdf_domain.to_string(),
+                deployer: OWNER.to_string(),
+                admin: String::new(),
+                asp_membership: String::new(),
+                added_asp_memberships: Vec::new(),
+                asp_non_membership: String::new(),
+                verifiers: Default::default(),
+                public_key_registry: REGISTRY.to_string(),
+                pools: Vec::new(),
+            },
+            None,
+        )
+        .expect("init client")
+        .account(
+            NoteOwnerAddress::new(OWNER),
+            SignerHandle::from(UnusedSigner),
+        )
+        .expect("open account")
+    }
+
+    /// The domain is checked before the keys are read or anything is signed.
+    #[tokio::test]
+    async fn a_registry_for_another_kdf_domain_is_refused() {
+        let rpc = registry_rpc("other-domain").await;
+
+        let err = account(&rpc.uri(), "tests")
+            .register_public_keys()
+            .await
+            .expect_err("another domain's registry must be refused");
+
+        assert!(
+            matches!(
+                &err,
+                Error::KdfDomainMismatch { registry, config }
+                    if registry == "other-domain" && config == "tests"
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_kdf_domain_check_ignores_surrounding_whitespace() {
+        let rpc = registry_rpc("tests").await;
+
+        let err = account(&rpc.uri(), " tests ")
+            .register_public_keys()
+            .await
+            .expect_err("no keys are stored");
+
+        assert!(matches!(err, Error::PrivacyKeysNotFound { .. }), "{err:?}");
     }
 }

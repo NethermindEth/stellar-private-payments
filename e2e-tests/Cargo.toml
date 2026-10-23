@@ -32,6 +32,8 @@ soroban-utils = { workspace = true, features = ["testutils"] }
 stellar-private-payments = { workspace = true, features = ["parallel"] }
 
 [dev-dependencies]
+# Signing a registration for the registry's cost row.
+ed25519-dalek = { workspace = true }
 # Serving a pool's real ledger entries back to the SDK's reader.
 serde_json = { workspace = true, features = ["std"] }
 stellar-xdr = { workspace = true }

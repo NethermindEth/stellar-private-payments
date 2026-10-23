@@ -48,16 +48,21 @@ use anyhow::Result;
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use contract_types::Groth16Proof;
+use ed25519_dalek::{Signer, SigningKey};
 use pool::{ExtData, PoolContract, PoolContractClient, hash_ext_data, policy};
 use pool_core::merkle_with_history::MerkleDataKey;
 use pool_gvk::{
     PoolGvkContract, PoolGvkContractClient,
     gvk::{self, BabyJubJubPoint, GvkCiphertext},
 };
-use public_key_registry::{Account, PublicKeyRegistry, PublicKeyRegistryClient};
+use public_key_registry::{
+    Account, ENCRYPTION_KEY_TAG, KeyOwnershipProof, PublicKeyRegistry, PublicKeyRegistryClient,
+    registration_digest, registration_message,
+};
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
-    Address, Bytes, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    address_payload::AddressPayload,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Deployer as _, Ledger as _, storage::Persistent as _},
     token::StellarAssetClient,
@@ -380,16 +385,35 @@ fn non_membership_rows() -> [Row; 3] {
 
 fn registry_row() -> Row {
     let env = mainnet_env();
+    let verifier = env.register(AcceptingVerifier, ());
     let id = env.register(
         PublicKeyRegistry,
-        (soroban_sdk::String::from_str(&env, "tests"),),
+        (soroban_sdk::String::from_str(&env, "tests"), verifier),
     );
-    let owner = Address::generate(&env);
-    PublicKeyRegistryClient::new(&env, &id).register(&Account {
-        owner,
-        encryption_key: Bytes::from_array(&env, &[1u8; 32]),
+    let owner_key = SigningKey::from_bytes(&[1u8; 32]);
+    let encryption_key = SigningKey::from_bytes(&[2u8; 32]);
+    let owner_payload = AddressPayload::AccountIdPublicKeyEd25519(BytesN::from_array(
+        &env,
+        &owner_key.verifying_key().to_bytes(),
+    ));
+    let account = Account {
+        owner: owner_payload.to_address(&env),
+        encryption_key: Bytes::from_array(&env, &encryption_key.verifying_key().to_bytes()),
         note_key: Bytes::from_array(&env, &[2u8; 32]),
-    });
+    };
+    let digest = registration_digest(&env, &registration_message(&env, &id, &account));
+    let mut challenge = Bytes::from_slice(&env, ENCRYPTION_KEY_TAG);
+    challenge.append(&digest.clone().into());
+    let challenge = env.crypto().sha256(&challenge).to_bytes().to_array();
+    let proof = KeyOwnershipProof {
+        note_key_proof: placeholder_groth16_proof(&env),
+        encryption_key_signature: BytesN::from_array(
+            &env,
+            &encryption_key.sign(&challenge).to_bytes(),
+        ),
+        owner_signature: BytesN::from_array(&env, &owner_key.sign(&digest.to_array()).to_bytes()),
+    };
+    PublicKeyRegistryClient::new(&env, &id).register(&account, &proof);
     measure(&env, "public-key-registry register, first registration")
 }
 
@@ -441,8 +465,12 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
-    "public-key-registry register, first registration" => 5, 2, 332, 1, 539_135_740;
+    "public-key-registry register, first registration" => 6, 2, 340, 1, 547_430_136;
 };
+
+/// Rows that read entries from disk, and how many. An account authorizer's
+/// entry is a classic entry.
+const DISK_READS: &[(&str, u32)] = &[("public-key-registry register, first registration", 1)];
 
 /// Checks every measured row against [`EXPECTED`], in both directions.
 ///
@@ -501,12 +529,17 @@ fn assert_pinned(rows: &[Row]) {
         }
     }
 
-    // The harness runs against live entries, so nothing should reach disk. A
-    // disk read is what the fee model bills, so it must not appear unnoticed.
+    // The harness runs against live entries, so only the rows in `DISK_READS`
+    // reach disk. A disk read is what the fee model bills, so it must not
+    // appear unnoticed.
     for row in rows {
-        if row.resources.disk_read_entries != 0 {
+        let expected = DISK_READS
+            .iter()
+            .find(|(path, _)| *path == row.path)
+            .map_or(0, |(_, reads)| *reads);
+        if row.resources.disk_read_entries != expected {
             mismatches.push(format!(
-                "{}: {} disk read entries, expected none",
+                "{}: {} disk read entries, expected {expected}",
                 row.path, row.resources.disk_read_entries
             ));
         }

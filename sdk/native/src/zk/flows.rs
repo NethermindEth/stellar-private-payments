@@ -1271,6 +1271,35 @@ fn sum_note_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
     Ok(sum)
 }
 
+/// Parameters for a `keyOwnership` proof: the note keypair and the
+/// registration it is bound to.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyOwnershipParams {
+    pub note_private_key: NotePrivateKey,
+    pub note_public_key: NotePublicKey,
+    /// See [`encryption::registration_hash`].
+    pub registration_hash: Field,
+}
+
+/// Generates circuit inputs for a `keyOwnership` proof.
+pub fn key_ownership(params: &KeyOwnershipParams) -> Result<CircuitInputs> {
+    if crypto::derive_public_key(&params.note_private_key.0)? != params.note_public_key.0 {
+        bail!("the note public key is not derived from the note private key");
+    }
+    let mut circuit = CircuitInputs::new();
+    circuit.set_single("publicKey", &field_bytes_to_hex(&params.note_public_key.0)?);
+    circuit.set_single(
+        "registrationHash",
+        &field_to_circuit_hex(&params.registration_hash)?,
+    );
+    circuit.set_single(
+        "privateKey",
+        &field_bytes_to_hex(&params.note_private_key.0)?,
+    );
+    Ok(circuit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2257,5 +2286,52 @@ mod tests {
                 n_notes * usize::try_from(tree_depth).expect("tree_depth"),
             );
         }
+    }
+
+    fn key_ownership_params(private_key: u8) -> KeyOwnershipParams {
+        let mut note_private_key = [0u8; 32];
+        note_private_key[0] = private_key;
+        let note_public_key = crypto::derive_public_key(&note_private_key)
+            .expect("derive public key")
+            .try_into()
+            .expect("32 bytes");
+        KeyOwnershipParams {
+            note_private_key: NotePrivateKey(note_private_key),
+            note_public_key: NotePublicKey(note_public_key),
+            registration_hash: Field::ONE,
+        }
+    }
+
+    #[test]
+    fn key_ownership_sets_every_circuit_input() {
+        let params = key_ownership_params(7);
+
+        let inputs = key_ownership(&params).expect("inputs");
+
+        let single = |name: &str| match inputs.signals.get(name) {
+            Some(InputValue::Single(value)) => value.clone(),
+            other => panic!("{name}: expected a single value, got {other:?}"),
+        };
+        assert_eq!(inputs.signals.len(), 3);
+        assert_eq!(
+            single("publicKey"),
+            field_bytes_to_hex(&params.note_public_key.0).expect("hex")
+        );
+        assert_eq!(
+            single("registrationHash"),
+            field_to_circuit_hex(&Field::ONE).expect("hex")
+        );
+        assert_eq!(
+            single("privateKey"),
+            field_bytes_to_hex(&params.note_private_key.0).expect("hex")
+        );
+    }
+
+    #[test]
+    fn key_ownership_refuses_a_public_key_of_another_private_key() {
+        let mut params = key_ownership_params(7);
+        params.note_public_key = key_ownership_params(8).note_public_key;
+
+        assert!(key_ownership(&params).is_err());
     }
 }

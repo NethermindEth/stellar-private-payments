@@ -23,8 +23,9 @@ usage() {
 Usage: deploy.sh <network> [OPTIONS]
 
 Deploys and runs constructors for the ASP membership, ASP non-membership,
-one Circom Groth16 verifier per (policy, GVK mode) combination used, and one
-or more Pool / pool-gvk contracts.
+one Circom Groth16 verifier per (policy, GVK mode) combination used, the public
+key registry with its own keyOwnership verifier, and one or more Pool / pool-gvk
+contracts.
 
 After writing the manifest, runs verify-deployment.sh against it (skipped with
 --skip-init) and exits with its status. On mainnet a failed custody check fails
@@ -102,6 +103,7 @@ Examples:
 
 Notes:
   - Each (policy, GVK mode) pair needs its own verifier contract (VK is baked into the WASM).
+  - The registry's verifier is built from deployments/<network>/circuit_keys/keyOwnership_vk.json.
   - Per-pool policyFlags / gvkMode are written to deployments/<network>/deployments.json.
   - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
     are taken from deployments/<network>/circuit_keys/ automatically.
@@ -643,6 +645,7 @@ if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
   cp "$WASM_DIR/pool_gvk.wasm" "$WASM_DIR/pool-gvk.wasm"
 fi
 
+REGISTRY_VERIFIER_WASM="$WASM_DIR/circom_groth16_verifier_keyOwnership.wasm"
 if [[ "$SKIP_INIT" != "true" ]]; then
   _u_i=0
   _u_len="$(array_len UNIQUE_VERIFIER_KEYS)"
@@ -650,6 +653,13 @@ if [[ "$SKIP_INIT" != "true" ]]; then
     build_verifier_wasm_for_key "${UNIQUE_VERIFIER_KEYS[$_u_i]}"
     _u_i=$((_u_i + 1))
   done
+
+  registry_vk="$ROOT_DIR/deployments/$NETWORK/circuit_keys/keyOwnership_vk.json"
+  [[ -f "$registry_vk" ]] || die "VK not found for the registry verifier: $registry_vk"
+  step "building verifier WASM for the public key registry from $registry_vk"
+  "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" \
+    "$registry_vk" --out-dir "$WASM_DIR" --wasm-name "$(basename "$REGISTRY_VERIFIER_WASM")"
+  [[ -f "$REGISTRY_VERIFIER_WASM" ]] || die "missing wasm: $REGISTRY_VERIFIER_WASM"
 fi
 
 ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
@@ -677,6 +687,8 @@ wasm_hash() {
 
 ASP_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_MEMBERSHIP_WASM")"
 ASP_NON_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_NON_MEMBERSHIP_WASM")"
+REGISTRY_VERIFIER_WASM_HASH=""
+[[ "$SKIP_INIT" == "true" ]] || REGISTRY_VERIFIER_WASM_HASH="$(wasm_hash "$REGISTRY_VERIFIER_WASM")"
 
 deploy_contract() {
   local name="$1"
@@ -758,9 +770,16 @@ else
   done
 fi
 
+REGISTRY_VERIFIER_ID=""
+if [[ "$SKIP_INIT" != "true" ]]; then
+  step "deploy circom-groth16-verifier (public key registry)"
+  REGISTRY_VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$REGISTRY_VERIFIER_WASM")"
+fi
+
 step "deploy public-key-registry"
 if [[ "$SKIP_INIT" != "true" ]]; then
-  PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM" --kdf-domain "$KDF_DOMAIN")"
+  PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM" \
+    --kdf-domain "$KDF_DOMAIN" --verifier "$REGISTRY_VERIFIER_ID")"
 else
   PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM")"
 fi
@@ -832,6 +851,7 @@ Deployment complete
   ASP membership:      $ASP_MEMBERSHIP_ID
   ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
   Public key registry: $PUBLIC_KEY_REGISTRY_ID
+  Registry verifier:   ${REGISTRY_VERIFIER_ID:-none}
   Pools deployed:      ${#POOL_IDS[@]}
   Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
 __DEPLOY_SUMMARY__
@@ -882,7 +902,11 @@ while [[ "$_pi" -lt "$_plen" ]]; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
+registry_verifier_json=""
+[[ -z "$REGISTRY_VERIFIER_ID" ]] \
+  || registry_verifier_json=",\"public_key_registry_verifier\":\"$REGISTRY_VERIFIER_ID\",\"public_key_registry_verifier_wasm_hash\":\"$REGISTRY_VERIFIER_WASM_HASH\""
+
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\"${registry_verifier_json},\"pools\":$pools_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"

@@ -13,7 +13,7 @@ pub use address::*;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
-pub use circuit_stem::CircuitStem;
+pub use circuit_stem::{CircuitStem, KEY_OWNERSHIP_CIRCUIT};
 pub use client::*;
 pub use correlation::*;
 pub use disclosure::*;

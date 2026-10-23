@@ -2372,6 +2372,7 @@ dependencies = [
  "circom-groth16-verifier",
  "circuits",
  "contract-types",
+ "ed25519-dalek 3.0.0",
  "num-bigint",
  "pool",
  "pool-core",
@@ -4665,6 +4666,10 @@ dependencies = [
 name = "public-key-registry"
 version = "0.1.0"
 dependencies = [
+ "contract-types",
+ "ed25519-dalek 3.0.0",
+ "pool-core",
+ "sha2 0.11.0",
  "soroban-sdk",
  "soroban-utils",
 ]

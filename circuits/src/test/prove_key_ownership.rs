@@ -17,6 +17,7 @@ mod tests {
 
     // Circom wire layout: constant one, outputs, public inputs, private inputs.
     const PUBLIC_KEY_WIRE: usize = 1;
+    const REGISTRATION_HASH_WIRE: usize = 2;
     const PRIVATE_KEY_WIRE: usize = 3;
 
     fn inputs(private_key: Scalar, public_key: Scalar, registration_hash: Scalar) -> Inputs {
@@ -78,7 +79,36 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_key_ownership_proof_bound_to_public_inputs() -> Result<()> {
+    fn test_key_ownership_registration_hash_constrained() -> Result<()> {
+        let (wasm, r1cs) = load_artifacts(CIRCUIT)?;
+
+        let sk = Scalar::from(7u64);
+        let pk = derive_public_key(sk);
+        let hash = Scalar::from(1u64);
+        let other_hash = Scalar::from(2u64);
+
+        let mut circuit = build_circuit(&wasm, &r1cs, &inputs(sk, pk, hash))?;
+        assert!(r1cs_satisfied(circuit.clone())?);
+
+        let witness = circuit
+            .witness
+            .as_mut()
+            .ok_or_else(|| anyhow!("missing witness"))?;
+        assert_eq!(witness[REGISTRATION_HASH_WIRE], hash);
+        witness[REGISTRATION_HASH_WIRE] = other_hash;
+
+        assert_eq!(circuit.get_public_inputs(), Some(vec![pk, other_hash]));
+        assert!(
+            !r1cs_satisfied(circuit)?,
+            "registrationHash is not in any constraint"
+        );
+        Ok(())
+    }
+
+    // The verifying key rejects any changed public input, constrained or not.
+    #[test]
+    #[ignore]
+    fn test_key_ownership_proof_fails_under_other_public_inputs() -> Result<()> {
         let (wasm, r1cs) = load_artifacts(CIRCUIT)?;
         let keys = generate_keys(&wasm, &r1cs)?;
 

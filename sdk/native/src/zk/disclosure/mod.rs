@@ -653,10 +653,10 @@ where
         proof_verified,
         context_verified,
         known_root_status,
-        // The generic disclosure crate does not perform on-chain spent-nullifier
-        // checks. Callers that need spent-status validation (e.g. the pool
-        // verifier) should perform that check separately and overwrite these
-        // fields.
+        // The generic disclosure crate does not perform on-chain
+        // spent-nullifier checks. Callers that need spent-status validation
+        // (e.g. the pool verifier) should perform that check separately and
+        // overwrite these fields.
         nullifiers_unspent: true,
         spent_nullifier_indices: Vec::new(),
     })

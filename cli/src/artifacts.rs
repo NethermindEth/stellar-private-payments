@@ -6,7 +6,7 @@ use stellar_private_payments::{
         RegisteredCircuit, SELECTIVE_DISCLOSURE_1, SELECTIVE_DISCLOSURE_2, SELECTIVE_DISCLOSURE_3,
         SELECTIVE_DISCLOSURE_4,
     },
-    types::{CircuitStem, ProverArtifacts},
+    types::{CircuitStem, KEY_OWNERSHIP_CIRCUIT, ProverArtifacts},
 };
 
 use stellar_private_payments::CircuitLockfile;
@@ -73,8 +73,25 @@ pub fn load_transact_artifacts_for_stem(
     lock: &CircuitLockfile,
     stem: CircuitStem,
 ) -> Result<ProverArtifacts> {
+    load_artifacts_for_stem(circuits_dir, keys_dir, lock, &stem.to_string())
+}
+
+/// Artifacts of the circuit that proves note key ownership to the registry.
+pub fn load_key_ownership_artifacts(
+    circuits_dir: &Path,
+    keys_dir: &Path,
+    lock: &CircuitLockfile,
+) -> Result<ProverArtifacts> {
+    load_artifacts_for_stem(circuits_dir, keys_dir, lock, KEY_OWNERSHIP_CIRCUIT)
+}
+
+fn load_artifacts_for_stem(
+    circuits_dir: &Path,
+    keys_dir: &Path,
+    lock: &CircuitLockfile,
+    stem_str: &str,
+) -> Result<ProverArtifacts> {
     let circuits = circuits_dir;
-    let stem_str = stem.to_string();
 
     let artifacts = ProverArtifacts {
         proving_key: read_artifact_file(
@@ -85,7 +102,7 @@ pub fn load_transact_artifacts_for_stem(
         circuit_graph: read_artifact_file(circuits, keys_dir, &format!("{stem_str}.graph.bin"))?,
         circuit_r1cs: read_artifact_file(circuits, keys_dir, &format!("{stem_str}.r1cs"))?,
     };
-    validate_artifacts(lock, &artifacts, &stem_str)?;
+    validate_artifacts(lock, &artifacts, stem_str)?;
     Ok(artifacts)
 }
 
@@ -220,6 +237,7 @@ mod tests {
             load_disclosure_artifacts(&config.circuits_dir_path(), &keys, &lock)?.len(),
             4
         );
+        load_key_ownership_artifacts(&config.circuits_dir_path(), &keys, &lock)?;
         // Explicit R1CS-only output retains the deployment-key fallback.
         config.circuits_dir = Some(output.clone());
         load_disclosure_artifacts(&config.circuits_dir_path(), &keys, &lock)?;

@@ -15,18 +15,18 @@ pub fn runs_wasm(contract: &Address, wasm_hash: &BytesN<32>) -> bool {
     matches!(contract.executable(), Some(Executable::Wasm(hash)) if &hash == wasm_hash)
 }
 
-#[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
+#[contractclient(name = "ASPMembershipClient")]
 pub trait ASPMembershipInterface {
     fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
     fn is_known_root(env: Env, root: U256) -> Result<bool, soroban_sdk::Error>;
 }
 
-#[contractclient(crate_path = "soroban_sdk", name = "ASPNonMembershipClient")]
+#[contractclient(name = "ASPNonMembershipClient")]
 pub trait ASPNonMembershipInterface {
     fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
 }
 
-#[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
+#[contractclient(name = "CircomGroth16VerifierClient")]
 pub trait CircomGroth16VerifierInterface {
     fn verify(
         env: Env,

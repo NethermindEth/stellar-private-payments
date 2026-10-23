@@ -1,6 +1,6 @@
 use crate::{
     account::Account,
-    artifacts::{load_disclosure_artifacts, load_transact_artifacts},
+    artifacts::{load_disclosure_artifacts, load_key_ownership_artifacts, load_transact_artifacts},
     config::CliConfig,
     signer::AliasSigner,
     stellar_cli::StellarNetwork,
@@ -93,6 +93,27 @@ impl ClientSession {
         })
     }
 
+    /// As [`Self::new`], over a client that can only prove key ownership.
+    pub fn new_registration(
+        config: &CliConfig,
+        owner: &Account,
+        network: &StellarNetwork,
+    ) -> Result<Self> {
+        let artifacts = load_key_ownership_artifacts(
+            &config.circuits_dir_path(),
+            &config.circuit_keys_dir_path(),
+            &config.circuit_lock()?,
+        )?;
+        let prover = LocalProver::from_key_ownership_artifacts(&artifacts)
+            .map_err(|e| anyhow::anyhow!("init key ownership prover: {e}"))?;
+        let client = client_with_prover(config, network, ProverHandle::from(prover))?;
+        let sdk_account = open_account(&client, config, owner, network)?;
+        Ok(Self {
+            client,
+            account: sdk_account,
+        })
+    }
+
     pub fn account(&self) -> &SdkAccount {
         &self.account
     }
@@ -167,6 +188,18 @@ impl ClientSession {
 
 /// A disclosure only client.
 pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
+    client_with_prover(
+        config,
+        network,
+        ProverHandle::from(disclosure_prover(config)?),
+    )
+}
+
+fn client_with_prover(
+    config: &CliConfig,
+    network: &StellarNetwork,
+    prover: ProverHandle,
+) -> Result<Client> {
     let storage_path = config.db_path().to_string_lossy().into_owned();
     let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
         .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
@@ -184,7 +217,7 @@ pub fn disclosure_client(config: &CliConfig, network: &StellarNetwork) -> Result
         config.deployment.clone(),
         bootnode_url,
     )
-    .map_err(|e| anyhow::anyhow!("init disclosure client: {e}"))
+    .map_err(|e| anyhow::anyhow!("init client: {e}"))
 }
 
 /// A native prover with all registered selective-disclosure circuits.

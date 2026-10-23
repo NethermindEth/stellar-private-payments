@@ -53,6 +53,13 @@ pub enum Error {
     #[error("account {} not found on-chain", crate::types::Sensitive(address))]
     AccountNotFound { address: String },
 
+    /// The public key registry was deployed for another key derivation domain
+    /// than this session's config.
+    #[error(
+        "the public key registry uses key derivation domain {registry:?}, but this deployment's config uses {config:?}"
+    )]
+    KdfDomainMismatch { registry: String, config: String },
+
     /// Local storage has no privacy keys for address
     #[error(
         "no privacy keys found in local storage for {}; derive privacy keys first",

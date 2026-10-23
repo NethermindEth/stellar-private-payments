@@ -28,6 +28,7 @@ use crate::{
     core::process_local_state,
     disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
     error::Error,
+    registration::{RegistrationInputs, RegistrationRequest, build_registration_inputs},
     transact::TransactRequest,
 };
 
@@ -199,6 +200,13 @@ impl Storage for LocalStorage {
         ))
     }
 
+    async fn build_registration_inputs(
+        &self,
+        req: &RegistrationRequest,
+    ) -> Result<RegistrationInputs, Error> {
+        build_registration_inputs(&self.storage(), req)
+    }
+
     async fn privacy_keys_exist(
         &self,
         user_address: &str,
@@ -247,11 +255,11 @@ impl Storage for LocalStorage {
     async fn registered_privacy_keys(
         &self,
         address: &str,
-        _public_key_registry_contract_id: &str,
+        public_key_registry_contract_id: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         let entry = self
             .storage()
-            .lookup_public_key_by_address(address)
+            .lookup_public_key_by_address(address, public_key_registry_contract_id)
             .context("lookup recipient")?
             .ok_or_else(|| {
                 Error::Other(anyhow::anyhow!(

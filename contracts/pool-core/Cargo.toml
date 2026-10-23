@@ -6,13 +6,13 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Non-contract infrastructure shared by the pool and pool-gvk contracts"
+description = "Non-contract infrastructure shared by the contract crates"
 
 # Deliberately no `cdylib`: this crate must never contain a `#[contract]` or
 # `#[contractimpl]`. Soroban's `#[contractimpl]` emits `#[no_mangle] extern "C"`
 # exports that survive dead-code elimination, so anything with one cannot be
 # shared between two contract crates without colliding at link time. Keeping
-# this crate free of them is what lets both `pool` and `pool-gvk` depend on it.
+# this crate free of them is what lets several contract crates depend on it.
 [lib]
 crate-type = ["lib"]
 doctest = false

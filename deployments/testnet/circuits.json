@@ -1,8 +1,8 @@
 {
-  "version": "0.6",
+  "version": "0.7",
   "meta": {
     "repository": "NethermindEth/stellar-private-payments",
-    "commit": "affec1e9d0e6282ad35b6ab67019d84a1eb2725d",
+    "commit": "801b311d22aff86f1b0802b6de4946758f5c2fef",
     "circom": "2.2.3",
     "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
     "circom-witness-rs": "0.3.0"
@@ -102,5 +102,11 @@
     "r1cs": "e8841669c28ca28acaa1d8a27e945e9ca1c87baff07dd181de4ee74393b2e63b",
     "graph.bin": "1905662f263d08205fb24da8d8fce5dc7cddc67842e30de8259de54edda40fec",
     "proving_key.bin": "ffa8beb90ef565d16110244c0b3c9284721218b19900ff37d41294e1312cb90d"
+  },
+  "keyOwnership": {
+    "setup": "local",
+    "r1cs": "c45779148590de2cffdc9e36d305816e35d444a26ab9ad4d3e80578b7d614e91",
+    "graph.bin": "4910fa3a4231317d4c887ed2ce5c944eff04b50facd30e26fb53c98eb55e8898",
+    "proving_key.bin": "9c0482fad1ccf26cfde666d92ac7079bbbd232cd0e2a8e21c21dced5086a7331"
   }
 }

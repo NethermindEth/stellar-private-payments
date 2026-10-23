@@ -55,6 +55,7 @@ pub mod network_defaults;
 pub mod plan;
 pub mod planner;
 pub mod prover;
+pub mod registration;
 pub mod state;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stellar_cli;
