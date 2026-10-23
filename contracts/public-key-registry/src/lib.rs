@@ -200,8 +200,7 @@ impl PublicKeyRegistry {
             BytesN::<32>::try_from(&account.note_key).map_err(|_| Error::InvalidKeyLength)?;
         let encryption_key =
             BytesN::<32>::try_from(&account.encryption_key).map_err(|_| Error::InvalidKeyLength)?;
-        let Some(AddressPayload::AccountIdPublicKeyEd25519(owner_key)) =
-            AddressPayload::from_address(&account.owner)
+        let Some(AddressPayload::AccountIdPublicKeyEd25519(owner_key)) = account.owner.to_payload()
         else {
             return Err(Error::OwnerNotAccount);
         };
