@@ -35,7 +35,7 @@ export const POOL_CONTROLS = {
         label: "Traceable",
         tag: "Admin view key · traceable",
         explanation:
-            "Notes are encrypted with the pool’s admin view key. Key holders can view owner public keys and amounts, link spent notes, and trace funds across transactions.",
+            "The admin view key reveals note owners and amounts, and links notes to their subsequent spends, allowing fund flows to be traced across transactions.",
         impact: "Privacy: the admin view key holder can trace funds through the pool.",
     },
 };
