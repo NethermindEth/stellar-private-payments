@@ -378,43 +378,39 @@ mod tests {
 
     #[test]
     fn a_seed_phrase_is_reported_against_the_flag_it_came_from() {
-        let account = validate_alias("--account", "abandon abandon abandon")
+        let err = validate_alias("--account", "abandon abandon abandon")
             .expect_err("a seed phrase must never reach the command line");
         assert!(
-            account
-                .to_string()
+            err.to_string()
                 .starts_with("--account must be a `stellar keys` alias name, not a seed phrase"),
-            "got: {account}"
+            "got: {err}"
         );
 
-        let sign_as = validate_alias("--sign-as", "abandon abandon abandon")
+        let err = validate_alias("--sign-as", "abandon abandon abandon")
             .expect_err("a seed phrase must never reach the command line");
         assert!(
-            sign_as
-                .to_string()
+            err.to_string()
                 .starts_with("--sign-as must be a `stellar keys` alias name, not a seed phrase"),
-            "got: {sign_as}"
+            "got: {err}"
         );
     }
 
     #[test]
     fn a_raw_secret_key_is_reported_against_the_flag_it_came_from() {
-        let account = validate_alias("--account", SECRET_SHAPED)
+        let err = validate_alias("--account", SECRET_SHAPED)
             .expect_err("a raw secret key must never reach the command line");
         assert!(
-            account
-                .to_string()
+            err.to_string()
                 .starts_with("--account must be a `stellar keys` alias name, not a raw secret key"),
-            "got: {account}"
+            "got: {err}"
         );
 
-        let sign_as = validate_alias("--sign-as", SECRET_SHAPED)
+        let err = validate_alias("--sign-as", SECRET_SHAPED)
             .expect_err("a raw secret key must never reach the command line");
         assert!(
-            sign_as
-                .to_string()
+            err.to_string()
                 .starts_with("--sign-as must be a `stellar keys` alias name, not a raw secret key"),
-            "got: {sign_as}"
+            "got: {err}"
         );
     }
 }

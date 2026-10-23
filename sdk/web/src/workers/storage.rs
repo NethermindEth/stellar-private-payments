@@ -458,27 +458,30 @@ fn encrypted_database_is_empty() -> anyhow::Result<bool> {
                 rc == ffi::SQLITE_OK,
                 "failed to inspect existing database size ({rc})"
             );
-            let mut file: *mut ffi::sqlite3_file = std::ptr::null_mut();
+            let mut file = std::mem::MaybeUninit::<*mut ffi::sqlite3_file>::zeroed();
             let rc = ffi::sqlite3_file_control(
                 db,
                 c"main".as_ptr(),
                 ffi::SQLITE_FCNTL_FILE_POINTER,
-                (&mut file as *mut *mut ffi::sqlite3_file).cast(),
+                file.as_mut_ptr().cast(),
             );
             anyhow::ensure!(
-                rc == ffi::SQLITE_OK && !file.is_null(),
+                rc == ffi::SQLITE_OK,
                 "failed to inspect existing database file ({rc})"
             );
-            let methods = (*file).pMethods;
-            anyhow::ensure!(
-                !methods.is_null(),
-                "existing database file has no VFS methods"
-            );
-            let size = (*methods)
+            let file_ptr = file.assume_init();
+            let file_ref = file_ptr
+                .as_ref()
+                .ok_or_else(|| anyhow!("failed to inspect existing database file ({rc})"))?;
+            let methods = file_ref
+                .pMethods
+                .as_ref()
+                .ok_or_else(|| anyhow!("existing database file has no VFS methods"))?;
+            let size = methods
                 .xFileSize
                 .ok_or_else(|| anyhow!("VFS cannot inspect database size"))?;
             let mut bytes = 0;
-            let rc = size(file, &mut bytes);
+            let rc = size(file_ptr, &mut bytes);
             anyhow::ensure!(
                 rc == ffi::SQLITE_OK && bytes >= 0,
                 "failed to read existing database size ({rc})"

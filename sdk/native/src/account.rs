@@ -592,7 +592,7 @@ mod derive_privacy_keys_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod register_public_keys_tests {
     use super::*;
-    use crate::{Client, LocalStorage, types::KeyDerivationSignature};
+    use crate::{Client, types::KeyDerivationSignature};
     use serde_json::json;
     use stellar_xdr::{Limits, ScString, ScVal, WriteXdr};
     use wiremock::{
@@ -656,7 +656,8 @@ mod register_public_keys_tests {
         Client::init_readonly(
             rpc_url,
             StorageHandle::from(
-                LocalStorage::open(db.to_string_lossy().as_ref()).expect("open storage"),
+                crate::state::test_local_storage(db.to_string_lossy().as_ref())
+                    .expect("open storage"),
             ),
             ContractConfig {
                 network_passphrase: None,

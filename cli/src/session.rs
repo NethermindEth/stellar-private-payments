@@ -203,7 +203,6 @@ fn client_with_prover(
     let storage_path = config.db_path().to_string_lossy().into_owned();
     let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
         .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
-    let prover = ProverHandle::from(disclosure_prover(config)?);
     let bootnode_setting = storage
         .storage()
         .get_bootnode_setting()
