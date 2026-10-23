@@ -888,12 +888,8 @@ mod tests {
             std::env::temp_dir().join(format!("spp-sync-{name}-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
         StorageHandle::from(
-            crate::LocalStorage::open_encrypted(
-                path.to_string_lossy().as_ref(),
-                crate::state::database_key::DatabaseKey::new([0x42; 32]),
-                crate::state::database_key::OpenPurpose::CreateNew,
-            )
-            .expect("open storage"),
+            crate::state::test_local_storage(path.to_string_lossy().as_ref())
+                .expect("open storage"),
         )
     }
 

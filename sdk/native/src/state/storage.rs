@@ -12,6 +12,9 @@ use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, path::Path};
 
+// shouldn't be changed for WASM OPFS otherwise the db will be lost
+#[cfg(feature = "unencrypted-storage")]
+const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
@@ -79,6 +82,7 @@ impl Storage {
     }
 
     /// Open encrypted storage with an explicit key and create/open policy.
+    #[cfg(feature = "encrypted-storage")]
     pub fn connect_encrypted(
         path: impl AsRef<Path>,
         key: &super::database_key::DatabaseKey,
@@ -89,11 +93,65 @@ impl Storage {
 
     /// Open another handle to encrypted storage that an open handle already
     /// unlocked with `key`. Used for forks.
+    #[cfg(feature = "encrypted-storage")]
     pub fn reopen_encrypted(
         path: impl AsRef<Path>,
         key: &super::database_key::DatabaseKey,
     ) -> Result<Self> {
         Self::connect_with_connection(super::database_key::reopen(path.as_ref(), key)?)
+    }
+
+    /// Open an existing plaintext database. A missing, empty or encrypted
+    /// file is rejected before SQLite can recover its journal without the key.
+    #[cfg(feature = "unencrypted-storage")]
+    pub fn connect_existing_plaintext(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        super::preflight::validate_plaintext(path)?;
+        let flags =
+            rusqlite::OpenFlags::default().difference(rusqlite::OpenFlags::SQLITE_OPEN_CREATE);
+        Self::connect_with_connection(Connection::open_with_flags(path, flags)?)
+    }
+
+    /// Open or create plaintext storage at the default path.
+    #[cfg(feature = "unencrypted-storage")]
+    pub fn connect() -> Result<Self> {
+        Self::connect_file(DB_NAME)
+    }
+
+    /// Open or create plaintext storage at `path`. On native targets an
+    /// existing encrypted file is rejected before SQLite can recover its
+    /// journal without the key; on WASM the OPFS owner must check first.
+    #[cfg(feature = "unencrypted-storage")]
+    pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        #[cfg(not(target_arch = "wasm32"))]
+        if path.exists() && std::fs::metadata(path)?.len() > 0 {
+            super::preflight::validate_plaintext(path)?;
+        }
+        Self::connect_with_connection(Connection::open(path)?)
+    }
+
+    /// Open another handle to plaintext storage that an open handle already
+    /// opened. Used for forks. It skips the read-only preflight, which must
+    /// not run while that handle may be writing.
+    #[cfg(feature = "unencrypted-storage")]
+    pub(crate) fn reopen_plaintext(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        // An absolute path keeps a literal "file:" filename from being read
+        // as a URI that selects a different database.
+        #[cfg(not(target_arch = "wasm32"))]
+        let absolute = std::path::absolute(path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let path = absolute.as_path();
+        Self::connect_with_connection(Connection::open(path)?)
     }
 
     pub fn connect_in_memory() -> Result<Self> {

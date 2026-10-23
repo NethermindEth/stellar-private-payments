@@ -88,7 +88,7 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
     #[cfg(not(target_arch = "wasm32"))]
     let path = absolute.as_path();
     if matches!(purpose, OpenPurpose::OpenExisting) {
-        validate_read_only(path, Some(key))?;
+        validate_read_only(path, key)?;
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _reservation = if matches!(purpose, OpenPurpose::CreateNew) {
@@ -281,68 +281,8 @@ pub fn clear_transport(bytes: &mut [u8]) {
 }
 
 // Authenticate the encrypted first page without allowing hot-journal recovery.
-// The immutable handle is closed before the normal recovery-capable handle
-// opens. This is a short preflight under the application's single-owner
-// database policy; it must never be used as a long-lived snapshot while another
-// writer is active.
-pub(crate) fn validation_connection(path: &Path) -> Result<Connection> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let absolute = std::path::absolute(path)?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let path = absolute.as_path();
-    let path = path
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("database path must be UTF-8"))?;
-    #[cfg(windows)]
-    let path = windows_uri_path(path);
-    #[cfg(windows)]
-    let path = path.as_str();
-    Connection::open_with_flags(
-        validation_uri(path),
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(Into::into)
-}
-
-fn validation_uri(path: &str) -> String {
-    let encoded: String = path
-        .bytes()
-        .enumerate()
-        .map(|(index, b)| {
-            if (b.is_ascii_alphanumeric() || b"/._-~".contains(&b))
-                && !(index == 0 && path.starts_with("//"))
-            {
-                char::from(b).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect();
-    format!("file:{encoded}?mode=ro&immutable=1")
-}
-
-#[cfg(any(windows, test))]
-fn windows_uri_path(path: &str) -> String {
-    let path = path.replace('\\', "/");
-    // Keep UNC and extended-length prefixes as paths, not URI authorities.
-    // SQLite's Windows VFS interprets these after URI percent decoding.
-    if path.as_bytes().get(1) == Some(&b':') {
-        format!("/{path}")
-    } else {
-        path
-    }
-}
-pub(crate) fn validate_read_only(path: &Path, key: Option<&DatabaseKey>) -> Result<()> {
-    let conn = validation_connection(path)?;
-    if let Some(key) = key {
-        configure(&conn, key)?;
-    }
-    // schema_version reads the authenticated page-1 header without traversing
-    // possibly inconsistent, uncommitted btree pages left by a crash.
-    let _: i64 = conn.query_row("PRAGMA schema_version", [], |r| r.get(0))?;
-    let pages: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
-    ensure!(pages > 0, "existing database is empty");
-    Ok(())
+pub(crate) fn validate_read_only(path: &Path, key: &DatabaseKey) -> Result<()> {
+    let conn = super::preflight::validation_connection(path)?;
+    configure(&conn, key)?;
+    super::preflight::check_header(&conn)
 }

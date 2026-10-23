@@ -1,16 +1,21 @@
+#[cfg(not(any(feature = "encrypted-storage", feature = "unencrypted-storage")))]
+compile_error!("enable at least one of the `encrypted-storage` or `unencrypted-storage` features");
+
 mod disclaimer;
 pub(crate) mod events_parsers;
+mod preflight;
 mod processor;
 mod storage;
 #[cfg(test)]
 mod test_events;
 
+#[cfg(feature = "encrypted-storage")]
 pub mod database_key;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 mod encrypted_migration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 pub mod native_wallet;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 mod wallet_vault;
 
 pub use disclaimer::CURRENT_DISCLAIMER_TEXT_MD;
@@ -23,7 +28,7 @@ mod process_local;
 pub(crate) use process_local::process_local_state;
 pub use process_local::process_local_state_batch;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "encrypted-storage"))]
 pub(crate) fn test_storage(path: impl AsRef<std::path::Path>) -> anyhow::Result<SqliteStorage> {
     let path = path.as_ref();
     SqliteStorage::connect_encrypted(
@@ -37,7 +42,16 @@ pub(crate) fn test_storage(path: impl AsRef<std::path::Path>) -> anyhow::Result<
     )
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    not(feature = "encrypted-storage"),
+    feature = "unencrypted-storage"
+))]
+pub(crate) fn test_storage(path: impl AsRef<std::path::Path>) -> anyhow::Result<SqliteStorage> {
+    SqliteStorage::connect_file(path)
+}
+
+#[cfg(all(test, feature = "encrypted-storage"))]
 pub(crate) fn test_local_storage(path: &str) -> Result<crate::LocalStorage, crate::Error> {
     crate::LocalStorage::open_encrypted(
         path,
@@ -50,8 +64,17 @@ pub(crate) fn test_local_storage(path: &str) -> Result<crate::LocalStorage, crat
     )
 }
 
+#[cfg(all(
+    test,
+    not(feature = "encrypted-storage"),
+    feature = "unencrypted-storage"
+))]
+pub(crate) fn test_local_storage(path: &str) -> Result<crate::LocalStorage, crate::Error> {
+    crate::LocalStorage::open(path)
+}
+
 /// Legacy plaintext fixture used only by migration tests.
-#[cfg(test)]
+#[cfg(all(test, feature = "encrypted-storage"))]
 pub(crate) fn test_plaintext_storage(
     path: impl AsRef<std::path::Path>,
 ) -> anyhow::Result<SqliteStorage> {

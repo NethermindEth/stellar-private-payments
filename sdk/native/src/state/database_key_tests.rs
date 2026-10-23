@@ -31,20 +31,6 @@ impl Drop for Fixture {
 const MARKER: &str = "ENCRYPTED_STORAGE_TEST_PROTECTED_1ce596";
 
 #[test]
-fn windows_validation_paths_preserve_drive_unc_and_literal_characters() {
-    for (path, encoded) in [
-        (r"C:\wallet\state #%.db", "/C%3A/wallet/state%20%23%25.db"),
-        (r"\\server\share\state.db", "%2F/server/share/state.db"),
-        (r"\\?\C:\wallet\state.db", "%2F/%3F/C%3A/wallet/state.db"),
-    ] {
-        assert_eq!(
-            validation_uri(&windows_uri_path(path)),
-            format!("file:{encoded}?mode=ro&immutable=1")
-        );
-    }
-}
-
-#[test]
 fn encrypted_filenames_remain_literal() -> Result<()> {
     let f = Fixture::new()?;
     let key = DatabaseKey::generate()?;
@@ -191,6 +177,13 @@ fn wrong_or_missing_key_preserves_clean_and_hot_database() -> Result<()> {
             .is_err()
         );
         assert_eq!(before, snapshot(&f.db())?);
+        #[cfg(feature = "unencrypted-storage")]
+        {
+            assert!(SqliteStorage::connect_file(f.db()).is_err());
+            assert!(SqliteStorage::connect_existing_plaintext(f.db()).is_err());
+            assert!(LocalStorage::open(f.db().to_str().expect("UTF-8 path")).is_err());
+            assert_eq!(before, snapshot(&f.db())?);
+        }
         let recovered = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
         assert_eq!(
             recovered.get_setting_json::<String>("large-0")?,
@@ -344,6 +337,33 @@ fn forks_open_while_another_fork_commits() -> Result<()> {
     done.store(true, std::sync::atomic::Ordering::Relaxed);
     handle.join().expect("writer thread")?;
     forked?;
+    Ok(())
+}
+
+#[cfg(feature = "unencrypted-storage")]
+#[test]
+fn plaintext_forks_open_while_another_fork_commits() -> Result<()> {
+    let f = Fixture::new()?;
+    let path = f.db();
+    let storage = LocalStorage::open(path.to_str().expect("UTF-8 temp directory"))?;
+    let writer = storage.fork_local()?;
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writing = done.clone();
+    let handle = std::thread::spawn(move || -> Result<()> {
+        let mut i = 0u32;
+        while !writing.load(std::sync::atomic::Ordering::Relaxed) {
+            writer
+                .storage_mut()
+                .set_setting_json(&format!("large-{}", i % 8), &MARKER.repeat(400))?;
+            i = i.wrapping_add(1);
+        }
+        Ok(())
+    });
+    let forked = (0..300).try_for_each(|_| storage.fork_local().map(drop));
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    handle.join().expect("writer thread")?;
+    forked?;
+    assert!(fs::read(&path)?.starts_with(b"SQLite format 3"));
     Ok(())
 }
 
