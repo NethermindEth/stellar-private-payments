@@ -1,10 +1,10 @@
 #![no_std]
 
-use contract_types::{Groth16Error, Groth16Proof};
+use contract_types::Groth16Proof;
+use pool_core::CircomGroth16VerifierClient;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, String, U256, Vec, address_payload::AddressPayload, contract,
-    contractclient, contracterror, contractevent, contractimpl, contracttype,
-    crypto::bn254::Bn254Fr, vec,
+    Address, Bytes, BytesN, Env, String, U256, address_payload::AddressPayload, contract,
+    contracterror, contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, vec,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -93,15 +93,6 @@ enum DataKey {
 struct Registration {
     encryption_key: Bytes,
     note_key: Bytes,
-}
-
-#[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
-pub trait CircomGroth16VerifierInterface {
-    fn verify(
-        env: Env,
-        proof: Groth16Proof,
-        public_inputs: Vec<Bn254Fr>,
-    ) -> Result<bool, Groth16Error>;
 }
 
 /// Domain tag of the challenge the encryption key signs.

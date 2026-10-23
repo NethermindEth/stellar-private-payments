@@ -1,6 +1,7 @@
 extern crate std;
 
 use super::*;
+use contract_types::Groth16Error;
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use soroban_sdk::{

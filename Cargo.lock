@@ -4816,6 +4816,7 @@ version = "0.1.0"
 dependencies = [
  "contract-types",
  "ed25519-dalek 3.0.0",
+ "pool-core",
  "sha2 0.11.0",
  "soroban-sdk",
  "soroban-utils",
