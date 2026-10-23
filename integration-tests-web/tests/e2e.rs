@@ -271,7 +271,8 @@ async fn build_test_client(storage: &StorageBridge) -> Client {
     prover
         .configure_circuits_base_js(
             test_circuits_base_url(),
-            // deploy-local.sh uses the canonical testnet keys for the local network.
+            // deploy-local.sh uses the canonical testnet keys for the local
+            // network.
             include_str!("../../deployments/testnet/circuits.json").to_owned(),
         )
         .await
