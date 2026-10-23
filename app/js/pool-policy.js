@@ -28,7 +28,7 @@ export const POOL_CONTROLS = {
         label: "View-only",
         tag: "Admin view key · view-only",
         explanation:
-            "Notes are encrypted with the pool's admin view key, revealing only the owner public key and the amount.",
+            "The admin view key reveals note owners and amounts, allowing partial inference of fund flows. In view-only mode, it does not reveal when those notes are spent, so it does not provide a complete transaction history.",
         impact: "Privacy: the admin view key holder can read every new note.",
     },
     traceable: {
