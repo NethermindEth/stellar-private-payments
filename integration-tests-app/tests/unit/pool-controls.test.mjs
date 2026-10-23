@@ -122,12 +122,12 @@ test('blocklist + traceable shows two tags with their explanations, in order', (
   assert.deepEqual(visible(root), [false, false]);
 });
 
-test('open + view-only shows both controls, neutral then amber', () => {
+test('open + view-only shows both controls, neutral then violet', () => {
   select(OPEN_VIEW_ONLY);
   assert.deepEqual(labels(roots.move), ['Open', 'Admin view key · view-only']);
   const [open, viewOnly] = tagsOf(roots.move);
   assert.match(open.className, /text-slate-200/);
-  assert.match(viewOnly.className, /text-amber-200/);
+  assert.match(viewOnly.className, /text-violet-200/);
   select(BLOCKLIST);
   assert.match(tagsOf(roots.move)[0].className, /text-cyan-100/);
 });

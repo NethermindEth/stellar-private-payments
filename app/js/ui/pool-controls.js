@@ -19,10 +19,10 @@ const TAG = 'inline-flex min-h-11 items-center gap-2 rounded-full border px-3.5 
 const PANEL = 'rounded-xl border border-white/10 bg-ink-850 p-3 text-sm leading-relaxed';
 
 // Open is the absence of ASP checks, so it stays neutral; ASP lists are cyan
-// and the admin view key, which reads notes, amber.
+// and the admin view key is violet. Amber is reserved for warnings.
 const NEUTRAL = { tag: 'border-white/10 bg-white/[0.04] text-slate-200 aria-expanded:ring-slate-300/30', impact: 'text-slate-300' };
 const ASP = { tag: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100 aria-expanded:ring-cyan-300/30', impact: 'text-cyan-200' };
-const VIEW_KEY = { tag: 'border-amber-300/30 bg-amber-300/10 text-amber-200 aria-expanded:ring-amber-300/30', impact: 'text-amber-200' };
+const VIEW_KEY = { tag: 'border-violet-300/30 bg-violet-300/10 text-violet-200 aria-expanded:ring-violet-300/30', impact: 'text-violet-200' };
 const TONES = { open: NEUTRAL, allowlist: ASP, blocklist: ASP, viewOnly: VIEW_KEY, traceable: VIEW_KEY };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
