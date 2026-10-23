@@ -10,6 +10,7 @@
 //!     types::{CircuitStem, ContractConfig, NoteOwnerAddress, PolicyFlags, SignerAddress},
 //! };
 //!
+//! # #[cfg(feature = "encrypted-storage")]
 //! # async fn example(deployment: ContractConfig, key: stellar_private_payments::state::database_key::DatabaseKey) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = LocalStorage::open_encrypted("wallet.sqlite", key, stellar_private_payments::state::database_key::OpenPurpose::OpenExisting)?.into();
 //!
@@ -57,7 +58,7 @@ pub mod planner;
 pub mod prover;
 pub mod registration;
 pub mod state;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 pub mod stellar_cli;
 pub mod transact;
 pub mod types;

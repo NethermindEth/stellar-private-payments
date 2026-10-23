@@ -9,7 +9,7 @@ publish = true
 description = "Stellar Private Payments Rust SDK"
 build = "build.rs"
 
-# sqlite-wasm-rs enables the WASM host adapter and encryption features for rusqlite.
+# sqlite-wasm-rs enables the WASM host adapter for rusqlite, and SQLite3MC with `encrypted-storage`.
 [package.metadata.cargo-shear]
 ignored = ["sqlite-wasm-rs"]
 
@@ -17,6 +17,21 @@ ignored = ["sqlite-wasm-rs"]
 name = "stellar_private_payments"
 
 [features]
+default = ["encrypted-storage"]
+# SQLite3MC-encrypted wallet storage (native and WASM).
+encrypted-storage = [
+    "rusqlite/in_gecko",
+    "sqlite-wasm-rs/sqlite3mc",
+    "dep:cc",
+    "dep:hkdf",
+    "dep:same-file",
+    "dep:sqlite3mc-src",
+    "dep:windows-sys",
+]
+# Plaintext wallet storage using rusqlite's bundled SQLite.
+unencrypted-storage = [
+    "rusqlite/bundled",
+]
 # multi-threaded proving
 parallel = [
     "dep:rayon",
@@ -69,22 +84,23 @@ x25519-dalek = { version = "3.0", default-features = false, features = ["static_
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 futures-timer = "3"
-hkdf = "0.13"
+hkdf = { version = "0.13", optional = true }
 getrandom = { workspace = true, features = ["std"] }
 rayon = { version = "1.12", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
-# `in_gecko` tells `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`
-# instead of running `pkg-config` or linking system `-lsqlite3`.
-rusqlite = { workspace = true, features = ["in_gecko"] }
+# The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
+# `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
+# (`unencrypted-storage`) compiles plain SQLite.
+rusqlite = { workspace = true }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
-same-file = "1.0.6"
+same-file = { version = "1.0.6", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+windows-sys = { version = "0.61.2", optional = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sqlite-wasm-rs = { workspace = true }
@@ -94,10 +110,10 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 
 [build-dependencies]
-cc = "1"
+cc = { version = "1", optional = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
-sqlite3mc-src = { workspace = true }
+sqlite3mc-src = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 circuit-keys = { workspace = true }
@@ -107,7 +123,7 @@ pool = { workspace = true }
 pool-gvk = { workspace = true }
 public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
-rusqlite = { workspace = true, features = ["in_gecko"] }
+rusqlite = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
