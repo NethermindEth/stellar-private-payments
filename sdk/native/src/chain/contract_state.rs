@@ -624,16 +624,15 @@ impl StateFetcher {
     /// Reads the key derivation domain the public key registry was deployed
     /// with.
     pub async fn registry_kdf_domain(&self) -> Result<String> {
-        let tx = build_invoke_contract_tx_envelope(
-            &self.config.deployer,
-            xdr::SequenceNumber(0),
-            BASE_FEE,
-            &self.config.public_key_registry,
-            "get_kdf_domain",
-            Vec::new(),
-            Vec::new(),
-        )?;
-        let retval = self.simulate_single_retval(&tx).await?;
+        let retval = self
+            .client
+            .read_contract(
+                &self.config.public_key_registry,
+                &self.config.deployer,
+                "get_kdf_domain",
+                Vec::new(),
+            )
+            .await?;
         Ok(scval_to_string(&retval)?)
     }
 

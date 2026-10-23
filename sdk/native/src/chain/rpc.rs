@@ -735,7 +735,7 @@ impl Client {
         }
     }
 
-    async fn read_contract(
+    pub(crate) async fn read_contract(
         &self,
         contract_id: &str,
         source: &str,
