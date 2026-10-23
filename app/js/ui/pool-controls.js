@@ -1,7 +1,8 @@
 /**
  * The "Pool controls" sections under the Available Token pickers: one tag per
  * control of the selected pool, in `poolControls` order, each a button that
- * opens its explanation below the tags.
+ * opens its explanation below the tags. Hover or keyboard focus previews the
+ * explanation; clicking pins it open until clicked again or dismissed.
  *
  * Each section is a `[data-pool-controls]` element whose value scopes its
  * panel ids. A section keeps at most one explanation open; Escape closes it.
@@ -83,8 +84,15 @@ function build(section, control) {
     button.setAttribute('aria-expanded', 'false');
     button.setAttribute('aria-controls', panelId);
     button.append(el('span', '', tag), helpIcon());
+    button.addEventListener('pointerenter', (event) => {
+        if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+        if (section.pinned && section.pinned !== button) section.pinned = null;
+        show(section, button);
+    });
+    button.addEventListener('focus', () => show(section, button));
     button.addEventListener('click', () => {
-        show(section, button.getAttribute('aria-expanded') === 'true' ? null : button);
+        section.pinned = section.pinned === button ? null : button;
+        show(section, section.pinned);
     });
 
     const panel = el('div', PANEL);
@@ -106,6 +114,7 @@ function render(section) {
     root.hidden = !pool;
     const shown = pool ? `${pool.poolContractId}|${controls.join(',')}` : '';
     if (root.dataset.shownPool === shown) return;
+    section.pinned = null;
     root.dataset.shownPool = shown;
     const built = controls.map((control) => build(section, control));
     tags.replaceChildren(...built.map(({ button }) => button));
@@ -117,8 +126,9 @@ function onKeydown(section, event) {
     const open = entries(section).find(({ panel }) => !panel.hidden);
     if (!open) return;
     const focusInPanel = open.panel.contains(document.activeElement);
-    show(section, null);
+    section.pinned = null;
     if (focusInPanel) open.button.focus();
+    show(section, null);
 }
 
 export const PoolControls = {
@@ -126,6 +136,15 @@ export const PoolControls = {
         const all = sections();
         for (const section of all) {
             section.root.addEventListener('keydown', (event) => onKeydown(section, event));
+            // The section includes the gap and explanation, so moving from a
+            // tag into its panel keeps the preview open for reading.
+            section.root.addEventListener('pointerleave', (event) => {
+                if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+                show(section, section.pinned);
+            });
+            section.root.addEventListener('focusout', (event) => {
+                if (!section.root.contains(event.relatedTarget)) show(section, section.pinned);
+            });
         }
         const renderAll = () => all.forEach(render);
         App.events.addEventListener('pool:config', renderAll);

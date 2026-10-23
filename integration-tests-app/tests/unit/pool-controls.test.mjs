@@ -132,6 +132,51 @@ test('open + view-only shows both controls, neutral then amber', () => {
   assert.match(tagsOf(roots.move)[0].className, /text-cyan-100/);
 });
 
+test('hover previews a tag, allows reading its panel, and closes on leaving the section', () => {
+  select(TRACEABLE);
+  const root = roots.move;
+  const [blocklist, traceable] = tagsOf(root);
+  blocklist.dispatch('pointerenter', { pointerType: 'mouse' });
+  assert.deepEqual(visible(root), [true, false]);
+  traceable.dispatch('pointerenter', { pointerType: 'mouse' });
+  assert.deepEqual(visible(root), [false, true]);
+  panelsOf(root)[1].dispatch('pointerenter', { pointerType: 'mouse' });
+  assert.deepEqual(visible(root), [false, true]);
+  root.dispatch('pointerleave', { pointerType: 'mouse' });
+  assert.deepEqual(visible(root), [false, false]);
+});
+
+test('click pins a hovered explanation; another click or Escape dismisses it', () => {
+  select(TRACEABLE);
+  const root = roots.move;
+  const button = tagsOf(root)[1];
+  button.dispatch('pointerenter', { pointerType: 'mouse' });
+  button.click();
+  root.dispatch('pointerleave', { pointerType: 'mouse' });
+  assert.deepEqual(visible(root), [false, true]);
+  button.click();
+  assert.deepEqual(visible(root), [false, false]);
+  button.dispatch('pointerenter', { pointerType: 'mouse' });
+  button.dispatch('keydown', { key: 'Escape' });
+  assert.deepEqual(visible(root), [false, false]);
+});
+
+test('keyboard focus previews and leaving focus closes; touch still toggles on tap', () => {
+  select(TRACEABLE);
+  const root = roots.move;
+  const button = tagsOf(root)[1];
+  button.dispatch('focus');
+  assert.deepEqual(visible(root), [false, true]);
+  button.dispatch('focusout', { relatedTarget: null });
+  assert.deepEqual(visible(root), [false, false]);
+  button.dispatch('pointerenter', { pointerType: 'touch' });
+  assert.deepEqual(visible(root), [false, false]);
+  button.click();
+  assert.deepEqual(visible(root), [false, true]);
+  button.click();
+  assert.deepEqual(visible(root), [false, false]);
+});
+
 test('a tag toggles its explanation, and opening another closes the first', () => {
   select(TRACEABLE);
   const root = roots.move;
