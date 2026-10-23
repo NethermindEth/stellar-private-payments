@@ -181,7 +181,8 @@ pub(crate) fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
 
 pub(crate) fn scval_to_string(val: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::String(s) = val {
-        String::from_utf8(s.0.to_vec()).map_err(|e| Error::UnexpectedScVal(e.to_string()))
+        s.to_utf8_string()
+            .map_err(|e| Error::UnexpectedScVal(e.to_string()))
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
     }

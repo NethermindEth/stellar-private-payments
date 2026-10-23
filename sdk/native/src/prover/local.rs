@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, fmt::Display, sync::Mutex};
 
 use anyhow::Context;
 
@@ -62,12 +62,7 @@ impl LocalProver {
 
         let mut transact = HashMap::with_capacity(transact_artifacts.len());
         for (stem, bundle) in transact_artifacts {
-            let engine = ProverEngine::new(
-                &bundle.proving_key,
-                &bundle.circuit_graph,
-                &bundle.circuit_r1cs,
-            )
-            .with_context(|| format!("init prover for {stem}"))?;
+            let engine = init_engine(bundle, stem)?;
             if transact.insert(*stem, engine).is_some() {
                 return Err(Error::Other(anyhow::anyhow!(
                     "duplicate transact circuit for {stem}"
@@ -77,12 +72,7 @@ impl LocalProver {
 
         let mut disclosure = HashMap::with_capacity(disclosure_artifacts.len());
         for (circuit, bundle) in disclosure_artifacts {
-            let engine = ProverEngine::new(
-                &bundle.proving_key,
-                &bundle.circuit_graph,
-                &bundle.circuit_r1cs,
-            )
-            .with_context(|| format!("init prover for {}", circuit.name))?;
+            let engine = init_engine(bundle, circuit.name)?;
             if disclosure.insert(circuit.name, engine).is_some() {
                 return Err(Error::Other(anyhow::anyhow!(
                     "duplicate disclosure circuit for {}",
@@ -103,14 +93,14 @@ impl LocalProver {
         Ok(Self {
             transact: Mutex::new(HashMap::new()),
             disclosure: Mutex::new(HashMap::new()),
-            key_ownership: Mutex::new(Some(key_ownership_engine(artifacts)?)),
+            key_ownership: Mutex::new(Some(init_engine(artifacts, KEY_OWNERSHIP_CIRCUIT)?)),
         })
     }
 
     /// Adds the `keyOwnership` circuit.
     pub fn with_key_ownership_artifacts(self, artifacts: &ProverArtifacts) -> Result<Self, Error> {
         Ok(Self {
-            key_ownership: Mutex::new(Some(key_ownership_engine(artifacts)?)),
+            key_ownership: Mutex::new(Some(init_engine(artifacts, KEY_OWNERSHIP_CIRCUIT)?)),
             ..self
         })
     }
@@ -130,13 +120,13 @@ impl LocalProver {
     }
 }
 
-fn key_ownership_engine(artifacts: &ProverArtifacts) -> Result<ProverEngine, Error> {
+fn init_engine(artifacts: &ProverArtifacts, circuit: impl Display) -> Result<ProverEngine, Error> {
     Ok(ProverEngine::new(
         &artifacts.proving_key,
         &artifacts.circuit_graph,
         &artifacts.circuit_r1cs,
     )
-    .with_context(|| format!("init prover for {KEY_OWNERSHIP_CIRCUIT}"))?)
+    .with_context(|| format!("init prover for {circuit}"))?)
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
