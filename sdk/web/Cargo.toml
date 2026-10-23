@@ -20,8 +20,21 @@ path = "src/bin/storage_worker.rs"
 name = "prover-worker"
 path = "src/bin/prover_worker.rs"
 
+[features]
+default = ["encrypted-storage"]
+# SQLite3MC-encrypted OPFS storage (`Storage.open`).
+encrypted-storage = [
+    "stellar-private-payments/encrypted-storage",
+    "sqlite-wasm-rs/sqlite3mc",
+]
+# Plaintext OPFS storage (`Storage.openPlaintext`).
+unencrypted-storage = [
+    "stellar-private-payments/unencrypted-storage",
+]
+
 [dependencies]
-stellar-private-payments = { workspace = true }
+# Not the workspace entry, which enables the SDK's default (encrypted) storage.
+stellar-private-payments = { path = "../native", version = "0.2.0", default-features = false }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
