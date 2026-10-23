@@ -50,6 +50,10 @@ function requireField(value, name) {
  * then pass the instance (or a fork) to {@link Client.new}.
  */
 async function openStorage(options) {
+  // Fail before the provider can prompt for a signature or persist a key.
+  if (!WasmStorage.encryptedStorageEnabled()) {
+    throw new Error('Encrypted storage requires a build with the encrypted-storage feature');
+  }
   const provider = requireField(options?.keyProvider, 'keyProvider');
   if (typeof provider !== 'function') throw new TypeError('keyProvider must be a function');
   const createNew = options.createNew === true;
@@ -64,6 +68,17 @@ async function openStorage(options) {
   } finally {
     transport.fill(0);
   }
+}
+
+/**
+ * Open plaintext worker-backed persistence (`spp.db`). Only available in
+ * builds with the `unencrypted-storage` Cargo feature.
+ */
+async function openPlaintextStorage(options) {
+  if (typeof WasmStorage.openPlaintext !== 'function') {
+    throw new Error('Unencrypted storage requires a build with the unencrypted-storage feature');
+  }
+  return await WasmStorage.openPlaintext(options?.workerUrl ?? storageWorkerUrl);
 }
 
 /**
@@ -221,7 +236,7 @@ async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, op
   }
 }
 
-export const Storage = { open: openStorage };
+export const Storage = { open: openStorage, openPlaintext: openPlaintextStorage };
 export const Client = {
   new: newClient,
 };
