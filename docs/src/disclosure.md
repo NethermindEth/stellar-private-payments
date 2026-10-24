@@ -107,10 +107,10 @@ receipt.
 A per-row **Disclose** button in the main app's notes table (Advanced tab → Actions column) links to:
 
 ```
-/#disclosure?commitment=0x<note-commitment>
+/#disclosure?commitment=0x<note-commitment>&pool=C<pool-contract-address>
 ```
 
-This pre-selects the matching notes if they are owned and unspent. Multiple `commitment` parameters may be provided to select up to four notes.
+This pre-selects the matching notes if they are owned and unspent. Multiple `commitment` parameters may be provided to select up to four notes. The `pool` parameter limits the match to that pool.
 
 ---
 
@@ -170,7 +170,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 1. Open the main app and connect your Freighter wallet on Testnet.
 2. Scroll to **Your Notes** and find an unspent note you want to disclose.
-3. Click **Disclose** in the note's Actions column. This opens `/#disclosure?commitment=0x<note-commitment>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
+3. Click **Disclose** in the note's Actions column. This opens `/#disclosure?commitment=0x<note-commitment>&pool=C<pool-contract-address>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
 4. Enter the context requested by the authority:
    - **Authority label** — e.g. the company or regulator name.
    - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.

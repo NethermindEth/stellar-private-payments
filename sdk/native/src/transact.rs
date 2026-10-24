@@ -284,15 +284,21 @@ fn build_pool_inputs(
         Err(status) => return Ok(Err(status)),
     };
 
+    let notes = storage.get_unspent_user_notes_by_commitments(
+        &req.pool_address,
+        &req.user_address,
+        &req.kdf_domain,
+        &req.input_commitments,
+    )?;
     let mut out = Vec::with_capacity(req.input_commitments.len());
-    for commitment in &req.input_commitments {
-        let Some((amount, blinding, leaf_index)) = storage.get_unspent_user_note_by_commitment(
-            &req.pool_address,
-            &req.user_address,
-            &req.kdf_domain,
-            commitment,
-        )?
-        else {
+    for (index, (commitment, note)) in req.input_commitments.iter().zip(notes).enumerate() {
+        let Some((amount, blinding, leaf_index)) = note else {
+            // Most likely one note listed twice, so fail rather than sync.
+            if req.input_commitments[..index].contains(commitment) {
+                anyhow::bail!(
+                    "a note ID is listed twice in the inputs, but the wallet holds only one unspent note with that ID in this pool"
+                );
+            }
             tracing::info!(
                 commitment = ?crate::types::Sensitive(commitment),
                 "unspent note not found for commitment; waiting for note derivation"

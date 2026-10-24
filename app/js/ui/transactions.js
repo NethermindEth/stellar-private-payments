@@ -303,7 +303,9 @@ function updateInputAmount(row) {
     const amountEl = row.querySelector('.note-input-amount');
     if (!amountEl) return;
     const id = row.querySelector('.note-input')?.value.trim();
-    const note = id ? App.state.notes.find(n => n.id === id) : null;
+    const note = id
+        ? App.state.notes.find(n => n.id === id && n.poolContractId === App.state.selectedPoolId)
+        : null;
     if (note) {
         const pool = App.state.pools.find(p => p.poolContractId === note.poolContractId);
         amountEl.textContent = `Amount: ${Utils.formatPoolAmount(note.amount, note.poolContractId)}`;
@@ -372,6 +374,8 @@ export const Transactions = {
         App.events.addEventListener('pool:selected', updatePoolLabels);
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
+        App.events.addEventListener('pool:selected', () =>
+            document.querySelectorAll('#advanced-inputs > *').forEach(updateInputAmount));
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);

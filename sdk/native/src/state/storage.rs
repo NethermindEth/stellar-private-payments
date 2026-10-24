@@ -24,8 +24,14 @@ const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema_v4_processed_events.sql")),
     M::up(include_str!("schema_v5_leaves_per_tree.sql")),
     M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
+    M::up(include_str!("schema_v7_note_per_leaf.sql")).foreign_key_check(),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
+
+// Note `n` has a saved nullifier in the pool of event `r`, reconciled or not.
+const SAVED_NULLIFIER: &str = "EXISTS (SELECT 1 FROM pool_nullifiers pnl
+    JOIN raw_contract_events rn ON rn.id = pnl.event_id
+    WHERE pnl.nullifier = n.expected_nullifier AND rn.contract_id = r.contract_id)";
 
 pub struct Storage {
     pub(super) conn: Connection,
@@ -494,14 +500,14 @@ impl Storage {
         kdf_domain: &str,
         limit: u32,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT
-                n.id,
+                c.commitment,
                 pool.address,
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                CASE WHEN {SAVED_NULLIFIER} THEN 1 ELSE 0 END AS spent,
                 c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
@@ -510,8 +516,9 @@ impl Storage {
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND a.kdf_domain = ?2
              ORDER BY r.ledger DESC
-             LIMIT ?3",
-        )?;
+             LIMIT ?3"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let rows = stmt.query_map(params![address, kdf_domain, limit], |row| {
             let id: Field = row.get(0)?;
@@ -550,13 +557,13 @@ impl Storage {
         address: &str,
         kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT
-                n.id,
+                c.commitment,
                 n.amount,
                 c.leaf_index,
                 r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent,
+                CASE WHEN {SAVED_NULLIFIER} THEN 1 ELSE 0 END AS spent,
                 c.gvk_ciphertext
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
@@ -564,8 +571,9 @@ impl Storage {
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1 AND pool.address = ?2 AND a.kdf_domain = ?3
-             ORDER BY r.ledger DESC",
-        )?;
+             ORDER BY r.ledger DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let rows = stmt.query_map(params![address, pool_contract_id, kdf_domain], |row| {
             let id: Field = row.get(0)?;
@@ -602,9 +610,9 @@ impl Storage {
         address: &str,
         kdf_domain: &str,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT
-                n.id,
+                c.commitment,
                 pool.address,
                 n.amount,
                 c.leaf_index,
@@ -618,9 +626,10 @@ impl Storage {
              WHERE a.address = ?1
                AND pool.address = ?2
                AND a.kdf_domain = ?3
-               AND n.nullifier_id IS NULL
-             ORDER BY r.ledger DESC",
-        )?;
+               AND NOT {SAVED_NULLIFIER}
+             ORDER BY r.ledger DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let rows = stmt.query_map(params![address, pool_contract_id, kdf_domain], |row| {
             let id: Field = row.get(0)?;
@@ -656,16 +665,17 @@ impl Storage {
         kdf_domain: &str,
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT pool.address, n.amount
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 AND a.kdf_domain = ?2 AND n.nullifier_id IS NULL
-             ORDER BY pool.address",
-        )?;
+             WHERE a.address = ?1 AND a.kdf_domain = ?2 AND NOT {SAVED_NULLIFIER}
+             ORDER BY pool.address"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let rows = stmt.query_map(params![address, kdf_domain], |row| {
             let pool_contract_id: String = row.get(0)?;
@@ -870,17 +880,25 @@ impl Storage {
         Ok(leaves)
     }
 
-    /// Lookup an unspent user note by pool commitment.
+    /// Looks up an unspent user note for each input commitment, in order.
     ///
-    /// Returns `(amount, blinding, leaf_index)` when found and unspent.
-    pub fn get_unspent_user_note_by_commitment(
+    /// Returns `(amount, blinding, leaf_index)` per commitment. A commitment
+    /// listed k times gets its k lowest unspent copies by leaf index, and
+    /// `None` past the last. A saved nullifier counts as spent before
+    /// reconciliation links it to the note.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a query fails, or if a commitment repeats more
+    /// than `u32::MAX` times in `commitments`.
+    pub fn get_unspent_user_notes_by_commitments(
         &self,
         pool_contract_id: &str,
         account_address: &str,
         kdf_domain: &str,
-        commitment: &Field,
-    ) -> Result<Option<(NoteAmount, Field, u32)>> {
-        let mut stmt = self.conn.prepare(
+        commitments: &[Field],
+    ) -> Result<Vec<Option<(NoteAmount, Field, u32)>>> {
+        let sql = format!(
             "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
@@ -892,35 +910,56 @@ impl Storage {
                AND pc.commitment = ?3
                AND a.kdf_domain = ?4
                AND n.nullifier_id IS NULL
-             LIMIT 1",
-        )?;
+               AND NOT {SAVED_NULLIFIER}
+             ORDER BY pc.leaf_index
+             LIMIT 1 OFFSET ?5"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
-        let row = stmt
-            .query_row(
-                params![pool_contract_id, account_address, commitment, kdf_domain],
-                |row| {
-                    let amount: NoteAmount = row.get(0)?;
-                    let blinding: Field = row.get(1)?;
-                    let leaf_index_i64: i64 = row.get(2)?;
-                    let leaf_index = col_u32(leaf_index_i64, 2)?;
-                    Ok((amount, blinding, leaf_index))
-                },
-            )
-            .optional()
-            .context("Failed to query unspent user note by commitment")?;
-
-        Ok(row)
+        commitments
+            .iter()
+            .enumerate()
+            .map(|(i, commitment)| {
+                let copy = u32::try_from(
+                    commitments
+                        .iter()
+                        .take(i)
+                        .filter(|c| *c == commitment)
+                        .count(),
+                )?;
+                stmt.query_row(
+                    params![
+                        pool_contract_id,
+                        account_address,
+                        commitment,
+                        kdf_domain,
+                        copy
+                    ],
+                    |row| {
+                        let amount: NoteAmount = row.get(0)?;
+                        let blinding: Field = row.get(1)?;
+                        let leaf_index_i64: i64 = row.get(2)?;
+                        let leaf_index = col_u32(leaf_index_i64, 2)?;
+                        Ok((amount, blinding, leaf_index))
+                    },
+                )
+                .optional()
+                .context("Failed to query unspent user note by commitment")
+            })
+            .collect()
     }
 
-    /// Like [`Self::get_unspent_user_note_by_commitment`], but returns the note
-    /// regardless of spent status.
+    /// Like [`Self::get_unspent_user_notes_by_commitments`], but returns the
+    /// note regardless of spent status.
     ///
     /// Selective disclosure proves Merkle membership of a commitment; spending
     /// a note publishes a nullifier but does not remove its commitment leaf
     /// from the tree, so a spent note can still be disclosed. Use this
     /// lookup on the disclosure input-building path. The transact path must
-    /// keep using [`Self::get_unspent_user_note_by_commitment`], which
+    /// keep using [`Self::get_unspent_user_notes_by_commitments`], which
     /// excludes spent notes.
+    ///
+    /// Among copies, prefers the lowest by leaf index with no saved nullifier.
     pub fn get_user_note_by_commitment(
         &self,
         pool_contract_id: &str,
@@ -928,7 +967,7 @@ impl Storage {
         kdf_domain: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
-        let mut stmt = self.conn.prepare(
+        let sql = format!(
             "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
@@ -939,8 +978,10 @@ impl Storage {
                AND c.address = ?1
                AND pc.commitment = ?3
                AND a.kdf_domain = ?4
-             LIMIT 1",
-        )?;
+             ORDER BY {SAVED_NULLIFIER}, pc.leaf_index
+             LIMIT 1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let row = stmt
             .query_row(
@@ -1594,16 +1635,14 @@ impl Storage {
 
                         tx.execute(
                             "INSERT OR IGNORE INTO user_notes (
-                                id,
                                 account_id,
                                 commitment_id,
                                 nullifier_id,
                                 expected_nullifier,
                                 blinding,
                                 amount
-                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                             params![
-                                row.commitment,
                                 account.account_id,
                                 row.commitment_id,
                                 nullifier_id,
@@ -1872,9 +1911,14 @@ mod tests {
 
     use super::*;
     use crate::{
+        planner::Transact,
         state::test_events,
-        types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount},
-        zk::{crypto, encryption},
+        transact::{BuildTransactParams, build_transact_params, transact_request_from_step},
+        types::{
+            AspMembershipSync, ContractEvent, ContractsEventData, ExtAmount, GvkMode,
+            KeyDerivationSignature, NoteAmount, PolicyFlags, TransactChainContext,
+        },
+        zk::{crypto, encryption, merkle::MerklePrefixTree},
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -2710,261 +2754,64 @@ mod tests {
     }
 
     #[test]
-    fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
+    fn get_unspent_user_notes_by_commitments_finds_unspent_note() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[3])?;
+        scan_notes(&mut storage)?;
 
-        let sig = KeyDerivationSignature(vec![1u8; 64]);
-        let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
-        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            "tests",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
-
-        let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
         blinding_le[0] = 7;
-        let blinding = Field::try_from_le_bytes(blinding_le)?;
-
-        let amount_field_le = Field::from(amount).to_le_bytes();
-        let commitment_le = crypto::compute_commitment(
-            &amount_field_le,
-            note_keypair.public.as_ref(),
-            &blinding.to_le_bytes(),
-        )?;
-        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
-            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
-        })?;
-        let commitment = Field::try_from_le_bytes(commitment_le)?;
-
-        let encrypted_output =
-            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
-
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
-
-        let mut derive = |account: &AccountKeys,
-                          row: &PoolCommitmentRow|
-         -> Result<Option<DerivedUserNoteRow>> {
-            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
-                &row.commitment,
-                row.leaf_index,
-                &row.encrypted_output,
-            )?;
-            Ok(opt.map(|d| DerivedUserNoteRow {
-                amount: d.amount,
-                blinding: d.blinding,
-                expected_nullifier: d.expected_nullifier,
-            }))
-        };
-        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
-
-        let result = storage.get_unspent_user_note_by_commitment(
+        let result = storage.get_unspent_user_notes_by_commitments(
             "CPOOL",
             "GTESTACCOUNT",
             "tests",
-            &commitment,
+            &[c],
         )?;
-        assert!(result.is_some());
-        let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
-        assert_eq!(got_amount, amount);
-        assert_eq!(got_blinding, blinding);
-        assert_eq!(got_leaf_index, 3);
+        assert_eq!(
+            result,
+            [Some((
+                NoteAmount::from(5),
+                Field::try_from_le_bytes(blinding_le)?,
+                3
+            ))]
+        );
 
         Ok(())
     }
 
     #[test]
-    fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
+    fn get_unspent_user_notes_by_commitments_rejects_spent_note() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
-
-        let sig = KeyDerivationSignature(vec![1u8; 64]);
-        let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
-        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            "tests",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
-
-        let amount = NoteAmount::from(5);
-        let mut blinding_le = [0u8; 32];
-        blinding_le[0] = 7;
-        let blinding = Field::try_from_le_bytes(blinding_le)?;
-
-        let amount_field_le = Field::from(amount).to_le_bytes();
-        let commitment_le = crypto::compute_commitment(
-            &amount_field_le,
-            note_keypair.public.as_ref(),
-            &blinding.to_le_bytes(),
-        )?;
-        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
-            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
-        })?;
-        let commitment = Field::try_from_le_bytes(commitment_le)?;
-
-        let encrypted_output =
-            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
-
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 3,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
-
-        let mut derive = |account: &AccountKeys,
-                          row: &PoolCommitmentRow|
-         -> Result<Option<DerivedUserNoteRow>> {
-            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
-                &row.commitment,
-                row.leaf_index,
-                &row.encrypted_output,
-            )?;
-            Ok(opt.map(|d| DerivedUserNoteRow {
-                amount: d.amount,
-                blinding: d.blinding,
-                expected_nullifier: d.expected_nullifier,
-            }))
-        };
-        storage.scan_commitments_for_user_notes(100, &mut derive)?;
-
-        // Spend the note via nullifier.
-        let leaf_index: u32 = 3;
-        let mut path_indices_le = [0u8; 32];
-        path_indices_le[..8].copy_from_slice(&(u64::from(leaf_index)).to_le_bytes());
-        let signature = crypto::compute_signature(
-            &note_keypair.private.0,
-            &commitment.to_le_bytes(),
-            &path_indices_le,
-        )?;
-        let nullifier_le =
-            crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
-        let nullifier_le: [u8; 32] = nullifier_le.try_into().map_err(|v: Vec<u8>| {
-            anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len())
-        })?;
-        let nullifier = Field::try_from_le_bytes(nullifier_le)?;
-
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-null")],
-            cursor: "cur2".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-            id: "evt-null".to_string(),
-            nullifier,
-            gvk_ciphertext: None,
-        }])?;
+        let c = save_copies(&mut storage, "CPOOL", &[3])?;
+        scan_notes(&mut storage)?;
+        save_spend(&mut storage, 3)?;
         storage.reconcile_nullifiers(100)?;
 
-        let result = storage.get_unspent_user_note_by_commitment(
+        let result = storage.get_unspent_user_notes_by_commitments(
             "CPOOL",
             "GTESTACCOUNT",
             "tests",
-            &commitment,
+            &[c],
         )?;
-        assert!(result.is_none(), "spent note should not be returned");
+        assert_eq!(result, [None], "spent note should not be returned");
 
         Ok(())
     }
 
     #[test]
-    fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
+    fn get_unspent_user_notes_by_commitments_rejects_wrong_commitment() -> Result<()> {
         let mut storage = Storage::connect_in_memory()?;
+        save_copies(&mut storage, "CPOOL", &[0])?;
+        scan_notes(&mut storage)?;
 
-        let sig = KeyDerivationSignature(vec![1u8; 64]);
-        let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
-        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
-        storage.save_encryption_and_note_keypairs(
-            "GTESTACCOUNT",
-            "tests",
-            &note_keypair,
-            &enc_keypair,
-            &membership_blinding,
-        )?;
-
-        let amount = NoteAmount::from(5);
-        let mut blinding_le = [0u8; 32];
-        blinding_le[0] = 7;
-        let blinding = Field::try_from_le_bytes(blinding_le)?;
-
-        let encrypted_output =
-            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
-
-        let mut commitment_le = [0u8; 32];
-        commitment_le[0] = 1;
-        let commitment = Field::try_from_le_bytes(commitment_le)?;
-
-        storage.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-commit")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
-        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            id: "evt-commit".to_string(),
-            commitment,
-            index: 0,
-            encrypted_output: encrypted_output.clone(),
-            gvk_ciphertext: None,
-        }])?;
-
-        let mut derive = |account: &AccountKeys,
-                          row: &PoolCommitmentRow|
-         -> Result<Option<DerivedUserNoteRow>> {
-            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
-                &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
-                &row.commitment,
-                row.leaf_index,
-                &row.encrypted_output,
-            )?;
-            Ok(opt.map(|d| DerivedUserNoteRow {
-                amount: d.amount,
-                blinding: d.blinding,
-                expected_nullifier: d.expected_nullifier,
-            }))
-        };
-        storage.scan_commitments_for_user_notes(100, &mut derive)?;
-
-        let wrong_commitment = Field::try_from_le_bytes([
-            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0,
-        ])?;
-        let result = storage.get_unspent_user_note_by_commitment(
+        let wrong_commitment = Field::try_from_le_bytes([2u8; 32])?;
+        let result = storage.get_unspent_user_notes_by_commitments(
             "CPOOL",
             "GTESTACCOUNT",
             "tests",
-            &wrong_commitment,
+            &[wrong_commitment],
         )?;
-        assert!(result.is_none(), "wrong commitment should not match");
+        assert_eq!(result, [None], "wrong commitment should not match");
 
         Ok(())
     }
@@ -3142,10 +2989,14 @@ mod tests {
 
         // The unspent-only lookup rejects it, but the spent-tolerant lookup
         // returns it.
-        assert!(
-            storage
-                .get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &commitment)?
-                .is_none(),
+        assert_eq!(
+            storage.get_unspent_user_notes_by_commitments(
+                "CPOOL",
+                "GTESTACCOUNT",
+                "tests",
+                &[commitment]
+            )?,
+            [None],
             "sanity: note is spent"
         );
 
@@ -3476,6 +3327,302 @@ mod tests {
         Ok(())
     }
 
+    fn save_copies(storage: &mut Storage, pool: &str, leaf_indices: &[u32]) -> Result<Field> {
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            "tests",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+        let commitment_le = crypto::compute_commitment(
+            &Field::from(amount).to_le_bytes(),
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        let ids: Vec<String> = leaf_indices
+            .iter()
+            .map(|leaf| format!("{pool}-{leaf}"))
+            .collect();
+        storage.save_events_batch(&ContractsEventData {
+            events: ids
+                .iter()
+                .map(|id| ContractEvent {
+                    contract_id: pool.to_string(),
+                    ..dummy_event(id)
+                })
+                .collect(),
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(
+            &ids.iter()
+                .zip(leaf_indices)
+                .map(|(id, &leaf)| NewCommitmentEvent {
+                    encrypted_output: encrypted_output.clone(),
+                    ..commitment_event(id, commitment, leaf)
+                })
+                .collect(),
+        )?;
+        Ok(commitment)
+    }
+
+    fn scan_notes(storage: &mut Storage) -> Result<bool> {
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
+                &account.keys.note_keypair,
+                &account.keys.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)
+    }
+
+    fn unspent_leaves(storage: &Storage, pool: &str) -> Result<Vec<u32>> {
+        let mut leaves: Vec<u32> = storage
+            .list_unspent_user_notes(pool, "GTESTACCOUNT", "tests")?
+            .iter()
+            .map(|note| note.leaf_index)
+            .collect();
+        leaves.sort_unstable();
+        Ok(leaves)
+    }
+
+    fn save_spend(storage: &mut Storage, leaf_index: u32) -> Result<()> {
+        let nullifier: Field = storage.conn.query_row(
+            "SELECT n.expected_nullifier
+             FROM user_notes n
+             JOIN pool_commitments pc ON pc.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = pc.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = 'CPOOL' AND pc.leaf_index = ?1",
+            params![leaf_index],
+            |row| row.get(0),
+        )?;
+        let id = format!("nul-{leaf_index}");
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event(&id)],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
+            id,
+            nullifier,
+            gvk_ciphertext: None,
+        }])
+    }
+
+    #[test]
+    fn every_copy_of_a_commitment_gets_a_note() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        save_copies(&mut storage, "CPOOL", &[0, 1])?;
+
+        scan_notes(&mut storage)?;
+
+        assert_eq!(unspent_leaves(&storage, "CPOOL")?, [0, 1]);
+        let balances = storage.list_portfolio_balances(
+            "GTESTACCOUNT",
+            "tests",
+            &[PortfolioPoolEntry {
+                pool_contract_id: "CPOOL".to_string(),
+                token_contract_id: "CTOKEN".to_string(),
+                token_label: "TOKEN".to_string(),
+            }],
+        )?;
+        assert_eq!(balances[0].amount, NoteAmount::from(10));
+        Ok(())
+    }
+
+    /// Leaf 0 stays spent only through the copied row, because its zeroed
+    /// nullifier matches nothing a rescan computes.
+    #[test]
+    fn opening_a_v6_database_derives_the_copies_it_dropped() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 6)?;
+        let mut v6 = Storage { conn };
+        save_copies(&mut v6, "CPOOL", &[0, 1])?;
+        save_copies(&mut v6, "CPOOL2", &[0])?;
+        v6.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-null")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        v6.conn.execute_batch(
+            "INSERT INTO pool_nullifiers (id, nullifier, event_id)
+                 VALUES (9, zeroblob(32), 'evt-null');
+             INSERT INTO user_notes (
+                 id, account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
+             )
+                 SELECT c.commitment, a.id, c.id, 9, zeroblob(32), zeroblob(32), '5'
+                 FROM pool_commitments c, accounts a
+                 WHERE c.event_id = 'CPOOL-0';
+             INSERT INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
+                 SELECT p.contract_id, a.id, 3
+                 FROM contracts p, accounts a
+                 WHERE p.address IN ('CPOOL', 'CPOOL2');",
+        )?;
+
+        let mut storage = Storage::connect_with_connection(v6.conn)?;
+        scan_notes(&mut storage)?;
+
+        assert_eq!(unspent_leaves(&storage, "CPOOL")?, [1]);
+        assert_eq!(unspent_leaves(&storage, "CPOOL2")?, [0]);
+        Ok(())
+    }
+
+    /// Saving leaf 2 first puts it first in rowid order, as a replayed dropped
+    /// copy would be.
+    #[test]
+    fn each_repeated_input_takes_its_own_unspent_copy() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[2, 0, 1])?;
+        scan_notes(&mut storage)?;
+        save_spend(&mut storage, 1)?;
+        storage.reconcile_nullifiers(100)?;
+
+        let leaves: Vec<_> = storage
+            .get_unspent_user_notes_by_commitments("CPOOL", "GTESTACCOUNT", "tests", &[c, c, c])?
+            .into_iter()
+            .map(|note| note.map(|(_, _, leaf)| leaf))
+            .collect();
+        assert_eq!(leaves, [Some(0), Some(2), None]);
+        Ok(())
+    }
+
+    /// Two unspent copies listed twice build. With one spent, the repeat fails
+    /// at once, while an input with no copy at all still waits for sync.
+    #[test]
+    fn a_repeated_input_past_its_last_copy_fails_at_once() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[0, 1])?;
+        scan_notes(&mut storage)?;
+        let chain = TransactChainContext {
+            pool_root: MerklePrefixTree::new(2, &[c, c])?.into_built().root()?,
+            pool_next_index: 2,
+            pool_merkle_levels: 2,
+            token_contract_id: String::new(),
+            asp_membership_levels: 0,
+            asp_membership_root: Field::ZERO,
+            asp_membership_contract_id: String::new(),
+            asp_membership_ledger: 0,
+            non_membership_proof: None,
+            policy_flags: PolicyFlags::default(),
+            gvk_mode: GvkMode::Off,
+            admin_view_key: None,
+            deposits_paused: false,
+        };
+        let step = Transact::new(
+            vec![c, c],
+            [NoteAmount::ZERO; 2],
+            ExtAmount::ZERO,
+            String::new(),
+            [None, None],
+            [None, None],
+        );
+        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain);
+        assert!(matches!(
+            build_transact_params(&storage, &req)?,
+            BuildTransactParams::Ready(params) if params.inputs.len() == 2
+        ));
+        save_spend(&mut storage, 1)?;
+
+        let Err(err) = build_transact_params(&storage, &req) else {
+            panic!("one unspent copy listed twice must fail");
+        };
+        assert!(err.to_string().contains("is listed twice"), "{err}");
+        for inputs in [vec![c, Field::ONE], vec![Field::ONE, Field::ONE]] {
+            req.input_commitments = inputs;
+            assert!(matches!(
+                build_transact_params(&storage, &req)?,
+                BuildTransactParams::MembershipSync(AspMembershipSync::SyncRequired(None))
+            ));
+        }
+        Ok(())
+    }
+
+    /// The `CPOOL2` copy shares leaf 0's nullifier but not its pool, so it
+    /// stays unspent.
+    #[test]
+    fn a_saved_nullifier_spends_a_copy_before_reconciliation() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[0, 1])?;
+        save_copies(&mut storage, "CPOOL2", &[0])?;
+        scan_notes(&mut storage)?;
+        save_spend(&mut storage, 0)?;
+
+        for (pool, unspent) in [("CPOOL", 1), ("CPOOL2", 0)] {
+            let leaves: Vec<_> = storage
+                .get_unspent_user_notes_by_commitments(pool, "GTESTACCOUNT", "tests", &[c])?
+                .into_iter()
+                .map(|note| note.map(|(_, _, leaf)| leaf))
+                .collect();
+            assert_eq!(leaves, [Some(unspent)]);
+            assert_eq!(unspent_leaves(&storage, pool)?, [unspent]);
+        }
+        for notes in [
+            storage.list_user_notes("GTESTACCOUNT", "tests", 10)?,
+            storage.list_pool_user_notes("CPOOL", "GTESTACCOUNT", "tests")?,
+        ] {
+            let spent: Vec<_> = notes
+                .iter()
+                .filter(|note| note.spent)
+                .map(|note| note.leaf_index)
+                .collect();
+            assert_eq!(spent, [0]);
+        }
+        let balances = storage.list_portfolio_balances(
+            "GTESTACCOUNT",
+            "tests",
+            &[PortfolioPoolEntry {
+                pool_contract_id: "CPOOL".to_string(),
+                token_contract_id: "CTOKEN".to_string(),
+                token_label: "TOKEN".to_string(),
+            }],
+        )?;
+        assert_eq!(balances[0].amount, NoteAmount::from(5));
+        Ok(())
+    }
+
+    #[test]
+    fn disclosure_prefers_an_unspent_copy() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let c = save_copies(&mut storage, "CPOOL", &[0, 1])?;
+        scan_notes(&mut storage)?;
+        save_spend(&mut storage, 0)?;
+
+        let note = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &c)?;
+        assert_eq!(note.map(|(_, _, leaf)| leaf), Some(1));
+        storage.reconcile_nullifiers(100)?;
+        let note = storage.get_user_note_by_commitment("CPOOL", "GTESTACCOUNT", "tests", &c)?;
+        assert_eq!(note.map(|(_, _, leaf)| leaf), Some(1));
+        Ok(())
+    }
+
     #[cfg(all(test, not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn gvk_ciphertext_persists_and_audits() -> Result<()> {
@@ -3545,11 +3692,9 @@ mod tests {
         )?;
         storage.conn.execute(
             "INSERT INTO user_notes (
-                id, account_id, commitment_id, nullifier_id,
-                expected_nullifier, blinding, amount
-             ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
+                account_id, commitment_id, nullifier_id, expected_nullifier, blinding, amount
+             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5)",
             params![
-                commitment,
                 account_id,
                 commitment_id,
                 Field(crate::types::U256::from(1)),
