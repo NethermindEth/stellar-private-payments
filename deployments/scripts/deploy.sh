@@ -77,7 +77,8 @@ Options:
                         Repository whose contracts-release.yml must have attested the
                         release (default: NethermindEth/stellar-private-payments)
   --allow-unverified    With --release-dir, print a warning instead of failing when the
-                        attestation cannot be verified
+                        attestation cannot be verified. On mainnet, also allow building
+                        the contracts locally instead of passing --release-dir
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
@@ -119,8 +120,8 @@ Notes:
   - The registry's verifier is built from, or with --release-dir picked by the hash of,
     deployments/<network>/circuit_keys/keyOwnership_vk.json.
   - Per-pool policyFlags / gvkMode are written to deployments/<network>/deployments.json.
-  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
-    are taken from deployments/<network>/circuit_keys/ automatically.
+  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys, and never on
+    mainnet; other VKs are taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
@@ -490,6 +491,8 @@ NETWORK_METADATA="$(stellar network ls --long | jq -Rs --arg name "$NETWORK" '
   map(select(.Name == $name)) | first |
   if .["RPC url"] == null or .["Network passphrase"] == null then error("network metadata missing")
   else {rpcUrl: .["RPC url"], networkPassphrase: .["Network passphrase"]} end')" || die "failed to resolve network metadata"
+IS_MAINNET="$(jq '.networkPassphrase == "Public Global Stellar Network ; September 2015"' \
+  <<<"$NETWORK_METADATA")"
 
 need stellar
 need jq
@@ -507,8 +510,26 @@ if [[ -n "$GVK_AUTHORITY_PUB_KEY_JSON" && -n "$GVK_AUTHORITY_PUB_KEY_FILE" ]]; t
   die "use only one of --gvk-authority-pubkey or --gvk-authority-pubkey-file"
 fi
 
-if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
-  die "mainnet requires --yes"
+if [[ "$IS_MAINNET" == "true" ]]; then
+  [[ "$YES" == "true" ]] || die "mainnet requires --yes"
+  if [[ -z "$RELEASE_DIR" ]]; then
+    [[ "$ALLOW_UNVERIFIED" == "true" ]] \
+      || die "mainnet deploys only the contracts of a release; pass --release-dir, or" \
+        "--allow-unverified to build them locally"
+    warn "building the contracts locally instead of deploying a release," \
+      "because of --allow-unverified"
+  fi
+  [[ -z "$VK_JSON$VK_FILE" ]] \
+    || die "mainnet refuses --vk-json and --vk-file; commit the key file under" \
+      "deployments/$NETWORK/circuit_keys instead"
+  # A link would let another network's key file stand in for this network's.
+  keys_dir="deployments/$NETWORK/circuit_keys"
+  [[ "$(cd "$ROOT_DIR/$keys_dir" && pwd -P)" == "$(cd "$ROOT_DIR" && pwd -P)/$keys_dir" ]] \
+    || die "$ROOT_DIR/$keys_dir must be a real directory on mainnet, not a link and not inside a" \
+      "linked directory; copy this network's key files into a real directory there"
+  for vk in "$ROOT_DIR/$keys_dir"/*_vk.json; do
+    [[ ! -L "$vk" ]] || die "$vk must be a file on mainnet, not a link"
+  done
 fi
 
 if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
@@ -767,6 +788,10 @@ if [[ -n "$RELEASE_DIR" ]]; then
       || die "contracts.json lists $file as built from $vk, but not with key name $(policy_suffix_label "$key")"
     [[ -z "$RELEASE_NETWORK" || "$net" == "$RELEASE_NETWORK" ]] \
       || die "the release's verifiers for this deployment were built for both $RELEASE_NETWORK and $net"
+    [[ "$IS_MAINNET" != "true" || "$net" == "$NETWORK" ]] \
+      || die "$file was built for network $net, and mainnet deploys only verifiers built for" \
+        "$NETWORK; commit $NETWORK's key files and features, then deploy from a release" \
+        "published after them, as DEPLOY.md's Deploy from a release describes"
     RELEASE_NETWORK="$net"
     release_wasm "$file" "$WASM_DIR/$(verifier_wasm_name_for_key "$key")" circom-groth16-verifier \
       "$(printf 'vk-%s-%s' "$net" "${key:-none}" | tr '[:upper:]' '[:lower:]' | tr _ -)"
