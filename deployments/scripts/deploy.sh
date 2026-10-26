@@ -1097,5 +1097,8 @@ printf '%s\n' "$DEPLOY_JSON_PRETTY"
 # A --skip-init deployment runs no constructors, so it stores no admin and every check would fail.
 if [[ "$SKIP_INIT" != "true" ]]; then
   step "verify the deployment against its manifest"
-  "$SCRIPT_DIR/verify-deployment.sh" "$NETWORK" --manifest "$DEPLOYMENTS_DIR/deployments.json" >&2
+  verify=("$SCRIPT_DIR/verify-deployment.sh" "$NETWORK" \
+    --manifest "$DEPLOYMENTS_DIR/deployments.json")
+  [[ "$ALLOW_UNVERIFIED" != "true" ]] || verify+=(--allow-unverified)
+  "${verify[@]}" >&2
 fi
