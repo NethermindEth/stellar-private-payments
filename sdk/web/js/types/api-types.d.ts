@@ -108,8 +108,9 @@ export interface Storage {
 export declare const Storage: {
   open(options: StorageOpenOptions): Promise<Storage>;
   /**
-   * Open plaintext `spp.db` in the default OPFS directory. Throws unless the
-   * package was built with the `unencrypted-storage` Cargo feature.
+   * Open plaintext `spp.db` in the `.opfs-sahpool-plaintext` OPFS directory.
+   * Throws unless the package was built with the `unencrypted-storage` Cargo
+   * feature.
    */
   openPlaintext(options?: StoragePlaintextOpenOptions): Promise<Storage>;
 };

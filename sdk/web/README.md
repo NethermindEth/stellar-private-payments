@@ -143,7 +143,7 @@ CI publishes from `main` when `version` in `package.json` is bumped (see `.githu
 OPFS storage is selected with Cargo features; at least one must be enabled.
 
 - `encrypted-storage` (default): SQLite3MC-encrypted storage in `spp.encrypted.db`, opened with `Storage.open({ keyProvider })`.
-- `unencrypted-storage`: plaintext storage in `spp.db` under the default `.opfs-sahpool` directory, opened with `Storage.openPlaintext()`. No SQLite3MC is compiled when it is the only storage feature.
+- `unencrypted-storage`: plaintext storage in `spp.db` under `.opfs-sahpool-plaintext`, separate from the legacy `.opfs-sahpool` directory, opened with `Storage.openPlaintext()`. No SQLite3MC is compiled when it is the only storage feature.
 
 `Storage.openPlaintext()` throws on a build without `unencrypted-storage`, and `Storage.open()` throws before calling `keyProvider` on a build without `encrypted-storage`. In a build with only `unencrypted-storage`, the WASM `Storage.open` opens plaintext storage when no key is supplied. Pass the features to the build through `SPP_WEB_CARGO_FEATURES`:
 

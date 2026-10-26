@@ -10,7 +10,7 @@ export const ProverBridge = { spawn() { return {
   async configureCircuitsBase(base, json) { configured.push({base, lock: JSON.parse(json)}); },
   async ping() {}, toHandle() { return {free() {}}; }, fork() { return this; }, free() {}
 }; }};
-export const Storage = {async open() { return {
+export const Storage = {encryptedStorageEnabled() { return true; }, async open() { return {
   async toHandle() { return {free() {}}; }, fork() { return this; }
 }; }};
 export const Client = {async new(rpc, storage, prover, config) {

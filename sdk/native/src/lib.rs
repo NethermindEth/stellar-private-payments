@@ -58,7 +58,7 @@ pub mod planner;
 pub mod prover;
 pub mod registration;
 pub mod state;
-#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
+#[cfg(not(target_arch = "wasm32"))]
 pub mod stellar_cli;
 pub mod transact;
 pub mod types;
