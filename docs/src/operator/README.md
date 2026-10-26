@@ -14,7 +14,7 @@ A deployment has six roles. One organization can hold all of them.
 
 | Role | Holds | Does |
 | --- | --- | --- |
-| Admin account signers | One signer key each | Approve admin calls: pause deposits, re-point pools, edit trees, transfer the admin; sign pause files ahead of time |
+| Admin account signers | One signer key each | Approve admin calls: pause deposits, re-point pools, claim fees, edit trees, transfer the admin; sign pause files ahead of time |
 | ASP | The admin of a tree | Adds members to the allowlist, adds and removes blocklist entries |
 | GVK holder | A GVK private key | Decrypts every note in a `pool-gvk` pool |
 | Bootnode operator | A server and a PostgreSQL database | Serves contract events older than the RPC keeps |
@@ -43,7 +43,7 @@ flowchart LR
     pool -- "check proof" --> verifier
     pool -- "read roots" --> allow
     pool -- "read root" --> block
-    admin -- "pause, re-point,<br/>transfer admin" --> pool
+    admin -- "pause, re-point,<br/>claim fees, transfer admin" --> pool
     admin -- "edit entries" --> allow
     admin -- "edit entries" --> block
     rpc -. "recent events" .-> users
