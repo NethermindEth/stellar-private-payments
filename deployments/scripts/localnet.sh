@@ -39,9 +39,10 @@ cmd_start() {
 
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   step "starting $CONTAINER_NAME on port $PORT"
+  # Pinned so a new quickstart build reaches CI only through a commit.
   # Quickstart's default protocol can trail what its RPC simulates.
-  docker run -d --pull always --name "$CONTAINER_NAME" -p "$PORT:$PORT" \
-    stellar/quickstart:testing \
+  docker run -d --name "$CONTAINER_NAME" -p "$PORT:$PORT" \
+    stellar/quickstart:v685-b1563.1-testing \
     --local --enable rpc,horizon --limits unlimited --protocol-version 30 >/dev/null \
     || die "failed to start stellar/quickstart"
 
