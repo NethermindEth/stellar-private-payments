@@ -36,6 +36,11 @@ Checks:
     public_key_registry_verifier_wasm_hash: deploy.sh's build of
     circuit_keys/keyOwnership_vk.json. A manifest without these fields, from
     before the registry had a verifier, skips these checks with a notice.
+  - No contract appears twice among verifiers and public_key_registry_verifier.
+  - Every pool stores its manifest entry's policyFlags and gvkMode, and the
+    verifier that verifiers lists under the pool's key name, such as B or
+    AB_gvk_T. The key name comes from the policy flags and GVK mode the pool
+    stores, not from the manifest.
   - Every pool's token is its asset's own Stellar asset contract. A pool whose
     asset is a contract token fails. A classic asset's issuer prints as a notice
     listing each power its flags give it over the pool's balance.
@@ -116,11 +121,25 @@ unit_key() { printf '{"vec":[{"symbol":"%s"}]}' "$1" | stellar xdr encode --type
 # Prints the address under a unit-variant key, or `none`.
 read_address() { read_entry "$1" "$(unit_key "$2")" | jq -r '.address // "none"'; }
 
-# Prints the address that an instance entry from `read_entry` stores under a unit-variant key, or
-# nothing.
+# Prints the address or u32 that an instance entry from `read_entry` stores under a unit-variant
+# key, or nothing.
 stored() {
   jq -r --arg key "$2" '.contract_instance.storage[]? | select(.key.vec[0].symbol == $key)
-    | .val.address' <<<"$1"
+    | .val | .address // .u32' <<<"$1"
+}
+
+# deploy.sh's verifier_key_for, from a pool's on-chain PolicyFlags and GvkMode.
+pool_key_name() {
+  local policy
+  case "$1" in
+    0) policy="" ;; 1) policy=A ;; 2) policy=B ;; 3) policy=AB ;; *) echo unknown; return ;;
+  esac
+  case "$2" in
+    "") echo "$policy" ;;
+    1) echo "${policy:+${policy}_}gvk_V" ;;
+    2) echo "${policy:+${policy}_}gvk_T" ;;
+    *) echo unknown ;;
+  esac
 }
 
 allowlists() { jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId' "$1"; }
@@ -184,11 +203,35 @@ HASHES="$(jq -c 'select(has("asp_membership_wasm_hash") or has("asp_non_membersh
 CHECKED="$(jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId,
   .asp_non_membership' "$MANIFEST")"
 
-step "checking the token and trees of every pool"
+step "checking that no verifier is listed twice"
+# One contract listed under two key names would pass as either key's verifier.
+TWICE="$(jq -r '[.verifiers[]?, .public_key_registry_verifier // empty] | group_by(.)
+  | map(select(length > 1)[0] + " listed twice") | join(", ")' "$MANIFEST")"
+check manifest verifiers distinct "${TWICE:-distinct}"
+
+step "checking the policy, verifier, token, and trees of every pool"
 for pool in $POOLS; do
   # AAAAFA== is the key of the contract's instance entry, which holds the pool's token and trees.
   instance="$(read_entry "$pool" AAAAFA==)" \
     || { check "$pool" instance readable unreadable; instance=null; }
+  flags="$(stored "$instance" PolicyFlags)"
+  gvk="$(stored "$instance" GvkMode)"
+  case "$flags" in
+    0) got='[]' ;; 1) got='["allowlist"]' ;; 2) got='["blocklist"]' ;;
+    3) got='["allowlist","blocklist"]' ;; *) got="${flags:-none}" ;;
+  esac
+  check "$pool" PolicyFlags "$(jq -c --arg pool "$pool" \
+    'first(.pools[] | select(.poolContractId == $pool)).policyFlags | unique' "$MANIFEST")" "$got"
+  case "$gvk" in "") got=off ;; 1) got=viewOnly ;; 2) got=traceable ;; *) got="$gvk" ;; esac
+  check "$pool" GvkMode "$(jq -r --arg pool "$pool" \
+    'first(.pools[] | select(.poolContractId == $pool)).gvkMode // "off"' "$MANIFEST")" "$got"
+  # The key name comes from the chain, so a manifest that misstates the policy cannot pick it.
+  key="$(pool_key_name "$flags" "$gvk")"
+  verifier="$(stored "$instance" Verifier)"
+  check "$pool" Verifier "$(jq -r --arg key "$key" \
+    '.verifiers[$key] // "a verifiers entry for key name \(if $key == "" then
+      "none (the empty key)" else $key end)"' "$MANIFEST")" \
+    "${verifier:-none}"
   # deploy.sh's token rule, checked against the token the pool stores.
   asset="$(jq -r --arg pool "$pool" 'first(.pools[] | select(.poolContractId == $pool)).asset
     | if .kind == "classic" then "\(.code):\(.issuer)" else .kind end' "$MANIFEST")"
