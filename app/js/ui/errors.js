@@ -18,6 +18,8 @@ export const CONTRACT_ERRORS = {
         18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
         20: 'No admin transfer is pending.',
         21: 'The contract does not run the code this pool accepts.',
+        22: 'The pool holds less than this would pay out, so it refused. Tell the pool operator.',
+        23: 'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim. The pool also refuses a claim paid to itself.',
     },
     // Groth16 verifier errors 
     verifier: {
@@ -81,12 +83,8 @@ const ERROR_PATTERNS = [
         message: 'Pool state has changed. Please wait for sync to complete and try again.',
     },
     {
-        // Deposits paused: the pool's #18, or the SDK's refusal before proving
-        test: (msg) => {
-            const lower = msg.toLowerCase();
-            return (lower.includes('#18') && lower.includes('contract')) ||
-                   (lower.includes('deposits into pool') && lower.includes('are paused'));
-        },
+        // Deposits paused (#18)
+        test: (msg) => msg.toLowerCase().includes('#18') && msg.toLowerCase().includes('contract'),
         message: CONTRACT_ERRORS.pool[18],
     },
     {

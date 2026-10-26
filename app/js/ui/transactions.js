@@ -14,7 +14,10 @@ import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { Dashboard } from './dashboard.js';
 import { getTransactionErrorMessage } from './errors.js';
+import { poolErrorMessage } from '../pool-errors.js';
+import { advancedGapMessage } from '../advanced-balance.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
@@ -123,22 +126,45 @@ function withdrawalRecipientWarning(owner) {
     return `You are withdrawing to the same account used for deposits (${Utils.shortAddress(owner)}). This can link your withdrawal to your deposits. For better privacy, withdraw to an unrelated account.`;
 }
 
-// Builds confirmation-dialog rows with the number of transactions the action
-// requires and the pool fees they pay. Best-effort only: a failed estimate must
-// not block the action.
-async function estimateRows(amountValue, pool, decimals) {
-    try {
-        const session = await ensureAppPool();
-        const estimate = await session.estimate(amountValue);
-        const txCount = estimate?.txCount;
-        if (!txCount) return [];
-        return [
-            { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
-            { label: 'Fee', value: Utils.formatTokenAmount(estimate.fees, Utils.poolLabel(pool), decimals) },
-        ];
-    } catch {
-        return [];
+// What poolErrorMessage needs to word a refusal in the pool's token.
+async function refusalTerms(pool, decimals) {
+    const fee = await (await ensureAppPool()).fee();
+    return { fee, format: (amount) => Utils.formatTokenAmount(amount, Utils.poolLabel(pool), decimals) };
+}
+
+// The refusals a spend's notes give.
+const SPEND_REFUSALS = ['NO_COMBINATION', 'NO_SPENDABLE_NOTES'];
+
+// Shows why a transfer or withdrawal failed. A refusal from the notes also
+// refreshes the page's balances, which can lag the notes it was planned from.
+function showSpendFailure(error, terms, label, origin) {
+    if (SPEND_REFUSALS.includes(error?.code)) {
+        Dashboard.refresh().catch((refreshError) => console.warn('[Transactions] balances refresh failed:', refreshError));
     }
+    Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, label), 'error', 7000, { origin });
+}
+
+// Throws when the notes cannot pay the spend. Any other failure, such as an RPC
+// error, returns null so the confirmation still opens without the estimate.
+async function spendEstimate(amountValue) {
+    try {
+        return await (await ensureAppPool()).estimate(amountValue);
+    } catch (error) {
+        if (SPEND_REFUSALS.includes(error?.code)) throw error;
+        return null;
+    }
+}
+
+// Builds confirmation-dialog rows with the pool fees the action pays and the
+// number of transactions it requires. Without an estimate, names the fee each
+// transaction pays.
+function estimateRows(estimate, terms) {
+    const txCount = estimate?.txCount;
+    if (!txCount) return terms.fee ? [{ label: 'Pool fee', value: `${terms.format(terms.fee)} per transaction` }] : [];
+    return [
+        { label: txCount === 1 ? 'Pool fee' : 'Pool fees', value: terms.format(estimate.fees) },
+        { label: 'Transactions', value: `${txCount} transaction${txCount === 1 ? '' : 's'}` },
+    ];
 }
 
 async function submitDeposit(button, amountValue, pool) {
@@ -227,23 +253,57 @@ function updatePoolLabels() {
     });
 }
 
+let maxSpendCall = 0;
+let maxSpendPoolId = null;
+
 // Show the balance of the currently selected token in Move Funds, and the most
 // one transfer or withdrawal can send from it after the pool fees.
 async function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
     const maxEl = document.getElementById('move-funds-max-spend');
     if (!el || !maxEl) return;
+    const call = ++maxSpendCall;
     const poolId = App.state.selectedPoolId;
     const balance = (App.state.balances || []).find(b => b.poolContractId === poolId);
     el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
+    if (poolId !== maxSpendPoolId) maxEl.textContent = '—';
+    maxSpendPoolId = poolId;
     let maxSpend = null;
     try {
         if (balance) maxSpend = await (await ensureAppPool()).maxSpend();
     } catch {
         // Leave the placeholder when the account or the pool cannot be read.
     }
-    if (App.state.selectedPoolId !== poolId) return;
+    if (call !== maxSpendCall) return;
     maxEl.textContent = maxSpend == null ? '—' : Utils.formatPoolAmount(maxSpend, poolId);
+}
+
+// Name the pool fee and the smallest deposit under the deposit amount, and the
+// fee in the Advanced composer, once the token's decimals are known so both
+// read in token units.
+async function updatePoolFeeLines() {
+    const el = document.getElementById('deposit-limits');
+    const advancedEl = document.getElementById('advanced-pool-fee');
+    if (el) el.textContent = '';
+    if (advancedEl) advancedEl.textContent = '';
+    const pool = selectedPool();
+    if (pool?.decimals == null) return;
+    let info = null;
+    try {
+        info = await (await ensureAppPool()).poolInfo();
+    } catch {
+        // Leave the line empty when the pool cannot be read.
+    }
+    if (!info || selectedPool() !== pool) return;
+    const format = (amount) => Utils.formatPoolAmount(amount, pool.poolContractId);
+    const fee = BigInt(info.fee);
+    const minimum = BigInt(info.minimumDepositAmount);
+    // A pool fee or smallest deposit of zero goes unsaid.
+    if (el) el.textContent = [
+        fee ? `A ${format(fee)} pool fee is added on top.` : '',
+        minimum ? `The smallest deposit is ${format(minimum)}.` : '',
+    ].filter(Boolean).join(' ');
+    if (advancedEl) advancedEl.textContent = fee ? `Every transaction pays a ${format(fee)} pool fee from its selected notes or its public deposit.` : '';
 }
 
 async function lookupRecipient(address, refs) {
@@ -385,6 +445,8 @@ export const Transactions = {
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
+        App.events.addEventListener('pool:config', updatePoolFeeLines);
+        App.events.addEventListener('pool:selected', updatePoolFeeLines);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success', 4000, { origin: 'advanced' });
@@ -396,6 +458,7 @@ export const Transactions = {
         const depositAmountInput = document.getElementById('deposit-amount');
 
         async function runDeposit(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -403,23 +466,14 @@ export const Transactions = {
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(depositAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
-                // The SDK also refuses a deposit below the minimum, but names it in base units.
-                let minimum = 0n;
-                try {
-                    const { pools } = await client().allContractsData();
-                    minimum = BigInt(pools.find(p => p.contractId === pool.poolContractId)?.minimumDepositAmount ?? 0);
-                } catch {
-                    // Any one unreadable pool fails this read; the SDK's own check stands in.
-                }
-                if (amount.value < minimum) {
-                    throw new Error(`The minimum deposit is ${Utils.formatTokenAmount(minimum, Utils.poolLabel(pool), decimals)}`);
-                }
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
-                const fee = await (await ensureAppPool()).fee();
+                terms = await refusalTerms(pool, decimals);
+                await (await ensureAppPool()).checkDeposit(amount.value);
+                const { fee, format } = terms;
                 const rows = [
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
-                    { label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) },
-                    { label: 'Total', value: Utils.formatTokenAmount(amount.value + fee, Utils.poolLabel(pool), decimals) },
+                    { label: 'Amount', value: format(amount.value) },
+                    { label: 'Pool fee', value: format(fee) },
+                    { label: 'Total sent', value: format(amount.value + fee) },
                     ...signerRows(signer, 'Signed and deposit paid by'),
                 ];
                 const confirmed = await confirmAction({
@@ -431,7 +485,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
+                Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
             } finally {
                 setLoading(button, false);
             }
@@ -467,6 +521,7 @@ export const Transactions = {
         const transferButton = document.getElementById('btn-transfer');
 
         async function runTransfer(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -478,15 +533,17 @@ export const Transactions = {
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
                 const signer = await SigningAccount.forTransaction('move');
+                terms = await refusalTerms(pool, decimals);
+                const estimate = await spendEstimate(amount.value);
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
                     : Utils.shortAddress(noteKey);
                 const rows = [
                     { label: 'Recipient', value: recipientLabel },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
+                    { label: 'Recipient gets', value: terms.format(amount.value) },
+                    ...estimateRows(estimate, terms),
                     ...signerRows(signer),
                 ];
-                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const confirmed = await confirmAction({
                     title: 'Confirm transfer',
                     rows,
@@ -497,7 +554,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error', 7000, { origin: 'transfer' });
+                showSpendFailure(error, terms, 'Transfer', 'transfer');
             } finally {
                 setLoading(button, false);
             }
@@ -536,6 +593,7 @@ export const Transactions = {
         const withdrawButton = document.getElementById('btn-withdraw');
 
         async function runWithdraw(button) {
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -549,12 +607,14 @@ export const Transactions = {
                     throw new Error('Invalid Stellar address');
                 }
                 const signer = await SigningAccount.forTransaction('move');
+                terms = await refusalTerms(pool, decimals);
+                const estimate = await spendEstimate(amount.value);
                 const rows = [
                     { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool), decimals) },
+                    { label: 'Recipient gets', value: terms.format(amount.value) },
+                    ...estimateRows(estimate, terms),
                     ...signerRows(signer),
                 ];
-                rows.push(...await estimateRows(amount.value, pool, decimals));
                 const owner = App.state.wallet.address;
                 const warning = [
                     withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
@@ -570,7 +630,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error', 7000, { origin: 'withdraw' });
+                showSpendFailure(error, terms, 'Withdraw', 'withdraw');
             } finally {
                 setLoading(button, false);
             }
@@ -608,6 +668,7 @@ export const Transactions = {
         updateSignerVisibility();
         document.getElementById('btn-advanced-transact')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
+            let terms = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
@@ -635,23 +696,40 @@ export const Transactions = {
                 if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
                 // The recipient is unused when no public funds leave the pool.
                 const recipient = enteredRecipient || App.state.wallet.address;
+                const notes = await (await ensureAppPool()).notes();
+                const inputNotes = inputNoteIds.map(id => notes.find(n => n.id === id));
+                if (inputNotes.includes(undefined)) {
+                    Toast.show('A selected note is not one of your notes for this token. Pick each one from your notes.', 'error', 7000, { origin: 'advanced' });
+                    return;
+                }
+                const inputs = inputNotes.reduce((sum, note) => sum + BigInt(note.amount), 0n);
+                const outputs = amounts.reduce((sum, amount) => sum + amount, 0n);
+                terms = await refusalTerms(pool, decimals);
+                const unbalanced = advancedGapMessage(
+                    { inputs, deposit: deposit.value, outputs, withdraw: withdraw.value, fee: terms.fee },
+                    terms.format,
+                );
+                if (unbalanced) {
+                    Toast.show(unbalanced, 'error', 7000, { origin: 'advanced' });
+                    return;
+                }
+                // Public deposit already holds the fee; checkDeposit adds it back.
+                if (publicAmount > 0n) await (await ensureAppPool()).checkDeposit(publicAmount > terms.fee ? publicAmount - terms.fee : 0n);
 
-                const rows = [
-                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                    { label: 'Input notes', value: `${inputNoteIds.length}` },
-                    { label: 'Outputs', value: `${amounts.length}` },
-                ];
+                const rows = [];
+                if (inputs > 0n) rows.push({ label: 'Selected notes', value: terms.format(inputs) });
+                if (outputs > 0n) rows.push({ label: 'Private outputs', value: terms.format(outputs) });
                 if (deposit.value > 0n) {
-                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool), decimals) });
+                    rows.push({ label: 'Public deposit', value: terms.format(deposit.value) });
                 }
                 if (withdraw.value > 0n) {
-                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool), decimals) });
+                    rows.push({ label: 'Public withdraw', value: terms.format(withdraw.value) });
+                    if (publicAmount < 0n) rows.push({ label: 'Public recipient', value: Utils.shortAddress(recipient) });
                 }
-                const fee = await (await ensureAppPool()).fee();
-                rows.push({ label: 'Fee', value: Utils.formatTokenAmount(fee, Utils.poolLabel(pool), decimals) });
-                rows.push(...signerRows(signer));
+                rows.push({ label: 'Pool fee', value: terms.format(terms.fee) });
                 // Advanced transact always executes as a single transaction.
                 rows.push({ label: 'Transactions', value: '1 transaction' });
+                rows.push(...signerRows(signer));
                 const owner = App.state.wallet.address;
                 const warning = [
                     publicAmount < 0n && withdrawalLinksAccounts({ owner, signer, recipient }) ? withdrawalRecipientWarning(owner) : '',
@@ -695,7 +773,11 @@ export const Transactions = {
                     updateSignerVisibility();
                 }
             } catch (error) {
-                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error', 7000, { origin: 'advanced' });
+                Toast.show(
+                    (terms && poolErrorMessage(error, { ...terms, feeIncluded: true }))
+                        ?? getTransactionErrorMessage(error, 'Advanced transaction'),
+                    'error', 7000, { origin: 'advanced' },
+                );
             } finally {
                 setLoading(button, false);
             }

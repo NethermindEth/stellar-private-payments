@@ -87,8 +87,8 @@ export async function run(helpers) {
   await page.locator('#deposit-amount').fill('0.01');
   const depositDialog = await readConfirmation(page, { submitSelector: '#btn-deposit', title: 'Confirm deposit' });
   assert(!/Signed and deposit paid by/.test(depositDialog.text), 'deposit confirmation offers a separate paying account');
-  assert(/Fee\s+0\.0001 XLM/.test(depositDialog.text), `deposit confirmation does not show the 0.0001 XLM pool fee: ${depositDialog.text}`);
-  assert(/Total\s+0\.0101 XLM/.test(depositDialog.text), `deposit confirmation does not total the amount and the fee: ${depositDialog.text}`);
+  assert(/Pool fee\s+0\.0001 XLM/.test(depositDialog.text), `deposit confirmation does not show the 0.0001 XLM pool fee: ${depositDialog.text}`);
+  assert(/Total sent\s+0\.0101 XLM/.test(depositDialog.text), `deposit confirmation does not total the amount and the fee: ${depositDialog.text}`);
 
   const initialSync = await waitForSyncedLedger(page);
   const noteReady = waitForNotesAfterIndexer(page, {
@@ -109,7 +109,7 @@ export async function run(helpers) {
   await gotoMoveFlow(page, 'withdraw');
   assert((await select.inputValue()) === signer, 'the signing account did not stay on the signer account');
   await page.locator('#withdraw-recipient-select').selectOption('');
-  await page.locator('#withdraw-amount').fill('0.01');
+  await page.locator('#withdraw-amount').fill('0.0099');
   await select.selectOption(owner);
   await page.locator('#btn-withdraw').click();
   await waitForToast(page, { origin: 'withdraw', predicate: (toast) => /Choose a withdrawal recipient/.test(toast.message) });

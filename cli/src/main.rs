@@ -112,8 +112,10 @@ enum Commands {
         #[arg(long)]
         no_register: bool,
     },
-    /// Pools, balances, contracts, network, and registration status
-    /// Omit the pool to show all enabled pools, or pass one pool contract id
+    /// Pools, balances, fees and limits, contracts, network, and registration
+    /// status
+    ///
+    /// Omit the pool to show all enabled pools, or pass one pool contract id.
     Overview {
         /// Pool contract id (C…); omit for all enabled pools
         pool: Option<String>,

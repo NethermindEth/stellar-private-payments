@@ -222,6 +222,16 @@ export function describeAdminCall(xdr, networkPassphrase) {
   };
 }
 
+/**
+ * Returns the card's line for a `claim_fees` call: the amount, when `amount`
+ * formats it, beside the base units Arguments and Freighter show, and whether
+ * the claim pays the admin account that signs it.
+ */
+export function claimLine({ source, args: [to, claimed] }, amount) {
+  const payee = to === source ? 'the admin account (Source)' : `${to}, not the admin account`;
+  return `Claim${amount ? ` ${amount(claimed)} (${claimed} in the token's smallest unit, as Arguments and Freighter show it)` : ''} to ${payee}`;
+}
+
 /** Returns the number of signatures an envelope carries. */
 export function signatureCount(xdr, networkPassphrase) {
   return TransactionBuilder.fromXdr(xdr, networkPassphrase).signatures.length;
@@ -375,12 +385,23 @@ const landedFailure = (hash, landed) => new Error(`transaction ${hash} ${landed.
 const SEQUENCE_USED = 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.';
 const TIME_BOUND_PASSED = 'This call has expired. Build it again.';
 
-/** Why the card's call can't land any more, or null. A co-signer may have sent it already. */
+/**
+ * Why the card's call can't land any more, or null. A co-signer may have sent
+ * it already, or the contract may refuse it now, as it refuses a claim that
+ * another claim has spent.
+ */
 export async function deadCall({ server, envelope, networkPassphrase, account, now, kind }) {
   const tx = TransactionBuilder.fromXdr(envelope, networkPassphrase);
   // Sequence number not used yet.
   if (BigInt(account.seqNum) < BigInt(tx.sequence)) {
-    return Number(tx.timeBounds.maxTime) * 1000 <= now ? { reason: TIME_BOUND_PASSED, landed: false } : null;
+    if (Number(tx.timeBounds.maxTime) * 1000 <= now) return { reason: TIME_BOUND_PASSED, landed: false };
+    const simulation = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationError(simulation)) return null;
+    const why = explainFailure(simulation.error, kind);
+    // An unnamed refusal is simulation output, unfit for the card.
+    if (why !== simulation.error) return { reason: `This call would fail if sent. ${why}`, landed: false };
+    console.error(simulation.error);
+    return { reason: 'This call would fail if sent, and this page can\'t tell why. The browser console shows the network\'s answer. Check the contract before building the call again.', landed: false };
   }
   const hash = hex(tx.hash());
   // About two ledger closes: a load-balanced node can lag the account read.
