@@ -77,8 +77,11 @@ key the blocklist can't clear](features-and-limits.md#a-key-the-blocklist-cant-c
 
 ## Run a compliance contract for another operator's pool
 
-A pool accepts only allowlists and blocklists of its tree code. To run one for another operator's
-pool:
+A pool accepts only allowlists and blocklists of its tree code, the Wasm hashes of the trees it was
+deployed with. Each [contracts release](../deploy.md#deploy-from-a-release) gives every contract a
+new Wasm hash, because each Wasm records the hash of the source it was built from, so deploy your
+tree from the code already on chain with `--wasm-hash`, never from a fresh build. To run a tree
+for another operator's pool:
 
 1. For an allowlist, record the output of `stellar ledger latest --network testnet` as the tree's
    deployment ledger. Read the tree code the pool accepts and deploy your tree from it:
