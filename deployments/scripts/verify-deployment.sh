@@ -23,8 +23,16 @@ Options:
   --base-manifest PATH
                      Manifest the change starts from, which decides which added
                      allowlists are new
+  --rebuild DIR      Check the manifest's contracts release against DIR, the
+                     release downloaded with `gh release download`, then
+                     rebuild every Wasm in DIR and compare hashes (needs Docker)
+  --release-repo OWNER/REPO
+                     Repository whose contracts-release.yml must have attested
+                     DIR (default: NethermindEth/stellar-private-payments)
   --allow-unverified On mainnet, print a notice instead of failing when the
-                     manifest records no contracts release
+                     manifest records no contracts release. With --rebuild,
+                     also print a notice when DIR's attestation cannot be
+                     verified
   -h, --help         Show this help
 
 Checks:
@@ -68,6 +76,17 @@ Checks:
     contracts_release.network must be the network argument.
   - A manifest without contracts_release prints a notice. On mainnet it fails
     unless --allow-unverified is passed.
+  - With --rebuild: contracts_release.repo is --release-repo, and gh verifies
+    that contracts-release.yml on that repository's main branch attested
+    DIR/SHA256SUMS. With --allow-unverified and no attestation, only the
+    vk_sha256 values in DIR/contracts.json say which key each verifier holds.
+    That file has contracts_release.tag, and the entry with each contract's
+    contracts_release.code hash has the package that contract is built from.
+    A verifier's entry also has its key name, contracts_release.network, and
+    the SHA-256 of its key file in deployments/<network>/circuit_keys, the
+    file deploy.sh picks it by. Last, unless a check above failed,
+    scripts/build-contracts.sh --rebuild DIR rebuilds every Wasm and compares
+    hashes.
   - The admin account has master weight 0, three equal thresholds of at least 2,
     signers that are all ed25519 keys of weight 1, and no fewer signers than the
     threshold. Off mainnet, a failure here prints as a notice. A contract admin
@@ -95,12 +114,16 @@ shift || true
 
 MANIFEST=""
 BASE_MANIFEST=""
+REBUILD=""
+RELEASE_REPO="NethermindEth/stellar-private-payments"
 ALLOW_UNVERIFIED=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest) MANIFEST="$2"; shift 2 ;;
     --base-manifest) BASE_MANIFEST="$2"; shift 2 ;;
+    --rebuild) REBUILD="$2"; shift 2 ;;
+    --release-repo) RELEASE_REPO="$2"; shift 2 ;;
     --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
@@ -115,6 +138,10 @@ MANIFEST="${MANIFEST:-$ROOT_DIR/deployments/$NETWORK/deployments.json}"
 [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
 HAS_RELEASE="$(jq 'has("contracts_release")' "$MANIFEST")"
 [[ -z "$BASE_MANIFEST" || -f "$BASE_MANIFEST" ]] || die "base manifest not found: $BASE_MANIFEST"
+[[ -z "$REBUILD" || -d "$REBUILD" ]] || die "release directory not found: $REBUILD"
+[[ -z "$REBUILD" || "$HAS_RELEASE" == true ]] \
+  || die "--rebuild needs a manifest with contracts_release, which deploy.sh records only with" \
+    "--release-dir; run the check without --rebuild"
 
 FAILED=0
 
@@ -327,6 +354,7 @@ else
 fi
 
 step "checking that every contract runs its release's code"
+RELEASE_NETWORK="$(jq -r '.contracts_release.network' "$MANIFEST")"
 if [[ "$HAS_RELEASE" == false ]]; then
   # deploy.sh records no release for code it built itself, which mainnet allows only with
   # --allow-unverified.
@@ -334,7 +362,6 @@ if [[ "$HAS_RELEASE" == false ]]; then
   [[ "$IS_MAINNET" == false || "$ALLOW_UNVERIFIED" == true ]] || label=FAIL
   check manifest contracts_release "a contracts release" none "$label"
 else
-  RELEASE_NETWORK="$(jq -r '.contracts_release.network' "$MANIFEST")"
   [[ "$IS_MAINNET" == false ]] \
     || check manifest "contracts_release network" "$NETWORK" "$RELEASE_NETWORK"
   # Every pool pins these hashes, so they must be the named trees' release code.
@@ -364,6 +391,65 @@ else
     check "$tree" "release code" "$(jq -r '.asp_membership_wasm_hash' "$MANIFEST")" \
       "$(code_hash "$tree")"
   done
+fi
+
+if [[ -n "$REBUILD" ]]; then
+  step "checking the release in $REBUILD against the manifest"
+  check manifest "contracts_release repo" "$RELEASE_REPO" \
+    "$(jq -r '.contracts_release.repo' "$MANIFEST")"
+  attested="an attestation by contracts-release.yml on main in $RELEASE_REPO"
+  if ! command -v gh >/dev/null 2>&1; then
+    got="none, because gh is not installed"
+  elif gh attestation verify "$REBUILD/SHA256SUMS" \
+    --repo "$RELEASE_REPO" --source-ref refs/heads/main --deny-self-hosted-runners \
+    --cert-identity "https://github.com/$RELEASE_REPO/.github/workflows/contracts-release.yml@refs/heads/main" \
+    >&2; then
+    got="$attested"
+  else
+    got="none that gh could verify (its error is above)"
+  fi
+  [[ "$got" == "$attested" ]] \
+    || got+=", so only $REBUILD/contracts.json vouches for the key each verifier holds"
+  label=FAIL
+  [[ "$ALLOW_UNVERIFIED" == false ]] || label=notice
+  check "$REBUILD/SHA256SUMS" attestation "$attested" "$got" "$label"
+  RELEASE_JSON="$REBUILD/contracts.json"
+  check "$RELEASE_JSON" tag "$(jq -r '.contracts_release.tag' "$MANIFEST")" \
+    "$(jq -r .tag "$RELEASE_JSON")"
+  # Prints the role fields of the release's entry for code hash $1.
+  release_role() {
+    jq -rc --arg hash "$1" 'first(.contracts[] | select(.sha256 == $hash)
+      | {package, network, key_name, vk_sha256} | with_entries(select(.value != null)))
+      // "no entry with this hash"' "$RELEASE_JSON"
+  }
+  sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum "$1" | cut -d' ' -f1
+    else
+      shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+  }
+  while read -r id pkg key <&3; do
+    want="$(printf '{"package":"%s"}' "$pkg")"
+    if [[ "$pkg" == circom-groth16-verifier ]]; then
+      vk="policy_tx_2_2${key:+_$key}_vk.json"
+      [[ "$key" != keyOwnership ]] || vk=keyOwnership_vk.json
+      want="$(jq -cn --arg package "$pkg" --arg network "$RELEASE_NETWORK" --arg key_name "$key" \
+        --arg vk_sha256 "$(sha256 "$ROOT_DIR/deployments/$NETWORK/circuit_keys/$vk")" \
+        '{$package, $network, $key_name, $vk_sha256}')"
+    fi
+    check "$id" "release role" "$want" \
+      "$(release_role "$(jq -r --arg id "$id" '.contracts_release.code[$id]' "$MANIFEST")")"
+  done 3<<<"$ROLES"
+  # A rebuild takes minutes, and a failed check above already fails the run.
+  got="skipped, since a check above failed"
+  if [[ "$FAILED" == 0 ]]; then
+    step "rebuilding every Wasm in $REBUILD"
+    got="every Wasm rebuilt to its hash"
+    "$ROOT_DIR/scripts/build-contracts.sh" --rebuild "$REBUILD" >&2 \
+      || got="build-contracts.sh --rebuild failed, see above"
+  fi
+  check "$REBUILD" rebuild "every Wasm rebuilt to its hash" "$got"
 fi
 
 step "checking the custody of the admin account"
