@@ -28,9 +28,7 @@ encrypted-storage = [
     "sqlite-wasm-rs/sqlite3mc",
 ]
 # Plaintext OPFS storage (`Storage.openPlaintext`).
-unencrypted-storage = [
-    "stellar-private-payments/unencrypted-storage",
-]
+unencrypted-storage = ["stellar-private-payments/unencrypted-storage"]
 
 [dependencies]
 stellar-private-payments = { workspace = true }

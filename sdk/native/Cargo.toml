@@ -29,9 +29,7 @@ encrypted-storage = [
     "dep:windows-sys",
 ]
 # Plaintext wallet storage using rusqlite's bundled SQLite.
-unencrypted-storage = [
-    "rusqlite/bundled",
-]
+unencrypted-storage = ["rusqlite/bundled"]
 # multi-threaded proving
 parallel = [
     "dep:rayon",
