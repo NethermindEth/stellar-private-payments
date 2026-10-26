@@ -23,6 +23,8 @@ Options:
   --base-manifest PATH
                      Manifest the change starts from, which decides which added
                      allowlists are new
+  --allow-unverified On mainnet, print a notice instead of failing when the
+                     manifest records no contracts release
   -h, --help         Show this help
 
 Checks:
@@ -35,7 +37,9 @@ Checks:
     public_key_registry_verifier, which runs the code whose hash is
     public_key_registry_verifier_wasm_hash: deploy.sh's build of
     circuit_keys/keyOwnership_vk.json. A manifest without these fields, from
-    before the registry had a verifier, skips these checks with a notice.
+    before the registry had a verifier, skips these checks with a notice. A
+    manifest that records contracts_release fails without
+    public_key_registry_verifier.
   - No contract appears twice among verifiers and public_key_registry_verifier.
   - Every pool stores its manifest entry's policyFlags and gvkMode, and the
     verifier that verifiers lists under the pool's key name, such as B or
@@ -50,6 +54,20 @@ Checks:
   - Every tree a pool reads that the manifest does not name, such as a
     blocklist the pool was re-pointed to, has no pending admin transfer. Its
     admin prints as a notice when it is not the manifest's.
+  - Every contract the manifest names, other than an added allowlist, runs the
+    code contracts_release.code records for it, and every added allowlist runs
+    asp_membership_wasm_hash. A contract with no code entry fails.
+    asp_membership_wasm_hash and asp_non_membership_wasm_hash, the tree code
+    every pool stores, are the code entries of asp_membership and
+    asp_non_membership.
+  - The Wasm meta of each of these contracts has exactly one bldopt
+    --package=, naming the package that kind of contract is built from:
+    pool-gvk for a pool that stores a GVK mode, pool for any other pool. A
+    verifier's meta also has exactly one bldopt --features=, naming
+    vk-<contracts_release.network>-<key name>. On mainnet,
+    contracts_release.network must be the network argument.
+  - A manifest without contracts_release prints a notice. On mainnet it fails
+    unless --allow-unverified is passed.
   - The admin account has master weight 0, three equal thresholds of at least 2,
     signers that are all ed25519 keys of weight 1, and no fewer signers than the
     threshold. Off mainnet, a failure here prints as a notice. A contract admin
@@ -77,11 +95,13 @@ shift || true
 
 MANIFEST=""
 BASE_MANIFEST=""
+ALLOW_UNVERIFIED=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest) MANIFEST="$2"; shift 2 ;;
     --base-manifest) BASE_MANIFEST="$2"; shift 2 ;;
+    --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
   esac
@@ -93,6 +113,7 @@ need jq
 
 MANIFEST="${MANIFEST:-$ROOT_DIR/deployments/$NETWORK/deployments.json}"
 [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
+HAS_RELEASE="$(jq 'has("contracts_release")' "$MANIFEST")"
 [[ -z "$BASE_MANIFEST" || -f "$BASE_MANIFEST" ]] || die "base manifest not found: $BASE_MANIFEST"
 
 FAILED=0
@@ -120,6 +141,12 @@ unit_key() { printf '{"vec":[{"symbol":"%s"}]}' "$1" | stellar xdr encode --type
 
 # Prints the address under a unit-variant key, or `none`.
 read_address() { read_entry "$1" "$(unit_key "$2")" | jq -r '.address // "none"'; }
+
+# Prints the hash of the code a contract runs. AAAAFA== is the key of its instance entry, which
+# names its code.
+code_hash() {
+  read_entry "$1" AAAAFA== | jq -r '.contract_instance.executable.wasm // "none"' || echo unreadable
+}
 
 # Prints the address or u32 that an instance entry from `read_entry` stores under a unit-variant
 # key, or nothing.
@@ -173,7 +200,8 @@ check manifest "indexed contracts" "at most 25" "$GOT"
 
 REGISTRY="$(jq -r '.public_key_registry' "$MANIFEST")"
 REGISTRY_VERIFIER="$(jq -r '.public_key_registry_verifier // empty' "$MANIFEST")"
-if [[ -z "$REGISTRY_VERIFIER" ]]; then
+# Only a manifest from before the registry had a verifier lacks one, and it records no release.
+if [[ -z "$REGISTRY_VERIFIER" && "$HAS_RELEASE" == false ]]; then
   step "no public_key_registry_verifier in $MANIFEST, skipping the registry checks"
 else
   step "checking the public key registry"
@@ -182,17 +210,16 @@ else
     stellar contract invoke --id "$REGISTRY" --source-account "$DEPLOYER" --network "$NETWORK" \
       --send=no -- "$1" | jq -r . || echo unreadable
   }
-  check "$REGISTRY" get_verifier "$REGISTRY_VERIFIER" "$(registry_get get_verifier)"
+  check "$REGISTRY" get_verifier \
+    "${REGISTRY_VERIFIER:-a public_key_registry_verifier in the manifest}" \
+    "$(registry_get get_verifier)"
   check "$REGISTRY" get_kdf_domain "$(jq -r '.kdf_domain' "$MANIFEST")" \
     "$(registry_get get_kdf_domain)"
   VERIFIER_HASH="$(jq -r '.public_key_registry_verifier_wasm_hash // empty' "$MANIFEST")"
   if [[ -z "$VERIFIER_HASH" ]]; then
     step "no public_key_registry_verifier_wasm_hash in $MANIFEST, skipping the verifier code check"
   else
-    # AAAAFA== is the key of the contract's instance entry, which names its code.
-    check "$REGISTRY_VERIFIER" "code hash" "$VERIFIER_HASH" \
-      "$(read_entry "$REGISTRY_VERIFIER" AAAAFA== | jq -r '.contract_instance.executable.wasm // "none"' \
-        || echo unreadable)"
+    check "$REGISTRY_VERIFIER" "code hash" "$VERIFIER_HASH" "$(code_hash "$REGISTRY_VERIFIER")"
   fi
 fi
 
@@ -209,6 +236,13 @@ TWICE="$(jq -r '[.verifiers[]?, .public_key_registry_verifier // empty] | group_
   | map(select(length > 1)[0] + " listed twice") | join(", ")' "$MANIFEST")"
 check manifest verifiers distinct "${TWICE:-distinct}"
 
+# Each contract the manifest names, other than an added allowlist, with the package that builds it
+# and a verifier's key name. The pool loop adds the pools, by the GVK mode each one stores.
+ROLES="$(jq -r '"\(.asp_membership) asp-membership", "\(.asp_non_membership) asp-non-membership",
+  "\(.public_key_registry) public-key-registry",
+  (.public_key_registry_verifier // empty | "\(.) circom-groth16-verifier keyOwnership"),
+  (.verifiers // {} | to_entries[] | "\(.value) circom-groth16-verifier \(.key)")' "$MANIFEST")"
+
 step "checking the policy, verifier, token, and trees of every pool"
 for pool in $POOLS; do
   # AAAAFA== is the key of the contract's instance entry, which holds the pool's token and trees.
@@ -216,6 +250,7 @@ for pool in $POOLS; do
     || { check "$pool" instance readable unreadable; instance=null; }
   flags="$(stored "$instance" PolicyFlags)"
   gvk="$(stored "$instance" GvkMode)"
+  ROLES+=$'\n'"$pool pool${gvk:+-gvk}"
   case "$flags" in
     0) got='[]' ;; 1) got='["allowlist"]' ;; 2) got='["blocklist"]' ;;
     3) got='["allowlist","blocklist"]' ;; *) got="${flags:-none}" ;;
@@ -281,18 +316,61 @@ for pool in $POOLS; do
   done
 done
 
-step "checking the custody of the admin account"
-# Local and integration deployments use one key as the admin, so a custody failure fails the run
-# only on mainnet.
 MAINNET_PASSPHRASE="Public Global Stellar Network ; September 2015"
 PASSPHRASE="$(stellar network info --network "$NETWORK" --output json \
   | jq -r '.passphrase // empty' || true)"
-CUSTODY=notice
+IS_MAINNET=false
 if [[ -n "$PASSPHRASE" ]]; then
-  [[ "$PASSPHRASE" != "$MAINNET_PASSPHRASE" ]] || CUSTODY=FAIL
+  [[ "$PASSPHRASE" != "$MAINNET_PASSPHRASE" ]] || IS_MAINNET=true
 else
-  [[ "$NETWORK" != mainnet ]] || CUSTODY=FAIL
+  [[ "$NETWORK" != mainnet ]] || IS_MAINNET=true
 fi
+
+step "checking that every contract runs its release's code"
+if [[ "$HAS_RELEASE" == false ]]; then
+  # deploy.sh records no release for code it built itself, which mainnet allows only with
+  # --allow-unverified.
+  label=notice
+  [[ "$IS_MAINNET" == false || "$ALLOW_UNVERIFIED" == true ]] || label=FAIL
+  check manifest contracts_release "a contracts release" none "$label"
+else
+  RELEASE_NETWORK="$(jq -r '.contracts_release.network' "$MANIFEST")"
+  [[ "$IS_MAINNET" == false ]] \
+    || check manifest "contracts_release network" "$NETWORK" "$RELEASE_NETWORK"
+  # Every pool pins these hashes, so they must be the named trees' release code.
+  for tree in asp_membership asp_non_membership; do
+    check manifest "${tree}_wasm_hash release code" "$(jq -r --arg t "$tree" \
+      '.contracts_release.code[.[$t]] // "a code entry for \($t)"' "$MANIFEST")" \
+      "$(jq -r --arg h "${tree}_wasm_hash" '.[$h]' "$MANIFEST")"
+  done
+  while read -r id pkg key <&3; do
+    check "$id" "release code" "$(jq -r --arg id "$id" \
+      '.contracts_release.code[$id] // "an entry in contracts_release.code"' "$MANIFEST")" \
+      "$(code_hash "$id")"
+    want="--package=$pkg" pattern='^--package='
+    if [[ "$pkg" == circom-groth16-verifier ]]; then
+      # The Cargo feature that embeds this key, named by build.rs's rule.
+      want+=" --features=$(printf 'vk-%s-%s' "$RELEASE_NETWORK" "${key:-none}" \
+        | tr '[:upper:]' '[:lower:]' | tr _ -)"
+      pattern='^--(package|features)='
+    fi
+    got="$(stellar contract info meta --quiet --contract-id "$id" --network "$NETWORK" \
+      --output json | jq -r --arg p "$pattern" \
+      '[.[].sc_meta_v0 | select(.key == "bldopt") | .val | select(test($p))] | join(" ")' \
+      || echo unreadable)"
+    check "$id" role "$want" "${got:-none}"
+  done 3<<<"$ROLES"
+  for tree in $(jq -r '(.added_asp_memberships // [])[].contractId' "$MANIFEST"); do
+    check "$tree" "release code" "$(jq -r '.asp_membership_wasm_hash' "$MANIFEST")" \
+      "$(code_hash "$tree")"
+  done
+fi
+
+step "checking the custody of the admin account"
+# Local and integration deployments use one key as the admin, so a custody failure fails the run
+# only on mainnet.
+CUSTODY=notice
+[[ "$IS_MAINNET" == false ]] || CUSTODY=FAIL
 ACCOUNT="$(stellar ledger entry fetch account --account "$ADMIN" --network "$NETWORK" \
   | jq -c '.entries[0].val.account' || echo null)"
 if [[ "$ACCOUNT" == null ]]; then
