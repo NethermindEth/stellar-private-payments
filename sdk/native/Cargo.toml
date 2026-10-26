@@ -41,6 +41,34 @@ parallel = [
     "ark-std/parallel",
 ]
 
+[target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
+same-file = { version = "1.0.6", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+futures-timer = "3"
+getrandom = { workspace = true, features = ["std"] }
+hkdf = { version = "0.13", optional = true }
+rayon = { version = "1.12", default-features = false, optional = true }
+reqwest = { workspace = true, features = ["rustls"] }
+# The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
+# `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
+# (`unencrypted-storage`) compiles plain SQLite.
+rusqlite = { workspace = true }
+tar = "0.4"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+gloo-timers = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+sqlite-wasm-rs = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", optional = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -80,34 +108,6 @@ crypto_secretbox.workspace = true
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "3.0", default-features = false, features = ["static_secrets"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-futures-timer = "3"
-hkdf = { version = "0.13", optional = true }
-getrandom = { workspace = true, features = ["std"] }
-rayon = { version = "1.12", default-features = false, optional = true }
-reqwest = { workspace = true, features = ["rustls"] }
-# The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
-# `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
-# (`unencrypted-storage`) compiles plain SQLite.
-rusqlite = { workspace = true }
-tar = "0.4"
-tokio = { workspace = true, features = ["rt-multi-thread"] }
-tracing-subscriber = { workspace = true }
-
-[target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
-same-file = { version = "1.0.6", optional = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", optional = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-sqlite-wasm-rs = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
-gloo-timers = { workspace = true }
-reqwest = { workspace = true }
-rusqlite = { workspace = true }
 
 [build-dependencies]
 cc = { version = "1", optional = true }
