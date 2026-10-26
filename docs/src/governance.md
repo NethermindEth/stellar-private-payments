@@ -109,9 +109,11 @@ and without `AUTH_IMMUTABLE` it can still set any of them. For the spec syntax, 
 
 `deploy.sh` then runs `deployments/scripts/verify-deployment.sh` on the manifest it wrote and exits
 with its status. The check compares each contract's admin, pending transfer, token, and tree code
-with the manifest, and the admin account with the shape above. Off mainnet, a custody failure is
-only a notice, because local and test deployments use one key. `verify-deployment.sh --help` lists
-every check.
+with the manifest, the policy and verifier the manifest gives each pool with the ones the pool
+stores, each contract's code with the release the manifest records, and the admin account with the
+shape above. Off mainnet, a custody failure or a manifest with no release is only a notice, so a
+local or test deployment can use one key and build its own contracts. `verify-deployment.sh --help`
+lists every check.
 
 CI runs the check on every pull request and push to `main` that changes a manifest, so merge a
 manifest only after every admin transfer it records has completed. CI reads mainnet through the

@@ -1,8 +1,10 @@
 # Deploying pools
 
 `deployments/scripts/deploy.sh` provides support for deploying pools.
-It builds the contracts before submitting deployment transactions. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for build prerequisites.
+It deploys the contracts of a release, as
+[Deploy from a release](#deploy-from-a-release) describes. Without one, it
+builds the contracts first; see [CONTRIBUTING.md](CONTRIBUTING.md) for build
+prerequisites.
 
 ## Usage
 
@@ -51,7 +53,10 @@ default.
 | `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
-| `--skip-init` | Deploy WASM only, no constructors |
+| `--skip-init` | Deploy Wasm only, no constructors |
+| `--release-dir <DIR>` | Deploy the contracts of a release downloaded to `<DIR>` instead of building them. Cannot be combined with `--vk-json`, `--vk-file`, or `--skip-init` |
+| `--release-repo <OWNER/REPO>` | Repository whose `contracts-release.yml` workflow must have attested the release; defaults to `NethermindEth/stellar-private-payments` |
+| `--allow-unverified` | Warn instead of stopping when the release's attestation cannot be verified, or, on mainnet, when the contracts are built locally |
 | `--yes` | Skip the confirmation prompt on mainnet |
 
 Per-pool `policyFlags` and `gvkMode` are recorded in
@@ -154,6 +159,83 @@ deployments/scripts/deploy.sh testnet \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```
+
+## Deploy from a release
+
+A contracts release is the GitHub release `contracts-v<version>`, where
+`<version>` is the contracts version, the `version` under `[workspace.package]`
+in the root `Cargo.toml`. It holds the Wasm of every contract, a verifier Wasm
+for each `policy_tx_2_2*_vk.json` and `keyOwnership_vk.json` file in
+`deployments/*/circuit_keys/`, the source archive they were built from,
+`contracts.json`, which says what each Wasm is, and `SHA256SUMS`. Bumping the
+contracts version on `main` publishes a release, as
+[CONTRIBUTING.md](CONTRIBUTING.md) describes: the `contracts-release.yml`
+workflow builds the files, rebuilds them on a second runner, and attests each
+file, signing a GitHub record that this run built it, before publishing it.
+
+Download a release into a new directory and pass that directory to
+`--release-dir`:
+
+```sh
+gh release download contracts-v<version> \
+  --repo NethermindEth/stellar-private-payments --dir <release-dir>
+deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-flags blocklist \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
+  --pool native:$(stellar contract id asset --asset native --network testnet) \
+  --release-dir <release-dir>
+```
+
+Before any transaction, `deploy.sh` checks the release:
+
+1. It runs `gh attestation verify` on `SHA256SUMS`, which passes only when
+   `contracts-release.yml` on the `main` branch of `--release-repo` attested
+   the file on a GitHub-hosted runner. `gh` must be installed and logged in.
+2. It checks `contracts.json` and every file it deploys against `SHA256SUMS`,
+   and stops when `contracts.json` names a repository other than
+   `--release-repo`.
+3. It picks each verifier by the SHA-256 of this network's key file, and
+   checks the build options each Wasm records in its meta, the contract
+   metadata `stellar contract info meta` prints: the package it was built
+   from and, for a verifier, the feature that embeds its key.
+
+It then deploys the files it picked, and records the release and each
+contract's Wasm hash in the manifest under `contracts_release`.
+
+When the attestation check fails, `deploy.sh` stops. `--allow-unverified`
+turns that stop into a warning and relaxes no other check, but those checks
+then rest only on what the release says about itself, including which key
+each verifier holds.
+
+A fork publishes its own releases the same way, from its own `main` with
+GitHub Actions turned on. Pass the fork as `--repo` to `gh release download`
+and as `--release-repo` to `deploy.sh`.
+
+`scripts/build-contracts.sh --out <dir>` builds the same files locally, with
+no attestation, so its output is for checking a release. `deploy.sh` deploys
+it only with `--allow-unverified`, and only when it was built with `--tag` and
+`--repo`, because `deploy.sh` compares the repository its `contracts.json`
+names with `--release-repo`.
+
+Without `--release-dir`, `deploy.sh` builds the contracts with your own
+Stellar CLI and Rust toolchain. That code matches no release, and the manifest
+records none. On mainnet, which `deploy.sh` detects by the network
+passphrase, it refuses such a run unless `--allow-unverified` is passed. On
+every mainnet run, with or without a release, it also refuses `--vk-json` and
+`--vk-file`, a `circuit_keys` directory or key file that is a link, and
+verifiers built for another network.
+
+A release holds verifiers only for the key files committed when it was made.
+Before a network with keys of its own, such as mainnet, can deploy from a
+release, commit its key files under `deployments/<network>/circuit_keys/`, add
+a feature for each one to `contracts/circom-groth16-verifier/Cargo.toml`,
+named as the `vk-testnet-*` features are, and then bump the contracts version.
+Off mainnet, a network whose key files are copies of testnet's deploys the
+release's testnet verifiers.
 
 ## Keep a deployment alive
 
