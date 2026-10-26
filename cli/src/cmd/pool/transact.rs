@@ -13,7 +13,7 @@ use stellar_private_payments::{
     },
 };
 
-use super::{map_pool_err, open_session, print_tx_results};
+use super::{map_pool_err, open_session, pool_fee, print_tx_results};
 use crate::{config::CliConfig, session::ClientSession};
 
 /// Arguments for pool transaction.
@@ -121,7 +121,14 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
         .notes()
         .map_err(|e| anyhow::anyhow!("list pool notes: {e}"))?;
     let input_total = selected_input_total(&input, &notes)?;
-    validate_balance(input_total, &output_values, deposit, withdraw, pool.fee()?)?;
+    let fee = pool_fee(&pool, decimals)?;
+    validate_balance(
+        input_total,
+        &output_values,
+        deposit,
+        withdraw,
+        fee.pool_fee_base_units,
+    )?;
 
     let (output_amounts, output_note_keys, output_encryption_keys) =
         resolve_outputs(&session, &args.outputs, &output_values)?;
@@ -142,12 +149,12 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     );
     let result = pool
         .transact(step)
-        .map_err(|e| map_pool_err(config, &pool, decimals, None, e, json))?;
+        .map_err(|e| map_pool_err(config, &pool, decimals, &fee, true, e, json))?;
     print_tx_results(
         config,
         "Advanced transaction submitted",
         &[result],
-        None,
+        &fee,
         json,
     )
 }

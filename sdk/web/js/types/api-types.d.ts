@@ -139,6 +139,27 @@ export interface PoolOptions {
   poolContract: string;
 }
 
+/**
+ * The error a pool call rejects with when the SDK refuses a deposit or a spend
+ * before proving. Amounts are decimal strings of base units, for `BigInt`.
+ */
+export interface PoolRefusal extends Error {
+  code:
+    | 'DEPOSITS_PAUSED'
+    | 'DEPOSIT_BELOW_MINIMUM'
+    | 'DEPOSIT_ABOVE_MAXIMUM'
+    | 'NO_COMBINATION'
+    | 'NO_SPENDABLE_NOTES';
+  /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
+  minimum?: string;
+  /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */
+  maximum?: string;
+  /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit leaves in notes, `maximum` less the pool fee. */
+  largestDeposit?: string;
+  /** With `NO_COMBINATION`: the most one spend can send after pool fees. */
+  maxSpend?: string;
+}
+
 /** Options for {@link verifySelectiveDisclosure}. */
 export interface VerifyDisclosureOptions {
   contractConfig: ContractConfig | ContractConfigInput;

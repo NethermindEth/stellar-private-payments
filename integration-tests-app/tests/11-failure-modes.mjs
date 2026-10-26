@@ -111,7 +111,7 @@ export async function run(helpers) {
   await confirmOperation(page, 'Confirm withdrawal');
   const overWithdraw = await waitForToast(page, {
     origin: 'withdraw',
-    predicate: (toast) => /^withdraw failed/i.test(toast.message) && /no combination of notes/i.test(toast.message),
+    predicate: (toast) => /^withdraw failed/i.test(toast.message) && /can send at most/i.test(toast.message),
   });
   await assertNoApproval(context, 'over-withdraw');
   await waitForOperationIdle(page, { submitSelector: '#btn-withdraw' });
@@ -127,7 +127,7 @@ export async function run(helpers) {
   await confirmOperation(page, 'Confirm transfer');
   const overTransfer = await waitForToast(page, {
     origin: 'transfer',
-    predicate: (toast) => /^transfer failed/i.test(toast.message) && /no combination of notes/i.test(toast.message),
+    predicate: (toast) => /^transfer failed/i.test(toast.message) && /can send at most/i.test(toast.message),
   });
   await assertNoApproval(context, 'over-transfer');
   await waitForOperationIdle(page, { submitSelector: '#btn-transfer' });
@@ -151,9 +151,10 @@ export async function run(helpers) {
   await waitForRecipientLookupReset(page);
 
   // (4) Read the deployed pool's live cap and fee, and deposit a note that,
-  // with the fee on top, exceeds the cap by one stroop. Deployment parameters
-  // can change independently of this test branch; a hard-coded amount can
-  // silently become valid and open a wallet approval.
+  // with the fee on top, exceeds the cap by one stroop. The SDK refuses it
+  // before proving. Deployment parameters can change independently of this
+  // test branch; a hard-coded amount can silently become valid and open a
+  // wallet approval.
   // Mirrors app/js/ui/pool.js's getActivePoolContractId: first enabled pool.
   const poolContractId = await page.evaluate(() =>
     fetch('./deployments.json')
@@ -170,7 +171,7 @@ export async function run(helpers) {
   const aboveCapOutcome = await Promise.race([
     waitForToast(page, {
       origin: 'deposit',
-      predicate: (toast) => /transaction simulation failed/i.test(toast.message),
+      predicate: (toast) => /^deposit failed/i.test(toast.message) && /more than the pool maximum/i.test(toast.message),
       timeoutMs: 20_000,
     }).then((toast) => ({ toast })),
     waitForAnyFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 20_000 })
