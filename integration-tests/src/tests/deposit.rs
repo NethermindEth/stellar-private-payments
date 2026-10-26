@@ -8,7 +8,8 @@ use stellar_private_payments::{
 };
 
 use super::support::{
-    assert_contract_error, deploy_default, deploy_scoped, deploy_with_max_deposit, session,
+    FEE_STROOPS, MIN_DEPOSIT_STROOPS, assert_contract_error, deploy_default, deploy_scoped,
+    deploy_with_max_deposit, session,
 };
 use crate::{network::LocalNetwork, pool::PoolOptions};
 
@@ -40,22 +41,24 @@ async fn deposit_exceeds_max_deposit() -> Result<()> {
     let session =
         session(deploy_with_max_deposit(LOW_CAP_STROOPS, &[PoolOptions::NONE]).await?).await?;
 
+    // The pool caps what the deposit sends, which is the note plus the fee.
     let err = session
         .pool()?
-        .deposit(NoteAmount::from(LOW_CAP_STROOPS.saturating_add(1)))
+        .deposit(NoteAmount::from(LOW_CAP_STROOPS - FEE_STROOPS + 1))
         .await
-        .expect_err("a deposit above the pool's max_deposit cap must be rejected");
+        .expect_err("a deposit whose note and fee exceed the cap must be rejected");
     assert_contract_error(err, 6);
 
     Ok(())
 }
 
+/// The largest deposit leaves room for the fee under the cap.
 #[tokio::test]
 async fn deposit_at_max_deposit() -> Result<()> {
     let session =
         session(deploy_with_max_deposit(LOW_CAP_STROOPS, &[PoolOptions::NONE]).await?).await?;
     let pool = session.pool()?;
-    let max_deposit = NoteAmount::from(LOW_CAP_STROOPS);
+    let max_deposit = NoteAmount::from(LOW_CAP_STROOPS - FEE_STROOPS);
 
     pool.deposit(max_deposit).await?;
 
@@ -92,6 +95,7 @@ async fn deposit_refused_while_paused() -> Result<()> {
     let admin_secret = &session.identity.admin_secret;
     let network = LocalNetwork::start().await?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let fees_before = network.fees_total(pool_contract_id, admin_secret).await?;
 
     pool.deposit(deposit_amount).await?;
     network
@@ -108,13 +112,19 @@ async fn deposit_refused_while_paused() -> Result<()> {
     let (note_public_key, encryption_public_key) = session.account.privacy_keys().await?;
     pool.transfer(
         TransferRecipient::keys(note_public_key, encryption_public_key),
-        deposit_amount,
+        pool.max_spend(pool.fee().await?).await?,
     )
     .await?;
-    assert_eq!(pool.balance().await?, deposit_amount);
+    assert_eq!(
+        pool.balance().await?,
+        NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS)
+    );
 
-    pool.withdraw(deposit_amount, session.wallet.address())
-        .await?;
+    pool.withdraw(
+        pool.max_spend(pool.fee().await?).await?,
+        session.wallet.address(),
+    )
+    .await?;
     assert_eq!(pool.balance().await?, NoteAmount::ZERO);
 
     network
@@ -122,6 +132,40 @@ async fn deposit_refused_while_paused() -> Result<()> {
         .await?;
     pool.deposit(deposit_amount).await?;
     assert_eq!(pool.balance().await?, deposit_amount);
+
+    let fees_after = network.fees_total(pool_contract_id, admin_secret).await?;
+    assert_eq!(
+        fees_after.checked_sub(fees_before),
+        Some(i128::try_from(4 * FEE_STROOPS)?),
+        "two deposits, a transfer and a withdrawal pay one fee each; the refused deposit none"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn deposit_below_minimum_is_refused() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let funded_balance = session.account.balance(&AssetDescriptor::Native).await?;
+
+    let deposit = session
+        .pool()?
+        .deposit(NoteAmount::from(MIN_DEPOSIT_STROOPS - 1))
+        .await;
+    assert!(
+        matches!(
+            deposit,
+            Err(Error::DepositBelowMinimum { minimum })
+                if minimum == NoteAmount::from(MIN_DEPOSIT_STROOPS)
+        ),
+        "a deposit below the pool minimum must be refused before proving: {deposit:?}"
+    );
+
+    let unchanged_balance = session.account.balance(&AssetDescriptor::Native).await?;
+    assert_eq!(
+        unchanged_balance, funded_balance,
+        "a refused deposit must not submit a transaction"
+    );
 
     Ok(())
 }

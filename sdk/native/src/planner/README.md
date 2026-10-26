@@ -16,6 +16,12 @@ The goal is to pay a target `NoteAmount` while keeping wallet and chain cost low
 
 3. **Exact before overshoot** — when the target cannot be matched exactly, prefer the smallest excess (change returned on the final step).
 
+## Pool fee
+
+Every `transact` pays the pool fee out of the notes it spends. A spend of `k` notes takes `max(k - 1, 1)` steps, so its notes must sum to at least `amount + steps × fee`. That sum is the goal the tiers below compare against: `amount + fee` for one or two notes, and `amount + (k - 1) × fee` for an exact `k`. Each `Consolidate` output is its two inputs minus the fee, and the final change is whatever the notes hold above the goal.
+
+A note at or below the fee costs at least what it brings when it adds a step, so it leaves only beside a larger note. [`max_spend`](plan/mod.rs) returns the most one spend can send from a wallet.
+
 ## Coin selection priority
 
 [`find_combination`](plan/combination.rs) picks note indices from the wallet. It tries tiers in this order and stops at the first hit:
@@ -35,7 +41,7 @@ At most [`TRANSACTION_LIMIT`](plan/combination.rs) notes (10) may be selected; [
 
 ## Plan shape
 
-[`plan(amount, notes)`](plan/mod.rs) runs coin selection, then builds a [`TransactionPlan`](plan/mod.rs):
+[`plan(amount, fee, notes)`](plan/mod.rs) runs coin selection, then builds a [`TransactionPlan`](plan/mod.rs):
 
 - **One note** — one step, `Final` (send + optional change).
 - **Several notes** — `Consolidate` steps merge two inputs into one synthetic note, then the last step is `Final` (send + optional change).
@@ -44,7 +50,8 @@ At most [`TRANSACTION_LIMIT`](plan/combination.rs) notes (10) may be selected; [
 
 ## Public API
 
-- `plan` — wallet notes + spend amount → `TransactionPlan` (also used for spend previews)
+- `plan` — wallet notes + spend amount + pool fee → `TransactionPlan` (also used for spend previews)
+- `max_spend` — wallet notes + pool fee → the largest amount one spend can send
 - `SpendSession::setup` — plan + wallet snapshot + `SpendTarget`
 - `SpendSession::step` / `complete_step` — step loop
 - `find_combination` — coin selection only

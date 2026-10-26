@@ -357,6 +357,8 @@ fn chain_snapshot_from_storage(
         gvk_mode: GvkMode::Off,
         admin_view_key: None,
         deposits_paused: false,
+        fee: NoteAmount::ZERO,
+        minimum_deposit_amount: NoteAmount::ZERO,
     })
 }
 

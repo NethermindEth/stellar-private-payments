@@ -42,6 +42,7 @@ impl PoolCore {
         note_public_key: NotePublicKey,
         encryption_public_key: EncryptionPublicKey,
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         if amount.is_zero() {
             return Err(Error::InvalidConfig("amount must be > 0".into()));
@@ -49,6 +50,7 @@ impl PoolCore {
         let session = SpendSession::setup(
             wallet.to_vec(),
             amount,
+            fee,
             self.config.pool_contract_id.clone(),
             SpendTarget::transfer(note_public_key, encryption_public_key),
         )?;
@@ -60,6 +62,7 @@ impl PoolCore {
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
+        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         if amount.is_zero() {
             return Err(Error::InvalidConfig("amount must be > 0".into()));
@@ -67,6 +70,7 @@ impl PoolCore {
         let session = SpendSession::setup(
             wallet.to_vec(),
             amount,
+            fee,
             self.config.pool_contract_id.clone(),
             SpendTarget::withdraw(recipient.into()),
         )?;
@@ -77,10 +81,12 @@ impl PoolCore {
         &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<Estimate, Error> {
-        let plan = crate::planner::plan(amount, wallet)?;
+        let plan = crate::planner::plan(amount, fee, wallet)?;
         Ok(Estimate {
             tx_count: u32::try_from(plan.len()).unwrap_or(u32::MAX),
+            fees: crate::planner::fees(plan.len(), fee)?,
         })
     }
 
@@ -89,12 +95,16 @@ impl PoolCore {
         note_pub: NotePublicKey,
         enc_pub: EncryptionPublicKey,
         amount: NoteAmount,
+        fee: NoteAmount,
     ) -> Result<Transact, Error> {
-        let ext_amount = ExtAmount::try_from(amount).map_err(|e| {
-            Error::Other(anyhow::anyhow!(
-                "deposit amount exceeds ext_amount range: {e}"
-            ))
-        })?;
+        let ext_amount = amount
+            .checked_add(fee)
+            .and_then(|sent| ExtAmount::try_from(sent).ok())
+            .ok_or_else(|| {
+                Error::Other(anyhow::anyhow!(
+                    "deposit amount plus fee exceeds ext_amount range"
+                ))
+            })?;
 
         Ok(Transact::new(
             Vec::new(),
@@ -129,11 +139,39 @@ mod tests {
                 NotePublicKey([1; 32]),
                 EncryptionPublicKey([2; 32]),
                 NoteAmount::from(amount),
+                NoteAmount::ZERO,
             )
         };
 
         let at_max = step(i128::MAX.unsigned_abs()).expect("i128::MAX converts");
         assert_eq!(at_max.ext_amount, ExtAmount::MAX);
         assert!(matches!(step(1 << 127), Err(Error::Other(_))));
+    }
+
+    #[test]
+    fn a_deposit_sends_the_amount_plus_the_fee() {
+        let core = PoolCore {
+            config: PrivatePoolConfig {
+                contract_config: ContractConfig::default(),
+                pool_contract_id: "POOL".into(),
+                user_address: NoteOwnerAddress::new("OWNER"),
+                signer_address: SignerAddress::new("SIGNER"),
+            },
+        };
+
+        let step = core
+            .deposit_transact_step(
+                NotePublicKey([1; 32]),
+                EncryptionPublicKey([2; 32]),
+                NoteAmount::from(10),
+                NoteAmount::from(3),
+            )
+            .expect("deposit step");
+
+        assert_eq!(step.ext_amount, ExtAmount::from(13));
+        assert_eq!(
+            step.output_amounts,
+            [NoteAmount::from(10), NoteAmount::ZERO]
+        );
     }
 }

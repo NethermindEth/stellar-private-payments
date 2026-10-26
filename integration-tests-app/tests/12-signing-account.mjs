@@ -87,6 +87,8 @@ export async function run(helpers) {
   await page.locator('#deposit-amount').fill('0.01');
   const depositDialog = await readConfirmation(page, { submitSelector: '#btn-deposit', title: 'Confirm deposit' });
   assert(!/Signed and deposit paid by/.test(depositDialog.text), 'deposit confirmation offers a separate paying account');
+  assert(/Fee\s+0\.0001 XLM/.test(depositDialog.text), `deposit confirmation does not show the 0.0001 XLM pool fee: ${depositDialog.text}`);
+  assert(/Total\s+0\.0101 XLM/.test(depositDialog.text), `deposit confirmation does not total the amount and the fee: ${depositDialog.text}`);
 
   const initialSync = await waitForSyncedLedger(page);
   const noteReady = waitForNotesAfterIndexer(page, {
@@ -143,7 +145,8 @@ export async function run(helpers) {
   assert(withdrawDialog.warning.startsWith('You are withdrawing to the same account used for deposits'), 'a different signer must still warn about the deposit recipient');
   assert(/withdraw to an unrelated account/.test(withdrawDialog.warning), 'different-signer withdrawal needs recipient privacy guidance');
 
-  const withdrawResult = await withdraw(helpers, { logTag, amount: '0.01', rpcUrl, progressTimeoutMs: 180_000 });
+  // With the 0.0001 XLM pool fee, 0.0099 spends exactly one 0.01 note.
+  const withdrawResult = await withdraw(helpers, { logTag, amount: '0.0099', rpcUrl, progressTimeoutMs: 180_000 });
   const withdrawSource = await transactionSourceAccount(withdrawResult.transactionHash, { rpcUrl });
   assert(withdrawSource === signer, `withdrawal was sent by ${withdrawSource}, not the signer account`);
 

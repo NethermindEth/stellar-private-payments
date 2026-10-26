@@ -131,9 +131,12 @@ impl LocalNetwork {
     /// `deployments/scripts/deploy.sh`. Coordinated per configuration (see
     /// [`acquire_deploy_lock`]), so concurrent processes deploying the same
     /// pool set share one deployment.
+    #[allow(clippy::too_many_arguments)]
     pub async fn deploy(
         &self,
         max_deposit: u128,
+        fee: u128,
+        min_deposit: u128,
         asp_levels: u32,
         pool_levels: u32,
         pools: &[PoolOptions],
@@ -153,7 +156,7 @@ impl LocalNetwork {
             .collect();
 
         let mut key = format!(
-            "{max_deposit}-{asp_levels}-{pool_levels}-{}",
+            "{max_deposit}-{fee}-{min_deposit}-{asp_levels}-{pool_levels}-{}",
             pool_specs.join(",")
         );
         if let Some(scope) = scope {
@@ -179,8 +182,8 @@ impl LocalNetwork {
             .args(["--deployer", &deployer_secret])
             .args(["--asp-levels", &asp_levels.to_string()])
             .args(["--pool-levels", &pool_levels.to_string()])
-            .args(["--fee", "0"])
-            .args(["--min-deposit", "0"])
+            .args(["--fee", &fee.to_string()])
+            .args(["--min-deposit", &min_deposit.to_string()])
             .args(["--max-deposit", &max_deposit.to_string()])
             .args(["--kdf-domain", KDF_DOMAIN])
             .current_dir(&root);
@@ -438,16 +441,47 @@ impl LocalNetwork {
         .await
     }
 
+    /// Returns a pool's fees total, read by simulating `get_fees_total`.
+    pub async fn fees_total(&self, pool_contract_id: &str, admin_secret: &str) -> Result<i128> {
+        let total = self
+            .stellar_invoke(
+                pool_contract_id,
+                admin_secret,
+                &["--send=no"],
+                &["get_fees_total"],
+            )
+            .await?;
+        total
+            .trim_matches('"')
+            .parse()
+            .with_context(|| format!("parse get_fees_total output: {total}"))
+    }
+
     async fn invoke_contract(
         &self,
         contract_id: &str,
         admin_secret: &str,
         args: &[&str],
     ) -> Result<()> {
+        self.stellar_invoke(contract_id, admin_secret, &[], args)
+            .await
+            .map(drop)
+    }
+
+    /// Runs `stellar contract invoke` with `flags` before `--` and returns its
+    /// trimmed stdout.
+    async fn stellar_invoke(
+        &self,
+        contract_id: &str,
+        admin_secret: &str,
+        flags: &[&str],
+        args: &[&str],
+    ) -> Result<String> {
         let output = Command::new("stellar")
             .args(["contract", "invoke", "--id", contract_id])
             .args(["--source-account", admin_secret])
             .args(["--network", STELLAR_CLI_NETWORK])
+            .args(flags)
             .arg("--")
             .args(args)
             .output()
@@ -461,7 +495,7 @@ impl LocalNetwork {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 

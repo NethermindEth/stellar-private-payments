@@ -73,11 +73,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         notes.len(),
         total
     );
-    if u128::from(amount) > total {
+    let fee = pool.fee()?;
+    let max_spend = pool.max_spend(fee)?;
+    if amount > max_spend {
         println!(
-            "Skipping: requested amount ({} stroops) exceeds available notes ({} stroops).",
+            "Skipping: requested amount ({} stroops) exceeds the most one spend can send after the pool fees ({} stroops).",
             u128::from(amount),
-            total
+            u128::from(max_spend)
         );
         println!("Lower SPP_AMOUNT_STROOPS or deposit more, then re-run this example.");
         std::process::exit(0);
@@ -89,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Estimating transaction count...");
-    let estimate = pool.estimate(amount)?;
+    let estimate = pool.estimate(amount, fee)?;
     println!("Expected on-chain transactions: {}", estimate.tx_count);
 
     println!();

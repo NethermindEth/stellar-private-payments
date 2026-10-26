@@ -312,6 +312,7 @@ mod tests {
             token_address: pool.token_contract_id.clone(),
             ext_recipient: pool.pool_contract_id.clone(),
             ext_amount: ExtAmount::from(10),
+            fee: NoteAmount::ZERO,
             inputs: Vec::new(),
             outputs: vec![TransactOutput {
                 amount: NoteAmount::from(10),

@@ -34,7 +34,7 @@ pub struct TransactArgs {
     )]
     pub outputs: Vec<OutputArg>,
 
-    /// Public amount entering the pool
+    /// Public amount sent into the pool, pool fee included
     #[arg(long, value_name = "AMOUNT", conflicts_with = "withdraw")]
     pub deposit: Option<String>,
 
@@ -121,7 +121,7 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
         .notes()
         .map_err(|e| anyhow::anyhow!("list pool notes: {e}"))?;
     let input_total = selected_input_total(&input, &notes)?;
-    validate_balance(input_total, &output_values, deposit, withdraw)?;
+    validate_balance(input_total, &output_values, deposit, withdraw, pool.fee()?)?;
 
     let (output_amounts, output_note_keys, output_encryption_keys) =
         resolve_outputs(&session, &args.outputs, &output_values)?;
@@ -142,8 +142,14 @@ pub fn run(config: &CliConfig, args: TransactArgs, json: bool) -> Result<()> {
     );
     let result = pool
         .transact(step)
-        .map_err(|e| map_pool_err(config, e, json))?;
-    print_tx_results(config, "Advanced transaction submitted", &[result], json)
+        .map_err(|e| map_pool_err(config, &pool, decimals, None, e, json))?;
+    print_tx_results(
+        config,
+        "Advanced transaction submitted",
+        &[result],
+        None,
+        json,
+    )
 }
 
 fn validate_shape(args: &TransactArgs) -> Result<()> {
@@ -221,6 +227,7 @@ fn validate_balance(
     outputs: &[NoteAmount],
     deposit: NoteAmount,
     withdraw: NoteAmount,
+    fee: NoteAmount,
 ) -> Result<()> {
     let output_total = outputs.iter().try_fold(NoteAmount::ZERO, |total, output| {
         total
@@ -232,10 +239,11 @@ fn validate_balance(
         .ok_or_else(|| anyhow::anyhow!("input plus deposit amount overflow"))?;
     let outgoing = output_total
         .checked_add(withdraw)
-        .ok_or_else(|| anyhow::anyhow!("output plus withdrawal amount overflow"))?;
+        .and_then(|total| total.checked_add(fee))
+        .ok_or_else(|| anyhow::anyhow!("output plus withdrawal plus fee amount overflow"))?;
     if incoming != outgoing {
         bail!(
-            "transaction is not balanced: inputs ({input_total}) + deposit ({deposit}) != outputs ({output_total}) + withdrawal ({withdraw})"
+            "transaction is not balanced: inputs ({input_total}) + deposit ({deposit}) != outputs ({output_total}) + withdrawal ({withdraw}) + fee ({fee})"
         );
     }
     Ok(())
@@ -303,4 +311,20 @@ fn external_amount(deposit: NoteAmount, withdraw: NoteAmount) -> Result<ExtAmoun
         return Ok(ExtAmount::from(amount));
     }
     Ok(ExtAmount::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_balance_counts_the_fee() {
+        let (inputs, fee) = (NoteAmount::from(10), NoteAmount::from(3));
+        let zero = NoteAmount::ZERO;
+        validate_balance(inputs, &[NoteAmount::from(7)], zero, zero, fee)
+            .expect("inputs of 10 pay outputs of 7 and a fee of 3");
+        let error = validate_balance(inputs, &[inputs], zero, zero, fee)
+            .expect_err("outputs equal to the inputs leave nothing for the fee");
+        assert!(error.to_string().contains("+ fee (3)"));
+    }
 }
