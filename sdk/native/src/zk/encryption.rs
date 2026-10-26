@@ -98,7 +98,10 @@ pub fn verify_owner_signature(
     // Strict, as the network itself verifies: a small-order owner key or `R`
     // is refused, where the lenient check accepts forgeries for such a key.
     owner_key
-        .verify_strict(&sep53_digest(message), &DalekSignature::from_bytes(signature))
+        .verify_strict(
+            &sep53_digest(message),
+            &DalekSignature::from_bytes(signature),
+        )
         .map_err(|_| anyhow!("the signature was not made by the note owner's key"))
 }
 

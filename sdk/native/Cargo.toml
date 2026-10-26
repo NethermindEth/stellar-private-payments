@@ -26,6 +26,33 @@ parallel = [
     "ark-std/parallel",
 ]
 
+[target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
+same-file = "1.0.6"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+futures-timer = "3"
+getrandom = { workspace = true, features = ["std"] }
+hkdf = "0.13"
+rayon = { version = "1.12", default-features = false, optional = true }
+reqwest = { workspace = true, features = ["rustls"] }
+# `in_gecko` tells `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`
+# instead of running `pkg-config` or linking system `-lsqlite3`.
+rusqlite = { workspace = true, features = ["in_gecko"] }
+tar = "0.4"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+gloo-timers = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+sqlite-wasm-rs = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -65,33 +92,6 @@ crypto_secretbox.workspace = true
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "3.0", default-features = false, features = ["static_secrets"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-futures-timer = "3"
-hkdf = "0.13"
-getrandom = { workspace = true, features = ["std"] }
-rayon = { version = "1.12", default-features = false, optional = true }
-reqwest = { workspace = true, features = ["rustls"] }
-# `in_gecko` tells `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`
-# instead of running `pkg-config` or linking system `-lsqlite3`.
-rusqlite = { workspace = true, features = ["in_gecko"] }
-tar = "0.4"
-tokio = { workspace = true, features = ["rt-multi-thread"] }
-tracing-subscriber = { workspace = true }
-
-[target.'cfg(all(not(unix), not(target_arch = "wasm32")))'.dependencies]
-same-file = "1.0.6"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-sqlite-wasm-rs = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
-gloo-timers = { workspace = true }
-reqwest = { workspace = true }
-rusqlite = { workspace = true }
 
 [build-dependencies]
 cc = "1"
