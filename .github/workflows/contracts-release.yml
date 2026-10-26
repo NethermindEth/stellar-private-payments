@@ -1,0 +1,174 @@
+name: Contracts Release
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["Cargo.toml"]
+  workflow_dispatch:
+
+# Keyed on the commit: GitHub drops a pending run when a newer one queues in its group, which
+# would lose a version bump queued behind a running release.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.sha }}"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - name: Refuse a ref other than main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] \
+            || { echo "::error::contracts releases run only on refs/heads/main, not $GITHUB_REF; run this workflow from main"; exit 1; }
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the contracts version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            sh scripts/release-versions.sh contracts retry
+          else
+            sh scripts/release-versions.sh contracts changed "$BEFORE"
+          fi
+
+      - name: Select the release tag
+        id: plan
+        if: steps.version.outputs.publish_contracts != ''
+        env:
+          VERSION: ${{ steps.version.outputs.publish_contracts }}
+        run: |
+          if sh scripts/release-versions.sh published contracts "$VERSION"; then
+            echo "contracts-v$VERSION is already published with every file its SHA256SUMS lists"
+          else
+            echo "tag=contracts-v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.files.outputs.files }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0
+        with:
+          version: v28.1.0
+
+      - name: Build contracts
+        run: scripts/build-contracts.sh --out "$RUNNER_TEMP/contracts" --tag "$TAG" --repo "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: contracts
+          path: ${{ runner.temp }}/contracts
+
+      - name: List the files to attest
+        id: files
+        run: echo "files=$(jq -c '[.contracts[].file, "SHA256SUMS"]' "$RUNNER_TEMP/contracts/contracts.json")" >> "$GITHUB_OUTPUT"
+
+  rebuild:
+    needs: build
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0
+        with:
+          version: v28.1.0
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: contracts
+          path: ${{ runner.temp }}/contracts
+
+      # Ties the release to the pushed commit: the build job's archive must be this checkout's.
+      - name: Compare the source archive with this checkout's
+        run: |
+          stellar contract build archive --out-file "$RUNNER_TEMP/contracts-source.tar.gz"
+          cmp "$RUNNER_TEMP/contracts-source.tar.gz" "$RUNNER_TEMP/contracts/contracts-source.tar.gz"
+
+      - name: Rebuild contracts and compare hashes
+        run: scripts/build-contracts.sh --rebuild "$RUNNER_TEMP/contracts"
+
+  attest:
+    needs: [build, rebuild]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        # One subject per attestation, because Stellar Lab reads only the first.
+        file: ${{ fromJSON(needs.build.outputs.files) }}
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: contracts
+          path: ${{ runner.temp }}/contracts
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/contracts/${{ matrix.file }}
+
+  publish:
+    needs: [plan, build, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: "${{ github.workflow }}-${{ needs.plan.outputs.tag }}"
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: contracts
+          path: ${{ runner.temp }}/contracts
+
+      - name: Publish the release
+        run: |
+          # gh release create would reuse an existing tag and ignore --target. Only this job's
+          # token sees draft releases.
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')"
+          if grep -qxF "$TAG" <<<"$releases"; then
+            echo "::error::release $TAG already exists, possibly as a draft. If a failed run left it, delete the release and its tag, then run this workflow by hand"
+            exit 1
+          fi
+          refs="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq '.[].ref')"
+          if grep -qxF "refs/tags/$TAG" <<<"$refs"; then
+            echo "::error::tag $TAG already exists with no release. If a failed run left it, delete the tag, then run this workflow by hand"
+            exit 1
+          fi
+          pre=false
+          case "${TAG#contracts-v}" in *-*) pre=true ;; esac
+          gh release create "$TAG" "$RUNNER_TEMP"/contracts/* -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "$TAG" --prerelease="$pre" || {
+            echo "::error::creating release $TAG failed; delete any draft release and tag $TAG it left, then run this workflow by hand"
+            exit 1
+          }

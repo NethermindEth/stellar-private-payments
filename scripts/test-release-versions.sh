@@ -110,7 +110,10 @@ test ! -s "$GITHUB_OUTPUT"
 # Feed the real CLI completion predicate synthetic read-only API responses.
 cat > "$fixture/bin/curl" <<'SH'
 #!/bin/sh
-cat "$RELEASE_TEST_ROOT/release.json"
+case "$*" in
+  */releases/download/*) cat "$RELEASE_TEST_ROOT/SHA256SUMS" ;;
+  *) cat "$RELEASE_TEST_ROOT/release.json" ;;
+esac
 SH
 chmod +x "$fixture/bin/curl"
 node - <<'JS'
@@ -144,4 +147,83 @@ JS
     exit 1
   fi
 done
+
+# A contracts release is complete when SHA256SUMS and every file it lists are uploaded.
+contracts_release() {
+  jq -n --argjson draft "$1" \
+    '{draft: $draft, assets: [$ARGS.positional[] | {name: ., state: "uploaded", size: 10}]}' \
+    --args "${@:2}" > "$fixture/release.json"
+}
+printf '00  a.wasm\n11  contracts.json\n' > "$fixture/SHA256SUMS"
+contracts_release false SHA256SUMS a.wasm contracts.json
+sh "$fixture/scripts/release-versions.sh" published contracts 0.2.0
+for assets in 'true SHA256SUMS a.wasm contracts.json' 'false a.wasm contracts.json' \
+  'false SHA256SUMS contracts.json'; do
+  # shellcheck disable=SC2086
+  contracts_release $assets
+  if sh "$fixture/scripts/release-versions.sh" published contracts 0.2.0; then
+    echo "Incomplete contracts release accepted: $assets" >&2
+    exit 1
+  fi
+done
+: > "$fixture/SHA256SUMS"
+contracts_release false SHA256SUMS
+if sh "$fixture/scripts/release-versions.sh" published contracts 0.2.0; then
+  echo 'Contracts release with an empty SHA256SUMS accepted' >&2
+  exit 1
+fi
+
+# Contracts releases read real history, so these cases run in a scratch repository without the
+# Git stub.
+contracts_repo="$fixture/contracts"
+mkdir -p "$contracts_repo/scripts"
+cp "$ROOT/scripts/release-versions.sh" "$contracts_repo/scripts/"
+commit_all() {
+  git -C "$contracts_repo" add -A
+  git -C "$contracts_repo" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false \
+    commit -qm "$1"
+  git -C "$contracts_repo" rev-parse HEAD
+}
+set_version() {
+  printf '[workspace.package]\nversion = "%s"\n' "$1" > "$contracts_repo/Cargo.toml"
+}
+contracts() {
+  : > "$GITHUB_OUTPUT"
+  sh "$contracts_repo/scripts/release-versions.sh" contracts "$@"
+}
+(
+  PATH="${PATH#"$fixture/bin:"}"
+  git init -q "$contracts_repo"
+  set_version 0.1.0
+  first=$(commit_all 'set contracts 0.1.0')
+  set_version 0.2.0
+  bump=$(commit_all 'bump contracts to 0.2.0')
+  # A push that bumps the version selects it.
+  contracts changed "$first"
+  diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
+  # After a fix to release tooling alone, a push selects nothing and a retry selects the version.
+  echo '# fix' > "$contracts_repo/scripts/build-contracts.sh"
+  commit_all 'fix the contracts build' >/dev/null
+  contracts changed "$bump"
+  test ! -s "$GITHUB_OUTPUT"
+  contracts retry
+  diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
+  # A push whose before commit is missing fails.
+  if contracts changed 0000000000000000000000000000000000000000 2>/dev/null; then
+    echo 'Expected a push with a missing before commit to fail' >&2
+    exit 1
+  fi
+  test ! -s "$GITHUB_OUTPUT"
+  # A retry after any other change fails and names the bump, even when the change adds a
+  # version line to another table.
+  printf '[workspace.dependencies.foo]\nversion = "1.0"\n' >> "$contracts_repo/Cargo.toml"
+  commit_all 'add a dependency' >/dev/null
+  if contracts retry 2>"$fixture/err"; then
+    echo 'Expected a retry after a source change to fail' >&2
+    exit 1
+  fi
+  test ! -s "$GITHUB_OUTPUT"
+  grep -qF "Cargo.toml changed since commit $bump set contracts version 0.2.0" "$fixture/err" \
+    || { cat "$fixture/err" >&2; exit 1; }
+)
 echo 'Release planning, recovery, and asset completeness checks passed'
