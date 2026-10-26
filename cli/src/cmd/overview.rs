@@ -1,20 +1,27 @@
 //! `overview` — dashboard-style view of pools, balances, contracts, network,
 //! and this account's registration status.
 
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::Serialize;
 use stellar_private_payments::types::{
-    AssetDescriptor, GvkMode, POLICY_FLAGS_IN_SUFFIX_ORDER, PolicyFlags,
+    AssetDescriptor, ContractConfig, GvkMode, POLICY_FLAGS_IN_SUFFIX_ORDER, PolicyFlags,
 };
 
 use crate::{
-    config::{CliConfig, validate_pool},
+    code_status::{self, Code, CodeStatus, Expected},
+    config::{CliConfig, ManifestExtras, validate_pool},
     explorer::Explorer,
     onboard, output,
     session::ClientSession,
+    stellar_cli::{self, ContractCode, StellarNetwork},
 };
+
+const VERIFIER_PACKAGE: &str = "circom-groth16-verifier";
 
 #[derive(Serialize)]
 struct ContractRef {
@@ -43,6 +50,15 @@ struct PoolErrorRow {
 }
 
 #[derive(Serialize)]
+struct CodeRow {
+    role: String,
+    contract_id: String,
+    link: String,
+    #[serde(flatten)]
+    status: CodeStatus,
+}
+
+#[derive(Serialize)]
 struct Overview {
     network: String,
     rpc_url: String,
@@ -55,6 +71,7 @@ struct Overview {
     asp_membership: ContractRef,
     asp_non_membership: ContractRef,
     public_key_registry: ContractRef,
+    contracts: Vec<CodeRow>,
 }
 
 #[tracing::instrument(
@@ -130,6 +147,7 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
         asp_membership: contract_ref(&explorer, &dep.asp_membership),
         asp_non_membership: contract_ref(&explorer, &dep.asp_non_membership),
         public_key_registry: contract_ref(&explorer, &dep.public_key_registry),
+        contracts: code_rows(config, &network, &explorer),
     };
 
     if json {
@@ -188,6 +206,18 @@ fn print_human(o: &Overview, alias: &str) {
     print_ref("asp_membership", &o.asp_membership);
     print_ref("asp_non_membership", &o.asp_non_membership);
     print_ref("public_key_registry", &o.public_key_registry);
+
+    println!();
+    output::print_section("Contract code");
+    println!(
+        "Where each contract's code was built, from GitHub's build records. A build record says \
+         where the code came from, not that it is safe. Showing this section sends a fingerprint \
+         of each contract's code, and your IP address, to GitHub."
+    );
+    for row in &o.contracts {
+        output::print_kv(&row.role, format!("{} → {}", row.contract_id, row.link));
+        output::print_kv("  build record", &row.status);
+    }
 }
 
 fn print_ref(label: &str, r: &ContractRef) {
@@ -199,6 +229,147 @@ fn contract_ref(explorer: &Explorer, contract_id: &str) -> ContractRef {
         contract_id: contract_id.to_string(),
         link: explorer.contract(contract_id),
     }
+}
+
+/// One row per contract the manifest names. Each contract is read once and
+/// each distinct Wasm looked up once, in parallel.
+fn code_rows(config: &CliConfig, network: &StellarNetwork, explorer: &Explorer) -> Vec<CodeRow> {
+    let named = contract_rows(&config.deployment, &config.manifest);
+    let config_dir = config.stellar_config_dir.as_deref();
+    let codes: HashMap<&str, Option<Option<ContractCode>>> = std::thread::scope(|scope| {
+        let reads: Vec<_> = named
+            .iter()
+            .map(|(_, id, _)| *id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .map(|id| {
+                let read = scope.spawn(move || stellar_cli::contract_code(id, network, config_dir));
+                (id, read)
+            })
+            .collect();
+        reads
+            .into_iter()
+            .map(|(id, read)| {
+                let code = read
+                    .join()
+                    .unwrap_or_else(|_| Err(anyhow!("the read stopped")))
+                    .inspect_err(|error| {
+                        log::warn!("could not read the code of contract {id}: {error:#}");
+                    })
+                    .ok();
+                (id, code)
+            })
+            .collect()
+    });
+    let rows: Vec<_> = named
+        .iter()
+        .map(|(_, id, want)| {
+            let code = match codes.get(id).and_then(Option::as_ref) {
+                Some(Some(code)) => Code::Wasm(code),
+                Some(None) => Code::NoWasm,
+                None => Code::Unread,
+            };
+            (want, code)
+        })
+        .collect();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let client = code_status::client(code_status::GITHUB_TIMEOUT);
+    let fetch = |url: &str| {
+        let client = client.as_ref().map_err(|error| anyhow!("{error:#}"))?;
+        code_status::fetch(client, url)
+    };
+    let statuses = code_status::statuses(&rows, &config.data_dir.join("code-status"), now, fetch);
+    named
+        .iter()
+        .zip(statuses)
+        .map(|((role, id, _), status)| CodeRow {
+            role: role.clone(),
+            contract_id: (*id).to_owned(),
+            link: explorer.contract(id),
+            status,
+        })
+        .collect()
+}
+
+/// Returns each contract the manifest names, with its role and the code it
+/// must run.
+fn contract_rows<'a>(
+    dep: &'a ContractConfig,
+    manifest: &'a ManifestExtras,
+) -> Vec<(String, &'a str, Expected<'a>)> {
+    let release = &manifest.contracts_release;
+    let mut named = Vec::new();
+    // Without a release entry, the hash deploy.sh records for the role, if any.
+    let mut push = |role: &str, id: &'a str, package, key, role_hash: Option<&'a String>| {
+        let recorded = release.code.get(id).or(role_hash).map(String::as_str);
+        let network = release.network.as_deref();
+        named.push((
+            role.to_owned(),
+            id,
+            Expected {
+                recorded,
+                package,
+                key,
+                network,
+            },
+        ));
+    };
+    for pool in &dep.pools {
+        let package = match pool.gvk_mode {
+            GvkMode::Off => "pool",
+            GvkMode::ViewOnly | GvkMode::Traceable => "pool-gvk",
+        };
+        push("pool", &pool.pool_contract_id, package, None, None);
+    }
+    let allowlist = manifest.asp_membership_wasm_hash.as_ref();
+    push(
+        "asp_membership",
+        &dep.asp_membership,
+        "asp-membership",
+        None,
+        allowlist,
+    );
+    for tree in &dep.added_asp_memberships {
+        push(
+            "added_asp_membership",
+            &tree.contract_id,
+            "asp-membership",
+            None,
+            allowlist,
+        );
+    }
+    let blocklist = manifest.asp_non_membership_wasm_hash.as_ref();
+    push(
+        "asp_non_membership",
+        &dep.asp_non_membership,
+        "asp-non-membership",
+        None,
+        blocklist,
+    );
+    push(
+        "public_key_registry",
+        &dep.public_key_registry,
+        "public-key-registry",
+        None,
+        None,
+    );
+    if let Some(id) = &manifest.public_key_registry_verifier {
+        let hash = manifest.public_key_registry_verifier_wasm_hash.as_ref();
+        push(
+            "public_key_registry_verifier",
+            id,
+            VERIFIER_PACKAGE,
+            Some("keyOwnership"),
+            hash,
+        );
+    }
+    for (key, id) in &dep.verifiers {
+        let role = format!("verifier.{}", if key.is_empty() { "none" } else { key });
+        push(&role, id, VERIFIER_PACKAGE, Some(key), None);
+    }
+    named
 }
 
 fn explorer_base(config: &CliConfig) -> Result<String> {
@@ -314,6 +485,7 @@ fn portfolio_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ContractsRelease;
     use stellar_private_payments::types::{NoteAmount, PoolConfigEntry, PortfolioBalance};
 
     fn pool_entry(id: &str, policy_flags: PolicyFlags, gvk_mode: GvkMode) -> PoolConfigEntry {
@@ -400,6 +572,106 @@ mod tests {
         assert_eq!(rows[0]["gvk_mode"], "traceable");
         assert_eq!(rows[1]["policy_flags"], serde_json::json!(["blocklist"]));
         assert_eq!(rows[1]["gvk_mode"], "viewOnly");
+    }
+
+    #[test]
+    fn contract_rows_name_each_contract_with_its_role() {
+        let pool = |id: &str| {
+            serde_json::json!({
+                "poolContractId": id, "tokenContractId": "token", "enabled": true,
+                "deploymentLedger": 0, "policyFlags": [], "asset": {"kind": "native"},
+            })
+        };
+        let mut gvk = pool("CGVK");
+        gvk["gvkMode"] = "viewOnly".into();
+        let dep: ContractConfig = serde_json::from_value(serde_json::json!({
+            "network": "testnet", "kdf_domain": "d", "deployer": "G", "admin": "G",
+            "pools": [pool("CPOOL"), gvk],
+            "asp_membership": "CALLOW",
+            "added_asp_memberships": [{ "contractId": "CADDED", "deploymentLedger": 1 }],
+            "asp_non_membership": "CBLOCK",
+            "verifiers": { "": "CNONE", "B": "CB" },
+            "public_key_registry": "CREG",
+        }))
+        .expect("deployment");
+        let mut manifest = ManifestExtras {
+            asp_membership_wasm_hash: Some("allow".into()),
+            asp_non_membership_wasm_hash: Some("block".into()),
+            public_key_registry_verifier: Some("CREGV".into()),
+            public_key_registry_verifier_wasm_hash: Some("regv".into()),
+            ..Default::default()
+        };
+        let rows = contract_rows(&dep, &manifest);
+        let roles: Vec<_> = rows
+            .iter()
+            .map(|(role, id, _)| (role.as_str(), *id))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                ("pool", "CPOOL"),
+                ("pool", "CGVK"),
+                ("asp_membership", "CALLOW"),
+                ("added_asp_membership", "CADDED"),
+                ("asp_non_membership", "CBLOCK"),
+                ("public_key_registry", "CREG"),
+                ("public_key_registry_verifier", "CREGV"),
+                ("verifier.none", "CNONE"),
+                ("verifier.B", "CB"),
+            ]
+        );
+        // What a manifest with a field of the wrong type loads as.
+        let unread = ManifestExtras::default();
+        let bare: Vec<_> = contract_rows(&dep, &unread)
+            .into_iter()
+            .map(|(role, _, want)| (role, want.recorded, want.network))
+            .collect();
+        let expected: Vec<_> = roles
+            .iter()
+            .filter(|(role, _)| *role != "public_key_registry_verifier")
+            .map(|(role, _)| ((*role).to_owned(), None, None))
+            .collect();
+        assert_eq!(bare, expected);
+        let packages: Vec<_> = rows.iter().map(|(_, _, want)| want.package).collect();
+        assert_eq!(
+            &packages[..6],
+            [
+                "pool",
+                "pool-gvk",
+                "asp-membership",
+                "asp-membership",
+                "asp-non-membership",
+                "public-key-registry",
+            ]
+        );
+        assert!(
+            packages[6..]
+                .iter()
+                .all(|package| *package == VERIFIER_PACKAGE)
+        );
+        let keys: Vec<_> = rows.iter().map(|(_, _, want)| want.key).collect();
+        assert_eq!(keys[6..], [Some("keyOwnership"), Some(""), Some("B")]);
+        assert!(keys[..6].iter().all(Option::is_none));
+        let recorded: Vec<_> = rows.iter().map(|(_, _, want)| want.recorded).collect();
+        let (allow, block, regv) = (Some("allow"), Some("block"), Some("regv"));
+        let unreleased = [None, None, allow, allow, block, None, regv, None, None];
+        assert_eq!(recorded, unreleased);
+        manifest.contracts_release = ContractsRelease {
+            network: Some("testnet".into()),
+            code: [("CB", "released"), ("CALLOW", "released")]
+                .map(|(id, hash)| (id.into(), hash.into()))
+                .into(),
+        };
+        let released = contract_rows(&dep, &manifest);
+        let recorded: Vec<_> = released.iter().map(|(_, _, want)| want.recorded).collect();
+        let release = Some("released");
+        let mixed = [None, None, release, allow, block, None, regv, None, release];
+        assert_eq!(recorded, mixed);
+        assert!(
+            released
+                .iter()
+                .all(|(_, _, want)| want.network == Some("testnet"))
+        );
     }
 
     #[test]

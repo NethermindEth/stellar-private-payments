@@ -36,8 +36,10 @@ account's signers review, sign, and submit it. Its tabs:
 The `spp` command-line client covers the user side of the app: `onboard`, `register`, `deposit`,
 `transfer`, `withdraw`, `transact`, `overview`, `notes`, `feed`, `keys`, `asp-secret`, and
 `disclosure generate` and `disclosure verify`. `transact` chooses the notes to spend and the
-outputs, as [Advanced transactions](../transact.md) describes. The CLI signs with Stellar CLI
-identities. It has no admin commands; admin calls go through the admin page or the Stellar CLI.
+outputs, as [Advanced transactions](../transact.md) describes. `overview` also lists where each
+contract's code was built, from GitHub's build records; this sends a fingerprint of each contract's
+code, and your IP address, to GitHub. The CLI signs with Stellar CLI identities. It has no admin
+commands; admin calls go through the admin page or the Stellar CLI.
 
 ## SDKs
 

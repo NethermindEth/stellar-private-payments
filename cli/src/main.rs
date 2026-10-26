@@ -1,6 +1,7 @@
 mod account;
 mod artifacts;
 mod cmd;
+mod code_status;
 mod config;
 mod explorer;
 mod logging;
@@ -114,6 +115,10 @@ enum Commands {
     },
     /// Pools, balances, contracts, network, and registration status
     /// Omit the pool to show all enabled pools, or pass one pool contract id
+    ///
+    /// Also lists where each contract's code was built, from GitHub's build
+    /// records; this sends a fingerprint of each contract's code, and your IP
+    /// address, to GitHub.
     Overview {
         /// Pool contract id (C…); omit for all enabled pools
         pool: Option<String>,
