@@ -98,6 +98,8 @@ struct Registration {
 /// Domain tag of the challenge the encryption key signs.
 pub const ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
 
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
 
 /// `2^255 - 19`, big-endian.
@@ -137,15 +139,14 @@ pub fn registration_digest(env: &Env, message: &Bytes) -> BytesN<32> {
 /// Appends `0x` and the lowercase hex of a 32-byte key, encoded locally so the
 /// host copies each key once.
 fn append_hex(out: &mut Bytes, key: &Bytes) {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut raw = [0u8; 32];
     key.copy_into_slice(&mut raw);
     let mut hex = [0u8; 66];
     let (prefix, digits) = hex.split_at_mut(2);
     prefix.copy_from_slice(b"0x");
     for (pair, byte) in digits.chunks_exact_mut(2).zip(raw) {
-        pair[0] = DIGITS[usize::from(byte >> 4)];
-        pair[1] = DIGITS[usize::from(byte & 0x0f)];
+        pair[0] = HEX_DIGITS[usize::from(byte >> 4)];
+        pair[1] = HEX_DIGITS[usize::from(byte & 0x0f)];
     }
     out.extend_from_slice(&hex);
 }
