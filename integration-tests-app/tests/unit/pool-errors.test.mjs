@@ -72,3 +72,77 @@ test('a paused pool says deposits are paused', () => {
 test('an uncoded error falls back to the error message', () => {
   assert.equal(poolErrorMessage(new Error('network down'), terms), null);
 });
+
+const RULE = 'Selected notes and public deposit must add up to the private outputs, public withdraw and the 0.0001 XLM pool fee.';
+const NO_FEE_RULE = 'Selected notes and public deposit must add up to the private outputs and public withdraw.';
+const none = { inputs: 0n, deposit: 0n, outputs: 0n, withdraw: 0n };
+
+function unbalanced(gap, amounts, fee = terms.fee) {
+  return poolErrorMessage(
+    refusal('NOT_BALANCED', { gap }),
+    { ...terms, fee, feeIncluded: true, amounts: { ...none, ...amounts } },
+  );
+}
+
+test('a transfer of the whole input takes the fee off a private output', () => {
+  assert.equal(
+    unbalanced('-1000', { inputs: 100000n, outputs: 100000n }),
+    `${RULE} Remove 0.0001 XLM from a private output.`,
+  );
+});
+
+test('a deposit of the whole output takes the fee off a private output', () => {
+  assert.equal(
+    unbalanced('-1000', { deposit: 100000n, outputs: 100000n }),
+    `${RULE} Remove 0.0001 XLM from a private output.`,
+  );
+});
+
+test('a withdrawal of the whole input takes the fee off the withdrawal', () => {
+  assert.equal(
+    unbalanced('-1000', { inputs: 100000n, withdraw: 100000n }),
+    `${RULE} Lower the public withdraw by 0.0001 XLM.`,
+  );
+});
+
+test('inputs left over go to a private output', () => {
+  assert.equal(
+    unbalanced('1', { inputs: 100000n, outputs: 98999n }),
+    `${RULE} Add 0.0000001 XLM to a private output.`,
+  );
+});
+
+test('an empty form asks for a note or a deposit', () => {
+  assert.equal(unbalanced('-1000', {}), `${RULE} Select a note or enter a public deposit.`);
+});
+
+test('a note smaller than the fee asks for more in', () => {
+  assert.equal(
+    unbalanced('-500', { inputs: 500n }),
+    `${RULE} Raise the public deposit by 0.00005 XLM, or select more notes.`,
+  );
+});
+
+test('a pool with no fee leaves the fee out of the balance rule', () => {
+  assert.equal(
+    unbalanced('-1', { inputs: 100000n, outputs: 100001n }, 0n),
+    `${NO_FEE_RULE} Remove 0.0000001 XLM from a private output.`,
+  );
+});
+
+test('a pool with no fee still asks for a note when nothing comes in', () => {
+  const ask = `${NO_FEE_RULE} Select a note or enter a public deposit.`;
+  assert.equal(unbalanced('-50000', { outputs: 50000n }, 0n), ask);
+  assert.equal(unbalanced('-10000000', { withdraw: 10000000n }, 0n), ask);
+});
+
+test('the gap comes from the SDK, not from the form', () => {
+  assert.equal(
+    unbalanced('-2000', { inputs: 100000n, outputs: 100000n }),
+    `${RULE} Remove 0.0002 XLM from a private output.`,
+  );
+});
+
+test('a balance refusal without the form has no sentence', () => {
+  assert.equal(poolErrorMessage(refusal('NOT_BALANCED', { gap: '-1000' }), terms), null);
+});

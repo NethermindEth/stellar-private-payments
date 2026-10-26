@@ -149,7 +149,8 @@ export interface PoolRefusal extends Error {
     | 'DEPOSIT_BELOW_MINIMUM'
     | 'DEPOSIT_ABOVE_MAXIMUM'
     | 'NO_COMBINATION'
-    | 'NO_SPENDABLE_NOTES';
+    | 'NO_SPENDABLE_NOTES'
+    | 'NOT_BALANCED';
   /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
   minimum?: string;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */
@@ -158,6 +159,8 @@ export interface PoolRefusal extends Error {
   largestDeposit?: string;
   /** With `NO_COMBINATION`: the most one spend can send after pool fees. */
   maxSpend?: string;
+  /** With `NOT_BALANCED`: in less out; negative when more goes out than comes in. */
+  gap?: string;
 }
 
 /** Options for {@link verifySelectiveDisclosure}. */

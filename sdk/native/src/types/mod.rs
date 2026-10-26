@@ -419,6 +419,28 @@ impl ContractConfig {
             .collect()
     }
 
+    /// Reports whether `address` is a contract this deployment names, enabled
+    /// or not. An empty `address` never matches.
+    pub fn is_deployment_contract(&self, address: &str) -> bool {
+        !address.is_empty()
+            && self
+                .pools
+                .iter()
+                .flat_map(|pool| [&pool.pool_contract_id, &pool.token_contract_id])
+                .chain([
+                    &self.asp_membership,
+                    &self.asp_non_membership,
+                    &self.public_key_registry,
+                ])
+                .chain(
+                    self.added_asp_memberships
+                        .iter()
+                        .map(|tree| &tree.contract_id),
+                )
+                .chain(self.verifiers.values())
+                .any(|id| id == address)
+    }
+
     /// Returns the earliest deployment ledger among enabled pools and added ASP
     /// membership contracts.
     ///
@@ -791,6 +813,37 @@ mod contract_config_tests {
             config()?.all_contract_ids(),
             ["CPOOL", "CMEMBERSHIP", "CADDED_A", "CADDED_B", "CREGISTRY"]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn is_deployment_contract_names_every_contract_of_the_deployment() -> Result<()> {
+        let mut config = config()?;
+        let disabled = PoolConfigEntry {
+            pool_contract_id: "COFF".into(),
+            token_contract_id: "COFFTOKEN".into(),
+            enabled: false,
+            ..config.pool("CPOOL")?.clone()
+        };
+        config.pools.push(disabled);
+        config.verifiers.insert("B".into(), "CVERIFIER".into());
+        config.verifiers.insert("A".into(), String::new());
+
+        for id in [
+            "CPOOL",
+            "CTOKEN",
+            "COFF",
+            "COFFTOKEN",
+            "CMEMBERSHIP",
+            "CADDED_A",
+            "CNONMEMBERSHIP",
+            "CVERIFIER",
+            "CREGISTRY",
+        ] {
+            assert!(config.is_deployment_contract(id), "{id}");
+        }
+        assert!(!config.is_deployment_contract("GADMIN"));
+        assert!(!config.is_deployment_contract(""));
         Ok(())
     }
 
