@@ -198,6 +198,7 @@ pub struct BackgroundSync {
     bootnode_url: Option<String>,
     kick: Handle<SyncKick>,
     stop: Handle<AtomicBool>,
+    interval_ms: u32,
 }
 
 impl BackgroundSync {
@@ -215,6 +216,7 @@ impl BackgroundSync {
             bootnode_url,
             kick,
             stop: Handle::new(AtomicBool::new(false)),
+            interval_ms: BACKGROUND_SYNC_INTERVAL_MS,
         }
     }
 
@@ -233,11 +235,12 @@ impl BackgroundSync {
     /// Long-running indexer loop. Polls until stopped or the future is dropped.
     ///
     /// Between rounds, waits up to [`BACKGROUND_SYNC_INTERVAL_MS`] or until
-    /// [`SyncKick::kick`].
+    /// [`SyncKick::kick`]. Each failed round in a row doubles the wait, up to
+    /// 16 times the interval; a good round resets it.
     ///
     /// On a main RPC retention gap, syncs historical events via the optional
     /// bootnode until handoff, then resumes on the main RPC. Retries any error
-    /// not listed below after the same wait.
+    /// not listed below.
     ///
     /// # Errors
     ///
@@ -300,11 +303,18 @@ impl BackgroundSync {
                     }
                 }
             }
-            self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
+            self.kick
+                .wait_timeout(retry_delay_ms(self.interval_ms, consecutive_failures))
+                .await;
         }
         tracing::info!("background sync stopped");
         Ok(())
     }
+}
+
+/// Returns `base` doubled once per failure, up to 16 times `base`.
+fn retry_delay_ms(base: u32, failures: u32) -> u32 {
+    base.saturating_mul(2u32.saturating_pow(failures.min(4)))
 }
 
 fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
@@ -1153,7 +1163,7 @@ mod tests {
             }
             stop.request();
         };
-        // Less than the 5 s wait: only the stop can end it.
+        // Less than the 10 s retry wait: only the stop can end it.
         let (result, ()) = tokio::time::timeout(
             Duration::from_secs(2),
             futures::future::join(sync.run(), stop_once_asked),
@@ -1225,6 +1235,7 @@ mod tests {
         let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
 
         // 7 calls to the good round, then 9 failed fetches; next log at 16.
+        // Kicks end even the 80 s retry wait.
         let fail_nine_fetches = async {
             while get_events_calls(&rpc).await < 16 {
                 kick.kick();
@@ -1246,6 +1257,42 @@ mod tests {
                 "WARN 1", "WARN 2", "ERROR 4", "ERROR 1", "ERROR 2", "ERROR 4", "ERROR 8"
             ]
         );
+    }
+
+    #[test]
+    fn retry_delay_doubles_up_to_sixteen_times_the_interval() {
+        let delays = [0, 1, 2, 3, 4, 5, u32::MAX].map(|failures| retry_delay_ms(5_000, failures));
+        assert_eq!(
+            delays,
+            [5_000, 10_000, 20_000, 40_000, 80_000, 80_000, 80_000]
+        );
+    }
+
+    /// No kicks, so only the timer paces the retries.
+    #[tokio::test]
+    async fn background_sync_backs_off_after_failures() {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![json_rpc_error(-32_603, "upstream timeout")]).await;
+        let storage = temp_storage("backoff");
+        let mut sync = background_sync(&rpc, &storage, None);
+        sync.interval_ms = 50;
+        let stop = sync.stop_handle();
+
+        // Rounds at 0, 0.1, 0.3 and 0.7 s; a fixed 50 ms wait gives about 20.
+        let stop_later = async {
+            tokio::time::sleep(Duration::from_millis(1_100)).await;
+            stop.request();
+        };
+        let (result, ()) = tokio::time::timeout(
+            Duration::from_secs(4),
+            futures::future::join(sync.run(), stop_later),
+        )
+        .await
+        .expect("stop ends the wait");
+
+        assert!(result.is_ok(), "{result:?}");
+        let calls = get_events_calls(&rpc).await;
+        assert!((2..=8).contains(&calls), "{calls} getEvents calls");
     }
 
     /// Inline sync returns a transient bootnode error at once.
