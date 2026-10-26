@@ -678,14 +678,6 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Get the fee every transaction pays
-    fn get_fee(env: &Env) -> Result<i128, Error> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Fee)
-            .ok_or(Error::NotInitialized)
-    }
-
     /// Get the smallest amount a deposit may add to notes after the fee
     fn get_minimum_deposit(env: &Env) -> Result<i128, Error> {
         env.storage()
@@ -731,6 +723,21 @@ impl PoolContract {
         env.storage()
             .instance()
             .get(&DataKey::DepositsPaused)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Returns the pool fee every transaction pays.
+    ///
+    /// The fee is in the token's smallest unit, and a proof's public amount is
+    /// `ext_amount` minus it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the fee is not stored.
+    pub fn get_fee(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Fee)
             .ok_or(Error::NotInitialized)
     }
 

@@ -912,9 +912,9 @@ fn constructor_stores_the_fee_and_the_minimum() {
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool_charging(&env, &setup, 5, 10);
 
+    assert_eq!(PoolContractClient::new(&env, &pool_id).get_fee(), 5);
     env.as_contract(&pool_id, || {
         let instance = env.storage().instance();
-        assert_eq!(instance.get::<_, i128>(&DataKey::Fee), Some(5));
         assert_eq!(
             instance.get::<_, i128>(&DataKey::MinimumDepositAmount),
             Some(10)
