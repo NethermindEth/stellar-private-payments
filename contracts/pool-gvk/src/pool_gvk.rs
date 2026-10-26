@@ -411,6 +411,21 @@ impl PoolGvkContract {
             .ok_or(Error::NotInitialized)
     }
 
+    /// Returns the pool fee every transaction pays.
+    ///
+    /// The fee is in the token's smallest unit, and a proof's public amount is
+    /// `ext_amount` minus it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the fee is not stored.
+    pub fn get_fee(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Fee)
+            .ok_or(Error::NotInitialized)
+    }
+
     /// Returns the fees the pool has collected and not paid out.
     pub fn get_fees_total(env: &Env) -> Result<i128, Error> {
         Ok(totals::fees_total(env)?)
@@ -715,14 +730,6 @@ impl PoolGvkContract {
         env.storage()
             .instance()
             .get(&DataKey::MaximumDepositAmount)
-            .ok_or(Error::NotInitialized)
-    }
-
-    /// Get the fee every transaction pays.
-    fn get_fee(env: &Env) -> Result<i128, Error> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Fee)
             .ok_or(Error::NotInitialized)
     }
 
