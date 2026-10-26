@@ -21,7 +21,7 @@ name = "prover-worker"
 path = "src/bin/prover_worker.rs"
 
 [dependencies]
-stellar-private-payments = { workspace = true }
+stellar-private-payments = { workspace = true, features = ["encrypted-storage"] }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
