@@ -8,9 +8,6 @@ license.workspace = true
 publish.workspace = true
 description = "CLI for Stellar Private Payments"
 
-[package.metadata.cargo-shear]
-ignored = ["reqwest"]
-
 [[bin]]
 name = "spp"
 path = "src/main.rs"
@@ -18,11 +15,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 clap.workspace = true
 log.workspace = true
-# Not referenced directly, but pulls in reqwest's rustls TLS backend for the
-# binary (the `stellar` crate depends on reqwest without a TLS feature).
-reqwest = { workspace = true, features = ["rustls"] }
+# Pulls in reqwest's rustls TLS backend for the binary (the `stellar` crate
+# depends on reqwest without a TLS feature).
+reqwest = { workspace = true, features = ["blocking", "rustls"] }
 serde.workspace = true
 serde_json.workspace = true
 stellar-private-payments = { workspace = true, features = ["encrypted-storage", "parallel"] }
