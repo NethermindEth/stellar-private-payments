@@ -37,6 +37,7 @@ const EXPLORER_TEXT: &str =
     "The UI uses a single explorer base URL across transaction feedback and address shortcuts.";
 const REGISTRATION_TEXT: &str = "If you register now, other users can transfer to your Stellar \
     address without asking for note and encryption public keys out of band. \
+    Once registered, the keys for this address can't be changed. \
     Note: this is different from an ASP provider registration which should be handled separately \
     according to the procedures of a specific provider.";
 
