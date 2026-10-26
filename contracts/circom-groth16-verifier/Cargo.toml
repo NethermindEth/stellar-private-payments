@@ -10,6 +10,22 @@ publish = false
 crate-type = ["lib", "cdylib"]
 doctest = false
 
+# One per key file in deployments/<network>/circuit_keys; build.rs embeds the enabled one.
+[features]
+vk-testnet-none = []
+vk-testnet-a = []
+vk-testnet-b = []
+vk-testnet-ab = []
+vk-testnet-gvk-v = []
+vk-testnet-gvk-t = []
+vk-testnet-a-gvk-v = []
+vk-testnet-a-gvk-t = []
+vk-testnet-b-gvk-v = []
+vk-testnet-b-gvk-t = []
+vk-testnet-ab-gvk-v = []
+vk-testnet-ab-gvk-t = []
+vk-testnet-keyownership = []
+
 [dependencies]
 # workspace
 contract-types = { workspace = true }
