@@ -172,10 +172,13 @@ const spentNote = waitForNotesAfterIndexer(page, {
   notes: { minCount: 1, predicate: (note) => note.state === 'spent' },
 });
 await gotoMoveFlow(page, 'withdraw');
-await withdraw(helpers, { logTag: 'my-flow', amount: '0.01', rpcUrl });
+await withdraw(helpers, { logTag: 'my-flow', amount: '0.0099', rpcUrl });
 await gotoAdvanced(page);
 await spentNote;
 ```
+
+The withdrawal asks for 0.0099 XLM because the 0.01 XLM note also pays the 0.0001 XLM pool fee
+that `deploy-local.sh` sets.
 
 For transfers, navigate to the `transfer` flow and use `transfer(...)` after
 the recipient lookup reaches its observable ready state. For selective
@@ -226,9 +229,9 @@ deliberately, not in a tight loop.
 | `tests/07-disclose-spent.mjs` | Deposit three times, withdraw once, then verify a spent-note receipt and an unspent-note receipt. |
 | `tests/08-disclose-lifecycle.mjs` | Verify 1/2/3/4-note and spent-note receipts, withdraw again, then re-verify each receipt against current chain state. |
 | `tests/09-disclose-negative.mjs` | Verify malformed-input recovery, proof tampering, and context tampering with their respective verification results. |
-| `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
-| `tests/11-failure-modes.mjs` | Verify pre-signing failures for insufficient notes, unregistered recipients, the pool deposit cap, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
-| `tests/12-signing-account.mjs` | Import a second ephemeral account and pick it to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw it back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and on-chain the deposit is sent by the owner and the withdrawal by the signer. |
+| `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, check that an output of the whole note, which leaves nothing for the 0.0001 XLM pool fee, is refused before any wallet prompt, then transfer 0.0099 XLM to a registered second account through the Advanced flow and confirm `SUCCESS` on-chain. |
+| `tests/11-failure-modes.mjs` | Verify pre-signing failures for an empty wallet, insufficient notes, a spend one stroop above Max to send after pool fees, unregistered recipients, the pool deposit cap, a deposit below the smallest deposit, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
+| `tests/12-signing-account.mjs` | Import a second ephemeral account and pick it to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw 0.0099 XLM back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and on-chain the deposit is sent by the owner and the withdrawal by the signer. |
 | `tests/13-onboarding.mjs` | Drives the app's real onboarding wizard end to end for a freshly imported, unseeded account (every other test pre-seeds past it). |
 
 ## CI

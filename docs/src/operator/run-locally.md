@@ -90,12 +90,15 @@ Then move value through the pool:
 POOL=$(jq -r '.pools[0].poolContractId' deployments/local/deployments.json)
 spp --data-dir alice-data deposit "$POOL" 10 --account alice
 spp --data-dir alice-data transfer "$POOL" 4 --to "$(stellar keys address bob)" --account alice
-spp --data-dir bob-data withdraw "$POOL" 4 --account bob
+spp --data-dir bob-data withdraw "$POOL" 3.9999 --account bob
 spp --data-dir alice-data notes "$POOL" --account alice
 ```
 
-Amounts are in token units, so `10` is 10 XLM. Alice ends with one spent 10 XLM note and one
-unspent 6 XLM change note. `spp --help` lists the other commands.
+Amounts are in token units, so `10` is 10 XLM. `deploy-local.sh` sets a pool fee of 0.0001 XLM,
+which every transaction pays on top of the amount it names: the deposit sends 10.0001 XLM, the
+transfer takes the fee from Alice's 10 XLM note, and Bob's 4 XLM note pays a 3.9999 XLM withdrawal
+plus the fee. Alice ends with one spent 10 XLM note and one unspent 5.9999 XLM change note.
+`spp --help` lists the other commands.
 
 ## Stop the network
 

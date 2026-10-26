@@ -625,8 +625,7 @@ where
         ));
     }
 
-    // Enforce the conservation equation: inputs + public_amount == outputs,
-    // where the public amount is ext_amount minus the pool fee.
+    // Enforce conservation: inputs + (ext_amount - fee) == outputs.
     let public_amount = ext_amount
         .checked_sub(ExtAmount::try_from(fee)?)
         .ok_or_else(|| anyhow!("ext_amount({ext_amount}) - fee({fee}) overflows"))?;

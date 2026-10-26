@@ -24,9 +24,9 @@ export function withdrawalsByPk(inputTotals, spent, fee) {
 
 /**
  * Adds one traceable spend to its PKs' nodes: every input PK pays the pool fee
- * and sends each output to a PK outside the inputs, and `withdrawn` maps an
- * input PK to what it took out of the pool. Returns the transfers as
- * `[fromPk, toPk, amount]`, one per sender and output, for the graph's edges.
+ * and sends each output to a PK outside the inputs; `withdrawn` maps an input
+ * PK to what it took out. Returns the graph's edges as `[fromPk, toPk, amount]`,
+ * one per sender and output.
  */
 export function chargeSpend(nodeOf, inputTotals, outputs, withdrawn, fee) {
   for (const pk of inputTotals.keys()) {

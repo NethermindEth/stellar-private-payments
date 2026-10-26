@@ -155,9 +155,8 @@ async function spendEstimate(amountValue) {
     }
 }
 
-// Builds confirmation-dialog rows with the pool fees the action pays and the
-// number of transactions it requires. Without an estimate, names the fee each
-// transaction pays.
+// Builds confirmation-dialog rows for the pool fees and the transaction count,
+// or for the fee per transaction without an estimate.
 function estimateRows(estimate, terms) {
     const txCount = estimate?.txCount;
     if (!txCount) return terms.fee ? [{ label: 'Pool fee', value: `${terms.format(terms.fee)} per transaction` }] : [];
@@ -279,8 +278,7 @@ async function updateMoveFundsBalance() {
 }
 
 // Name the pool fee and the smallest deposit under the deposit amount, and the
-// fee in the Advanced composer, once the token's decimals are known so both
-// read in token units.
+// fee in the Advanced composer, in token units once the decimals are known.
 async function updatePoolFeeLines() {
     const el = document.getElementById('deposit-limits');
     const advancedEl = document.getElementById('advanced-pool-fee');
@@ -298,7 +296,6 @@ async function updatePoolFeeLines() {
     const format = (amount) => Utils.formatPoolAmount(amount, pool.poolContractId);
     const fee = BigInt(info.fee);
     const minimum = BigInt(info.minimumDepositAmount);
-    // A pool fee or smallest deposit of zero goes unsaid.
     if (el) el.textContent = [
         fee ? `A ${format(fee)} pool fee is added on top.` : '',
         minimum ? `The smallest deposit is ${format(minimum)}.` : '',
