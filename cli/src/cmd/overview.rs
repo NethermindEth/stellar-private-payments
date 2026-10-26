@@ -5,7 +5,9 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use serde::Serialize;
-use stellar_private_payments::types::AssetDescriptor;
+use stellar_private_payments::types::{
+    AssetDescriptor, GvkMode, POLICY_FLAGS_IN_SUFFIX_ORDER, PolicyFlags,
+};
 
 use crate::{
     config::{CliConfig, validate_pool},
@@ -27,6 +29,8 @@ struct PoolRow {
     token_contract_id: String,
     token_link: String,
     asset: String,
+    policy_flags: PolicyFlags,
+    gvk_mode: GvkMode,
     balance: String,
     balance_base_units: String,
     decimals: Option<u32>,
@@ -164,6 +168,10 @@ fn print_human(o: &Overview, alias: &str) {
             format!("{} → {}", pool.token_contract_id, pool.token_link),
         );
         output::print_kv("  asset", &pool.asset);
+        output::print_kv(
+            "  controls",
+            controls_label(pool.policy_flags, pool.gvk_mode),
+        );
         output::print_kv("  balance", &pool.balance);
         println!();
     }
@@ -226,6 +234,25 @@ fn asset_label(asset: &AssetDescriptor) -> String {
     }
 }
 
+/// Pool controls as shown in human output: ASP flags (or `open` when none are
+/// set), then the admin view key mode when enabled.
+fn controls_label(flags: PolicyFlags, gvk_mode: GvkMode) -> String {
+    let mut controls: Vec<&str> = POLICY_FLAGS_IN_SUFFIX_ORDER
+        .iter()
+        .filter(|flag| flags.contains(**flag))
+        .map(|flag| flag.name())
+        .collect();
+    if controls.is_empty() {
+        controls.push("open");
+    }
+    match gvk_mode {
+        GvkMode::Off => {}
+        GvkMode::ViewOnly => controls.push("admin view key (view-only)"),
+        GvkMode::Traceable => controls.push("admin view key (traceable)"),
+    }
+    controls.join(", ")
+}
+
 fn portfolio_rows(
     portfolio: &[stellar_private_payments::types::PortfolioBalance],
     entries: &[&stellar_private_payments::types::PoolConfigEntry],
@@ -258,6 +285,8 @@ fn portfolio_rows(
             token_contract_id: entry.token_contract_id.clone(),
             token_link: explorer.contract(&entry.token_contract_id),
             asset: asset_label(&entry.asset),
+            policy_flags: entry.policy_flags,
+            gvk_mode: entry.gvk_mode,
             balance_base_units: balance.amount.to_string(),
             decimals,
             balance: output::format_token_amount(
@@ -285,7 +314,30 @@ fn portfolio_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_private_payments::types::{NoteAmount, PortfolioBalance};
+    use stellar_private_payments::types::{NoteAmount, PoolConfigEntry, PortfolioBalance};
+
+    fn pool_entry(id: &str, policy_flags: PolicyFlags, gvk_mode: GvkMode) -> PoolConfigEntry {
+        PoolConfigEntry {
+            pool_contract_id: id.into(),
+            token_contract_id: "token".into(),
+            deployment_ledger: 0,
+            enabled: true,
+            asset: AssetDescriptor::Native,
+            policy_flags,
+            gvk_mode,
+            gvk_authority_pub_key: None,
+        }
+    }
+
+    fn balance(id: &str) -> PortfolioBalance {
+        PortfolioBalance {
+            pool_contract_id: id.into(),
+            token_contract_id: "token".into(),
+            token_label: "XLM".into(),
+            amount: NoteAmount::from(1u128),
+            note_count: 1,
+        }
+    }
 
     #[test]
     fn metadata_failure_keeps_balance_and_reports_pool_error() {
@@ -312,6 +364,8 @@ mod tests {
         assert_eq!(row["balance"], "123 base units");
         assert_eq!(row["balance_base_units"], "123");
         assert!(row["decimals"].is_null());
+        assert_eq!(row["policy_flags"], serde_json::json!([]));
+        assert_eq!(row["gvk_mode"], "off");
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].pool_contract_id, "pool");
         assert_eq!(errors[0].error, "offline");
@@ -320,5 +374,65 @@ mod tests {
                 .0
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn portfolio_rows_carry_pool_controls() {
+        let traceable = pool_entry(
+            "traceable",
+            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+            GvkMode::Traceable,
+        );
+        let view_only = pool_entry("view-only", PolicyFlags::BLOCKLIST, GvkMode::ViewOnly);
+        let (rows, errors) = portfolio_rows(
+            &[balance("traceable"), balance("view-only")],
+            &[&traceable, &view_only],
+            &Explorer::new("https://example.test"),
+            &Default::default(),
+        );
+        assert!(errors.is_empty());
+        assert_eq!(rows.len(), 2);
+        let rows = serde_json::to_value(&rows).expect("JSON");
+        assert_eq!(
+            rows[0]["policy_flags"],
+            serde_json::json!(["allowlist", "blocklist"])
+        );
+        assert_eq!(rows[0]["gvk_mode"], "traceable");
+        assert_eq!(rows[1]["policy_flags"], serde_json::json!(["blocklist"]));
+        assert_eq!(rows[1]["gvk_mode"], "viewOnly");
+    }
+
+    #[test]
+    fn controls_label_formats_flags_and_gvk() {
+        let both = PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST;
+        let cases = [
+            (PolicyFlags::EMPTY, GvkMode::Off, "open"),
+            (PolicyFlags::BLOCKLIST, GvkMode::Off, "blocklist"),
+            (PolicyFlags::ALLOWLIST, GvkMode::Off, "allowlist"),
+            (both, GvkMode::Off, "allowlist, blocklist"),
+            (
+                PolicyFlags::BLOCKLIST,
+                GvkMode::Traceable,
+                "blocklist, admin view key (traceable)",
+            ),
+            (
+                PolicyFlags::BLOCKLIST,
+                GvkMode::ViewOnly,
+                "blocklist, admin view key (view-only)",
+            ),
+            (
+                PolicyFlags::EMPTY,
+                GvkMode::ViewOnly,
+                "open, admin view key (view-only)",
+            ),
+            (
+                PolicyFlags::EMPTY,
+                GvkMode::Traceable,
+                "open, admin view key (traceable)",
+            ),
+        ];
+        for (flags, gvk_mode, expected) in cases {
+            assert_eq!(controls_label(flags, gvk_mode), expected);
+        }
     }
 }

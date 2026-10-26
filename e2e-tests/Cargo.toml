@@ -29,7 +29,7 @@ soroban-env-host = "=28.0.2"
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Shared deps
 soroban-utils = { workspace = true, features = ["testutils"] }
-stellar-private-payments = { workspace = true, features = ["parallel"] }
+stellar-private-payments = { workspace = true, features = ["encrypted-storage", "parallel"] }
 
 [dev-dependencies]
 # Signing a registration for the registry's cost row.

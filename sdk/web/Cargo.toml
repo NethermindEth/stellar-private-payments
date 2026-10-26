@@ -33,8 +33,7 @@ unencrypted-storage = [
 ]
 
 [dependencies]
-# Not the workspace entry, which enables the SDK's default (encrypted) storage.
-stellar-private-payments = { path = "../native", version = "0.2.0", default-features = false }
+stellar-private-payments = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }

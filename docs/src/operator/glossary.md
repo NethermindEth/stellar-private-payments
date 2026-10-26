@@ -8,6 +8,7 @@ differs.
 | Admin | The address stored as a contract's admin (`Admin`). One admin account usually administers every pool and tree in a deployment. |
 | Admin account | A Stellar account that needs M of its N signers on every transaction, used as the admin. |
 | Admin call | A transaction that calls an admin-only entry point, signed by the admin. |
+| Admin view key | A cryptographic key that allow the pool admin to view the private details of a note without granting access to spend's user funds. · In view-only admin can see only the owner key, the amount and the blinding · In traceable the admin can see everything. |
 | Allowlist | The tree of approved members (`asp-membership`). A pool with the allowlist policy accepts only spenders whose leaf is in it. |
 | ASP | Association set provider: whoever maintains a pool's allowlist or blocklist. |
 | ASP secret | A per-user value derived from the user's key-derivation signature (`membership_blinding`). It blinds the user's allowlist leaf. |
@@ -30,7 +31,7 @@ differs.
 | Nullifier | A value derived from a note and its owner's note private key. The pool records it when the note is spent, which stops a second spend. |
 | Operator | Whoever runs a deployment: the reader of this manual. |
 | Pause file | A pre-signed authorization of one `pause_deposits` call on one pool, which whoever keeps it can submit with no signer present. The admin page makes them in its Pre-signed deposit pauses panel. |
-| Policy | The ASP checks a pool requires: `none`, `allowlist`, `blocklist`, or `allowlist-blocklist` (`policy_flags`). |
+| Policy | The ASP checks a pool requires: `none`, `allowlist`, `blocklist`, or `allowlist-blocklist` (`policy_flags`). The app shows `none` as Open. |
 | Pool | The contract that holds one token and accepts deposits, transfers, and withdrawals (`pool`, or `pool-gvk` with a GVK). |
 | Proof | A zero-knowledge proof: it shows that a transaction follows the circuit's rules without revealing the notes and keys behind it. |
 | Proving key, verifying key | The pair of keys a circuit needs. Clients prove with the proving key; the verifier checks with the verifying key. Together they are the circuit keys. |
