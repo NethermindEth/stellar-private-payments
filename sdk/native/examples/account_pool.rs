@@ -15,8 +15,9 @@
 //!   SPP_DEPLOYMENT_JSON  default: deployments/testnet/deployments.json
 //!   SPP_POOL_CONTRACT_ID default: first enabled pool in deployment config
 //!   SPP_REGISTER         default: unset; set to "1" to actually call
-//!                        register_public_keys (this performs an on-chain
-//!                        write and costs a small amount of XLM).
+//!                        register_public_keys (this loads the keyOwnership
+//!                        circuit, performs an on-chain write and costs a
+//!                        small amount of XLM).
 
 mod common;
 
@@ -27,7 +28,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = common::load_contract_config()?;
     let storage = common::open_storage()?;
-    let client = common::build_readonly_client(storage, config.clone())?;
+    let register = common::env_or("SPP_REGISTER", "") == "1";
+    let client = if register {
+        common::build_registration_client(storage, config.clone())?
+    } else {
+        common::build_readonly_client(storage, config.clone())?
+    };
     let account = common::build_account(&client)?;
     common::require_onboarded(&account)?;
 
@@ -135,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  count: {} | total amount: {}", spendable.len(), total);
     }
 
-    if !registered && common::env_or("SPP_REGISTER", "") == "1" {
+    if !registered && register {
         println!();
         println!("SPP_REGISTER=1: publishing privacy public keys on-chain...");
         let result = account.register_public_keys()?;
