@@ -5,7 +5,6 @@ use crate::{
     Error,
     state::SqliteStorage,
     storage::map_private_keys,
-    types::NotePublicKey,
     zk::{
         encryption::{
             encryption_edwards_key, registration_digest, registration_hash, registration_message,
@@ -32,7 +31,6 @@ pub struct RegistrationRequest {
 pub struct RegistrationInputs {
     /// Message the owner signs (SEP-53).
     pub message: String,
-    pub note_key: NotePublicKey,
     /// Edwards encoding of the X25519 encryption key.
     pub encryption_key: [u8; 32],
     /// The encryption key's signature (64 bytes).
@@ -74,11 +72,10 @@ pub fn build_registration_inputs(
         .to_vec(),
         key_ownership: KeyOwnershipParams {
             note_private_key: keys.note_keypair.private,
-            note_public_key: note_key.clone(),
+            note_public_key: note_key,
             registration_hash: registration_hash(&digest),
         },
         message,
-        note_key,
         encryption_key,
     })
 }
@@ -118,7 +115,6 @@ mod tests {
 
         let inputs = build_registration_inputs(&storage, &request()).expect("inputs");
 
-        assert_eq!(inputs.note_key.0, note.public.0);
         assert_eq!(inputs.key_ownership.note_public_key.0, note.public.0);
         assert_eq!(inputs.key_ownership.note_private_key.0, note.private.0);
         assert_eq!(

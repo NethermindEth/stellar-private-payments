@@ -6041,6 +6041,7 @@ dependencies = [
  "stellar-xdr",
  "taceo-poseidon2",
  "tar",
+ "tempfile",
  "thiserror 2.0.21",
  "time",
  "tokio",

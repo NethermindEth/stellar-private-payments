@@ -109,6 +109,7 @@ public-key-registry = { workspace = true }
 reqwest = { workspace = true, features = ["rustls"] }
 rusqlite = { workspace = true, features = ["in_gecko"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
+tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 wiremock = { workspace = true }

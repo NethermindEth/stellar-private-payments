@@ -296,7 +296,7 @@ export function getRegistrationErrorMessage(error) {
     if (rawMessage.includes('public key registry uses key derivation domain')) {
         return 'The address book was deployed for other keys than this app uses. Reload the page. If that does not help, the operator has not published a matching deployment yet.';
     }
-    if (rawMessage.includes('registration message was not signed by the owner')) {
+    if (rawMessage.includes('signature was not made by the note owner')) {
         return 'The registration message was signed by another account. Sign it with the account you are registering.';
     }
     return getFriendlyErrorMessage(error, 'Registration');
