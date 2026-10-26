@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { poolControls, poolSelectLabel } from '../../../app/js/pool-policy.js';
+import { POOL_CONTROLS, poolControls, poolSelectLabel } from '../../../app/js/pool-policy.js';
 
 const XLM = { kind: 'native' };
 const pool = (poolContractId, policyFlags, gvkMode, asset = XLM) => ({ poolContractId, asset, policyFlags, gvkMode });
@@ -73,4 +73,19 @@ test('short labels that still collide fall back to full IDs', () => {
     `XLM · ${second.poolContractId} · Blocklist`,
     'XLM · CCIVQD...GWFL · Blocklist · Traceable',
   ]);
+});
+
+test('every control of every ASP and view key configuration has its copy', () => {
+  const keys = new Set();
+  for (const flags of [[], ['allowlist'], ['blocklist'], ['allowlist', 'blocklist']]) {
+    for (const gvkMode of [undefined, 'off', 'viewOnly', 'traceable']) {
+      poolControls(pool('C', flags, gvkMode)).forEach((control) => keys.add(control));
+    }
+  }
+  assert.deepEqual([...keys].sort(), Object.keys(POOL_CONTROLS).sort());
+  for (const key of keys) {
+    for (const field of ['label', 'tag', 'explanation', 'impact']) {
+      assert.ok(POOL_CONTROLS[key][field]?.trim(), `${key}.${field}`);
+    }
+  }
 });

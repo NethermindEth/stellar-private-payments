@@ -35,12 +35,27 @@ use crate::{
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
     path: PathBuf,
-    database_key: std::sync::Arc<crate::state::database_key::DatabaseKey>,
+    #[cfg(feature = "encrypted-storage")]
+    database_key: Option<std::sync::Arc<crate::state::database_key::DatabaseKey>>,
     db: Mutex<SqliteStorage>,
 }
 
 impl LocalStorage {
+    /// Open or create plaintext persistent storage.
+    #[cfg(feature = "unencrypted-storage")]
+    pub fn open(storage_path: &str) -> Result<Self, Error> {
+        let path = PathBuf::from(storage_path);
+        let db = SqliteStorage::connect_file(&path).context("open storage")?;
+        Ok(Self {
+            path,
+            #[cfg(feature = "encrypted-storage")]
+            database_key: None,
+            db: Mutex::new(db),
+        })
+    }
+
     /// Open persistent storage with an explicit key and create/open policy.
+    #[cfg(feature = "encrypted-storage")]
     pub fn open_encrypted(
         storage_path: &str,
         key: crate::state::database_key::DatabaseKey,
@@ -51,11 +66,12 @@ impl LocalStorage {
         Ok(Self {
             path,
             db: Mutex::new(db),
-            database_key: std::sync::Arc::new(key),
+            database_key: Some(std::sync::Arc::new(key)),
         })
     }
 
     /// Reopen an encrypted database already unlocked with this key.
+    #[cfg(feature = "encrypted-storage")]
     pub fn open_with_key(
         storage_path: &str,
         key: &crate::state::database_key::DatabaseKey,
@@ -64,7 +80,9 @@ impl LocalStorage {
         let db = SqliteStorage::reopen_encrypted(&path, key).context("open encrypted storage")?;
         Ok(Self {
             path,
-            database_key: std::sync::Arc::new(crate::state::database_key::DatabaseKey::new(**key)),
+            database_key: Some(std::sync::Arc::new(
+                crate::state::database_key::DatabaseKey::new(**key),
+            )),
             db: Mutex::new(db),
         })
     }
@@ -79,10 +97,20 @@ impl LocalStorage {
 
     /// Open an independent connection, retaining the key for encrypted storage.
     pub(crate) fn fork_local(&self) -> Result<Self, Error> {
-        let db = SqliteStorage::reopen_encrypted(&self.path, &self.database_key)
-            .context("fork encrypted storage")?;
+        #[cfg(feature = "encrypted-storage")]
+        let db = match &self.database_key {
+            Some(key) => SqliteStorage::reopen_encrypted(&self.path, key)
+                .context("fork encrypted storage")?,
+            #[cfg(feature = "unencrypted-storage")]
+            None => SqliteStorage::reopen_plaintext(&self.path).context("fork storage")?,
+            #[cfg(not(feature = "unencrypted-storage"))]
+            None => unreachable!("only `open` creates storage without a key"),
+        };
+        #[cfg(not(feature = "encrypted-storage"))]
+        let db = SqliteStorage::reopen_plaintext(&self.path).context("fork storage")?;
         Ok(Self {
             path: self.path.clone(),
+            #[cfg(feature = "encrypted-storage")]
             database_key: self.database_key.clone(),
             db: Mutex::new(db),
         })
@@ -303,5 +331,113 @@ impl Storage for LocalStorage {
         Ok(self
             .storage()
             .pool_has_commitments(pool_contract_id, commitments)?)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "unencrypted-storage"))]
+mod tests {
+    use super::LocalStorage;
+    use crate::state::SqliteStorage;
+    use std::path::{Path, PathBuf};
+
+    // Removes the listed files when the test ends, even on failure.
+    struct Cleanup(Vec<PathBuf>);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            for path in &self.0 {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    fn unique_name(prefix: &str) -> anyhow::Result<String> {
+        let mut suffix = [0; 8];
+        getrandom::getrandom(&mut suffix)?;
+        Ok(format!("{prefix}-{}.sqlite", hex::encode(suffix)))
+    }
+
+    fn assert_set_and_forked(storage: &LocalStorage) -> anyhow::Result<()> {
+        storage.storage_mut().set_setting_json("plain", &"stored")?;
+        let fork = storage.fork_local()?;
+        let forked = std::thread::spawn(move || fork.storage().get_setting_json::<String>("plain"))
+            .join()
+            .expect("fork thread")?;
+        assert_eq!(forked.as_deref(), Some("stored"));
+        Ok(())
+    }
+
+    #[test]
+    fn plaintext_storage_round_trips_and_forks() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(unique_name("spp-plaintext")?);
+        let _cleanup = Cleanup(vec![path.clone()]);
+        let path_str = path.to_str().expect("UTF-8 temp path");
+        assert_set_and_forked(&LocalStorage::open(path_str)?)?;
+        let reopened = SqliteStorage::connect_existing_plaintext(&path)?
+            .get_setting_json::<String>("plain")?;
+        assert_eq!(reopened.as_deref(), Some("stored"));
+        assert!(std::fs::read(&path)?.starts_with(b"SQLite format 3"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plaintext_storage_is_created_private() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(unique_name("spp-private")?);
+        let _cleanup = Cleanup(vec![path.clone()]);
+        LocalStorage::open(path.to_str().expect("UTF-8 temp path"))?;
+        assert_eq!(
+            std::fs::metadata(&path)?.permissions().mode() & 0o777,
+            0o600
+        );
+        Ok(())
+    }
+
+    // A relative "file:" name must stay a literal filename for forks too,
+    // not a URI that selects another database.
+    #[cfg(unix)]
+    #[test]
+    fn plaintext_forks_keep_literal_file_names() -> anyhow::Result<()> {
+        let name = format!("file:{}", unique_name("spp-literal")?);
+        let uri_target = name.trim_start_matches("file:").to_owned();
+        let _cleanup = Cleanup(vec![PathBuf::from(&name), PathBuf::from(&uri_target)]);
+        assert_set_and_forked(&LocalStorage::open(&name)?)?;
+        assert!(Path::new(&name).exists());
+        assert!(!Path::new(&uri_target).exists());
+        Ok(())
+    }
+
+    #[test]
+    fn existing_plaintext_open_rejects_missing_and_empty_files() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(unique_name("spp-missing")?);
+        let _cleanup = Cleanup(vec![path.clone()]);
+        assert!(SqliteStorage::connect_existing_plaintext(&path).is_err());
+        assert!(!path.exists());
+        std::fs::write(&path, b"")?;
+        assert!(SqliteStorage::connect_existing_plaintext(&path).is_err());
+        assert_eq!(std::fs::metadata(&path)?.len(), 0);
+        Ok(())
+    }
+
+    // Stands in for an encrypted database and its hot journal: neither has a
+    // plaintext SQLite header, so every plaintext open must refuse it before
+    // SQLite can replay or delete the journal.
+    #[test]
+    fn plaintext_opens_reject_unreadable_database_and_keep_journal() -> anyhow::Result<()> {
+        let path = std::env::temp_dir().join(unique_name("spp-ciphertext")?);
+        let journal = PathBuf::from(format!("{}-journal", path.display()));
+        let _cleanup = Cleanup(vec![path.clone(), journal.clone()]);
+        let mut database = vec![0; 8192];
+        getrandom::getrandom(&mut database)?;
+        let mut hot_journal = vec![0; 4096];
+        getrandom::getrandom(&mut hot_journal)?;
+        std::fs::write(&path, &database)?;
+        std::fs::write(&journal, &hot_journal)?;
+        assert!(SqliteStorage::connect_file(&path).is_err());
+        assert!(SqliteStorage::connect_existing_plaintext(&path).is_err());
+        assert!(LocalStorage::open(path.to_str().expect("UTF-8 temp path")).is_err());
+        assert_eq!(std::fs::read(&path)?, database);
+        assert_eq!(std::fs::read(&journal)?, hot_journal);
+        Ok(())
     }
 }

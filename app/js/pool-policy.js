@@ -1,11 +1,43 @@
 import { Utils } from "./ui/core.js";
 
-const CONTROL_LABELS = {
-    open: "Open",
-    allowlist: "Allowlist",
-    blocklist: "Blocklist",
-    viewOnly: "View-only",
-    traceable: "Traceable",
+/**
+ * Mapping containing the label and a long and short description of each tag
+ */
+export const POOL_CONTROLS = {
+    open: {
+        label: "Open",
+        tag: "Open",
+        explanation: "This pool has no allowlist or blocklist requirements.",
+        impact: "Pool access: no allowlist or blocklist.",
+    },
+    allowlist: {
+        label: "Allowlist",
+        tag: "Allowlist",
+        explanation:
+            "This pool requires public keys to be on the ASP allowlist.",
+        impact: "Pool access: required to be on the ASP allowlist.",
+    },
+    blocklist: {
+        label: "Blocklist",
+        tag: "Blocklist",
+        explanation:
+            "This pool requires public keys to NOT be on the ASP blocklist.",
+        impact: "Pool access: required to NOT be on the ASP blocklist.",
+    },
+    viewOnly: {
+        label: "View-only",
+        tag: "Admin view key · view-only",
+        explanation:
+            "The admin view key reveals note owners and amounts, allowing partial inference of fund flows. In view-only mode, it does not reveal when those notes are spent, so it does not provide a complete transaction history.",
+        impact: "Privacy: the admin view key holder can read every new note.",
+    },
+    traceable: {
+        label: "Traceable",
+        tag: "Admin view key · traceable",
+        explanation:
+            "The admin view key reveals note owners and amounts, and links notes to their subsequent spends, allowing fund flows to be traced across transactions.",
+        impact: "Privacy: the admin view key holder can trace funds through the pool.",
+    },
 };
 
 /** Return all the flags of a pool. */
@@ -27,7 +59,7 @@ function detailedLabel(
     return [
         Utils.poolLabel(pool),
         id,
-        ...poolControls(pool).map((control) => CONTROL_LABELS[control]),
+        ...poolControls(pool).map((control) => POOL_CONTROLS[control].label),
     ].join(" · ");
 }
 

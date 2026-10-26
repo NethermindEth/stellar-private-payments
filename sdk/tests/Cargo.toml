@@ -20,11 +20,11 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rusqlite = { workspace = true, features = ["bundled"] }
-stellar-private-payments = { workspace = true, features = ["parallel"] }
+stellar-private-payments = { workspace = true, features = ["encrypted-storage", "parallel"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rusqlite = { workspace = true }
-stellar-private-payments = { workspace = true }
+stellar-private-payments = { workspace = true, features = ["encrypted-storage"] }
 
 [lints]
 workspace = true

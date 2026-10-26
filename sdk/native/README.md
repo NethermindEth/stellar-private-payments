@@ -24,6 +24,19 @@ cargo test -p stellar-private-payments --lib
 cargo build -p stellar-private-payments-cli --release --target x86_64-unknown-linux-musl
 ```
 
+### Storage features
+
+Wallet storage is selected with Cargo features; at least one must be enabled.
+
+- `encrypted-storage` (default): SQLite3MC-encrypted storage, opened with `LocalStorage::open_encrypted` or `LocalStorage::open_with_key`. Also provides `state::database_key` and `state::native_wallet`.
+- `unencrypted-storage`: plaintext storage built on rusqlite's bundled SQLite, opened with `LocalStorage::open`. No SQLite3MC is compiled when it is the only storage feature.
+
+```toml
+stellar-private-payments = { version = "0.2", default-features = false, features = ["unencrypted-storage"] }
+```
+
+With both features enabled, SQLite3MC provides SQLite for both kinds of storage. On native targets, the plaintext constructors refuse to open an encrypted database in any configuration; on WASM, the OPFS owner must check before calling `connect_file`.
+
 ## Quick start
 
 ```rust

@@ -4,6 +4,9 @@ use sha2::{Digest, Sha256};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+    // With both storage features, `libsqlite3-sys` sees `in_gecko` first and
+    // skips its bundled build, so only SQLite3MC provides the SQLite symbols.
+    #[cfg(feature = "encrypted-storage")]
     if env::var_os("DOCS_RS").is_none()
         && env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32")
     {
@@ -30,6 +33,7 @@ fn main() {
     fs::write(out, contents).expect("write generated disclaimer_hash.rs");
 }
 
+#[cfg(feature = "encrypted-storage")]
 fn build_sqlite3mc() {
     let source_dir = sqlite3mc_src::source_dir();
     for name in [sqlite3mc_src::SOURCE_FILE, sqlite3mc_src::HEADER_FILE] {

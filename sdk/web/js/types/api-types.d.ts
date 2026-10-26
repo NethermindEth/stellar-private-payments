@@ -78,6 +78,11 @@ export interface StorageOpenOptions {
   workerUrl?: string;
 }
 
+/** Options for {@link Storage.openPlaintext}. */
+export interface StoragePlaintextOpenOptions {
+  workerUrl?: string;
+}
+
 /** Supply a random 256-bit key; preserve a recoverable wrapped copy before
  * creating the database. Do not return a wallet signature or a SEP-53 key.
  */
@@ -102,6 +107,12 @@ export interface Storage {
 /** Encrypted storage lives in its own OPFS directory, separate from `spp.db`. */
 export declare const Storage: {
   open(options: StorageOpenOptions): Promise<Storage>;
+  /**
+   * Open plaintext `spp.db` in the `.opfs-sahpool-plaintext` OPFS directory.
+   * Throws unless the package was built with the `unencrypted-storage` Cargo
+   * feature.
+   */
+  openPlaintext(options?: StoragePlaintextOpenOptions): Promise<Storage>;
 };
 
 /** Options for {@link Client.new}. */

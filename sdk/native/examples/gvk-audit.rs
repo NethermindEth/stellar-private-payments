@@ -26,7 +26,7 @@
 
 mod common;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use stellar_private_payments::{
     gvk::{GvkAudit, GvkOutputSlot, GvkSpentInput, GvkTxAudit},
@@ -116,7 +116,7 @@ async fn run_audit(
 ) -> Result<(), String> {
     let mut audit = GvkAudit::new(storage, pool_contract_id, d_priv);
     let mut count = 0u32;
-    let mut origins: HashMap<Field, NoteOrigin> = HashMap::new();
+    let mut origins: HashMap<Field, VecDeque<NoteOrigin>> = HashMap::new();
 
     println!();
     println!("Auditing pool transacts (limit {limit})...");
@@ -140,32 +140,39 @@ async fn run_audit(
             tx.outputs.len(),
             tx.inputs.len(),
         );
+        // Matched before this tx's outputs are queued: a tx cannot spend its
+        // own outputs. The GVK ciphertext carries no leaf index, so guess the
+        // oldest unspent copy: the SDK spends a wallet's oldest copy first.
+        let spent_from: Vec<Option<NoteOrigin>> = tx
+            .inputs
+            .iter()
+            .map(|slot| {
+                slot.note
+                    .as_ref()
+                    .and_then(|note| origins.get_mut(&note.commitment)?.pop_front())
+            })
+            .collect();
         for (i, slot) in tx.outputs.iter().enumerate() {
             println!(
                 "    output[{i}]: commitment={} | {}",
                 truncate_hex(&slot.commitment),
                 format_note_line(slot.note.as_ref()),
             );
-            if let Some(note) = &slot.note {
-                origins.insert(
-                    note.commitment,
-                    NoteOrigin {
-                        tx: count,
-                        ledger: tx.ledger,
-                        output_index: i,
-                    },
-                );
-            }
+            origins
+                .entry(slot.commitment)
+                .or_default()
+                .push_back(NoteOrigin {
+                    tx: count,
+                    ledger: tx.ledger,
+                    output_index: i,
+                });
         }
-        for (i, slot) in tx.inputs.iter().enumerate() {
+        for ((i, slot), origin) in tx.inputs.iter().enumerate().zip(&spent_from) {
             println!(
                 "    input[{i}]: nullifier={} | {} | {}",
                 truncate_hex(&slot.nullifier),
                 format_note_line(slot.note.as_ref()),
-                slot.note
-                    .as_ref()
-                    .map(|note| format_spent_from(&origins, note.commitment))
-                    .unwrap_or_else(|| "from=unknown".to_string()),
+                format_spent_from(origin.as_ref()),
             );
         }
     }
@@ -236,8 +243,8 @@ fn format_note_line(note: Option<&GvkAuditedNote>) -> String {
     }
 }
 
-fn format_spent_from(origins: &HashMap<Field, NoteOrigin>, commitment: Field) -> String {
-    match origins.get(&commitment) {
+fn format_spent_from(origin: Option<&NoteOrigin>) -> String {
+    match origin {
         Some(origin) => format!(
             "from=tx{} ledger{} output[{}]",
             origin.tx, origin.ledger, origin.output_index
