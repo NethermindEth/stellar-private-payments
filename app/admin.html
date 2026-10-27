@@ -240,7 +240,7 @@
                             Clear filters
                         </button>
                     </div>
-                    <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (token units)</label>
                             <div class="mt-2 flex items-center gap-2">
@@ -261,12 +261,12 @@
                                 <input id="gvkFilterLedgerTo" type="number" min="0" placeholder="to" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                             </div>
                         </div>
-                        <div class="sm:col-span-2 lg:col-span-2">
+                        <div class="sm:col-span-2 lg:col-span-3">
                             <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterTimeFrom">Time range (UTC)</label>
-                            <div class="mt-2 flex items-center gap-2">
-                                <input id="gvkFilterTimeFrom" type="datetime-local" step="1" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
-                                <span class="text-slate-600">–</span>
-                                <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                            <div class="mt-2 flex flex-wrap items-center gap-2">
+                                <input id="gvkFilterTimeFrom" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <span class="text-slate-600 max-md:hidden">–</span>
+                                <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                             </div>
                             <p id="gvkFilterTimeHint" class="mt-1 text-[11px] text-slate-500">Approximated from ledger close times.</p>
                         </div>
@@ -458,7 +458,7 @@
     </div>
 
     <!-- Toast Notifications Container -->
-    <div id="toast-container" class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-3"></div>
+    <div id="toast-container" class="pointer-events-none fixed inset-x-4 bottom-4 z-60 flex flex-col gap-3 sm:left-auto sm:w-full sm:max-w-sm"></div>
 
     <!-- Toast Template -->
     <template id="tpl-toast">

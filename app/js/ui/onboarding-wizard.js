@@ -370,7 +370,7 @@ export async function runOnboardingWizard({
 
         if (stepId === 'disclaimer') {
             const markdown = document.createElement('div');
-            markdown.className = 'space-y-3 text-sm text-slate-300';
+            markdown.className = 'space-y-3 text-sm text-slate-300 break-words';
             renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', markdown);
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
