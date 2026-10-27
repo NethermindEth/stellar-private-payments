@@ -14,8 +14,8 @@ import {
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
-import { filterNotes, createNoteRow, formatAmount } from './ui/notes-view.js';
-import { App, Toast } from './ui/core.js';
+import { filterNotes, createNoteRow, formatAmount, shortHex } from './ui/notes-view.js';
+import { App, Toast, Utils } from './ui/core.js';
 import { el, elc, svgEl } from './ui/dom.js';
 import { onEnter } from './ui/keys.js';
 import { createDisclosureMetadata } from './disclosure-metadata.js';
@@ -72,11 +72,6 @@ let connectBtn;
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-function shortAddress(address) {
-  if (!address) return 'Disconnected';
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
 
 function spinnerEl() {
   return el('span', 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin');
@@ -202,11 +197,6 @@ function tokenLabelForPool(poolContractId) {
   return 'Token';
 }
 
-function shortCommitment(hex) {
-  if (!hex || hex.length < 10) return hex || '--';
-  return `${hex.slice(0, 8)}…${hex.slice(-4)}`;
-}
-
 function normalizeCommitment(s) {
   if (!s) return '';
   let t = s.toLowerCase().trim();
@@ -275,7 +265,7 @@ export function mountGenerate(container) {
 
   // Wallet status line
   const statusLine = el('div', 'text-xs text-dark-500 mb-4');
-  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(App.state.wallet.address)));
+  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', Utils.truncateHex(App.state.wallet.address, 6, 4)));
   container.appendChild(statusLine);
 
   if (state.notesLoading) {
@@ -1043,7 +1033,7 @@ export function mountVerify(container) {
       { label: 'Nonce', value: r.context.contextNonce },
       { label: 'Issued at (unverified)', value: r.issuedAt },
       { label: 'Circuit', value: r.circuit.name },
-      { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
+      { label: 'Receipt VK hash', value: shortHex(r.circuit.vkHash) },
       { label: 'Disclosed amount', value: amountSummary },
       { label: 'Nullifiers', value: `${nullifierCount} disclosed` },
     ];

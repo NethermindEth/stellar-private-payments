@@ -8,7 +8,7 @@ import { format } from 'd3-format';
 import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import { symbol, symbolCircle } from 'd3-shape';
-import { rpcServer } from './admin-transactions.js';
+import { rpcServer, shortAddress } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
@@ -2282,8 +2282,7 @@ async function populatePools() {
     const assetLabel = pool.asset?.kind === 'native'
       ? 'XLM'
       : pool.asset?.symbol || pool.asset?.code || 'asset';
-    const shortId = `${pool.poolContractId.slice(0, 6)}...${pool.poolContractId.slice(-4)}`;
-    return new Option(`${assetLabel} · ${pool.gvkMode} · ${shortId}`, pool.poolContractId);
+    return new Option(`${assetLabel} · ${pool.gvkMode} · ${shortAddress(pool.poolContractId)}`, pool.poolContractId);
   }));
   poolSelectEl.disabled = false;
   auditBtnEl.disabled = false;

@@ -50,7 +50,6 @@ export function tokenLabel(pool) {
   return 'Token';
 }
 
-// Shorten a hex string for display (mirrors disclosure.js shortCommitment).
 export function shortHex(hex, start = 8, end = 4, ellipsis = '…') {
   if (!hex || hex.length < start + end + 2) return hex || '--';
   return `${hex.slice(0, start)}${ellipsis}${hex.slice(-end)}`;
