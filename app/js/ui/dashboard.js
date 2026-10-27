@@ -2,17 +2,11 @@ import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { el } from './dom.js';
 
 function poolLabelById(poolContractId) {
     const pool = App.state.pools.find(item => item.poolContractId === poolContractId);
     return Utils.poolLabel(pool);
-}
-
-function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
 }
 
 function shortCounterparty(cp) {

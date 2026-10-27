@@ -6,6 +6,7 @@ import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransac
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
+import { el, elc } from './ui/dom.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
@@ -440,7 +441,7 @@ function renderAdminTx(kind) {
     const current = () => adminTxXdrInput.value.trim() === xdr && state.address;
     const server = rpcServer(state.rpcUrl);
     // Takes ~10 s when another transaction used the sequence number.
-    adminTxSignersEl.replaceChildren(Object.assign(document.createElement('li'), { className: 'text-sm text-slate-400', textContent: 'Checking this call with the network...' }));
+    adminTxSignersEl.replaceChildren(el('li', 'text-sm text-slate-400', 'Checking this call with the network...'));
     server.getAccountEntry(call.source).then(async (account) => {
       if (!current()) return;
       const dead = await deadCall({ server, envelope: xdr, networkPassphrase: state.networkPassphrase, account, now: Date.now(), kind: state.adminTxKind });
@@ -855,7 +856,7 @@ async function poolRow(contractId, lists) {
     const used = (allowlist) => (usesList(flags, allowlist) ? stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership') : null);
     lists.set(contractId, { allowlist: used(true), blocklist: used(false) });
     row.querySelector('.pool-trees').replaceChildren(...[['Allowlist', 'ASPMembership', true], ['Blocklist', 'ASPNonMembership', false]].map(([label, key, allowlist]) => {
-      const line = document.createElement('div');
+      const line = el('div');
       showAddress(line, stored.get(key));
       // Before the address, which a phone cuts off.
       const unused = !usesList(flags, allowlist);
@@ -914,7 +915,7 @@ function renderRepoint() {
   const built = repointInCard();
   const passes = ({ ok, confirm, confirmed }) => ok || (Boolean(confirm) && Boolean(confirmed));
   // Once built, Build stays off: a rebuild drops the card's signatures.
-  const note = document.createElement('li');
+  const note = el('li');
   const paintNote = () => {
     const ready = lines.length > 0 && lines.every(passes);
     const [text, className] = state.repoint?.done
@@ -928,9 +929,8 @@ function renderRepoint() {
     buildRepointBtn.disabled = built || !ready;
   };
   repointChecksEl.replaceChildren(...lines.map((line) => {
-    const item = document.createElement('li');
-    const text = document.createElement('span');
-    item.append(text);
+    const text = el('span');
+    const item = elc('li', null, [text]);
     const paint = () => {
       // Ticked means accepted, not passed.
       const [word, className] = line.ok ? ['OK', 'text-emerald-300'] : (line.confirm ? [line.confirmed ? 'ACCEPTED' : 'CONFIRM', 'text-amber-300'] : ['FAIL', 'text-rose-300']);
@@ -938,14 +938,14 @@ function renderRepoint() {
       text.textContent = `${word} ${line.label}: ${line.text}`;
     };
     if (line.confirm) {
-      const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: Boolean(line.confirmed), className: 'mt-0.5 h-4 w-4 shrink-0 accent-cyan-400' });
+      const box = Object.assign(el('input', 'mt-0.5 h-4 w-4 shrink-0 accent-cyan-400'), { type: 'checkbox', checked: Boolean(line.confirmed) });
       // Repaint only this line so the box keeps focus.
       box.addEventListener('change', () => {
         line.confirmed = box.checked;
         paint();
         paintNote();
       });
-      const label = Object.assign(document.createElement('label'), { className: 'mb-1 mt-2 flex cursor-pointer items-start gap-3 font-sans text-sm text-slate-200' });
+      const label = el('label', 'mb-1 mt-2 flex cursor-pointer items-start gap-3 font-sans text-sm text-slate-200');
       label.append(box, line.confirm);
       item.append(label);
     }
@@ -1109,14 +1109,14 @@ async function checkRepoint() {
 // Pre-signed deposit pauses
 // -----------------------------
 function offerFile(name, text) {
-  Object.assign(document.createElement('a'), {
+  Object.assign(el('a'), {
     href: `data:application/json;charset=utf-8,${encodeURIComponent(text)}`,
     download: name,
   }).click();
 }
 
 function reportPause(text) {
-  pauseAuthResultsEl.append(Object.assign(document.createElement('li'), { textContent: text }));
+  pauseAuthResultsEl.append(el('li', null, text));
 }
 
 // Everything that decides whether a file can pause its pool.
@@ -1432,11 +1432,9 @@ async function confirmCustody(newAdmin) {
 }
 
 function showAddress(cell, address) {
-  const button = document.createElement('button');
+  const button = el('button', 'transition hover:text-cyan-100', shortAddress(address));
   button.type = 'button';
-  button.className = 'transition hover:text-cyan-100';
   button.title = `${address} (click to copy)`;
-  button.textContent = shortAddress(address);
   button.addEventListener('click', () => copyText(address, 'Address'));
   cell.replaceChildren(button);
 }
