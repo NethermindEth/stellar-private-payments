@@ -1,12 +1,23 @@
 //! Shared setup for tests: each test deploys the one pool it needs on the
 //! shared network, then opens its own wallet session against it.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
+    Account, CircuitStore, Client, Error, LocalProver, LocalSigner, LocalStorage,
+    PreparedTransaction, PrivatePool, Signer,
+    chain::PreparedSorobanTx,
+    types::{
+        ContractConfig, KeyDerivationSignature, NoteOwnerAddress, PoolConfigEntry,
+        SignedTransaction, SignerAddress,
+    },
     zk::disclosure::find_circuit,
 };
 
@@ -27,9 +38,16 @@ pub struct TestSession {
     pool_contract_ids: Vec<String>,
     storage_path: PathBuf,
     storage_key: std::sync::Arc<stellar_private_payments::state::database_key::DatabaseKey>,
+    reject_next_transaction: Arc<AtomicBool>,
 }
 
 impl TestSession {
+    /// Make the wallet reject the next transaction it is asked to sign, as a
+    /// user declining the wallet prompt would.
+    pub fn reject_next_transaction(&self) {
+        self.reject_next_transaction.store(true, Ordering::SeqCst);
+    }
+
     pub fn pool(&self) -> Result<PrivatePool> {
         self.pool_at(0)
     }
@@ -201,11 +219,15 @@ async fn build_session(
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
 
-    let signer = LocalSigner::new(
-        &wallet.secret(),
-        NETWORK_PASSPHRASE,
-        SignerAddress::new(wallet.address()),
-    )?
+    let reject_next_transaction = Arc::new(AtomicBool::new(false));
+    let signer = WalletSigner {
+        inner: LocalSigner::new(
+            &wallet.secret(),
+            NETWORK_PASSPHRASE,
+            SignerAddress::new(wallet.address()),
+        )?,
+        reject_next_transaction: reject_next_transaction.clone(),
+    }
     .into();
     let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
     account
@@ -223,5 +245,41 @@ async fn build_session(
             .collect(),
         storage_path,
         storage_key,
+        reject_next_transaction,
     })
+}
+
+/// A [`LocalSigner`] that can reject a transaction the way a browser wallet
+/// does when the user declines its prompt.
+struct WalletSigner {
+    inner: LocalSigner,
+    reject_next_transaction: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl Signer for WalletSigner {
+    fn signer_address(&self) -> SignerAddress {
+        self.inner.signer_address()
+    }
+
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
+        if self.reject_next_transaction.swap(false, Ordering::SeqCst) {
+            return Err(Error::UserRejected("user declined the request".to_string()));
+        }
+        self.inner.sign_soroban_transaction(prepared).await
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        self.inner.sign_message(message).await
+    }
 }

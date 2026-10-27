@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use stellar_private_payments::types::{AssetDescriptor, NoteAmount};
+use stellar_private_payments::{
+    Error,
+    types::{AssetDescriptor, NoteAmount},
+};
 
 use super::support::{deploy, deploy_default, session};
 use crate::{network::LocalNetwork, pool::PoolOptions};
@@ -104,6 +107,26 @@ async fn unknown_pool() -> Result<()> {
 #[tokio::test]
 async fn is_registered() -> Result<()> {
     let session = session(deploy_default().await?).await?;
+    assert!(!session.account.is_registered().await?);
+
+    session.account.register_public_keys().await?;
+    assert!(session.account.is_registered().await?);
+
+    Ok(())
+}
+
+/// Declining the wallet prompt registers nothing, so the registration
+/// retried right after lands.
+#[tokio::test]
+async fn register_public_keys_retry_after_wallet_rejection() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+
+    session.reject_next_transaction();
+    let rejected = session.account.register_public_keys().await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "the registration must fail with the wallet's rejection: {rejected:?}"
+    );
     assert!(!session.account.is_registered().await?);
 
     session.account.register_public_keys().await?;

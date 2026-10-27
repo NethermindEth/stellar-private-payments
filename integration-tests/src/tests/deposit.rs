@@ -33,6 +33,35 @@ async fn deposit_basic() -> Result<()> {
     Ok(())
 }
 
+/// Declining the wallet prompt leaves local state untouched, so the same
+/// deposit retried right after lands (#428).
+#[tokio::test]
+async fn deposit_retry_after_wallet_rejection() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let funded_balance = session.account.balance(&AssetDescriptor::Native).await?;
+
+    session.reject_next_transaction();
+    let rejected = pool.deposit(deposit_amount).await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "the deposit must fail with the wallet's rejection: {rejected:?}"
+    );
+    assert!(pool.notes().await?.is_empty());
+    assert_eq!(pool.balance().await?, NoteAmount::ZERO);
+    assert_eq!(
+        session.account.balance(&AssetDescriptor::Native).await?,
+        funded_balance
+    );
+
+    pool.deposit(deposit_amount).await?;
+
+    assert_eq!(pool.balance().await?, deposit_amount);
+
+    Ok(())
+}
+
 /// The pool refuses the deposit with `WrongExtAmount` (code 6), where
 /// `is_err()` also passed on a failure inside the SDK.
 #[tokio::test]
