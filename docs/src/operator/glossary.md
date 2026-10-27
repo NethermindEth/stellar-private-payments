@@ -16,6 +16,7 @@ differs.
 | Authority | The party a user sends a disclosure receipt to. Used only for selective disclosure. |
 | Blocklist | The sparse Merkle tree of blocked note public keys (`asp-non-membership`). A pool with the blocklist policy refuses spenders whose key is in it. |
 | Bootnode | A service that archives a deployment's contract events and serves them to clients that fall behind the RPC's event retention. |
+| Build record | What the admin page and `spp overview` call an attestation. |
 | Circuit | The program a proof is about. Each policy and GVK mode has its own transaction circuit. |
 | Commitment | The hash of a note that the pool stores in its commitment tree. |
 | Contracts release | The GitHub release `contracts-vVERSION` that holds the Wasm of every contract and verifier, the source archive they were built from, `contracts.json`, and `SHA256SUMS`. Bumping the contracts version on `main` publishes one. |

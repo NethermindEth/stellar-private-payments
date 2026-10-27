@@ -359,8 +359,8 @@ than the RPC's event retention, about seven days on the public testnet RPC:
 
    For a blocklist, the records file holds note public keys as the Blocklist tab takes them. Load
    them through that tab, never the CLI's `insert_leaf`, which would store each key in the wrong
-   byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's ASP
-   Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
+   byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's
+   Blocklist contract ID field, paste the keys on the Blocklist tab, and press Add to
    Blocklist. No pool uses the tree yet, so the page asks first; confirm. The page builds the insert
    with the deployer as its source. If Freighter is connected as the deployer, it signs and the page
    sends the insert at once. Otherwise open Transaction XDR in the Admin Transaction card, press
@@ -448,6 +448,6 @@ when every signer has the same weight, a file it built is then short.
 | --- | --- |
 | A signer's device is lost or stolen | While M other signers remain, replace the signer, then sign replacements for every pause file that carries its signature. One stolen key cannot sign alone, but replace it before another is lost. |
 | A soundness bug in a circuit, the verifier, or a pool | Whoever keeps the pause files submits one for every pool at once. Transfers and withdrawals cannot be stopped. Warn users and deploy fixed contracts, since none can be upgraded. |
-| A key is sanctioned | List it, with any other keys due, in each blocklist a pool reads ([Watch the account and the contracts](#watch-the-account-and-the-contracts) shows how to find them): enter each blocklist's address in the Overview tab's ASP Non-Membership Contract ID field in turn, and add the keys on the Blocklist tab. Each write voids the proofs in flight in every pool that reads that blocklist. Until the calls land, the key's owner can move value to a fresh key. |
+| A key is sanctioned | List it, with any other keys due, in each blocklist a pool reads ([Watch the account and the contracts](#watch-the-account-and-the-contracts) shows how to find them): enter each blocklist's address in the Overview tab's Blocklist contract ID field in turn, and add the keys on the Blocklist tab. Each write voids the proofs in flight in every pool that reads that blocklist. Until the calls land, the key's owner can move value to a fresh key. |
 | A tree another party runs misbehaves | Pause the pools that read it. Prepare a replacement tree as [Re-point a pool](#re-point-a-pool) describes, including step 4 for an allowlist, before the re-point. Then check the tree, re-point, and unpause. |
 | Deposits pause unexpectedly | Read the landed pause's nonce, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, and find in the record who kept that file. No call revokes a signed file. Replace signers whose signatures that person's files carry until each file falls short of the threshold; when every signer has the same weight, one replacement voids a file the panel built. Then unpause and sign replacements for the voided files. |
