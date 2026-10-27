@@ -146,7 +146,7 @@ async function loadNotes() {
   state.notesLoading = true;
   state.notesError = null;
 
-  const generateContainer = document.getElementById('disclosure-generate');
+  const generateContainer = document.getElementById('disclosure-generate-body');
   if (generateContainer) mountGenerate(generateContainer);
 
   try {
@@ -187,7 +187,7 @@ async function loadNotes() {
     state.notesError = 'Failed to load notes. The indexer may still be syncing.';
   } finally {
     state.notesLoading = false;
-    const generateContainer = document.getElementById('disclosure-generate');
+    const generateContainer = document.getElementById('disclosure-generate-body');
     if (generateContainer) mountGenerate(generateContainer);
   }
 }
@@ -290,12 +290,6 @@ function buildGenerateFilters(container) {
 
 export function mountGenerate(container) {
   container.replaceChildren();
-
-  const heading = document.createElement('h2');
-  heading.id = 'generate-heading';
-  heading.className = 'text-sm uppercase tracking-[0.25em] text-brand-400 mb-4';
-  heading.textContent = 'Generate Disclosure Receipt';
-  container.appendChild(heading);
 
   if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
     const msg = document.createElement('div');
@@ -852,12 +846,6 @@ async function generateReceipt(form) {
 
 export function mountVerify(container) {
   container.replaceChildren();
-
-  const heading = document.createElement('h2');
-  heading.id = 'verify-heading';
-  heading.className = 'text-sm uppercase tracking-[0.25em] text-brand-400 mb-4';
-  heading.textContent = 'Verify Disclosure Receipt';
-  container.appendChild(heading);
 
   let receipt = null;
   let receiptError = null;
@@ -1449,14 +1437,14 @@ export async function initDisclosure() {
   await loadDeploymentConfig();
   const query = parseQueryParams();
 
-  const generateContainer = document.getElementById('disclosure-generate');
-  const verifyContainer = document.getElementById('disclosure-verify');
+  const generateContainer = document.getElementById('disclosure-generate-body');
+  const verifyContainer = document.getElementById('disclosure-verify-body');
 
   if (generateContainer) mountGenerate(generateContainer);
   if (verifyContainer) mountVerify(verifyContainer);
 
   if (query.verify && verifyContainer) {
-    verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    verifyContainer.parentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   App.events.addEventListener('disclosure:metadata', () => {
