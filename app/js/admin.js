@@ -275,8 +275,7 @@ async function connect() {
 
     setStatus('Wallet connected', 'ok');
     showToast(`Connected: ${shortAddress(address)}`, 'success');
-    await refreshPools();
-    await refreshAdmins();
+    await Promise.all([refreshPools(), refreshAdmins()]);
     // The card reads a pasted call's kind against the contracts the tables load.
     renderAdminTx();
 
@@ -352,8 +351,7 @@ async function refreshState({ unlock = false } = {}) {
   } catch (err) {
     setStatus('State load error', 'error');
   }
-  await refreshPools();
-  await refreshAdmins();
+  await Promise.all([refreshPools(), refreshAdmins()]);
 }
 
 // -----------------------------
@@ -810,16 +808,22 @@ async function removeNonMembershipLeaf() {
 // Fills a table with the rows `rowsFor` builds from the manifest. Rows read
 // contracts by simulation, so they need the connected wallet's network.
 async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
+  // A later call owns the table: an earlier one that finishes after it writes nothing.
+  const run = String(Number(rowsEl.dataset.run ?? 0) + 1);
+  rowsEl.dataset.run = run;
   rowsEl.replaceChildren();
   if (!state.rpcUrl) {
     noticeEl.textContent = `Connect your wallet to read the ${noun}.`;
     return;
   }
+  noticeEl.textContent = `Reading the ${noun}...`;
   try {
-    rowsEl.replaceChildren(...(await Promise.all(rowsFor(await loadDeploymentConfig()))));
+    const rows = await Promise.all(rowsFor(await loadDeploymentConfig()));
+    if (rowsEl.dataset.run !== run) return;
+    rowsEl.replaceChildren(...rows);
     noticeEl.textContent = '';
   } catch (err) {
-    noticeEl.textContent = `The ${noun} could not be read: ${err.message}`;
+    if (rowsEl.dataset.run === run) noticeEl.textContent = `The ${noun} could not be read: ${err.message}`;
   }
 }
 
