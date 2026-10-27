@@ -55,6 +55,8 @@
     cursor: pointer;
   }
 
+  :focus-visible { outline: 2px solid var(--color-cyan-300); outline-offset: 2px; }
+
   /* Themed <select>: hide native chrome and draw a slate chevron so dropdowns
      match the navy UI. (The open option list is OS-rendered; we colour the
      options for dark mode but its exact look is browser-controlled.) */
