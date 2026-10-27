@@ -16,6 +16,7 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
 import { filterNotes, createNoteRow, formatAmount } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
+import { el, elc, svgEl } from './ui/dom.js';
 import { onEnter } from './ui/keys.js';
 import { createDisclosureMetadata } from './disclosure-metadata.js';
 import { refreshTokenDecimals } from './token-metadata.js';
@@ -77,33 +78,6 @@ function shortAddress(address) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-// DOM builders (used instead of innerHTML).
-const SVG_NS = 'http://www.w3.org/2000/svg';
-function svgEl(tag, attrs = {}, children = []) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  for (const c of children) node.appendChild(c);
-  return node;
-}
-// Create an element with optional class and text. Text always goes through
-// textContent, so it is never interpreted as HTML.
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = String(text);
-  return node;
-}
-// Create an element and append DOM-node children. `children` only ever
-// contains Nodes (or null) built via el()/svgEl() — never raw strings — so
-// nothing untrusted reaches appendChild as markup.
-function elc(tag, className, children) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  for (const child of children) {
-    if (child instanceof Node) node.appendChild(child);
-  }
-  return node;
-}
 function spinnerEl() {
   return el('span', 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin');
 }
@@ -279,14 +253,7 @@ function buildGenerateFilters(container) {
       'select',
       'text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200',
     );
-    const optAll = el('option', null, 'All tokens');
-    optAll.value = '';
-    select.appendChild(optAll);
-    poolIds.forEach((pid) => {
-      const opt = el('option', null, tokenLabelForPool(pid));
-      opt.value = pid;
-      select.appendChild(opt);
-    });
+    select.append(new Option('All tokens', ''), ...poolIds.map((pid) => new Option(tokenLabelForPool(pid), pid)));
     select.value = state.notePoolFilter || '';
     select.addEventListener('change', () => {
       state.notePoolFilter = select.value || null;
@@ -302,11 +269,7 @@ export function mountGenerate(container) {
   container.replaceChildren();
 
   if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
-    const msg = document.createElement('div');
-    msg.className = 'text-sm text-dark-400';
-    msg.textContent =
-      'Connect your Freighter wallet to generate disclosure receipts for your notes.';
-    container.appendChild(msg);
+    container.appendChild(el('div', 'text-sm text-dark-400', 'Connect your Freighter wallet to generate disclosure receipts for your notes.'));
     return;
   }
 
@@ -323,18 +286,12 @@ export function mountGenerate(container) {
   }
 
   if (state.notesError) {
-    const err = document.createElement('div');
-    err.className = 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3';
-    err.textContent = state.notesError;
-    container.appendChild(err);
+    container.appendChild(el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3', state.notesError));
     return;
   }
 
   if (state.notes.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'text-sm text-dark-400';
-    empty.textContent = 'No notes found for this account.';
-    container.appendChild(empty);
+    container.appendChild(el('div', 'text-sm text-dark-400', 'No notes found for this account.'));
     return;
   }
 
@@ -346,13 +303,9 @@ export function mountGenerate(container) {
   });
 
   // Note picker
-  const pickerLabel = document.createElement('label');
-  pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
-  pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
-  container.appendChild(pickerLabel);
+  container.appendChild(el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2', `Select up to 4 notes (${notes.length})`));
 
-  const list = document.createElement('div');
-  list.className = 'space-y-2 mb-4';
+  const list = el('div', 'space-y-2 mb-4');
   list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'Notes');
 
@@ -406,51 +359,34 @@ export function mountGenerate(container) {
   // -------------------------------------------------------------------------
   // Context form
   // -------------------------------------------------------------------------
-  const formWrap = document.createElement('div');
-  formWrap.className = 'border-t border-dark-800 pt-4 mt-2 space-y-4';
+  const formWrap = el('div', 'border-t border-dark-800 pt-4 mt-2 space-y-4');
   formWrap.dataset.testid = 'disclosure-generate-form';
 
   // Helper to build a labeled input
   const makeField = (id, labelText, opts = {}) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'space-y-1';
-
-    const label = document.createElement('label');
+    const label = el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', labelText);
     label.htmlFor = id;
-    label.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
-    label.textContent = labelText;
-    wrap.appendChild(label);
 
-    const inputWrap = document.createElement('div');
-    inputWrap.className = 'flex gap-2';
+    const inputWrap = el('div', 'flex gap-2');
 
-    const input = document.createElement('input');
+    const input = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500');
     input.id = id;
     input.type = opts.type || 'text';
-    input.className =
-      'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
     if (opts.placeholder) input.placeholder = opts.placeholder;
     if (opts.value) input.value = opts.value;
     inputWrap.appendChild(input);
 
     if (opts.button) {
-      const btn = document.createElement('button');
+      const btn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', opts.button.label);
       btn.type = 'button';
-      btn.className =
-        'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition';
-      btn.textContent = opts.button.label;
       btn.addEventListener('click', opts.button.onClick);
       inputWrap.appendChild(btn);
     }
 
-    wrap.appendChild(inputWrap);
-
-    const errorEl = document.createElement('div');
+    const errorEl = el('div', 'text-xs text-rose-400 hidden');
     errorEl.id = `${id}-error`;
-    errorEl.className = 'text-xs text-rose-400 hidden';
-    wrap.appendChild(errorEl);
 
-    return { wrap, input, errorEl };
+    return { wrap: elc('div', 'space-y-1', [label, inputWrap, errorEl]), input, errorEl };
   };
 
   const authorityField = makeField('authority-label', 'Authority label', {
@@ -533,16 +469,14 @@ export function mountGenerate(container) {
   };
 
   // Progress / result area
-  const progressArea = document.createElement('div');
+  const progressArea = el('div', 'hidden');
   progressArea.id = 'generate-progress';
-  progressArea.className = 'hidden';
   progressArea.dataset.testid = 'disclosure-generate-progress';
   progressArea.dataset.state = 'idle';
   formWrap.appendChild(progressArea);
 
-  const resultArea = document.createElement('div');
+  const resultArea = el('div', 'hidden');
   resultArea.id = 'generate-result';
-  resultArea.className = 'hidden';
   resultArea.dataset.testid = 'disclosure-generate-result';
   resultArea.dataset.state = 'idle';
   formWrap.appendChild(resultArea);
@@ -556,17 +490,10 @@ export function mountGenerate(container) {
       progressArea.dataset.state = error ? 'error' : 'running';
       progressArea.classList.remove('hidden');
       const isError = !!error;
-      const wrap = document.createElement('div');
-      wrap.className = `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`;
-      if (!isError) {
-        const spinner = document.createElement('span');
-        spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
-        wrap.appendChild(spinner);
-      }
-      const msg = document.createElement('span');
-      msg.textContent = message;
-      wrap.appendChild(msg);
-      progressArea.replaceChildren(wrap);
+      progressArea.replaceChildren(elc('div', `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`, [
+        isError ? null : spinnerEl(),
+        el('span', null, message),
+      ]));
     } else {
       progressArea.dataset.state = 'idle';
       progressArea.classList.add('hidden');
@@ -669,7 +596,7 @@ export function mountGenerate(container) {
     document.getElementById('btn-download-receipt')?.addEventListener('click', () => {
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = el('a');
       a.href = url;
       a.download = filename;
       a.click();
@@ -709,12 +636,9 @@ export function mountGenerate(container) {
   };
 
   // Generate button
-  const generateBtn = document.createElement('button');
+  const generateBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Generate Disclosure Receipt');
   generateBtn.type = 'button';
   generateBtn.dataset.testid = 'disclosure-generate-submit';
-  generateBtn.className =
-    'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
-  generateBtn.textContent = 'Generate Disclosure Receipt';
   generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
   formWrap.appendChild(generateBtn);
 
@@ -788,15 +712,7 @@ async function generateReceipt(form) {
     const d = e.detail;
     if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
     progressArea.classList.remove('hidden');
-    const wrap = document.createElement('div');
-    wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
-    const spinner = document.createElement('span');
-    spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
-    wrap.appendChild(spinner);
-    const msg = document.createElement('span');
-    msg.textContent = d.message;
-    wrap.appendChild(msg);
-    progressArea.replaceChildren(wrap);
+    progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-dark-300', [spinnerEl(), el('span', null, d.message)]));
   };
   window.addEventListener(TX_PROGRESS_EVENT, handler);
 
@@ -866,55 +782,36 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // Import area
   // -------------------------------------------------------------------------
-  const importWrap = document.createElement('div');
-  importWrap.className = 'space-y-3 mb-4';
+  const importWrap = el('div', 'space-y-3 mb-4');
 
   // File picker
-  const fileWrap = document.createElement('div');
-  fileWrap.className = 'space-y-1';
-  const fileLabel = document.createElement('label');
-  fileLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
-  fileLabel.textContent = 'Import from file';
-  fileWrap.appendChild(fileLabel);
-
-  const fileInput = document.createElement('input');
+  const fileInput = el('input', 'block w-full text-xs text-dark-300 file:mr-3 file:px-3 file:py-1.5 file:bg-dark-800 file:border file:border-dark-700 file:rounded-lg file:text-dark-200 file:hover:border-brand-500 file:transition');
   fileInput.type = 'file';
   fileInput.accept = '.json';
-  fileInput.className =
-    'block w-full text-xs text-dark-300 file:mr-3 file:px-3 file:py-1.5 file:bg-dark-800 file:border file:border-dark-700 file:rounded-lg file:text-dark-200 file:hover:border-brand-500 file:transition';
-  fileWrap.appendChild(fileInput);
-  importWrap.appendChild(fileWrap);
+  importWrap.appendChild(elc('div', 'space-y-1', [
+    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Import from file'),
+    fileInput,
+  ]));
 
   // Paste textarea
-  const pasteWrap = document.createElement('div');
-  pasteWrap.className = 'space-y-1';
-  const pasteLabel = document.createElement('label');
-  pasteLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
-  pasteLabel.textContent = 'Or paste receipt JSON';
-  pasteWrap.appendChild(pasteLabel);
-
-  const pasteArea = document.createElement('textarea');
+  const pasteArea = el('textarea', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y');
   pasteArea.dataset.testid = 'disclosure-receipt-input';
   pasteArea.rows = 4;
-  pasteArea.className =
-    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y';
   pasteArea.placeholder = '{ "version": 1, ... }';
-  pasteWrap.appendChild(pasteArea);
-  importWrap.appendChild(pasteWrap);
+  importWrap.appendChild(elc('div', 'space-y-1', [
+    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Or paste receipt JSON'),
+    pasteArea,
+  ]));
 
   // Load button
-  const loadBtn = document.createElement('button');
+  const loadBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Load Receipt');
   loadBtn.type = 'button';
   loadBtn.dataset.testid = 'disclosure-load-receipt';
-  loadBtn.className =
-    'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition';
-  loadBtn.textContent = 'Load Receipt';
   importWrap.appendChild(loadBtn);
 
   // Receipt error display
-  const importErrorEl = document.createElement('div');
+  const importErrorEl = el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden');
   importErrorEl.dataset.testid = 'disclosure-receipt-import-error';
-  importErrorEl.className = 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden';
   importWrap.appendChild(importErrorEl);
 
   container.appendChild(importWrap);
@@ -922,83 +819,48 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // Receipt summary + VK hash (shown after successful import)
   // -------------------------------------------------------------------------
-  const summaryWrap = document.createElement('div');
-  summaryWrap.className = 'hidden space-y-4 mb-4';
+  const summaryWrap = el('div', 'hidden space-y-4 mb-4');
   summaryWrap.dataset.testid = 'disclosure-receipt-summary';
   summaryWrap.dataset.state = 'idle';
 
-  const summaryHeading = document.createElement('h3');
-  summaryHeading.className = 'text-xs font-medium text-dark-400 uppercase tracking-wide';
-  summaryHeading.textContent = 'Receipt Context';
-  summaryWrap.appendChild(summaryHeading);
+  summaryWrap.appendChild(el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Receipt Context'));
 
-  const summaryGrid = document.createElement('div');
-  summaryGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+  const summaryGrid = el('div', 'grid grid-cols-1 sm:grid-cols-2 gap-3');
   summaryWrap.appendChild(summaryGrid);
 
   // VK hash field (canonical default, editable override)
-  const vkWrap = document.createElement('div');
-  vkWrap.className = 'space-y-1';
-  const vkLabel = document.createElement('label');
-  vkLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
-  vkLabel.textContent = 'Expected VK hash';
-  vkWrap.appendChild(vkLabel);
-
-  const vkInputWrap = document.createElement('div');
-  vkInputWrap.className = 'flex gap-2';
-
-  const vkInput = document.createElement('input');
+  const vkInput = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
   vkInput.type = 'text';
   vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
   vkInput.readOnly = true;
-  vkInput.className =
-    'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
-  vkInputWrap.appendChild(vkInput);
 
-  const vkOverrideBtn = document.createElement('button');
+  const vkOverrideBtn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Override');
   vkOverrideBtn.type = 'button';
-  vkOverrideBtn.className =
-    'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition';
-  vkOverrideBtn.textContent = 'Override';
   vkOverrideBtn.addEventListener('click', () => {
     vkInput.readOnly = !vkInput.readOnly;
     vkOverrideBtn.textContent = vkInput.readOnly ? 'Override' : 'Lock';
     if (!vkInput.readOnly) vkInput.focus();
   });
-  vkInputWrap.appendChild(vkOverrideBtn);
 
-  vkWrap.appendChild(vkInputWrap);
-
-  const vkErrorEl = document.createElement('div');
-  vkErrorEl.className = 'text-xs text-rose-400 hidden';
-  vkWrap.appendChild(vkErrorEl);
-  summaryWrap.appendChild(vkWrap);
+  const vkErrorEl = el('div', 'text-xs text-rose-400 hidden');
+  summaryWrap.appendChild(elc('div', 'space-y-1', [
+    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Expected VK hash'),
+    elc('div', 'flex gap-2', [vkInput, vkOverrideBtn]),
+    vkErrorEl,
+  ]));
 
   // -------------------------------------------------------------------------
   // RPC endpoint (only used when no wallet is connected)
   // -------------------------------------------------------------------------
-  const rpcDetails = document.createElement('details');
-  rpcDetails.className = 'text-xs';
-  const rpcSummary = document.createElement('summary');
-  rpcSummary.className = 'cursor-pointer text-dark-400 hover:text-brand-400 select-none';
-  rpcSummary.textContent = 'Advanced: RPC endpoint';
-  rpcDetails.appendChild(rpcSummary);
-
-  const rpcWrap = document.createElement('div');
-  rpcWrap.className = 'mt-2 space-y-1';
-  const rpcInput = document.createElement('input');
+  const rpcInput = el('input', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
   rpcInput.type = 'text';
   rpcInput.value = deploymentDefaults.rpcUrl;
-  rpcInput.className =
-    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
-  rpcWrap.appendChild(rpcInput);
 
-  const rpcHintEl = document.createElement('div');
-  rpcHintEl.className = 'text-[10px] text-dark-500';
-  rpcWrap.appendChild(rpcHintEl);
-
-  rpcDetails.appendChild(rpcWrap);
-  summaryWrap.appendChild(rpcDetails);
+  const rpcHintEl = el('div', 'text-[10px] text-dark-500');
+  summaryWrap.appendChild(elc('details', 'text-xs', [
+    el('summary', 'cursor-pointer text-dark-400 hover:text-brand-400 select-none', 'Advanced: RPC endpoint'),
+    elc('div', 'mt-2 space-y-1', [rpcInput, rpcHintEl]),
+  ]));
 
   const updateRpcFieldState = () => {
     const walletActive = isRuntimeReady() && App.state.wallet.connected;
@@ -1012,17 +874,13 @@ export function mountVerify(container) {
   App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
 
   // Verify button
-  const verifyBtn = document.createElement('button');
+  const verifyBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Verify Receipt');
   verifyBtn.type = 'button';
   verifyBtn.dataset.testid = 'disclosure-verify-submit';
-  verifyBtn.className =
-    'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
-  verifyBtn.textContent = 'Verify Receipt';
   summaryWrap.appendChild(verifyBtn);
 
   // Disclosed notes section (populated after loading a receipt)
-  const disclosedNotesWrap = document.createElement('div');
-  disclosedNotesWrap.className = 'hidden space-y-2';
+  const disclosedNotesWrap = el('div', 'hidden space-y-2');
   disclosedNotesWrap.dataset.testid = 'disclosure-disclosed-notes';
   summaryWrap.appendChild(disclosedNotesWrap);
 
@@ -1031,8 +889,7 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // Results area
   // -------------------------------------------------------------------------
-  const resultsWrap = document.createElement('div');
-  resultsWrap.className = 'hidden space-y-3';
+  const resultsWrap = el('div', 'hidden space-y-3');
   resultsWrap.dataset.testid = 'disclosure-verification-results';
   resultsWrap.dataset.state = 'idle';
   container.appendChild(resultsWrap);
@@ -1327,8 +1184,7 @@ export function mountVerify(container) {
 
       resultsWrap.replaceChildren();
 
-      const list = document.createElement('ul');
-      list.className = 'space-y-2';
+      const list = el('ul', 'space-y-2');
       list.setAttribute('role', 'list');
       list.setAttribute('aria-label', 'Verification results');
 
