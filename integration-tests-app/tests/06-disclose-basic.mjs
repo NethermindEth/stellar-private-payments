@@ -31,6 +31,7 @@ export async function run(helpers) {
 
   await unspentReady;
   await gotoDisclosure(page);
+  assert(await page.locator('[aria-current]').count() === 1, 'expected aria-current only on the Disclosure nav button');
   const receipt = await generateDisclosure(page, {
     authority: 'E2E Test Authority',
     payload: '0xdeadbeef',
