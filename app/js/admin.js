@@ -7,10 +7,11 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, hex, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
+import { checkCode, codeRecordsRead, contractRows, wasmMeta } from './code-check.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -33,6 +34,9 @@ const membershipRootEl = document.getElementById('membershipRoot');
 const membershipLevelsEl = document.getElementById('membershipLevels');
 const membershipNextIndexEl = document.getElementById('membershipNextIndex');
 const nonMembershipRootEl = document.getElementById('nonMembershipRoot');
+const codeRowsEl = document.getElementById('codeRows');
+const codeNoticeEl = document.getElementById('codeNotice');
+const codeRowTemplate = document.getElementById('tpl-code-row');
 
 // Inputs & Action Buttons
 const allowlistPublicKeyInput = document.getElementById('allowlistPublicKey');
@@ -691,7 +695,7 @@ async function insertMembershipLeaf() {
   try {
     ensureWalletConnected();
     const contractId = membershipContractInput.value.trim();
-    if (!contractId) throw new Error('Membership contract ID is required');
+    if (!contractId) throw new Error('Enter the allowlist contract ID on the Overview tab');
 
     const notePublicKey = allowlistPublicKeyInput.value.trim();
     if (parseBigIntInput(notePublicKey, 'Public key') === null) {
@@ -745,7 +749,7 @@ async function insertNonMembershipLeaf() {
   try {
     ensureWalletConnected();
     const contractId = nonMembershipContractInput.value.trim();
-    if (!contractId) throw new Error('Non-membership contract ID is required');
+    if (!contractId) throw new Error('Enter the blocklist contract ID on the Overview tab');
 
     const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keys.length === 0) throw new Error('User note public key is required');
@@ -774,7 +778,7 @@ async function removeNonMembershipLeaf() {
   try {
     ensureWalletConnected();
     const contractId = nonMembershipContractInput.value.trim();
-    if (!contractId) throw new Error('Non-membership contract ID is required');
+    if (!contractId) throw new Error('Enter the blocklist contract ID on the Overview tab');
 
     const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keyValue === undefined) throw new Error('User note public key is required');
@@ -805,23 +809,27 @@ async function removeNonMembershipLeaf() {
 // -----------------------------
 // Pools
 // -----------------------------
-// Fills a table with the rows `rowsFor` builds from the manifest. Rows read
-// contracts by simulation, so they need the connected wallet's network.
-async function fillTable(rowsEl, noticeEl, noun, rowsFor) {
+// Fills a table with the rows `rowsFor` builds from the manifest. Rows that read
+// contracts by simulation need the connected wallet's network; rows that read
+// only ledger entries pass `needsWallet: false`.
+async function fillTable(rowsEl, noticeEl, noun, rowsFor, { needsWallet = true, warningFor = () => '' } = {}) {
   // A later call owns the table: an earlier one that finishes after it writes nothing.
   const run = String(Number(rowsEl.dataset.run ?? 0) + 1);
   rowsEl.dataset.run = run;
   rowsEl.replaceChildren();
-  if (!state.rpcUrl) {
+  noticeEl.classList.replace('text-amber-300', 'text-slate-400');
+  if (needsWallet && !state.rpcUrl) {
     noticeEl.textContent = `Connect your wallet to read the ${noun}.`;
     return;
   }
   noticeEl.textContent = `Reading the ${noun}...`;
   try {
-    const rows = await Promise.all(rowsFor(await loadDeploymentConfig()));
+    const manifest = await loadDeploymentConfig();
+    const rows = await Promise.all(rowsFor(manifest));
     if (rowsEl.dataset.run !== run) return;
     rowsEl.replaceChildren(...rows);
-    noticeEl.textContent = '';
+    noticeEl.textContent = warningFor(manifest);
+    if (noticeEl.textContent) noticeEl.classList.replace('text-slate-400', 'text-amber-300');
   } catch (err) {
     if (rowsEl.dataset.run === run) noticeEl.textContent = `The ${noun} could not be read: ${err.message}`;
   }
@@ -1403,16 +1411,26 @@ async function submitPauseFiles() {
 // -----------------------------
 // Admins
 // -----------------------------
+// Labels for the Admins and Contract code tables.
+const ROLE_LABELS = {
+  pool: 'Pool',
+  asp_membership: 'Allowlist',
+  added_asp_membership: 'Added allowlist',
+  asp_non_membership: 'Blocklist',
+  public_key_registry: 'Public key registry',
+  public_key_registry_verifier: 'Registry verifier',
+};
+
 // Lists each contract the manifest names, a disabled pool too, with its admin
 // and its pending admin.
 function refreshAdmins() {
   return fillTable(adminRowsEl, adminsNoticeEl, 'admins', ({ pools, asp_membership, added_asp_memberships: added = [], asp_non_membership }) => {
     state.addedAllowlists = added.map(({ contractId }) => contractId);
     return [
-      ...pools.map(({ poolContractId }) => ({ label: 'Pool', kind: 'pool', contractId: poolContractId })),
-      { label: 'Allowlist', kind: 'asp-membership', contractId: asp_membership },
-      ...added.map(({ contractId }) => ({ label: 'Added allowlist', kind: 'asp-membership', contractId })),
-      { label: 'Blocklist', kind: 'asp-non-membership', contractId: asp_non_membership },
+      ...pools.map(({ poolContractId }) => ({ label: ROLE_LABELS.pool, kind: 'pool', contractId: poolContractId })),
+      { label: ROLE_LABELS.asp_membership, kind: 'asp-membership', contractId: asp_membership },
+      ...added.map(({ contractId }) => ({ label: ROLE_LABELS.added_asp_membership, kind: 'asp-membership', contractId })),
+      { label: ROLE_LABELS.asp_non_membership, kind: 'asp-non-membership', contractId: asp_non_membership },
     ].map(adminRow);
   });
 }
@@ -1497,6 +1515,90 @@ async function adminRow({ label, kind, contractId }) {
 }
 
 // -----------------------------
+// Contract code
+// -----------------------------
+// Callers don't wait for it: nothing else reads the table, and GitHub can be slow.
+function refreshCode() {
+  return fillTable(codeRowsEl, codeNoticeEl, 'contract code', (manifest) => {
+    // Public ledger entries, so the manifest's network and no wallet.
+    const server = rpcServer(deploymentDefaults.rpcUrl);
+    // A contract under two roles is read once.
+    const codes = new Map();
+    const read = (contractId) => codes.get(contractId) ?? codes.set(contractId, readCode(server, contractId)).get(contractId);
+    return contractRows(manifest).map((row) => codeRow(manifest, row, read));
+  }, {
+    needsWallet: false,
+    warningFor: (manifest) => (codeRecordsRead(manifest) ? '' : 'deployments.json has a value of the wrong type in contracts_release, public_key_registry_verifier, or a field ending in _wasm_hash, so this table ignores the code the file records and leaves out any registry verifier it names. Correct the value, then reload this page.'),
+  });
+}
+
+// By status, and by reason for an unknown one.
+const CODE_STATUS_TEXT = {
+  matches_manifest: 'matches deployments.json; GitHub has no build record for it',
+  differs: 'not the code deployments.json records, or built for another kind of contract',
+  code_unread: 'unknown: could not read the contract\'s code; press Refresh State to try again',
+  no_contract: 'unknown: no contract at this address; check that deployments.json names the right address',
+  no_code: 'unknown: this address is a token, not one of the project\'s contracts; check that deployments.json names the right address',
+  github_unchecked: 'unknown: no usable answer from GitHub; press Refresh State later to try again',
+  not_recorded: 'unknown: GitHub has no build record for it, and deployments.json names no contracts release to compare with',
+};
+
+// A pool verifier is named by the pools its key serves.
+const VERIFIER_LISTS = { '': 'pools with no lists', A: 'allowlist pools', B: 'blocklist pools', AB: 'allowlist and blocklist pools' };
+const VERIFIER_MODES = { gvk_V: 'view-only ', gvk_T: 'traceable ' };
+
+function verifierLabel(key) {
+  const m = /^(A|B|AB)?_?(gvk_[VT])?$/.exec(key ?? '');
+  return m ? `Verifier, ${VERIFIER_MODES[m[2]] ?? ''}${VERIFIER_LISTS[m[1] ?? '']}` : `Verifier (${key})`;
+}
+
+async function codeRow(manifest, row, read) {
+  const item = codeRowTemplate.content.cloneNode(true).firstElementChild;
+  const roleEl = item.querySelector('.code-role');
+  roleEl.textContent = ROLE_LABELS[row.role] ?? verifierLabel(row.key);
+  showAddress(item.querySelector('.code-contract'), row.contractId);
+  const { code, problem: unread, missing } = await read(row.contractId);
+  const { status, reason, repo, commit, runUrl, otherRepo, problem = unread } = await checkCode({ manifest, row, code, fetch, now: Date.now() });
+  const codeStatusEl = item.querySelector('.code-status');
+  const link = item.querySelector('.code-run');
+  if (status === 'attested') {
+    codeStatusEl.textContent = `built by ${repo}${otherRepo ? ', which is not the project\'s official repository,' : ''} from source version ${commit.slice(0, 7)}`;
+    codeStatusEl.classList.toggle('text-amber-300', otherRepo);
+    link.href = runUrl;
+    link.setAttribute('aria-label', `See the build of ${shortAddress(row.contractId)} (${roleEl.textContent}) on GitHub (opens a new tab)`);
+  } else if (status === 'differs') {
+    codeStatusEl.textContent = CODE_STATUS_TEXT.differs;
+    codeStatusEl.classList.add('text-rose-300');
+    link.textContent = 'How to tell which \u2197';
+    // The project's manual: a self-hosted site has no docs/.
+    link.href = 'https://nethermindeth.github.io/stellar-private-payments/docs/operator/deploy.html#check-a-deployments-code';
+    link.setAttribute('aria-label', `How to tell which problem ${shortAddress(row.contractId)} (${roleEl.textContent}) has, in the operator manual (opens a new tab)`);
+  } else {
+    codeStatusEl.textContent = CODE_STATUS_TEXT[reason === 'code_unread' && missing ? 'no_contract' : reason ?? status];
+    link.remove();
+  }
+  if (problem) console.warn(`${row.contractId}: ${problem}`);
+  return item;
+}
+
+// Null code: no Wasm. Undefined code: unreadable, and `problem` says why; `missing` when no contract is there.
+async function readCode(server, contractId) {
+  let wasmHash;
+  try {
+    ({ wasmHash } = await readInstance(server, contractId));
+  } catch (err) {
+    // The SDK throws a 404 when the address has no contract instance.
+    return { problem: err.message, missing: err?.code === 404 };
+  }
+  if (!wasmHash) return { code: null };
+  try {
+    return { code: { hash: hex(wasmHash), meta: await wasmMeta(await server.getContractWasmByHash(wasmHash)) } };
+  } catch (err) {
+    return { problem: err.message };
+  }
+}
+
+// -----------------------------
 // Tab Switching Logic
 // -----------------------------
 const tabBtns = document.querySelectorAll('.tab-btn');
@@ -1560,6 +1662,7 @@ refreshBtn.addEventListener('click', () => {
   if (state.repoint?.lines) resetRepoint();
   if (!state.busy) renderAdminTx(state.adminTxKind);
   refreshState({ unlock: true });
+  refreshCode();
 });
 
 addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
@@ -1617,6 +1720,8 @@ nonMembershipContractInput?.addEventListener('input', () => {
 
 async function init() {
   setStatus('Initializing...', 'info');
+  // Before the unlock and the wallet, which it needs neither of.
+  refreshCode();
   await loadExplorerSetting();
   if (storageWasLocked() && !isStorageUnlocked()) {
     await refreshPools();
