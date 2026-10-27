@@ -24,7 +24,7 @@ account's signers review, sign, and submit it. Its tabs:
 
 | Tab | Purpose |
 | --- | --- |
-| Overview | The tree addresses the other tabs write to, and each tree's state |
+| Overview | The tree addresses the other tabs write to, each tree's state, and where each contract's code was built, from GitHub's build records |
 | Allowlist | Add members |
 | Blocklist | Add and remove keys |
 | Global View | Decrypt and export a GVK pool's notes with the GVK private key |
