@@ -63,9 +63,22 @@ Options:
   --vk-json JSON        Verification key as a JSON string (snarkjs or repo format).
                         Applies to allowlist-blocklist (AB suffix) verifier builds only.
   --vk-file PATH        Path to a verification key JSON file (allowlist-blocklist only)
-  --skip-init           Deploy WASM only (no constructors). Writes verifiers under the
-                        circuit suffix key ("", A, B, AB, B_gvk_T, ...); use --policy-flags
-                        or per-pool prefixes when the suffix is not otherwise known.
+  --skip-init           Deploy Wasm only (no constructors). Writes verifiers under their
+                        key name ("", A, B, AB, B_gvk_T, ...); use --policy-flags or
+                        per-pool prefixes when the key name is not otherwise known.
+  --release-dir DIR     Deploy the Wasm of a contracts release downloaded with
+                        `gh release download` instead of building. Checks that
+                        contracts-release.yml attested its SHA256SUMS and that every
+                        file used matches SHA256SUMS, and picks each verifier whose
+                        contracts.json entry and Wasm meta name this network's key
+                        file. Cannot be combined with --vk-json, --vk-file, or
+                        --skip-init
+  --release-repo OWNER/REPO
+                        Repository whose contracts-release.yml must have attested the
+                        release (default: NethermindEth/stellar-private-payments)
+  --allow-unverified    With --release-dir, print a warning instead of failing when the
+                        attestation cannot be verified. On mainnet, also allow building
+                        the contracts locally instead of passing --release-dir
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
@@ -102,11 +115,13 @@ Examples:
     --kdf-domain Nethermind
 
 Notes:
-  - Each (policy, GVK mode) pair needs its own verifier contract (VK is baked into the WASM).
-  - The registry's verifier is built from deployments/<network>/circuit_keys/keyOwnership_vk.json.
+  - Each (policy, GVK mode) pair needs its own verifier contract (the verifying key is built
+    into the Wasm).
+  - The registry's verifier is built from, or with --release-dir picked by the hash of,
+    deployments/<network>/circuit_keys/keyOwnership_vk.json.
   - Per-pool policyFlags / gvkMode are written to deployments/<network>/deployments.json.
-  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
-    are taken from deployments/<network>/circuit_keys/ automatically.
+  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys, and never on
+    mainnet; other VKs are taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
@@ -135,6 +150,9 @@ GVK_AUTHORITY_PUB_KEY_JSON=""
 GVK_AUTHORITY_PUB_KEY_FILE=""
 SKIP_INIT=false
 YES=false
+RELEASE_DIR=""
+RELEASE_REPO="NethermindEth/stellar-private-payments"
+ALLOW_UNVERIFIED=false
 
 policy_suffix_label() {
   if [[ -z "$1" ]]; then
@@ -452,6 +470,9 @@ while [[ $# -gt 0 ]]; do
     --vk-json) VK_JSON="$2"; shift 2 ;;
     --vk-file) VK_FILE="$2"; shift 2 ;;
     --skip-init) SKIP_INIT=true; shift ;;
+    --release-dir) RELEASE_DIR="$2"; shift 2 ;;
+    --release-repo) RELEASE_REPO="$2"; shift 2 ;;
+    --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
     --yes) YES=true; shift ;;
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
@@ -470,6 +491,8 @@ NETWORK_METADATA="$(stellar network ls --long | jq -Rs --arg name "$NETWORK" '
   map(select(.Name == $name)) | first |
   if .["RPC url"] == null or .["Network passphrase"] == null then error("network metadata missing")
   else {rpcUrl: .["RPC url"], networkPassphrase: .["Network passphrase"]} end')" || die "failed to resolve network metadata"
+IS_MAINNET="$(jq '.networkPassphrase == "Public Global Stellar Network ; September 2015"' \
+  <<<"$NETWORK_METADATA")"
 
 need stellar
 need jq
@@ -487,8 +510,26 @@ if [[ -n "$GVK_AUTHORITY_PUB_KEY_JSON" && -n "$GVK_AUTHORITY_PUB_KEY_FILE" ]]; t
   die "use only one of --gvk-authority-pubkey or --gvk-authority-pubkey-file"
 fi
 
-if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
-  die "mainnet requires --yes"
+if [[ "$IS_MAINNET" == "true" ]]; then
+  [[ "$YES" == "true" ]] || die "mainnet requires --yes"
+  if [[ -z "$RELEASE_DIR" ]]; then
+    [[ "$ALLOW_UNVERIFIED" == "true" ]] \
+      || die "mainnet deploys only the contracts of a release; pass --release-dir, or" \
+        "--allow-unverified to build them locally"
+    warn "building the contracts locally instead of deploying a release," \
+      "because of --allow-unverified"
+  fi
+  [[ -z "$VK_JSON$VK_FILE" ]] \
+    || die "mainnet refuses --vk-json and --vk-file; commit the key file under" \
+      "deployments/$NETWORK/circuit_keys instead"
+  # A link would let another network's key file stand in for this network's.
+  keys_dir="deployments/$NETWORK/circuit_keys"
+  [[ "$(cd "$ROOT_DIR/$keys_dir" && pwd -P)" == "$(cd "$ROOT_DIR" && pwd -P)/$keys_dir" ]] \
+    || die "$ROOT_DIR/$keys_dir must be a real directory on mainnet, not a link and not inside a" \
+      "linked directory; copy this network's key files into a real directory there"
+  for vk in "$ROOT_DIR/$keys_dir"/*_vk.json; do
+    [[ ! -L "$vk" ]] || die "$vk must be a file on mainnet, not a link"
+  done
 fi
 
 if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
@@ -633,49 +674,6 @@ build_verifier_wasm_for_key() {
   [[ -z "$tmp_vk" ]] || rm -f "$tmp_vk"
 }
 
-step "build contracts"
-mkdir -p "$WASM_DIR"
-for pkg in asp-membership asp-non-membership public-key-registry pool; do
-  stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
-    --package "$pkg" >/dev/null
-done
-if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
-  stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
-    --package pool-gvk >/dev/null
-  cp "$WASM_DIR/pool_gvk.wasm" "$WASM_DIR/pool-gvk.wasm"
-fi
-
-REGISTRY_VERIFIER_WASM="$WASM_DIR/circom_groth16_verifier_keyOwnership.wasm"
-if [[ "$SKIP_INIT" != "true" ]]; then
-  _u_i=0
-  _u_len="$(array_len UNIQUE_VERIFIER_KEYS)"
-  while [[ "$_u_i" -lt "$_u_len" ]]; do
-    build_verifier_wasm_for_key "${UNIQUE_VERIFIER_KEYS[$_u_i]}"
-    _u_i=$((_u_i + 1))
-  done
-
-  registry_vk="$ROOT_DIR/deployments/$NETWORK/circuit_keys/keyOwnership_vk.json"
-  [[ -f "$registry_vk" ]] || die "VK not found for the registry verifier: $registry_vk"
-  step "building verifier WASM for the public key registry from $registry_vk"
-  "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" \
-    "$registry_vk" --out-dir "$WASM_DIR" --wasm-name "$(basename "$REGISTRY_VERIFIER_WASM")"
-  [[ -f "$REGISTRY_VERIFIER_WASM" ]] || die "missing wasm: $REGISTRY_VERIFIER_WASM"
-fi
-
-ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
-ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
-PUBLIC_KEY_REGISTRY_WASM="$WASM_DIR/public_key_registry.wasm"
-POOL_WASM="$WASM_DIR/pool.wasm"
-POOL_GVK_WASM="$WASM_DIR/pool-gvk.wasm"
-
-[[ -f "$ASP_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_MEMBERSHIP_WASM"
-[[ -f "$ASP_NON_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_NON_MEMBERSHIP_WASM"
-[[ -f "$PUBLIC_KEY_REGISTRY_WASM" ]] || die "missing wasm: $PUBLIC_KEY_REGISTRY_WASM"
-[[ -f "$POOL_WASM" ]] || die "missing wasm: $POOL_WASM"
-if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
-  [[ -f "$POOL_GVK_WASM" ]] || die "missing wasm: $POOL_GVK_WASM"
-fi
-
 # The network names uploaded code by the SHA-256 of its bytes.
 wasm_hash() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -684,6 +682,161 @@ wasm_hash() {
     shasum -a 256 "$1" | cut -d' ' -f1
   fi
 }
+
+# Dies unless release file $1 has the hash the release's SHA256SUMS lists for it.
+release_summed() {
+  [[ -f "$RELEASE_DIR/$1" && "$(wasm_hash "$RELEASE_DIR/$1")" \
+    == "$(awk -v f="$1" '$2 == f { print $1 }' "$RELEASE_DIR/SHA256SUMS")" ]] \
+    || die "$1 is missing from $RELEASE_DIR or does not match its SHA256SUMS; download the" \
+      "release again into a new directory"
+}
+
+# Copies release Wasm $1 to $2, dying unless its own meta builds exactly one package, $3, and,
+# for a verifier, with exactly one feature, $4.
+release_wasm() {
+  local opts held
+  release_summed "$1"
+  opts="$(stellar contract info meta --quiet --wasm "$RELEASE_DIR/$1" --output json \
+    | jq -r '.[].sc_meta_v0 | select(.key == "bldopt") | .val')" \
+    || die "cannot read the meta of $RELEASE_DIR/$1"
+  held="${opts//$'\n'/ }"
+  [[ "$(grep '^--package=' <<<"$opts")" == "--package=$3" ]] \
+    && [[ -z "${4:-}" || "$(grep '^--features=' <<<"$opts")" == "--features=$4" ]] \
+    || die "$1 is not the build of $3${4:+ with --features=$4} that contracts.json lists: its" \
+      "meta must hold exactly one bldopt=--package=$3${4:+ and one bldopt=--features=$4}, but" \
+      "holds: ${held:-no bldopt}; do not deploy this release"
+  cp "$RELEASE_DIR/$1" "$2"
+}
+
+# Copies the release's Wasm of package $1 to $2.
+release_contract() {
+  local file
+  file="$(jq -r --arg p "$1" 'first(.contracts[] | select(.package == $p) | .file) // empty' \
+    "$RELEASE_JSON")"
+  [[ -n "$file" ]] || die "$RELEASE_JSON has no Wasm for package $1"
+  release_wasm "$file" "$2" "$1"
+}
+
+if [[ -n "$RELEASE_DIR" ]]; then
+  [[ -z "$VK_JSON$VK_FILE" && "$SKIP_INIT" != "true" ]] \
+    || die "--release-dir cannot be combined with --vk-json, --vk-file, or --skip-init"
+  [[ -f "$RELEASE_DIR/SHA256SUMS" ]] \
+    || die "$RELEASE_DIR/SHA256SUMS not found; pass the directory gh release download wrote the" \
+      "release to"
+
+  step "verify the attestation of $RELEASE_DIR/SHA256SUMS"
+  unverified="cannot verify that contracts-release.yml in $RELEASE_REPO attested $RELEASE_DIR/SHA256SUMS"
+  next="gh's error above says why. For a release from another repository, pass --release-repo OWNER/REPO"
+  if ! command -v gh >/dev/null 2>&1; then
+    unverified+=": gh is not installed"
+    next="install the GitHub CLI and run gh auth login"
+  elif gh attestation verify "$RELEASE_DIR/SHA256SUMS" \
+    --repo "$RELEASE_REPO" --source-ref refs/heads/main --deny-self-hosted-runners \
+    --cert-identity "https://github.com/$RELEASE_REPO/.github/workflows/contracts-release.yml@refs/heads/main" \
+    >&2; then
+    unverified=""
+  fi
+  if [[ -n "$unverified" ]]; then
+    [[ "$ALLOW_UNVERIFIED" == "true" ]] \
+      || die "$unverified; $next. --allow-unverified deploys it without this check"
+    warn "$unverified; deploying it anyway because of --allow-unverified"
+  fi
+
+  release_summed contracts.json
+  RELEASE_JSON="$RELEASE_DIR/contracts.json"
+  release_repo="$(jq -r '.repo // empty' "$RELEASE_JSON")"
+  [[ -n "$release_repo" ]] \
+    || die "$RELEASE_JSON names no repository, because build-contracts.sh ran without --tag and" \
+      "--repo; run it again with both, or download a published release"
+  [[ "$release_repo" == "$RELEASE_REPO" ]] \
+    || die "$RELEASE_JSON names repository $release_repo, not $RELEASE_REPO;" \
+      "pass --release-repo for a release from another repository"
+  # A fresh directory, so no file from an earlier local build can be deployed.
+  WASM_DIR="$(mktemp -d)"
+  trap 'rm -rf "$WASM_DIR"' EXIT
+fi
+
+ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
+ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
+PUBLIC_KEY_REGISTRY_WASM="$WASM_DIR/public_key_registry.wasm"
+POOL_WASM="$WASM_DIR/pool.wasm"
+POOL_GVK_WASM="$WASM_DIR/pool-gvk.wasm"
+REGISTRY_VERIFIER_WASM="$WASM_DIR/$(verifier_wasm_name_for_key keyOwnership)"
+REGISTRY_VK="$ROOT_DIR/deployments/$NETWORK/circuit_keys/keyOwnership_vk.json"
+
+if [[ -n "$RELEASE_DIR" ]]; then
+  step "check the release's Wasm"
+  RELEASE_NETWORK=""
+  for key in "${UNIQUE_VERIFIER_KEYS[@]}" keyOwnership; do
+    if [[ "$key" == keyOwnership ]]; then
+      vk="$REGISTRY_VK"
+    else
+      vk="$(default_vk_file "$NETWORK" "$key")"
+    fi
+    [[ -f "$vk" ]] || die "no key file for key name $(policy_suffix_label "$key"): $vk"
+    # Two networks can share a key file; prefer this network's build of it.
+    entry="$(jq -c --arg h "$(wasm_hash "$vk")" --arg n "$NETWORK" '
+      [.contracts[] | select(.package == "circom-groth16-verifier" and .vk_sha256 == $h)]
+      | (map(select(.network == $n)) + .)[0] // empty' "$RELEASE_JSON")"
+    [[ -n "$entry" ]] \
+      || die "the release has no verifier for key name $(policy_suffix_label "$key") built from" \
+        "$vk; deploy from a release published after this key file was committed, as DEPLOY.md's" \
+        "Deploy from a release describes"
+    file="$(jq -r .file <<<"$entry")"
+    net="$(jq -r .network <<<"$entry")"
+    [[ "$(jq -r .key_name <<<"$entry")" == "$key" ]] \
+      || die "contracts.json lists $file as built from $vk, but not with key name $(policy_suffix_label "$key")"
+    [[ -z "$RELEASE_NETWORK" || "$net" == "$RELEASE_NETWORK" ]] \
+      || die "the release's verifiers for this deployment were built for both $RELEASE_NETWORK and $net"
+    [[ "$IS_MAINNET" != "true" || "$net" == "$NETWORK" ]] \
+      || die "$file was built for network $net, and mainnet deploys only verifiers built for" \
+        "$NETWORK; commit $NETWORK's key files and features, then deploy from a release" \
+        "published after them, as DEPLOY.md's Deploy from a release describes"
+    RELEASE_NETWORK="$net"
+    release_wasm "$file" "$WASM_DIR/$(verifier_wasm_name_for_key "$key")" circom-groth16-verifier \
+      "$(printf 'vk-%s-%s' "$net" "${key:-none}" | tr '[:upper:]' '[:lower:]' | tr _ -)"
+  done
+  release_contract asp-membership "$ASP_MEMBERSHIP_WASM"
+  release_contract asp-non-membership "$ASP_NON_MEMBERSHIP_WASM"
+  release_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM"
+  release_contract pool "$POOL_WASM"
+  release_contract pool-gvk "$POOL_GVK_WASM"
+else
+  step "build contracts"
+  mkdir -p "$WASM_DIR"
+  for pkg in asp-membership asp-non-membership public-key-registry pool; do
+    stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
+      --package "$pkg" >/dev/null
+  done
+  if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
+    stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
+      --package pool-gvk >/dev/null
+    cp "$WASM_DIR/pool_gvk.wasm" "$WASM_DIR/pool-gvk.wasm"
+  fi
+
+  if [[ "$SKIP_INIT" != "true" ]]; then
+    _u_i=0
+    _u_len="$(array_len UNIQUE_VERIFIER_KEYS)"
+    while [[ "$_u_i" -lt "$_u_len" ]]; do
+      build_verifier_wasm_for_key "${UNIQUE_VERIFIER_KEYS[$_u_i]}"
+      _u_i=$((_u_i + 1))
+    done
+
+    [[ -f "$REGISTRY_VK" ]] || die "VK not found for the registry verifier: $REGISTRY_VK"
+    step "building verifier WASM for the public key registry from $REGISTRY_VK"
+    "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" \
+      "$REGISTRY_VK" --out-dir "$WASM_DIR" --wasm-name "$(basename "$REGISTRY_VERIFIER_WASM")"
+    [[ -f "$REGISTRY_VERIFIER_WASM" ]] || die "missing wasm: $REGISTRY_VERIFIER_WASM"
+  fi
+fi
+
+[[ -f "$ASP_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_MEMBERSHIP_WASM"
+[[ -f "$ASP_NON_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_NON_MEMBERSHIP_WASM"
+[[ -f "$PUBLIC_KEY_REGISTRY_WASM" ]] || die "missing wasm: $PUBLIC_KEY_REGISTRY_WASM"
+[[ -f "$POOL_WASM" ]] || die "missing wasm: $POOL_WASM"
+if [[ "$NEEDS_GVK_POOL" == "true" ]]; then
+  [[ -f "$POOL_GVK_WASM" ]] || die "missing wasm: $POOL_GVK_WASM"
+fi
 
 ASP_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_MEMBERSHIP_WASM")"
 ASP_NON_MEMBERSHIP_WASM_HASH="$(wasm_hash "$ASP_NON_MEMBERSHIP_WASM")"
@@ -906,7 +1059,34 @@ registry_verifier_json=""
 [[ -z "$REGISTRY_VERIFIER_ID" ]] \
   || registry_verifier_json=",\"public_key_registry_verifier\":\"$REGISTRY_VERIFIER_ID\",\"public_key_registry_verifier_wasm_hash\":\"$REGISTRY_VERIFIER_WASM_HASH\""
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\"${registry_verifier_json},\"pools\":$pools_json}"
+contracts_release_json=""
+if [[ -n "$RELEASE_DIR" ]]; then
+  code_json="$({
+    printf '%s %s\n' "$ASP_MEMBERSHIP_ID" "$ASP_MEMBERSHIP_WASM_HASH" \
+      "$ASP_NON_MEMBERSHIP_ID" "$ASP_NON_MEMBERSHIP_WASM_HASH" \
+      "$PUBLIC_KEY_REGISTRY_ID" "$(wasm_hash "$PUBLIC_KEY_REGISTRY_WASM")" \
+      "$REGISTRY_VERIFIER_ID" "$REGISTRY_VERIFIER_WASM_HASH"
+    _vi=0
+    while [[ "$_vi" -lt "$(array_len VERIFIER_KEY_LIST)" ]]; do
+      printf '%s %s\n' "${VERIFIER_ID_LIST[$_vi]}" \
+        "$(wasm_hash "$WASM_DIR/$(verifier_wasm_name_for_key "${VERIFIER_KEY_LIST[$_vi]}")")"
+      _vi=$((_vi + 1))
+    done
+    _pi=0
+    while [[ "$_pi" -lt "$(array_len POOL_IDS)" ]]; do
+      pool_wasm="$POOL_WASM"
+      [[ "${POOL_GVK_MODES[$_pi]}" == "off" ]] || pool_wasm="$POOL_GVK_WASM"
+      printf '%s %s\n' "${POOL_IDS[$_pi]}" "$(wasm_hash "$pool_wasm")"
+      _pi=$((_pi + 1))
+    done
+  } | jq -Rn '[inputs | split(" ") | {key: .[0], value: .[1]}] | from_entries')"
+  contracts_release_json=",\"contracts_release\":$(jq -c --arg repo "$RELEASE_REPO" \
+    --arg network "$RELEASE_NETWORK" --argjson code "$code_json" \
+    '{tag, repo: $repo, network: $network, commit, release_url, source_sha256: .source.sha256,
+      code: $code}' "$RELEASE_JSON")"
+fi
+
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"kdf_domain\":$(jq -Rn --arg d "$KDF_DOMAIN" '$d'),\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"added_asp_memberships\":[],\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"asp_membership_wasm_hash\":\"$ASP_MEMBERSHIP_WASM_HASH\",\"asp_non_membership_wasm_hash\":\"$ASP_NON_MEMBERSHIP_WASM_HASH\",${verifiers_json},\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\"${registry_verifier_json},\"pools\":$pools_json${contracts_release_json}}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"
@@ -917,5 +1097,8 @@ printf '%s\n' "$DEPLOY_JSON_PRETTY"
 # A --skip-init deployment runs no constructors, so it stores no admin and every check would fail.
 if [[ "$SKIP_INIT" != "true" ]]; then
   step "verify the deployment against its manifest"
-  "$SCRIPT_DIR/verify-deployment.sh" "$NETWORK" --manifest "$DEPLOYMENTS_DIR/deployments.json" >&2
+  verify=("$SCRIPT_DIR/verify-deployment.sh" "$NETWORK" \
+    --manifest "$DEPLOYMENTS_DIR/deployments.json")
+  [[ "$ALLOW_UNVERIFIED" != "true" ]] || verify+=(--allow-unverified)
+  "${verify[@]}" >&2
 fi

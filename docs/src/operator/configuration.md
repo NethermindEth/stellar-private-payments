@@ -19,7 +19,7 @@ asking users to move.
 | KDF domain | `--kdf-domain` | Any string | Part of the message users sign to derive their keys. The same wallet gets different keys under another domain. |
 | Pool depth | `--pool-levels` | `20` | The committed circuits prove against 20 levels. See [Limits](features-and-limits.md#limits) for the capacity this gives. |
 | Allowlist depth | `--asp-levels` | `10` | The committed circuits prove against 10 levels. |
-| Verifier | Built by `deploy.sh` | One per policy and GVK mode in use | The verifying key is built into the verifier, and a pool's verifier is fixed. |
+| Verifier | Picked from the release by `deploy.sh`, or built by it without `--release-dir` | One per policy and GVK mode in use | The verifying key is built into the verifier, and a pool's verifier is fixed. |
 
 One `deploy.sh` run deploys one allowlist, one blocklist, and one public key registry, and every
 pool in the run shares them, along with the admin and the KDF domain.

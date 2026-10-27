@@ -12,11 +12,13 @@ differs.
 | Allowlist | The tree of approved members (`asp-membership`). A pool with the allowlist policy accepts only spenders whose leaf is in it. |
 | ASP | Association set provider: whoever maintains a pool's allowlist or blocklist. |
 | ASP secret | A per-user value derived from the user's key-derivation signature (`membership_blinding`). It blinds the user's allowlist leaf. |
+| Attestation | GitHub's signed record that a workflow run built a file. `deploy.sh` and `verify-deployment.sh` check that the `contracts-release.yml` workflow on `main` made the one for a release's `SHA256SUMS`. |
 | Authority | The party a user sends a disclosure receipt to. Used only for selective disclosure. |
 | Blocklist | The sparse Merkle tree of blocked note public keys (`asp-non-membership`). A pool with the blocklist policy refuses spenders whose key is in it. |
 | Bootnode | A service that archives a deployment's contract events and serves them to clients that fall behind the RPC's event retention. |
 | Circuit | The program a proof is about. Each policy and GVK mode has its own transaction circuit. |
 | Commitment | The hash of a note that the pool stores in its commitment tree. |
+| Contracts release | The GitHub release `contracts-vVERSION` that holds the Wasm of every contract and verifier, the source archive they were built from, `contracts.json`, and `SHA256SUMS`. Bumping the contracts version on `main` publishes one. |
 | Deployer | The account that pays for the deployment. It keeps no power once the contracts name another admin. |
 | Deployment ledger | The ledger a contract was deployed in. Clients and the bootnode read its events from there. |
 | Deposit pause | A flag on one pool that, while set, refuses deposits. Transfers and withdrawals still go through. |
@@ -24,6 +26,7 @@ differs.
 | GVK | Global View Key: a Baby JubJub key pair fixed in a `pool-gvk` pool at construction. Every note in that pool is encrypted to the GVK public key. |
 | GVK holder | Whoever holds a GVK private key, and so can decrypt that pool's notes. The GVK holder need not be the admin. |
 | KDF domain | Key derivation function domain (`kdf_domain`): a string, fixed per deployment, inside the message users sign to derive their note key, encryption key, and ASP secret. |
+| Key name | The name a policy and GVK mode give their verifying key and verifier: `B` for blocklist, `AB_gvk_T` for allowlist and blocklist with traceable GVK, and the empty name `""`, which messages print as none, for no policy with GVK off. The manifest's `verifiers` lists each verifier under its key name. |
 | Leaf | An entry in a tree. An allowlist leaf is the hash of a note public key and an ASP secret. |
 | Manifest | The file `deploy.sh` writes, `deployments/NETWORK/deployments.json`. Clients read the deployment's contract addresses from it. |
 | Note | A private balance: an amount, the owner's note public key, and a random blinding. |
