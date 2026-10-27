@@ -139,7 +139,7 @@
                     <p class="mt-1 text-sm text-slate-400">Where each contract's code was built, from GitHub's build records. A build record says where the code came from, not that it is safe. This page sends a fingerprint of each contract's code, and your IP address, to GitHub when you open it and when you press Refresh State.</p>
                     <table class="mt-4 w-full text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-400">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
                                 <th class="pb-3 font-medium" scope="col">Build record</th>
                             </tr>
@@ -308,7 +308,7 @@
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-400">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
@@ -328,7 +328,7 @@
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointPool">Pool</label>
-                            <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
+                            <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
                         </div>
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">List</label>
@@ -372,7 +372,7 @@
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                         <div class="flex-1">
                             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
-                            <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
+                            <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
                         </div>
                         <button class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="buildPauseAuthBtn" type="button" disabled>
                             New pause file
@@ -405,7 +405,7 @@
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="text-[10px] uppercase tracking-wide text-slate-400">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Kind</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Admin</th>
@@ -489,7 +489,10 @@
     <!-- Pool Row Template -->
     <template id="tpl-pool-row">
         <tr>
-            <td class="pool-id py-3 pr-4 font-mono text-xs text-slate-200"></td>
+            <td class="py-3 pr-4">
+                <div class="pool-label text-[10px] uppercase tracking-wide text-slate-400"></div>
+                <div class="pool-id mt-1 font-mono text-xs text-slate-200"></div>
+            </td>
             <td class="pool-trees py-3 pr-4 whitespace-nowrap font-mono text-xs text-slate-300"></td>
             <td class="pool-deposits py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="py-3">
@@ -505,7 +508,7 @@
     <template id="tpl-code-row">
         <tr class="align-middle">
             <td class="py-3 pr-4">
-                <div class="code-role text-[10px] uppercase tracking-wide text-slate-500"></div>
+                <div class="code-role text-[10px] uppercase tracking-wide text-slate-400"></div>
                 <div class="code-contract mt-1 font-mono text-xs text-slate-200"></div>
             </td>
             <td class="py-3 text-xs text-slate-300">
@@ -545,7 +548,7 @@
     <!-- Admin Row Template -->
     <template id="tpl-admin-row">
         <tr class="whitespace-nowrap align-middle">
-            <td class="admin-label py-3 pr-4 text-[10px] uppercase tracking-wide text-slate-500"></td>
+            <td class="admin-label w-40 whitespace-normal py-3 pr-4 text-[10px] uppercase tracking-wide text-slate-400"></td>
             <td class="admin-contract py-3 pr-4 font-mono text-xs text-slate-200"></td>
             <td class="admin-current py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="admin-pending py-3 pr-4 font-mono text-xs text-slate-300"></td>

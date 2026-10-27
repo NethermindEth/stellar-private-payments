@@ -845,11 +845,11 @@ async function refreshPools() {
     [repointPoolSelect, pauseAuthPoolSelect].forEach((select) => {
       // Keep the operator's pick across a refresh.
       const chosen = select.value;
-      select.replaceChildren(...state.pools.map((contractId) => new Option(shortAddress(contractId), contractId)));
+      select.replaceChildren(...pools.map((pool) => new Option(`${poolName(pool)}, ${shortAddress(pool.poolContractId)}`, pool.poolContractId)));
       if (state.pools.includes(chosen)) select.value = chosen;
     });
     listed = state.pools.length;
-    return state.pools.map((contractId) => poolRow(contractId, lists));
+    return pools.map((pool) => poolRow(pool.poolContractId, poolName(pool), lists));
   });
   // One unread pool: can't tell which lists are unused.
   state.poolLists = lists.size === listed ? lists : null;
@@ -857,8 +857,9 @@ async function refreshPools() {
 }
 
 // No `deposits_paused`, or unreadable: no buttons. Records the lists it uses in `lists`.
-async function poolRow(contractId, lists) {
+async function poolRow(contractId, label, lists) {
   const row = poolRowTemplate.content.cloneNode(true).firstElementChild;
+  row.querySelector('.pool-label').textContent = label;
   showAddress(row.querySelector('.pool-id'), contractId);
   const depositsEl = row.querySelector('.pool-deposits');
   try {
@@ -1413,7 +1414,6 @@ async function submitPauseFiles() {
 // -----------------------------
 // Labels for the Admins and Contract code tables.
 const ROLE_LABELS = {
-  pool: 'Pool',
   asp_membership: 'Allowlist',
   added_asp_membership: 'Added allowlist',
   asp_non_membership: 'Blocklist',
@@ -1421,13 +1421,21 @@ const ROLE_LABELS = {
   public_key_registry_verifier: 'Registry verifier',
 };
 
+// Asset and lists, in the words of the verifier labels, so pools on one asset differ.
+function poolName(pool) {
+  const flags = pool.policyFlags ?? [];
+  const lists = ['allowlist', 'blocklist'].filter((list) => flags.includes(list)).join(' and ') || 'no lists';
+  const mode = { viewOnly: 'view-only ', traceable: 'traceable ' }[pool.gvkMode] ?? '';
+  return `${Utils.poolLabel(pool)}, ${mode}${lists}`;
+}
+
 // Lists each contract the manifest names, a disabled pool too, with its admin
 // and its pending admin.
 function refreshAdmins() {
   return fillTable(adminRowsEl, adminsNoticeEl, 'admins', ({ pools, asp_membership, added_asp_memberships: added = [], asp_non_membership }) => {
     state.addedAllowlists = added.map(({ contractId }) => contractId);
     return [
-      ...pools.map(({ poolContractId }) => ({ label: ROLE_LABELS.pool, kind: 'pool', contractId: poolContractId })),
+      ...pools.map((pool) => ({ label: `Pool, ${poolName(pool)}`, kind: 'pool', contractId: pool.poolContractId })),
       { label: ROLE_LABELS.asp_membership, kind: 'asp-membership', contractId: asp_membership },
       ...added.map(({ contractId }) => ({ label: ROLE_LABELS.added_asp_membership, kind: 'asp-membership', contractId })),
       { label: ROLE_LABELS.asp_non_membership, kind: 'asp-non-membership', contractId: asp_non_membership },
@@ -1555,7 +1563,9 @@ function verifierLabel(key) {
 async function codeRow(manifest, row, read) {
   const item = codeRowTemplate.content.cloneNode(true).firstElementChild;
   const roleEl = item.querySelector('.code-role');
-  roleEl.textContent = ROLE_LABELS[row.role] ?? verifierLabel(row.key);
+  roleEl.textContent = row.role === 'pool'
+    ? `Pool, ${poolName(manifest.pools.find(({ poolContractId }) => poolContractId === row.contractId))}`
+    : ROLE_LABELS[row.role] ?? verifierLabel(row.key);
   showAddress(item.querySelector('.code-contract'), row.contractId);
   const { code, problem: unread, missing } = await read(row.contractId);
   const { status, reason, repo, commit, runUrl, otherRepo, problem = unread } = await checkCode({ manifest, row, code, fetch, now: Date.now() });
