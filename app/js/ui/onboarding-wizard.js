@@ -492,7 +492,7 @@ export async function runOnboardingWizard({
 
             let permStatus = null;
             if (enableNotifications) {
-                permStatus = el('p', 'text-xs text-slate-500', `Current permission: ${Notification.permission}`);
+                permStatus = el('p', 'text-xs text-slate-400', `Current permission: ${Notification.permission}`);
                 inputWrap.appendChild(elc('div', 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2', [
                     el('p', 'font-medium text-white', 'Browser reminder'),
                     el('p', null, 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.'),

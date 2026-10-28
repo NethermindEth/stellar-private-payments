@@ -136,7 +136,7 @@ export const Dashboard = {
             top.appendChild(el('span', `font-mono text-sm ${op.direction === 'out' ? 'text-rose-200' : 'text-cyan-100'}`, amountText));
             row.appendChild(top);
 
-            const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-[11px] text-slate-500');
+            const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-[11px] text-slate-400');
             if (op.counterparty) {
                 const cp = el('button', 'break-all text-left text-slate-400 transition hover:text-cyan-100', `→ ${shortHex(op.counterparty, 8, 6)}`);
                 cp.type = 'button';
