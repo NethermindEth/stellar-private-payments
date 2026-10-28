@@ -45,7 +45,7 @@
         <header class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
             <div class="flex flex-col gap-4">
                 <div class="flex items-center gap-4">
-                    <a href="index.html" title="Go to Home" class="cursor-pointer text-2xl font-semibold tracking-tight text-white transition hover:opacity-80">
+                    <a href="index.html" title="Go to Home" class="section-title cursor-pointer transition hover:opacity-80">
                         Stellar Private Payments <span class="text-cyan-300 font-normal tracking-normal ml-1">Admin</span>
                     </a>
                 </div>
@@ -86,8 +86,8 @@
             <section id="overview" class="tab-content rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="state-heading">
                 <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contracts and State</p>
-                        <h2 id="state-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">System Overview</h2>
+                        <p class="eyebrow">Contracts and State</p>
+                        <h2 id="state-heading" class="section-title mt-2">System Overview</h2>
                     </div>
                     <button class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" id="refreshBtn" type="button">
                         Refresh State
@@ -99,14 +99,14 @@
                     <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                         <div>
                             <div class="flex items-center justify-between gap-2">
-                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="membershipContract">ASP Membership Contract ID</label>
+                                <label class="field-label" for="membershipContract">ASP Membership Contract ID</label>
                                 <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
                             <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
                             <div class="flex items-center justify-between gap-2">
-                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+                                <label class="field-label" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
                                 <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
                             <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
@@ -116,19 +116,19 @@
                     <!-- State Details -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Root</div>
+                            <div class="field-label text-3xs">Membership Root</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="membershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Levels</div>
+                            <div class="field-label text-3xs">Membership Levels</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipLevels" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Next Index</div>
+                            <div class="field-label text-3xs">Membership Next Index</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipNextIndex" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Non-Membership Root</div>
+                            <div class="field-label text-3xs">Non-Membership Root</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="nonMembershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                     </div>
@@ -138,18 +138,18 @@
             <!-- 2. Allowlist Tab -->
             <section id="allowlist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="membership-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Membership</p>
-                    <h2 id="membership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Allowlist Management</h2>
+                    <p class="eyebrow">Membership</p>
+                    <h2 id="membership-heading" class="section-title mt-2">Allowlist Management</h2>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
                     <div class="space-y-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistPublicKey">User Note Public Key</label>
+                            <label class="field-label" for="allowlistPublicKey">User Note Public Key</label>
                             <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="allowlistPublicKey" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistAspSecret">ASP Secret</label>
+                            <label class="field-label" for="allowlistAspSecret">ASP Secret</label>
                             <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="allowlistAspSecret" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
                         </div>
                     </div>
@@ -162,12 +162,12 @@
             <!-- 3. Blocklist Tab -->
             <section id="blocklist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="nonmembership-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Non-Membership</p>
-                    <h2 id="nonmembership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Blocklist Management</h2>
+                    <p class="eyebrow">Non-Membership</p>
+                    <h2 id="nonmembership-heading" class="section-title mt-2">Blocklist Management</h2>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
-                    <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="blocklistPublicKey">User Note Public Keys, one per line</label>
+                    <label class="field-label" for="blocklistPublicKey">User Note Public Keys, one per line</label>
                     <textarea class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="blocklistPublicKey" rows="4" placeholder="0x..." autocomplete="off" spellcheck="false"></textarea>
 
                     <div class="mt-6 flex flex-col sm:flex-row gap-3">
@@ -185,8 +185,8 @@
             <section id="global-view" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="global-view-heading">
                 <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Pool Audit</p>
-                        <h2 id="global-view-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Global View</h2>
+                        <p class="eyebrow">Pool Audit</p>
+                        <h2 id="global-view-heading" class="section-title mt-2">Global View</h2>
                         <p class="mt-2 text-sm text-slate-400">Decrypt and verify pool transacts with the admin authority key. No wallet required.</p>
                     </div>
                     <div class="flex flex-wrap gap-2">
@@ -201,13 +201,13 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                     <div>
-                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPoolSelect">Pool</label>
+                        <label class="field-label" for="gvkPoolSelect">Pool</label>
                         <select id="gvkPoolSelect" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40">
                             <option value="">Loading pools...</option>
                         </select>
                     </div>
                     <div>
-                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPrivateKey">Authority private key (d)</label>
+                        <label class="field-label" for="gvkPrivateKey">Authority private key (d)</label>
                         <input id="gvkPrivateKey" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
                         <p id="gvkKeyHint" class="mt-2 text-xs text-slate-500">Loaded from local DB when available; not saved from this page.</p>
                     </div>
@@ -235,14 +235,14 @@
 
                 <div class="rounded-2xl border border-white/8 bg-ink-950/40 p-4">
                     <div class="flex items-center justify-between">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Filters</p>
+                        <p class="field-label">Filters</p>
                         <button type="button" id="gvkFiltersClearBtn" class="text-xs font-medium text-slate-400 transition hover:text-cyan-200">
                             Clear filters
                         </button>
                     </div>
                     <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (token units)</label>
+                            <label class="field-label" for="gvkFilterAmountMin">Note amount (token units)</label>
                             <div class="mt-2 flex items-center gap-2">
                                 <input id="gvkFilterAmountMin" type="text" inputmode="decimal" placeholder="min" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                                 <span class="text-slate-600">–</span>
@@ -250,11 +250,11 @@
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
+                            <label class="field-label" for="gvkFilterPk">Note owner (PK)</label>
                             <input id="gvkFilterPk" type="text" placeholder="0x... or partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterLedgerFrom">Ledger range</label>
+                            <label class="field-label" for="gvkFilterLedgerFrom">Ledger range</label>
                             <div class="mt-2 flex items-center gap-2">
                                 <input id="gvkFilterLedgerFrom" type="number" min="0" placeholder="from" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                                 <span class="text-slate-600">–</span>
@@ -262,7 +262,7 @@
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterTimeFrom">Time range (UTC)</label>
+                            <label class="field-label" for="gvkFilterTimeFrom">Time range (UTC)</label>
                             <div class="mt-2 flex flex-wrap items-center gap-2">
                                 <input id="gvkFilterTimeFrom" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                                 <span class="text-slate-600 max-md:hidden">–</span>
@@ -285,15 +285,15 @@
             <!-- 5. Pools Tab -->
             <section id="pools" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="pools-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Deposits</p>
-                    <h2 id="pools-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Pools</h2>
+                    <p class="eyebrow">Deposits</p>
+                    <h2 id="pools-heading" class="section-title mt-2">Pools</h2>
                     <p class="mt-2 text-sm text-slate-400">A paused pool refuses deposits. Transfers and withdrawals still work.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="table-head">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
@@ -312,22 +312,22 @@
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointPool">Pool</label>
+                            <label class="field-label" for="repointPool">Pool</label>
                             <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40"></select>
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">List</label>
+                            <label class="field-label" for="repointKind">List</label>
                             <select id="repointKind" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
                                 <option value="asp-membership">Allowlist</option>
                                 <option value="asp-non-membership">Blocklist</option>
                             </select>
                         </div>
                         <div class="md:col-span-2">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New contract address</label>
+                            <label class="field-label" for="repointTree">New contract address</label>
                             <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <details class="md:col-span-2">
-                            <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.22em] text-slate-400 transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
+                            <summary class="field-label cursor-pointer text-slate-400 transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
                             <p class="mt-2 text-xs text-slate-400">Check confirms the new contract holds exactly these. One per line: allowlist entries as 0x hex, or blocklist keys as the Blocklist tab takes them.</p>
                             <label class="sr-only" for="repointRecords">File of expected entries</label>
                             <div class="mt-2 flex items-center gap-3">
@@ -356,7 +356,7 @@
                     </div>
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                         <div class="flex-1">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
+                            <label class="field-label" for="pauseAuthPool">Pool</label>
                             <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40"></select>
                         </div>
                         <button class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="buildPauseAuthBtn" type="button" disabled>
@@ -382,15 +382,15 @@
             <!-- 6. Admins Tab -->
             <section id="admins" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admins-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Admin Transfer</p>
-                    <h2 id="admins-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Admins</h2>
+                    <p class="eyebrow">Admin Transfer</p>
+                    <h2 id="admins-heading" class="section-title mt-2">Admins</h2>
                     <p class="mt-2 text-sm text-slate-400">The admin proposes a new admin and keeps every power until the new admin accepts. Until then, the admin can cancel the proposal.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="table-head">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Kind</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Admin</th>
@@ -407,8 +407,8 @@
             <!-- Admin Transaction Card -->
             <section id="admin-transaction" class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admin-transaction-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Admin Account</p>
-                    <h2 id="admin-transaction-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Admin Transaction</h2>
+                    <p class="eyebrow">Admin Account</p>
+                    <h2 id="admin-transaction-heading" class="section-title mt-2">Admin Transaction</h2>
                     <p class="mt-2 text-sm text-slate-400">A call the connected account can sign alone goes straight to Freighter. Otherwise each signer signs here and passes the link on.</p>
                 </div>
 
@@ -428,7 +428,7 @@
                     </div>
 
                     <details class="border-t border-white/5 pt-4">
-                        <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.22em] text-slate-400 transition hover:text-cyan-100">Transaction XDR</summary>
+                        <summary class="field-label cursor-pointer text-slate-400 transition hover:text-cyan-100">Transaction XDR</summary>
                         <p class="mt-3 text-xs text-slate-400">For a signer who signs with the Stellar CLI, or to paste a call from one.</p>
                         <textarea class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" id="adminTxXdr" rows="4" placeholder="Paste a transaction XDR" aria-label="Transaction XDR" autocomplete="off" spellcheck="false"></textarea>
                         <button class="mt-3 rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="copyAdminTxBtn" type="button" disabled>Copy XDR</button>
@@ -514,7 +514,7 @@
     <!-- Admin Row Template -->
     <template id="tpl-admin-row">
         <tr class="whitespace-nowrap align-middle">
-            <td class="admin-label py-3 pr-4 text-[10px] uppercase tracking-wide text-slate-500"></td>
+            <td class="admin-label table-head py-3 pr-4"></td>
             <td class="admin-contract py-3 pr-4 font-mono text-xs text-slate-200"></td>
             <td class="admin-current py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="admin-pending py-3 pr-4 font-mono text-xs text-slate-300"></td>

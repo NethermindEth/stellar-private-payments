@@ -293,7 +293,7 @@ export function mountGenerate(container) {
   });
 
   // Note picker
-  container.appendChild(el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2', `Select up to 4 notes (${notes.length})`));
+  container.appendChild(el('label', 'field-label mb-2 block', `Select up to 4 notes (${notes.length})`));
 
   const list = el('div', 'space-y-2 mb-4');
   list.setAttribute('role', 'group');
@@ -354,7 +354,7 @@ export function mountGenerate(container) {
 
   // Helper to build a labeled input
   const makeField = (id, labelText, opts = {}) => {
-    const label = el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', labelText);
+    const label = el('label', 'field-label block', labelText);
     label.htmlFor = id;
 
     const inputWrap = el('div', 'flex gap-2');
@@ -505,7 +505,7 @@ export function mountGenerate(container) {
   const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
     const notesWrap = el('div', 'space-y-2');
     notesWrap.appendChild(
-      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+      el('h3', 'field-label', 'Disclosed notes')
     );
 
     const n = Math.min(
@@ -779,7 +779,7 @@ export function mountVerify(container) {
   fileInput.type = 'file';
   fileInput.accept = '.json';
   importWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Import from file'),
+    el('label', 'field-label block', 'Import from file'),
     fileInput,
   ]));
 
@@ -789,7 +789,7 @@ export function mountVerify(container) {
   pasteArea.rows = 4;
   pasteArea.placeholder = '{ "version": 1, ... }';
   importWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Or paste receipt JSON'),
+    el('label', 'field-label block', 'Or paste receipt JSON'),
     pasteArea,
   ]));
 
@@ -813,7 +813,7 @@ export function mountVerify(container) {
   summaryWrap.dataset.testid = 'disclosure-receipt-summary';
   summaryWrap.dataset.state = 'idle';
 
-  summaryWrap.appendChild(el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Receipt Context'));
+  summaryWrap.appendChild(el('h3', 'field-label', 'Receipt Context'));
 
   const summaryGrid = el('div', 'grid grid-cols-1 sm:grid-cols-2 gap-3');
   summaryWrap.appendChild(summaryGrid);
@@ -834,7 +834,7 @@ export function mountVerify(container) {
 
   const vkErrorEl = el('div', 'text-xs text-rose-400 hidden');
   summaryWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Expected VK hash'),
+    el('label', 'field-label block', 'Expected VK hash'),
     elc('div', 'flex gap-2', [vkInput, vkOverrideBtn]),
     vkErrorEl,
   ]));
@@ -962,7 +962,7 @@ export function mountVerify(container) {
     disclosedNotesWrap.replaceChildren();
     disclosedNotesWrap.classList.remove('hidden');
     disclosedNotesWrap.appendChild(
-      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+      el('h3', 'field-label', 'Disclosed notes')
     );
 
     const n = Math.min(
@@ -1040,7 +1040,7 @@ export function mountVerify(container) {
     items.forEach((item) => {
       const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
       cell.append(
-        el('div', 'text-[10px] uppercase tracking-wide text-dark-500', item.label),
+        el('div', 'field-label', item.label),
         el('div', 'text-xs font-mono text-dark-200 break-all', String(item.value)),
       );
       summaryGrid.appendChild(cell);
