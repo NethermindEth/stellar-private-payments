@@ -6,7 +6,7 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
         let selectedAddress = address;
         let closed = false;
         let stopWatching;
-        const dialog = el('dialog', 'm-auto w-full max-w-lg rounded-[28px] border border-white/10 bg-ink-950 p-8 text-white backdrop:bg-ink-950/90');
+        const dialog = el('dialog', 'modal-panel m-auto w-full max-w-lg p-8 text-white backdrop:bg-ink-950/90');
         const title = el('h2', 'text-xl font-semibold', fresh ? 'Choose your unlocking account' : 'Unlock local storage');
         title.id = 'storage-account-title';
         const description = el('p', 'mt-4 text-sm text-slate-300', fresh

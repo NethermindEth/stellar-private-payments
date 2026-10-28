@@ -10,7 +10,7 @@
 // callbacks; the module returns DOM and derived values.
 //
 // Reuse boundary (by design): the table view keeps its own <tr>/<td> row
-// (it is a real HTML table) but reuses filterNotes(), the statusBadge spec,
+// (it is a real HTML table) but reuses filterNotes(), createStatusBadge(),
 // and the formatting helpers below. createNoteRow() is an el()-based CARD row
 // for non-table note lists (the disclosure selector and any future surface).
 
@@ -73,26 +73,10 @@ export function filterNotes(notes, { status = 'all', poolId = null } = {}) {
 // Status badge — one source of truth for the Spent/Available pill.
 // ---------------------------------------------------------------------------
 
-// Returns { text, className } so callers can either build a fresh element
-// (createStatusBadge) or apply the styling to an existing span (the table view,
-// which keeps its `.note-status` hook class).
-export function statusBadgeSpec(spent) {
-  return spent
-    ? {
-        text: 'Spent',
-        className:
-          'inline-flex rounded-full border border-rose-400/30 bg-rose-400/10 px-2 py-1 text-[11px] font-medium text-rose-200',
-      }
-    : {
-        text: 'Available',
-        className:
-          'inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100',
-      };
-}
-
 export function createStatusBadge(spent) {
-  const { text, className } = statusBadgeSpec(spent);
-  return el('span', className, text);
+  const badge = el('span', 'chip', spent ? 'Spent' : 'Available');
+  badge.dataset.tone = spent ? 'fail' : 'info';
+  return badge;
 }
 
 // ---------------------------------------------------------------------------

@@ -110,7 +110,7 @@ function makePanel({ eyebrow, title, body, aside }) {
     ]);
 
     if (aside) {
-        const info = el('div', 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300');
+        const info = el('div', 'panel bg-ink-950/70 text-sm leading-6 text-slate-300');
         info.append(aside);
         wrap.appendChild(info);
     }
@@ -494,7 +494,7 @@ export async function runOnboardingWizard({
             let permStatus = null;
             if (enableNotifications) {
                 permStatus = el('p', 'text-xs text-slate-400', `Current permission: ${Notification.permission}`);
-                inputWrap.appendChild(elc('div', 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2', [
+                inputWrap.appendChild(elc('div', 'panel bg-white/[0.03] text-sm text-slate-300 space-y-2', [
                     el('p', 'font-medium text-white', 'Browser reminder'),
                     el('p', null, 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.'),
                     permStatus,

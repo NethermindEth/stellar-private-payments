@@ -16,15 +16,13 @@ import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
 import { App, Utils } from './core.js';
 import { el, svgEl } from './dom.js';
 
-const TAG = 'inline-flex min-h-11 items-center gap-2 rounded-full border px-3.5 text-[13px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60 aria-expanded:ring-2';
+const TAG = 'chip min-h-11 gap-2 px-3.5 text-[13px] font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60 aria-expanded:ring-2';
 const PANEL = 'rounded-xl border border-white/10 bg-ink-850 p-3 text-sm leading-relaxed';
+const IMPACT = 'mt-2 text-xs text-slate-300 data-[tone=info]:text-cyan-200 data-[tone=key]:text-violet-200';
 
 // Open is the absence of ASP checks, so it stays neutral; ASP lists are cyan
 // and the admin view key is violet. Amber is reserved for warnings.
-const NEUTRAL = { tag: 'border-white/10 bg-white/[0.04] text-slate-200 aria-expanded:ring-slate-300/30', impact: 'text-slate-300' };
-const ASP = { tag: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100 aria-expanded:ring-cyan-300/30', impact: 'text-cyan-200' };
-const VIEW_KEY = { tag: 'border-violet-300/30 bg-violet-300/10 text-violet-200 aria-expanded:ring-violet-300/30', impact: 'text-violet-200' };
-const TONES = { open: NEUTRAL, allowlist: ASP, blocklist: ASP, viewOnly: VIEW_KEY, traceable: VIEW_KEY };
+const TONES = { allowlist: 'info', blocklist: 'info', viewOnly: 'key', traceable: 'key' };
 
 function helpIcon() {
     return svgEl('svg', { class: 'h-3.5 w-3.5 shrink-0', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'aria-hidden': 'true' }, [
@@ -60,10 +58,9 @@ function show(section, open) {
 
 function build(section, control) {
     const { tag, explanation, impact } = POOL_CONTROLS[control];
-    const tone = TONES[control];
     const panelId = `${section.scope}-pool-control-${control}`;
 
-    const button = el('button', `${TAG} ${tone.tag}`);
+    const button = el('button', TAG);
     button.type = 'button';
     button.dataset.poolControl = control;
     button.setAttribute('aria-expanded', 'false');
@@ -80,13 +77,20 @@ function build(section, control) {
         show(section, section.pinned);
     });
 
+    const impactLine = el('p', IMPACT, impact);
+    const tone = TONES[control];
+    if (tone) {
+        button.dataset.tone = tone;
+        impactLine.dataset.tone = tone;
+    }
+
     const panel = el('div', PANEL);
     panel.id = panelId;
     panel.hidden = true;
     panel.append(
         el('p', 'font-semibold text-white', tag),
         el('p', 'mt-1 text-slate-300', explanation),
-        el('p', `mt-2 text-xs ${tone.impact}`, impact),
+        impactLine,
     );
     return { button, panel };
 }
