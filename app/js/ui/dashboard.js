@@ -133,7 +133,9 @@ export const Dashboard = {
             top.appendChild(el('span', 'text-sm font-medium text-white', op.opType));
             const sign = op.direction === 'out' ? '−' : op.direction === 'in' ? '+' : '';
             const amountText = op.amount != null ? `${sign}${Utils.formatPoolAmount(op.amount, poolId)}` : '';
-            top.appendChild(el('span', `font-mono text-sm ${op.direction === 'out' ? 'text-rose-200' : 'text-cyan-100'}`, amountText));
+            const amount = el('span', 'font-mono text-sm text-cyan-100 data-[tone=fail]:text-rose-200', amountText);
+            if (op.direction === 'out') amount.dataset.tone = 'fail';
+            top.appendChild(amount);
             row.appendChild(top);
 
             const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-[11px] text-slate-400');

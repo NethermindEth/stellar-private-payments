@@ -120,26 +120,7 @@ function makePanel({ eyebrow, title, body, aside }) {
 
 function setStepState(stepId, state) {
     const pill = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
-    if (!pill) return;
-    pill.dataset.state = state;
-    pill.classList.remove(
-        'border-white/8',
-        'bg-white/[0.03]',
-        'text-slate-400',
-        'border-cyan-300/30',
-        'bg-cyan-300/10',
-        'text-cyan-100',
-        'border-emerald-300/30',
-        'bg-emerald-300/10',
-        'text-emerald-100'
-    );
-    if (state === 'current') {
-        pill.classList.add('border-cyan-300/30', 'bg-cyan-300/10', 'text-cyan-100');
-    } else if (state === 'done') {
-        pill.classList.add('border-emerald-300/30', 'bg-emerald-300/10', 'text-emerald-100');
-    } else {
-        pill.classList.add('border-white/8', 'bg-white/[0.03]', 'text-slate-400');
-    }
+    if (pill) pill.dataset.state = state;
 }
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
@@ -370,7 +351,7 @@ export async function runOnboardingWizard({
         }
 
         if (stepId === 'storage') {
-            const statusValue = el('span', 'font-semibold text-white', persisted ? 'already persisted' : 'not persisted yet');
+            const statusValue = el('span', 'font-semibold text-white data-[tone=ok]:text-emerald-200 data-[tone=warn]:text-amber-200', persisted ? 'already persisted' : 'not persisted yet');
             const statusWrap = el('p');
             statusWrap.append('Current status: ', statusValue);
             const panel = makePanel({
@@ -400,7 +381,7 @@ export async function runOnboardingWizard({
                             const granted = await persistStorageIfWanted();
                             setPersistPromptedFlag();
                             statusValue.textContent = granted ? 'granted — storage is now persistent' : 'denied by the browser';
-                            statusValue.className = granted ? 'font-semibold text-emerald-200' : 'font-semibold text-amber-200';
+                            statusValue.dataset.tone = granted ? 'ok' : 'warn';
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             request.disabled = false;
