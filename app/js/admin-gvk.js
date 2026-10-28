@@ -2414,6 +2414,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
+      auditBtnEl.ariaBusy = true;
       loadMoreBtnEl.disabled = true;
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
@@ -2425,6 +2426,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       showToast?.(`Global View audit failed: ${err?.message || err}`, 'error');
     } finally {
       auditBtnEl.disabled = false;
+      auditBtnEl.ariaBusy = false;
       auditBtnEl.textContent = originalText;
       syncActionButtons();
     }
@@ -2446,6 +2448,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
+      loadMoreBtnEl.ariaBusy = true;
       await startAudit({ reset: false });
       await applyFiltersAndRender();
     } catch (err) {
@@ -2453,6 +2456,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       showToast?.(`Load more failed: ${err?.message || err}`, 'error');
     } finally {
       loadMoreBtnEl.textContent = originalText;
+      loadMoreBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });
@@ -2464,6 +2468,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     try {
       exportBtnEl.disabled = true;
       exportBtnEl.textContent = 'Exporting…';
+      exportBtnEl.ariaBusy = true;
       if (!state.exhausted) setPanelStatus('Loading full result set to export…', 'info');
       await ensureFullyLoaded();
       if (!readFilters().valid) throw new Error('Correct the amount filters before exporting.');
@@ -2481,6 +2486,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       showToast?.(`Export failed: ${err?.message || err}`, 'error');
     } finally {
       exportBtnEl.textContent = originalText;
+      exportBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });

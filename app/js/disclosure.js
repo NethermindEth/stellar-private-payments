@@ -628,6 +628,7 @@ export function mountGenerate(container) {
   async function executeGenerate(form) {
     generating = true;
     generateBtn.disabled = true;
+    generateBtn.ariaBusy = true;
     resultArea.dataset.state = 'generating';
     generateBtn.textContent = 'Generating…';
     resultArea.classList.add('hidden');
@@ -650,6 +651,7 @@ export function mountGenerate(container) {
       showGenerateError(err.message || 'Generation failed');
     } finally {
       generating = false;
+      generateBtn.ariaBusy = false;
     }
   }
 
@@ -1132,6 +1134,7 @@ export function mountVerify(container) {
     const verifyingRpc = verificationRpcUrl();
     updateSpentMessage = () => {};
     verifyBtn.disabled = true;
+    verifyBtn.ariaBusy = true;
     verifyBtn.textContent = 'Verifying…';
     resultsWrap.classList.remove('hidden');
     resultsWrap.dataset.state = 'verifying';
@@ -1269,6 +1272,7 @@ export function mountVerify(container) {
       resultsWrap.dataset.state = 'error';
     } finally {
       verifyBtn.disabled = false;
+      verifyBtn.ariaBusy = false;
       verifyBtn.textContent = 'Verify Receipt';
     }
   });

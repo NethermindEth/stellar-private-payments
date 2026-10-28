@@ -577,6 +577,7 @@ async function signAdminTx(signer, button) {
   if (state.busy) return;
   setBusy(true);
   button.textContent = 'Signing...';
+  button.ariaBusy = true;
   try {
     const envelope = adminTxXdrInput.value.trim();
     const call = describeAdminCall(envelope, state.networkPassphrase);
@@ -606,6 +607,7 @@ async function signAdminTx(signer, button) {
     showToast(`Signing failed: ${reason}`, 'error');
   } finally {
     button.textContent = 'Sign';
+    button.ariaBusy = false;
     setBusy(false);
   }
 }
@@ -615,6 +617,7 @@ async function submitAdminTx() {
   setBusy(true);
   submitAdminTxBtn.disabled = true;
   submitAdminTxBtn.textContent = 'Submitting...';
+  submitAdminTxBtn.ariaBusy = true;
   adminTxXdrInput.readOnly = true;
   let call;
   try {
@@ -633,6 +636,7 @@ async function submitAdminTx() {
   } finally {
     setBusy(false);
     submitAdminTxBtn.textContent = 'Submit';
+    submitAdminTxBtn.ariaBusy = false;
     adminTxXdrInput.readOnly = false;
   }
   setStatus('Admin transaction succeeded', 'ok');
@@ -706,6 +710,7 @@ async function insertMembershipLeaf() {
     if (!confirmListWrite(contractId, true)) return;
 
     addToAllowlistBtn.disabled = true;
+    addToAllowlistBtn.ariaBusy = true;
     addToAllowlistBtn.textContent = 'Processing...';
 
     setStatus('Building the allowlist insert...', 'info');
@@ -728,6 +733,7 @@ async function insertMembershipLeaf() {
     showToast(`Allowlist insert failed: ${explainFailure(err, 'asp-membership')}`, 'error');
   } finally {
     if (state.address) addToAllowlistBtn.disabled = false;
+    addToAllowlistBtn.ariaBusy = false;
     addToAllowlistBtn.textContent = originalText;
   }
 }
@@ -753,6 +759,7 @@ async function insertNonMembershipLeaf() {
     if (!confirmListWrite(contractId, false)) return;
 
     addToBlocklistBtn.disabled = true;
+    addToBlocklistBtn.ariaBusy = true;
     addToBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Building the blocklist insert...', 'info');
@@ -765,6 +772,7 @@ async function insertNonMembershipLeaf() {
     showToast(`Blocklist insert failed: ${explainFailure(err, 'asp-non-membership')}`, 'error');
   } finally {
     if (state.address) addToBlocklistBtn.disabled = false;
+    addToBlocklistBtn.ariaBusy = false;
     addToBlocklistBtn.textContent = originalText;
   }
 }
@@ -784,6 +792,7 @@ async function removeNonMembershipLeaf() {
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
+    removeFromBlocklistBtn.ariaBusy = true;
 
     setStatus('Building the blocklist removal...', 'info');
     await prepareAdminCall('asp-non-membership', {
@@ -800,6 +809,7 @@ async function removeNonMembershipLeaf() {
   } finally {
     if (state.address) removeFromBlocklistBtn.disabled = false;
     removeFromBlocklistBtn.textContent = originalText;
+    removeFromBlocklistBtn.ariaBusy = false;
   }
 }
 
@@ -889,8 +899,7 @@ async function buildRowCall(button, kind, call) {
   if (refuseWhileBusy()) return;
   const { disabled, textContent } = button;
   button.style.minWidth = `${button.offsetWidth}px`;
-  button.disabled = true;
-  button.textContent = 'Processing...';
+  Object.assign(button, { disabled: true, ariaBusy: true, textContent: 'Processing...' });
   try {
     ensureWalletConnected();
     setStatus(`${callName(call.method)}: building the call...`, 'info');
@@ -899,7 +908,7 @@ async function buildRowCall(button, kind, call) {
     setStatus(`${callName(call.method)}: couldn't build the call`, 'error');
     showToast(`${callName(call.method)} failed: ${explainFailure(err, kind)}`, 'error');
   } finally {
-    Object.assign(button, { disabled, textContent });
+    Object.assign(button, { disabled, textContent, ariaBusy: false });
     button.style.minWidth = '';
   }
 }
@@ -1003,6 +1012,7 @@ async function checkRepoint() {
 
     checkRepointBtn.disabled = true;
     checkRepointBtn.textContent = 'Checking...';
+    checkRepointBtn.ariaBusy = true;
     setStatus('Checking the contract...', 'info');
     const server = rpcServer(state.rpcUrl);
     const [manifest, admin, poolInstance, treeInstance] = await Promise.all([
@@ -1100,6 +1110,7 @@ async function checkRepoint() {
   } finally {
     if (state.address) checkRepointBtn.disabled = false;
     checkRepointBtn.textContent = originalText;
+    checkRepointBtn.ariaBusy = false;
   }
 }
 
@@ -1216,7 +1227,7 @@ function renderPauseFiles() {
         const signed = signers.includes(key);
         const signer = signerItem(key, signed, short && !signed && (() => signPauseFile(file, key)), weight >= rule.threshold);
         const button = signer.querySelector('.sign-as-btn');
-        if (button) Object.assign(button, { disabled: locked, textContent: file.signing.has(key) ? 'Signing...' : 'Sign' });
+        if (button) Object.assign(button, { disabled: locked, ariaBusy: file.signing.has(key), textContent: file.signing.has(key) ? 'Signing...' : 'Sign' });
         return signer;
       }));
     item.querySelector('.pause-file-details').textContent = `Pool ${pool} · admin ${admin} · nonce ${nonce} · expires at ledger ${expirationLedger}`;
@@ -1354,6 +1365,7 @@ async function submitPauseFiles() {
   if (refuseWhileBusy()) return;
   setBusy(true);
   submitPauseAuthBtn.textContent = 'Pausing...';
+  submitPauseAuthBtn.ariaBusy = true;
   pauseAuthResultsEl.replaceChildren();
   setStatus('Pausing deposits...', 'info');
   try {
@@ -1389,6 +1401,7 @@ async function submitPauseFiles() {
     showToast(`Pausing deposits failed: ${err.message}`, 'error');
   } finally {
     submitPauseAuthBtn.textContent = 'Pause deposits now';
+    submitPauseAuthBtn.ariaBusy = false;
     setBusy(false);
   }
   await refreshPools();

@@ -108,9 +108,10 @@
   .section-title { @apply text-2xl font-semibold tracking-tight text-white; }
   .table-head { @apply text-3xs uppercase tracking-wide text-slate-400; }
   .field { @apply w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40; }
-  .btn-primary, .btn-secondary, .btn-danger { @apply inline-flex items-center justify-center rounded-2xl px-5 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary, .btn-secondary, .btn-danger { @apply inline-flex items-center justify-center rounded-2xl px-5 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 aria-busy:cursor-progress; }
   .btn-primary { @apply bg-linear-135/srgb from-accent-from to-accent-to font-semibold text-ink-950 shadow-glow not-disabled:hover:brightness-110; }
-  .btn-primary:disabled { @apply bg-none text-slate-300 shadow-none inset-ring inset-ring-white/10; }
+  .btn-primary:disabled:not([aria-busy=true]) { @apply bg-none text-slate-300 shadow-none inset-ring inset-ring-white/10; }
+  .btn-primary[aria-busy=true] { @apply opacity-70 shadow-none; }
   .btn-secondary { @apply border border-white/10 text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100; }
   .btn-danger { @apply border border-rose-500/30 bg-rose-500/10 text-rose-100 hover:border-rose-500/50 hover:bg-rose-500/20; }
   .tab { @apply rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100; }

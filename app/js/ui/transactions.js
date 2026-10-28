@@ -62,6 +62,7 @@ function requireWallet() {
 function setLoading(button, loading, label = 'Submitting…') {
     if (!button) return;
     button.disabled = loading;
+    button.ariaBusy = loading;
     button.dataset.status = loading ? 'submitting' : 'idle';
     if (!loading) delete button.dataset.progress;
     button.querySelector('.btn-text')?.classList.toggle('hidden', loading);
