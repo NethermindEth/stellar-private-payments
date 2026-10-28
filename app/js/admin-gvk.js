@@ -487,7 +487,7 @@ function renderSlotTable(title, headers, noteRows) {
 
   if (noteRows.length === 0) {
     const empty = el('div', 'w-full rounded-lg border border-white/6 bg-ink-950/50 px-2 py-1.5');
-    empty.appendChild(el('p', 'font-mono text-[11px] text-slate-500', '—'));
+    empty.appendChild(el('p', 'font-mono text-[11px] text-slate-400', '—'));
     block.appendChild(empty);
     return block;
   }
@@ -1131,7 +1131,7 @@ function renderGraphDetailPanel(container, notes) {
   const note = notes.find((n) => n.noteId === state.selectedNoteId);
 
   if (!note) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a note in the graph to inspect it. Use ← → to step through notes.'));
+    panel.appendChild(el('p', 'text-slate-400', 'Click a note in the graph to inspect it. Use ← → to step through notes.'));
     container.appendChild(panel);
     return;
   }
@@ -1225,7 +1225,7 @@ function renderGraphLegend() {
   } else {
     addItem(dot('bg-cyan-400'), 'Note at its creation ledger');
     addItem(square(''), 'Tx output (created here)');
-    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: inputs are not decryptable, so spends are not drawn and every note\'s status is unknown.'));
+    legend.appendChild(el('div', 'text-slate-400', 'View-only pool: inputs are not decryptable, so spends are not drawn and every note\'s status is unknown.'));
   }
 
   return wrap;
@@ -1247,7 +1247,7 @@ function renderGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (notes.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No notes to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-400', 'No notes to plot.'));
     renderGraphDetailPanel(outer, notes);
     return;
   }
@@ -1511,7 +1511,7 @@ function renderPkGraphLegend() {
     addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
   } else {
     addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that PK');
-    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
+    legend.appendChild(el('div', 'text-slate-400', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
   }
 
   return wrap;
@@ -1569,7 +1569,7 @@ function pkGraphDetailSelectedDotRow(dot) {
   } else if (dot.received > 0n) {
     row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.received)));
-    row.appendChild(el('div', 'text-[10px] text-slate-500', 'Origin unknown — view-only pool'));
+    row.appendChild(el('div', 'text-[10px] text-slate-400', 'Origin unknown — view-only pool'));
   } else if (dot.transferIn > 0n || dot.transferOut > 0n) {
     row.appendChild(el('div', 'table-head text-cyan-400', 'This transfer'));
     if (dot.transferIn > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
@@ -1579,7 +1579,7 @@ function pkGraphDetailSelectedDotRow(dot) {
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(0n)));
   }
 
-  row.appendChild(el('div', 'font-mono text-[10px] text-slate-500', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
+  row.appendChild(el('div', 'font-mono text-[10px] text-slate-400', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
   return row;
 }
 
@@ -1618,7 +1618,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const node = nodes.find((n) => n.pk === state.selectedPk);
 
   if (!node) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect a PK, or an arrow to inspect a transfer. Use ← → to step through PKs.'));
+    panel.appendChild(el('p', 'text-slate-400', 'Click a node to inspect a PK, or an arrow to inspect a transfer. Use ← → to step through PKs.'));
     container.appendChild(panel);
     return;
   }
@@ -1754,7 +1754,7 @@ function renderPkGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (orderedPks.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No public keys to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-400', 'No public keys to plot.'));
     renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
     return;
   }

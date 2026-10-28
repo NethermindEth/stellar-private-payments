@@ -117,14 +117,14 @@
                                 <select id="primary-pool-select" data-pool-select class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
                                 </select>
                                 <p class="mt-3 flex items-baseline justify-between gap-2 text-sm">
-                                    <span class="text-slate-500">Balance</span>
+                                    <span class="text-slate-400">Balance</span>
                                     <span id="move-funds-balance" class="font-mono font-medium text-white">—</span>
                                 </p>
                                 <!-- Rendered by pool-controls.js. w-0 min-w-full: fill the card without widening it to fit an explanation. -->
                                 <section data-pool-controls="move" aria-labelledby="move-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
                                     <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                                         <h3 id="move-pool-controls-heading" class="field-label whitespace-nowrap">Pool controls</h3>
-                                        <span class="whitespace-nowrap text-xs text-slate-500">Select a tag for details</span>
+                                        <span class="whitespace-nowrap text-xs text-slate-400">Select a tag for details</span>
                                     </div>
                                     <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
                                     <div data-pool-controls-panels class="mt-3"></div>
@@ -141,7 +141,7 @@
                                         </div>
                                         <p data-signing-error data-testid="signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                     </div>
-                                    <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
+                                    <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
                                 </div>
                             </div>
                         </div>
@@ -254,7 +254,7 @@
                                 <section data-pool-controls="advanced" aria-labelledby="advanced-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
                                     <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                                         <h3 id="advanced-pool-controls-heading" class="field-label whitespace-nowrap">Pool controls</h3>
-                                        <span class="whitespace-nowrap text-xs text-slate-500">Select a tag for details</span>
+                                        <span class="whitespace-nowrap text-xs text-slate-400">Select a tag for details</span>
                                     </div>
                                     <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
                                     <div data-pool-controls-panels class="mt-3"></div>
@@ -283,7 +283,7 @@
                                     <tbody id="advanced-notes-tbody" data-testid="advanced-notes-table" data-state="idle" data-refresh-sequence="0" data-note-count="0"></tbody>
                                 </table>
                             </div>
-                            <div id="advanced-notes-empty" class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-500">No notes available for the current filter.</div>
+                            <div id="advanced-notes-empty" class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-400">No notes available for the current filter.</div>
                         </div>
                     </section>
 
@@ -302,7 +302,7 @@
                                 <div class="mt-5 border-t border-white/8 pt-5">
                                     <label for="advanced-public-deposit" class="field-label">Public deposit</label>
                                     <input id="advanced-public-deposit" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    <p class="mt-2 text-[11px] text-slate-500">Public funds added into the transaction.</p>
+                                    <p class="mt-2 text-[11px] text-slate-400">Public funds added into the transaction.</p>
                                 </div>
                             </div>
 
@@ -322,7 +322,7 @@
                                         <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
                                         <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
                                     </div>
-                                    <p class="text-[11px] text-slate-500">Public funds withdrawn to the recipient.</p>
+                                    <p class="text-[11px] text-slate-400">Public funds withdrawn to the recipient.</p>
                                 </div>
                             </div>
                         </div>
@@ -340,7 +340,7 @@
                                     </div>
                                     <p data-signing-error data-testid="advanced-signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                 </div>
-                                <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
+                                <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
                             </div>
                         </div>
 
@@ -416,23 +416,23 @@
         <div class="mt-8 space-y-6">
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
                 <p class="field-label">Identity</p>
-                <p class="mt-1 text-xs text-slate-500">Click any value to copy it.</p>
+                <p class="mt-1 text-xs text-slate-400">Click any value to copy it.</p>
                 <dl class="mt-4 space-y-4 text-sm">
                     <div>
-                        <dt class="text-slate-500">Wallet</dt>
+                        <dt class="text-slate-400">Wallet</dt>
                         <dd id="settings-wallet-address" data-copy class="mt-1 cursor-pointer break-all font-mono text-slate-100 transition hover:text-cyan-100" title="Click to copy">Not connected</dd>
                     </div>
                     <div>
-                        <dt class="text-slate-500">Note Public Key</dt>
+                        <dt class="text-slate-400">Note Public Key</dt>
                         <dd id="settings-note-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                     <div>
-                        <dt class="text-slate-500">Encryption Public Key</dt>
+                        <dt class="text-slate-400">Encryption Public Key</dt>
                         <dd id="settings-enc-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
-                            <dt class="text-slate-500">ASP Secret</dt>
+                            <dt class="text-slate-400">ASP Secret</dt>
                             <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
                                 <svg class="settings-eye h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
@@ -468,7 +468,7 @@
                 <p class="field-label">Signing Accounts</p>
                 <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Freighter.</p>
                 <ul id="settings-signing-accounts" data-testid="settings-signing-accounts" class="mt-4 space-y-2"></ul>
-                <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-500"></p>
+                <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-400"></p>
             </section>
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
@@ -571,7 +571,7 @@
                         <li>Privacy risk: the operator can observe IP address and sync timing.</li>
                         <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
                     </ul>
-                    <p class="mt-4 text-xs text-slate-500">You can change this later in settings or self-host a bootnode for stronger trust guarantees.</p>
+                    <p class="mt-4 text-xs text-slate-400">You can change this later in settings or self-host a bootnode for stronger trust guarantees.</p>
                 </div>
                 <div>
                     <label for="bootnode-consent-url" class="field-label">Bootnode RPC URL</label>
@@ -650,14 +650,14 @@
             <p class="mt-3 text-sm text-slate-300">Share these with your ASP provider so they can add you to the allowed list. Everything is derived locally from your wallet signature.</p>
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                 <div class="flex items-center justify-between gap-3">
-                    <p class="text-xs text-slate-500">Note public key</p>
+                    <p class="text-xs text-slate-400">Note public key</p>
                     <button data-copy="note" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
                 </div>
                 <p data-field="note" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
             </div>
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                 <div class="flex items-center justify-between gap-3">
-                    <p class="text-xs text-slate-500">ASP secret</p>
+                    <p class="text-xs text-slate-400">ASP secret</p>
                     <button data-copy="asp" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
                 </div>
                 <p data-field="asp" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
@@ -718,7 +718,7 @@
         <article class="rounded-[24px] border border-white/8 bg-ink-900/80 p-5">
             <div class="flex items-start justify-between gap-4">
                 <h3 class="feed-title text-lg font-semibold text-white"></h3>
-                <a class="feed-meta rounded-full border border-white/8 px-3 py-1 text-[11px] uppercase tracking-label text-slate-500 transition hover:border-cyan-300/30 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50" target="_blank" rel="noopener noreferrer"></a>
+                <a class="feed-meta rounded-full border border-white/8 px-3 py-1 text-[11px] uppercase tracking-label text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50" target="_blank" rel="noopener noreferrer"></a>
             </div>
             <p class="feed-body mt-3 text-sm leading-6 text-slate-300"></p>
         </article>
@@ -728,7 +728,7 @@
         <tr data-testid="advanced-note" class="border-t border-white/8 align-top text-slate-200">
             <td class="px-3 py-3 text-sm">
                 <span class="note-token block font-medium text-white"></span>
-                <span class="note-pool mt-1 block font-mono text-[11px] text-slate-500"></span>
+                <span class="note-pool mt-1 block font-mono text-[11px] text-slate-400"></span>
             </td>
             <td class="px-3 py-3">
                 <span class="note-id block font-mono text-xs"></span>
@@ -793,9 +793,9 @@
                     </svg>
                 </button>
             </div>
-            <p class="mt-1 text-xs text-slate-500">Last 10 operations performed in this app.</p>
+            <p class="mt-1 text-xs text-slate-400">Last 10 operations performed in this app.</p>
             <div id="pool-history-list" class="mt-5 max-h-[60vh] space-y-2 overflow-y-auto"></div>
-            <p id="pool-history-empty" class="mt-5 hidden text-sm text-slate-500">No operations recorded yet for this token.</p>
+            <p id="pool-history-empty" class="mt-5 hidden text-sm text-slate-400">No operations recorded yet for this token.</p>
         </div>
     </div>
 

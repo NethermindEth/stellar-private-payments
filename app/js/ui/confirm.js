@@ -43,7 +43,7 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
 
         if (rows.length) {
             panel.appendChild(elc('dl', 'mt-5 space-y-3 rounded-[24px] border border-white/8 bg-ink-900/80 p-5', rows.map(({ label, value }) => elc('div', 'flex items-center justify-between gap-4 text-sm', [
-                el('dt', 'shrink-0 text-slate-500', label),
+                el('dt', 'shrink-0 text-slate-400', label),
                 el('dd', 'break-all text-right font-mono text-slate-100', value),
             ]))));
         }

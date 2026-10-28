@@ -209,7 +209,7 @@
                     <div>
                         <label class="field-label" for="gvkPrivateKey">Authority private key (d)</label>
                         <input id="gvkPrivateKey" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
-                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-500">Loaded from local DB when available; not saved from this page.</p>
+                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-400">Loaded from local DB when available; not saved from this page.</p>
                     </div>
                 </div>
 
@@ -268,14 +268,14 @@
                                 <span class="text-slate-600 max-md:hidden">–</span>
                                 <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
                             </div>
-                            <p id="gvkFilterTimeHint" class="mt-1 text-[11px] text-slate-500">Approximated from ledger close times.</p>
+                            <p id="gvkFilterTimeHint" class="mt-1 text-[11px] text-slate-400">Approximated from ledger close times.</p>
                         </div>
                     </div>
                 </div>
 
                 <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300"></div>
 
-                <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-500">
+                <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-400">
                     Select a pool, enter the authority key, then run Sync &amp; Audit.
                 </div>
 
@@ -327,7 +327,7 @@
                             <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <details class="md:col-span-2">
-                            <summary class="field-label cursor-pointer text-slate-400 transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
+                            <summary class="field-label cursor-pointer transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
                             <p class="mt-2 text-xs text-slate-400">Check confirms the new contract holds exactly these. One per line: allowlist entries as 0x hex, or blocklist keys as the Blocklist tab takes them.</p>
                             <label class="sr-only" for="repointRecords">File of expected entries</label>
                             <div class="mt-2 flex items-center gap-3">
@@ -428,7 +428,7 @@
                     </div>
 
                     <details class="border-t border-white/5 pt-4">
-                        <summary class="field-label cursor-pointer text-slate-400 transition hover:text-cyan-100">Transaction XDR</summary>
+                        <summary class="field-label cursor-pointer transition hover:text-cyan-100">Transaction XDR</summary>
                         <p class="mt-3 text-xs text-slate-400">For a signer who signs with the Stellar CLI, or to paste a call from one.</p>
                         <textarea class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" id="adminTxXdr" rows="4" placeholder="Paste a transaction XDR" aria-label="Transaction XDR" autocomplete="off" spellcheck="false"></textarea>
                         <button class="mt-3 rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="copyAdminTxBtn" type="button" disabled>Copy XDR</button>

@@ -159,7 +159,7 @@ export function createNoteRow(note, opts = {}) {
   leftItems.push(
     elc('div', 'min-w-0', [
       el('div', 'font-mono text-xs truncate', shortHex(note.id)),
-      el('div', 'text-[10px] text-dark-500 mt-0.5', metaParts.join(' · ')),
+      el('div', 'text-[10px] text-slate-400 mt-0.5', metaParts.join(' · ')),
     ]),
   );
   const left = elc('div', 'flex items-center gap-3 min-w-0', leftItems);

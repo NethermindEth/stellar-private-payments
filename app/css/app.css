@@ -99,9 +99,9 @@
 
 @layer components {
   .eyebrow { @apply text-2xs font-semibold uppercase tracking-eyebrow text-cyan-200/70; }
-  .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-500; }
+  .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-400; }
   .section-title { @apply text-2xl font-semibold tracking-tight text-white; }
-  .table-head { @apply text-3xs uppercase tracking-wide text-slate-500; }
+  .table-head { @apply text-3xs uppercase tracking-wide text-slate-400; }
 }
 
 @layer utilities {
