@@ -32,7 +32,7 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
 
         const overlay = el('div', 'fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/75 px-4 backdrop-blur-sm');
 
-        const panel = el('div', 'w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]');
+        const panel = el('div', 'modal-panel w-full max-w-md');
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
         panel.setAttribute('data-testid', 'confirm-dialog');
@@ -42,7 +42,7 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
         panel.appendChild(heading);
 
         if (rows.length) {
-            panel.appendChild(elc('dl', 'mt-5 space-y-3 rounded-[24px] border border-white/8 bg-ink-900/80 p-5', rows.map(({ label, value }) => elc('div', 'flex items-center justify-between gap-4 text-sm', [
+            panel.appendChild(elc('dl', 'panel mt-5 space-y-3 bg-ink-900/80', rows.map(({ label, value }) => elc('div', 'flex items-center justify-between gap-4 text-sm', [
                 el('dt', 'shrink-0 text-slate-400', label),
                 el('dd', 'break-all text-right font-mono text-slate-100', value),
             ]))));
