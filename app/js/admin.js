@@ -118,16 +118,10 @@ const state = {
 // UI Updates & Toasts
 // -----------------------------
 
-const STATUS_STYLES = {
-  info: 'border-white/10 bg-white/[0.03] text-slate-300',
-  ok: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
-  error: 'border-rose-500/20 bg-rose-500/10 text-rose-300',
-};
-
 function setStatus(text, kind = 'info') {
   if (!statusEl) return;
   statusEl.textContent = text;
-  statusEl.className = 'rounded-xl border px-4 py-2 text-center text-sm font-medium transition-colors ' + (STATUS_STYLES[kind] || STATUS_STYLES.info);
+  statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
 }
 
 function showToast(message, type = 'success', duration = 4000) {
@@ -261,8 +255,7 @@ async function connect() {
     networkChip.textContent = deploymentDefaults.displayName || deploymentDefaults.network;
 
     // UI states reflecting connection
-    syncDot.classList.remove('bg-emerald-500', 'animate-pulse', 'shadow-emerald-500');
-    syncDot.classList.add('bg-cyan-400', 'shadow-cyan-400');
+    syncDot.dataset.tone = 'info';
     connectBtn.classList.replace('btn-primary', 'btn-secondary');
 
     // Enable Action Buttons & remove tooltips
@@ -299,8 +292,7 @@ function disconnect() {
   connectBtn.removeAttribute('title');
   networkChip.textContent = 'Disconnected';
 
-  syncDot.classList.remove('bg-cyan-400', 'shadow-cyan-400');
-  syncDot.classList.add('bg-emerald-500', 'animate-pulse', 'shadow-emerald-500');
+  delete syncDot.dataset.tone;
   connectBtn.classList.replace('btn-secondary', 'btn-primary');
 
   // Disable Action Buttons & restore tooltips
@@ -414,7 +406,7 @@ function renderAdminTx(kind) {
   adminTxSignersEl.replaceChildren();
   adminTxDescriptionEl.textContent = '';
   adminTxNoticeEl.textContent = '';
-  adminTxNoticeEl.classList.replace('text-amber-300', 'text-slate-400');
+  delete adminTxNoticeEl.dataset.tone;
   submitAdminTxBtn.disabled = true;
   adminTxSignaturesLineEl.classList.toggle('hidden', !xdr || !state.networkPassphrase);
   copyAdminTxBtn.disabled = copyAdminTxLinkBtn.disabled = !xdr;
@@ -471,7 +463,7 @@ function renderAdminTx(kind) {
         state.adminTxExpiry = setTimeout(() => renderAdminTx(state.adminTxKind), 10_000);
       }
       // Keep an earlier warning, not the signing note.
-      const prior = adminTxNoticeEl.classList.contains('text-amber-300') ? adminTxNoticeEl.textContent : '';
+      const prior = adminTxNoticeEl.dataset.tone === 'warn' ? adminTxNoticeEl.textContent : '';
       warnAdminTx([prior, text].filter(Boolean).join(' '));
     });
   } catch (err) {
@@ -501,7 +493,7 @@ function signerItem(key, signed, sign, enough) {
   item.querySelector('.signer-key').textContent = key;
   const status = item.querySelector('.signer-status');
   status.textContent = signed === false && enough ? 'not needed' : SIGNED_LABELS.get(signed);
-  status.classList.add(signed ? 'text-emerald-300' : 'text-slate-400');
+  if (signed) status.dataset.tone = 'ok';
   const button = item.querySelector('.sign-as-btn');
   if (sign) {
     button.addEventListener('click', () => sign(button));
@@ -658,7 +650,7 @@ async function settleAdminTx(call, { landed = true, reason = '' } = {}) {
 // Amber until the card renders again.
 function warnAdminTx(text) {
   adminTxNoticeEl.textContent = text;
-  adminTxNoticeEl.classList.replace('text-slate-400', 'text-amber-300');
+  adminTxNoticeEl.dataset.tone = 'warn';
 }
 
 async function copyText(text, what) {
@@ -864,12 +856,12 @@ async function poolRow(contractId, lists) {
     const used = (allowlist) => (usesList(flags, allowlist) ? stored.get(allowlist ? 'ASPMembership' : 'ASPNonMembership') : null);
     lists.set(contractId, { allowlist: used(true), blocklist: used(false) });
     row.querySelector('.pool-trees').replaceChildren(...[['Allowlist', 'ASPMembership', true], ['Blocklist', 'ASPNonMembership', false]].map(([label, key, allowlist]) => {
-      const line = el('div');
+      const line = el('div', 'data-[state=unused]:text-slate-400');
       showAddress(line, stored.get(key));
       // Before the address, which a phone cuts off.
       const unused = !usesList(flags, allowlist);
       line.prepend(unused ? `${label} (not used) ` : `${label} `);
-      line.classList.toggle('text-slate-400', unused);
+      if (unused) line.dataset.state = 'unused';
       return line;
     }));
     if (!pool.deposits_paused) {
@@ -922,26 +914,27 @@ function renderRepoint() {
   const built = repointInCard();
   const passes = ({ ok, confirm, confirmed }) => ok || (Boolean(confirm) && Boolean(confirmed));
   // Once built, Build stays off: a rebuild drops the card's signatures.
-  const note = el('li');
+  const note = el('li', 'tone');
   const paintNote = () => {
     const ready = lines.length > 0 && lines.every(passes);
-    const [text, className] = state.repoint?.done
-      ? [state.repoint.done, 'text-emerald-300']
+    const [text, tone] = state.repoint?.done
+      ? [state.repoint.done, 'ok']
       : (!built ? ['', ''] : (ready
-        ? ['Built. Signers sign it in the Admin Transaction card below.', 'text-cyan-200']
-        : ['A box above is unticked, so don\'t sign the call in the card below.', 'text-rose-300']));
-    Object.assign(note, { textContent: text, className });
+        ? ['Built. Signers sign it in the Admin Transaction card below.', 'info']
+        : ['A box above is unticked, so don\'t sign the call in the card below.', 'fail']));
+    note.textContent = text;
+    note.dataset.tone = tone;
     if (text) repointChecksEl.append(note);
     else note.remove();
     buildRepointBtn.disabled = built || !ready;
   };
   repointChecksEl.replaceChildren(...lines.map((line) => {
     const text = el('span');
-    const item = elc('li', null, [text]);
+    const item = elc('li', 'tone', [text]);
     const paint = () => {
       // Ticked means accepted, not passed.
-      const [word, className] = line.ok ? ['OK', 'text-emerald-300'] : (line.confirm ? [line.confirmed ? 'ACCEPTED' : 'CONFIRM', 'text-amber-300'] : ['FAIL', 'text-rose-300']);
-      item.className = className;
+      const [word, tone] = line.ok ? ['OK', 'ok'] : (line.confirm ? [line.confirmed ? 'ACCEPTED' : 'CONFIRM', 'warn'] : ['FAIL', 'fail']);
+      item.dataset.tone = tone;
       text.textContent = `${word} ${line.label}: ${line.text}`;
     };
     if (line.confirm) {
@@ -1219,7 +1212,7 @@ function renderPauseFiles() {
     // A dead file keeps its reason. A live one keeps its buttons: Sign and Pause read it again.
     const readError = problem ? null : file.readError;
     status.textContent = readError ?? text;
-    status.classList.add(readError ? 'text-amber-300' : (problem ? 'text-rose-300' : (short ? 'text-slate-300' : 'text-emerald-300')));
+    status.dataset.tone = readError ? 'warn' : (problem ? 'fail' : (short ? '' : 'ok'));
     const dead = Boolean(problem);
     item.querySelector('.pause-file-signers').replaceChildren(...[...(dead ? [] : rule.weights)]
       .filter(([key, keyWeight]) => keyWeight > 0 && StrKey.isValidEd25519PublicKey(key))

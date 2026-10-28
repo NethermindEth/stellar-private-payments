@@ -201,10 +201,10 @@ function copyToClipboard(cell, text) {
   navigator.clipboard?.writeText(text).then(() => {
     const original = cell.textContent;
     cell.textContent = 'Copied!';
-    cell.classList.add('!text-emerald-300');
+    cell.dataset.copied = '';
     setTimeout(() => {
       cell.textContent = original;
-      cell.classList.remove('!text-emerald-300');
+      delete cell.dataset.copied;
     }, 900);
   }).catch(() => {});
 }
@@ -213,12 +213,12 @@ function appendGridCell(grid, value, noteId) {
   const { display, full, matchPk } = asCell(value);
   const cell = el(
     'div',
-    'bg-ink-950/70 px-2 py-1.5 font-mono text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis transition-colors',
+    'bg-ink-950/70 px-2 py-1.5 font-mono text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis transition-colors data-copy:cursor-pointer data-copy:hover:text-white data-copied:text-emerald-300 data-[highlight=pk]:bg-cyan-500/20 data-[highlight=pk]:text-cyan-50 data-[highlight=note]:bg-amber-500/20 data-[highlight=note]:text-amber-50',
     display,
   );
   if (full) {
     cell.title = `${full} (click to copy)`;
-    cell.classList.add('cursor-pointer', 'hover:!text-white');
+    cell.dataset.copy = '';
     cell.addEventListener('click', () => copyToClipboard(cell, full));
   }
   if (matchPk) cell.dataset.gvkPk = matchPk;
@@ -226,24 +226,15 @@ function appendGridCell(grid, value, noteId) {
   grid.appendChild(cell);
 }
 
-const PK_HIGHLIGHT_CLASSES = ['!bg-cyan-500/20', '!text-cyan-50'];
-const NOTE_HIGHLIGHT_CLASSES = ['!bg-amber-500/20', '!text-amber-50'];
 let activePkHighlight = null;
 /** @type {HTMLElement[]} */
 let activeNoteCells = [];
 let activeNoteSource = null;
 
-function toggleCellHighlight(cells, classes, enabled) {
+function toggleCellHighlight(cells, kind, enabled) {
   for (const cell of cells) {
-    // Tailwind's bg-/text-color utilities don't affect SVG fill/stroke, so
-    // graph marks (circles/lines) get a filter-based highlight instead.
-    if (cell instanceof SVGElement) {
-      cell.style.filter = enabled ? 'brightness(1.6) drop-shadow(0 0 3px rgba(255,255,255,0.7))' : '';
-      continue;
-    }
-    for (const className of classes) {
-      cell.classList.toggle(className, enabled);
-    }
+    if (enabled) cell.dataset.highlight = kind;
+    else delete cell.dataset.highlight;
   }
 }
 
@@ -256,7 +247,7 @@ function setPkHighlight(pk, enabled) {
   if (!resultsEl || !pk) return;
   toggleCellHighlight(
     [...resultsEl.querySelectorAll(`[data-gvk-pk="${CSS.escape(pk)}"]`)],
-    PK_HIGHLIGHT_CLASSES,
+    'pk',
     enabled,
   );
 }
@@ -286,7 +277,7 @@ function txSquareSelector(txIndex) {
 function setTxSquaresVisible(txIndex, visible) {
   if (!resultsEl || txIndex == null) return;
   for (const square of resultsEl.querySelectorAll(txSquareSelector(txIndex))) {
-    square.style.opacity = visible ? '1' : '0';
+    square.toggleAttribute('data-highlight', visible);
   }
 }
 
@@ -311,12 +302,12 @@ function syncTxSquaresForElement(el) {
 function applyNoteHighlight(cells) {
   clearNoteHighlight();
   activeNoteCells = cells;
-  toggleCellHighlight(activeNoteCells, NOTE_HIGHLIGHT_CLASSES, true);
+  toggleCellHighlight(activeNoteCells, 'note', true);
 }
 
 function clearNoteHighlight() {
   if (activeNoteCells.length === 0) return;
-  toggleCellHighlight(activeNoteCells, NOTE_HIGHLIGHT_CLASSES, false);
+  toggleCellHighlight(activeNoteCells, 'note', false);
   activeNoteCells = [];
 }
 
@@ -443,13 +434,7 @@ function setPanelStatus(message, kind = 'info') {
   }
   statusEl.textContent = message;
   statusEl.classList.remove('hidden');
-  statusEl.className = 'rounded-xl border px-4 py-3 text-sm ' + (
-    kind === 'error'
-      ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-      : kind === 'ok'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-        : 'border-white/10 bg-ink-900/70 text-slate-300'
-  );
+  statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
 }
 
 function noteCells(audited) {
@@ -1184,6 +1169,9 @@ const GRAPH_SIDE_PANEL_ALLOWANCE = 256 + 16 + 32 + 2;
 const GRAPH_PANEL_MIN_HEIGHT = 360;
 // Fixed height for the Account graph row, so the detail panel scrolls internally instead of growing it.
 const PK_GRAPH_PANEL_HEIGHT = GRAPH_PANEL_MIN_HEIGHT + 32 + 5;
+// bg- and text- utilities don't reach SVG fill or stroke, so a highlighted mark glows instead.
+const MARK_HIGHLIGHT = 'data-highlight:brightness-160 data-highlight:drop-shadow-[0_0_3px_--alpha(var(--color-white)/70%)]';
+const MARK_SELECTED = 'data-highlight:drop-shadow-[0_0_3px_--alpha(var(--color-white)/80%)]';
 
 function renderGraphLegend() {
   const wrap = el('div', 'group absolute right-3 top-3 z-10');
@@ -1321,6 +1309,7 @@ function renderGraph(rows, containerWidth, filters) {
     .join('line')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('x1', (d) => xScale(d.createdLedger))
     .attr('x2', (d) => xScale(d.spentLedger))
     .attr('y1', yFor)
@@ -1344,6 +1333,7 @@ function renderGraph(rows, containerWidth, filters) {
     .join('path')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('data-gvk-tx-created', (d) => (d.createdTxIndex != null ? d.createdTxIndex : null))
     .attr('data-gvk-tx-spent', (d) => (d.createdTxIndex == null && d.spentTxIndex != null ? d.spentTxIndex : null))
     .attr('transform', (d) => {
@@ -1365,6 +1355,7 @@ function renderGraph(rows, containerWidth, filters) {
     .join('path')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('data-gvk-tx-spent', (d) => d.spentTxIndex)
     .attr('transform', (d) => {
       const rotate = d.spentKind === 'deposit' ? ' rotate(180)' : '';
@@ -1384,8 +1375,6 @@ function renderGraph(rows, containerWidth, filters) {
   // can't shadow the pk/note highlighting on the dots above. It's shown
   // persistently for the tx of the currently selected note, and toggled on
   // for whatever's hovered by syncTxSquaresForElement (see bindResultHighlights).
-  const selectedNote = notes.find((n) => n.noteId === state.selectedNoteId);
-  const selectedTxIndex = selectedNote?.createdTxIndex ?? selectedNote?.spentTxIndex ?? null;
   const txCounts = txMemberCounts(notes);
   const createdGrouped = notes.filter((n) => n.createdTxIndex != null && txCounts.get(n.createdTxIndex) > 1);
   const spentGrouped = notes.filter((n) => n.spentTxIndex != null && txCounts.get(n.spentTxIndex) > 1);
@@ -1405,7 +1394,7 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('stroke', 'rgba(226,232,240,0.6)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
-    .style('opacity', (d) => (selectedTxIndex != null && d.createdTxIndex === selectedTxIndex ? 1 : 0));
+    .attr('class', 'opacity-0 data-highlight:opacity-100');
 
   svg.append('g')
     .selectAll('rect')
@@ -1422,7 +1411,7 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('stroke', 'rgba(226,232,240,0.6)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
-    .style('opacity', (d) => (selectedTxIndex != null && d.spentTxIndex === selectedTxIndex ? 1 : 0));
+    .attr('class', 'opacity-0 data-highlight:opacity-100');
 
   renderGraphDetailPanel(outer, notes);
 }
@@ -1531,7 +1520,7 @@ function pkGraphDetailAmountRow(label, amount, count) {
 function pkGraphDetailPkRow(label, pk) {
   const row = el('div');
   row.appendChild(el('div', 'table-head', label));
-  const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', pk);
+  const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:text-white data-copied:text-emerald-300', pk);
   value.title = `${pk} (click to copy)`;
   value.addEventListener('click', () => copyToClipboard(value, pk));
   row.appendChild(value);
@@ -1956,12 +1945,14 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('stroke', (g) => g.color)
     .attr('stroke-width', (g) => (isSelectedFlow(g.flow) ? FLOW_STROKE_WIDTH + 2 : FLOW_STROKE_WIDTH))
     .attr('stroke-linecap', 'round')
-    .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
 
   flowGroups.append('path')
     .attr('d', (g) => `M ${g.x - FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x + FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x} ${g.tipY} Z`)
     .attr('fill', (g) => g.color)
-    .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
 
   flowGroups.append('title')
     .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${truncateHex(g.flow.fromPk).display} → ${truncateHex(g.flow.toPk).display}\n${formatTokenAmount(g.flow.amount)}`);
@@ -1987,7 +1978,8 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? '#e0f2fe' : '#0b1220'))
     .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
     .style('cursor', 'pointer')
-    .style('filter', (d) => (isSelectedDot(d) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null))
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (d) => (isSelectedDot(d) ? '' : null))
     .on('click', (_event, d) => selectPkGraphDot(d))
     .append('title')
     .text((d) => {

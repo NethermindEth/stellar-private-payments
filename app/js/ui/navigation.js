@@ -221,19 +221,17 @@ function renderSyncStatus() {
     if (!dot || !text) return;
     if (!App.state.wallet.connected) {
         text.textContent = 'Offline';
-        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        delete dot.dataset.tone;
         return;
     }
     if (!isStorageUnlocked()) {
         text.textContent = 'Locked';
-        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        delete dot.dataset.tone;
         return;
     }
     const synced = !!App.state.profile?.registryLookup?.registryFullySynced;
     text.textContent = synced ? 'Synced' : 'Syncing';
-    dot.className = synced
-        ? 'h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.7)]'
-        : 'h-2 w-2 rounded-full bg-amber-300 animate-pulse-dot';
+    dot.dataset.tone = synced ? 'ok' : 'warn';
 }
 
 function renderSettingsDrawer() {

@@ -448,7 +448,7 @@ export function mountGenerate(container) {
   };
 
   // Progress / result area
-  const progressArea = el('div', 'hidden');
+  const progressArea = el('div', 'group hidden');
   progressArea.id = 'generate-progress';
   progressArea.dataset.testid = 'disclosure-generate-progress';
   progressArea.dataset.state = 'idle';
@@ -468,9 +468,8 @@ export function mountGenerate(container) {
     if (stage) {
       progressArea.dataset.state = error ? 'error' : 'running';
       progressArea.classList.remove('hidden');
-      const isError = !!error;
-      progressArea.replaceChildren(elc('div', `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`, [
-        isError ? null : spinnerEl(),
+      progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-dark-300 group-data-[state=error]:text-rose-300', [
+        error ? null : spinnerEl(),
         el('span', null, message),
       ]));
     } else {

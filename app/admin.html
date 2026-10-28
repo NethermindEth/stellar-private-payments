@@ -64,7 +64,7 @@
                     <div class="flex items-center gap-2">
                         <!-- Network Chip -->
                         <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
-                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500 animate-pulse"></span>
+                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500 animate-pulse data-[tone=info]:animate-none data-[tone=info]:bg-cyan-400 data-[tone=info]:shadow-cyan-400"></span>
                             <span id="networkChip">Disconnected</span>
                         </div>
                         <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="btn-secondary px-4 py-2">Unlock</button>
@@ -78,7 +78,7 @@
         </header>
 
         <!-- Status Banner -->
-        <div id="status" class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-sm font-medium text-slate-300">Initializing...</div>
+        <div id="status" class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-sm font-medium text-slate-300 transition-colors data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-300 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-300">Initializing...</div>
 
         <main id="main-content" class="flex-1 flex flex-col gap-4 sm:gap-6">
 
@@ -273,7 +273,7 @@
                     </div>
                 </div>
 
-                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300"></div>
+                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200"></div>
 
                 <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-400">
                     Select a pool, enter the authority key, then run Sync &amp; Audit.
@@ -416,7 +416,7 @@
                     <pre id="adminTxDescription" class="whitespace-pre-wrap break-all font-mono text-xs text-slate-300 empty:hidden"></pre>
                     <p id="adminTxSignaturesLine" class="text-sm text-slate-400">Signatures: <span id="adminTxSignatures" class="font-mono text-slate-100">0</span></p>
                     <ul id="adminTxSigners" class="space-y-2 empty:hidden"></ul>
-                    <p id="adminTxNotice" class="text-sm text-slate-400 empty:hidden"></p>
+                    <p id="adminTxNotice" class="tone text-sm text-slate-400 empty:hidden"></p>
 
                     <div class="flex flex-col sm:flex-row gap-3">
                         <button class="btn-secondary flex-1" id="submitAdminTxBtn" type="button" disabled title="Please connect your wallet first">
@@ -490,7 +490,7 @@
     <template id="tpl-signer">
         <li class="flex items-center gap-3">
             <span class="signer-key break-all font-mono text-xs text-slate-300"></span>
-            <span class="signer-status shrink-0 text-xs"></span>
+            <span class="signer-status tone shrink-0 text-xs text-slate-400"></span>
             <button type="button" class="sign-as-btn btn-secondary shrink-0 px-3 py-1 text-xs">Sign</button>
         </li>
     </template>
@@ -505,7 +505,7 @@
                     <button type="button" class="remove-pause-file-btn btn-danger px-3 py-1 text-xs">Remove</button>
                 </div>
             </div>
-            <p class="pause-file-status text-sm [overflow-wrap:anywhere]"></p>
+            <p class="pause-file-status tone text-sm text-slate-300 [overflow-wrap:anywhere]"></p>
             <ul class="pause-file-signers space-y-2 empty:hidden"></ul>
             <p class="pause-file-details font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]"></p>
         </li>

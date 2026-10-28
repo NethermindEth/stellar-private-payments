@@ -52,6 +52,9 @@
   --shadow-glow: 0 12px 30px rgba(63, 138, 255, 0.45);
   --shadow-modal: 0 24px 100px rgba(0, 0, 0, 0.6);
 
+  --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
   --color-border: rgba(255, 255, 255, 0.08);
 }
 
@@ -105,6 +108,14 @@
   }
 }
 
+/* A utility, not a component, so the tone beats the base text color beside it. */
+@utility tone {
+  &[data-tone=ok] { color: var(--color-emerald-300); }
+  &[data-tone=info] { color: var(--color-cyan-200); }
+  &[data-tone=warn] { color: var(--color-amber-300); }
+  &[data-tone=fail] { color: var(--color-rose-300); }
+}
+
 @layer components {
   .eyebrow { @apply text-2xs font-semibold uppercase tracking-eyebrow text-cyan-200/70; }
   .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-400; }
@@ -128,6 +139,12 @@
   .chip[data-tone=info] { @apply border-cyan-300/30 bg-cyan-400/10 text-cyan-100 ring-cyan-300/30; }
   .chip[data-tone=key] { @apply border-violet-300/30 bg-violet-300/10 text-violet-200 ring-violet-300/30; }
   .chip[data-tone=fail] { @apply border-rose-400/30 bg-rose-400/10 text-rose-200; }
+  .sync-dot { @apply h-2 w-2 rounded-full bg-slate-500; }
+  .sync-dot[data-tone=ok] { @apply bg-emerald-400; box-shadow: 0 0 18px rgba(52, 211, 153, 0.7); }
+  .sync-dot[data-tone=warn] { @apply bg-amber-300 animate-pulse-dot; }
+  .step { @apply rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-slate-400; }
+  .step[data-state=current] { @apply border-cyan-300/30 bg-cyan-300/10 text-cyan-100; }
+  .step[data-state=done] { @apply border-emerald-300/30 bg-emerald-300/10 text-emerald-100; }
 }
 
 @layer utilities {
@@ -165,15 +182,6 @@
 
   input[type="number"] {
     -moz-appearance: textfield;
-  }
-
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.45; }
-  }
-
-  .animate-pulse-dot {
-    animation: pulse-dot 1.8s ease-in-out infinite;
   }
 
   @keyframes spin {

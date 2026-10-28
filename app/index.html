@@ -63,7 +63,7 @@
 
                     <div class="flex flex-wrap items-center gap-2">
                         <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network & sync status">
-                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-slate-500"></span>
+                            <span id="sync-dot" class="sync-dot"></span>
                             <span id="network-name">NETWORK</span>
                             <span class="text-slate-600">·</span>
                             <span id="sync-status" class="text-slate-400">Offline</span>
@@ -601,12 +601,12 @@
             </div>
 
             <div id="onboarding-steps" class="mt-8 grid gap-3 md:grid-cols-6">
-                <div data-step="disclaimer" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Disclaimer</div>
-                <div data-step="retention" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Retention</div>
-                <div data-step="storage" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Storage</div>
-                <div data-step="keys" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Keys</div>
-                <div data-step="explorer" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Explorer</div>
-                <div data-step="registration" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Registration</div>
+                <div data-step="disclaimer" class="step">Disclaimer</div>
+                <div data-step="retention" class="step">Retention</div>
+                <div data-step="storage" class="step">Storage</div>
+                <div data-step="keys" class="step">Keys</div>
+                <div data-step="explorer" class="step">Explorer</div>
+                <div data-step="registration" class="step">Registration</div>
             </div>
 
             <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
