@@ -529,7 +529,7 @@ function columnWidth(header) {
 
 function renderSlotTable(title, headers, noteRows) {
   const block = el('div', 'min-w-0 flex-1 space-y-1.5');
-  block.appendChild(el('div', 'text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500', title));
+  block.appendChild(el('div', 'field-label text-3xs', title));
   const totalWidth = headers.reduce((sum, header) => sum + columnWidth(header), 0);
   block.style.flexGrow = totalWidth;
   block.style.flexBasis = '0%';
@@ -546,11 +546,7 @@ function renderSlotTable(title, headers, noteRows) {
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
-    grid.appendChild(el(
-      'div',
-      'bg-ink-950/90 px-2 py-1.5 font-medium uppercase tracking-wide text-slate-500',
-      header,
-    ));
+    grid.appendChild(el('div', 'table-head bg-ink-950/90 px-2 py-1.5 text-2xs font-medium', header));
   }
 
   for (const { noteId, cells } of noteRows) {
@@ -1007,11 +1003,7 @@ function renderNoteTable(rows, filters) {
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
-    grid.appendChild(el(
-      'div',
-      'bg-ink-950/90 px-3 py-2 font-medium uppercase tracking-wide text-slate-500',
-      header,
-    ));
+    grid.appendChild(el('div', 'table-head bg-ink-950/90 px-3 py-2 text-2xs font-medium', header));
   }
 
   for (const note of notes) {
@@ -1164,14 +1156,14 @@ function renderGraphDetailPanel(container, notes) {
 
   const addRow = (label, value, valueClass = 'break-all') => {
     const row = el('div');
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+    row.appendChild(el('div', 'table-head', label));
     row.appendChild(el('div', `font-mono text-slate-200 ${valueClass}`, value));
     rows.appendChild(row);
   };
 
   const addTxRow = (label, txIndex, ledger, kind) => {
     const row = el('div');
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', kind ? `${label} (${kind})` : label));
+    row.appendChild(el('div', 'table-head', kind ? `${label} (${kind})` : label));
     row.appendChild(el('div', 'font-mono text-slate-200 break-words', txLabel(txIndex, ledger)));
     rows.appendChild(row);
   };
@@ -1542,7 +1534,7 @@ function renderPkGraphLegend() {
 
 function pkGraphDetailAmountRow(label, amount, count) {
   const row = el('div');
-  row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+  row.appendChild(el('div', 'table-head', label));
   row.appendChild(el(
     'div',
     'font-mono text-slate-200',
@@ -1554,7 +1546,7 @@ function pkGraphDetailAmountRow(label, amount, count) {
 /** Click-to-copy detail row: the registered address (when unique) above the PK. */
 function pkGraphDetailPkRow(label, pk) {
   const row = el('div');
-  row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+  row.appendChild(el('div', 'table-head', label));
   const addValue = (text) => {
     const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', text);
     value.title = `${text} (click to copy)`;
@@ -1571,11 +1563,7 @@ function pkGraphDetailPkRow(label, pk) {
 function pkGraphDetailBalanceRow(node) {
   const traceable = state.poolGvkMode === 'traceable';
   const row = el('div');
-  row.appendChild(el(
-    'div',
-    'text-[10px] uppercase tracking-wide text-slate-500',
-    traceable ? 'Current balance' : 'Total received',
-  ));
+  row.appendChild(el('div', 'table-head', traceable ? 'Current balance' : 'Total received'));
   row.appendChild(el(
     'div',
     'font-mono text-sm text-white',
@@ -1589,21 +1577,21 @@ function pkGraphDetailSelectedDotRow(dot) {
   const row = el('div', 'rounded-lg border border-white/10 bg-ink-950/60 p-2 space-y-1');
 
   if (dot.deposited > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-emerald-400', 'This deposit'));
+    row.appendChild(el('div', 'table-head text-emerald-400', 'This deposit'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.deposited)));
   } else if (dot.withdrawn > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-rose-400', 'This withdrawal'));
+    row.appendChild(el('div', 'table-head text-rose-400', 'This withdrawal'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.withdrawn)));
   } else if (dot.received > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.received)));
     row.appendChild(el('div', 'text-[10px] text-slate-500', 'Origin unknown — view-only pool'));
   } else if (dot.transferIn > 0n || dot.transferOut > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-cyan-400', 'This transfer'));
+    row.appendChild(el('div', 'table-head text-cyan-400', 'This transfer'));
     if (dot.transferIn > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
     if (dot.transferOut > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Sent ${formatTokenAmount(dot.transferOut)}`));
   } else {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(0n)));
   }
 
@@ -1616,13 +1604,13 @@ function renderPkGraphFlowDetailPanel(container, flow) {
   const rows = el('div', 'space-y-3');
   panel.appendChild(rows);
 
-  rows.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transfer'));
+  rows.appendChild(el('div', 'table-head', 'Transfer'));
   rows.appendChild(pkGraphDetailPkRow('From', flow.fromPk));
   rows.appendChild(pkGraphDetailPkRow('To', flow.toPk));
   rows.appendChild(pkGraphDetailAmountRow('Amount', flow.amount, 1));
 
   const txRow = el('div');
-  txRow.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transaction'));
+  txRow.appendChild(el('div', 'table-head', 'Transaction'));
   txRow.appendChild(el('div', 'font-mono text-slate-200', `tx ${flow.txIndex} · ledger ${flow.ledger}`));
   rows.appendChild(txRow);
 
@@ -1674,7 +1662,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const neighbors = pkGraphNeighborEdges(node.pk, edges);
   if (neighbors.length > 0) {
     const transfersBox = el('div', 'space-y-1 rounded-lg border border-white/10 bg-ink-950/40 p-2');
-    transfersBox.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transfers'));
+    transfersBox.appendChild(el('div', 'table-head', 'Transfers'));
     const list = el('div', 'space-y-1');
     for (const edge of neighbors) {
       const outgoing = edge.from === node.pk;

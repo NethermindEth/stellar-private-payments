@@ -39,6 +39,11 @@
   --font-sans: "Manrope", ui-sans-serif, system-ui;
   --font-mono: "JetBrains Mono", monospace;
 
+  --text-2xs: 0.6875rem;
+  --text-3xs: 0.625rem;
+  --tracking-label: 0.22em;
+  --tracking-eyebrow: 0.34em;
+
   --color-border: rgba(255, 255, 255, 0.08);
 }
 
@@ -90,6 +95,13 @@
     background: rgba(116, 197, 255, 0.3);
     color: #f8fbff;
   }
+}
+
+@layer components {
+  .eyebrow { @apply text-2xs font-semibold uppercase tracking-eyebrow text-cyan-200/70; }
+  .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-500; }
+  .section-title { @apply text-2xl font-semibold tracking-tight text-white; }
+  .table-head { @apply text-3xs uppercase tracking-wide text-slate-500; }
 }
 
 @layer utilities {

@@ -107,8 +107,8 @@ function makeButton({ text, variant = 'secondary', onClick }) {
 function makePanel({ eyebrow, title, body, aside }) {
     const wrap = elc('div', 'space-y-5', [
         elc('div', null, [
-            el('p', 'text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70', eyebrow),
-            el('h3', 'mt-2 text-2xl font-semibold tracking-tight text-white', title),
+            el('p', 'eyebrow', eyebrow),
+            el('h3', 'section-title mt-2', title),
             body ? el('p', 'mt-3 text-sm leading-6 text-slate-300', body) : null,
         ]),
     ]);
