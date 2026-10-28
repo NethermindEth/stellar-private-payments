@@ -255,7 +255,7 @@ async function connect() {
     networkChip.textContent = deploymentDefaults.displayName || deploymentDefaults.network;
 
     // UI states reflecting connection
-    syncDot.dataset.tone = 'info';
+    syncDot.dataset.tone = 'ok';
     connectBtn.classList.replace('btn-primary', 'btn-secondary');
 
     // Enable Action Buttons & remove tooltips
