@@ -55,10 +55,10 @@
 
                 <div class="flex flex-col gap-3 md:flex-row md:items-center">
                     <nav class="flex flex-wrap gap-2" aria-label="Primary views">
-                        <button type="button" data-view="dashboard" data-testid="nav-dashboard" data-state="active" aria-current="page" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Overview</button>
-                        <button type="button" data-view="move-funds" data-testid="nav-move-funds" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Move Funds</button>
-                        <button type="button" data-view="advanced" data-testid="nav-advanced" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
-                        <button type="button" data-view="disclosure" data-testid="nav-disclosure" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Disclosure</button>
+                        <button type="button" data-view="dashboard" data-testid="nav-dashboard" data-state="active" aria-current="page" class="tab">Overview</button>
+                        <button type="button" data-view="move-funds" data-testid="nav-move-funds" data-state="inactive" class="tab">Move Funds</button>
+                        <button type="button" data-view="advanced" data-testid="nav-advanced" data-state="inactive" class="tab">Advanced</button>
+                        <button type="button" data-view="disclosure" data-testid="nav-disclosure" data-state="inactive" class="tab">Disclosure</button>
                     </nav>
 
                     <div class="flex flex-wrap items-center gap-2">
@@ -68,11 +68,11 @@
                             <span class="text-slate-600">·</span>
                             <span id="sync-status" class="text-slate-400">Offline</span>
                         </div>
-                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition data-[state=locked]:border-cyan-300/50 data-[state=locked]:bg-cyan-400/15 data-[state=locked]:text-cyan-100 data-[state=locked]:ring-2 data-[state=locked]:ring-cyan-300/30 data-[state=locked]:hover:bg-cyan-400/25 disabled:opacity-40">Unlock</button>
-                        <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
+                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="btn-secondary px-4 py-2 data-[state=locked]:border-cyan-300/50 data-[state=locked]:bg-cyan-400/15 data-[state=locked]:text-cyan-100 data-[state=locked]:ring-2 data-[state=locked]:ring-cyan-300/30 data-[state=locked]:hover:bg-cyan-400/25">Unlock</button>
+                        <button id="wallet-btn" type="button" class="btn-primary px-4 py-2">
                             Connect Freighter
                         </button>
-                        <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                        <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="icon-btn gap-2 px-3 py-2">
                             <span id="wallet-text" class="hidden font-mono text-sm text-slate-100"></span>
                             <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                 <circle cx="12" cy="12" r="3"/>
@@ -114,7 +114,7 @@
                             </div>
                             <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 lg:min-w-[300px]">
                                 <label for="primary-pool-select" class="field-label">Available Token</label>
-                                <select id="primary-pool-select" data-pool-select class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                                <select id="primary-pool-select" data-pool-select class="field mt-3 pr-10">
                                 </select>
                                 <p class="mt-3 flex items-baseline justify-between gap-2 text-sm">
                                     <span class="text-slate-400">Balance</span>
@@ -131,13 +131,13 @@
                                 </section>
                                 <div data-signing-account="move" class="mt-5 hidden">
                                     <label for="signing-account-select" class="field-label block">Sign and pay with</label>
-                                    <select id="signing-account-select" data-signing-select data-testid="signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                                    <select id="signing-account-select" data-signing-select data-testid="signing-account-select" class="field mt-3 pr-10">
                                     </select>
                                     <p data-signing-warning data-testid="signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
                                     <div data-signing-other class="mt-3 hidden">
                                         <div class="flex gap-2">
-                                            <input id="signing-account-input" data-signing-input data-testid="signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                            <button data-signing-use data-testid="signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                                            <input id="signing-account-input" data-signing-input data-testid="signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="field min-w-0 flex-1 font-mono text-xs" autocomplete="off" spellcheck="false">
+                                            <button data-signing-use data-testid="signing-account-use" type="button" class="btn-secondary px-4">Use</button>
                                         </div>
                                         <p data-signing-error data-testid="signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                     </div>
@@ -147,10 +147,10 @@
                         </div>
 
                         <div class="mt-8 flex flex-wrap gap-2">
-                            <button type="button" data-move-flow="deposit" data-testid="move-flow-deposit" data-state="active" aria-pressed="true" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
-                            <button type="button" data-move-flow="transfer" data-testid="move-flow-transfer" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
-                            <button type="button" data-move-flow="withdraw" data-testid="move-flow-withdraw" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
-                            <button type="button" id="move-funds-history" aria-label="History of operations" title="History of operations" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                            <button type="button" data-move-flow="deposit" data-testid="move-flow-deposit" data-state="active" aria-pressed="true" class="tab aria-pressed:bg-cyan-400 aria-pressed:text-ink-950">Deposit</button>
+                            <button type="button" data-move-flow="transfer" data-testid="move-flow-transfer" data-state="inactive" aria-pressed="false" class="tab aria-pressed:bg-cyan-400 aria-pressed:text-ink-950">Transfer</button>
+                            <button type="button" data-move-flow="withdraw" data-testid="move-flow-withdraw" data-state="inactive" aria-pressed="false" class="tab aria-pressed:bg-cyan-400 aria-pressed:text-ink-950">Withdraw</button>
+                            <button type="button" id="move-funds-history" aria-label="History of operations" title="History of operations" class="icon-btn h-9 w-9">
                                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <circle cx="12" cy="12" r="9"/>
                                     <path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -168,8 +168,8 @@
                                         </div>
                                     </div>
                                     <label for="deposit-amount" class="field-label mt-6 block">Amount</label>
-                                    <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    <button id="btn-deposit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
+                                    <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
+                                    <button id="btn-deposit" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Deposit</span>
                                         <span class="btn-loading hidden"></span>
                                     </button>
@@ -184,7 +184,7 @@
 
                                     <div class="mt-6">
                                         <label for="transfer-address" class="field-label">Recipient Stellar Address</label>
-                                        <input id="transfer-address" type="text" placeholder="G..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <input id="transfer-address" type="text" placeholder="G..." class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     </div>
 
                                     <p id="transfer-lookup-status" class="mt-3 text-sm text-cyan-100"></p>
@@ -193,20 +193,20 @@
                                     <div id="transfer-manual-fields" class="mt-6 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
                                         <div>
                                             <label for="transfer-note-key" class="field-label">Recipient Note Public Key</label>
-                                            <input id="transfer-note-key" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                            <input id="transfer-note-key" type="text" class="field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
                                         </div>
                                         <div>
                                             <label for="transfer-enc-key" class="field-label">Recipient Encryption Public Key</label>
-                                            <input id="transfer-enc-key" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                            <input id="transfer-enc-key" type="text" class="field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
                                         </div>
                                     </div>
 
                                     <div class="mt-6">
                                         <label for="transfer-amount" class="field-label">Amount</label>
-                                        <input id="transfer-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <input id="transfer-amount" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     </div>
 
-                                    <button id="btn-transfer" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
+                                    <button id="btn-transfer" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Transfer</span>
                                         <span class="btn-loading hidden"></span>
                                     </button>
@@ -220,15 +220,15 @@
                                     <div class="mt-6 space-y-4">
                                         <div data-recipient-account="withdraw">
                                             <label for="withdraw-recipient-select" class="field-label">Recipient Address</label>
-                                            <select id="withdraw-recipient-select" data-recipient-select data-testid="withdraw-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
-                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                            <select id="withdraw-recipient-select" data-recipient-select data-testid="withdraw-recipient-select" class="field mt-3 pr-10"><option value="">Choose a recipient…</option></select>
+                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="field hidden mt-3 font-mono" autocomplete="off" spellcheck="false">
                                         </div>
                                         <div>
                                             <label for="withdraw-amount" class="field-label">Amount</label>
-                                            <input id="withdraw-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                            <input id="withdraw-amount" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                         </div>
                                     </div>
-                                    <button id="btn-withdraw" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
+                                    <button id="btn-withdraw" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Withdraw</span>
                                         <span class="btn-loading hidden"></span>
                                     </button>
@@ -250,7 +250,7 @@
                             </div>
                             <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 md:min-w-[280px]">
                                 <label for="advanced-pool-select" class="field-label">Available Token</label>
-                                <select id="advanced-pool-select" data-pool-select class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40"></select>
+                                <select id="advanced-pool-select" data-pool-select class="field mt-3 pr-10"></select>
                                 <section data-pool-controls="advanced" aria-labelledby="advanced-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
                                     <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                                         <h3 id="advanced-pool-controls-heading" class="field-label whitespace-nowrap">Pool controls</h3>
@@ -263,9 +263,9 @@
                         </div>
 
                         <div class="mt-6 flex flex-wrap gap-2">
-                            <button type="button" data-note-filter="all" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">All Notes</button>
-                            <button type="button" data-note-filter="unspent" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Available</button>
-                            <button type="button" data-note-filter="spent" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Spent</button>
+                            <button type="button" data-note-filter="all" aria-pressed="true" class="tab">All Notes</button>
+                            <button type="button" data-note-filter="unspent" aria-pressed="false" class="tab">Available</button>
+                            <button type="button" data-note-filter="spent" aria-pressed="false" class="tab">Spent</button>
                         </div>
 
                         <div class="mt-6 overflow-hidden rounded-[24px] border border-white/8 bg-ink-950/80">
@@ -301,7 +301,7 @@
                                 <div id="advanced-inputs" class="mt-5 space-y-4"></div>
                                 <div class="mt-5 border-t border-white/8 pt-5">
                                     <label for="advanced-public-deposit" class="field-label">Public deposit</label>
-                                    <input id="advanced-public-deposit" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                    <input id="advanced-public-deposit" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     <p class="mt-2 text-[11px] text-slate-400">Public funds added into the transaction.</p>
                                 </div>
                             </div>
@@ -315,12 +315,12 @@
                                 <div class="mt-5 space-y-4 border-t border-white/8 pt-5">
                                     <div>
                                         <label for="advanced-public-withdraw" class="field-label">Public withdraw</label>
-                                        <input id="advanced-public-withdraw" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <input id="advanced-public-withdraw" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     </div>
                                     <div data-recipient-account="advanced">
                                         <label for="advanced-public-recipient-select" class="field-label">Public recipient</label>
-                                        <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
-                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                                        <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="field mt-3 pr-10"><option value="">Choose a recipient…</option></select>
+                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="field hidden mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     </div>
                                     <p class="text-[11px] text-slate-400">Public funds withdrawn to the recipient.</p>
                                 </div>
@@ -330,13 +330,13 @@
                         <div data-signing-account="advanced" class="mt-6 rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
                             <div>
                                 <label for="advanced-signing-account-select" class="field-label block">Sign and pay with</label>
-                                <select id="advanced-signing-account-select" data-signing-select data-testid="advanced-signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                                <select id="advanced-signing-account-select" data-signing-select data-testid="advanced-signing-account-select" class="field mt-3 pr-10">
                                 </select>
                                     <p data-signing-warning data-testid="advanced-signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
                                 <div data-signing-other class="mt-3 hidden">
                                     <div class="flex gap-2">
-                                        <input id="advanced-signing-account-input" data-signing-input data-testid="advanced-signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        <button data-signing-use data-testid="advanced-signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                                        <input id="advanced-signing-account-input" data-signing-input data-testid="advanced-signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="field min-w-0 flex-1 font-mono text-xs" autocomplete="off" spellcheck="false">
+                                        <button data-signing-use data-testid="advanced-signing-account-use" type="button" class="btn-secondary px-4">Use</button>
                                     </div>
                                     <p data-signing-error data-testid="advanced-signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                 </div>
@@ -344,7 +344,7 @@
                             </div>
                         </div>
 
-                        <button id="btn-advanced-transact" data-testid="advanced-transact-submit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
+                        <button id="btn-advanced-transact" data-testid="advanced-transact-submit" type="button" class="btn-primary mt-6 w-full py-3.5">
                             <span class="btn-text">Execute Advanced Transaction</span>
                             <span class="btn-loading hidden"></span>
                         </button>
@@ -384,16 +384,16 @@
             <div class="py-6 text-xs text-dark-400 space-y-2">
                 <p class="leading-relaxed">
                     Terms &amp; Conditions:
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
+                    <a class="link" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
                 </p>
                 <p class="leading-relaxed">
                     Distribution notice:
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
+                    <a class="link" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
+                    <a class="link" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
+                    <a class="link" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
+                    <a class="link" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
+                    <a class="link" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
+                    <a class="link" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
                 </p>
             </div>
         </footer>
@@ -405,7 +405,7 @@
             <div>
                 <p class="eyebrow">Profile & Settings</p>
             </div>
-            <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+            <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                     <line x1="18" y1="6" x2="6" y2="18"/>
                     <line x1="6" y1="6" x2="18" y2="18"/>
@@ -433,7 +433,7 @@
                     <div>
                         <div class="flex items-center gap-2">
                             <dt class="text-slate-400">ASP Secret</dt>
-                            <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                            <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="icon-btn h-7 w-7">
                                 <svg class="settings-eye h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
                                     <circle cx="12" cy="12" r="3"/>
@@ -449,7 +449,7 @@
                 </dl>
                 <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 hidden rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
                     <p class="text-sm text-slate-300">Freighter's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
-                    <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="mt-3 rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Make it the note owner</button>
+                    <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="btn-secondary mt-3 px-4 py-2">Make it the note owner</button>
                 </div>
             </section>
 
@@ -459,7 +459,7 @@
                         <p class="field-label">Address Book</p>
                         <p id="settings-registration-status" class="mt-2 text-sm text-slate-100">Not registered</p>
                     </div>
-                    <button id="settings-register-btn" type="button" class="rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Register now</button>
+                    <button id="settings-register-btn" type="button" class="btn-secondary px-4 py-2">Register now</button>
                 </div>
                 <p class="mt-3 text-sm text-slate-400">Register your public keys so other users can transfer using only your Stellar address. Your wallet asks you to sign a message that proves this account holds the keys, and then the transaction. Once registered, the keys can't be changed.</p>
             </section>
@@ -476,7 +476,7 @@
                 <div class="mt-5 space-y-5">
                     <div>
                         <label for="settings-explorer-input" class="field-label">Explorer Base URL</label>
-                        <input id="settings-explorer-input" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                        <input id="settings-explorer-input" type="text" class="field mt-3" autocomplete="off" spellcheck="false">
                     </div>
                     <label class="flex items-center justify-between gap-4">
                         <span>
@@ -487,14 +487,14 @@
                     </label>
                     <div>
                         <label for="settings-bootnode-url" class="field-label">Bootnode RPC URL</label>
-                        <input id="settings-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                        <input id="settings-bootnode-url" type="text" placeholder="https://..." class="field mt-3" autocomplete="off" spellcheck="false">
                     </div>
                     <div class="border-t border-white/10 pt-5">
                         <p class="field-label mb-4">Diagnostics & Telemetry</p>
                         <div class="space-y-4">
                             <div>
                                 <label for="settings-log-level" class="field-label">Log Level</label>
-                                <select id="settings-log-level" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                                <select id="settings-log-level" class="field mt-3">
                                     <option value="info">Info (Default)</option>
                                     <option value="debug">Debug (Verbose)</option>
                                     <option value="trace">Trace (Diagnostic)</option>
@@ -508,15 +508,15 @@
                                 <input id="settings-reveal-sensitive" type="checkbox" class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
                             </label>
                             <div class="flex gap-3 mt-4">
-                                <button id="settings-copy-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Copy Logs</button>
-                                <button id="settings-download-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Download Logs</button>
+                                <button id="settings-copy-logs-btn" type="button" class="btn-secondary flex-1 px-4">Copy Logs</button>
+                                <button id="settings-download-logs-btn" type="button" class="btn-secondary flex-1 px-4">Download Logs</button>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <label class="mt-6 block text-sm text-slate-200" for="settings-auto-lock">Automatically lock local data after inactivity</label>
-                <select disabled id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
+                <select disabled id="settings-auto-lock" data-testid="storage-auto-lock" class="field mt-2">
                     <option value="" disabled>Unlock to change</option>
                     <option value="5">5 minutes</option>
                     <option value="15">15 minutes</option>
@@ -528,8 +528,8 @@
                 <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-                    <button id="settings-save-btn" type="button" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Save settings</button>
-                    <button id="wallet-disconnect-btn" type="button" class="inline-flex items-center justify-center rounded-2xl border border-rose-400/25 px-5 py-3 text-sm font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10">Disconnect wallet</button>
+                    <button id="settings-save-btn" type="button" class="btn-primary flex-1">Save settings</button>
+                    <button id="wallet-disconnect-btn" type="button" class="btn-danger">Disconnect wallet</button>
                 </div>
             </section>
 
@@ -538,12 +538,12 @@
                 <p id="storage-recovery-message" role="status" class="mt-2 text-sm text-slate-300">Backups remain encrypted and require the original unlocking account. Exporting, importing or resetting while unlocked locks local data first.</p>
                 <div id="storage-legacy-notice" data-testid="storage-legacy-notice" hidden class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">
                     <span>Unencrypted browser data from an earlier version (<code class="font-mono text-xs">.opfs-sahpool</code>) is still stored on disk. Derived keys and notes can be recovered via Freighter, while older local settings and history are not migrated automatically.</span>
-                    <button id="storage-delete-legacy" type="button" class="rounded-xl border border-amber-300/30 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-300/10 disabled:opacity-40">Delete legacy unencrypted data</button>
+                    <button id="storage-delete-legacy" type="button" class="btn-danger px-3 py-1.5 text-xs">Delete legacy unencrypted data</button>
                 </div>
                 <div class="mt-4 flex flex-wrap gap-3">
-                    <button id="storage-export" type="button" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40">Export encrypted backup</button>
-                    <button id="storage-import" type="button" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40">Import backup</button>
-                    <button id="storage-reset" type="button" class="rounded-xl border border-rose-400/25 px-4 py-2 text-sm text-rose-100 disabled:opacity-40">Reset local storage</button>
+                    <button id="storage-export" type="button" class="btn-secondary px-4 py-2">Export encrypted backup</button>
+                    <button id="storage-import" type="button" class="btn-secondary px-4 py-2">Import backup</button>
+                    <button id="storage-reset" type="button" class="btn-danger px-4 py-2">Reset local storage</button>
                     <input id="storage-backup-file" type="file" accept=".json,application/json" hidden>
                 </div>
             </section>
@@ -557,7 +557,7 @@
                     <p class="eyebrow">Retention Bypass</p>
                     <h2 class="section-title mt-2">Bootnode required to finish sync</h2>
                 </div>
-                <button id="bootnode-consent-close" type="button" class="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Close</button>
+                <button id="bootnode-consent-close" type="button" class="btn-secondary px-3 py-2">Close</button>
             </div>
             <div class="mt-6 space-y-4 text-sm text-slate-300">
                 <p>Your current RPC could not serve enough historical events to rebuild local state.</p>
@@ -575,13 +575,13 @@
                 </div>
                 <div>
                     <label for="bootnode-consent-url" class="field-label">Bootnode RPC URL</label>
-                    <input id="bootnode-consent-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                    <input id="bootnode-consent-url" type="text" placeholder="https://..." class="field mt-3" autocomplete="off" spellcheck="false">
                 </div>
                 <p id="bootnode-consent-error" class="hidden text-sm text-rose-200"></p>
             </div>
             <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <button id="bootnode-consent-cancel" type="button" class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Cancel</button>
-                <button id="bootnode-consent-accept" type="button" class="rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Use bootnode</button>
+                <button id="bootnode-consent-cancel" type="button" class="btn-secondary">Cancel</button>
+                <button id="bootnode-consent-accept" type="button" class="btn-primary">Use bootnode</button>
             </div>
         </div>
     </div>
@@ -592,7 +592,7 @@
                 <div>
                     <p class="eyebrow">Onboarding</p>
                 </div>
-                <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -651,14 +651,14 @@
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                 <div class="flex items-center justify-between gap-3">
                     <p class="text-xs text-slate-400">Note public key</p>
-                    <button data-copy="note" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
+                    <button data-copy="note" type="button" class="btn-secondary px-3 py-1.5 text-xs">Copy</button>
                 </div>
                 <p data-field="note" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
             </div>
             <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                 <div class="flex items-center justify-between gap-3">
                     <p class="text-xs text-slate-400">ASP secret</p>
-                    <button data-copy="asp" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
+                    <button data-copy="asp" type="button" class="btn-secondary px-3 py-1.5 text-xs">Copy</button>
                 </div>
                 <p data-field="asp" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
             </div>
@@ -676,7 +676,7 @@
             </label>
             <div class="mt-4">
                 <label for="wizard-bootnode-url" class="field-label">Bootnode RPC URL</label>
-                <input id="wizard-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                <input id="wizard-bootnode-url" type="text" placeholder="https://..." class="field mt-3">
             </div>
         </div>
     </template>
@@ -684,7 +684,7 @@
     <template id="tpl-wizard-explorer">
         <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
             <label for="wizard-explorer-url" class="field-label">Explorer Base URL</label>
-            <input id="wizard-explorer-url" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+            <input id="wizard-explorer-url" type="text" class="field mt-3">
             <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
         </div>
     </template>
@@ -697,14 +697,14 @@
                     <p class="field-label mt-2">Pool address</p>
                     <a class="balance-pool mt-1 block font-mono text-2xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
                 </div>
-                <button type="button" data-view-notes title="View notes for this token" class="balance-notes shrink-0 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-300/20"></button>
+                <button type="button" data-view-notes title="View notes for this token" class="balance-notes btn-secondary shrink-0 px-3 py-1 text-2xs"></button>
             </div>
             <p class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"></p>
             <div class="mt-6 flex flex-wrap gap-2">
-                <button type="button" data-quick-flow="deposit" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
-                <button type="button" data-quick-flow="transfer" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
-                <button type="button" data-quick-flow="withdraw" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
-                <button type="button" data-view-history aria-label="History of operations" title="History of operations" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                <button type="button" data-quick-flow="deposit" class="btn-secondary px-3 py-2">Deposit</button>
+                <button type="button" data-quick-flow="transfer" class="btn-secondary px-3 py-2">Transfer</button>
+                <button type="button" data-quick-flow="withdraw" class="btn-secondary px-3 py-2">Withdraw</button>
+                <button type="button" data-view-history aria-label="History of operations" title="History of operations" class="icon-btn h-9 w-9">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <circle cx="12" cy="12" r="9"/>
                         <path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -738,9 +738,9 @@
             <td class="px-3 py-3"><span class="note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100"></span></td>
             <td class="px-3 py-3">
                 <div class="flex flex-nowrap justify-end gap-0.5">
-                    <button type="button" data-testid="advanced-note-use" class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
-                    <button type="button" class="note-copy rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                    <button type="button" class="note-disclose rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" title="Selective disclosure">Disclose</button>
+                    <button type="button" data-testid="advanced-note-use" class="note-use btn-secondary px-2 py-1.5 text-2xs">Use</button>
+                    <button type="button" class="note-copy btn-secondary px-2 py-1.5 text-2xs">Copy</button>
+                    <button type="button" class="note-disclose btn-secondary px-2 py-1.5 text-2xs" title="Selective disclosure">Disclose</button>
                 </div>
             </td>
         </tr>
@@ -749,7 +749,7 @@
     <template id="tpl-note-input-row">
         <div class="rounded-2xl border border-white/8 bg-ink-950/80 p-4">
             <label class="field-label">Input Note ID</label>
-            <input type="text" class="note-input mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" placeholder="Paste or use a note from the table" autocomplete="off" spellcheck="false">
+            <input type="text" class="note-input field mt-3 font-mono text-xs" placeholder="Paste or use a note from the table" autocomplete="off" spellcheck="false">
             <p class="note-input-amount mt-2 text-xs text-cyan-200/80"></p>
         </div>
     </template>
@@ -758,23 +758,23 @@
         <div data-testid="advanced-output" class="advanced-output-row rounded-2xl border border-white/8 bg-ink-950/80 p-4">
             <div>
                 <label class="field-label">Recipient Stellar Address</label>
-                <input data-testid="advanced-output-address" type="text" class="output-address mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" placeholder="Leave blank for connected wallet" autocomplete="off" spellcheck="false">
+                <input data-testid="advanced-output-address" type="text" class="output-address field mt-3 font-mono text-xs" placeholder="Leave blank for connected wallet" autocomplete="off" spellcheck="false">
             </div>
             <p data-testid="advanced-output-lookup-status" class="lookup-status mt-3 text-sm text-cyan-100"></p>
             <p class="lookup-warning mt-2 text-sm text-amber-200"></p>
             <div class="manual-fields mt-4 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
                 <div>
                     <label class="field-label">Note Public Key</label>
-                    <input type="text" class="output-note-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                    <input type="text" class="output-note-key field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
                 </div>
                 <div>
                     <label class="field-label">Encryption Public Key</label>
-                    <input type="text" class="output-enc-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
+                    <input type="text" class="output-enc-key field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
                 </div>
             </div>
             <div class="mt-4">
                 <label class="field-label">Private Output Amount</label>
-                <input data-testid="advanced-output-amount" type="text" class="output-amount mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" placeholder="0.0" inputmode="decimal" autocomplete="off" spellcheck="false">
+                <input data-testid="advanced-output-amount" type="text" class="output-amount field mt-3 font-mono" placeholder="0.0" inputmode="decimal" autocomplete="off" spellcheck="false">
             </div>
         </div>
     </template>
@@ -786,7 +786,7 @@
                     <p class="eyebrow">History</p>
                     <h2 id="pool-history-title" class="mt-2 text-xl font-semibold tracking-tight text-white">Operations</h2>
                 </div>
-                <button id="pool-history-close" type="button" aria-label="Close" title="Close" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                <button id="pool-history-close" type="button" aria-label="Close" title="Close" class="icon-btn h-9 w-9">
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>

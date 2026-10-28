@@ -103,12 +103,8 @@ function setActiveView(view) {
     App.state.views.active = view;
     document.querySelectorAll('[data-view]').forEach(btn => {
         const active = btn.dataset.view === view;
-        btn.classList.toggle('bg-cyan-400/15', active);
-        btn.classList.toggle('text-cyan-100', active);
-        btn.classList.toggle('text-slate-400', !active);
         btn.dataset.state = active ? 'active' : 'inactive';
-        if (active) btn.setAttribute('aria-current', 'page');
-        else btn.removeAttribute('aria-current');
+        btn.ariaCurrent = active ? 'page' : null;
     });
     document.querySelectorAll('.view-panel').forEach(panel => {
         const active = panel.dataset.viewPanel === view;
@@ -133,11 +129,8 @@ function setMoveFlow(flow) {
     document.querySelector('[data-signing-account="move"]')?.classList.toggle('hidden', flow === 'deposit');
     document.querySelectorAll('[data-move-flow]').forEach(btn => {
         const active = btn.dataset.moveFlow === flow;
-        btn.classList.toggle('bg-cyan-400', active);
-        btn.classList.toggle('text-slate-950', active);
-        btn.classList.toggle('text-slate-300', !active);
         btn.dataset.state = active ? 'active' : 'inactive';
-        btn.setAttribute('aria-pressed', String(active));
+        btn.ariaPressed = active;
     });
     document.querySelectorAll('.move-flow-panel').forEach(panel => {
         const active = panel.dataset.movePanel === flow;

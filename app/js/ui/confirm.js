@@ -55,11 +55,11 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
             panel.appendChild(note);
         }
 
-        const cancelBtn = el('button', 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
+        const cancelBtn = el('button', 'btn-secondary', 'Cancel');
         cancelBtn.type = 'button';
         cancelBtn.setAttribute('data-testid', 'confirm-dialog-cancel');
 
-        const confirmBtn = el('button', 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110', confirmLabel);
+        const confirmBtn = el('button', 'btn-primary', confirmLabel);
         confirmBtn.type = 'button';
         confirmBtn.setAttribute('data-testid', 'confirm-dialog-confirm');
 

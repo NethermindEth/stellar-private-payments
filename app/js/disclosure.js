@@ -212,37 +212,26 @@ function normalizeCommitment(s) {
 function buildGenerateFilters(container) {
   const wrap = el('div', 'flex flex-wrap items-center gap-2 mb-3');
 
-  const statusGroup = el('div', 'inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5');
   const statuses = [
     { key: 'all', label: 'All' },
     { key: 'unspent', label: 'Available' },
     { key: 'spent', label: 'Spent' },
   ];
   statuses.forEach(({ key, label }) => {
-    const active = state.noteStatusFilter === key;
-    const btn = el(
-      'button',
-      `px-3 py-1 text-xs rounded-md transition-colors ${
-        active ? 'bg-brand-500/20 text-brand-300' : 'text-dark-400 hover:text-dark-200'
-      }`,
-      label,
-    );
+    const btn = el('button', 'tab', label);
     btn.type = 'button';
+    btn.ariaPressed = state.noteStatusFilter === key;
     btn.dataset.testid = `disclosure-filter-${key}`;
     btn.addEventListener('click', () => {
       state.noteStatusFilter = key;
       mountGenerate(container);
     });
-    statusGroup.appendChild(btn);
+    wrap.appendChild(btn);
   });
-  wrap.appendChild(statusGroup);
 
   const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
   if (poolIds.length > 1) {
-    const select = el(
-      'select',
-      'text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200',
-    );
+    const select = el('select', 'field w-auto py-2 pr-10');
     select.append(new Option('All tokens', ''), ...poolIds.map((pid) => new Option(tokenLabelForPool(pid), pid)));
     select.value = state.notePoolFilter || '';
     select.addEventListener('change', () => {
@@ -359,7 +348,7 @@ export function mountGenerate(container) {
 
     const inputWrap = el('div', 'flex gap-2');
 
-    const input = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500');
+    const input = el('input', 'field flex-1 font-mono text-xs');
     input.id = id;
     input.type = opts.type || 'text';
     if (opts.placeholder) input.placeholder = opts.placeholder;
@@ -367,7 +356,7 @@ export function mountGenerate(container) {
     inputWrap.appendChild(input);
 
     if (opts.button) {
-      const btn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', opts.button.label);
+      const btn = el('button', 'btn-secondary', opts.button.label);
       btn.type = 'button';
       btn.addEventListener('click', opts.button.onClick);
       inputWrap.appendChild(btn);
@@ -569,14 +558,14 @@ export function mountGenerate(container) {
     const receiptJson = el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json);
     receiptJson.dataset.testid = 'disclosure-receipt-json';
     box.appendChild(receiptJson);
-    const actions = el('div', 'flex gap-2');
-    const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
+    const actions = el('div', 'flex flex-col gap-2 sm:flex-row');
+    const dlBtn = el('button', 'btn-primary', 'Download JSON');
     dlBtn.type = 'button';
     dlBtn.id = 'btn-download-receipt';
-    const copyBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Copy to clipboard');
+    const copyBtn = el('button', 'btn-secondary', 'Copy to clipboard');
     copyBtn.type = 'button';
     copyBtn.id = 'btn-copy-receipt';
-    const resetBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Generate another');
+    const resetBtn = el('button', 'btn-secondary', 'Generate another');
     resetBtn.type = 'button';
     resetBtn.id = 'btn-reset-generate';
     actions.append(dlBtn, copyBtn, resetBtn);
@@ -626,7 +615,7 @@ export function mountGenerate(container) {
   };
 
   // Generate button
-  const generateBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Generate Disclosure Receipt');
+  const generateBtn = el('button', 'btn-primary w-full', 'Generate Disclosure Receipt');
   generateBtn.type = 'button';
   generateBtn.dataset.testid = 'disclosure-generate-submit';
   generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
@@ -784,7 +773,7 @@ export function mountVerify(container) {
   ]));
 
   // Paste textarea
-  const pasteArea = el('textarea', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y');
+  const pasteArea = el('textarea', 'field resize-y font-mono text-xs');
   pasteArea.dataset.testid = 'disclosure-receipt-input';
   pasteArea.rows = 4;
   pasteArea.placeholder = '{ "version": 1, ... }';
@@ -794,7 +783,7 @@ export function mountVerify(container) {
   ]));
 
   // Load button
-  const loadBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Load Receipt');
+  const loadBtn = el('button', 'btn-secondary', 'Load Receipt');
   loadBtn.type = 'button';
   loadBtn.dataset.testid = 'disclosure-load-receipt';
   importWrap.appendChild(loadBtn);
@@ -819,12 +808,12 @@ export function mountVerify(container) {
   summaryWrap.appendChild(summaryGrid);
 
   // VK hash field (canonical default, editable override)
-  const vkInput = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
+  const vkInput = el('input', 'field flex-1 font-mono text-xs');
   vkInput.type = 'text';
   vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
   vkInput.readOnly = true;
 
-  const vkOverrideBtn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Override');
+  const vkOverrideBtn = el('button', 'btn-secondary', 'Override');
   vkOverrideBtn.type = 'button';
   vkOverrideBtn.addEventListener('click', () => {
     vkInput.readOnly = !vkInput.readOnly;
@@ -842,7 +831,7 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // RPC endpoint (only used when no wallet is connected)
   // -------------------------------------------------------------------------
-  const rpcInput = el('input', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
+  const rpcInput = el('input', 'field font-mono text-xs disabled:opacity-60');
   rpcInput.type = 'text';
   rpcInput.value = deploymentDefaults.rpcUrl;
 
@@ -864,7 +853,7 @@ export function mountVerify(container) {
   App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
 
   // Verify button
-  const verifyBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Verify Receipt');
+  const verifyBtn = el('button', 'btn-primary w-full', 'Verify Receipt');
   verifyBtn.type = 'button';
   verifyBtn.dataset.testid = 'disclosure-verify-submit';
   summaryWrap.appendChild(verifyBtn);

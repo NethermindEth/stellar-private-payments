@@ -93,12 +93,8 @@ function renderActions(buttons) {
     actions.replaceChildren(...buttons);
 }
 
-function makeButton({ text, variant = 'secondary', onClick }) {
-    const btn = el('button', variant === 'primary'
-        ? 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60'
-        : variant === 'ghost'
-            ? 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60'
-            : 'rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60', text);
+function makeButton({ text, variant, onClick }) {
+    const btn = el('button', variant === 'primary' ? 'btn-primary' : 'btn-secondary', text);
     btn.type = 'button';
     if (onClick) btn.addEventListener('click', onClick);
     return btn;
@@ -350,7 +346,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
+                const cancel = makeButton({ text: 'Cancel', onClick: cancelOnboarding });
                 const accept = makeButton({
                     text: 'Accept disclaimer',
                     variant: 'primary',
@@ -386,7 +382,6 @@ export async function runOnboardingWizard({
             await waitForStep((resolve, reject) => {
                 const later = makeButton({
                     text: 'Continue without it',
-                    variant: 'ghost',
                     onClick: () => {
                         setPersistPromptedFlag();
                         resolve();
@@ -443,7 +438,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
+                const cancel = makeButton({ text: 'Cancel', onClick: cancelOnboarding });
                 const derive = makeButton({
                     text: 'Derive and store keys',
                     variant: 'primary',
@@ -509,7 +504,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const later = makeButton({ text: 'Continue', variant: 'ghost', onClick: () => resolve() });
+                const later = makeButton({ text: 'Continue', onClick: () => resolve() });
                 const requestNotif = enableNotifications && Notification.permission !== 'granted'
                     ? makeButton({
                         text: 'Allow reminders',
@@ -591,7 +586,6 @@ export async function runOnboardingWizard({
                 resolveStep = resolve;
                 const later = makeButton({
                     text: 'Use default',
-                    variant: 'ghost',
                     onClick: () => persistExplorer(later, deploymentDefaults.explorerUrl),
                 });
                 const save = makeButton({
@@ -619,7 +613,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const later = makeButton({ text: 'Register later', variant: 'ghost', onClick: () => resolve() });
+                const later = makeButton({ text: 'Register later', onClick: () => resolve() });
                 const register = makeButton({
                     text: 'Register now',
                     variant: 'primary',

@@ -263,8 +263,7 @@ async function connect() {
     // UI states reflecting connection
     syncDot.classList.remove('bg-emerald-500', 'animate-pulse', 'shadow-emerald-500');
     syncDot.classList.add('bg-cyan-400', 'shadow-cyan-400');
-    connectBtn.classList.remove('bg-[linear-gradient(135deg,#74c5ff,#2f6dff)]', 'text-ink-950');
-    connectBtn.classList.add('bg-white/[0.05]', 'text-slate-100');
+    connectBtn.classList.replace('btn-primary', 'btn-secondary');
 
     // Enable Action Buttons & remove tooltips
     ACTION_BUTTONS.forEach(btn => {
@@ -302,8 +301,7 @@ function disconnect() {
 
   syncDot.classList.remove('bg-cyan-400', 'shadow-cyan-400');
   syncDot.classList.add('bg-emerald-500', 'animate-pulse', 'shadow-emerald-500');
-  connectBtn.classList.add('bg-[linear-gradient(135deg,#74c5ff,#2f6dff)]', 'text-ink-950');
-  connectBtn.classList.remove('bg-white/[0.05]', 'text-slate-100');
+  connectBtn.classList.replace('btn-secondary', 'btn-primary');
 
   // Disable Action Buttons & restore tooltips
   ACTION_BUTTONS.forEach(btn => {
@@ -1498,10 +1496,7 @@ const tabContents = document.querySelectorAll('.tab-content');
 
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    tabBtns.forEach(t => {
-      t.className = 'tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100';
-    });
-    btn.className = 'tab-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition';
+    for (const t of tabBtns) t.ariaCurrent = t === btn ? 'page' : null;
 
     tabContents.forEach(c => c.classList.add('hidden'));
 

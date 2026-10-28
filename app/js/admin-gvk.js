@@ -1164,10 +1164,10 @@ function renderGraphDetailPanel(container, notes) {
   addRow('Nullifier', note.nullifier ? cellDisplay(truncateHex(note.nullifier)) : '—');
 
   const nav = el('div', 'mt-auto flex items-center justify-between gap-2 pt-4');
-  const prevBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', '← Prev');
+  const prevBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', '← Prev');
   prevBtn.type = 'button';
   prevBtn.addEventListener('click', () => moveGraphSelection(-1));
-  const nextBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Next →');
+  const nextBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Next →');
   nextBtn.type = 'button';
   nextBtn.addEventListener('click', () => moveGraphSelection(1));
   nav.appendChild(prevBtn);
@@ -1599,7 +1599,7 @@ function renderPkGraphFlowDetailPanel(container, flow) {
   rows.appendChild(txRow);
 
   const footer = el('div', 'mt-auto pt-4');
-  const closeBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Clear selection');
+  const closeBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Clear selection');
   closeBtn.type = 'button';
   closeBtn.addEventListener('click', () => selectPkGraphFlow(flow));
   footer.appendChild(closeBtn);
@@ -1661,10 +1661,10 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   }
 
   const nav = el('div', 'mt-auto flex shrink-0 items-center justify-between gap-2 pt-4');
-  const prevBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', '← Prev');
+  const prevBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', '← Prev');
   prevBtn.type = 'button';
   prevBtn.addEventListener('click', () => movePkGraphSelection(-1));
-  const nextBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Next →');
+  const nextBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Next →');
   nextBtn.type = 'button';
   nextBtn.addEventListener('click', () => movePkGraphSelection(1));
   nav.appendChild(prevBtn);
@@ -2056,19 +2056,10 @@ async function ensureFullyLoaded() {
   await drainPromise;
 }
 
-function setLoadMoreHighlight(active) {
-  loadMoreBtnEl.classList.toggle('border-white/10', !active);
-  loadMoreBtnEl.classList.toggle('text-slate-300', !active);
-  loadMoreBtnEl.classList.toggle('border-cyan-300/50', active);
-  loadMoreBtnEl.classList.toggle('text-cyan-100', active);
-  loadMoreBtnEl.classList.toggle('bg-cyan-400/10', active);
-}
-
 function updateLoadMoreButton() {
   if (!loadMoreBtnEl) return;
   if (!state.audit) {
     loadMoreBtnEl.disabled = true;
-    setLoadMoreHighlight(false);
     return;
   }
 
@@ -2078,7 +2069,6 @@ function updateLoadMoreButton() {
     : !state.exhausted);
 
   loadMoreBtnEl.disabled = !hasMore;
-  setLoadMoreHighlight(hasMore);
 }
 
 function updateExportButton() {
@@ -2212,11 +2202,7 @@ function updateViewButtons() {
     [viewTxBtnEl, 'tx'], [viewNoteBtnEl, 'note'], [viewGraphBtnEl, 'graph'], [viewPkGraphBtnEl, 'pkGraph'],
   ]) {
     if (!btn) continue;
-    const active = state.view === view;
-    btn.setAttribute('aria-pressed', String(active));
-    btn.classList.toggle('bg-cyan-400/15', active);
-    btn.classList.toggle('text-cyan-100', active);
-    btn.classList.toggle('text-slate-400', !active);
+    btn.ariaPressed = state.view === view;
   }
 }
 

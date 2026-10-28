@@ -38,12 +38,7 @@ export const NotesTable = {
         document.querySelectorAll('[data-note-filter]').forEach(btn => {
             btn.addEventListener('click', () => {
                 this.filter = btn.dataset.noteFilter;
-                document.querySelectorAll('[data-note-filter]').forEach(item => {
-                    const active = item === btn;
-                    item.classList.toggle('bg-cyan-400/20', active);
-                    item.classList.toggle('text-cyan-100', active);
-                    item.classList.toggle('text-slate-400', !active);
-                });
+                for (const item of document.querySelectorAll('[data-note-filter]')) item.ariaPressed = item === btn;
                 this.render();
             });
         });
