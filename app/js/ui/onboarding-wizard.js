@@ -353,10 +353,12 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             accept.disabled = true;
+                            accept.ariaBusy = true;
                             await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
+                            accept.ariaBusy = false;
                             setError(error?.message || 'Failed to accept disclaimer');
                         }
                     },
@@ -393,6 +395,7 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             request.disabled = true;
+                            request.ariaBusy = true;
                             later.disabled = true;
                             const granted = await persistStorageIfWanted();
                             setPersistPromptedFlag();
@@ -401,6 +404,7 @@ export async function runOnboardingWizard({
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             request.disabled = false;
+                            request.ariaBusy = false;
                             later.disabled = false;
                             setError(error?.message || 'Failed to request storage persistence');
                         }
@@ -445,6 +449,7 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             derive.disabled = true;
+                            derive.ariaBusy = true;
                             await client().openAccount(
                                 { networkPassphrase, userAddress: address },
                                 signer,
@@ -459,6 +464,7 @@ export async function runOnboardingWizard({
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
+                            derive.ariaBusy = false;
                             setError(error?.message || 'Failed to derive privacy keys');
                         }
                     },
@@ -572,12 +578,14 @@ export async function runOnboardingWizard({
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
+                    button.ariaBusy = true;
                     saveExplorerPreference(baseUrl);
                     await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();
                 } catch (error) {
                     button.disabled = false;
+                    button.ariaBusy = false;
                     setError(error?.message || 'Failed to save explorer setting');
                 }
             };
@@ -623,11 +631,13 @@ export async function runOnboardingWizard({
                                 throw new Error('Derive keys before registration');
                             }
                             register.disabled = true;
+                            register.ariaBusy = true;
                             await registerNow({ address, networkPassphrase, signer });
                             state.registered = true;
                             resolve();
                         } catch (error) {
                             register.disabled = false;
+                            register.ariaBusy = false;
                             setError(getRegistrationErrorMessage(error));
                         }
                     },

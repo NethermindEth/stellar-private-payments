@@ -2530,6 +2530,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
+      auditBtnEl.ariaBusy = true;
       loadMoreBtnEl.disabled = true;
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
@@ -2541,6 +2542,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Global View audit failed: ${err?.message || err}`, 'error');
     } finally {
       auditBtnEl.disabled = false;
+      auditBtnEl.ariaBusy = false;
       auditBtnEl.textContent = originalText;
       syncActionButtons();
     }
@@ -2562,6 +2564,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
+      loadMoreBtnEl.ariaBusy = true;
       await fetchBatch(BATCH_SIZE);
       await applyFiltersAndRender();
     } catch (err) {
@@ -2569,6 +2572,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Load more failed: ${err?.message || err}`, 'error');
     } finally {
       loadMoreBtnEl.textContent = originalText;
+      loadMoreBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });
@@ -2580,6 +2584,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       exportBtnEl.disabled = true;
       exportBtnEl.textContent = 'Exporting…';
+      exportBtnEl.ariaBusy = true;
       if (!state.exhausted) setPanelStatus('Loading full result set to export…', 'info');
       await ensureFullyLoaded();
       if (!readFilters().valid) throw new Error('Correct the amount filters before exporting.');
@@ -2597,6 +2602,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Export failed: ${err?.message || err}`, 'error');
     } finally {
       exportBtnEl.textContent = originalText;
+      exportBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });
