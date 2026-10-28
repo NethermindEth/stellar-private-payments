@@ -141,7 +141,7 @@ function renderSettings() {
 
         const address = el('span', 'min-w-0 break-all font-mono text-xs text-slate-100', signer);
 
-        const remove = el('button', 'shrink-0 rounded-full border border-rose-400/25 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10', 'Remove');
+        const remove = el('button', 'btn-danger shrink-0 px-3 py-1.5 text-xs', 'Remove');
         remove.type = 'button';
         remove.setAttribute('data-testid', 'settings-signing-account-remove');
         remove.setAttribute('aria-label', `Remove ${Utils.shortAddress(signer)}`);

@@ -36,6 +36,9 @@
   --color-ink-850: #101b2d;
   --color-ink-800: #16233a;
 
+  --color-accent-from: #74c5ff;
+  --color-accent-to: #2f6dff;
+
   --font-sans: "Manrope", ui-sans-serif, system-ui;
   --font-mono: "JetBrains Mono", monospace;
 
@@ -43,6 +46,8 @@
   --text-3xs: 0.625rem;
   --tracking-label: 0.22em;
   --tracking-eyebrow: 0.34em;
+
+  --shadow-glow: 0 12px 30px rgba(63, 138, 255, 0.45);
 
   --color-border: rgba(255, 255, 255, 0.08);
 }
@@ -102,6 +107,16 @@
   .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-400; }
   .section-title { @apply text-2xl font-semibold tracking-tight text-white; }
   .table-head { @apply text-3xs uppercase tracking-wide text-slate-400; }
+  .field { @apply w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40; }
+  .btn-primary, .btn-secondary, .btn-danger { @apply inline-flex items-center justify-center rounded-2xl px-5 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply bg-linear-135/srgb from-accent-from to-accent-to font-semibold text-ink-950 shadow-glow not-disabled:hover:brightness-110; }
+  .btn-primary:disabled { @apply bg-none text-slate-300 shadow-none inset-ring inset-ring-white/10; }
+  .btn-secondary { @apply border border-white/10 text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100; }
+  .btn-danger { @apply border border-rose-500/30 bg-rose-500/10 text-rose-100 hover:border-rose-500/50 hover:bg-rose-500/20; }
+  .tab { @apply rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100; }
+  .tab:is([aria-current=page], [aria-pressed=true]) { @apply bg-cyan-400/15 text-cyan-100; }
+  .icon-btn { @apply inline-flex items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100; }
+  .link { @apply text-cyan-400 underline underline-offset-2 transition hover:text-cyan-300; }
 }
 
 @layer utilities {

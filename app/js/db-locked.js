@@ -18,7 +18,7 @@ export function showDbLockedModal(message) {
     if (shown || typeof document === 'undefined') return;
     shown = true;
 
-    const btn = el('button', 'mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110', 'Reload this page');
+    const btn = el('button', 'btn-primary mt-6 w-full', 'Reload this page');
     btn.type = 'button';
     btn.addEventListener('click', () => window.location.reload());
 

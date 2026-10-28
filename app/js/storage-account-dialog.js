@@ -17,9 +17,9 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
         const account = el('p', 'mt-2 break-all font-mono text-sm', address);
         account.setAttribute('aria-live', 'polite');
         const actions = el('div', 'mt-6 flex justify-end gap-3');
-        const cancel = el('button', 'rounded-xl border border-white/10 px-5 py-3', 'Cancel');
+        const cancel = el('button', 'btn-secondary', 'Cancel');
         cancel.type = 'button';
-        const proceed = el('button', 'rounded-xl bg-cyan-900 px-5 py-3 text-white', fresh ? 'Continue' : 'Unlock with Freighter');
+        const proceed = el('button', 'btn-primary', fresh ? 'Continue' : 'Unlock with Freighter');
         proceed.type = 'button';
         proceed.dataset.testid = 'storage-account-continue';
         const finish = accepted => {
