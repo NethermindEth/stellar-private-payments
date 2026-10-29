@@ -67,23 +67,23 @@
   }
 
   select option {
-    background-color: #0b1423;
-    color: #e2e8f0;
+    background-color: var(--color-ink-900);
+    color: var(--color-slate-200);
   }
 
   select option[data-privacy-warning="true"] {
-    color: #f87171;
+    color: var(--color-amber-300);
   }
 
   body {
     background:
-      radial-gradient(circle at top, rgba(63, 138, 255, 0.12), transparent 32%),
-      linear-gradient(180deg, #040914 0%, #061021 48%, #040914 100%);
+      radial-gradient(circle at top, --alpha(var(--color-blue-500) / 12%), transparent 32%),
+      linear-gradient(180deg, var(--color-ink-950) 0%, var(--color-ink-900) 48%, var(--color-ink-950) 100%);
   }
 
   ::selection {
-    background: rgba(116, 197, 255, 0.3);
-    color: #f8fbff;
+    background: --alpha(var(--color-accent-from) / 30%);
+    color: var(--color-slate-50);
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -129,17 +129,24 @@
   .chip[data-tone=key] { @apply border-violet-300/30 bg-violet-300/10 text-violet-200 ring-violet-300/30; }
   .chip[data-tone=fail] { @apply border-rose-400/30 bg-rose-400/10 text-rose-200; }
   .sync-dot { @apply h-2 w-2 rounded-full bg-slate-500; }
-  .sync-dot[data-tone=ok] { @apply bg-emerald-400; box-shadow: 0 0 18px rgba(52, 211, 153, 0.7); }
+  .sync-dot[data-tone=ok] { @apply bg-emerald-400; box-shadow: 0 0 18px --alpha(var(--color-emerald-400) / 70%); }
   .sync-dot[data-tone=warn] { @apply bg-amber-300 animate-pulse-dot; }
   .step { @apply rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-slate-400; }
   .step[data-state=current] { @apply border-cyan-300/30 bg-cyan-300/10 text-cyan-100; }
   .step[data-state=done] { @apply border-emerald-300/30 bg-emerald-300/10 text-emerald-100; }
+  .ambient {
+    @apply pointer-events-none fixed inset-0 overflow-hidden;
+    background: radial-gradient(circle at top, --alpha(var(--color-blue-400) / 28%), transparent 58%) top / 100% 32rem no-repeat;
+    &::before, &::after { @apply absolute rounded-full blur-3xl content-['']; }
+    &::before { @apply -left-24 top-44 size-72 bg-cyan-400/10; }
+    &::after { @apply top-24 right-0 size-96; background-color: --alpha(var(--color-blue-500) / 10%); }
+  }
 }
 
 /* Firefox reads the scrollbar-* properties, WebKit the pseudo-elements. */
 @utility thin-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  scrollbar-color: --alpha(var(--color-slate-400) / 35%) transparent;
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -151,11 +158,11 @@
   }
 
   &::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.35);
+    background-color: --alpha(var(--color-slate-400) / 35%);
     border-radius: 9999px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(148, 163, 184, 0.55);
+    background-color: --alpha(var(--color-slate-400) / 55%);
   }
 }

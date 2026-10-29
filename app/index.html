@@ -40,11 +40,7 @@
         Skip to main content
     </a>
 
-    <div class="pointer-events-none fixed inset-0 overflow-hidden">
-        <div class="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(circle_at_top,rgba(88,166,255,0.28),transparent_58%)]"></div>
-        <div class="absolute -left-24 top-44 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl"></div>
-        <div class="absolute right-0 top-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"></div>
-    </div>
+    <div class="ambient" aria-hidden="true"></div>
 
     <div class="relative mx-auto flex min-h-screen max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
         <header class="card px-5 py-4 shadow-header">
@@ -400,7 +396,7 @@
     </div>
 
     <div id="settings-overlay" class="fixed inset-0 z-40 hidden bg-ink-950/65 backdrop-blur-sm"></div>
-    <aside id="settings-drawer" class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-[linear-gradient(180deg,rgba(8,14,29,0.98),rgba(4,9,20,1))] px-6 py-6 shadow-modal">
+    <aside id="settings-drawer" class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-linear-to-b from-ink-900/98 to-ink-950 px-6 py-6 shadow-modal">
         <div class="flex items-center justify-between gap-4">
             <div>
                 <p class="eyebrow">Profile & Settings</p>
@@ -690,7 +686,7 @@
     </template>
 
     <template id="tpl-balance-card">
-        <article class="panel bg-[linear-gradient(180deg,rgba(19,30,56,0.96),rgba(10,17,31,0.98))] shadow-[0_14px_40px_rgba(2,6,23,0.35)]">
+        <article class="panel bg-linear-to-b from-ink-800/96 to-ink-900/98 shadow-[0_14px_40px_--alpha(var(--color-slate-950)/35%)]">
             <div class="flex items-start justify-between gap-4">
                 <div class="min-w-0">
                     <a class="balance-token text-sm font-semibold text-white transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
