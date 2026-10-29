@@ -8,29 +8,6 @@
 @source not "../../dist";
 
 @theme {
-  --color-brand-50: #ebf8ff;
-  --color-brand-100: #cfe9ff;
-  --color-brand-200: #add7ff;
-  --color-brand-300: #84c2ff;
-  --color-brand-400: #58a6ff;
-  --color-brand-500: #3f8aff;
-  --color-brand-600: #2f6dff;
-  --color-brand-700: #244fd3;
-  --color-brand-800: #1e3f9f;
-  --color-brand-900: #1a336f;
-
-  --color-dark-50: #f8fbff;
-  --color-dark-100: #e6eefc;
-  --color-dark-200: #ccd9ef;
-  --color-dark-300: #aebdd6;
-  --color-dark-400: #7e91ae;
-  --color-dark-500: #5d6d88;
-  --color-dark-600: #3f4d64;
-  --color-dark-700: #243044;
-  --color-dark-800: #151f31;
-  --color-dark-900: #0b1423;
-  --color-dark-950: #040914;
-
   --color-ink-950: #040914;
   --color-ink-900: #0b1423;
   --color-ink-850: #101b2d;

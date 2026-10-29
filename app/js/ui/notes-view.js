@@ -112,12 +112,8 @@ export function createNoteRow(note, opts = {}) {
   const rowTag = selectable ? 'label' : 'div';
   const row = el(
     rowTag,
-    `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 ${
-      selectable ? 'cursor-pointer ' : ''
-    }${
-      selected
-        ? 'bg-brand-500/10 border-brand-500/40 text-brand-300'
-        : 'bg-dark-800 border-dark-700 hover:border-dark-600 text-dark-200'
+    `group w-full text-left p-3 rounded-2xl border border-white/8 bg-white/3 text-slate-200 transition-all duration-200 flex items-center justify-between gap-3 hover:border-cyan-300/30 has-checked:border-cyan-400/40 has-checked:bg-cyan-400/10 has-checked:text-cyan-200 ${
+      selectable ? 'cursor-pointer' : ''
     }`,
   );
   if (note.id) row.dataset.noteId = note.id;
@@ -127,7 +123,7 @@ export function createNoteRow(note, opts = {}) {
   // Left cluster: optional checkbox + commitment / meta line.
   const leftItems = [];
   if (selectable) {
-    const checkbox = el('input', 'accent-brand-500');
+    const checkbox = el('input', 'accent-cyan-400');
     checkbox.type = 'checkbox';
     if (testId) checkbox.dataset.testid = `${testId}-select`;
     checkbox.checked = selected;
@@ -153,7 +149,7 @@ export function createNoteRow(note, opts = {}) {
   if (showBadge) rightItems.push(createStatusBadge(note.spent));
   const amountLabel = el(
     'div',
-    `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`,
+    'text-xs font-medium whitespace-nowrap text-slate-300 group-has-checked:text-cyan-200',
     formatAmount(note.amount, symbol, decimals),
   );
   amountLabel.dataset.noteAmount = '';
