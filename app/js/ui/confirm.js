@@ -18,15 +18,8 @@ import { el, elc } from './dom.js';
  * lands on the Cancel button (safe default for financial confirmations: a
  * follow-up Enter cancels rather than confirms). Confirm is reachable via Tab
  * or click.
- *
- * @param {object} opts
- * @param {string} opts.title - Dialog heading.
- * @param {Array<{label: string, value: string}>} [opts.rows] - Summary lines shown above the actions.
- * @param {string} [opts.confirmLabel] - Primary button label (default 'Confirm').
- * @param {string} [opts.warning] - Caution shown below the summary; the user can still confirm.
- * @returns {Promise<boolean>} true on Confirm, false on every cancel path.
  */
-export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warning = '' } = {}) {
+export function confirmAction({ title = '', message = '', rows = [], confirmLabel = 'Confirm', warning = '', danger = false } = {}) {
     return new Promise((resolve) => {
         const previouslyFocused = document.activeElement;
 
@@ -35,11 +28,15 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
         const panel = el('div', 'modal-panel w-full max-w-md');
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
+        panel.ariaLabel = title || message;
         panel.setAttribute('data-testid', 'confirm-dialog');
 
-        const heading = el('h2', 'text-xl font-semibold tracking-tight text-white', title);
-        heading.setAttribute('data-testid', 'confirm-dialog-title');
-        panel.appendChild(heading);
+        if (title) {
+            const heading = el('h2', 'text-xl font-semibold tracking-tight text-white', title);
+            heading.setAttribute('data-testid', 'confirm-dialog-title');
+            panel.appendChild(heading);
+        }
+        if (message) panel.appendChild(el('p', 'text-sm leading-relaxed text-slate-200 [overflow-wrap:anywhere]', message));
 
         if (rows.length) {
             panel.appendChild(elc('dl', 'panel mt-5 space-y-3 bg-ink-900/80', rows.map(({ label, value }) => elc('div', 'flex items-center justify-between gap-4 text-sm', [
@@ -59,7 +56,7 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
         cancelBtn.type = 'button';
         cancelBtn.setAttribute('data-testid', 'confirm-dialog-cancel');
 
-        const confirmBtn = el('button', 'btn-primary', confirmLabel);
+        const confirmBtn = el('button', danger ? 'btn-danger' : 'btn-primary', confirmLabel);
         confirmBtn.type = 'button';
         confirmBtn.setAttribute('data-testid', 'confirm-dialog-confirm');
 

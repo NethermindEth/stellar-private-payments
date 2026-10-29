@@ -5,6 +5,7 @@ import { explorerPreference } from './public-settings.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { App, Utils } from './ui/core.js';
+import { confirmAction } from './ui/confirm.js';
 import { el, elc } from './ui/dom.js';
 import { showToast } from './ui/toast.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
@@ -653,7 +654,7 @@ async function insertMembershipLeaf() {
     if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
       throw new Error('ASP secret is required');
     }
-    if (!confirmListWrite(contractId, true)) return;
+    if (!(await confirmListWrite(contractId, true))) return;
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.ariaBusy = true;
@@ -685,11 +686,11 @@ async function insertMembershipLeaf() {
 }
 
 // Asks before writing to a list no pool uses, once every pool has been read.
-function confirmListWrite(list, allowlist) {
+async function confirmListWrite(list, allowlist) {
   if (!state.poolLists) return true;
   const used = [...state.poolLists.values()].map((lists) => lists[allowlist ? 'allowlist' : 'blocklist']);
   const warning = unusedListWarning(list, used, allowlist);
-  return !warning || window.confirm(warning);
+  return !warning || await confirmAction({ message: warning, confirmLabel: 'Continue anyway' });
 }
 
 async function insertNonMembershipLeaf() {
@@ -702,7 +703,7 @@ async function insertNonMembershipLeaf() {
 
     const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keys.length === 0) throw new Error('User note public key is required');
-    if (!confirmListWrite(contractId, false)) return;
+    if (!(await confirmListWrite(contractId, false))) return;
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.ariaBusy = true;
@@ -734,7 +735,7 @@ async function removeNonMembershipLeaf() {
     const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keyValue === undefined) throw new Error('User note public key is required');
     if (others.length > 0) throw new Error('Remove takes one note public key at a time');
-    if (!confirmListWrite(contractId, false)) return;
+    if (!(await confirmListWrite(contractId, false))) return;
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
@@ -1187,8 +1188,8 @@ function renderPauseFiles() {
     });
     const remove = item.querySelector('.remove-pause-file-btn');
     remove.disabled = state.busy;
-    remove.addEventListener('click', () => {
-      if (unsaved(file) && !window.confirm('Remove this pause file? Its signatures haven\'t been saved, so they will be lost.')) return;
+    remove.addEventListener('click', async () => {
+      if (unsaved(file) && !(await confirmAction({ message: 'Remove this pause file? Its signatures haven\'t been saved, so they will be lost.', confirmLabel: 'Remove file', danger: true }))) return;
       state.pauseFiles = state.pauseFiles.filter((held) => held !== file);
       pauseAuthResultsEl.replaceChildren();
       renderPauseFiles();
@@ -1338,7 +1339,7 @@ async function submitPauseFiles() {
     const pools = [...new Set(sendable.map(({ authorization: { pool } }) => pool))];
     if (pools.length === 0) {
       setStatus('Nothing paused', 'error');
-    } else if (window.confirm(`Pause deposits into ${pools.map(shortAddress).join(', ')} now? No one can deposit there until the admin unpauses.`)) {
+    } else if (await confirmAction({ message: `Pause deposits into ${pools.map(shortAddress).join(', ')} now? No one can deposit there until the admin unpauses.`, confirmLabel: 'Pause deposits', danger: true })) {
       await sendPauseFiles(sendable);
     } else {
       setStatus('Nothing paused', 'info');
@@ -1386,7 +1387,7 @@ async function confirmCustody(newAdmin) {
     }
   }
   return problems.length === 0
-    || window.confirm(`The new admin is not a multisig account: ${problems.join('; ')}.\n\nPropose it anyway?`);
+    || await confirmAction({ message: `The new admin is not a multisig account: ${problems.join('; ')}. Propose it anyway?`, confirmLabel: 'Propose anyway' });
 }
 
 function showAddress(cell, address) {
