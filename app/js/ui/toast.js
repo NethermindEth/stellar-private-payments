@@ -2,6 +2,24 @@
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { el, elc } from './dom.js';
 
+let container;
+
+// Everything outside the topmost modal dialog is inert, so toasts follow it.
+function place() {
+    const dialog = [...document.querySelectorAll('dialog:modal')].at(-1);
+    const parent = dialog ?? document.body;
+    // A move blurs a focused toast button.
+    if (container.parentElement !== parent) parent.append(container);
+    dialog?.addEventListener('close', place, { once: true });
+}
+
+// Last in <body> is then last opened, the order the browser stacks modal dialogs in.
+export function openModal(dialog) {
+    document.body.append(dialog);
+    dialog.showModal();
+    if (container) place();
+}
+
 export function showToast(message, type = 'success', duration = 4000, { origin, transactionHash, linkUrl } = {}) {
     const text = String(friendlyErrorMessage(message) ?? '');
     const body = Object.assign(el('p', 'break-words', text), { title: text });
@@ -22,6 +40,9 @@ export function showToast(message, type = 'success', duration = 4000, { origin, 
         setTimeout(() => toast.remove(), 200);
     };
     close.addEventListener('click', dismiss);
-    document.getElementById('toast-container').append(toast);
+    // Cached: a dialog removed right after close() holds it until its close event.
+    container ??= document.getElementById('toast-container');
+    place();
+    container.append(toast);
     setTimeout(dismiss, duration);
 }

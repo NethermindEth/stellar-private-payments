@@ -395,11 +395,10 @@
         </footer>
     </div>
 
-    <div id="settings-overlay" class="fixed inset-0 z-40 hidden bg-ink-950/65 backdrop-blur-sm"></div>
-    <aside id="settings-drawer" class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-linear-to-b from-ink-900/98 to-ink-950 px-6 py-6 shadow-modal">
+    <dialog id="settings-drawer" aria-labelledby="settings-title" class="modal ml-auto max-w-xl border-l border-white/8 bg-linear-to-b from-ink-900/98 to-ink-950 p-6 shadow-modal backdrop:bg-ink-950/65">
         <div class="flex items-center justify-between gap-4">
             <div>
-                <p class="eyebrow">Profile & Settings</p>
+                <p id="settings-title" class="eyebrow">Profile & Settings</p>
             </div>
             <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -544,14 +543,14 @@
                 </div>
             </section>
         </div>
-    </aside>
+    </dialog>
 
-    <div id="bootnode-consent-modal" class="fixed inset-0 z-50 hidden bg-ink-950/75 px-4 py-8 backdrop-blur-sm">
+    <dialog id="bootnode-consent-modal" aria-labelledby="bootnode-consent-title" class="modal px-4 py-8 backdrop:bg-ink-950/75">
         <div class="modal-panel mx-auto max-w-2xl">
             <div class="flex items-start justify-between gap-4">
                 <div>
                     <p class="eyebrow">Retention Bypass</p>
-                    <h2 class="section-title mt-2">Bootnode required to finish sync</h2>
+                    <h2 id="bootnode-consent-title" class="section-title mt-2">Bootnode required to finish sync</h2>
                 </div>
                 <button id="bootnode-consent-close" type="button" class="btn-secondary px-3 py-2">Close</button>
             </div>
@@ -580,13 +579,13 @@
                 <button id="bootnode-consent-accept" type="button" class="btn-primary">Use bootnode</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
-    <div id="onboarding-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-ink-950/80 px-4 py-8 backdrop-blur-sm">
+    <dialog id="onboarding-modal" aria-labelledby="onboarding-title" class="modal px-4 py-8 backdrop:bg-ink-950/80">
         <div class="modal-panel mx-auto max-w-4xl sm:p-8">
             <div class="flex items-start justify-between gap-4">
                 <div>
-                    <p class="eyebrow">Onboarding</p>
+                    <p id="onboarding-title" class="eyebrow">Onboarding</p>
                 </div>
                 <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -638,7 +637,7 @@
 
             <div id="onboarding-actions" class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end"></div>
         </div>
-    </div>
+    </dialog>
 
     <template id="tpl-onboarding-keys">
         <div class="panel bg-ink-950/75">
@@ -775,7 +774,7 @@
         </div>
     </template>
 
-    <div id="pool-history-modal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-ink-950/80 px-4 backdrop-blur-sm">
+    <dialog id="pool-history-modal" aria-labelledby="pool-history-title" class="modal open:grid place-items-center px-4 backdrop:bg-ink-950/80">
         <div class="modal-panel mx-auto w-full max-w-md">
             <div class="flex items-start justify-between gap-4">
                 <div>
@@ -793,7 +792,7 @@
             <div id="pool-history-list" class="mt-5 max-h-[60vh] space-y-2 overflow-y-auto"></div>
             <p id="pool-history-empty" class="mt-5 text-sm text-slate-400" hidden>No operations recorded yet for this token.</p>
         </div>
-    </div>
+    </dialog>
 
     <div id="toast-container" class="pointer-events-none fixed inset-x-4 bottom-4 z-60 flex flex-col gap-3 sm:left-auto sm:w-full sm:max-w-sm"></div>
 

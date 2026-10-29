@@ -10,6 +10,7 @@ import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
+import { openModal } from './toast.js';
 import { getRegistrationErrorMessage } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { loadPrivateSigners } from '../private-signers.js';
@@ -68,14 +69,13 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
     urlInput.value = defaultUrl || '';
     rpcUrlEl.textContent = rpcUrl || '';
     detailsEl.textContent = errorMessage || '';
-    modal.classList.remove('hidden');
+    openModal(modal);
 
     return new Promise(resolve => {
+        const listening = new AbortController();
         const cleanup = (accepted = false) => {
-            acceptBtn.removeEventListener('click', onAccept);
-            cancelBtn.removeEventListener('click', onCancel);
-            closeBtn.removeEventListener('click', onCancel);
-            modal.classList.add('hidden');
+            listening.abort();
+            modal.close();
             resolve(accepted ? { accepted: true, url: urlInput.value.trim() } : { accepted: false });
         };
         const onCancel = () => cleanup(false);
@@ -87,9 +87,10 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
             }
             cleanup(true);
         };
-        acceptBtn.addEventListener('click', onAccept);
-        cancelBtn.addEventListener('click', onCancel);
-        closeBtn.addEventListener('click', onCancel);
+        acceptBtn.addEventListener('click', onAccept, { signal: listening.signal });
+        cancelBtn.addEventListener('click', onCancel, { signal: listening.signal });
+        closeBtn.addEventListener('click', onCancel, { signal: listening.signal });
+        modal.addEventListener('cancel', onCancel, { signal: listening.signal });
     });
 }
 
@@ -308,11 +309,15 @@ export const Shell = {
         });
         document.getElementById('open-settings-btn')?.addEventListener('click', () => Wallet.openSettings());
         document.getElementById('settings-close-btn')?.addEventListener('click', () => Wallet.closeSettings());
-        document.getElementById('settings-overlay')?.addEventListener('click', () => Wallet.closeSettings());
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && App.state.ui.settingsOpen) {
-                Wallet.closeSettings();
-            }
+        const drawer = document.getElementById('settings-drawer');
+        // A dismissed file chooser fires a bubbling cancel from the backup input.
+        drawer.addEventListener('cancel', (event) => { if (event.target === drawer) Wallet.closeSettings(); });
+        // A backdrop click targets the dialog itself, left of its box; a drag that only ends there is not one.
+        const onBackdrop = (event) => event.target === drawer && event.clientX < drawer.getBoundingClientRect().left;
+        let pressedBackdrop = false;
+        drawer.addEventListener('pointerdown', (event) => { pressedBackdrop = onBackdrop(event); });
+        drawer.addEventListener('click', (event) => {
+            if (pressedBackdrop && onBackdrop(event)) Wallet.closeSettings();
         });
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
@@ -631,16 +636,12 @@ export const Wallet = {
 
     openSettings() {
         if (['not-checked', 'unavailable'].includes(publicIdentity.status)) void refreshPublicIdentity();
-        App.state.ui.settingsOpen = true;
-        document.getElementById('settings-drawer')?.classList.remove('hidden', 'translate-x-full');
-        document.getElementById('settings-overlay')?.classList.remove('hidden');
+        openModal(document.getElementById('settings-drawer'));
         renderSettingsDrawer();
     },
 
     closeSettings() {
-        App.state.ui.settingsOpen = false;
-        document.getElementById('settings-drawer')?.classList.add('hidden', 'translate-x-full');
-        document.getElementById('settings-overlay')?.classList.add('hidden');
+        document.getElementById('settings-drawer').close();
         clearRevealedAspSecret();
     },
 

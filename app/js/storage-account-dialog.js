@@ -1,4 +1,5 @@
 import { el } from './ui/dom.js';
+import { openModal } from './ui/toast.js';
 
 /** Confirm the public account used to unlock local data before requesting signatures. */
 export function confirmStorageAccount({ address, fresh, watchAccount }) {
@@ -38,8 +39,7 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
         dialog.setAttribute('aria-describedby', description.id);
         actions.append(cancel, proceed);
         dialog.append(title, description, label, account, actions);
-        document.body.append(dialog);
-        dialog.showModal();
+        openModal(dialog);
         if (fresh && watchAccount) {
             try {
                 stopWatching = watchAccount({ intervalMs: 500, onChange: ({ address: next }) => {

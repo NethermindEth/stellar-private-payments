@@ -53,9 +53,6 @@ export const App = {
                 url: '',
             },
         },
-        ui: {
-            settingsOpen: false,
-        },
     },
 
     events: new EventTarget(),
