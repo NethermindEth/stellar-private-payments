@@ -1030,7 +1030,7 @@ function txMemberCounts(notes) {
 }
 
 function colorForPk(pk) {
-  if (!pk) return '#64748b';
+  if (!pk) return 'var(--color-slate-500)';
   let hash = 2166136261;
   for (let i = 0; i < pk.length; i += 1) {
     hash ^= pk.charCodeAt(i);
@@ -1295,9 +1295,8 @@ function renderGraph(rows, containerWidth, filters) {
   svg.append('g')
     .attr('transform', `translate(0, ${height - bottomAxis})`)
     .call(axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(format('d')))
-    .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+    .call((g) => g.selectAll('.domain, line').style('stroke', 'color-mix(in oklab, var(--color-white) 15%, transparent)'))
+    .call((g) => g.selectAll('text').style('fill', 'var(--color-slate-400)').attr('font-size', 10));
 
   // Behind the marks (dots keep their own click handler where they overlap
   // the brush's hit area) so drag-to-zoom and click-to-select coexist.
@@ -1329,7 +1328,7 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('x2', (d) => xScale(d.spentLedger))
     .attr('y1', yFor)
     .attr('y2', yFor)
-    .attr('stroke', colorForNote)
+    .style('stroke', colorForNote)
     .attr('stroke-width', 1.5)
     .attr('opacity', 0.45);
 
@@ -1356,8 +1355,8 @@ function renderGraph(rows, containerWidth, filters) {
       return `translate(${xScale(d.createdLedger ?? d.spentLedger)}, ${yFor(d)})${rotate}`;
     })
     .attr('d', (d) => noteMarkPath(primaryKind(d), primaryRadius(d)))
-    .attr('fill', colorForNote)
-    .attr('stroke', (d) => (d.noteId === state.selectedNoteId ? '#e0f2fe' : '#0b1220'))
+    .style('fill', colorForNote)
+    .style('stroke', (d) => (d.noteId === state.selectedNoteId ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
     .attr('stroke-width', (d) => (d.noteId === state.selectedNoteId ? 2 : 1))
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
@@ -1377,8 +1376,8 @@ function renderGraph(rows, containerWidth, filters) {
       return `translate(${xScale(d.spentLedger)}, ${yFor(d)})${rotate}`;
     })
     .attr('d', (d) => noteMarkPath(d.spentKind, 5))
-    .attr('fill', '#0b1220')
-    .attr('stroke', colorForNote)
+    .style('fill', 'var(--color-ink-900)')
+    .style('stroke', colorForNote)
     .attr('stroke-width', 1.5)
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
@@ -1406,7 +1405,7 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('height', squareSize)
     .attr('rx', 3)
     .attr('fill', 'transparent')
-    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .style('stroke', 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
     .attr('class', 'opacity-0 data-highlight:opacity-100');
@@ -1423,7 +1422,7 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('rx', 3)
     .attr('transform', (d) => `rotate(45, ${xScale(d.spentLedger)}, ${yFor(d)})`)
     .attr('fill', 'transparent')
-    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .style('stroke', 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
     .attr('class', 'opacity-0 data-highlight:opacity-100');
@@ -1798,8 +1797,8 @@ function renderPkGraph(rows, containerWidth, filters) {
   const FLOW_HEAD_HALF_WIDTH = 5;
 
   const laneStripeFill = (pk) => (pk === state.selectedPk
-    ? 'rgba(34,211,238,0.08)'
-    : laneIndexOf.get(pk) % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent');
+    ? 'color-mix(in oklab, var(--color-cyan-400) 8%, transparent)'
+    : laneIndexOf.get(pk) % 2 === 0 ? 'color-mix(in oklab, var(--color-white) 2%, transparent)' : 'transparent');
 
   // Label column stays fixed (frozen first column); horizontal scroll is
   // driven by the axis strip below (always visible, unlike a scrollbar on
@@ -1838,9 +1837,8 @@ function renderPkGraph(rows, containerWidth, filters) {
   axisSvgEl.append('g')
     .attr('transform', 'translate(0, 1)')
     .call(axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(format('d')))
-    .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+    .call((g) => g.selectAll('.domain, line').style('stroke', 'color-mix(in oklab, var(--color-white) 15%, transparent)'))
+    .call((g) => g.selectAll('text').style('fill', 'var(--color-slate-400)').attr('font-size', 10));
 
   axisScrollX.addEventListener('scroll', () => {
     select(plotScrollX).select('svg').style('transform', `translateX(${-axisScrollX.scrollLeft}px)`);
@@ -1866,7 +1864,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', PK_TIMELINE_LABEL_WIDTH)
     .attr('height', rowHeight)
-    .attr('fill', laneStripeFill);
+    .style('fill', laneStripeFill);
 
   labelsSvg.append('g')
     .selectAll('text')
@@ -1877,7 +1875,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('dy', '0.32em')
     .attr('font-size', 11)
     .attr('font-family', 'monospace')
-    .attr('fill', (pk) => colorForPk(pk))
+    .style('fill', (pk) => colorForPk(pk))
     .style('cursor', 'pointer')
     .style('user-select', 'none')
     .text((pk) => ownerLabel(pk))
@@ -1901,7 +1899,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', plotWidth)
     .attr('height', rowHeight)
-    .attr('fill', laneStripeFill);
+    .style('fill', laneStripeFill);
 
   // Behind the marks (same drag-to-zoom-by-ledger-range as the Note graph),
   // so it and click-to-select coexist — marks appended after it stay on top.
@@ -1959,7 +1957,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('x2', (g) => g.x)
     .attr('y1', (g) => g.shaftStartY)
     .attr('y2', (g) => g.shaftEndY)
-    .attr('stroke', (g) => g.color)
+    .style('stroke', (g) => g.color)
     .attr('stroke-width', (g) => (isSelectedFlow(g.flow) ? FLOW_STROKE_WIDTH + 2 : FLOW_STROKE_WIDTH))
     .attr('stroke-linecap', 'round')
     .attr('class', MARK_SELECTED)
@@ -1967,7 +1965,7 @@ function renderPkGraph(rows, containerWidth, filters) {
 
   flowGroups.append('path')
     .attr('d', (g) => `M ${g.x - FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x + FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x} ${g.tipY} Z`)
-    .attr('fill', (g) => g.color)
+    .style('fill', (g) => g.color)
     .attr('class', MARK_SELECTED)
     .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
 
@@ -1991,8 +1989,8 @@ function renderPkGraph(rows, containerWidth, filters) {
       return `translate(${xScale(d.ledger)}, ${yFor(d.pk)})${rotate}`;
     })
     .attr('d', dotPathD)
-    .attr('fill', (d) => colorForPk(d.pk))
-    .attr('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? '#e0f2fe' : '#0b1220'))
+    .style('fill', (d) => colorForPk(d.pk))
+    .style('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
     .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
     .style('cursor', 'pointer')
     .attr('class', MARK_SELECTED)
