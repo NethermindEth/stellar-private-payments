@@ -51,7 +51,9 @@
 
   --shadow-glow: 0 12px 30px rgba(63, 138, 255, 0.45);
   --shadow-modal: 0 24px 100px rgba(0, 0, 0, 0.6);
+  --shadow-header: 0 20px 80px rgba(0, 0, 0, 0.35);
 
+  --animate-spin: spin 0.8s linear infinite;
   --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
   @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
@@ -106,6 +108,16 @@
     background: rgba(116, 197, 255, 0.3);
     color: #f8fbff;
   }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
 }
 
 /* A utility, not a component, so the tone beats the base text color beside it. */
@@ -147,48 +159,26 @@
   .step[data-state=done] { @apply border-emerald-300/30 bg-emerald-300/10 text-emerald-100; }
 }
 
-@layer utilities {
-  /* A thin, low-contrast scrollbar for compact scroll regions (e.g. the GVK
-     admin panel's graph/history areas), instead of the chunky OS default.
-     Firefox honors scrollbar-width/-color; the rest use the WebKit pseudo-elements. */
-  .thin-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
-  }
+/* Firefox reads the scrollbar-* properties, WebKit the pseudo-elements. */
+@utility thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
 
-  .thin-scroll::-webkit-scrollbar {
+  &::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
-  .thin-scroll::-webkit-scrollbar-track {
+  &::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .thin-scroll::-webkit-scrollbar-thumb {
+  &::-webkit-scrollbar-thumb {
     background-color: rgba(148, 163, 184, 0.35);
     border-radius: 9999px;
   }
 
-  .thin-scroll::-webkit-scrollbar-thumb:hover {
+  &::-webkit-scrollbar-thumb:hover {
     background-color: rgba(148, 163, 184, 0.55);
-  }
-
-  input[type="number"]::-webkit-outer-spin-button,
-  input[type="number"]::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  input[type="number"] {
-    -moz-appearance: textfield;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .animate-spin {
-    animation: spin 0.8s linear infinite;
   }
 }
