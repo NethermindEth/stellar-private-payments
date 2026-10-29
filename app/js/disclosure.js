@@ -352,8 +352,7 @@ export function mountGenerate(container) {
       inputWrap.appendChild(btn);
     }
 
-    const errorEl = el('div', 'text-xs text-rose-400 hidden');
-    errorEl.id = `${id}-error`;
+    const errorEl = Object.assign(el('div', 'text-xs text-rose-400'), { id: `${id}-error`, hidden: true });
 
     return { wrap: elc('div', 'space-y-1', [label, inputWrap, errorEl]), input, errorEl };
   };
@@ -388,7 +387,7 @@ export function mountGenerate(container) {
       label: 'Random',
       onClick: () => {
         nonceField.input.value = generateRandomNonce();
-        nonceField.errorEl.classList.add('hidden');
+        nonceField.errorEl.hidden = true;
       },
     },
   });
@@ -416,7 +415,7 @@ export function mountGenerate(container) {
 
     const setErr = (field, msg) => {
       field.errorEl.textContent = msg || '';
-      field.errorEl.classList.toggle('hidden', !msg);
+      field.errorEl.hidden = !msg;
       if (msg) ok = false;
     };
 
@@ -438,14 +437,12 @@ export function mountGenerate(container) {
   };
 
   // Progress / result area
-  const progressArea = el('div', 'group hidden');
-  progressArea.id = 'generate-progress';
+  const progressArea = Object.assign(el('div', 'group'), { id: 'generate-progress', hidden: true });
   progressArea.dataset.testid = 'disclosure-generate-progress';
   progressArea.dataset.state = 'idle';
   formWrap.appendChild(progressArea);
 
-  const resultArea = el('div', 'hidden');
-  resultArea.id = 'generate-result';
+  const resultArea = Object.assign(el('div'), { id: 'generate-result', hidden: true });
   resultArea.dataset.testid = 'disclosure-generate-result';
   resultArea.dataset.state = 'idle';
   formWrap.appendChild(resultArea);
@@ -454,17 +451,16 @@ export function mountGenerate(container) {
     state.generateStage = stage;
     state.generateStageMessage = message;
     state.generateError = error;
+    progressArea.hidden = !stage;
 
     if (stage) {
       progressArea.dataset.state = error ? 'error' : 'running';
-      progressArea.classList.remove('hidden');
       progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-slate-300 group-data-[state=error]:text-rose-300', [
         error ? null : spinnerEl(),
         el('span', null, message),
       ]));
     } else {
       progressArea.dataset.state = 'idle';
-      progressArea.classList.add('hidden');
       progressArea.replaceChildren();
     }
   };
@@ -525,7 +521,7 @@ export function mountGenerate(container) {
 
   const showResult = (receipt) => {
     state.lastReceipt = receipt;
-    resultArea.classList.remove('hidden');
+    resultArea.hidden = false;
     resultArea.dataset.state = 'ready';
     const json = JSON.stringify(receipt, null, 2);
     const commitmentPrefix = state.selectedNotes.length
@@ -585,10 +581,10 @@ export function mountGenerate(container) {
       state.lastReceipt = null;
       state.generateError = null;
       state.generateStage = null;
-      resultArea.classList.add('hidden');
+      resultArea.hidden = true;
       resultArea.dataset.state = 'idle';
       resultArea.replaceChildren();
-      progressArea.classList.add('hidden');
+      progressArea.hidden = true;
       progressArea.replaceChildren();
       // Re-enable form
       generateBtn.disabled = false;
@@ -620,7 +616,7 @@ export function mountGenerate(container) {
     generateBtn.ariaBusy = true;
     resultArea.dataset.state = 'generating';
     generateBtn.textContent = 'Generating…';
-    resultArea.classList.add('hidden');
+    resultArea.hidden = true;
     state.lastReceipt = null;
 
     try {
@@ -681,7 +677,7 @@ async function generateReceipt(form) {
   const handler = (e) => {
     const d = e.detail;
     if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
-    progressArea.classList.remove('hidden');
+    progressArea.hidden = false;
     progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-slate-300', [spinnerEl(), el('span', null, d.message)]));
   };
   window.addEventListener(TX_PROGRESS_EVENT, handler);
@@ -780,7 +776,7 @@ export function mountVerify(container) {
   importWrap.appendChild(loadBtn);
 
   // Receipt error display
-  const importErrorEl = el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-3 hidden');
+  const importErrorEl = Object.assign(el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-3'), { hidden: true });
   importErrorEl.dataset.testid = 'disclosure-receipt-import-error';
   importWrap.appendChild(importErrorEl);
 
@@ -789,7 +785,7 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // Receipt summary + VK hash (shown after successful import)
   // -------------------------------------------------------------------------
-  const summaryWrap = el('div', 'hidden space-y-4 mb-4');
+  const summaryWrap = Object.assign(el('div', 'space-y-4 mb-4'), { hidden: true });
   summaryWrap.dataset.testid = 'disclosure-receipt-summary';
   summaryWrap.dataset.state = 'idle';
 
@@ -812,7 +808,7 @@ export function mountVerify(container) {
     if (!vkInput.readOnly) vkInput.focus();
   });
 
-  const vkErrorEl = el('div', 'text-xs text-rose-400 hidden');
+  const vkErrorEl = Object.assign(el('div', 'text-xs text-rose-400'), { hidden: true });
   summaryWrap.appendChild(elc('div', 'space-y-1', [
     el('label', 'field-label block', 'Expected VK hash'),
     elc('div', 'flex gap-2', [vkInput, vkOverrideBtn]),
@@ -850,7 +846,7 @@ export function mountVerify(container) {
   summaryWrap.appendChild(verifyBtn);
 
   // Disclosed notes section (populated after loading a receipt)
-  const disclosedNotesWrap = el('div', 'hidden space-y-2');
+  const disclosedNotesWrap = Object.assign(el('div', 'space-y-2'), { hidden: true });
   disclosedNotesWrap.dataset.testid = 'disclosure-disclosed-notes';
   summaryWrap.appendChild(disclosedNotesWrap);
 
@@ -859,7 +855,7 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // Results area
   // -------------------------------------------------------------------------
-  const resultsWrap = el('div', 'hidden space-y-3');
+  const resultsWrap = Object.assign(el('div', 'space-y-3'), { hidden: true });
   resultsWrap.dataset.testid = 'disclosure-verification-results';
   resultsWrap.dataset.state = 'idle';
   container.appendChild(resultsWrap);
@@ -869,14 +865,14 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   const showImportError = (msg) => {
     importErrorEl.textContent = msg;
-    importErrorEl.classList.remove('hidden');
-    summaryWrap.classList.add('hidden');
+    importErrorEl.hidden = false;
+    summaryWrap.hidden = true;
     summaryWrap.dataset.state = 'error';
-    resultsWrap.classList.add('hidden');
+    resultsWrap.hidden = true;
   };
 
   const clearImportError = () => {
-    importErrorEl.classList.add('hidden');
+    importErrorEl.hidden = true;
     importErrorEl.textContent = '';
   };
 
@@ -940,7 +936,7 @@ export function mountVerify(container) {
 
   const renderDisclosedNotesVerify = (publicInputs, symbol = 'Token', spentIndices = []) => {
     disclosedNotesWrap.replaceChildren();
-    disclosedNotesWrap.classList.remove('hidden');
+    disclosedNotesWrap.hidden = false;
     disclosedNotesWrap.appendChild(
       el('h3', 'field-label', 'Disclosed notes')
     );
@@ -1039,7 +1035,7 @@ export function mountVerify(container) {
   const refreshVerificationNetwork = () => {
     verifiedSpentIndices = [];
     updateSpentMessage = () => {};
-    resultsWrap.classList.add('hidden');
+    resultsWrap.hidden = true;
     resultsWrap.dataset.state = 'idle';
     refreshMetadata();
   };
@@ -1068,9 +1064,9 @@ export function mountVerify(container) {
     verifiedSpentIndices = [];
     updateSpentMessage = () => {};
     refreshMetadata();
-    summaryWrap.classList.remove('hidden');
+    summaryWrap.hidden = false;
     summaryWrap.dataset.state = 'ready';
-    resultsWrap.classList.add('hidden');
+    resultsWrap.hidden = true;
     resultsWrap.dataset.state = 'idle';
   };
 
@@ -1099,7 +1095,7 @@ export function mountVerify(container) {
     const expectedVkHash = vkInput.value.trim();
     if (!expectedVkHash) {
       vkErrorEl.textContent = 'Expected VK hash is required';
-      vkErrorEl.classList.remove('hidden');
+      vkErrorEl.hidden = false;
       return;
     }
     if (
@@ -1108,10 +1104,10 @@ export function mountVerify(container) {
       !/^[0-9a-f]+$/.test(expectedVkHash.slice(2))
     ) {
       vkErrorEl.textContent = 'Invalid VK hash: expected 0x-prefixed 32-byte lowercase hex';
-      vkErrorEl.classList.remove('hidden');
+      vkErrorEl.hidden = false;
       return;
     }
-    vkErrorEl.classList.add('hidden');
+    vkErrorEl.hidden = true;
 
     const verifyingReceipt = receipt;
     const verifyingRpc = verificationRpcUrl();
@@ -1119,7 +1115,7 @@ export function mountVerify(container) {
     verifyBtn.disabled = true;
     verifyBtn.ariaBusy = true;
     verifyBtn.textContent = 'Verifying…';
-    resultsWrap.classList.remove('hidden');
+    resultsWrap.hidden = false;
     resultsWrap.dataset.state = 'verifying';
     const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-slate-300');
     verifyingRow.append(spinnerEl(), el('span', null, 'Running verification checks…'));

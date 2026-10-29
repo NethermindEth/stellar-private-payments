@@ -120,12 +120,12 @@ export const Dashboard = {
         if (titleEl) titleEl.textContent = `${label} operations`;
 
         listEl.replaceChildren();
-        emptyEl?.classList.add('hidden');
+        emptyEl.hidden = true;
         modal.classList.remove('hidden');
         modal.classList.add('flex');
 
         const ops = await OpHistory.list(App.state.wallet.address, poolId, 10);
-        emptyEl?.classList.toggle('hidden', ops.length > 0);
+        emptyEl.hidden = ops.length > 0;
 
         ops.forEach(op => {
             const row = el('div', 'rounded-2xl border border-white/8 bg-white/3 p-3');
