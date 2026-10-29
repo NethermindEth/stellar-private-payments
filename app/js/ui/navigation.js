@@ -64,7 +64,7 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
     const detailsEl = document.getElementById('bootnode-consent-details');
 
     errorEl.textContent = '';
-    errorEl.classList.add('hidden');
+    errorEl.hidden = true;
     urlInput.value = defaultUrl || '';
     rpcUrlEl.textContent = rpcUrl || '';
     detailsEl.textContent = errorMessage || '';
@@ -82,7 +82,7 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
         const onAccept = () => {
             if (urlInput.value.trim() && !urlInput.value.trim().startsWith('https://')) {
                 errorEl.textContent = 'Bootnode URL must start with https://';
-                errorEl.classList.remove('hidden');
+                errorEl.hidden = false;
                 return;
             }
             cleanup(true);
@@ -108,9 +108,8 @@ function setActiveView(view) {
     });
     document.querySelectorAll('.view-panel').forEach(panel => {
         const active = panel.dataset.viewPanel === view;
-        panel.classList.toggle('hidden', !active);
+        panel.hidden = !active;
         panel.dataset.state = active ? 'active' : 'inactive';
-        panel.setAttribute('aria-hidden', String(!active));
     });
 
     if (view === 'disclosure' && !disclosureLoaded) {
@@ -126,7 +125,7 @@ function setActiveView(view) {
 
 function setMoveFlow(flow) {
     App.state.views.moveFlow = flow;
-    document.querySelector('[data-signing-account="move"]')?.classList.toggle('hidden', flow === 'deposit');
+    document.querySelector('[data-signing-account="move"]').hidden = flow === 'deposit';
     document.querySelectorAll('[data-move-flow]').forEach(btn => {
         const active = btn.dataset.moveFlow === flow;
         btn.dataset.state = active ? 'active' : 'inactive';
@@ -134,9 +133,8 @@ function setMoveFlow(flow) {
     });
     document.querySelectorAll('.move-flow-panel').forEach(panel => {
         const active = panel.dataset.movePanel === flow;
-        panel.classList.toggle('hidden', !active);
+        panel.hidden = !active;
         panel.dataset.state = active ? 'active' : 'inactive';
-        panel.setAttribute('aria-hidden', String(!active));
     });
 }
 
@@ -206,8 +204,8 @@ function renderWallet() {
     const walletBtn = document.getElementById('wallet-btn');
     const walletAddress = document.getElementById('settings-wallet-address');
     walletText.textContent = connected ? Utils.shortAddress(App.state.wallet.address, 8, 6) : '';
-    walletText.classList.toggle('hidden', !connected);
-    walletBtn?.classList.toggle('hidden', connected);
+    walletText.hidden = !connected;
+    walletBtn.hidden = connected;
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = (deploymentDefaults.displayName || deploymentDefaults.network || 'NETWORK').toUpperCase();
     renderSyncStatus();
@@ -242,12 +240,12 @@ function renderSettingsDrawer() {
     const aspMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
     const aspValue = document.getElementById('settings-asp-secret');
     const revealBtn = document.getElementById('settings-reveal-secret');
-    const revealed = revealBtn?.dataset.revealed === 'true';
+    const revealed = revealBtn.dataset.revealed === 'true';
     aspValue.textContent = revealed ? (revealedAspSecret || '—') : aspMasked;
-    revealBtn?.classList.toggle('hidden', !hasKeys);
-    revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
-    revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
-    if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
+    revealBtn.hidden = !hasKeys;
+    revealBtn.querySelector('.settings-eye').toggleAttribute('hidden', revealed);
+    revealBtn.querySelector('.settings-eye-off').toggleAttribute('hidden', !revealed);
+    revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
     const registered = publicIdentity.status === 'registered' || (unlocked && App.state.profile.registered);
     document.getElementById('settings-registration-status').textContent = registered ? 'Registered' : ({ 'not-checked': 'Not checked', loading: 'Checking…', 'not-found': 'No active registration found', unavailable: 'Unavailable' }[publicIdentity.status] || 'Not checked');
     const registerBtn = document.getElementById('settings-register-btn');
@@ -288,7 +286,7 @@ function renderOwnerSwitch() {
     if (!box) return;
     const { connected, address: owner, activeAddress: active } = App.state.wallet;
     const offered = connected && active && active !== owner ? active : null;
-    box.classList.toggle('hidden', !offered);
+    box.hidden = !offered;
     const label = document.getElementById('settings-owner-switch-address');
     if (label) label.textContent = offered ? Utils.shortAddress(offered) : '';
 }

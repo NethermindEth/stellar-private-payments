@@ -362,7 +362,7 @@ function renderAdminTx(kind) {
   adminTxNoticeEl.textContent = '';
   delete adminTxNoticeEl.dataset.tone;
   submitAdminTxBtn.disabled = true;
-  adminTxSignaturesLineEl.classList.toggle('hidden', !xdr || !state.networkPassphrase);
+  adminTxSignaturesLineEl.hidden = !xdr || !state.networkPassphrase;
   copyAdminTxBtn.disabled = copyAdminTxLinkBtn.disabled = !xdr;
   if (!xdr) {
     adminTxNoticeEl.textContent = 'No admin call loaded. Build one above, or open a link from a signer.';
@@ -421,7 +421,7 @@ function renderAdminTx(kind) {
       warnAdminTx([prior, text].filter(Boolean).join(' '));
     });
   } catch (err) {
-    adminTxSignaturesLineEl.classList.add('hidden');
+    adminTxSignaturesLineEl.hidden = true;
     copyAdminTxLinkBtn.disabled = true;
     adminTxNoticeEl.textContent = `Not an admin call: ${err.message}`;
   }
@@ -1457,11 +1457,7 @@ const tabContents = document.querySelectorAll('.tab-content');
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     for (const t of tabBtns) t.ariaCurrent = t === btn ? 'page' : null;
-
-    tabContents.forEach(c => c.classList.add('hidden'));
-
-    const targetId = btn.getAttribute('data-target');
-    document.getElementById(targetId).classList.remove('hidden');
+    for (const c of tabContents) c.hidden = c.id !== btn.dataset.target;
   });
 });
 
@@ -1535,7 +1531,7 @@ if (sharedTx) {
 repointRecordsInput.addEventListener('change', () => {
   const [file] = repointRecordsInput.files;
   repointRecordsNameEl.textContent = file?.name ?? 'No file chosen';
-  clearRepointRecordsBtn.classList.toggle('hidden', !file);
+  clearRepointRecordsBtn.hidden = !file;
 });
 clearRepointRecordsBtn.addEventListener('click', () => {
   repointRecordsInput.value = '';

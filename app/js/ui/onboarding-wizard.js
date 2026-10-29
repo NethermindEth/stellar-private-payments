@@ -54,13 +54,8 @@ function setPersistPromptedFlag() {
 function setError(message) {
     const box = document.getElementById('onboarding-error');
     if (!box) return;
-    if (!message) {
-        box.textContent = '';
-        box.classList.add('hidden');
-        return;
-    }
+    box.hidden = !message;
     box.textContent = friendlyErrorMessage(message);
-    box.classList.remove('hidden');
 }
 
 function showModal() {
@@ -83,7 +78,7 @@ function renderContent(node) {
 
 function renderWhy(stepId) {
     document.querySelectorAll('#onboarding-why [data-why]').forEach(panel => {
-        panel.classList.toggle('hidden', panel.dataset.why !== stepId);
+        panel.hidden = panel.dataset.why !== stepId;
     });
 }
 

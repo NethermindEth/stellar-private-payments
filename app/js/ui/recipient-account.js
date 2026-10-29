@@ -31,7 +31,7 @@ function render(scope, reset = false) {
     select.replaceChildren(...options);
     select.disabled = !owner;
     select.value = owner && (selected === OTHER || selected === owner || saved.includes(selected)) ? selected : '';
-    input.classList.toggle('hidden', select.value !== OTHER);
+    input.hidden = select.value !== OTHER;
     input.disabled = !owner || select.value !== OTHER;
     if (reset || select.value !== OTHER) input.value = '';
 }

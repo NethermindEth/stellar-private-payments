@@ -73,7 +73,7 @@ export const Templates = {
         const useBtn = row.querySelector('.note-use');
         if (useBtn) {
             if (note.spent) {
-                useBtn.classList.add('hidden');
+                useBtn.hidden = true;
             } else {
                 useBtn.addEventListener('click', () => opts.onUse?.(note));
             }

@@ -57,7 +57,7 @@ function updateWarning(p) {
     if (!p.warning) return;
     const warning = signingPrivacyWarning({ owner: App.state.wallet.address, signer: p.select?.value });
     p.warning.textContent = warning;
-    p.warning.classList.toggle('hidden', !warning);
+    p.warning.hidden = !warning;
 }
 
 function render(p, selected = null) {
@@ -96,7 +96,7 @@ function render(p, selected = null) {
     select.value = chosenSigner({ selected, owner, signers, active }) ?? '';
     updateWarning(p);
 
-    other?.classList.add('hidden');
+    other.hidden = true;
     if (input) input.value = '';
     if (error) error.textContent = '';
 }
@@ -158,7 +158,7 @@ function renderSettings() {
         empty.textContent = !isStorageUnlocked() ? 'Unlock local data to view saved signing accounts.' : owner
             ? 'No accounts added. Add one under "Sign and pay with" in Move Funds or Advanced.'
             : 'Connect a wallet to see the accounts added to sign for it.';
-        empty.classList.toggle('hidden', signers.length > 0);
+        empty.hidden = signers.length > 0;
     }
 }
 
@@ -211,7 +211,7 @@ export const SigningAccount = {
                     return;
                 }
                 const choosingOther = p.select.value === OTHER;
-                p.other?.classList.toggle('hidden', !choosingOther);
+                p.other.hidden = !choosingOther;
                 if (choosingOther) p.input?.focus();
             });
             p.use?.addEventListener('click', () => useOtherAccount(p));
