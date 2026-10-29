@@ -4,6 +4,7 @@ import { rememberedNoteOwner } from '../account-session.js';
 import { getConnectedAddress } from '../wallet.js';
 import { Wallet } from './navigation.js';
 import { Toast } from './core.js';
+import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
@@ -78,7 +79,7 @@ export const LocalData = {
         render();
         void checkLegacyPlaintextStorage().catch(() => {});
         document.getElementById('storage-delete-legacy')?.addEventListener('click', async () => {
-            if (!window.confirm('Permanently delete legacy unencrypted browser storage (.opfs-sahpool)? Make sure you do not need any unmigrated local operation history or settings from the older version.')) return;
+            if (!(await confirmAction({ message: 'Permanently delete legacy unencrypted browser storage (.opfs-sahpool)? Make sure you do not need any unmigrated local operation history or settings from the older version.', confirmLabel: 'Delete legacy data', danger: true }))) return;
             try {
                 await deleteLegacyStorage();
                 Toast.show('Deleted legacy unencrypted browser storage.', 'info');
@@ -100,7 +101,7 @@ export const LocalData = {
             fileInput.value = '';
             if (!file) return;
             if (file.size > 384 * 1024 * 1024) { Toast.show('Backup is too large.', 'error'); return; }
-            if (!window.confirm('Restore this encrypted backup? It will become your active local storage after the original wallet account unlocks it and validation succeeds. Changes made since the backup will not appear in the restored data.')) return;
+            if (!(await confirmAction({ message: 'Restore this encrypted backup? It will become your active local storage after the original wallet account unlocks it and validation succeeds. Changes made since the backup will not appear in the restored data.', confirmLabel: 'Restore backup' }))) return;
             const wasUnlocked = isStorageUnlocked();
             try {
                 await manageStorageBackup('import', await file.text());
