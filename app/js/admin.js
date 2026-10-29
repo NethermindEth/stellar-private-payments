@@ -4,9 +4,9 @@ import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUs
 import { explorerPreference } from './public-settings.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
-import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { el, elc } from './ui/dom.js';
+import { showToast } from './ui/toast.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
@@ -21,9 +21,6 @@ const walletChip = document.getElementById('walletChip');
 const storageLockBtn = document.getElementById('storage-lock-btn');
 const connectBtn = document.getElementById('connectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
-
-const toastContainer = document.getElementById('toast-container');
-const toastTemplate = document.getElementById('tpl-toast');
 
 // Contract/state display
 const membershipContractInput = document.getElementById('membershipContract');
@@ -114,53 +111,10 @@ const state = {
   cryptoReady: false,
 };
 
-// -----------------------------
-// UI Updates & Toasts
-// -----------------------------
-
 function setStatus(text, kind = 'info') {
   if (!statusEl) return;
   statusEl.textContent = text;
   statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
-}
-
-function showToast(message, type = 'success', duration = 4000) {
-  if (!toastContainer || !toastTemplate) return;
-  const toastWrapper = toastTemplate.content.cloneNode(true).firstElementChild;
-
-  toastWrapper.querySelector('.toast-message').textContent = friendlyErrorMessage(message);
-
-  const icon = toastWrapper.querySelector('.toast-icon');
-  if (type === 'success') {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 shrink-0 shadow-[0_0_8px_rgba(52,211,153,0.8)]';
-  } else if (type === 'error') {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 shrink-0 shadow-[0_0_8px_rgba(244,63,94,0.8)]';
-  } else {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300 shrink-0 shadow-[0_0_8px_rgba(103,232,249,0.8)]';
-  }
-
-  toastWrapper.querySelector('.toast-close').addEventListener('click', () => {
-    toastWrapper.classList.remove('translate-x-0', 'opacity-100');
-    toastWrapper.classList.add('translate-x-full', 'opacity-0');
-    setTimeout(() => toastWrapper.remove(), 300);
-  });
-
-  toastContainer.appendChild(toastWrapper);
-
-  requestAnimationFrame(() => {
-    toastWrapper.classList.remove('translate-x-full', 'opacity-0');
-    toastWrapper.classList.add('translate-x-0', 'opacity-100');
-  });
-
-  setTimeout(() => {
-    if (toastWrapper.parentNode) {
-        toastWrapper.classList.remove('translate-x-0', 'opacity-100');
-        toastWrapper.classList.add('translate-x-full', 'opacity-0');
-        setTimeout(() => {
-            if(toastWrapper.parentNode) toastWrapper.remove();
-        }, 300);
-    }
-  }, duration);
 }
 
 // -----------------------------

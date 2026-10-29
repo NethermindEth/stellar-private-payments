@@ -710,10 +710,7 @@ export const Wallet = {
             App.state.profile.registered = true;
             void refreshPublicIdentity();
             renderSettingsDrawer();
-            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {
-                linkUrl: Utils.explorerTxUrl(hash),
-                linkAriaLabel: 'Open transaction in explorer',
-            });
+            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, { linkUrl: Utils.explorerTxUrl(hash) });
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
             Toast.show(getRegistrationErrorMessage(error), 'error');

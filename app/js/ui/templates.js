@@ -9,7 +9,6 @@ export const Templates = {
             noteRow: document.getElementById('tpl-note-row'),
             feedCard: document.getElementById('tpl-feed-card'),
             balanceCard: document.getElementById('tpl-balance-card'),
-            toast: document.getElementById('tpl-toast'),
         };
     },
 

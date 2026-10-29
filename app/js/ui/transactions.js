@@ -715,7 +715,6 @@ export const Transactions = {
             : `${label}: ${hashes.length} transactions submitted. Last: ${Utils.truncateHex(lastHash, 10, 8)}`;
         Toast.show(message, 'success', 7000, {
             linkUrl: Utils.explorerTxUrl(lastHash),
-            linkAriaLabel: 'Open transaction in explorer',
             origin,
             transactionHash: lastHash,
         });

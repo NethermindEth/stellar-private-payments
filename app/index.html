@@ -797,16 +797,6 @@
 
     <div id="toast-container" class="pointer-events-none fixed inset-x-4 bottom-4 z-60 flex flex-col gap-3 sm:left-auto sm:w-full sm:max-w-sm"></div>
 
-    <template id="tpl-toast">
-        <div data-testid="toast" class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
-            <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300"></div>
-            <div class="min-w-0 flex-1">
-                <p class="toast-message break-words" data-testid="toast-message"></p>
-                <a class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4" data-testid="toast-link" target="_blank" rel="noreferrer">Open explorer</a>
-            </div>
-        </div>
-    </template>
-
     <script type="module" src="./js/ui.js"></script>
 </body>
 </html>

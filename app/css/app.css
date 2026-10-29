@@ -134,6 +134,10 @@
   .step { @apply rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-slate-400; }
   .step[data-state=current] { @apply border-cyan-300/30 bg-cyan-300/10 text-cyan-100; }
   .step[data-state=done] { @apply border-emerald-300/30 bg-emerald-300/10 text-emerald-100; }
+  .toast { @apply pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-linear-to-b from-slate-900/98 to-ink-950 px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_--alpha(var(--color-black)/45%)] transition duration-200 before:mt-0.5 before:size-2.5 before:rounded-full before:bg-cyan-300; }
+  .toast[data-status=info] { @apply before:bg-slate-300; }
+  .toast[data-status=error] { @apply before:bg-rose-400; }
+  .toast[data-state=dismissing] { @apply translate-y-2 opacity-0; }
   .ambient {
     @apply pointer-events-none fixed inset-0 overflow-hidden;
     background: radial-gradient(circle at top, --alpha(var(--color-blue-400) / 28%), transparent 58%) top / 100% 32rem no-repeat;
