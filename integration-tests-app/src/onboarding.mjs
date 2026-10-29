@@ -3,7 +3,7 @@
 
 import { createLogger } from './logger.mjs';
 import { waitForCondition } from './waits.mjs';
-import { waitForWalletRuntimeReady } from './appState.mjs';
+import { isOnboardingWizardVisible, waitForWalletRuntimeReady } from './appState.mjs';
 
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
@@ -32,9 +32,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
   for (let step = 0; step < 10; step += 1) {
     // The modal remains in the DOM and may appear after asynchronous storage
     // checks, so visibility is checked after a short settle window.
-    const modalHidden = async () => page.evaluate(
-      () => document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true,
-    );
+    const modalHidden = async () => !(await isOnboardingWizardVisible(page));
     if (await modalHidden()) {
       if (step === 0) {
         await waitForCondition({
@@ -54,7 +52,8 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
       }
     }
     const readButtons = () =>
-      page.$$eval('#onboarding-modal button', (els) =>
+      // Toasts move into the open dialog, so read only the wizard's own buttons.
+      page.$$eval('#onboarding-actions button', (els) =>
         els
           .map((el) => {
             const rect = el.getBoundingClientRect();

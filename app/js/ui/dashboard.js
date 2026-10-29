@@ -3,6 +3,7 @@ import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { el } from './dom.js';
+import { openModal } from './toast.js';
 import { shortHex } from './notes-view.js';
 
 function poolLabelById(poolContractId) {
@@ -121,8 +122,7 @@ export const Dashboard = {
 
         listEl.replaceChildren();
         emptyEl.hidden = true;
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
+        openModal(modal);
 
         const ops = await OpHistory.list(App.state.wallet.address, poolId, 10);
         emptyEl.hidden = ops.length > 0;
@@ -163,9 +163,7 @@ export const Dashboard = {
     },
 
     closeHistory() {
-        const modal = document.getElementById('pool-history-modal');
-        modal?.classList.add('hidden');
-        modal?.classList.remove('flex');
+        document.getElementById('pool-history-modal').close();
     },
 
     renderFeed() {

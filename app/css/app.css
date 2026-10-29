@@ -123,6 +123,7 @@
   .link { @apply text-cyan-400 underline underline-offset-2 transition hover:text-cyan-300; }
   .card { @apply rounded-card border border-white/8 bg-white/3 p-6 backdrop-blur-xl; }
   .panel { @apply rounded-3xl border border-white/8 p-5; }
+  .modal { @apply size-full max-h-none max-w-none overflow-y-auto bg-transparent text-inherit backdrop:backdrop-blur-sm; }
   .modal-panel { @apply rounded-card border border-white/8 bg-linear-to-b from-ink-900 to-ink-950 p-6 shadow-modal; }
   .chip { @apply inline-flex items-center rounded-full border border-white/10 bg-white/4 px-2 py-1 text-2xs font-medium text-slate-200 ring-slate-300/30 transition; }
   .chip[data-tone=info] { @apply border-cyan-300/30 bg-cyan-400/10 text-cyan-100 ring-cyan-300/30; }

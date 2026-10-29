@@ -5,6 +5,7 @@ import { friendlyErrorMessage } from '../facade-errors.js';
 import { getRegistrationErrorMessage } from './errors.js';
 import { Utils, Toast } from './core.js';
 import { el, elc } from './dom.js';
+import { openModal } from './toast.js';
 import {
     hasNotificationSupport,
     getNotificationsPrompted,
@@ -62,11 +63,11 @@ function showModal() {
     const modal = document.getElementById('onboarding-modal');
     if (!modal) throw new Error('Onboarding modal is missing');
     setError('');
-    modal.classList.remove('hidden');
+    openModal(modal);
 }
 
 function hideModal() {
-    document.getElementById('onboarding-modal')?.classList.add('hidden');
+    document.getElementById('onboarding-modal').close();
 }
 
 function renderContent(node) {
@@ -268,6 +269,7 @@ export async function runOnboardingWizard({
     };
     const closeBtn = document.getElementById('onboarding-close-btn');
     closeBtn.onclick = cancelOnboarding;
+    document.getElementById('onboarding-modal').oncancel = cancelOnboarding;
 
     const state = {
         keys: keysExist
