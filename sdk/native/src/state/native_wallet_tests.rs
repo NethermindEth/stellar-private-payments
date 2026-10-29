@@ -261,3 +261,142 @@ fn rejects_short_and_large_non_sqlite_records_without_modification() -> Result<(
     }
     Ok(())
 }
+
+#[cfg(unix)]
+mod through_stellar_cli {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    use super::*;
+    use crate::stellar_cli::fake::{FakeStellar, Reply};
+
+    fn encoded(signature: &KeyDerivationSignature) -> String {
+        format!("{}\n", STANDARD.encode(&signature.0))
+    }
+
+    #[test]
+    fn unlock_with_stellar_unlocks_existing_storage_through_the_cli() -> Result<()> {
+        // A new record gets a random salt, which no scripted signature can
+        // anticipate, so the fake replays the signature for an existing one.
+        let f = Fixture::new()?;
+        let key = unlock_with(&f.db(), &address(), &mut sign)?;
+        let context = wallet_vault::context(&record_path(&f.db()))?
+            .expect("creation stores the wallet context");
+        let unlock_message = message(&context);
+        let fake = FakeStellar::new()
+            .reply("keys-public-key", Reply::ok(format!("{}\n", address())))
+            .reply("message-sign", Reply::ok(encoded(&sign(&unlock_message)?)));
+        let config_dir = f.0.join("stellar-config");
+
+        let recovered = unlock_with_stellar(&f.db(), "alice", Some(&config_dir))?;
+
+        assert_eq!(*key, *recovered);
+        let config_dir = config_dir.display().to_string();
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0].args,
+            ["keys", "public-key", "alice", "--config-dir", &config_dir]
+        );
+        assert_eq!(
+            calls[1].args,
+            [
+                "message",
+                "sign",
+                &unlock_message,
+                "--sign-with-key",
+                "alice",
+                "--config-dir",
+                &config_dir
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_with_stellar_rejects_a_secret_key_alias_without_launching_the_cli() -> Result<()> {
+        let f = Fixture::new()?;
+        let fake = FakeStellar::new();
+        let error = unlock_with_stellar(&f.db(), &format!("S{}", "A".repeat(55)), None)
+            .expect_err("a raw secret key is not an alias");
+        assert!(
+            error.to_string().starts_with(
+                "--storage-account must be a `stellar keys` alias name, not a raw secret key"
+            ),
+            "got: {error}"
+        );
+        assert!(fake.calls().is_empty());
+        assert_eq!(fs::read_dir(&f.0)?.count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_with_stellar_creates_nothing_when_the_cli_cannot_resolve_the_alias() -> Result<()> {
+        let f = Fixture::new()?;
+        let fake = FakeStellar::new().reply(
+            "keys-public-key",
+            Reply::failure("error: no key named alice"),
+        );
+        let error = unlock_with_stellar(&f.db(), "alice", None)
+            .expect_err("an unknown alias cannot unlock storage");
+        assert!(
+            error
+                .to_string()
+                .ends_with("failed: error: no key named alice"),
+            "got: {error}"
+        );
+        assert_eq!(
+            fake.calls().len(),
+            1,
+            "no message is signed without an address"
+        );
+        assert_eq!(fs::read_dir(&f.0)?.count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_with_stellar_creates_nothing_when_the_cli_refuses_to_sign() -> Result<()> {
+        let f = Fixture::new()?;
+        let fake = FakeStellar::new()
+            .reply("keys-public-key", Reply::ok(address()))
+            .reply(
+                "message-sign",
+                Reply::failure("error: signing was cancelled"),
+            );
+        let error = unlock_with_stellar(&f.db(), "alice", None)
+            .expect_err("a refused signature cannot unlock storage");
+        assert!(
+            error
+                .to_string()
+                .ends_with("failed: error: signing was cancelled"),
+            "got: {error}"
+        );
+        assert_eq!(fake.calls().len(), 2);
+        assert_eq!(fs::read_dir(&f.0)?.count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_with_stellar_refuses_a_signature_the_alias_key_did_not_make() -> Result<()> {
+        let f = Fixture::new()?;
+        unlock_with(&f.db(), &address(), &mut sign)?;
+        let database = fs::read(f.db())?;
+        let record = fs::read(record_path(&f.db()))?;
+        let _fake = FakeStellar::new()
+            .reply("keys-public-key", Reply::ok(address()))
+            .reply(
+                "message-sign",
+                Reply::ok(encoded(&KeyDerivationSignature(vec![0; 64]))),
+            );
+        let error = unlock_with_stellar(&f.db(), "alice", None)
+            .expect_err("a signature by another key must not unlock storage");
+        assert!(
+            error
+                .to_string()
+                .contains("was not made by the note owner's key"),
+            "got: {error}"
+        );
+        assert_eq!(database, fs::read(f.db())?);
+        assert_eq!(record, fs::read(record_path(&f.db()))?);
+        Ok(())
+    }
+}
