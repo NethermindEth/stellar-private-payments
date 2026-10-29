@@ -517,13 +517,13 @@ export function mountGenerate(container) {
         ])
       );
       card.appendChild(
-        el('div', 'text-[10px] text-slate-400', 'Commitment')
+        el('div', 'text-3xs text-slate-400', 'Commitment')
       );
       card.appendChild(
         el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
       );
       card.appendChild(
-        el('div', 'text-[10px] text-slate-400 mt-1', 'Nullifier')
+        el('div', 'text-3xs text-slate-400 mt-1', 'Nullifier')
       );
       card.appendChild(
         el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
@@ -836,7 +836,7 @@ export function mountVerify(container) {
   rpcInput.type = 'text';
   rpcInput.value = deploymentDefaults.rpcUrl;
 
-  const rpcHintEl = el('div', 'text-[10px] text-slate-400');
+  const rpcHintEl = el('div', 'text-3xs text-slate-400');
   summaryWrap.appendChild(elc('details', 'text-xs', [
     el('summary', 'cursor-pointer text-dark-400 hover:text-brand-400 select-none', 'Advanced: RPC endpoint'),
     elc('div', 'mt-2 space-y-1', [rpcInput, rpcHintEl]),
@@ -978,17 +978,17 @@ export function mountVerify(container) {
           el('span', 'text-slate-400', `Note ${i + 1}`),
           elc('div', 'flex items-center gap-2', [
             isSpent
-              ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
+              ? el('span', 'text-3xs font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
               : null,
             el('span', `font-medium ${isSpent ? 'text-amber-300 line-through' : 'text-brand-300'}`, amountText),
           ]),
         ])
       );
-      card.appendChild(el('div', 'text-[10px] text-slate-400', 'Commitment'));
+      card.appendChild(el('div', 'text-3xs text-slate-400', 'Commitment'));
       card.appendChild(
         el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
       );
-      card.appendChild(el('div', 'text-[10px] text-slate-400 mt-1', 'Nullifier'));
+      card.appendChild(el('div', 'text-3xs text-slate-400 mt-1', 'Nullifier'));
       card.appendChild(
         el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
       );

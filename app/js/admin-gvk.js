@@ -472,13 +472,13 @@ function renderSlotTable(title, headers, noteRows) {
 
   if (noteRows.length === 0) {
     const empty = el('div', 'w-full rounded-lg border border-white/6 bg-ink-950/50 px-2 py-1.5');
-    empty.appendChild(el('p', 'font-mono text-[11px] text-slate-400', '—'));
+    empty.appendChild(el('p', 'font-mono text-2xs text-slate-400', '—'));
     block.appendChild(empty);
     return block;
   }
 
   const table = el('div', 'w-full rounded-lg border border-white/6 bg-ink-950/50');
-  const grid = el('div', 'grid w-full gap-px bg-white/6 text-[11px]');
+  const grid = el('div', 'grid w-full gap-px bg-white/6 text-2xs');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
@@ -971,7 +971,7 @@ function renderNoteTable(rows, filters) {
   const notes = collectNotes(state.rows, rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'PK', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
-  const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
+  const grid = el('div', 'grid gap-px bg-white/6 text-2xs');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
@@ -1178,14 +1178,14 @@ function renderGraphLegend() {
 
   const badge = el(
     'div',
-    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-[11px] font-semibold text-slate-300',
+    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-2xs font-semibold text-slate-300',
     'i',
   );
   wrap.appendChild(badge);
 
   const legend = el(
     'div',
-    'pointer-events-none absolute right-0 top-7 hidden w-56 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-[10px] leading-tight text-slate-300 backdrop-blur group-hover:block',
+    'pointer-events-none absolute right-0 top-7 hidden w-56 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-3xs leading-tight text-slate-300 backdrop-blur group-hover:block',
   );
   wrap.appendChild(legend);
 
@@ -1197,7 +1197,7 @@ function renderGraphLegend() {
   };
 
   const dot = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-full ${extra}`);
-  const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] border border-slate-300 ${extra}`);
+  const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-xs border border-slate-300 ${extra}`);
   const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
 
   addItem(dot('bg-cyan-400'), 'Color = note owner (PK)');
@@ -1468,14 +1468,14 @@ function renderPkGraphLegend() {
 
   const badge = el(
     'div',
-    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-[11px] font-semibold text-slate-300',
+    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-2xs font-semibold text-slate-300',
     'i',
   );
   wrap.appendChild(badge);
 
   const legend = el(
     'div',
-    'pointer-events-none absolute right-0 top-7 hidden w-64 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-[10px] leading-tight text-slate-300 backdrop-blur group-hover:block',
+    'pointer-events-none absolute right-0 top-7 hidden w-64 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-3xs leading-tight text-slate-300 backdrop-blur group-hover:block',
   );
   wrap.appendChild(legend);
 
@@ -1558,7 +1558,7 @@ function pkGraphDetailSelectedDotRow(dot) {
   } else if (dot.received > 0n) {
     row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.received)));
-    row.appendChild(el('div', 'text-[10px] text-slate-400', 'Origin unknown — view-only pool'));
+    row.appendChild(el('div', 'text-3xs text-slate-400', 'Origin unknown — view-only pool'));
   } else if (dot.transferIn > 0n || dot.transferOut > 0n) {
     row.appendChild(el('div', 'table-head text-cyan-400', 'This transfer'));
     if (dot.transferIn > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
@@ -1568,7 +1568,7 @@ function pkGraphDetailSelectedDotRow(dot) {
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(0n)));
   }
 
-  row.appendChild(el('div', 'font-mono text-[10px] text-slate-400', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
+  row.appendChild(el('div', 'font-mono text-3xs text-slate-400', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
   return row;
 }
 

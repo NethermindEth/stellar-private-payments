@@ -42,7 +42,7 @@
     <div class="relative mx-auto flex min-h-screen max-w-[1200px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
 
         <!-- Header -->
-        <header class="card px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)]">
+        <header class="card px-5 py-4 shadow-header">
             <div class="flex flex-col gap-4">
                 <div class="flex items-center gap-4">
                     <a href="index.html" title="Go to Home" class="section-title cursor-pointer transition hover:opacity-80">
@@ -63,7 +63,7 @@
 
                     <div class="flex items-center gap-2">
                         <!-- Network Chip -->
-                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
+                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/3 px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
                             <span id="sync-dot" class="sync-dot"></span>
                             <span id="networkChip">Disconnected</span>
                         </div>
@@ -78,7 +78,7 @@
         </header>
 
         <!-- Status Banner -->
-        <div id="status" class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-sm font-medium text-slate-300 transition-colors data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-300 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-300">Initializing...</div>
+        <div id="status" class="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-center text-sm font-medium text-slate-300 transition-colors data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-300 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-300">Initializing...</div>
 
         <main id="main-content" class="flex-1 flex flex-col gap-4 sm:gap-6">
 
@@ -100,14 +100,14 @@
                         <div>
                             <div class="flex items-center justify-between gap-2">
                                 <label class="field-label" for="membershipContract">ASP Membership Contract ID</label>
-                                <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                                <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-3xs font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
                             <input class="field mt-2 font-mono" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
                             <div class="flex items-center justify-between gap-2">
                                 <label class="field-label" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
-                                <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                                <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-3xs font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
                             <input class="field mt-2 font-mono" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
@@ -268,7 +268,7 @@
                                 <span class="text-slate-600 max-md:hidden">–</span>
                                 <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="field max-md:min-w-full flex-1 px-3 py-2 font-mono" />
                             </div>
-                            <p id="gvkFilterTimeHint" class="mt-1 text-[11px] text-slate-400">Approximated from ledger close times.</p>
+                            <p id="gvkFilterTimeHint" class="mt-1 text-2xs text-slate-400">Approximated from ledger close times.</p>
                         </div>
                     </div>
                 </div>
@@ -507,7 +507,7 @@
             </div>
             <p class="pause-file-status tone text-sm text-slate-300 [overflow-wrap:anywhere]"></p>
             <ul class="pause-file-signers space-y-2 empty:hidden"></ul>
-            <p class="pause-file-details font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]"></p>
+            <p class="pause-file-details font-mono text-2xs text-slate-400 [overflow-wrap:anywhere]"></p>
         </li>
     </template>
 
