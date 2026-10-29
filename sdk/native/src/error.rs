@@ -90,10 +90,11 @@ pub enum RetentionGap {
     #[error("main RPC is missing event history and no fallback bootnode is configured")]
     SyncGap,
 
+    /// The bootnode cannot serve this deployment; retrying cannot help.
     #[error("configured bootnode failed to fill retention gap: {0}")]
     BootnodeFailed(String),
 
-    /// The bootnode answered `-32004`; retry later.
+    /// The bootnode cannot answer now; retry later.
     #[error("configured bootnode cannot serve the event history yet: {0}")]
     BootnodeNotReady(String),
 }

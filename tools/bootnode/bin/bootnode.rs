@@ -58,7 +58,7 @@ struct Cli {
     #[arg(long, env = "BOOTNODE_ACME_DIRECTORY_URL")]
     acme_directory_url: Option<Url>,
 
-    /// Redirect buffer in days before network tip.
+    /// Redirect buffer in days before the archived network tip.
     #[arg(long, env = "BOOTNODE_REDIRECT_DAYS", default_value_t = 5)]
     redirect_days: u32,
 
