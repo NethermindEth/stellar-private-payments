@@ -37,9 +37,11 @@ docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 rm -f "$PKG_ROOT"/../target/integration-tests-deploy-*.lock "$PKG_ROOT"/../target/integration-tests-deploy-*.json
 
 step "starting $CONTAINER_NAME on port $PORT"
+# Pinned so a new quickstart build reaches CI only through a commit.
+# Quickstart's default protocol can trail what its RPC simulates.
 docker run -d --name "$CONTAINER_NAME" -p "$PORT:$PORT" \
-  stellar/quickstart:v678-b1525.1-testing \
-  --local --enable rpc,horizon --limits unlimited >/dev/null \
+  stellar/quickstart:v685-b1563.1-testing \
+  --local --enable rpc,horizon --limits unlimited --protocol-version 30 >/dev/null \
   || die "failed to start stellar/quickstart"
 
 # network.rs also waits for health, per test process; this just fails fast
