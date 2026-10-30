@@ -32,8 +32,12 @@ soroban-utils = { workspace = true, features = ["testutils"] }
 stellar-private-payments = { workspace = true, features = ["encrypted-storage", "parallel"] }
 
 [dev-dependencies]
+# Implementing the SDK's prover, signer and storage traits.
+async-trait = { workspace = true }
 # Signing a registration for the registry's cost row.
 ed25519-dalek = { workspace = true }
+# A seeded wallet for the offline pool.
+sdk-tests = { path = "../sdk/tests" }
 # Serving a pool's real ledger entries back to the SDK's reader.
 serde_json = { workspace = true, features = ["std"] }
 stellar-xdr = { workspace = true }
