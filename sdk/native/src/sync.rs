@@ -1358,4 +1358,191 @@ mod tests {
             "{result:?}"
         );
     }
+
+    async fn probe(rpc: &MockServer, storage: &StorageHandle) -> Result<bool, Error> {
+        bootnode_required(
+            &RpcClient::new(&rpc.uri()).expect("rpc client"),
+            storage,
+            &distinct_config(),
+        )
+        .await
+    }
+
+    /// Every contract synced up to `ledger`, with a cursor and fully indexed.
+    async fn synced_to(storage: &StorageHandle, ledger: u32) {
+        let rows = distinct_config()
+            .all_contract_ids()
+            .into_iter()
+            .map(|contract_id| SyncMetadata {
+                contract_id,
+                cursor: "synced-cursor".into(),
+                last_indexed_ledger: ledger,
+                last_fully_indexed_ledger: ledger,
+            })
+            .collect();
+        storage
+            .save_sync_progress(rows, true)
+            .await
+            .expect("save sync progress");
+    }
+
+    #[tokio::test]
+    async fn bootnode_required_is_false_when_the_rpc_has_the_history() {
+        let rpc = MockServer::start().await;
+        mount_get_events(
+            &rpc,
+            vec![get_events_page("main-cursor", json!([]), 3_000_000)],
+        )
+        .await;
+
+        let required = probe(&rpc, &temp_storage("probe-history")).await;
+
+        assert!(matches!(required, Ok(false)), "{required:?}");
+        assert_eq!(get_events_calls(&rpc).await, 1);
+    }
+
+    #[tokio::test]
+    async fn bootnode_required_is_true_on_a_retention_gap() {
+        let rpc = main_rpc_with_a_gap().await;
+
+        let required = probe(&rpc, &temp_storage("probe-gap")).await;
+
+        assert!(matches!(required, Ok(true)), "{required:?}");
+    }
+
+    /// Storage past the RPC's events tip is caught up, not missing history.
+    #[tokio::test]
+    async fn bootnode_required_is_false_when_storage_is_ahead_of_the_rpc() {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![range_error(100, 3_000_000)]).await;
+        let storage = temp_storage("probe-ahead");
+        synced_to(&storage, 3_000_500).await;
+
+        let required = probe(&rpc, &storage).await;
+
+        assert!(matches!(required, Ok(false)), "{required:?}");
+    }
+
+    #[tokio::test]
+    async fn bootnode_required_returns_other_rpc_errors() {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![json_rpc_error(-32_603, "upstream timeout")]).await;
+
+        let required = probe(&rpc, &temp_storage("probe-error")).await;
+
+        let Err(Error::Other(err)) = &required else {
+            panic!("expected an untyped error, got {required:?}");
+        };
+        let message = format!("{err:#}");
+        assert!(message.starts_with("bootnode probe: "), "{message}");
+        assert!(message.contains("upstream timeout"), "{message}");
+    }
+
+    /// A `-32002` without `data.fromLedger` is not a handoff.
+    #[tokio::test]
+    async fn inline_sync_reports_a_handoff_without_a_from_ledger_as_not_ready() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        let page = get_events_page("bootnode-cursor", json!([]), 3_000_000);
+        mount_get_events(
+            &bootnode,
+            vec![
+                page.clone(),
+                page,
+                json_rpc_error(-32_002, "Continue syncing on your RPC endpoint"),
+            ],
+        )
+        .await;
+        let storage = temp_storage("handoff-no-ledger");
+
+        let result = catch_up(
+            &RpcClient::new(&rpc.uri()).expect("rpc client"),
+            &storage,
+            &distinct_config(),
+            Some(&bootnode.uri()),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(_)))
+            ),
+            "{result:?}"
+        );
+        let rows = storage.get_sync_state().await.expect("sync state");
+        assert!(at_cursor("bootnode-cursor")(&rows), "{rows:?}");
+        assert!(!handed_off(&rows), "{rows:?}");
+        // Only the probe that found the gap.
+        assert_eq!(get_events_calls(&rpc).await, 1);
+    }
+
+    /// Waits out the 5 s pause at the bootnode tip, which a kick cannot cut
+    /// short.
+    #[tokio::test]
+    async fn inline_sync_waits_at_the_bootnode_tip_for_the_handoff() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        let page = get_events_page("bootnode-cursor", json!([]), 3_000_000);
+        // Probe, then a round that ends at the tip, then the handoff.
+        mount_get_events(
+            &bootnode,
+            vec![page.clone(), page.clone(), page, handoff_response()],
+        )
+        .await;
+        let storage = temp_storage("inline-bootnode-tip");
+        let started = Instant::now();
+
+        // One 5 s pause, not a second one.
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            catch_up(
+                &RpcClient::new(&rpc.uri()).expect("rpc client"),
+                &storage,
+                &distinct_config(),
+                Some(&bootnode.uri()),
+            ),
+        )
+        .await
+        .expect("inline sync ends at the handoff");
+
+        assert!(result.is_ok(), "{result:?}");
+        assert!(started.elapsed() >= Duration::from_secs(5));
+        assert_eq!(get_events_calls(&bootnode).await, 4);
+        // The main RPC resumed from the handoff ledger.
+        let rows = storage.get_sync_state().await.expect("sync state");
+        assert!(handed_off(&rows), "{rows:?}");
+        assert!(at_cursor("main-cursor")(&rows), "{rows:?}");
+    }
+
+    #[tokio::test]
+    async fn background_sync_stops_during_bootnode_catch_up_without_reopening_the_rpc() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        // A new cursor on every page, so the bootnode never reaches its tip.
+        let pages: Vec<_> = (0..1_000)
+            .map(|n| get_events_page(&format!("bootnode-{n}"), json!([]), 3_000_000))
+            .collect();
+        mount_get_events(&bootnode, pages).await;
+        let storage = temp_storage("stop-during-bootnode");
+        let sync = background_sync(&rpc, &storage, Some(bootnode.uri()));
+        let stop = sync.stop_handle();
+
+        let stop_once_catching_up = async {
+            while get_events_calls(&bootnode).await < 2 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            stop.request();
+        };
+        let (result, ()) = tokio::time::timeout(
+            Duration::from_secs(4),
+            futures::future::join(sync.run(), stop_once_catching_up),
+        )
+        .await
+        .expect("stop ends the bootnode catch-up");
+
+        assert!(result.is_ok(), "{result:?}");
+        // Only the probe that found the gap.
+        assert_eq!(get_events_calls(&rpc).await, 1);
+    }
 }
