@@ -1515,6 +1515,42 @@ mod tests {
         assert!(at_cursor("main-cursor")(&rows), "{rows:?}");
     }
 
+    /// Inline sync has no stop flag, so `bootnode_catch_up` waits 5 s and
+    /// polls again for as long as the bootnode serves pages without a handoff.
+    #[tokio::test]
+    #[ignore = "bug: inline sync waits forever at a bootnode tip that never hands off"]
+    async fn inline_sync_reports_a_bootnode_tip_that_never_hands_off() {
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        mount_get_events(
+            &bootnode,
+            vec![get_events_page("bootnode-cursor", json!([]), 3_000_000)],
+        )
+        .await;
+        let storage = temp_storage("inline-bootnode-stuck");
+
+        // Room for one 5 s pause, as a transient bootnode error gets.
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            catch_up(
+                &RpcClient::new(&rpc.uri()).expect("rpc client"),
+                &storage,
+                &distinct_config(),
+                Some(&bootnode.uri()),
+            ),
+        )
+        .await
+        .expect("inline sync returns without a handoff");
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::RetentionGap(RetentionGap::BootnodeNotReady(_)))
+            ),
+            "{result:?}"
+        );
+    }
+
     #[tokio::test]
     async fn background_sync_stops_during_bootnode_catch_up_without_reopening_the_rpc() {
         let rpc = main_rpc_with_a_gap().await;
