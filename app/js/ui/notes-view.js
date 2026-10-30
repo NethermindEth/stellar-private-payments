@@ -71,13 +71,6 @@ export function tokenLabel(pool) {
   return 'Token';
 }
 
-// Convenience for callers that hold a pool contract id + the pools list
-// (mirrors disclosure.js tokenLabelForPool).
-export function tokenLabelFor(poolContractId, pools) {
-  const pool = (pools || []).find((p) => p.poolContractId === poolContractId);
-  return tokenLabel(pool);
-}
-
 // Shorten a hex string for display (mirrors disclosure.js shortCommitment).
 export function shortHex(hex, start = 8, end = 4, ellipsis = '…') {
   if (!hex || hex.length < start + end + 2) return hex || '--';

@@ -161,7 +161,7 @@ const ERROR_PATTERNS = [
  * @param {Error|string|unknown} error - The error to extract message from
  * @returns {string} The error message
  */
-export function getErrorMessage(error) {
+function getErrorMessage(error) {
     if (!error) return '';
     if (typeof error === 'string') return error;
     if (error instanceof Error) return error.message || String(error);
@@ -191,18 +191,6 @@ function walletProvidedMessage(error) {
     if (typeof cause === 'string' && cause) return cause;
     if (cause && typeof cause === 'object' && cause.message) return String(cause.message);
     return getErrorMessage(error);
-}
-
-/**
- * Checks if an error message indicates a proof verification failure.
- * @param {string} message - Error message to check
- * @returns {boolean} True if this is a proof verification error
- */
-export function isProofVerificationError(message) {
-    const msg = (message || '').toLowerCase();
-    // Pool contract InvalidProof is #7; verifier InvalidProof is #0.
-    return (msg.includes('contract') && msg.includes('#7')) ||
-           (msg.includes('contract') && msg.includes('#0') && msg.includes('verif'));
 }
 
 /**
