@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use stellar_private_payments::types::{AssetDescriptor, NoteAmount};
+use stellar_private_payments::{
+    Error,
+    types::{AssetDescriptor, NoteAmount},
+};
 
 use super::support::{deploy, deploy_default, session};
 use crate::{network::LocalNetwork, pool::PoolOptions};
@@ -101,9 +104,33 @@ async fn unknown_pool() -> Result<()> {
     Ok(())
 }
 
+/// Registration asks the wallet to sign the registration message, then the
+/// transaction. Declining either prompt registers nothing, so the
+/// registration retried after both lands.
 #[tokio::test]
-async fn is_registered() -> Result<()> {
+async fn register_public_keys_retry_after_wallet_rejection() -> Result<()> {
     let session = session(deploy_default().await?).await?;
+    assert!(!session.account.is_registered().await?);
+
+    session.reject_next_message();
+    let rejected = session.account.register_public_keys().await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "declining the message signature must fail the registration: {rejected:?}"
+    );
+    assert_eq!(
+        session.transaction_prompts(),
+        0,
+        "the wallet must not be asked for the transaction after declining the message"
+    );
+    assert!(!session.account.is_registered().await?);
+
+    session.reject_next_transaction();
+    let rejected = session.account.register_public_keys().await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "declining the transaction must fail the registration: {rejected:?}"
+    );
     assert!(!session.account.is_registered().await?);
 
     session.account.register_public_keys().await?;

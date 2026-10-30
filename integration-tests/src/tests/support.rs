@@ -1,12 +1,23 @@
 //! Shared setup for tests: each test deploys the one pool it needs on the
 //! shared network, then opens its own wallet session against it.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
+};
 
 use anyhow::{Context, Result};
 use stellar_private_payments::{
-    Account, CircuitStore, Client, LocalProver, LocalSigner, LocalStorage, PrivatePool,
-    types::{ContractConfig, NoteOwnerAddress, PoolConfigEntry, SignerAddress},
+    Account, CircuitStore, Client, Error, LocalProver, LocalSigner, LocalStorage,
+    PreparedTransaction, PrivatePool, Signer,
+    chain::PreparedSorobanTx,
+    types::{
+        ContractConfig, Field, KeyDerivationSignature, NoteOwnerAddress, PoolConfigEntry,
+        SignedTransaction, SignerAddress,
+    },
     zk::disclosure::find_circuit,
 };
 
@@ -27,9 +38,38 @@ pub struct TestSession {
     pool_contract_ids: Vec<String>,
     storage_path: PathBuf,
     storage_key: std::sync::Arc<stellar_private_payments::state::database_key::DatabaseKey>,
+    prompts: Arc<WalletPrompts>,
 }
 
 impl TestSession {
+    /// Make the wallet reject the next message it is asked to sign, as a user
+    /// declining the wallet prompt would.
+    pub fn reject_next_message(&self) {
+        self.prompts
+            .reject_next_message
+            .store(true, Ordering::SeqCst);
+    }
+
+    /// Make the wallet reject the next transaction it is asked to sign, as a
+    /// user declining the wallet prompt would.
+    pub fn reject_next_transaction(&self) {
+        self.reject_transaction(1);
+    }
+
+    /// Make the wallet reject the `n`th transaction it is asked to sign from
+    /// now on, 1 being the next one, and sign the ones before it.
+    pub fn reject_transaction(&self, n: u32) {
+        self.prompts
+            .reject_transaction_in
+            .store(n, Ordering::SeqCst);
+    }
+
+    /// How many transactions the wallet has been asked to sign, rejected ones
+    /// included.
+    pub fn transaction_prompts(&self) -> u32 {
+        self.prompts.transaction_prompts.load(Ordering::SeqCst)
+    }
+
     pub fn pool(&self) -> Result<PrivatePool> {
         self.pool_at(0)
     }
@@ -112,6 +152,17 @@ pub fn assert_contract_error(err: impl Into<anyhow::Error>, code: u32) {
     let err = format!("{:#}", err.into());
     let expected = format!("Error(Contract, #{code})");
     assert!(err.contains(&expected), "expected {expected}, got: {err}");
+}
+
+/// Each of the pool's notes for this wallet with whether it is spent, to
+/// compare the wallet's notes before and after an operation.
+pub async fn note_states(pool: &PrivatePool) -> Result<Vec<(Field, bool)>> {
+    Ok(pool
+        .notes()
+        .await?
+        .into_iter()
+        .map(|note| (note.id, note.spent))
+        .collect())
 }
 
 /// Open a new wallet session against an existing deployment.
@@ -201,11 +252,15 @@ async fn build_session(
 
     let client = Client::init(network.rpc_url(), storage, prover, config, None)?;
 
-    let signer = LocalSigner::new(
-        &wallet.secret(),
-        NETWORK_PASSPHRASE,
-        SignerAddress::new(wallet.address()),
-    )?
+    let prompts = Arc::new(WalletPrompts::default());
+    let signer = WalletSigner {
+        inner: LocalSigner::new(
+            &wallet.secret(),
+            NETWORK_PASSPHRASE,
+            SignerAddress::new(wallet.address()),
+        )?,
+        prompts: prompts.clone(),
+    }
     .into();
     let account = client.account(NoteOwnerAddress::new(wallet.address()), signer)?;
     account
@@ -223,5 +278,67 @@ async fn build_session(
             .collect(),
         storage_path,
         storage_key,
+        prompts,
     })
+}
+
+/// What the test wallet is told to reject, and how often it was asked to
+/// sign a transaction.
+#[derive(Default)]
+struct WalletPrompts {
+    reject_next_message: AtomicBool,
+    /// Counts down on each transaction prompt and rejects the one that takes
+    /// it from 1 to 0; 0 rejects nothing.
+    reject_transaction_in: AtomicU32,
+    transaction_prompts: AtomicU32,
+}
+
+/// A [`LocalSigner`] that can reject a message or a transaction the way a
+/// browser wallet does when the user declines its prompt.
+struct WalletSigner {
+    inner: LocalSigner,
+    prompts: Arc<WalletPrompts>,
+}
+
+#[async_trait::async_trait]
+impl Signer for WalletSigner {
+    fn signer_address(&self) -> SignerAddress {
+        self.inner.signer_address()
+    }
+
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
+        self.prompts
+            .transaction_prompts
+            .fetch_add(1, Ordering::SeqCst);
+        let countdown = self.prompts.reject_transaction_in.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |n| n.checked_sub(1),
+        );
+        if countdown == Ok(1) {
+            return Err(Error::UserRejected("user declined the request".to_string()));
+        }
+        self.inner.sign_soroban_transaction(prepared).await
+    }
+
+    async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
+        if self
+            .prompts
+            .reject_next_message
+            .swap(false, Ordering::SeqCst)
+        {
+            return Err(Error::UserRejected("user declined the request".to_string()));
+        }
+        self.inner.sign_message(message).await
+    }
 }

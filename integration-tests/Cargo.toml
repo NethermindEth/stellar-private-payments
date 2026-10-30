@@ -18,6 +18,7 @@ stellar-private-payments = { path = "../sdk/native", version = "0.2.1" }
 
 # external
 anyhow = { version = "1", default-features = false, features = ["std"] }
+async-trait = { version = "0.1.92", default-features = false }
 ed25519-dalek = { version = "3.0", default-features = false, features = ["rand_core"] }
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
