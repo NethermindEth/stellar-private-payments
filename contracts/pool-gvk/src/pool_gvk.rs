@@ -20,9 +20,11 @@ use pool_core::{
     clients::runs_wasm,
     events::{
         AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
+        FeesClaimed,
     },
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
+    totals::{self, Error as TotalsError},
 };
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
@@ -54,7 +56,9 @@ pub enum Error {
     WrongLevels = 4,
     /// Internal error: next leaf index is not even
     NextIndexNotEven = 5,
-    /// External amount is invalid (negative or exceeds 2^248)
+    /// A deposit over the maximum or below the minimum after the fee, an
+    /// amount outside the range the pool can hold, or a public amount other
+    /// than `ext_amount` minus the fee
     WrongExtAmount = 6,
     /// Zero-knowledge proof verification failed
     InvalidProof = 7,
@@ -84,6 +88,10 @@ pub enum Error {
     NoPendingAdmin = 20,
     /// An association set does not run the code fixed at construction
     TreeCodeMismatch = 21,
+    /// A call would take the notes total below zero
+    NotesTotalExceeded = 22,
+    /// A claim is negative, above the fees total, or paid to the pool
+    InvalidClaimAmount = 23,
 }
 
 impl From<MerkleError> for Error {
@@ -95,6 +103,17 @@ impl From<MerkleError> for Error {
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
             MerkleError::NotInitialized => Error::NotInitialized,
             MerkleError::Overflow => Error::Overflow,
+        }
+    }
+}
+
+impl From<TotalsError> for Error {
+    fn from(e: TotalsError) -> Self {
+        match e {
+            TotalsError::NotInitialized => Error::NotInitialized,
+            TotalsError::NotesTotalExceeded => Error::NotesTotalExceeded,
+            TotalsError::Overflow => Error::Overflow,
+            TotalsError::InvalidClaimAmount => Error::InvalidClaimAmount,
         }
     }
 }
@@ -125,6 +144,10 @@ pub(crate) enum DataKey {
     Verifier,
     /// Maximum allowed deposit amount per transaction
     MaximumDepositAmount,
+    /// Fee every transaction pays. Immutable.
+    Fee,
+    /// Smallest amount a deposit may add to notes after the fee. Immutable.
+    MinimumDepositAmount,
     /// Spent nullifier marker keyed by nullifier (presence-only; value unused).
     Nullifier(U256),
     /// Address of the ASP Membership contract
@@ -239,6 +262,8 @@ impl PoolGvkContract {
     ///
     /// Returns [`Error::InvalidPolicyFlags`] for an unsupported bit,
     /// [`Error::TreeCodeMismatch`] if a tree runs other code,
+    /// [`Error::WrongExtAmount`] for a negative fee or minimum, or for a fee
+    /// and minimum that together exceed the maximum,
     /// [`Error::InvalidGvkMode`] for an unsupported mode,
     /// [`Error::InvalidAdminViewKey`] if the key is not a usable circuit input,
     /// and [`Error::WrongLevels`] if `levels` is outside 1 to 32.
@@ -251,6 +276,8 @@ impl PoolGvkContract {
         asp_non_membership: Address,
         asp_membership_wasm_hash: BytesN<32>,
         asp_non_membership_wasm_hash: BytesN<32>,
+        fee: i128,
+        minimum_deposit_amount: i128,
         maximum_deposit_amount: U256,
         levels: u32,
         policy_flags: u32,
@@ -265,6 +292,16 @@ impl PoolGvkContract {
             || !runs_wasm(&asp_non_membership, &asp_non_membership_wasm_hash)
         {
             return Err(Error::TreeCodeMismatch);
+        }
+        if fee < 0 || minimum_deposit_amount < 0 {
+            return Err(Error::WrongExtAmount);
+        }
+        let smallest_deposit = fee
+            .checked_add(minimum_deposit_amount)
+            .and_then(|sum| u128::try_from(sum).ok())
+            .ok_or(Error::WrongExtAmount)?;
+        if U256::from_u128(&env, smallest_deposit) > maximum_deposit_amount {
+            return Err(Error::WrongExtAmount);
         }
         if !gvk::is_valid(gvk_mode) {
             return Err(Error::InvalidGvkMode);
@@ -281,12 +318,15 @@ impl PoolGvkContract {
             &DataKey::ASPNonMembershipWasmHash,
             &asp_non_membership_wasm_hash,
         );
+        instance.set(&DataKey::Fee, &fee);
+        instance.set(&DataKey::MinimumDepositAmount, &minimum_deposit_amount);
         instance.set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         instance.set(&DataKey::PolicyFlags, &policy_flags);
         instance.set(&DataKey::KdfDomain, &kdf_domain);
         instance.set(&DataKey::AdminViewKey, &admin_view_key);
         instance.set(&DataKey::GvkMode, &gvk_mode);
         instance.set(&DataKey::DepositsPaused, &false);
+        totals::init(&env);
 
         MerkleTreeWithHistory::init(&env, levels)?;
 
@@ -369,6 +409,26 @@ impl PoolGvkContract {
             .instance()
             .get(&DataKey::DepositsPaused)
             .ok_or(Error::NotInitialized)
+    }
+
+    /// Returns the pool fee every transaction pays.
+    ///
+    /// The fee is in the token's smallest unit, and a proof's public amount is
+    /// `ext_amount` minus it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotInitialized`] if the fee is not stored.
+    pub fn get_fee(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Fee)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Returns the fees the pool has collected and not paid out.
+    pub fn get_fees_total(env: &Env) -> Result<i128, Error> {
+        Ok(totals::fees_total(env)?)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool.
@@ -505,6 +565,27 @@ impl PoolGvkContract {
         } else {
             DepositPauseRepeated { paused }.publish(env);
         }
+        Ok(())
+    }
+
+    /// Pays `amount` of the collected fees to `to` and publishes
+    /// [`FeesClaimed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidClaimAmount`] for a negative amount, one above
+    /// the fees total, or a `to` that is the pool itself.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the admin does not authorize the call or the token transfer
+    /// fails.
+    pub fn claim_fees(env: &Env, to: Address, amount: i128) -> Result<(), Error> {
+        soroban_utils::get_admin(env, &DataKey::Admin)?.require_auth();
+        totals::claim(env, &to, amount)?;
+        let token_client = TokenClient::new(env, &Self::get_token(env)?);
+        token_client.transfer(&env.current_contract_address(), &to, &amount);
+        FeesClaimed { to, amount }.publish(env);
         Ok(())
     }
 
@@ -649,6 +730,14 @@ impl PoolGvkContract {
         env.storage()
             .instance()
             .get(&DataKey::MaximumDepositAmount)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Get the smallest amount a deposit may add to notes after the fee.
+    fn get_minimum_deposit(env: &Env) -> Result<i128, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinimumDepositAmount)
             .ok_or(Error::NotInitialized)
     }
 
@@ -870,6 +959,8 @@ impl PoolGvkContract {
 
     /// Executes a shielded transaction.
     ///
+    /// Every call pays the pool fee, from its deposit or from the notes it
+    /// spends, so the proof's public amount is `ext_amount` minus the fee.
     /// Tokens move only after every check and the proof pass and the pool's
     /// state is updated: a deposit pulls `ext_amount` from `sender`, a
     /// withdrawal pays `recipient`. Renews the pool, its tree, and its
@@ -878,11 +969,12 @@ impl PoolGvkContract {
     /// # Errors
     ///
     /// Returns [`Error::DepositsPaused`] for a deposit while paused, before the
-    /// cap check and any transfer, [`Error::WrongExtAmount`] for a deposit
-    /// over the cap or an out-of-range or mismatched amount, and
-    /// [`Error::InvalidProof`] for an empty or refused proof, an ASP root
-    /// the trees reject, or a failed tree call. Every other error names the
-    /// failed check or marks missing or corrupt state.
+    /// cap and minimum checks and any transfer, [`Error::WrongExtAmount`] for
+    /// a deposit over the cap or below the pool minimum after the fee, or an
+    /// out-of-range or mismatched amount, and [`Error::InvalidProof`] for an
+    /// empty or refused proof, an ASP root the trees reject, or a failed tree
+    /// call. Every other error names the failed check or marks missing or
+    /// corrupt state.
     ///
     /// # Panics
     ///
@@ -911,7 +1003,7 @@ impl PoolGvkContract {
     ) -> Result<(), Error> {
         let zero = I256::from_i32(env, 0);
 
-        // 1. Deposit pause, cap, and i128 range check
+        // 1. Deposit pause, cap, minimum, and i128 range check
         let deposit_amount = if ext_data.ext_amount > zero {
             if Self::deposits_paused(env)? {
                 return Err(Error::DepositsPaused);
@@ -921,7 +1013,14 @@ impl PoolGvkContract {
             if deposit_u > max {
                 return Err(Error::WrongExtAmount);
             }
-            Some(Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?)
+            let amount = Self::i256_to_i128_nonneg(env, &ext_data.ext_amount)?;
+            let net = amount
+                .checked_sub(Self::get_fee(env)?)
+                .ok_or(Error::WrongExtAmount)?;
+            if net < Self::get_minimum_deposit(env)? {
+                return Err(Error::WrongExtAmount);
+            }
+            Some(amount)
         } else {
             None
         };
@@ -955,9 +1054,14 @@ impl PoolGvkContract {
             return Err(Error::WrongExtHash);
         }
 
-        // 5. Public amount and withdrawal range check
-        let expected_public_amount =
-            Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
+        // 5. Public amount, net of the pool fee, and withdrawal range check
+        let fee = Self::get_fee(env)?;
+        let net = ext_data
+            .ext_amount
+            .to_i128()
+            .and_then(|amount| amount.checked_sub(fee))
+            .ok_or(Error::WrongExtAmount)?;
+        let expected_public_amount = Self::calculate_public_amount(env, I256::from_i128(env, net))?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
@@ -994,6 +1098,10 @@ impl PoolGvkContract {
         if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
+
+        // Only a broken circuit or verifier could take the notes total below
+        // zero, since every note a call spends came from an earlier output.
+        totals::record(env, net, fee)?;
 
         // 8. Mark nullifiers as spent
         for n in proof.input_nullifiers.iter() {

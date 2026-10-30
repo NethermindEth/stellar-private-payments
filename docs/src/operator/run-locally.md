@@ -10,7 +10,7 @@ You need the following tools:
 - Docker, which runs the local network.
 - Rust through `rustup`. The repository's `rust-toolchain.toml` file pins the version.
 - The [Stellar CLI](https://developers.stellar.org/docs/tools/cli/install-cli).
-- `jq`.
+- `jq` and `bc`.
 - Node.js and npm, for the web app.
 
 `make serve` installs Trunk and the WebAssembly target on first use. For the full list of build
