@@ -498,3 +498,318 @@ mod gvk_passthrough_tests {
         assert_eq!(ct.c2, Field(U256::from(2)));
     }
 }
+
+#[cfg(test)]
+mod asp_non_membership_tests {
+    use super::*;
+    use crate::{
+        state::test_events::{leaf_event, u256},
+        types::U256,
+    };
+    use stellar_xdr as xdr;
+
+    const ID: &str = "0000000000000000001-0000000000";
+
+    type Fields = Vec<(&'static str, xdr::ScVal)>;
+
+    fn field(v: u64) -> Field {
+        Field(U256::from(v))
+    }
+
+    fn inserted() -> Fields {
+        vec![("key", u256(1)), ("value", u256(42)), ("root", u256(7))]
+    }
+
+    fn updated() -> Fields {
+        vec![
+            ("key", u256(1)),
+            ("old_value", u256(42)),
+            ("new_value", u256(43)),
+            ("root", u256(8)),
+        ]
+    }
+
+    fn deleted() -> Fields {
+        vec![("key", u256(1)), ("root", u256(9))]
+    }
+
+    /// Each event's contract name, its snake_case name, and its fields.
+    fn leaf_events() -> [(&'static str, &'static str, Fields); 3] {
+        [
+            ("LeafInserted", "leaf_inserted", inserted()),
+            ("LeafUpdated", "leaf_updated", updated()),
+            ("LeafDeleted", "leaf_deleted", deleted()),
+        ]
+    }
+
+    /// Parses every event built by replacing one field of each leaf event with
+    /// `val`, and returns the error message for each.
+    fn errors_with_each_field_replaced_by(val: &xdr::ScVal) -> Result<Vec<(String, String)>> {
+        let mut errors = vec![];
+        for (name, _, fields) in leaf_events() {
+            for (replaced, _) in &fields {
+                let fields: Fields = fields
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            *k,
+                            if k == replaced {
+                                val.clone()
+                            } else {
+                                v.clone()
+                            },
+                        )
+                    })
+                    .collect();
+                let err = parse_event(leaf_event(ID, name, &fields)?)
+                    .expect_err("a field of the wrong shape");
+                errors.push((format!("{name}.{replaced}"), err.to_string()));
+            }
+        }
+        Ok(errors)
+    }
+
+    #[test]
+    fn leaf_inserted_parses_its_key_value_and_root() -> Result<()> {
+        let Some(ProcessedEvent::LeafInserted(ev)) =
+            parse_event(leaf_event(ID, "LeafInserted", &inserted())?)?
+        else {
+            panic!("expected a LeafInserted event");
+        };
+
+        assert_eq!(ev.id, ID);
+        assert_eq!(ev.key, field(1));
+        assert_eq!(ev.value, field(42));
+        assert_eq!(ev.root, field(7));
+        Ok(())
+    }
+
+    /// The contract no longer emits `LeafUpdated` (removed in #253), but the
+    /// SDK still decodes it.
+    #[test]
+    fn leaf_updated_parses_its_key_both_values_and_root() -> Result<()> {
+        let Some(ProcessedEvent::LeafUpdated(ev)) =
+            parse_event(leaf_event(ID, "LeafUpdated", &updated())?)?
+        else {
+            panic!("expected a LeafUpdated event");
+        };
+
+        assert_eq!(ev.id, ID);
+        assert_eq!(ev.key, field(1));
+        assert_eq!(ev.old_value, field(42));
+        assert_eq!(ev.new_value, field(43));
+        assert_eq!(ev.root, field(8));
+        Ok(())
+    }
+
+    #[test]
+    fn leaf_deleted_parses_its_key_and_root() -> Result<()> {
+        let Some(ProcessedEvent::LeafDeleted(ev)) =
+            parse_event(leaf_event(ID, "LeafDeleted", &deleted())?)?
+        else {
+            panic!("expected a LeafDeleted event");
+        };
+
+        assert_eq!(ev.id, ID);
+        assert_eq!(ev.key, field(1));
+        assert_eq!(ev.root, field(9));
+        Ok(())
+    }
+
+    #[test]
+    fn snake_case_leaf_event_names_parse_like_the_contract_names() -> Result<()> {
+        for (name, snake_name, fields) in leaf_events() {
+            let parsed = format!("{:?}", parse_event(leaf_event(ID, name, &fields)?)?);
+            let snake_parsed = format!("{:?}", parse_event(leaf_event(ID, snake_name, &fields)?)?);
+
+            // The variants are named after the contract events.
+            assert!(parsed.starts_with(&format!("Some({name}(")), "{parsed}");
+            assert_eq!(snake_parsed, parsed);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_event_missing_a_field_fails_naming_the_field() -> Result<()> {
+        for (name, _, fields) in leaf_events() {
+            for (missing, _) in &fields {
+                let fields: Fields = fields
+                    .iter()
+                    .filter(|(k, _)| k != missing)
+                    .cloned()
+                    .collect();
+
+                let err = parse_event(leaf_event(ID, name, &fields)?).expect_err("missing field");
+
+                let message = err.to_string();
+                assert!(
+                    message.contains(ID) && message.contains(&format!("{missing} value")),
+                    "{name} without {missing}: {message}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_event_field_that_is_not_a_u256_fails() -> Result<()> {
+        for (field, message) in errors_with_each_field_replaced_by(&xdr::ScVal::U32(1))? {
+            assert!(
+                message.contains("Unexpected ScVal") && message.contains("U32(1)"),
+                "{field}: {message}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_event_field_outside_the_scalar_field_fails() -> Result<()> {
+        let too_large = xdr::ScVal::U256(xdr::UInt256Parts {
+            hi_hi: u64::MAX,
+            hi_lo: 0,
+            lo_hi: 0,
+            lo_lo: 0,
+        });
+
+        for (field, message) in errors_with_each_field_replaced_by(&too_large)? {
+            assert!(
+                message.contains("field element out of range"),
+                "{field}: {message}"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod asp_membership_tests {
+    use super::*;
+    use crate::{
+        state::test_events::{membership_event, u256},
+        types::U256,
+    };
+    use stellar_xdr as xdr;
+
+    const ID: &str = "0000000000000000001-0000000000";
+
+    fn fields(index: xdr::ScVal) -> Vec<(&'static str, xdr::ScVal)> {
+        vec![("leaf", u256(42)), ("index", index), ("root", u256(7))]
+    }
+
+    fn parse(fields: &[(&str, xdr::ScVal)]) -> Result<Option<ProcessedEvent>> {
+        parse_event(membership_event(ID, "LeafAdded", fields)?)
+    }
+
+    fn parsed_index(index: u64) -> Result<u32> {
+        let Some(ProcessedEvent::LeafAdded(ev)) = parse(&fields(xdr::ScVal::U64(index)))? else {
+            panic!("expected a LeafAdded event");
+        };
+        Ok(ev.index)
+    }
+
+    #[test]
+    fn leaf_added_parses_its_leaf_index_and_root() -> Result<()> {
+        let Some(ProcessedEvent::LeafAdded(ev)) = parse(&fields(xdr::ScVal::U64(5)))? else {
+            panic!("expected a LeafAdded event");
+        };
+
+        assert_eq!(ev.id, ID);
+        assert_eq!(ev.leaf, Field(U256::from(42)));
+        assert_eq!(ev.index, 5);
+        assert_eq!(ev.root, Field(U256::from(7)));
+        Ok(())
+    }
+
+    #[test]
+    fn snake_case_leaf_added_parses_like_the_contract_name() -> Result<()> {
+        let fields = fields(xdr::ScVal::U64(5));
+        let parsed = format!("{:?}", parse(&fields)?);
+        let snake_parsed = format!(
+            "{:?}",
+            parse_event(membership_event(ID, "leaf_added", &fields)?)?
+        );
+
+        assert!(parsed.starts_with("Some(LeafAdded("), "{parsed}");
+        assert_eq!(snake_parsed, parsed);
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_added_event_missing_a_field_fails_naming_the_field() -> Result<()> {
+        for missing in ["leaf", "index", "root"] {
+            let fields: Vec<_> = fields(xdr::ScVal::U64(5))
+                .into_iter()
+                .filter(|(k, _)| *k != missing)
+                .collect();
+
+            let err = parse(&fields).expect_err("missing field");
+
+            let message = err.to_string();
+            assert!(
+                message.contains(ID) && message.contains(&format!("{missing} value")),
+                "LeafAdded without {missing}: {message}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The contract caps the tree at 32 levels, so every index it emits fits
+    /// in the `u32` the SDK stores.
+    #[test]
+    fn a_leaf_added_index_of_u32_max_parses() -> Result<()> {
+        assert_eq!(parsed_index(u64::from(u32::MAX))?, u32::MAX);
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_added_index_above_u32_max_fails_instead_of_truncating() -> Result<()> {
+        let too_large = u64::from(u32::MAX).checked_add(1).expect("fits in u64");
+
+        let err = parse(&fields(xdr::ScVal::U64(too_large))).expect_err("index above u32");
+
+        assert!(
+            err.to_string()
+                .contains("out of range integral type conversion"),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_added_index_that_is_not_a_u64_fails() -> Result<()> {
+        let err = parse(&fields(xdr::ScVal::U32(5))).expect_err("u32 index");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("Unexpected ScVal") && message.contains("U32(5)"),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_added_leaf_or_root_outside_the_scalar_field_fails() -> Result<()> {
+        let too_large = xdr::ScVal::U256(xdr::UInt256Parts {
+            hi_hi: u64::MAX,
+            hi_lo: 0,
+            lo_hi: 0,
+            lo_lo: 0,
+        });
+
+        for replaced in ["leaf", "root"] {
+            let fields: Vec<_> = fields(xdr::ScVal::U64(5))
+                .into_iter()
+                .map(|(k, v)| (k, if k == replaced { too_large.clone() } else { v }))
+                .collect();
+
+            let err = parse(&fields).expect_err("out-of-range field element");
+
+            let message = err.to_string();
+            assert!(
+                message.contains("field element out of range"),
+                "{replaced}: {message}"
+            );
+        }
+        Ok(())
+    }
+}
