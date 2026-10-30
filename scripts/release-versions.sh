@@ -1,11 +1,14 @@
 #!/usr/bin/env sh
-# Release version helpers for sdk (crates.io), npm, and cli.
+# Release version helpers for sdk (crates.io), npm, cli, and contracts.
 #
 #   check     — major.minor must match across sdk/native, npm, and cli
 #   plan MODE — emit publish_* outputs without tagging (all for PRs, changed for pushes)
 #   retry PKG — select a current, already-tagged version after orchestration-only fixes
 #   tag       — push sdk-v* / npm-v* / cli-v* for bumped versions; sets publish_* outputs
 #   published — exit 0 if VERSION is already on the registry (crates.io / npm / GitHub)
+#   contracts — emit publish_contracts when a push since BEFORE bumped the contracts version
+#               (changed BEFORE), or when only contracts release tooling changed since the
+#               commit that set it (retry)
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,9 +25,18 @@ crate_version() {
     return 0
   fi
   printf '%s\n' "$crate_toml" | grep -q '^version.workspace = true' || return 0
-  printf '%s\n' "$workspace_toml" \
+  workspace_version "$workspace_toml"
+}
+
+workspace_version() {
+  printf '%s\n' "$1" \
     | sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\([^"]*\)".*/\1/p;}' \
     | head -1
+}
+
+# The contracts version at commit $1, or nothing.
+contracts_version_at() {
+  workspace_version "$(git show "$1:Cargo.toml" 2>/dev/null || true)"
 }
 
 read_cargo_version() {
@@ -137,6 +149,55 @@ cmd_retry() {
   echo "publish_${package}=${current}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
 }
 
+cmd_contracts() {
+  mode="${1:-}"
+  version="$(workspace_version "$(cat Cargo.toml)")"
+  [ -n "$version" ] || {
+    echo "error: Cargo.toml has no [workspace.package] version" >&2
+    exit 1
+  }
+  case "$mode" in
+    changed)
+      before="${2:-}"
+      if ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+        echo "error: cannot tell whether this push changed the contracts version: the commit before it, $before, is not in the history. To release contracts-v$version, run this workflow by hand from main" >&2
+        exit 1
+      fi
+      if [ "$(contracts_version_at "$before")" = "$version" ]; then
+        echo "skip contracts ($version unchanged)"
+        return 0
+      fi
+      ;;
+    retry)
+      # Newest first, so the first commit whose parent has another version set this one.
+      bump=""
+      for commit in $(git log --first-parent --format=%H -- Cargo.toml); do
+        if [ "$(contracts_version_at "$commit^")" != "$version" ]; then
+          bump="$commit"
+          break
+        fi
+      done
+      if [ -z "$bump" ]; then
+        echo "error: cannot find the commit that set contracts version $version; bump the contracts version to release" >&2
+        exit 1
+      fi
+      # Only contracts release tooling may differ from the commit that set the version.
+      changed="$(git diff --name-only "$bump" HEAD -- . \
+        ':(exclude).github/workflows/contracts-release.yml' \
+        ':(exclude)scripts/build-contracts.sh' \
+        ':(exclude)scripts/test-build-contracts.sh' \
+        ':(exclude)scripts/release-versions.sh' \
+        ':(exclude)scripts/test-release-versions.sh' | paste -s -d ' ' -)"
+      if [ -n "$changed" ]; then
+        echo "error: $changed changed since commit $bump set contracts version $version; bump the contracts version to release them" >&2
+        exit 1
+      fi
+      ;;
+    *) echo "usage: $0 contracts changed BEFORE | contracts retry" >&2; exit 2 ;;
+  esac
+  echo "publish_contracts=${version}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
+}
+
 maybe_tag() {
   prefix="$1"
   current="$2"
@@ -189,7 +250,7 @@ cmd_published() {
   version="${2:-}"
 
   [ -n "$target" ] && [ -n "$version" ] || {
-    echo "usage: $0 published sdk|npm|cli VERSION" >&2
+    echo "usage: $0 published sdk|npm|cli|contracts VERSION" >&2
     exit 2
   }
 
@@ -224,8 +285,20 @@ cmd_published() {
           process.exit(complete ? 0 : 1);
         "
       ;;
+    contracts)
+      tag="contracts-v${version}"
+      repo="${GITHUB_REPOSITORY:-NethermindEth/stellar-private-payments}"
+      release="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${tag}" 2>/dev/null)" || exit 1
+      sums="$(curl -fsSL "https://github.com/${repo}/releases/download/${tag}/SHA256SUMS" 2>/dev/null)" || exit 1
+      # Complete when SHA256SUMS and every file it lists are uploaded.
+      printf '%s\n' "$release" | jq -e --arg sums "$sums" '
+        ($sums | split("\n") | map(select(. != "") | split("  ")[1])) as $names
+        | [.assets[]? | select(.state == "uploaded" and .size > 0) | .name] as $have
+        | .draft == false and ($names | length) > 0
+          and all(["SHA256SUMS"] + $names | .[]; IN($have[]))' >/dev/null
+      ;;
     *)
-      echo "unknown target: $target (expected sdk, npm, or cli)" >&2
+      echo "unknown target: $target (expected sdk, npm, cli, or contracts)" >&2
       exit 2
       ;;
   esac
@@ -238,8 +311,9 @@ case "$cmd" in
   retry) cmd_retry "${2:-}" ;;
   tag) cmd_tag ;;
   published) cmd_published "$2" "$3" ;;
+  contracts) cmd_contracts "${2:-}" "${3:-}" ;;
   *)
-    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli VERSION" >&2
+    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli|contracts VERSION | contracts changed BEFORE|retry" >&2
     exit 2
     ;;
 esac

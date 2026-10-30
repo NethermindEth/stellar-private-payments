@@ -255,6 +255,8 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 ./deployments/scripts/deploy.sh --help
 ```
 
+The contracts version is `version` under `[workspace.package]` in the root `Cargo.toml`. Merging a change to it makes the Contracts Release workflow publish `contracts-vX.Y.Z`. Every crate that inherits its version from the workspace shares the contracts version, so bumping it for any of them publishes a contracts release.
+
 ### Deploying Contracts
 
 See [DEPLOY.md](DEPLOY.md) for the `deployments/scripts/deploy.sh` pool spec
