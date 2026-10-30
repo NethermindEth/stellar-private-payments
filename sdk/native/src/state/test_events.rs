@@ -1,4 +1,4 @@
-//! Pool events as RPC serves them, for the state tests.
+//! Contract events as RPC serves them, for the state tests.
 
 use crate::types::ContractEvent;
 use anyhow::Result;
@@ -45,6 +45,42 @@ pub(super) fn commitment_event(
         &[symbol("new_commitment_event")?, u256(commitment)],
         entries,
     )
+}
+
+/// An ASP non-membership event as `contracts/asp-non-membership` emits it:
+/// the name is the only topic and the fields are the data map, in key order.
+pub(super) fn leaf_event(
+    id: &str,
+    name: &str,
+    fields: &[(&str, xdr::ScVal)],
+) -> Result<ContractEvent> {
+    let mut entries = fields
+        .iter()
+        .map(|(key, val)| {
+            Ok(xdr::ScMapEntry {
+                key: symbol(key)?,
+                val: val.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(ContractEvent {
+        contract_id: "CNONMEMBERSHIP".to_string(),
+        ..raw_event(id, &[symbol(name)?], entries)?
+    })
+}
+
+/// An ASP membership event as `contracts/asp-membership` emits it, shaped like
+/// [`leaf_event`].
+pub(super) fn membership_event(
+    id: &str,
+    name: &str,
+    fields: &[(&str, xdr::ScVal)],
+) -> Result<ContractEvent> {
+    Ok(ContractEvent {
+        contract_id: "CMEMBERSHIP".to_string(),
+        ..leaf_event(id, name, fields)?
+    })
 }
 
 pub(super) fn commitment_entries(index: u32) -> Result<Vec<xdr::ScMapEntry>> {
