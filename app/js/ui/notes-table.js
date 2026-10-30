@@ -103,12 +103,7 @@ export const NotesTable = {
             poolId: App.state.selectedPoolId,
         }).map(noteWithLabels);
 
-        if (!filtered.length) {
-            empty.classList.remove('hidden');
-            return;
-        }
-
-        empty.classList.add('hidden');
+        empty.hidden = filtered.length > 0;
         filtered.forEach(note => {
             tbody.appendChild(Templates.createNoteRow(note, {
                 onUse: (selected) => App.events.dispatchEvent(new CustomEvent('advanced:use-note', { detail: selected })),

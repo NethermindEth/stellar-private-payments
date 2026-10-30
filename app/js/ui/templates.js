@@ -9,7 +9,6 @@ export const Templates = {
             noteRow: document.getElementById('tpl-note-row'),
             feedCard: document.getElementById('tpl-feed-card'),
             balanceCard: document.getElementById('tpl-balance-card'),
-            toast: document.getElementById('tpl-toast'),
         };
     },
 
@@ -74,7 +73,7 @@ export const Templates = {
         const useBtn = row.querySelector('.note-use');
         if (useBtn) {
             if (note.spent) {
-                useBtn.classList.add('hidden');
+                useBtn.hidden = true;
             } else {
                 useBtn.addEventListener('click', () => opts.onUse?.(note));
             }

@@ -132,7 +132,7 @@
             </section>
 
             <!-- 2. Allowlist Tab -->
-            <section id="allowlist" class="tab-content hidden card space-y-6" aria-labelledby="membership-heading">
+            <section id="allowlist" class="tab-content card space-y-6" aria-labelledby="membership-heading" hidden>
                 <div>
                     <p class="eyebrow">Membership</p>
                     <h2 id="membership-heading" class="section-title mt-2">Allowlist Management</h2>
@@ -156,7 +156,7 @@
             </section>
 
             <!-- 3. Blocklist Tab -->
-            <section id="blocklist" class="tab-content hidden card space-y-6" aria-labelledby="nonmembership-heading">
+            <section id="blocklist" class="tab-content card space-y-6" aria-labelledby="nonmembership-heading" hidden>
                 <div>
                     <p class="eyebrow">Non-Membership</p>
                     <h2 id="nonmembership-heading" class="section-title mt-2">Blocklist Management</h2>
@@ -178,7 +178,7 @@
             </section>
 
             <!-- 4. Global View Tab -->
-            <section id="global-view" class="tab-content hidden card space-y-6" aria-labelledby="global-view-heading">
+            <section id="global-view" class="tab-content card space-y-6" aria-labelledby="global-view-heading" hidden>
                 <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
                         <p class="eyebrow">Pool Audit</p>
@@ -269,17 +269,17 @@
                     </div>
                 </div>
 
-                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200"></div>
+                <div id="gvkAuditStatus" class="rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200" hidden></div>
 
                 <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-400">
                     Select a pool, enter the authority key, then run Sync &amp; Audit.
                 </div>
 
-                <div id="gvkAuditResults" class="hidden space-y-3"></div>
+                <div id="gvkAuditResults" class="space-y-3" hidden></div>
             </section>
 
             <!-- 5. Pools Tab -->
-            <section id="pools" class="tab-content hidden card space-y-6" aria-labelledby="pools-heading">
+            <section id="pools" class="tab-content card space-y-6" aria-labelledby="pools-heading" hidden>
                 <div>
                     <p class="eyebrow">Deposits</p>
                     <h2 id="pools-heading" class="section-title mt-2">Pools</h2>
@@ -330,7 +330,7 @@
                                 <input id="repointRecords" class="peer sr-only" type="file" />
                                 <label for="repointRecords" class="btn-secondary shrink-0 cursor-pointer px-4 py-2 text-xs peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60">Choose file</label>
                                 <span id="repointRecordsName" class="min-w-0 truncate text-xs text-slate-400">No file chosen</span>
-                                <button id="clearRepointRecordsBtn" type="button" class="hidden shrink-0 text-xs font-medium text-slate-400 underline underline-offset-4 transition hover:text-cyan-100">Clear</button>
+                                <button id="clearRepointRecordsBtn" type="button" class="shrink-0 text-xs font-medium text-slate-400 underline underline-offset-4 transition hover:text-cyan-100" hidden>Clear</button>
                             </div>
                         </details>
                     </div>
@@ -376,7 +376,7 @@
             </section>
 
             <!-- 6. Admins Tab -->
-            <section id="admins" class="tab-content hidden card space-y-6" aria-labelledby="admins-heading">
+            <section id="admins" class="tab-content card space-y-6" aria-labelledby="admins-heading" hidden>
                 <div>
                     <p class="eyebrow">Admin Transfer</p>
                     <h2 id="admins-heading" class="section-title mt-2">Admins</h2>
@@ -455,17 +455,6 @@
 
     <!-- Toast Notifications Container -->
     <div id="toast-container" class="pointer-events-none fixed inset-x-4 bottom-4 z-60 flex flex-col gap-3 sm:left-auto sm:w-full sm:max-w-sm"></div>
-
-    <!-- Toast Template -->
-    <template id="tpl-toast">
-        <div class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)] transition-all duration-300 transform translate-x-full opacity-0">
-            <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300 shrink-0"></div>
-            <div class="min-w-0 flex-1">
-                <p class="toast-message break-words font-medium"></p>
-                <button type="button" class="toast-close mt-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition underline underline-offset-4">Dismiss</button>
-            </div>
-        </div>
-    </template>
 
     <!-- Pool Row Template -->
     <template id="tpl-pool-row">

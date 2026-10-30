@@ -4,9 +4,10 @@ import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUs
 import { explorerPreference } from './public-settings.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
-import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
+import { confirmAction } from './ui/confirm.js';
 import { el, elc } from './ui/dom.js';
+import { showToast } from './ui/toast.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
 import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
@@ -21,9 +22,6 @@ const walletChip = document.getElementById('walletChip');
 const storageLockBtn = document.getElementById('storage-lock-btn');
 const connectBtn = document.getElementById('connectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
-
-const toastContainer = document.getElementById('toast-container');
-const toastTemplate = document.getElementById('tpl-toast');
 
 // Contract/state display
 const membershipContractInput = document.getElementById('membershipContract');
@@ -114,53 +112,10 @@ const state = {
   cryptoReady: false,
 };
 
-// -----------------------------
-// UI Updates & Toasts
-// -----------------------------
-
 function setStatus(text, kind = 'info') {
   if (!statusEl) return;
   statusEl.textContent = text;
   statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
-}
-
-function showToast(message, type = 'success', duration = 4000) {
-  if (!toastContainer || !toastTemplate) return;
-  const toastWrapper = toastTemplate.content.cloneNode(true).firstElementChild;
-
-  toastWrapper.querySelector('.toast-message').textContent = friendlyErrorMessage(message);
-
-  const icon = toastWrapper.querySelector('.toast-icon');
-  if (type === 'success') {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 shrink-0 shadow-[0_0_8px_rgba(52,211,153,0.8)]';
-  } else if (type === 'error') {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 shrink-0 shadow-[0_0_8px_rgba(244,63,94,0.8)]';
-  } else {
-      icon.className = 'toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300 shrink-0 shadow-[0_0_8px_rgba(103,232,249,0.8)]';
-  }
-
-  toastWrapper.querySelector('.toast-close').addEventListener('click', () => {
-    toastWrapper.classList.remove('translate-x-0', 'opacity-100');
-    toastWrapper.classList.add('translate-x-full', 'opacity-0');
-    setTimeout(() => toastWrapper.remove(), 300);
-  });
-
-  toastContainer.appendChild(toastWrapper);
-
-  requestAnimationFrame(() => {
-    toastWrapper.classList.remove('translate-x-full', 'opacity-0');
-    toastWrapper.classList.add('translate-x-0', 'opacity-100');
-  });
-
-  setTimeout(() => {
-    if (toastWrapper.parentNode) {
-        toastWrapper.classList.remove('translate-x-0', 'opacity-100');
-        toastWrapper.classList.add('translate-x-full', 'opacity-0');
-        setTimeout(() => {
-            if(toastWrapper.parentNode) toastWrapper.remove();
-        }, 300);
-    }
-  }, duration);
 }
 
 // -----------------------------
@@ -408,7 +363,7 @@ function renderAdminTx(kind) {
   adminTxNoticeEl.textContent = '';
   delete adminTxNoticeEl.dataset.tone;
   submitAdminTxBtn.disabled = true;
-  adminTxSignaturesLineEl.classList.toggle('hidden', !xdr || !state.networkPassphrase);
+  adminTxSignaturesLineEl.hidden = !xdr || !state.networkPassphrase;
   copyAdminTxBtn.disabled = copyAdminTxLinkBtn.disabled = !xdr;
   if (!xdr) {
     adminTxNoticeEl.textContent = 'No admin call loaded. Build one above, or open a link from a signer.';
@@ -467,7 +422,7 @@ function renderAdminTx(kind) {
       warnAdminTx([prior, text].filter(Boolean).join(' '));
     });
   } catch (err) {
-    adminTxSignaturesLineEl.classList.add('hidden');
+    adminTxSignaturesLineEl.hidden = true;
     copyAdminTxLinkBtn.disabled = true;
     adminTxNoticeEl.textContent = `Not an admin call: ${err.message}`;
   }
@@ -699,7 +654,7 @@ async function insertMembershipLeaf() {
     if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
       throw new Error('ASP secret is required');
     }
-    if (!confirmListWrite(contractId, true)) return;
+    if (!(await confirmListWrite(contractId, true))) return;
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.ariaBusy = true;
@@ -731,11 +686,11 @@ async function insertMembershipLeaf() {
 }
 
 // Asks before writing to a list no pool uses, once every pool has been read.
-function confirmListWrite(list, allowlist) {
+async function confirmListWrite(list, allowlist) {
   if (!state.poolLists) return true;
   const used = [...state.poolLists.values()].map((lists) => lists[allowlist ? 'allowlist' : 'blocklist']);
   const warning = unusedListWarning(list, used, allowlist);
-  return !warning || window.confirm(warning);
+  return !warning || await confirmAction({ message: warning, confirmLabel: 'Continue anyway' });
 }
 
 async function insertNonMembershipLeaf() {
@@ -748,7 +703,7 @@ async function insertNonMembershipLeaf() {
 
     const keys = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keys.length === 0) throw new Error('User note public key is required');
-    if (!confirmListWrite(contractId, false)) return;
+    if (!(await confirmListWrite(contractId, false))) return;
 
     addToBlocklistBtn.disabled = true;
     addToBlocklistBtn.ariaBusy = true;
@@ -780,7 +735,7 @@ async function removeNonMembershipLeaf() {
     const [keyValue, ...others] = parseBlocklistKeys(blocklistPublicKeyInput.value);
     if (keyValue === undefined) throw new Error('User note public key is required');
     if (others.length > 0) throw new Error('Remove takes one note public key at a time');
-    if (!confirmListWrite(contractId, false)) return;
+    if (!(await confirmListWrite(contractId, false))) return;
 
     removeFromBlocklistBtn.disabled = true;
     removeFromBlocklistBtn.textContent = 'Processing...';
@@ -1233,8 +1188,8 @@ function renderPauseFiles() {
     });
     const remove = item.querySelector('.remove-pause-file-btn');
     remove.disabled = state.busy;
-    remove.addEventListener('click', () => {
-      if (unsaved(file) && !window.confirm('Remove this pause file? Its signatures haven\'t been saved, so they will be lost.')) return;
+    remove.addEventListener('click', async () => {
+      if (unsaved(file) && !(await confirmAction({ message: 'Remove this pause file? Its signatures haven\'t been saved, so they will be lost.', confirmLabel: 'Remove file', danger: true }))) return;
       state.pauseFiles = state.pauseFiles.filter((held) => held !== file);
       pauseAuthResultsEl.replaceChildren();
       renderPauseFiles();
@@ -1384,7 +1339,7 @@ async function submitPauseFiles() {
     const pools = [...new Set(sendable.map(({ authorization: { pool } }) => pool))];
     if (pools.length === 0) {
       setStatus('Nothing paused', 'error');
-    } else if (window.confirm(`Pause deposits into ${pools.map(shortAddress).join(', ')} now? No one can deposit there until the admin unpauses.`)) {
+    } else if (await confirmAction({ message: `Pause deposits into ${pools.map(shortAddress).join(', ')} now? No one can deposit there until the admin unpauses.`, confirmLabel: 'Pause deposits', danger: true })) {
       await sendPauseFiles(sendable);
     } else {
       setStatus('Nothing paused', 'info');
@@ -1432,7 +1387,7 @@ async function confirmCustody(newAdmin) {
     }
   }
   return problems.length === 0
-    || window.confirm(`The new admin is not a multisig account: ${problems.join('; ')}.\n\nPropose it anyway?`);
+    || await confirmAction({ message: `The new admin is not a multisig account: ${problems.join('; ')}. Propose it anyway?`, confirmLabel: 'Propose anyway' });
 }
 
 function showAddress(cell, address) {
@@ -1503,11 +1458,7 @@ const tabContents = document.querySelectorAll('.tab-content');
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     for (const t of tabBtns) t.ariaCurrent = t === btn ? 'page' : null;
-
-    tabContents.forEach(c => c.classList.add('hidden'));
-
-    const targetId = btn.getAttribute('data-target');
-    document.getElementById(targetId).classList.remove('hidden');
+    for (const c of tabContents) c.hidden = c.id !== btn.dataset.target;
   });
 });
 
@@ -1581,7 +1532,7 @@ if (sharedTx) {
 repointRecordsInput.addEventListener('change', () => {
   const [file] = repointRecordsInput.files;
   repointRecordsNameEl.textContent = file?.name ?? 'No file chosen';
-  clearRepointRecordsBtn.classList.toggle('hidden', !file);
+  clearRepointRecordsBtn.hidden = !file;
 });
 clearRepointRecordsBtn.addEventListener('click', () => {
   repointRecordsInput.value = '';

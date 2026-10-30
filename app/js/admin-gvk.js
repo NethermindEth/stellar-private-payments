@@ -427,13 +427,8 @@ function classifyTx(tx) {
 
 function setPanelStatus(message, kind = 'info') {
   if (!statusEl) return;
-  if (!message) {
-    statusEl.classList.add('hidden');
-    statusEl.textContent = '';
-    return;
-  }
+  statusEl.hidden = !message;
   statusEl.textContent = message;
-  statusEl.classList.remove('hidden');
   statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
 }
 
@@ -577,8 +572,8 @@ function renderResults() {
   filterAmountMinEl?.setCustomValidity(filters.errors[0]);
   filterAmountMaxEl?.setCustomValidity(filters.errors[1]);
   if (!filters.valid) {
-    resultsEl.classList.add('hidden');
-    emptyEl.classList.remove('hidden');
+    resultsEl.hidden = true;
+    emptyEl.hidden = false;
     emptyEl.textContent = 'Correct the amount filters to view results.';
     return;
   }
@@ -586,15 +581,15 @@ function renderResults() {
   const visibleRows = computeVisibleRows(filters);
 
   if (state.rows.length === 0) {
-    resultsEl.classList.add('hidden');
-    emptyEl.classList.remove('hidden');
+    resultsEl.hidden = true;
+    emptyEl.hidden = false;
     emptyEl.textContent = 'Select a pool, enter the authority key, then run Sync & Audit.';
     return;
   }
 
   if (visibleRows.length === 0) {
-    resultsEl.classList.add('hidden');
-    emptyEl.classList.remove('hidden');
+    resultsEl.hidden = true;
+    emptyEl.hidden = false;
     emptyEl.textContent = filtersActive
       ? 'No transactions match the current filters.'
       : 'Select a pool, enter the authority key, then run Sync & Audit.';
@@ -606,8 +601,8 @@ function renderResults() {
   // is transiently shorter, which makes the browser clamp/jump scroll position.
   const containerWidth = resultsEl.clientWidth;
 
-  emptyEl.classList.add('hidden');
-  resultsEl.classList.remove('hidden');
+  emptyEl.hidden = true;
+  resultsEl.hidden = false;
   clearAllHighlights();
   resultsEl.replaceChildren();
 

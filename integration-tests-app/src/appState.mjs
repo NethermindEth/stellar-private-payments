@@ -16,11 +16,12 @@ async function readWalletState(page) {
 }
 
 /**
- * The wizard modal stays in the DOM and is toggled with a `hidden` class, so
- * presence proves nothing — visibility is the signal.
+ * The wizard is a `<dialog>` that stays in the DOM while closed, so presence
+ * proves nothing — visibility is the signal. Throws once the page is gone, so a
+ * crash never reads as a closed wizard.
  */
 export async function isOnboardingWizardVisible(page) {
-  return page.locator(ONBOARDING_MODAL_SELECTOR).isVisible().catch(() => false);
+  return page.locator(ONBOARDING_MODAL_SELECTOR).isVisible();
 }
 
 // A missing-history check happens before `runOnboardingWizard()`. The app
@@ -34,7 +35,7 @@ export async function isBootnodeConsentVisible(page) {
 export async function readAppLifecycle(page) {
   const [walletState, onboardingVisible, bootnodeConsentVisible] = await Promise.all([
     readWalletState(page),
-    isOnboardingWizardVisible(page),
+    isOnboardingWizardVisible(page).catch(() => false),
     isBootnodeConsentVisible(page),
   ]);
   return { walletState, onboardingVisible, bootnodeConsentVisible };

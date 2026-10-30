@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { scrub } from '../src/redact.mjs';
 import { launch, unlockFreighter, connectApp } from '../src/runner.mjs';
 import { importAccount } from '../src/wallet.mjs';
+import { isOnboardingWizardVisible } from '../src/appState.mjs';
 import {
   FRIENDBOT_URL,
   NETWORK_PASSPHRASE,
@@ -134,10 +135,7 @@ async function verifyProfile(context) {
   const page = await context.newPage();
   await connectApp(page, { appUrl, context });
 
-  const wizardVisible = await page.evaluate(
-    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
-  );
-  if (wizardVisible) {
+  if (await isOnboardingWizardVisible(page)) {
     throw new Error('verify: onboarding wizard rendered for a seeded ephemeral account');
   }
 

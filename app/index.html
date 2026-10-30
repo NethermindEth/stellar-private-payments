@@ -69,7 +69,7 @@
                             Connect Freighter
                         </button>
                         <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="icon-btn gap-2 px-3 py-2">
-                            <span id="wallet-text" class="hidden font-mono text-sm text-slate-100"></span>
+                            <span id="wallet-text" class="font-mono text-sm text-slate-100" hidden></span>
                             <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -85,7 +85,7 @@
         </section>
 
         <main id="main-content" class="flex-1">
-            <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active" aria-hidden="false">
+            <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active">
                 <div class="space-y-6">
                     <section class="card">
                         <p class="eyebrow">Portfolio</p>
@@ -99,7 +99,7 @@
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="move-funds" data-testid="view-move-funds" data-state="inactive" aria-hidden="true">
+            <section class="view-panel" data-view-panel="move-funds" data-testid="view-move-funds" data-state="inactive" hidden>
                 <div class="grid gap-6">
                     <section class="card">
                         <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -125,12 +125,12 @@
                                     <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
                                     <div data-pool-controls-panels class="mt-3"></div>
                                 </section>
-                                <div data-signing-account="move" class="mt-5 hidden">
+                                <div data-signing-account="move" class="mt-5" hidden>
                                     <label for="signing-account-select" class="field-label block">Sign and pay with</label>
                                     <select id="signing-account-select" data-signing-select data-testid="signing-account-select" class="field mt-3 pr-10">
                                     </select>
-                                    <p data-signing-warning data-testid="signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
-                                    <div data-signing-other class="mt-3 hidden">
+                                    <p data-signing-warning data-testid="signing-account-warning" role="status" class="mt-3 text-xs text-amber-200" hidden></p>
+                                    <div data-signing-other class="mt-3" hidden>
                                         <div class="flex gap-2">
                                             <input id="signing-account-input" data-signing-input data-testid="signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="field min-w-0 flex-1 font-mono text-xs" autocomplete="off" spellcheck="false">
                                             <button data-signing-use data-testid="signing-account-use" type="button" class="btn-secondary px-4">Use</button>
@@ -155,7 +155,7 @@
                         </div>
 
                         <div class="mt-8 space-y-6">
-                            <section class="move-flow-panel" data-move-panel="deposit" data-testid="move-panel-deposit" data-state="active" aria-hidden="false">
+                            <section class="move-flow-panel" data-move-panel="deposit" data-testid="move-panel-deposit" data-state="active">
                                 <div class="panel bg-ink-900/70 p-6">
                                     <div class="flex items-start justify-between gap-4">
                                         <div>
@@ -167,12 +167,12 @@
                                     <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" class="field mt-3 font-mono" autocomplete="off" spellcheck="false">
                                     <button id="btn-deposit" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Deposit</span>
-                                        <span class="btn-loading hidden"></span>
+                                        <span class="btn-loading" hidden></span>
                                     </button>
                                 </div>
                             </section>
 
-                            <section class="move-flow-panel hidden" data-move-panel="transfer" data-testid="move-panel-transfer" data-state="inactive" aria-hidden="true">
+                            <section class="move-flow-panel" data-move-panel="transfer" data-testid="move-panel-transfer" data-state="inactive" hidden>
                                 <div class="panel bg-ink-900/70 p-6">
                                     <p class="field-label">Transfer</p>
                                     <h3 class="mt-2 text-xl font-semibold text-white">Send private funds by Stellar address</h3>
@@ -186,7 +186,7 @@
                                     <p id="transfer-lookup-status" class="mt-3 text-sm text-cyan-100"></p>
                                     <p id="transfer-lookup-warning" class="mt-2 text-sm text-amber-200"></p>
 
-                                    <div id="transfer-manual-fields" class="mt-6 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
+                                    <div id="transfer-manual-fields" class="mt-6 space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4" hidden>
                                         <div>
                                             <label for="transfer-note-key" class="field-label">Recipient Note Public Key</label>
                                             <input id="transfer-note-key" type="text" class="field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
@@ -204,12 +204,12 @@
 
                                     <button id="btn-transfer" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Transfer</span>
-                                        <span class="btn-loading hidden"></span>
+                                        <span class="btn-loading" hidden></span>
                                     </button>
                                 </div>
                             </section>
 
-                            <section class="move-flow-panel hidden" data-move-panel="withdraw" data-testid="move-panel-withdraw" data-state="inactive" aria-hidden="true">
+                            <section class="move-flow-panel" data-move-panel="withdraw" data-testid="move-panel-withdraw" data-state="inactive" hidden>
                                 <div class="panel bg-ink-900/70 p-6">
                                     <p class="field-label">Withdraw</p>
                                     <h3 class="mt-2 text-xl font-semibold text-white">Release funds back to a public Stellar address</h3>
@@ -217,7 +217,7 @@
                                         <div data-recipient-account="withdraw">
                                             <label for="withdraw-recipient-select" class="field-label">Recipient Address</label>
                                             <select id="withdraw-recipient-select" data-recipient-select data-testid="withdraw-recipient-select" class="field mt-3 pr-10"><option value="">Choose a recipient…</option></select>
-                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="field hidden mt-3 font-mono" autocomplete="off" spellcheck="false">
+                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="field mt-3 font-mono" autocomplete="off" spellcheck="false" hidden>
                                         </div>
                                         <div>
                                             <label for="withdraw-amount" class="field-label">Amount</label>
@@ -226,7 +226,7 @@
                                     </div>
                                     <button id="btn-withdraw" type="button" class="btn-primary mt-6 w-full py-3.5">
                                         <span class="btn-text">Withdraw</span>
-                                        <span class="btn-loading hidden"></span>
+                                        <span class="btn-loading" hidden></span>
                                     </button>
                                 </div>
                             </section>
@@ -235,7 +235,7 @@
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="advanced" data-testid="view-advanced" data-state="inactive" aria-hidden="true">
+            <section class="view-panel" data-view-panel="advanced" data-testid="view-advanced" data-state="inactive" hidden>
                 <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(380px,0.92fr)_minmax(0,1.08fr)]">
                     <section class="card">
                         <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -279,7 +279,7 @@
                                     <tbody id="advanced-notes-tbody" data-testid="advanced-notes-table" data-state="idle" data-refresh-sequence="0" data-note-count="0"></tbody>
                                 </table>
                             </div>
-                            <div id="advanced-notes-empty" class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-400">No notes available for the current filter.</div>
+                            <div id="advanced-notes-empty" class="border-t border-white/8 px-4 py-12 text-center text-sm text-slate-400" hidden>No notes available for the current filter.</div>
                         </div>
                     </section>
 
@@ -316,7 +316,7 @@
                                     <div data-recipient-account="advanced">
                                         <label for="advanced-public-recipient-select" class="field-label">Public recipient</label>
                                         <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="field mt-3 pr-10"><option value="">Choose a recipient…</option></select>
-                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="field hidden mt-3 font-mono" autocomplete="off" spellcheck="false">
+                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="field mt-3 font-mono" autocomplete="off" spellcheck="false" hidden>
                                     </div>
                                     <p class="text-2xs text-slate-400">Public funds withdrawn to the recipient.</p>
                                 </div>
@@ -328,8 +328,8 @@
                                 <label for="advanced-signing-account-select" class="field-label block">Sign and pay with</label>
                                 <select id="advanced-signing-account-select" data-signing-select data-testid="advanced-signing-account-select" class="field mt-3 pr-10">
                                 </select>
-                                    <p data-signing-warning data-testid="advanced-signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
-                                <div data-signing-other class="mt-3 hidden">
+                                    <p data-signing-warning data-testid="advanced-signing-account-warning" role="status" class="mt-3 text-xs text-amber-200" hidden></p>
+                                <div data-signing-other class="mt-3" hidden>
                                     <div class="flex gap-2">
                                         <input id="advanced-signing-account-input" data-signing-input data-testid="advanced-signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="field min-w-0 flex-1 font-mono text-xs" autocomplete="off" spellcheck="false">
                                         <button data-signing-use data-testid="advanced-signing-account-use" type="button" class="btn-secondary px-4">Use</button>
@@ -342,13 +342,13 @@
 
                         <button id="btn-advanced-transact" data-testid="advanced-transact-submit" type="button" class="btn-primary mt-6 w-full py-3.5">
                             <span class="btn-text">Execute Advanced Transaction</span>
-                            <span class="btn-loading hidden"></span>
+                            <span class="btn-loading" hidden></span>
                         </button>
                     </section>
                 </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="disclosure" data-testid="view-disclosure" data-state="inactive" aria-hidden="true">
+            <section class="view-panel" data-view-panel="disclosure" data-testid="view-disclosure" data-state="inactive" hidden>
                 <div class="space-y-6">
                     <section class="card">
                         <div class="flex flex-col gap-4">
@@ -395,11 +395,10 @@
         </footer>
     </div>
 
-    <div id="settings-overlay" class="fixed inset-0 z-40 hidden bg-ink-950/65 backdrop-blur-sm"></div>
-    <aside id="settings-drawer" class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-linear-to-b from-ink-900/98 to-ink-950 px-6 py-6 shadow-modal">
+    <dialog id="settings-drawer" aria-labelledby="settings-title" class="modal ml-auto max-w-xl border-l border-white/8 bg-linear-to-b from-ink-900/98 to-ink-950 p-6 shadow-modal backdrop:bg-ink-950/65">
         <div class="flex items-center justify-between gap-4">
             <div>
-                <p class="eyebrow">Profile & Settings</p>
+                <p id="settings-title" class="eyebrow">Profile & Settings</p>
             </div>
             <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                 <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -434,7 +433,7 @@
                                     <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
                                     <circle cx="12" cy="12" r="3"/>
                                 </svg>
-                                <svg class="settings-eye-off hidden h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <svg class="settings-eye-off h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" hidden>
                                     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
                                     <line x1="1" y1="1" x2="23" y2="23"/>
                                 </svg>
@@ -443,7 +442,7 @@
                         <dd id="settings-asp-secret" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                 </dl>
-                <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 hidden rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
+                <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4" hidden>
                     <p class="text-sm text-slate-300">Freighter's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
                     <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="btn-secondary mt-3 px-4 py-2">Make it the note owner</button>
                 </div>
@@ -544,14 +543,14 @@
                 </div>
             </section>
         </div>
-    </aside>
+    </dialog>
 
-    <div id="bootnode-consent-modal" class="fixed inset-0 z-50 hidden bg-ink-950/75 px-4 py-8 backdrop-blur-sm">
+    <dialog id="bootnode-consent-modal" aria-labelledby="bootnode-consent-title" class="modal px-4 py-8 backdrop:bg-ink-950/75">
         <div class="modal-panel mx-auto max-w-2xl">
             <div class="flex items-start justify-between gap-4">
                 <div>
                     <p class="eyebrow">Retention Bypass</p>
-                    <h2 class="section-title mt-2">Bootnode required to finish sync</h2>
+                    <h2 id="bootnode-consent-title" class="section-title mt-2">Bootnode required to finish sync</h2>
                 </div>
                 <button id="bootnode-consent-close" type="button" class="btn-secondary px-3 py-2">Close</button>
             </div>
@@ -573,20 +572,20 @@
                     <label for="bootnode-consent-url" class="field-label">Bootnode RPC URL</label>
                     <input id="bootnode-consent-url" type="text" placeholder="https://..." class="field mt-3" autocomplete="off" spellcheck="false">
                 </div>
-                <p id="bootnode-consent-error" class="hidden text-sm text-rose-200"></p>
+                <p id="bootnode-consent-error" class="text-sm text-rose-200" hidden></p>
             </div>
             <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
                 <button id="bootnode-consent-cancel" type="button" class="btn-secondary">Cancel</button>
                 <button id="bootnode-consent-accept" type="button" class="btn-primary">Use bootnode</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
-    <div id="onboarding-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-ink-950/80 px-4 py-8 backdrop-blur-sm">
+    <dialog id="onboarding-modal" aria-labelledby="onboarding-title" class="modal px-4 py-8 backdrop:bg-ink-950/80">
         <div class="modal-panel mx-auto max-w-4xl sm:p-8">
             <div class="flex items-start justify-between gap-4">
                 <div>
-                    <p class="eyebrow">Onboarding</p>
+                    <p id="onboarding-title" class="eyebrow">Onboarding</p>
                 </div>
                 <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="icon-btn h-10 w-10">
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -608,19 +607,19 @@
             <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <div class="card min-w-0">
                     <div id="onboarding-content" class="space-y-4 text-sm text-slate-300"></div>
-                    <p id="onboarding-error" class="mt-4 hidden text-sm text-rose-200"></p>
+                    <p id="onboarding-error" class="mt-4 text-sm text-rose-200" hidden></p>
                 </div>
                 <aside class="card min-w-0 border-cyan-300/12 bg-cyan-300/4">
                     <p class="eyebrow">Why This Exists</p>
                     <div id="onboarding-why" class="mt-3">
-                        <div data-why="disclaimer" class="hidden text-sm text-slate-300">Review the risks and terms before using this deployment. Disclaimer acceptance is required on every network.</div>
-                        <div data-why="storage" class="hidden space-y-3 text-sm text-slate-300">
+                        <div data-why="disclaimer" class="text-sm text-slate-300" hidden>Review the risks and terms before using this deployment. Disclaimer acceptance is required on every network.</div>
+                        <div data-why="storage" class="space-y-3 text-sm text-slate-300" hidden>
                             <p>The private payment material is stored locally in your browser.</p>
                             <p>Without granting permanent storage, the browser can delete your local data under storage pressure or across updates.</p>
                             <p>Most of the data (all critical one like keys, secrets and notes) can be restored if it is lost.</p>
                         </div>
-                        <div data-why="keys" class="hidden text-sm text-slate-300">The ASP provider needs your note public key and ASP secret to include you in the allowed list.</div>
-                        <div data-why="retention" class="hidden space-y-3 text-sm text-slate-300">
+                        <div data-why="keys" class="text-sm text-slate-300" hidden>The ASP provider needs your note public key and ASP secret to include you in the allowed list.</div>
+                        <div data-why="retention" class="space-y-3 text-sm text-slate-300" hidden>
                             <p>If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
                             <p>You should understand the risks of using a bootnode (similar to the ones when using a 3d-party-hosted RPC:</p>
                             <ul class="list-disc space-y-2 pl-5">
@@ -630,15 +629,15 @@
                                 <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
                             </ul>
                         </div>
-                        <div data-why="explorer" class="hidden text-sm text-slate-300">The UI uses a single explorer base URL across transaction feedback and address shortcuts.</div>
-                        <div data-why="registration" class="hidden text-sm text-slate-300">Registration lets others transfer to your Stellar address without exchanging note and encryption public keys out of band.</div>
+                        <div data-why="explorer" class="text-sm text-slate-300" hidden>The UI uses a single explorer base URL across transaction feedback and address shortcuts.</div>
+                        <div data-why="registration" class="text-sm text-slate-300" hidden>Registration lets others transfer to your Stellar address without exchanging note and encryption public keys out of band.</div>
                     </div>
                 </aside>
             </div>
 
             <div id="onboarding-actions" class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end"></div>
         </div>
-    </div>
+    </dialog>
 
     <template id="tpl-onboarding-keys">
         <div class="panel bg-ink-950/75">
@@ -758,7 +757,7 @@
             </div>
             <p data-testid="advanced-output-lookup-status" class="lookup-status mt-3 text-sm text-cyan-100"></p>
             <p class="lookup-warning mt-2 text-sm text-amber-200"></p>
-            <div class="manual-fields mt-4 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
+            <div class="manual-fields mt-4 space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4" hidden>
                 <div>
                     <label class="field-label">Note Public Key</label>
                     <input type="text" class="output-note-key field mt-3 font-mono text-xs" autocomplete="off" spellcheck="false">
@@ -775,7 +774,7 @@
         </div>
     </template>
 
-    <div id="pool-history-modal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-ink-950/80 px-4 backdrop-blur-sm">
+    <dialog id="pool-history-modal" aria-labelledby="pool-history-title" class="modal open:grid place-items-center px-4 backdrop:bg-ink-950/80">
         <div class="modal-panel mx-auto w-full max-w-md">
             <div class="flex items-start justify-between gap-4">
                 <div>
@@ -791,21 +790,11 @@
             </div>
             <p class="mt-1 text-xs text-slate-400">Last 10 operations performed in this app.</p>
             <div id="pool-history-list" class="mt-5 max-h-[60vh] space-y-2 overflow-y-auto"></div>
-            <p id="pool-history-empty" class="mt-5 hidden text-sm text-slate-400">No operations recorded yet for this token.</p>
+            <p id="pool-history-empty" class="mt-5 text-sm text-slate-400" hidden>No operations recorded yet for this token.</p>
         </div>
-    </div>
+    </dialog>
 
     <div id="toast-container" class="pointer-events-none fixed inset-x-4 bottom-4 z-60 flex flex-col gap-3 sm:left-auto sm:w-full sm:max-w-sm"></div>
-
-    <template id="tpl-toast">
-        <div data-testid="toast" class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
-            <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300"></div>
-            <div class="min-w-0 flex-1">
-                <p class="toast-message break-words" data-testid="toast-message"></p>
-                <a class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4" data-testid="toast-link" target="_blank" rel="noreferrer">Open explorer</a>
-            </div>
-        </div>
-    </template>
 
     <script type="module" src="./js/ui.js"></script>
 </body>

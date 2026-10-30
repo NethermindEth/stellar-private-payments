@@ -5,6 +5,7 @@ import { friendlyErrorMessage } from '../facade-errors.js';
 import { getRegistrationErrorMessage } from './errors.js';
 import { Utils, Toast } from './core.js';
 import { el, elc } from './dom.js';
+import { openModal } from './toast.js';
 import {
     hasNotificationSupport,
     getNotificationsPrompted,
@@ -54,24 +55,19 @@ function setPersistPromptedFlag() {
 function setError(message) {
     const box = document.getElementById('onboarding-error');
     if (!box) return;
-    if (!message) {
-        box.textContent = '';
-        box.classList.add('hidden');
-        return;
-    }
+    box.hidden = !message;
     box.textContent = friendlyErrorMessage(message);
-    box.classList.remove('hidden');
 }
 
 function showModal() {
     const modal = document.getElementById('onboarding-modal');
     if (!modal) throw new Error('Onboarding modal is missing');
     setError('');
-    modal.classList.remove('hidden');
+    openModal(modal);
 }
 
 function hideModal() {
-    document.getElementById('onboarding-modal')?.classList.add('hidden');
+    document.getElementById('onboarding-modal').close();
 }
 
 function renderContent(node) {
@@ -83,7 +79,7 @@ function renderContent(node) {
 
 function renderWhy(stepId) {
     document.querySelectorAll('#onboarding-why [data-why]').forEach(panel => {
-        panel.classList.toggle('hidden', panel.dataset.why !== stepId);
+        panel.hidden = panel.dataset.why !== stepId;
     });
 }
 
@@ -273,6 +269,7 @@ export async function runOnboardingWizard({
     };
     const closeBtn = document.getElementById('onboarding-close-btn');
     closeBtn.onclick = cancelOnboarding;
+    document.getElementById('onboarding-modal').oncancel = cancelOnboarding;
 
     const state = {
         keys: keysExist
