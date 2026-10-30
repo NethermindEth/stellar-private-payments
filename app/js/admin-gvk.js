@@ -8,13 +8,14 @@ import { format } from 'd3-format';
 import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import { symbol, symbolCircle } from 'd3-shape';
-import { rpcServer } from './admin-transactions.js';
+import { rpcServer, shortAddress } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
-import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
+import { formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
+import { el } from './ui/dom.js';
 
 const BATCH_SIZE = 20;
 
@@ -627,7 +628,7 @@ function renderResults() {
   emptyEl.classList.add('hidden');
   resultsEl.classList.remove('hidden');
   clearAllHighlights();
-  resultsEl.innerHTML = '';
+  resultsEl.replaceChildren();
 
   if (state.view === 'note') {
     renderNoteTable(visibleRows, filters);
@@ -2179,7 +2180,7 @@ function downloadCsv(filename, rows) {
   const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = el('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
@@ -2270,27 +2271,19 @@ async function populatePools() {
   const config = client().contractConfig();
   state.pools = (config?.pools ?? []).filter((pool) => pool?.gvkMode && pool.gvkMode !== 'off');
 
-  poolSelectEl.innerHTML = '';
   if (state.pools.length === 0) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'No GVK-enabled pools in deployment';
-    poolSelectEl.appendChild(option);
+    poolSelectEl.replaceChildren(new Option('No GVK-enabled pools in deployment', ''));
     poolSelectEl.disabled = true;
     auditBtnEl.disabled = true;
     return;
   }
 
-  for (const pool of state.pools) {
-    const option = document.createElement('option');
-    option.value = pool.poolContractId;
+  poolSelectEl.replaceChildren(...state.pools.map((pool) => {
     const assetLabel = pool.asset?.kind === 'native'
       ? 'XLM'
       : pool.asset?.symbol || pool.asset?.code || 'asset';
-    const shortId = `${pool.poolContractId.slice(0, 6)}...${pool.poolContractId.slice(-4)}`;
-    option.textContent = `${assetLabel} · ${pool.gvkMode} · ${shortId}`;
-    poolSelectEl.appendChild(option);
-  }
+    return new Option(`${assetLabel} · ${pool.gvkMode} · ${shortAddress(pool.poolContractId)}`, pool.poolContractId);
+  }));
   poolSelectEl.disabled = false;
   auditBtnEl.disabled = false;
 }

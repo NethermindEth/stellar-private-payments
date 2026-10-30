@@ -9,6 +9,7 @@ import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
+import { el } from './dom.js';
 import { getRegistrationErrorMessage } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { loadPrivateSigners } from '../private-signers.js';
@@ -180,13 +181,7 @@ async function loadRuntimeState() {
     const labels = pools.map(pool => poolSelectLabel(pool, pools));
     const poolSelects = document.querySelectorAll('[data-pool-select]');
     poolSelects.forEach(select => {
-        select.replaceChildren();
-        pools.forEach((pool, index) => {
-            const option = document.createElement('option');
-            option.value = pool.poolContractId;
-            option.textContent = labels[index];
-            select.appendChild(option);
-        });
+        select.replaceChildren(...pools.map((pool, index) => new Option(labels[index], pool.poolContractId)));
         select.value = App.state.selectedPoolId || '';
     });
 
@@ -349,7 +344,7 @@ export const Shell = {
                 const logs = await dumpTelemetryLogs();
                 const blob = new Blob([logs], { type: 'text/plain;charset=utf-8' });
                 const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
+                const a = el('a');
                 a.href = url;
                 a.download = 'spp-diagnostics.log';
                 document.body.appendChild(a);

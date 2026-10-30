@@ -2,22 +2,12 @@ import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { el } from './dom.js';
+import { shortHex } from './notes-view.js';
 
 function poolLabelById(poolContractId) {
     const pool = App.state.pools.find(item => item.poolContractId === poolContractId);
     return Utils.poolLabel(pool);
-}
-
-function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-}
-
-function shortCounterparty(cp) {
-    if (!cp) return '';
-    return cp.length > 18 ? `${cp.slice(0, 8)}…${cp.slice(-6)}` : cp;
 }
 
 export const Dashboard = {
@@ -148,7 +138,7 @@ export const Dashboard = {
 
             const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-[11px] text-slate-500');
             if (op.counterparty) {
-                const cp = el('button', 'break-all text-left text-slate-400 transition hover:text-cyan-100', `→ ${shortCounterparty(op.counterparty)}`);
+                const cp = el('button', 'break-all text-left text-slate-400 transition hover:text-cyan-100', `→ ${shortHex(op.counterparty, 8, 6)}`);
                 cp.type = 'button';
                 cp.title = `Copy ${op.counterparty}`;
                 cp.addEventListener('click', () => Utils.copyToClipboard(op.counterparty));
