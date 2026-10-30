@@ -2,9 +2,12 @@
 //! balances afterward, plus the ways a transfer can be rejected.
 
 use anyhow::{Context, Result};
-use stellar_private_payments::types::{NoteAmount, TransferRecipient};
+use stellar_private_payments::{
+    Error,
+    types::{NoteAmount, TransferRecipient},
+};
 
-use super::support::{assert_contract_error, deploy_default, session};
+use super::support::{assert_contract_error, deploy_default, note_states, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
@@ -68,6 +71,55 @@ async fn transfer_via_keys() -> Result<()> {
 
     let recipient_balance = recipient.pool()?.balance().await?;
     assert_eq!(recipient_balance, transfer_amount);
+
+    Ok(())
+}
+
+/// Declining the wallet prompt leaves the sender's note unspent and the
+/// recipient without one, so the same transfer retried right after lands
+/// (#428).
+#[tokio::test]
+async fn transfer_retry_after_wallet_rejection() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    let (note_public_key, encryption_public_key) = recipient.account.privacy_keys().await?;
+    let pool = sender.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
+
+    pool.deposit(deposit_amount).await?;
+    let notes = note_states(&pool).await?;
+
+    sender.reject_next_transaction();
+    let rejected = pool
+        .transfer(
+            TransferRecipient::keys(note_public_key.clone(), encryption_public_key.clone()),
+            transfer_amount,
+        )
+        .await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "the transfer must fail with the wallet's rejection: {rejected:?}"
+    );
+    assert_eq!(note_states(&pool).await?, notes);
+    assert_eq!(pool.balance().await?, deposit_amount);
+    assert!(recipient.pool()?.notes().await?.is_empty());
+
+    pool.transfer(
+        TransferRecipient::keys(note_public_key, encryption_public_key),
+        transfer_amount,
+    )
+    .await?;
+
+    assert_eq!(
+        pool.balance().await?,
+        deposit_amount
+            .checked_sub(transfer_amount)
+            .context("transfer amount fits within deposit")?
+    );
+    assert_eq!(recipient.pool()?.balance().await?, transfer_amount);
 
     Ok(())
 }

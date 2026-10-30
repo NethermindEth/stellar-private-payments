@@ -57,13 +57,16 @@ async fn deposit_retry_after_wallet_rejection() -> Result<()> {
 
     pool.deposit(deposit_amount).await?;
 
+    assert_eq!(pool.spendable_notes().await?.len(), 1);
     assert_eq!(pool.balance().await?, deposit_amount);
+    assert!(session.account.balance(&AssetDescriptor::Native).await? < funded_balance);
 
     Ok(())
 }
 
 /// The pool refuses the deposit with `WrongExtAmount` (code 6), where
-/// `is_err()` also passed on a failure inside the SDK.
+/// `is_err()` also passed on a failure inside the SDK. The refusal comes from
+/// simulation, before the wallet is asked to sign anything.
 #[tokio::test]
 async fn deposit_exceeds_max_deposit() -> Result<()> {
     let session =
@@ -75,6 +78,11 @@ async fn deposit_exceeds_max_deposit() -> Result<()> {
         .await
         .expect_err("a deposit above the pool's max_deposit cap must be rejected");
     assert_contract_error(err, 6);
+    assert_eq!(
+        session.transaction_prompts(),
+        0,
+        "a deposit refused in simulation must never reach the wallet"
+    );
 
     Ok(())
 }
