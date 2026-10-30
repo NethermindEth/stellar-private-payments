@@ -17,7 +17,7 @@ const WIZARD_BUTTON_PRIORITY = [
   // profile should already see it satisfied.
   'Request persistent storage',
   'Use default', // explorer step: keep the default explorer base URL
-  // Retention step: "Continue" (ghost) resolves the step WITHOUT saving a
+  // Retention step: "Continue" resolves the step WITHOUT saving a
   // bootnode_config setting, so the wizard's `!bootnodeSetting` gate makes
   // it reappear every session forever. "Save retention setup" is the only
   // choice that actually persists.

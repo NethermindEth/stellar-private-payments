@@ -33,19 +33,15 @@
     </a>
 
     <!-- Main Page Ambient Background -->
-    <div class="pointer-events-none fixed inset-0 overflow-hidden">
-        <div class="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(circle_at_top,rgba(88,166,255,0.28),transparent_58%)]"></div>
-        <div class="absolute -left-24 top-44 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl"></div>
-        <div class="absolute right-0 top-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"></div>
-    </div>
+    <div class="ambient" aria-hidden="true"></div>
 
     <div class="relative mx-auto flex min-h-screen max-w-[1200px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
 
         <!-- Header -->
-        <header class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+        <header class="card px-5 py-4 shadow-header">
             <div class="flex flex-col gap-4">
                 <div class="flex items-center gap-4">
-                    <a href="index.html" title="Go to Home" class="cursor-pointer text-2xl font-semibold tracking-tight text-white transition hover:opacity-80">
+                    <a href="index.html" title="Go to Home" class="section-title cursor-pointer transition hover:opacity-80">
                         Stellar Private Payments <span class="text-cyan-300 font-normal tracking-normal ml-1">Admin</span>
                     </a>
                 </div>
@@ -53,23 +49,23 @@
                 <div class="flex flex-col gap-3 md:flex-row md:items-center">
                     <!-- Navigation Tabs -->
                     <nav class="flex flex-wrap gap-2 mr-2" aria-label="Primary views">
-                        <button type="button" data-target="overview" class="tab-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition">Overview</button>
-                        <button type="button" data-target="allowlist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Allowlist</button>
-                        <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
-                        <button type="button" data-target="global-view" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Global View</button>
-                        <button type="button" data-target="pools" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Pools</button>
-                        <button type="button" data-target="admins" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Admins</button>
+                        <button type="button" data-target="overview" aria-current="page" class="tab-btn tab">Overview</button>
+                        <button type="button" data-target="allowlist" class="tab-btn tab">Allowlist</button>
+                        <button type="button" data-target="blocklist" class="tab-btn tab">Blocklist</button>
+                        <button type="button" data-target="global-view" class="tab-btn tab">Global View</button>
+                        <button type="button" data-target="pools" class="tab-btn tab">Pools</button>
+                        <button type="button" data-target="admins" class="tab-btn tab">Admins</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
                         <!-- Network Chip -->
-                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
-                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500 animate-pulse"></span>
+                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/3 px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
+                            <span id="sync-dot" class="sync-dot"></span>
                             <span id="networkChip">Disconnected</span>
                         </div>
-                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">Unlock</button>
+                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="btn-secondary px-4 py-2">Unlock</button>
                         <!-- Connect Wallet -->
-                        <button id="connectBtn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50">
+                        <button id="connectBtn" type="button" class="btn-primary px-4 py-2">
                             <span id="walletChip">Connect Freighter</span>
                         </button>
                     </div>
@@ -78,18 +74,18 @@
         </header>
 
         <!-- Status Banner -->
-        <div id="status" class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-sm font-medium text-slate-300">Initializing...</div>
+        <div id="status" class="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-center text-sm font-medium text-slate-300 transition-colors data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-300 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-300">Initializing...</div>
 
         <main id="main-content" class="flex-1 flex flex-col gap-4 sm:gap-6">
 
             <!-- 1. Overview Tab -->
-            <section id="overview" class="tab-content rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="state-heading">
+            <section id="overview" class="tab-content card space-y-6" aria-labelledby="state-heading">
                 <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contracts and State</p>
-                        <h2 id="state-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">System Overview</h2>
+                        <p class="eyebrow">Contracts and State</p>
+                        <h2 id="state-heading" class="section-title mt-2">System Overview</h2>
                     </div>
-                    <button class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" id="refreshBtn" type="button">
+                    <button class="btn-secondary px-4 py-2" id="refreshBtn" type="button">
                         Refresh State
                     </button>
                 </div>
@@ -99,36 +95,36 @@
                     <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                         <div>
                             <div class="flex items-center justify-between gap-2">
-                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="membershipContract">ASP Membership Contract ID</label>
-                                <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                                <label class="field-label" for="membershipContract">ASP Membership Contract ID</label>
+                                <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-3xs font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
-                            <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                            <input class="field mt-2 font-mono" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
                             <div class="flex items-center justify-between gap-2">
-                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
-                                <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                                <label class="field-label" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+                                <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-3xs font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
                             </div>
-                            <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                            <input class="field mt-2 font-mono" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                     </div>
 
                     <!-- State Details -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Root</div>
+                            <div class="field-label text-3xs">Membership Root</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="membershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Levels</div>
+                            <div class="field-label text-3xs">Membership Levels</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipLevels" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Next Index</div>
+                            <div class="field-label text-3xs">Membership Next Index</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipNextIndex" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Non-Membership Root</div>
+                            <div class="field-label text-3xs">Non-Membership Root</div>
                             <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="nonMembershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                     </div>
@@ -136,45 +132,45 @@
             </section>
 
             <!-- 2. Allowlist Tab -->
-            <section id="allowlist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="membership-heading">
+            <section id="allowlist" class="tab-content hidden card space-y-6" aria-labelledby="membership-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Membership</p>
-                    <h2 id="membership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Allowlist Management</h2>
+                    <p class="eyebrow">Membership</p>
+                    <h2 id="membership-heading" class="section-title mt-2">Allowlist Management</h2>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
                     <div class="space-y-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistPublicKey">User Note Public Key</label>
-                            <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="allowlistPublicKey" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                            <label class="field-label" for="allowlistPublicKey">User Note Public Key</label>
+                            <input class="field mt-3 font-mono" id="allowlistPublicKey" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistAspSecret">ASP Secret</label>
-                            <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="allowlistAspSecret" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                            <label class="field-label" for="allowlistAspSecret">ASP Secret</label>
+                            <input class="field mt-3 font-mono" id="allowlistAspSecret" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
                         </div>
                     </div>
-                    <button class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed" id="addToAllowlistBtn" type="button" disabled title="Please connect your wallet first">
+                    <button class="btn-primary mt-6 w-full py-3.5" id="addToAllowlistBtn" type="button" disabled title="Please connect your wallet first">
                         Add to Allowlist
                     </button>
                 </div>
             </section>
 
             <!-- 3. Blocklist Tab -->
-            <section id="blocklist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="nonmembership-heading">
+            <section id="blocklist" class="tab-content hidden card space-y-6" aria-labelledby="nonmembership-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Non-Membership</p>
-                    <h2 id="nonmembership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Blocklist Management</h2>
+                    <p class="eyebrow">Non-Membership</p>
+                    <h2 id="nonmembership-heading" class="section-title mt-2">Blocklist Management</h2>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
-                    <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="blocklistPublicKey">User Note Public Keys, one per line</label>
-                    <textarea class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" id="blocklistPublicKey" rows="4" placeholder="0x..." autocomplete="off" spellcheck="false"></textarea>
+                    <label class="field-label" for="blocklistPublicKey">User Note Public Keys, one per line</label>
+                    <textarea class="field mt-3 font-mono" id="blocklistPublicKey" rows="4" placeholder="0x..." autocomplete="off" spellcheck="false"></textarea>
 
                     <div class="mt-6 flex flex-col sm:flex-row gap-3">
-                        <button class="flex-1 inline-flex items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed" id="addToBlocklistBtn" type="button" disabled title="Please connect your wallet first">
+                        <button class="btn-primary flex-1" id="addToBlocklistBtn" type="button" disabled title="Please connect your wallet first">
                             Add to Blocklist
                         </button>
-                        <button class="flex-1 inline-flex items-center justify-center rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed" id="removeFromBlocklistBtn" type="button" disabled title="Please connect your wallet first">
+                        <button class="btn-danger flex-1" id="removeFromBlocklistBtn" type="button" disabled title="Please connect your wallet first">
                             Remove from Blocklist
                         </button>
                     </div>
@@ -182,18 +178,18 @@
             </section>
 
             <!-- 4. Global View Tab -->
-            <section id="global-view" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="global-view-heading">
+            <section id="global-view" class="tab-content hidden card space-y-6" aria-labelledby="global-view-heading">
                 <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Pool Audit</p>
-                        <h2 id="global-view-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Global View</h2>
+                        <p class="eyebrow">Pool Audit</p>
+                        <h2 id="global-view-heading" class="section-title mt-2">Global View</h2>
                         <p class="mt-2 text-sm text-slate-400">Decrypt and verify pool transacts with the admin authority key. No wallet required.</p>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        <button type="button" id="gvkAuditBtn" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <button type="button" id="gvkAuditBtn" class="btn-primary px-4 py-2">
                             Sync &amp; Audit
                         </button>
-                        <button type="button" id="gvkLoadMoreBtn" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <button type="button" id="gvkLoadMoreBtn" class="btn-secondary px-4 py-2 enabled:border-cyan-300/50 enabled:bg-cyan-400/10 enabled:text-cyan-100 aria-busy:border-cyan-300/50 aria-busy:bg-cyan-400/10 aria-busy:text-cyan-100" disabled>
                             Load more
                         </button>
                     </div>
@@ -201,81 +197,81 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                     <div>
-                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPoolSelect">Pool</label>
-                        <select id="gvkPoolSelect" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40">
+                        <label class="field-label" for="gvkPoolSelect">Pool</label>
+                        <select id="gvkPoolSelect" class="field mt-2 font-mono">
                             <option value="">Loading pools...</option>
                         </select>
                     </div>
                     <div>
-                        <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPrivateKey">Authority private key (d)</label>
-                        <input id="gvkPrivateKey" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
-                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-500">Loaded from local DB when available; not saved from this page.</p>
+                        <label class="field-label" for="gvkPrivateKey">Authority private key (d)</label>
+                        <input id="gvkPrivateKey" class="field mt-2 font-mono" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-400">Loaded from local DB when available; not saved from this page.</p>
                     </div>
                 </div>
 
                 <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div class="inline-flex items-center gap-1 rounded-full border border-white/10 bg-ink-950/40 p-1" role="tablist" aria-label="Result view">
-                        <button type="button" id="gvkViewTxBtn" class="rounded-full bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-100 transition" aria-pressed="true">
+                    <div class="flex flex-wrap gap-2" role="tablist" aria-label="Result view">
+                        <button type="button" id="gvkViewTxBtn" class="tab" aria-pressed="true">
                             Transactions
                         </button>
-                        <button type="button" id="gvkViewNoteBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
+                        <button type="button" id="gvkViewNoteBtn" class="tab" aria-pressed="false">
                             Notes
                         </button>
-                        <button type="button" id="gvkViewGraphBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
+                        <button type="button" id="gvkViewGraphBtn" class="tab" aria-pressed="false">
                             Note graph
                         </button>
-                        <button type="button" id="gvkViewPkGraphBtn" class="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200" aria-pressed="false">
+                        <button type="button" id="gvkViewPkGraphBtn" class="tab" aria-pressed="false">
                             Account graph
                         </button>
                     </div>
-                    <button type="button" id="gvkExportBtn" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <button type="button" id="gvkExportBtn" class="btn-secondary px-4 py-2" disabled>
                         Export CSV
                     </button>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-950/40 p-4">
                     <div class="flex items-center justify-between">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Filters</p>
+                        <p class="field-label">Filters</p>
                         <button type="button" id="gvkFiltersClearBtn" class="text-xs font-medium text-slate-400 transition hover:text-cyan-200">
                             Clear filters
                         </button>
                     </div>
                     <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterAmountMin">Note amount (token units)</label>
+                            <label class="field-label" for="gvkFilterAmountMin">Note amount (token units)</label>
                             <div class="mt-2 flex items-center gap-2">
-                                <input id="gvkFilterAmountMin" type="text" inputmode="decimal" placeholder="min" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterAmountMin" type="text" inputmode="decimal" placeholder="min" class="field px-3 py-2 font-mono" />
                                 <span class="text-slate-600">–</span>
-                                <input id="gvkFilterAmountMax" type="text" inputmode="decimal" placeholder="max" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterAmountMax" type="text" inputmode="decimal" placeholder="max" class="field px-3 py-2 font-mono" />
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
-                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                            <label class="field-label" for="gvkFilterPk">Note owner (PK)</label>
+                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="field mt-2 px-3 py-2 font-mono" />
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterLedgerFrom">Ledger range</label>
+                            <label class="field-label" for="gvkFilterLedgerFrom">Ledger range</label>
                             <div class="mt-2 flex items-center gap-2">
-                                <input id="gvkFilterLedgerFrom" type="number" min="0" placeholder="from" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterLedgerFrom" type="number" min="0" placeholder="from" class="field px-3 py-2 font-mono" />
                                 <span class="text-slate-600">–</span>
-                                <input id="gvkFilterLedgerTo" type="number" min="0" placeholder="to" class="w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterLedgerTo" type="number" min="0" placeholder="to" class="field px-3 py-2 font-mono" />
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">
-                            <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterTimeFrom">Time range (UTC)</label>
+                            <label class="field-label" for="gvkFilterTimeFrom">Time range (UTC)</label>
                             <div class="mt-2 flex flex-wrap items-center gap-2">
-                                <input id="gvkFilterTimeFrom" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterTimeFrom" type="datetime-local" step="1" class="field max-md:min-w-full flex-1 px-3 py-2 font-mono" />
                                 <span class="text-slate-600 max-md:hidden">–</span>
-                                <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="w-full max-md:min-w-full flex-1 rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" />
+                                <input id="gvkFilterTimeTo" type="datetime-local" step="1" class="field max-md:min-w-full flex-1 px-3 py-2 font-mono" />
                             </div>
-                            <p id="gvkFilterTimeHint" class="mt-1 text-[11px] text-slate-500">Approximated from ledger close times.</p>
+                            <p id="gvkFilterTimeHint" class="mt-1 text-2xs text-slate-400">Approximated from ledger close times.</p>
                         </div>
                     </div>
                 </div>
 
-                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300"></div>
+                <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200"></div>
 
-                <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-500">
+                <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-400">
                     Select a pool, enter the authority key, then run Sync &amp; Audit.
                 </div>
 
@@ -283,17 +279,17 @@
             </section>
 
             <!-- 5. Pools Tab -->
-            <section id="pools" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="pools-heading">
+            <section id="pools" class="tab-content hidden card space-y-6" aria-labelledby="pools-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Deposits</p>
-                    <h2 id="pools-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Pools</h2>
+                    <p class="eyebrow">Deposits</p>
+                    <h2 id="pools-heading" class="section-title mt-2">Pools</h2>
                     <p class="mt-2 text-sm text-slate-400">A paused pool refuses deposits. Transfers and withdrawals still work.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="table-head">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Pool</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Lists</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Deposits</th>
@@ -312,27 +308,27 @@
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointPool">Pool</label>
-                            <select id="repointPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40"></select>
+                            <label class="field-label" for="repointPool">Pool</label>
+                            <select id="repointPool" class="field mt-2 font-mono"></select>
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointKind">List</label>
-                            <select id="repointKind" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40">
+                            <label class="field-label" for="repointKind">List</label>
+                            <select id="repointKind" class="field mt-2">
                                 <option value="asp-membership">Allowlist</option>
                                 <option value="asp-non-membership">Blocklist</option>
                             </select>
                         </div>
                         <div class="md:col-span-2">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="repointTree">New contract address</label>
-                            <input id="repointTree" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                            <label class="field-label" for="repointTree">New contract address</label>
+                            <input id="repointTree" class="field mt-2 font-mono" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <details class="md:col-span-2">
-                            <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.22em] text-slate-400 transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
+                            <summary class="field-label cursor-pointer transition hover:text-cyan-100">Compare with a file of expected entries (optional)</summary>
                             <p class="mt-2 text-xs text-slate-400">Check confirms the new contract holds exactly these. One per line: allowlist entries as 0x hex, or blocklist keys as the Blocklist tab takes them.</p>
                             <label class="sr-only" for="repointRecords">File of expected entries</label>
                             <div class="mt-2 flex items-center gap-3">
                                 <input id="repointRecords" class="peer sr-only" type="file" />
-                                <label for="repointRecords" class="shrink-0 cursor-pointer rounded-full border border-white/10 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60">Choose file</label>
+                                <label for="repointRecords" class="btn-secondary shrink-0 cursor-pointer px-4 py-2 text-xs peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60">Choose file</label>
                                 <span id="repointRecordsName" class="min-w-0 truncate text-xs text-slate-400">No file chosen</span>
                                 <button id="clearRepointRecordsBtn" type="button" class="hidden shrink-0 text-xs font-medium text-slate-400 underline underline-offset-4 transition hover:text-cyan-100">Clear</button>
                             </div>
@@ -340,10 +336,10 @@
                     </div>
                     <ul id="repointChecks" class="space-y-1 font-mono text-xs [overflow-wrap:anywhere]"></ul>
                     <div class="flex flex-col sm:flex-row gap-3">
-                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="checkRepointBtn" type="button" disabled title="Please connect your wallet first">
+                        <button class="btn-secondary flex-1" id="checkRepointBtn" type="button" disabled title="Please connect your wallet first">
                             Check
                         </button>
-                        <button class="flex-1 rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:saturate-0" id="buildRepointBtn" type="button" disabled>
+                        <button class="btn-primary flex-1" id="buildRepointBtn" type="button" disabled>
                             Build
                         </button>
                     </div>
@@ -356,22 +352,22 @@
                     </div>
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                         <div class="flex-1">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="pauseAuthPool">Pool</label>
-                            <select id="pauseAuthPool" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 transition focus:border-cyan-300/40"></select>
+                            <label class="field-label" for="pauseAuthPool">Pool</label>
+                            <select id="pauseAuthPool" class="field mt-2 font-mono"></select>
                         </div>
-                        <button class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="buildPauseAuthBtn" type="button" disabled>
+                        <button class="btn-secondary" id="buildPauseAuthBtn" type="button" disabled>
                             New pause file
                         </button>
                     </div>
                     <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                         <input id="pauseAuthFiles" class="peer sr-only" type="file" accept=".json,application/json" multiple aria-describedby="pauseAuthFilesHelp" disabled />
-                        <label for="pauseAuthFiles" class="shrink-0 cursor-pointer rounded-2xl text-center border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">Open pause files</label>
+                        <label for="pauseAuthFiles" class="btn-secondary shrink-0 cursor-pointer peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-300/60 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">Open pause files</label>
                         <span id="pauseAuthFilesHelp" class="text-xs text-slate-400">To sign a file you were sent, or to pause with one.</span>
                     </div>
                     <ul id="pauseAuthFileList" class="space-y-3 empty:hidden"></ul>
                     <ul id="pauseAuthResults" class="space-y-1 font-mono text-xs text-slate-300 empty:hidden [overflow-wrap:anywhere]"></ul>
                     <div>
-                        <button class="w-full rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed" id="submitPauseAuthBtn" type="button" disabled>
+                        <button class="btn-danger w-full" id="submitPauseAuthBtn" type="button" disabled>
                             Pause deposits now
                         </button>
                         <p id="pauseAuthHint" class="mt-2 text-center text-xs text-slate-400 empty:hidden"></p>
@@ -380,17 +376,17 @@
             </section>
 
             <!-- 6. Admins Tab -->
-            <section id="admins" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admins-heading">
+            <section id="admins" class="tab-content hidden card space-y-6" aria-labelledby="admins-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Admin Transfer</p>
-                    <h2 id="admins-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Admins</h2>
+                    <p class="eyebrow">Admin Transfer</p>
+                    <h2 id="admins-heading" class="section-title mt-2">Admins</h2>
                     <p class="mt-2 text-sm text-slate-400">The admin proposes a new admin and keeps every power until the new admin accepts. Until then, the admin can cancel the proposal.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 overflow-x-auto">
                     <table class="w-full min-w-[720px] text-left text-sm">
                         <thead>
-                            <tr class="text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr class="table-head">
                                 <th class="pb-3 pr-4 font-medium" scope="col">Kind</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Contract</th>
                                 <th class="pb-3 pr-4 font-medium" scope="col">Admin</th>
@@ -405,10 +401,10 @@
             </section>
 
             <!-- Admin Transaction Card -->
-            <section id="admin-transaction" class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="admin-transaction-heading">
+            <section id="admin-transaction" class="card space-y-6" aria-labelledby="admin-transaction-heading">
                 <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Admin Account</p>
-                    <h2 id="admin-transaction-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Admin Transaction</h2>
+                    <p class="eyebrow">Admin Account</p>
+                    <h2 id="admin-transaction-heading" class="section-title mt-2">Admin Transaction</h2>
                     <p class="mt-2 text-sm text-slate-400">A call the connected account can sign alone goes straight to Freighter. Otherwise each signer signs here and passes the link on.</p>
                 </div>
 
@@ -416,22 +412,22 @@
                     <pre id="adminTxDescription" class="whitespace-pre-wrap break-all font-mono text-xs text-slate-300 empty:hidden"></pre>
                     <p id="adminTxSignaturesLine" class="text-sm text-slate-400">Signatures: <span id="adminTxSignatures" class="font-mono text-slate-100">0</span></p>
                     <ul id="adminTxSigners" class="space-y-2 empty:hidden"></ul>
-                    <p id="adminTxNotice" class="text-sm text-slate-400 empty:hidden"></p>
+                    <p id="adminTxNotice" class="tone text-sm text-slate-400 empty:hidden"></p>
 
                     <div class="flex flex-col sm:flex-row gap-3">
-                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="submitAdminTxBtn" type="button" disabled title="Please connect your wallet first">
+                        <button class="btn-secondary flex-1" id="submitAdminTxBtn" type="button" disabled title="Please connect your wallet first">
                             Submit
                         </button>
-                        <button class="flex-1 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="copyAdminTxLinkBtn" type="button" disabled>
+                        <button class="btn-secondary flex-1" id="copyAdminTxLinkBtn" type="button" disabled>
                             Copy link
                         </button>
                     </div>
 
                     <details class="border-t border-white/5 pt-4">
-                        <summary class="cursor-pointer text-xs font-medium uppercase tracking-[0.22em] text-slate-400 transition hover:text-cyan-100">Transaction XDR</summary>
+                        <summary class="field-label cursor-pointer transition hover:text-cyan-100">Transaction XDR</summary>
                         <p class="mt-3 text-xs text-slate-400">For a signer who signs with the Stellar CLI, or to paste a call from one.</p>
-                        <textarea class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" id="adminTxXdr" rows="4" placeholder="Paste a transaction XDR" aria-label="Transaction XDR" autocomplete="off" spellcheck="false"></textarea>
-                        <button class="mt-3 rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed" id="copyAdminTxBtn" type="button" disabled>Copy XDR</button>
+                        <textarea class="field mt-3 font-mono text-xs" id="adminTxXdr" rows="4" placeholder="Paste a transaction XDR" aria-label="Transaction XDR" autocomplete="off" spellcheck="false"></textarea>
+                        <button class="btn-secondary mt-3 px-3 py-2 text-xs" id="copyAdminTxBtn" type="button" disabled>Copy XDR</button>
                     </details>
                 </div>
             </section>
@@ -442,16 +438,16 @@
             <div class="py-6 text-xs text-slate-400 space-y-2">
                 <p class="leading-relaxed">
                     Terms &amp; Conditions:
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
+                    <a class="link" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
                 </p>
                 <p class="leading-relaxed">
                     Distribution notice:
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
-                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
+                    <a class="link" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
+                    <a class="link" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
+                    <a class="link" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
+                    <a class="link" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
+                    <a class="link" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
+                    <a class="link" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
                 </p>
             </div>
         </footer>
@@ -479,8 +475,8 @@
             <td class="pool-deposits py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="py-3">
                 <div class="pool-actions flex flex-wrap items-center gap-2">
-                    <button type="button" class="pause-deposits-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed">Pause deposits</button>
-                    <button type="button" class="unpause-deposits-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed">Unpause deposits</button>
+                    <button type="button" class="pause-deposits-btn btn-danger px-3 py-2 text-xs">Pause deposits</button>
+                    <button type="button" class="unpause-deposits-btn btn-secondary px-3 py-2 text-xs">Unpause deposits</button>
                 </div>
             </td>
         </tr>
@@ -490,8 +486,8 @@
     <template id="tpl-signer">
         <li class="flex items-center gap-3">
             <span class="signer-key break-all font-mono text-xs text-slate-300"></span>
-            <span class="signer-status shrink-0 text-xs"></span>
-            <button type="button" class="sign-as-btn shrink-0 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/20 disabled:opacity-50 disabled:cursor-not-allowed">Sign</button>
+            <span class="signer-status tone shrink-0 text-xs text-slate-400"></span>
+            <button type="button" class="sign-as-btn btn-secondary shrink-0 px-3 py-1 text-xs">Sign</button>
         </li>
     </template>
 
@@ -501,30 +497,30 @@
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <p class="pause-file-pool font-mono text-sm text-slate-100"></p>
                 <div class="flex items-center gap-2">
-                    <button type="button" class="save-pause-file-btn rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Save file</button>
-                    <button type="button" class="remove-pause-file-btn rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-400 transition hover:border-rose-500/40 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-50">Remove</button>
+                    <button type="button" class="save-pause-file-btn btn-secondary px-3 py-1 text-xs">Save file</button>
+                    <button type="button" class="remove-pause-file-btn btn-danger px-3 py-1 text-xs">Remove</button>
                 </div>
             </div>
-            <p class="pause-file-status text-sm [overflow-wrap:anywhere]"></p>
+            <p class="pause-file-status tone text-sm text-slate-300 [overflow-wrap:anywhere]"></p>
             <ul class="pause-file-signers space-y-2 empty:hidden"></ul>
-            <p class="pause-file-details font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]"></p>
+            <p class="pause-file-details font-mono text-2xs text-slate-400 [overflow-wrap:anywhere]"></p>
         </li>
     </template>
 
     <!-- Admin Row Template -->
     <template id="tpl-admin-row">
         <tr class="whitespace-nowrap align-middle">
-            <td class="admin-label py-3 pr-4 text-[10px] uppercase tracking-wide text-slate-500"></td>
+            <td class="admin-label table-head py-3 pr-4"></td>
             <td class="admin-contract py-3 pr-4 font-mono text-xs text-slate-200"></td>
             <td class="admin-current py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="admin-pending py-3 pr-4 font-mono text-xs text-slate-300"></td>
             <td class="py-3">
                 <div class="admin-actions flex flex-col gap-2">
-                    <input type="text" class="new-admin-input w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-xs text-slate-100 transition focus:border-cyan-300/40" placeholder="New admin G..." aria-label="New admin address" autocomplete="off" spellcheck="false" />
+                    <input type="text" class="new-admin-input field px-3 py-2 font-mono text-xs" placeholder="New admin G..." aria-label="New admin address" autocomplete="off" spellcheck="false" />
                     <div class="flex flex-nowrap items-center gap-2">
-                        <button type="button" class="propose-admin-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/20">Propose</button>
-                        <button type="button" class="cancel-admin-btn rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20">Cancel</button>
-                        <button type="button" class="accept-admin-btn rounded-full border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Accept</button>
+                        <button type="button" class="propose-admin-btn btn-secondary px-3 py-2 text-xs">Propose</button>
+                        <button type="button" class="cancel-admin-btn btn-danger px-3 py-2 text-xs">Cancel</button>
+                        <button type="button" class="accept-admin-btn btn-secondary px-3 py-2 text-xs">Accept</button>
                     </div>
                 </div>
             </td>

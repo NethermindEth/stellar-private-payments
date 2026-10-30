@@ -93,12 +93,8 @@ function renderActions(buttons) {
     actions.replaceChildren(...buttons);
 }
 
-function makeButton({ text, variant = 'secondary', onClick }) {
-    const btn = el('button', variant === 'primary'
-        ? 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60'
-        : variant === 'ghost'
-            ? 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60'
-            : 'rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60', text);
+function makeButton({ text, variant, onClick }) {
+    const btn = el('button', variant === 'primary' ? 'btn-primary' : 'btn-secondary', text);
     btn.type = 'button';
     if (onClick) btn.addEventListener('click', onClick);
     return btn;
@@ -107,14 +103,14 @@ function makeButton({ text, variant = 'secondary', onClick }) {
 function makePanel({ eyebrow, title, body, aside }) {
     const wrap = elc('div', 'space-y-5', [
         elc('div', null, [
-            el('p', 'text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70', eyebrow),
-            el('h3', 'mt-2 text-2xl font-semibold tracking-tight text-white', title),
+            el('p', 'eyebrow', eyebrow),
+            el('h3', 'section-title mt-2', title),
             body ? el('p', 'mt-3 text-sm leading-6 text-slate-300', body) : null,
         ]),
     ]);
 
     if (aside) {
-        const info = el('div', 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300');
+        const info = el('div', 'panel bg-ink-950/70 text-sm leading-6 text-slate-300');
         info.append(aside);
         wrap.appendChild(info);
     }
@@ -124,26 +120,7 @@ function makePanel({ eyebrow, title, body, aside }) {
 
 function setStepState(stepId, state) {
     const pill = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
-    if (!pill) return;
-    pill.dataset.state = state;
-    pill.classList.remove(
-        'border-white/8',
-        'bg-white/[0.03]',
-        'text-slate-400',
-        'border-cyan-300/30',
-        'bg-cyan-300/10',
-        'text-cyan-100',
-        'border-emerald-300/30',
-        'bg-emerald-300/10',
-        'text-emerald-100'
-    );
-    if (state === 'current') {
-        pill.classList.add('border-cyan-300/30', 'bg-cyan-300/10', 'text-cyan-100');
-    } else if (state === 'done') {
-        pill.classList.add('border-emerald-300/30', 'bg-emerald-300/10', 'text-emerald-100');
-    } else {
-        pill.classList.add('border-white/8', 'bg-white/[0.03]', 'text-slate-400');
-    }
+    if (pill) pill.dataset.state = state;
 }
 
 const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
@@ -350,17 +327,19 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
+                const cancel = makeButton({ text: 'Cancel', onClick: cancelOnboarding });
                 const accept = makeButton({
                     text: 'Accept disclaimer',
                     variant: 'primary',
                     onClick: async () => {
                         try {
                             accept.disabled = true;
+                            accept.ariaBusy = true;
                             await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
+                            accept.ariaBusy = false;
                             setError(error?.message || 'Failed to accept disclaimer');
                         }
                     },
@@ -372,7 +351,7 @@ export async function runOnboardingWizard({
         }
 
         if (stepId === 'storage') {
-            const statusValue = el('span', 'font-semibold text-white', persisted ? 'already persisted' : 'not persisted yet');
+            const statusValue = el('span', 'font-semibold text-white data-[tone=ok]:text-emerald-200 data-[tone=warn]:text-amber-200', persisted ? 'already persisted' : 'not persisted yet');
             const statusWrap = el('p');
             statusWrap.append('Current status: ', statusValue);
             const panel = makePanel({
@@ -386,7 +365,6 @@ export async function runOnboardingWizard({
             await waitForStep((resolve, reject) => {
                 const later = makeButton({
                     text: 'Continue without it',
-                    variant: 'ghost',
                     onClick: () => {
                         setPersistPromptedFlag();
                         resolve();
@@ -398,14 +376,16 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             request.disabled = true;
+                            request.ariaBusy = true;
                             later.disabled = true;
                             const granted = await persistStorageIfWanted();
                             setPersistPromptedFlag();
                             statusValue.textContent = granted ? 'granted — storage is now persistent' : 'denied by the browser';
-                            statusValue.className = granted ? 'font-semibold text-emerald-200' : 'font-semibold text-amber-200';
+                            statusValue.dataset.tone = granted ? 'ok' : 'warn';
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             request.disabled = false;
+                            request.ariaBusy = false;
                             later.disabled = false;
                             setError(error?.message || 'Failed to request storage persistence');
                         }
@@ -443,13 +423,14 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
+                const cancel = makeButton({ text: 'Cancel', onClick: cancelOnboarding });
                 const derive = makeButton({
                     text: 'Derive and store keys',
                     variant: 'primary',
                     onClick: async () => {
                         try {
                             derive.disabled = true;
+                            derive.ariaBusy = true;
                             await client().openAccount(
                                 { networkPassphrase, userAddress: address },
                                 signer,
@@ -464,6 +445,7 @@ export async function runOnboardingWizard({
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
+                            derive.ariaBusy = false;
                             setError(error?.message || 'Failed to derive privacy keys');
                         }
                     },
@@ -492,8 +474,8 @@ export async function runOnboardingWizard({
 
             let permStatus = null;
             if (enableNotifications) {
-                permStatus = el('p', 'text-xs text-slate-500', `Current permission: ${Notification.permission}`);
-                inputWrap.appendChild(elc('div', 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2', [
+                permStatus = el('p', 'text-xs text-slate-400', `Current permission: ${Notification.permission}`);
+                inputWrap.appendChild(elc('div', 'panel bg-white/3 text-sm text-slate-300 space-y-2', [
                     el('p', 'font-medium text-white', 'Browser reminder'),
                     el('p', null, 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.'),
                     permStatus,
@@ -509,7 +491,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const later = makeButton({ text: 'Continue', variant: 'ghost', onClick: () => resolve() });
+                const later = makeButton({ text: 'Continue', onClick: () => resolve() });
                 const requestNotif = enableNotifications && Notification.permission !== 'granted'
                     ? makeButton({
                         text: 'Allow reminders',
@@ -577,12 +559,14 @@ export async function runOnboardingWizard({
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
+                    button.ariaBusy = true;
                     saveExplorerPreference(baseUrl);
                     await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();
                 } catch (error) {
                     button.disabled = false;
+                    button.ariaBusy = false;
                     setError(error?.message || 'Failed to save explorer setting');
                 }
             };
@@ -591,7 +575,6 @@ export async function runOnboardingWizard({
                 resolveStep = resolve;
                 const later = makeButton({
                     text: 'Use default',
-                    variant: 'ghost',
                     onClick: () => persistExplorer(later, deploymentDefaults.explorerUrl),
                 });
                 const save = makeButton({
@@ -619,7 +602,7 @@ export async function runOnboardingWizard({
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const later = makeButton({ text: 'Register later', variant: 'ghost', onClick: () => resolve() });
+                const later = makeButton({ text: 'Register later', onClick: () => resolve() });
                 const register = makeButton({
                     text: 'Register now',
                     variant: 'primary',
@@ -629,11 +612,13 @@ export async function runOnboardingWizard({
                                 throw new Error('Derive keys before registration');
                             }
                             register.disabled = true;
+                            register.ariaBusy = true;
                             await registerNow({ address, networkPassphrase, signer });
                             state.registered = true;
                             resolve();
                         } catch (error) {
                             register.disabled = false;
+                            register.ariaBusy = false;
                             setError(getRegistrationErrorMessage(error));
                         }
                     },

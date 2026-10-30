@@ -14,7 +14,7 @@ import {
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
-import { filterNotes, createNoteRow, formatAmount, shortHex } from './ui/notes-view.js';
+import { filterNotes, createNoteRow, createStatusBadge, formatAmount, shortHex } from './ui/notes-view.js';
 import { App, Toast, Utils } from './ui/core.js';
 import { el, elc, svgEl } from './ui/dom.js';
 import { onEnter } from './ui/keys.js';
@@ -74,7 +74,7 @@ let connectBtn;
 // ---------------------------------------------------------------------------
 
 function spinnerEl() {
-  return el('span', 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin');
+  return el('span', 'w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin');
 }
 function checkCircleIcon(cls) {
   return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
@@ -212,37 +212,26 @@ function normalizeCommitment(s) {
 function buildGenerateFilters(container) {
   const wrap = el('div', 'flex flex-wrap items-center gap-2 mb-3');
 
-  const statusGroup = el('div', 'inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5');
   const statuses = [
     { key: 'all', label: 'All' },
     { key: 'unspent', label: 'Available' },
     { key: 'spent', label: 'Spent' },
   ];
   statuses.forEach(({ key, label }) => {
-    const active = state.noteStatusFilter === key;
-    const btn = el(
-      'button',
-      `px-3 py-1 text-xs rounded-md transition-colors ${
-        active ? 'bg-brand-500/20 text-brand-300' : 'text-dark-400 hover:text-dark-200'
-      }`,
-      label,
-    );
+    const btn = el('button', 'tab', label);
     btn.type = 'button';
+    btn.ariaPressed = state.noteStatusFilter === key;
     btn.dataset.testid = `disclosure-filter-${key}`;
     btn.addEventListener('click', () => {
       state.noteStatusFilter = key;
       mountGenerate(container);
     });
-    statusGroup.appendChild(btn);
+    wrap.appendChild(btn);
   });
-  wrap.appendChild(statusGroup);
 
   const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
   if (poolIds.length > 1) {
-    const select = el(
-      'select',
-      'text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200',
-    );
+    const select = el('select', 'field w-auto py-2 pr-10');
     select.append(new Option('All tokens', ''), ...poolIds.map((pid) => new Option(tokenLabelForPool(pid), pid)));
     select.value = state.notePoolFilter || '';
     select.addEventListener('change', () => {
@@ -259,29 +248,29 @@ export function mountGenerate(container) {
   container.replaceChildren();
 
   if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
-    container.appendChild(el('div', 'text-sm text-dark-400', 'Connect your Freighter wallet to generate disclosure receipts for your notes.'));
+    container.appendChild(el('div', 'text-sm text-slate-400', 'Connect your Freighter wallet to generate disclosure receipts for your notes.'));
     return;
   }
 
   // Wallet status line
-  const statusLine = el('div', 'text-xs text-dark-500 mb-4');
-  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', Utils.truncateHex(App.state.wallet.address, 6, 4)));
+  const statusLine = el('div', 'text-xs text-slate-400 mb-4');
+  statusLine.append('Connected: ', el('span', 'font-mono text-slate-300', Utils.truncateHex(App.state.wallet.address, 6, 4)));
   container.appendChild(statusLine);
 
   if (state.notesLoading) {
-    const spinner = el('div', 'text-sm text-dark-400 flex items-center gap-2');
+    const spinner = el('div', 'text-sm text-slate-400 flex items-center gap-2');
     spinner.append(spinnerEl(), 'Loading notes…');
     container.appendChild(spinner);
     return;
   }
 
   if (state.notesError) {
-    container.appendChild(el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3', state.notesError));
+    container.appendChild(el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-3', state.notesError));
     return;
   }
 
   if (state.notes.length === 0) {
-    container.appendChild(el('div', 'text-sm text-dark-400', 'No notes found for this account.'));
+    container.appendChild(el('div', 'text-sm text-slate-400', 'No notes found for this account.'));
     return;
   }
 
@@ -293,7 +282,7 @@ export function mountGenerate(container) {
   });
 
   // Note picker
-  container.appendChild(el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2', `Select up to 4 notes (${notes.length})`));
+  container.appendChild(el('label', 'field-label mb-2 block', `Select up to 4 notes (${notes.length})`));
 
   const list = el('div', 'space-y-2 mb-4');
   list.setAttribute('role', 'group');
@@ -304,7 +293,7 @@ export function mountGenerate(container) {
 
   if (notes.length === 0) {
     list.appendChild(
-      el('div', 'text-sm text-dark-400 p-3', 'No notes match this filter.'),
+      el('div', 'text-sm text-slate-400 p-3', 'No notes match this filter.'),
     );
   } else {
     notes.forEach((note) => {
@@ -332,16 +321,16 @@ export function mountGenerate(container) {
   container.appendChild(list);
 
   // Selection summary
-  const selectedChip = el('div', 'text-xs text-brand-400 mb-4');
+  const selectedChip = el('div', 'text-xs text-cyan-300 mb-4');
   const circuitName = `selectiveDisclosure_${state.selectedNotes.length || 1}`;
   selectedChip.append(
-    el('span', 'text-dark-400', 'Selected: '),
+    el('span', 'text-slate-400', 'Selected: '),
     `${state.selectedNotes.length} note${state.selectedNotes.length === 1 ? '' : 's'}`,
   );
   if (state.selectedNotes.length > 0) {
     selectedChip.append(
       ' · ',
-      el('span', 'font-mono text-dark-300', circuitName),
+      el('span', 'font-mono text-slate-300', circuitName),
     );
   }
   container.appendChild(selectedChip);
@@ -349,17 +338,17 @@ export function mountGenerate(container) {
   // -------------------------------------------------------------------------
   // Context form
   // -------------------------------------------------------------------------
-  const formWrap = el('div', 'border-t border-dark-800 pt-4 mt-2 space-y-4');
+  const formWrap = el('div', 'border-t border-white/8 pt-4 mt-2 space-y-4');
   formWrap.dataset.testid = 'disclosure-generate-form';
 
   // Helper to build a labeled input
   const makeField = (id, labelText, opts = {}) => {
-    const label = el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', labelText);
+    const label = el('label', 'field-label block', labelText);
     label.htmlFor = id;
 
     const inputWrap = el('div', 'flex gap-2');
 
-    const input = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500');
+    const input = el('input', 'field flex-1 font-mono text-xs');
     input.id = id;
     input.type = opts.type || 'text';
     if (opts.placeholder) input.placeholder = opts.placeholder;
@@ -367,7 +356,7 @@ export function mountGenerate(container) {
     inputWrap.appendChild(input);
 
     if (opts.button) {
-      const btn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', opts.button.label);
+      const btn = el('button', 'btn-secondary', opts.button.label);
       btn.type = 'button';
       btn.addEventListener('click', opts.button.onClick);
       inputWrap.appendChild(btn);
@@ -459,7 +448,7 @@ export function mountGenerate(container) {
   };
 
   // Progress / result area
-  const progressArea = el('div', 'hidden');
+  const progressArea = el('div', 'group hidden');
   progressArea.id = 'generate-progress';
   progressArea.dataset.testid = 'disclosure-generate-progress';
   progressArea.dataset.state = 'idle';
@@ -479,9 +468,8 @@ export function mountGenerate(container) {
     if (stage) {
       progressArea.dataset.state = error ? 'error' : 'running';
       progressArea.classList.remove('hidden');
-      const isError = !!error;
-      progressArea.replaceChildren(elc('div', `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`, [
-        isError ? null : spinnerEl(),
+      progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-slate-300 group-data-[state=error]:text-rose-300', [
+        error ? null : spinnerEl(),
         el('span', null, message),
       ]));
     } else {
@@ -505,7 +493,7 @@ export function mountGenerate(container) {
   const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
     const notesWrap = el('div', 'space-y-2');
     notesWrap.appendChild(
-      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+      el('h3', 'field-label', 'Disclosed notes')
     );
 
     const n = Math.min(
@@ -519,26 +507,26 @@ export function mountGenerate(container) {
       const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
       const amountText = amountValue != null ? formatAmount(amountValue, symbol, selectedNotesForSymbol[i]?.decimals) : publicInputs.amounts[i];
 
-      const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
+      const card = el('div', 'p-3 bg-white/3 border border-white/8 rounded-2xl space-y-1');
       card.dataset.testid = 'disclosure-disclosed-note';
       card.dataset.state = 'unspent';
       card.appendChild(
         elc('div', 'flex justify-between text-xs', [
-          el('span', 'text-dark-500', `Note ${i + 1}`),
-          el('span', 'font-medium text-brand-300', amountText),
+          el('span', 'text-slate-400', `Note ${i + 1}`),
+          el('span', 'font-medium text-cyan-200', amountText),
         ])
       );
       card.appendChild(
-        el('div', 'text-[10px] text-dark-500', 'Commitment')
+        el('div', 'text-3xs text-slate-400', 'Commitment')
       );
       card.appendChild(
-        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+        el('div', 'text-xs font-mono text-slate-200 break-all', publicInputs.noteCommitments[i])
       );
       card.appendChild(
-        el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier')
+        el('div', 'text-3xs text-slate-400 mt-1', 'Nullifier')
       );
       card.appendChild(
-        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+        el('div', 'text-xs font-mono text-slate-200 break-all', publicInputs.nullifiers[i])
       );
       notesWrap.appendChild(card);
     }
@@ -562,21 +550,21 @@ export function mountGenerate(container) {
     }));
 
     const box = el('div', 'space-y-3');
-    box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-2xl p-3', 'Disclosure receipt generated successfully.'));
     if (receipt.publicInputs) {
       box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
     }
-    const receiptJson = el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json);
+    const receiptJson = el('pre', 'p-3 bg-ink-950 border border-white/8 rounded-2xl text-xs font-mono text-slate-200 overflow-auto max-h-64', json);
     receiptJson.dataset.testid = 'disclosure-receipt-json';
     box.appendChild(receiptJson);
-    const actions = el('div', 'flex gap-2');
-    const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
+    const actions = el('div', 'flex flex-col gap-2 sm:flex-row');
+    const dlBtn = el('button', 'btn-primary', 'Download JSON');
     dlBtn.type = 'button';
     dlBtn.id = 'btn-download-receipt';
-    const copyBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Copy to clipboard');
+    const copyBtn = el('button', 'btn-secondary', 'Copy to clipboard');
     copyBtn.type = 'button';
     copyBtn.id = 'btn-copy-receipt';
-    const resetBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Generate another');
+    const resetBtn = el('button', 'btn-secondary', 'Generate another');
     resetBtn.type = 'button';
     resetBtn.id = 'btn-reset-generate';
     actions.append(dlBtn, copyBtn, resetBtn);
@@ -626,7 +614,7 @@ export function mountGenerate(container) {
   };
 
   // Generate button
-  const generateBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Generate Disclosure Receipt');
+  const generateBtn = el('button', 'btn-primary w-full', 'Generate Disclosure Receipt');
   generateBtn.type = 'button';
   generateBtn.dataset.testid = 'disclosure-generate-submit';
   generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
@@ -639,6 +627,7 @@ export function mountGenerate(container) {
   async function executeGenerate(form) {
     generating = true;
     generateBtn.disabled = true;
+    generateBtn.ariaBusy = true;
     resultArea.dataset.state = 'generating';
     generateBtn.textContent = 'Generating…';
     resultArea.classList.add('hidden');
@@ -661,6 +650,7 @@ export function mountGenerate(container) {
       showGenerateError(err.message || 'Generation failed');
     } finally {
       generating = false;
+      generateBtn.ariaBusy = false;
     }
   }
 
@@ -702,7 +692,7 @@ async function generateReceipt(form) {
     const d = e.detail;
     if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
     progressArea.classList.remove('hidden');
-    progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-dark-300', [spinnerEl(), el('span', null, d.message)]));
+    progressArea.replaceChildren(elc('div', 'flex items-center gap-2 text-sm text-slate-300', [spinnerEl(), el('span', null, d.message)]));
   };
   window.addEventListener(TX_PROGRESS_EVENT, handler);
 
@@ -775,32 +765,32 @@ export function mountVerify(container) {
   const importWrap = el('div', 'space-y-3 mb-4');
 
   // File picker
-  const fileInput = el('input', 'block w-full text-xs text-dark-300 file:mr-3 file:px-3 file:py-1.5 file:bg-dark-800 file:border file:border-dark-700 file:rounded-lg file:text-dark-200 file:hover:border-brand-500 file:transition');
+  const fileInput = el('input', 'block w-full text-xs text-slate-300 file:mr-3 file:px-3 file:py-1.5 file:bg-ink-800 file:border file:border-white/10 file:rounded-lg file:text-slate-200 file:hover:border-cyan-300/30 file:transition');
   fileInput.type = 'file';
   fileInput.accept = '.json';
   importWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Import from file'),
+    el('label', 'field-label block', 'Import from file'),
     fileInput,
   ]));
 
   // Paste textarea
-  const pasteArea = el('textarea', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y');
+  const pasteArea = el('textarea', 'field resize-y font-mono text-xs');
   pasteArea.dataset.testid = 'disclosure-receipt-input';
   pasteArea.rows = 4;
   pasteArea.placeholder = '{ "version": 1, ... }';
   importWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Or paste receipt JSON'),
+    el('label', 'field-label block', 'Or paste receipt JSON'),
     pasteArea,
   ]));
 
   // Load button
-  const loadBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Load Receipt');
+  const loadBtn = el('button', 'btn-secondary', 'Load Receipt');
   loadBtn.type = 'button';
   loadBtn.dataset.testid = 'disclosure-load-receipt';
   importWrap.appendChild(loadBtn);
 
   // Receipt error display
-  const importErrorEl = el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden');
+  const importErrorEl = el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-3 hidden');
   importErrorEl.dataset.testid = 'disclosure-receipt-import-error';
   importWrap.appendChild(importErrorEl);
 
@@ -813,18 +803,18 @@ export function mountVerify(container) {
   summaryWrap.dataset.testid = 'disclosure-receipt-summary';
   summaryWrap.dataset.state = 'idle';
 
-  summaryWrap.appendChild(el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Receipt Context'));
+  summaryWrap.appendChild(el('h3', 'field-label', 'Receipt Context'));
 
   const summaryGrid = el('div', 'grid grid-cols-1 sm:grid-cols-2 gap-3');
   summaryWrap.appendChild(summaryGrid);
 
   // VK hash field (canonical default, editable override)
-  const vkInput = el('input', 'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
+  const vkInput = el('input', 'field flex-1 font-mono text-xs');
   vkInput.type = 'text';
   vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
   vkInput.readOnly = true;
 
-  const vkOverrideBtn = el('button', 'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Override');
+  const vkOverrideBtn = el('button', 'btn-secondary', 'Override');
   vkOverrideBtn.type = 'button';
   vkOverrideBtn.addEventListener('click', () => {
     vkInput.readOnly = !vkInput.readOnly;
@@ -834,7 +824,7 @@ export function mountVerify(container) {
 
   const vkErrorEl = el('div', 'text-xs text-rose-400 hidden');
   summaryWrap.appendChild(elc('div', 'space-y-1', [
-    el('label', 'block text-xs font-medium text-dark-400 uppercase tracking-wide', 'Expected VK hash'),
+    el('label', 'field-label block', 'Expected VK hash'),
     elc('div', 'flex gap-2', [vkInput, vkOverrideBtn]),
     vkErrorEl,
   ]));
@@ -842,13 +832,13 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   // RPC endpoint (only used when no wallet is connected)
   // -------------------------------------------------------------------------
-  const rpcInput = el('input', 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60');
+  const rpcInput = el('input', 'field font-mono text-xs disabled:opacity-60');
   rpcInput.type = 'text';
   rpcInput.value = deploymentDefaults.rpcUrl;
 
-  const rpcHintEl = el('div', 'text-[10px] text-dark-500');
+  const rpcHintEl = el('div', 'text-3xs text-slate-400');
   summaryWrap.appendChild(elc('details', 'text-xs', [
-    el('summary', 'cursor-pointer text-dark-400 hover:text-brand-400 select-none', 'Advanced: RPC endpoint'),
+    el('summary', 'cursor-pointer text-slate-400 hover:text-cyan-100 select-none', 'Advanced: RPC endpoint'),
     elc('div', 'mt-2 space-y-1', [rpcInput, rpcHintEl]),
   ]));
 
@@ -864,7 +854,7 @@ export function mountVerify(container) {
   App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
 
   // Verify button
-  const verifyBtn = el('button', 'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed', 'Verify Receipt');
+  const verifyBtn = el('button', 'btn-primary w-full', 'Verify Receipt');
   verifyBtn.type = 'button';
   verifyBtn.dataset.testid = 'disclosure-verify-submit';
   summaryWrap.appendChild(verifyBtn);
@@ -962,7 +952,7 @@ export function mountVerify(container) {
     disclosedNotesWrap.replaceChildren();
     disclosedNotesWrap.classList.remove('hidden');
     disclosedNotesWrap.appendChild(
-      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+      el('h3', 'field-label', 'Disclosed notes')
     );
 
     const n = Math.min(
@@ -976,31 +966,25 @@ export function mountVerify(container) {
       const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
       const amountText = amountValue != null ? formatAmount(amountValue, symbol, metadata.value.decimals) : publicInputs.amounts[i];
 
-      const card = el('div', `p-3 border rounded-lg space-y-1.5 ${
-        isSpent
-          ? 'bg-amber-500/5 border-amber-500/30'
-          : 'bg-dark-800 border-dark-700'
-      }`);
+      const card = el('div', 'group p-3 border rounded-2xl space-y-1.5 bg-white/3 border-white/8');
       card.dataset.testid = 'disclosure-disclosed-note';
       card.dataset.state = isSpent ? 'spent' : 'unspent';
       card.appendChild(
         elc('div', 'flex justify-between text-xs', [
-          el('span', 'text-dark-500', `Note ${i + 1}`),
+          el('span', 'text-slate-400', `Note ${i + 1}`),
           elc('div', 'flex items-center gap-2', [
-            isSpent
-              ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
-              : null,
-            el('span', `font-medium ${isSpent ? 'text-amber-300 line-through' : 'text-brand-300'}`, amountText),
+            isSpent ? createStatusBadge(true) : null,
+            el('span', 'font-medium text-cyan-200 group-data-[state=spent]:text-slate-400 group-data-[state=spent]:line-through', amountText),
           ]),
         ])
       );
-      card.appendChild(el('div', 'text-[10px] text-dark-500', 'Commitment'));
+      card.appendChild(el('div', 'text-3xs text-slate-400', 'Commitment'));
       card.appendChild(
-        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+        el('div', 'text-xs font-mono text-slate-200 break-all', publicInputs.noteCommitments[i])
       );
-      card.appendChild(el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier'));
+      card.appendChild(el('div', 'text-3xs text-slate-400 mt-1', 'Nullifier'));
       card.appendChild(
-        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+        el('div', 'text-xs font-mono text-slate-200 break-all', publicInputs.nullifiers[i])
       );
       disclosedNotesWrap.appendChild(card);
     }
@@ -1038,10 +1022,10 @@ export function mountVerify(container) {
       { label: 'Nullifiers', value: `${nullifierCount} disclosed` },
     ];
     items.forEach((item) => {
-      const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
+      const cell = el('div', 'p-4 bg-white/3 border border-white/8 rounded-2xl');
       cell.append(
-        el('div', 'text-[10px] uppercase tracking-wide text-dark-500', item.label),
-        el('div', 'text-xs font-mono text-dark-200 break-all', String(item.value)),
+        el('div', 'field-label', item.label),
+        el('div', 'mt-1 text-xs font-mono text-slate-200 break-all', String(item.value)),
       );
       summaryGrid.appendChild(cell);
     });
@@ -1143,10 +1127,11 @@ export function mountVerify(container) {
     const verifyingRpc = verificationRpcUrl();
     updateSpentMessage = () => {};
     verifyBtn.disabled = true;
+    verifyBtn.ariaBusy = true;
     verifyBtn.textContent = 'Verifying…';
     resultsWrap.classList.remove('hidden');
     resultsWrap.dataset.state = 'verifying';
-    const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-dark-300');
+    const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-slate-300');
     verifyingRow.append(spinnerEl(), el('span', null, 'Running verification checks…'));
     resultsWrap.replaceChildren(verifyingRow);
 
@@ -1180,15 +1165,10 @@ export function mountVerify(container) {
 
       const makeCheck = (label, pass, failText, passText, failSeverity = 'error') => {
         const isInfo = !pass && failSeverity === 'info';
-        const li = el('li', `flex items-start gap-3 p-3 rounded-lg border ${
-          pass
-            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-            : isInfo
-              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
-              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
-        }`);
+        const li = el('li', 'flex items-start gap-3 p-3 rounded-2xl border bg-rose-500/10 border-rose-500/40 text-rose-300 data-[state=pass]:bg-emerald-500/10 data-[state=pass]:border-emerald-500/40 data-[state=pass]:text-emerald-300 data-[tone=warn]:bg-amber-500/10 data-[tone=warn]:border-amber-500/40 data-[tone=warn]:text-amber-300');
         li.dataset.testid = `disclosure-check-${label}`;
         li.dataset.state = pass ? 'pass' : 'fail';
+        if (isInfo) li.dataset.tone = 'warn';
         const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
         if (pass) {
           iconWrap.appendChild(checkCircleIcon('w-4 h-4'));
@@ -1261,7 +1241,7 @@ export function mountVerify(container) {
       }
 
       if (fullyVerified) {
-        const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2');
+        const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-2xl text-emerald-300 text-sm font-medium flex items-center gap-2');
         badge.setAttribute('role', 'status');
         badge.append(shieldIcon('w-5 h-5'), el('span', null, 'Fully verified — this receipt is trustworthy.'));
         resultsWrap.appendChild(badge);
@@ -1274,12 +1254,13 @@ export function mountVerify(container) {
         showDbLockedModal(err.message);
       }
       resultsWrap.replaceChildren(
-        el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
+        el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-3',
           `Verification could not be completed: ${err.message || 'Unknown error'}`),
       );
       resultsWrap.dataset.state = 'error';
     } finally {
       verifyBtn.disabled = false;
+      verifyBtn.ariaBusy = false;
       verifyBtn.textContent = 'Verify Receipt';
     }
   });

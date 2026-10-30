@@ -128,15 +128,17 @@ export const Dashboard = {
         emptyEl?.classList.toggle('hidden', ops.length > 0);
 
         ops.forEach(op => {
-            const row = el('div', 'rounded-2xl border border-white/8 bg-white/[0.03] p-3');
+            const row = el('div', 'rounded-2xl border border-white/8 bg-white/3 p-3');
             const top = el('div', 'flex items-center justify-between gap-3');
             top.appendChild(el('span', 'text-sm font-medium text-white', op.opType));
             const sign = op.direction === 'out' ? '−' : op.direction === 'in' ? '+' : '';
             const amountText = op.amount != null ? `${sign}${Utils.formatPoolAmount(op.amount, poolId)}` : '';
-            top.appendChild(el('span', `font-mono text-sm ${op.direction === 'out' ? 'text-rose-200' : 'text-cyan-100'}`, amountText));
+            const amount = el('span', 'font-mono text-sm text-cyan-100 data-[tone=fail]:text-rose-200', amountText);
+            if (op.direction === 'out') amount.dataset.tone = 'fail';
+            top.appendChild(amount);
             row.appendChild(top);
 
-            const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-[11px] text-slate-500');
+            const meta = el('div', 'mt-1 flex items-center justify-between gap-3 text-2xs text-slate-400');
             if (op.counterparty) {
                 const cp = el('button', 'break-all text-left text-slate-400 transition hover:text-cyan-100', `→ ${shortHex(op.counterparty, 8, 6)}`);
                 cp.type = 'button';
@@ -150,7 +152,7 @@ export const Dashboard = {
             row.appendChild(meta);
 
             if (op.txHash) {
-                const a = el('a', 'mt-2 inline-block text-[11px] font-medium text-cyan-100 underline underline-offset-4', 'Open in explorer');
+                const a = el('a', 'mt-2 inline-block text-2xs font-medium text-cyan-100 underline underline-offset-4', 'Open in explorer');
                 a.href = Utils.explorerTxUrl(op.txHash);
                 a.target = '_blank';
                 a.rel = 'noreferrer noopener';

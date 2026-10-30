@@ -10,7 +10,7 @@
 // callbacks; the module returns DOM and derived values.
 //
 // Reuse boundary (by design): the table view keeps its own <tr>/<td> row
-// (it is a real HTML table) but reuses filterNotes(), the statusBadge spec,
+// (it is a real HTML table) but reuses filterNotes(), createStatusBadge(),
 // and the formatting helpers below. createNoteRow() is an el()-based CARD row
 // for non-table note lists (the disclosure selector and any future surface).
 
@@ -73,26 +73,10 @@ export function filterNotes(notes, { status = 'all', poolId = null } = {}) {
 // Status badge — one source of truth for the Spent/Available pill.
 // ---------------------------------------------------------------------------
 
-// Returns { text, className } so callers can either build a fresh element
-// (createStatusBadge) or apply the styling to an existing span (the table view,
-// which keeps its `.note-status` hook class).
-export function statusBadgeSpec(spent) {
-  return spent
-    ? {
-        text: 'Spent',
-        className:
-          'inline-flex rounded-full border border-rose-400/30 bg-rose-400/10 px-2 py-1 text-[11px] font-medium text-rose-200',
-      }
-    : {
-        text: 'Available',
-        className:
-          'inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100',
-      };
-}
-
 export function createStatusBadge(spent) {
-  const { text, className } = statusBadgeSpec(spent);
-  return el('span', className, text);
+  const badge = el('span', 'chip', spent ? 'Spent' : 'Available');
+  badge.dataset.tone = spent ? 'fail' : 'info';
+  return badge;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,12 +112,8 @@ export function createNoteRow(note, opts = {}) {
   const rowTag = selectable ? 'label' : 'div';
   const row = el(
     rowTag,
-    `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 ${
-      selectable ? 'cursor-pointer ' : ''
-    }${
-      selected
-        ? 'bg-brand-500/10 border-brand-500/40 text-brand-300'
-        : 'bg-dark-800 border-dark-700 hover:border-dark-600 text-dark-200'
+    `group w-full text-left p-3 rounded-2xl border border-white/8 bg-white/3 text-slate-200 transition-all duration-200 flex items-center justify-between gap-3 hover:border-cyan-300/30 has-checked:border-cyan-400/40 has-checked:bg-cyan-400/10 has-checked:text-cyan-200 ${
+      selectable ? 'cursor-pointer' : ''
     }`,
   );
   if (note.id) row.dataset.noteId = note.id;
@@ -143,7 +123,7 @@ export function createNoteRow(note, opts = {}) {
   // Left cluster: optional checkbox + commitment / meta line.
   const leftItems = [];
   if (selectable) {
-    const checkbox = el('input', 'accent-brand-500');
+    const checkbox = el('input', 'accent-cyan-400');
     checkbox.type = 'checkbox';
     if (testId) checkbox.dataset.testid = `${testId}-select`;
     checkbox.checked = selected;
@@ -159,7 +139,7 @@ export function createNoteRow(note, opts = {}) {
   leftItems.push(
     elc('div', 'min-w-0', [
       el('div', 'font-mono text-xs truncate', shortHex(note.id)),
-      el('div', 'text-[10px] text-dark-500 mt-0.5', metaParts.join(' · ')),
+      el('div', 'text-3xs text-slate-400 mt-0.5', metaParts.join(' · ')),
     ]),
   );
   const left = elc('div', 'flex items-center gap-3 min-w-0', leftItems);
@@ -169,7 +149,7 @@ export function createNoteRow(note, opts = {}) {
   if (showBadge) rightItems.push(createStatusBadge(note.spent));
   const amountLabel = el(
     'div',
-    `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`,
+    'text-xs font-medium whitespace-nowrap text-slate-300 group-has-checked:text-cyan-200',
     formatAmount(note.amount, symbol, decimals),
   );
   amountLabel.dataset.noteAmount = '';
