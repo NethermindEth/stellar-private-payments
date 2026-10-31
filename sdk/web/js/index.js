@@ -151,6 +151,7 @@ function wrapClient(wasmClient, telemetrySinks) {
       }
     },
     recipientLookup: (address) => wasmClient.recipientLookup(address),
+    noteKeyOwnerLookup: (noteKeys) => wasmClient.noteKeyOwnerLookup(noteKeys),
     aspState: () => wasmClient.aspState(),
     allContractsData: () => wasmClient.allContractsData(),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>

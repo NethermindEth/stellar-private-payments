@@ -22,7 +22,8 @@ use crate::{
     deployment::parse_contract_config,
     models::{
         ContractConfig as JsContractConfig, ContractsStateData, DisclosureVerificationReport,
-        OperationalFeedItem, RecipientLookup, VerifyDisclosureOptions, operational_feed_items,
+        NoteKeyOwnerLookup, OperationalFeedItem, RecipientLookup, VerifyDisclosureOptions,
+        operational_feed_items,
     },
     signer::SignerHandle,
     workers::{ProverHandle, StorageHandle},
@@ -189,6 +190,32 @@ impl Client {
             .await
             .map_err(pool_err)?;
         Ok(RecipientLookup::from(lookup))
+    }
+
+    /// Reverse public key registry lookup: every address that has ever
+    /// registered each of `note_keys` (`0x` big-endian field hex, as in a
+    /// GVK-audited note's `pk`).
+    ///
+    /// A key may have several owners (rotation, or no registry uniqueness) or
+    /// none; each owner carries the ledger of its first registration.
+    #[wasm_bindgen(js_name = noteKeyOwnerLookup)]
+    pub async fn note_key_owner_lookup(
+        &self,
+        note_keys: Vec<String>,
+    ) -> Result<NoteKeyOwnerLookup, JsError> {
+        let note_keys = note_keys
+            .iter()
+            .map(|key| {
+                Field::from_str(key.trim())
+                    .map_err(|e| JsError::new(&format!("invalid note key {key:?}: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let lookup = self
+            .inner
+            .note_key_owner_lookup(&note_keys)
+            .await
+            .map_err(pool_err)?;
+        Ok(NoteKeyOwnerLookup::from(lookup))
     }
 
     /// On-chain ASP membership and non-membership state.
