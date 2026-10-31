@@ -98,6 +98,8 @@ struct Registration {
 /// Domain tag of the challenge the encryption key signs.
 pub const ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
 
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
 
 /// `2^255 - 19`, big-endian.
@@ -134,13 +136,19 @@ pub fn registration_digest(env: &Env, message: &Bytes) -> BytesN<32> {
     env.crypto().sha256(&payload).to_bytes()
 }
 
-fn append_hex(out: &mut Bytes, bytes: &Bytes) {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    out.extend_from_slice(b"0x");
-    for byte in bytes.iter() {
-        out.push_back(DIGITS[usize::from(byte >> 4)]);
-        out.push_back(DIGITS[usize::from(byte & 0x0f)]);
+/// Appends `0x` and the lowercase hex of a 32-byte key, encoded locally so the
+/// host copies each key once.
+fn append_hex(out: &mut Bytes, key: &Bytes) {
+    let mut raw = [0u8; 32];
+    key.copy_into_slice(&mut raw);
+    let mut hex = [0u8; 66];
+    let (prefix, digits) = hex.split_at_mut(2);
+    prefix.copy_from_slice(b"0x");
+    for (pair, byte) in digits.chunks_exact_mut(2).zip(raw) {
+        pair[0] = HEX_DIGITS[usize::from(byte >> 4)];
+        pair[1] = HEX_DIGITS[usize::from(byte & 0x0f)];
     }
+    out.extend_from_slice(&hex);
 }
 
 /// Reads a little-endian 32-byte value as a big-endian `U256`, with the top

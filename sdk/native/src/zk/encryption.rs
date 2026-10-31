@@ -67,6 +67,11 @@ pub fn sep53_payload(message: &str) -> Vec<u8> {
     [SEP53_MESSAGE_PREFIX.as_bytes(), message.as_bytes()].concat()
 }
 
+/// The SHA-256 of [`sep53_payload`], which a SEP-53 wallet signs.
+pub fn sep53_digest(message: &str) -> [u8; 32] {
+    Sha256::digest(sep53_payload(message)).into()
+}
+
 /// Check that `signature` is `owner_address`'s own SEP-53 signature of
 /// `message`.
 ///
@@ -84,18 +89,20 @@ pub fn verify_owner_signature(
         .0
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow!("key-derivation signature must be 64 bytes"))?;
+        .map_err(|_| anyhow!("signature must be 64 bytes"))?;
     let owner = stellar_strkey::ed25519::PublicKey::from_string(owner_address)
-        .map_err(|_| anyhow!("note owner is not a valid account address"))?;
+        .map_err(|_| anyhow!("note owner is not an account (G...) address"))?;
     let owner_key = VerifyingKey::from_bytes(&owner.0)
         .map_err(|e| anyhow!("note owner key is not a valid Ed25519 key: {e}"))?;
 
-    let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
     // Strict, as the network itself verifies: a small-order owner key or `R`
     // is refused, where the lenient check accepts forgeries for such a key.
     owner_key
-        .verify_strict(&digest, &DalekSignature::from_bytes(signature))
-        .map_err(|_| anyhow!("the key-derivation signature was not made by the note owner's key"))
+        .verify_strict(
+            &sep53_digest(message),
+            &DalekSignature::from_bytes(signature),
+        )
+        .map_err(|_| anyhow!("the signature was not made by the note owner's key"))
 }
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
@@ -275,7 +282,7 @@ pub fn registration_message(
 /// SEP-53 digest `D` of a registration message, which the owner signature,
 /// the encryption key signature and the `keyOwnership` proof all cover.
 pub fn registration_digest(message: &str) -> [u8; 32] {
-    Sha256::digest(sep53_payload(message)).into()
+    sep53_digest(message)
 }
 
 /// The `keyOwnership` circuit's `registrationHash`: `D` read big-endian and
@@ -566,8 +573,7 @@ mod owner_signature_tests {
     }
 
     fn sign(key: &SigningKey, message: &str) -> KeyDerivationSignature {
-        let digest: [u8; 32] = Sha256::digest(sep53_payload(message)).into();
-        KeyDerivationSignature(key.sign(&digest).to_bytes().to_vec())
+        KeyDerivationSignature(key.sign(&sep53_digest(message)).to_bytes().to_vec())
     }
 
     #[test]

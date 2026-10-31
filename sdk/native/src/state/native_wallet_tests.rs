@@ -1,6 +1,5 @@
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
-use sha2::Digest;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -28,7 +27,7 @@ fn address() -> String {
         .to_owned()
 }
 fn sign(message: &str) -> Result<KeyDerivationSignature> {
-    let digest = Sha256::digest(crate::zk::encryption::sep53_payload(message));
+    let digest = crate::zk::encryption::sep53_digest(message);
     Ok(KeyDerivationSignature(
         SigningKey::from_bytes(&[7; 32])
             .sign(&digest)

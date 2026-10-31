@@ -163,7 +163,8 @@ impl Account {
             self.user_address.as_str(),
             &message,
             &signature,
-        )?;
+        )
+        .context("check the key-derivation signature")?;
         let (note_keypair, encryption_keypair) =
             crate::zk::encryption::derive_encryption_and_note_keypairs(signature.clone())
                 .context("derive privacy keypairs")?;
@@ -284,11 +285,7 @@ impl Account {
             &inputs.message,
             &owner_signature,
         )
-        .map_err(|_| {
-            Error::Other(anyhow::anyhow!(
-                "the registration message was not signed by the owner's key"
-            ))
-        })?;
+        .context("check the owner's signature of the registration message")?;
         let proof = RegistrationProof {
             note_key_proof,
             encryption_key_signature: inputs
@@ -309,7 +306,7 @@ impl Account {
             .prepare_register(
                 &self.user_address,
                 &self.signer_address,
-                inputs.note_key.0,
+                inputs.key_ownership.note_public_key.0,
                 inputs.encryption_key,
                 &proof,
             )
@@ -454,14 +451,8 @@ mod derive_privacy_keys_tests {
     const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
-    fn test_client() -> Client {
-        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let db = std::env::temp_dir().join(format!(
-            "spp-derive-privacy-keys-{}-{}.sqlite",
-            std::process::id(),
-            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_file(&db);
+    fn test_client(dir: &tempfile::TempDir) -> Client {
+        let db = dir.path().join("wallet.sqlite");
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
             StorageHandle::from(
@@ -523,7 +514,8 @@ mod derive_privacy_keys_tests {
 
     #[tokio::test]
     async fn derive_privacy_keys_derives_and_persists_privacy_keys_for_the_owner() {
-        let account = test_client()
+        let dir = tempfile::tempdir().expect("temp dir");
+        let account = test_client(&dir)
             .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
             .expect("open account");
 
@@ -537,7 +529,8 @@ mod derive_privacy_keys_tests {
 
     #[tokio::test]
     async fn derive_privacy_keys_does_not_re_derive_when_keys_already_exist() {
-        let client = test_client();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let client = test_client(&dir);
         let account = client
             .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
             .expect("open account");
@@ -568,7 +561,8 @@ mod derive_privacy_keys_tests {
         /// `SECRET`, so `OWNER`'s real signature must not verify against it.
         const DELEGATE: &str = "GD6ROJBYLKQMOW3E7N4M2YBPUHMZD7PL65VRHRMO24BOVSBV5H3BQRSL";
 
-        let account = test_client()
+        let dir = tempfile::tempdir().expect("temp dir");
+        let account = test_client(&dir)
             .account(NoteOwnerAddress::new(DELEGATE), test_signer(DELEGATE))
             .expect("open account");
 
@@ -645,14 +639,8 @@ mod register_public_keys_tests {
         server
     }
 
-    fn account(rpc_url: &str, kdf_domain: &str) -> Account {
-        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let db = std::env::temp_dir().join(format!(
-            "spp-register-public-keys-{}-{}.sqlite",
-            std::process::id(),
-            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_file(&db);
+    fn account(dir: &tempfile::TempDir, rpc_url: &str, kdf_domain: &str) -> Account {
+        let db = dir.path().join("wallet.sqlite");
         Client::init_readonly(
             rpc_url,
             StorageHandle::from(
@@ -687,8 +675,9 @@ mod register_public_keys_tests {
     #[tokio::test]
     async fn a_registry_for_another_kdf_domain_is_refused() {
         let rpc = registry_rpc("other-domain").await;
+        let dir = tempfile::tempdir().expect("temp dir");
 
-        let err = account(&rpc.uri(), "tests")
+        let err = account(&dir, &rpc.uri(), "tests")
             .register_public_keys()
             .await
             .expect_err("another domain's registry must be refused");
@@ -706,8 +695,9 @@ mod register_public_keys_tests {
     #[tokio::test]
     async fn the_kdf_domain_check_ignores_surrounding_whitespace() {
         let rpc = registry_rpc("tests").await;
+        let dir = tempfile::tempdir().expect("temp dir");
 
-        let err = account(&rpc.uri(), " tests ")
+        let err = account(&dir, &rpc.uri(), " tests ")
             .register_public_keys()
             .await
             .expect_err("no keys are stored");

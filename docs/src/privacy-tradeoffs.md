@@ -12,10 +12,10 @@ As a consequence, on-chain observers can correlate:
 
 ## 2. Public Key Registry Opt-In Trade-off
 
-The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's public Stellar `Address` to their X25519 `encryption_key` and BN254 `note_key`.
+The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's public Stellar `Address` to their BN254 `note_key` and their X25519 encryption key. The event's `encryption_key` carries that key in its Edwards (Ed25519) encoding; clients convert it to the Montgomery (X25519) form before encrypting to it.
 
 * **Purpose**: Allows senders to resolve a recipient's keys on-chain without out-of-band communication.
-* **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band.
+* **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band. Registration is permanent: the keys registered for an address can't be changed or removed.
 * **Blocklist Lookups**: Before each transaction in a blocklist pool, the client asks the RPC for its note key's blocklist path. The request doesn't carry the user's address, but an RPC that also relays the transaction can link the two by timing or IP.
 
 ## 3. Event Privacy Classification Summary
@@ -27,7 +27,7 @@ The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's 
 | `LeafAddedEvent` | `asp-membership` | `[Symbol("LeafAdded")]` | `leaf: U256`, `index: u64`, `root: U256` | **Public Protocol Data**: Blinded membership commitment `poseidon2_hash2(note_pubkey, blinding, 1)`. |
 | `LeafInsertedEvent` | `asp-non-membership` | `[Symbol("LeafInserted")]` | `key: U256`, `value: U256`, `root: U256` | **Transparency Property / Correlatable**: In ASP blocklist management, `key` is the unblinded note public key. Public blocklist key transparency allows users to verify non-membership. |
 | `LeafDeletedEvent` | `asp-non-membership` | `[Symbol("LeafDeleted")]` | `key: U256`, `root: U256` | **Transparency Property**: Key removed from blocklist. |
-| `PublicKeyEvent` | `public-key-registry` | `[Symbol("PublicKeyEvent"), owner: Address]` | `encryption_key: Bytes`, `note_key: Bytes` | **Opt-In Public Directory**: Binds public Stellar address to note/encryption public keys for recipient discovery. |
+| `PublicKeyEvent` | `public-key-registry` | `[Symbol("PublicKeyEvent"), owner: Address]` | `encryption_key: Bytes` (Edwards encoding), `note_key: Bytes` | **Opt-In Public Directory**: Binds public Stellar address to note/encryption public keys for recipient discovery. |
 
 ## 4. Unchecked Note Ciphertexts
 
