@@ -1,7 +1,7 @@
 //! Compose and submit one explicit 2-input / 2-output pool
 //! transaction.
 
-use std::{collections::HashSet, str::FromStr};
+use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -157,18 +157,12 @@ fn validate_shape(args: &TransactArgs) -> Result<()> {
 }
 
 fn parse_inputs(raw: &[String]) -> Result<Vec<Field>> {
-    let mut parsed = Vec::with_capacity(raw.len());
-    let mut unique = HashSet::with_capacity(raw.len());
-    for commitment in raw {
-        let field = Field::from_str(commitment)
-            .with_context(|| format!("invalid input commitment: {commitment}"))?;
-        let canonical = field.to_string();
-        if !unique.insert(canonical) {
-            bail!("input commitment is repeated: {commitment}");
-        }
-        parsed.push(field);
-    }
-    Ok(parsed)
+    raw.iter()
+        .map(|commitment| {
+            Field::from_str(commitment)
+                .with_context(|| format!("invalid input commitment: {commitment}"))
+        })
+        .collect()
 }
 
 fn parse_optional_amount(raw: Option<&str>, label: &str, decimals: u32) -> Result<NoteAmount> {
@@ -201,14 +195,27 @@ fn validate_activity(inputs: &[Field], deposit: NoteAmount) -> Result<()> {
 
 fn selected_input_total(inputs: &[Field], notes: &[UserNoteSummary]) -> Result<NoteAmount> {
     let mut total = NoteAmount::ZERO;
-    for commitment in inputs {
-        let note = notes
+    for (index, commitment) in inputs.iter().enumerate() {
+        let copy = inputs
             .iter()
-            .find(|note| note.id == *commitment)
-            .ok_or_else(|| anyhow::anyhow!("input note {commitment} is not owned in this pool"))?;
-        if note.spent {
-            bail!("input note {commitment} has already been spent");
-        }
+            .take(index)
+            .filter(|earlier| *earlier == commitment)
+            .count();
+        let Some(note) = notes
+            .iter()
+            .filter(|note| note.id == *commitment && !note.spent)
+            .nth(copy)
+        else {
+            if copy > 0 {
+                bail!(
+                    "input note {commitment} is listed twice, but only one unspent note with that commitment is owned in this pool"
+                );
+            }
+            if notes.iter().any(|note| note.id == *commitment) {
+                bail!("input note {commitment} has already been spent");
+            }
+            bail!("input note {commitment} is not owned in this pool");
+        };
         total = total
             .checked_add(note.amount)
             .ok_or_else(|| anyhow::anyhow!("input amount total overflow"))?;
@@ -303,4 +310,39 @@ fn external_amount(deposit: NoteAmount, withdraw: NoteAmount) -> Result<ExtAmoun
         return Ok(ExtAmount::from(amount));
     }
     Ok(ExtAmount::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_total_takes_each_unspent_copy_once() -> Result<()> {
+        let c = Field::ONE;
+        let notes =
+            [(0, true), (1, false), (2, false)].map(|(leaf_index, spent)| UserNoteSummary {
+                id: c,
+                pool_contract_id: "pool".into(),
+                amount: NoteAmount::from(5u128),
+                leaf_index,
+                created_at_ledger: 1,
+                spent,
+                gvk_ciphertext: None,
+            });
+        let s = c.to_string();
+
+        assert_eq!(parse_inputs(&[s.clone(), s])?, [c, c]);
+        assert_eq!(selected_input_total(&[c], &notes)?, NoteAmount::from(5u128));
+        assert_eq!(
+            selected_input_total(&[c, c], &notes)?,
+            NoteAmount::from(10u128)
+        );
+        let err = selected_input_total(&[c, c], &notes[..2]).expect_err("one unspent copy");
+        assert!(err.to_string().contains("is listed twice"));
+        let err = selected_input_total(&[c, c], &notes[..1]).expect_err("only the spent copy");
+        assert!(err.to_string().contains("has already been spent"));
+        let err = selected_input_total(&[c, Field::ZERO], &notes).expect_err("not in the wallet");
+        assert!(err.to_string().contains("is not owned in this pool"));
+        Ok(())
+    }
 }

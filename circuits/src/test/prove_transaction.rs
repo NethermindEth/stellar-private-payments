@@ -100,6 +100,41 @@ mod tests {
         prove_transaction_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64), LEVELS)
     }
 
+    /// Two notes with one amount, key, and blinding sit at two leaves. Their
+    /// nullifiers differ, so one transaction spends both.
+    #[test]
+    #[ignore]
+    fn test_tx_2in_same_commitment() -> Result<()> {
+        let (wasm, r1cs) = load_artifacts("transaction2")?;
+
+        let copy = |leaf_index| InputNote {
+            leaf_index,
+            priv_key: Scalar::from(201u64),
+            blinding: Scalar::from(301u64),
+            amount: Scalar::from(9u64),
+        };
+
+        let case = TxCase::new(
+            vec![copy(5), copy(13)],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(701u64),
+                    blinding: Scalar::from(801u64),
+                    amount: Scalar::from(18u64),
+                }, // real
+                OutputNote {
+                    pub_key: Scalar::from(702u64),
+                    blinding: Scalar::from(802u64),
+                    amount: Scalar::from(0u64),
+                }, // dummy
+            ],
+        );
+
+        let leaves = prepopulated_leaves(LEVELS, 0xFACEu64, &[5, 13], 24);
+
+        prove_transaction_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64), LEVELS)
+    }
+
     #[test]
     #[ignore]
     fn test_tx_1in_2out_split() -> Result<()> {
