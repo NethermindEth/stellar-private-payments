@@ -201,15 +201,14 @@ contracts() {
   # A push that bumps the version selects it.
   contracts changed "$first"
   diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
-  # After a fix to release tooling alone, a push selects nothing and a retry selects the version.
-  echo '# fix' > "$contracts_repo/scripts/build-contracts.sh"
-  commit_all 'fix the contracts build' >/dev/null
+  # A later push selects nothing, and a pull request selects the version anyway, even when the
+  # push adds version lines to tables before and after it.
+  printf '[package]\nversion = "9.9.9"\n%s\n[workspace.dependencies.foo]\nversion = "1.0"\n' \
+    "$(cat "$contracts_repo/Cargo.toml")" > "$contracts_repo/Cargo.toml"
+  commit_all 'add versions to other tables' >/dev/null
   contracts changed "$bump"
   test ! -s "$GITHUB_OUTPUT"
-  # A pull request selects the version whether or not it changed.
   contracts all
-  diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
-  contracts retry
   diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
   # A push whose before commit is missing fails.
   if contracts changed 0000000000000000000000000000000000000000 2>/dev/null; then
@@ -217,16 +216,5 @@ contracts() {
     exit 1
   fi
   test ! -s "$GITHUB_OUTPUT"
-  # A retry after any other change fails and names the bump, even when the change adds a
-  # version line to another table.
-  printf '[workspace.dependencies.foo]\nversion = "1.0"\n' >> "$contracts_repo/Cargo.toml"
-  commit_all 'add a dependency' >/dev/null
-  if contracts retry 2>"$fixture/err"; then
-    echo 'Expected a retry after a source change to fail' >&2
-    exit 1
-  fi
-  test ! -s "$GITHUB_OUTPUT"
-  grep -qF "Cargo.toml changed since commit $bump set contracts version 0.2.0" "$fixture/err" \
-    || { cat "$fixture/err" >&2; exit 1; }
 )
 echo 'Release planning, recovery, and asset completeness checks passed'

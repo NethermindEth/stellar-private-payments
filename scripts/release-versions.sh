@@ -6,9 +6,8 @@
 #   retry PKG — select a current, already-tagged version after orchestration-only fixes
 #   tag       — push sdk-v* / npm-v* / cli-v* for bumped versions; sets publish_* outputs
 #   published — exit 0 if VERSION is already on the registry (crates.io / npm / GitHub)
-#   contracts — emit publish_contracts for the contracts version: always (all, for PRs), when a
-#               push since BEFORE bumped it (changed BEFORE), or when only contracts release
-#               tooling changed since the commit that set it (retry)
+#   contracts — emit publish_contracts for the contracts version: always (all, for PRs), or
+#               when a push since BEFORE bumped it (changed BEFORE)
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -161,7 +160,7 @@ cmd_contracts() {
     changed)
       before="${2:-}"
       if ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-        echo "error: cannot tell whether this push changed the contracts version: the commit before it, $before, is not in the history. To release contracts-v$version, run this workflow by hand from main" >&2
+        echo "error: cannot tell whether this push changed the contracts version: the commit before it, $before, is not in the history. To release, bump the contracts version again" >&2
         exit 1
       fi
       if [ "$(contracts_version_at "$before")" = "$version" ]; then
@@ -169,32 +168,7 @@ cmd_contracts() {
         return 0
       fi
       ;;
-    retry)
-      # Newest first, so the first commit whose parent has another version set this one.
-      bump=""
-      for commit in $(git log --first-parent --format=%H -- Cargo.toml); do
-        if [ "$(contracts_version_at "$commit^")" != "$version" ]; then
-          bump="$commit"
-          break
-        fi
-      done
-      if [ -z "$bump" ]; then
-        echo "error: cannot find the commit that set contracts version $version; bump the contracts version to release" >&2
-        exit 1
-      fi
-      # Only contracts release tooling may differ from the commit that set the version.
-      changed="$(git diff --name-only "$bump" HEAD -- . \
-        ':(exclude).github/workflows/contracts-release.yml' \
-        ':(exclude)scripts/build-contracts.sh' \
-        ':(exclude)scripts/test-build-contracts.sh' \
-        ':(exclude)scripts/release-versions.sh' \
-        ':(exclude)scripts/test-release-versions.sh' | paste -s -d ' ' -)"
-      if [ -n "$changed" ]; then
-        echo "error: $changed changed since commit $bump set contracts version $version; bump the contracts version to release them" >&2
-        exit 1
-      fi
-      ;;
-    *) echo "usage: $0 contracts all | contracts changed BEFORE | contracts retry" >&2; exit 2 ;;
+    *) echo "usage: $0 contracts all | contracts changed BEFORE" >&2; exit 2 ;;
   esac
   echo "publish_contracts=${version}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
 }
@@ -314,7 +288,7 @@ case "$cmd" in
   published) cmd_published "$2" "$3" ;;
   contracts) cmd_contracts "${2:-}" "${3:-}" ;;
   *)
-    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli|contracts VERSION | contracts all|changed BEFORE|retry" >&2
+    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli|contracts VERSION | contracts all|changed BEFORE" >&2
     exit 2
     ;;
 esac
