@@ -206,6 +206,9 @@ contracts() {
   commit_all 'fix the contracts build' >/dev/null
   contracts changed "$bump"
   test ! -s "$GITHUB_OUTPUT"
+  # A pull request selects the version whether or not it changed.
+  contracts all
+  diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
   contracts retry
   diff -u <(printf 'publish_contracts=0.2.0\n') "$GITHUB_OUTPUT"
   # A push whose before commit is missing fails.

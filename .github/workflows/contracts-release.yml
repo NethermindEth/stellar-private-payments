@@ -1,26 +1,52 @@
 name: Contracts Release
 
 on:
+  # A dry run: tests, plans, builds, and rebuilds, but attests and publishes nothing.
+  pull_request:
+    branches: ["main"]
   push:
     branches: ["main"]
     paths: ["Cargo.toml"]
   workflow_dispatch:
 
-# Keyed on the commit: GitHub drops a pending run when a newer one queues in its group, which
-# would lose a version bump queued behind a running release.
+# A push is keyed on its commit: GitHub drops a pending run when a newer one queues in its group,
+# which would lose a version bump queued behind a running release.
 concurrency:
-  group: "${{ github.workflow }}-${{ github.sha }}"
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  checks:
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Check that each vk-* feature embeds its own key file
+        run: bash scripts/test-verifier-features.sh
+
+      - name: Test build-contracts.sh's refusals
+        run: bash scripts/test-build-contracts.sh
+
   plan:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - name: Refuse a ref other than main
+        if: github.event_name != 'pull_request'
         run: |
           [ "$GITHUB_REF" = refs/heads/main ] \
             || { echo "::error::contracts releases run only on refs/heads/main, not $GITHUB_REF; run this workflow from main"; exit 1; }
@@ -36,7 +62,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+          if [ "$EVENT_NAME" = pull_request ]; then
+            sh scripts/release-versions.sh contracts all
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
             sh scripts/release-versions.sh contracts retry
           else
             sh scripts/release-versions.sh contracts changed "$BEFORE"
@@ -46,9 +74,11 @@ jobs:
         id: plan
         if: steps.version.outputs.publish_contracts != ''
         env:
+          EVENT_NAME: ${{ github.event_name }}
           VERSION: ${{ steps.version.outputs.publish_contracts }}
         run: |
-          if sh scripts/release-versions.sh published contracts "$VERSION"; then
+          if [ "$EVENT_NAME" != pull_request ] \
+            && sh scripts/release-versions.sh published contracts "$VERSION"; then
             echo "contracts-v$VERSION is already published with every file its SHA256SUMS lists"
           else
             echo "tag=contracts-v$VERSION" >> "$GITHUB_OUTPUT"
@@ -115,6 +145,7 @@ jobs:
 
   attest:
     needs: [build, rebuild]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -136,6 +167,7 @@ jobs:
 
   publish:
     needs: [plan, build, attest]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write

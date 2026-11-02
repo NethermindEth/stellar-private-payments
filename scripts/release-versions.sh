@@ -6,9 +6,9 @@
 #   retry PKG — select a current, already-tagged version after orchestration-only fixes
 #   tag       — push sdk-v* / npm-v* / cli-v* for bumped versions; sets publish_* outputs
 #   published — exit 0 if VERSION is already on the registry (crates.io / npm / GitHub)
-#   contracts — emit publish_contracts when a push since BEFORE bumped the contracts version
-#               (changed BEFORE), or when only contracts release tooling changed since the
-#               commit that set it (retry)
+#   contracts — emit publish_contracts for the contracts version: always (all, for PRs), when a
+#               push since BEFORE bumped it (changed BEFORE), or when only contracts release
+#               tooling changed since the commit that set it (retry)
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -157,6 +157,7 @@ cmd_contracts() {
     exit 1
   }
   case "$mode" in
+    all) ;;
     changed)
       before="${2:-}"
       if ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
@@ -193,7 +194,7 @@ cmd_contracts() {
         exit 1
       fi
       ;;
-    *) echo "usage: $0 contracts changed BEFORE | contracts retry" >&2; exit 2 ;;
+    *) echo "usage: $0 contracts all | contracts changed BEFORE | contracts retry" >&2; exit 2 ;;
   esac
   echo "publish_contracts=${version}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
 }
@@ -313,7 +314,7 @@ case "$cmd" in
   published) cmd_published "$2" "$3" ;;
   contracts) cmd_contracts "${2:-}" "${3:-}" ;;
   *)
-    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli|contracts VERSION | contracts changed BEFORE|retry" >&2
+    echo "usage: $0 check | plan all|changed | retry sdk|npm|cli | tag | published sdk|npm|cli|contracts VERSION | contracts all|changed BEFORE|retry" >&2
     exit 2
     ;;
 esac
