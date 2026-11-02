@@ -87,6 +87,7 @@ sqlite-wasm-vfs = { version = "0.3.0", default-features = false, features = ["sa
 sqlite3mc-src = { version = "=205.1.0", default-features = false }
 stellar-xdr = { version = "28.0.0", default-features = false, features = ["serde", "base64", "std", "alloc"] }
 taceo-poseidon2 = { version = "0.3", default-features = false, features = ["bn254", "t2", "t3", "t4"] }
+tempfile = { version = "3", default-features = false, features = ["getrandom"] }
 thiserror = { version = "2", default-features = false }
 time = { version = "0.3.55", default-features = false, features = ["formatting", "std"] }
 tokio = { version = "1.53.3", default-features = false }
