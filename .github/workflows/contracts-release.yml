@@ -19,7 +19,8 @@ permissions:
 
 jobs:
   checks:
-    if: github.event_name == 'pull_request'
+    needs: plan
+    if: needs.plan.outputs.tag != ''
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -135,7 +136,7 @@ jobs:
         run: scripts/build-contracts.sh --rebuild "$RUNNER_TEMP/contracts"
 
   attest:
-    needs: [build, rebuild]
+    needs: [checks, build, rebuild]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
