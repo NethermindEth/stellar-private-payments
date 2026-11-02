@@ -1564,13 +1564,11 @@ fn transact_bounds_withdrawals_to_i128() {
 
     let r = bn256_modulus(&env);
     let cases = [
-        // `i128::MIN`, refused by `i256_to_i128_nonneg` before proof verification.
         (
             I256::from_i128(&env, i128::MIN),
             r.sub(&U256::from_parts(&env, 0, 0, 0x8000_0000_0000_0000, 0)),
             Error::WrongExtAmount,
         ),
-        // `-i128::MAX`, which passes both bounds and reaches the verifier.
         (
             I256::from_i128(&env, -i128::MAX),
             r.sub(&U256::from_u128(&env, i128::MAX as u128)),
