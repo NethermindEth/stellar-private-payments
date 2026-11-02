@@ -171,6 +171,14 @@ pub(crate) fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
     }
 }
 
+pub(crate) fn scval_to_i128(val: &xdr::ScVal) -> Result<i128, Error> {
+    if let xdr::ScVal::I128(parts) = val {
+        Ok(i128::from(parts))
+    } else {
+        Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
 pub(crate) fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     if let xdr::ScVal::Bool(n) = val {
         Ok(*n)
