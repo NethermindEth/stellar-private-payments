@@ -850,6 +850,7 @@ mod registration_tests {
         let env = Env::default();
         let registry = Address::generate(&env);
         let note_key = NotePublicKey([0x11; 32]);
+        let note_key = NotePublicKey(std::array::from_fn(|i| (i + 1) as u8));
         let encryption_key = encryption_edwards_key(&derived_encryption_keys()[0].private);
         let account = public_key_registry::Account {
             owner: Address::from_str(&env, OWNER),

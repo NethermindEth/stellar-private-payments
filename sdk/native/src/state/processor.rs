@@ -232,6 +232,7 @@ mod tests {
             Ok(xdr::ScVal::Bytes(xdr::ScBytes(b.try_into()?)))
         };
         let note_key = [owner_seed; 32];
+        let note_key: [u8; 32] = std::array::from_fn(|i| (i + 1) as u8);
         let mut entries = vec![
             xdr::ScMapEntry {
                 key: symbol("encryption_key")?,
