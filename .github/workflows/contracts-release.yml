@@ -78,7 +78,7 @@ jobs:
   build:
     needs: plan
     if: needs.plan.outputs.tag != ''
-    timeout-minutes: 90
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     outputs:
       files: ${{ steps.files.outputs.files }}
@@ -108,7 +108,7 @@ jobs:
 
   rebuild:
     needs: build
-    timeout-minutes: 90
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
