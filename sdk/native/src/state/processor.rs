@@ -208,6 +208,26 @@ mod tests {
         encryption_key: [u8; 32],
         signer_seed: Option<u8>,
     ) -> Result<ContractEvent> {
+        registration_signed_over(
+            id,
+            registry,
+            registry,
+            owner_seed,
+            encryption_key,
+            signer_seed,
+        )
+    }
+
+    /// Like [`registration_with_signature`], but the signature covers a
+    /// message for `signed_registry` rather than the event's own contract.
+    fn registration_signed_over(
+        id: &str,
+        registry: &str,
+        signed_registry: &str,
+        owner_seed: u8,
+        encryption_key: [u8; 32],
+        signer_seed: Option<u8>,
+    ) -> Result<ContractEvent> {
         let bytes = |b: Vec<u8>| -> Result<xdr::ScVal> {
             Ok(xdr::ScVal::Bytes(xdr::ScBytes(b.try_into()?)))
         };
@@ -225,7 +245,7 @@ mod tests {
         if let Some(signer_seed) = signer_seed {
             let owner_address = crate::chain::scval_to_address_string(&owner(owner_seed))?;
             let message = registration_message(
-                registry,
+                signed_registry,
                 &owner_address,
                 &NotePublicKey(note_key),
                 &encryption_key,
@@ -385,6 +405,23 @@ mod tests {
             7,
             edwards_key(1),
             Some(8),
+        )?])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_registration_signed_for_another_registry_is_not_stored() -> Result<()> {
+        let mut storage = storage_with(vec![registration_signed_over(
+            "0000000000000000001-0000000000",
+            REGISTRY,
+            OLD_REGISTRY,
+            7,
+            edwards_key(1),
+            Some(7),
         )?])?;
 
         assert!(process_events(&mut storage, 10)?);

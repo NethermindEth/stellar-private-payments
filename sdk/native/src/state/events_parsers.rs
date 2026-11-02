@@ -5,10 +5,11 @@ use crate::{
         scval_to_optional_global_view_key_ciphertext, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     types::{
-        ContractEvent, EncryptionPublicKey, Field, LeafAddedEvent, LeafDeletedEvent,
-        LeafInsertedEvent, LeafUpdatedEvent, NewCommitmentEvent, NewNullifierEvent, ProcessedEvent,
-        PublicKeyEvent,
+        ContractEvent, EncryptionPublicKey, Field, KeyDerivationSignature, LeafAddedEvent,
+        LeafDeletedEvent, LeafInsertedEvent, LeafUpdatedEvent, NewCommitmentEvent,
+        NewNullifierEvent, ProcessedEvent, PublicKeyEvent,
     },
+    zk::encryption::{registration_message, verify_owner_signature},
 };
 use anyhow::{Result, anyhow};
 use ed25519_dalek::VerifyingKey;
@@ -156,13 +157,19 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //     pub encryption_key: Bytes,
 //     /// BN254 note public key
 //     pub note_key: Bytes,
+//     /// SEP-53 signature by the owner over the registration message
+//     pub owner_signature: BytesN<64>,
 // }
 //
-// The encryption key is stored in its X25519 form. A key that is not a curve
-// point skips the event, since a parse error stops all later processing.
+// An event is indexed only after its owner signature verifies over the
+// registration message built from the emitting contract, the owner and both
+// keys, so a lying RPC or bootnode cannot substitute keys. The encryption key
+// is stored in its X25519 form. A key that is not a curve point skips the
+// event, since a parse error stops all later processing.
 fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKeyEvent>> {
     let ParsedContractEvent {
         id,
+        contract_id,
         name,
         topics,
         values,
@@ -182,6 +189,29 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKe
         .get("note_key")
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have an note_key value"))?;
     let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
+    let Some(owner_signature_scval) = values.get("owner_signature") else {
+        tracing::warn!(%id, "skipping a registration without an owner signature");
+        return Ok(None);
+    };
+    let Ok(signature_bytes) = scval_to_bytes(owner_signature_scval) else {
+        tracing::warn!(%id, "skipping a registration whose owner signature is not bytes");
+        return Ok(None);
+    };
+    let Ok(owner_signature) = <[u8; 64]>::try_from(signature_bytes) else {
+        tracing::warn!(%id, "skipping a registration whose owner signature is not 64 bytes");
+        return Ok(None);
+    };
+    let message = registration_message(&contract_id, &owner, &note_key, &edwards);
+    if verify_owner_signature(
+        &owner,
+        &message,
+        &KeyDerivationSignature(owner_signature.to_vec()),
+    )
+    .is_err()
+    {
+        tracing::warn!(%id, "skipping a registration whose owner signature is invalid");
+        return Ok(None);
+    }
     let Ok(encryption_key) = VerifyingKey::from_bytes(&edwards) else {
         tracing::warn!(%id, "skipping a registration whose encryption key is not a curve point");
         return Ok(None);

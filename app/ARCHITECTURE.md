@@ -215,7 +215,7 @@ The requested transaction signer must match the note owner when keys are missing
 
 ## Public key registry
 
-Registered note + encryption public keys on-chain enable private transfers to `G...` addresses. `Client.recipientLookup` / `PrivatePool.transfer` resolve recipients through the local registry index (backed by synced contract events).
+Registered note + encryption public keys on-chain enable private transfers to `G...` addresses. `Client.recipientLookup` / `PrivatePool.transfer` resolve recipients through the local registry index (backed by synced contract events). Each event carries the owner's SEP-53 signature over the registration message, and the index only stores events whose signature verifies, so a lying RPC or bootnode cannot substitute a recipient's keys.
 
 ## Recovery scenarios
 
