@@ -152,6 +152,7 @@ jobs:
           name: contracts
           path: ${{ runner.temp }}/contracts
 
+      # Makes SLSA build provenance; attest-build-provenance v4 is a wrapper around this action.
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/contracts/${{ matrix.file }}
