@@ -179,6 +179,8 @@ impl LocalNetwork {
             .args(["--deployer", &deployer_secret])
             .args(["--asp-levels", &asp_levels.to_string()])
             .args(["--pool-levels", &pool_levels.to_string()])
+            .args(["--fee", "0"])
+            .args(["--min-deposit", "0"])
             .args(["--max-deposit", &max_deposit.to_string()])
             .args(["--kdf-domain", KDF_DOMAIN])
             .current_dir(&root);

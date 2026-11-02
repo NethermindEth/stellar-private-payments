@@ -41,3 +41,13 @@ pub struct AspNonMembershipUpdated {
     /// The blocklist the pool reads after the change.
     pub new_tree: Address,
 }
+
+/// The event a pool publishes each time the admin claims collected fees.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeesClaimed {
+    /// The address the fees were paid to.
+    pub to: Address,
+    /// The amount paid, in the token's smallest unit.
+    pub amount: i128,
+}
