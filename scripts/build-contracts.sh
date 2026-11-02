@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build every contract from a source archive of this checkout in a pinned build image, or rebuild
 # a directory this script wrote and compare every hash.
-# Usage: scripts/build-contracts.sh --out DIR [--tag TAG] [--repo OWNER/REPO]
+# Usage: scripts/build-contracts.sh --out DIR [--tag TAG --repo OWNER/REPO]
 #        scripts/build-contracts.sh --rebuild DIR
 
 set -euo pipefail
@@ -14,50 +14,27 @@ step() { echo "==> $*" >&2; }
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/build-contracts.sh --out DIR [--tag TAG] [--repo OWNER/REPO]
+Usage: scripts/build-contracts.sh --out DIR [--tag TAG --repo OWNER/REPO]
        scripts/build-contracts.sh --rebuild DIR
 
-Archives this checkout with `stellar contract build archive`, builds every contract
-from that archive in the pinned build image, and writes to DIR:
+--out archives this checkout with `stellar contract build archive`, builds every
+contract, plus one verifier per policy_tx_2_2*_vk.json or keyOwnership_vk.json file
+in deployments/<network>/circuit_keys, from that archive in the pinned build image,
+and writes the Wasm files, the archive, contracts.json, and SHA256SUMS to DIR. Each
+Wasm records its SEP-58 build meta. The archive step refuses uncommitted changes and
+untracked files, even files listed only in .git/info/exclude, so build such a
+checkout from a fresh clone of it or from a worktree made with `git worktree add`.
 
-  asp_membership.wasm, asp_non_membership.wasm, public_key_registry.wasm,
-  pool.wasm, pool_gvk.wasm
-  circom_groth16_verifier_<network>_<key name>.wasm
-                        one per key file (policy_tx_2_2*_vk.json or
-                        keyOwnership_vk.json) in deployments/<network>/circuit_keys,
-                        with "none" as the key name of policy_tx_2_2_vk.json
-  contracts-source.tar.gz
-                        the source archive
-  contracts.json        what each Wasm is, its SHA-256, and its meta
-  SHA256SUMS            the SHA-256 of every other file in DIR
+--rebuild checks a directory --out wrote. Before building anything, it refuses
+extra, missing, or altered files, a build image, build flag, or meta key it does not
+allow, a Wasm whose own meta differs from its meta in contracts.json, a verifier that
+does not match its key file, and an archive entry that is a link or sits outside one
+top-level directory. It then rebuilds every Wasm, prints "ok FILE" or "MISMATCH
+FILE" for each, and exits 1 on any mismatch. A pass shows that the files rebuild
+from their own source, not who built them.
 
-Each Wasm records its build image, build flags, and source archive hash as SEP-58
-meta, so anyone can rebuild it and compare hashes.
-
-The archive step refuses a checkout with uncommitted changes or untracked files,
-even files listed only in .git/info/exclude. To build such a checkout, build from
-a fresh clone of it or from a worktree made with `git worktree add`.
-
-With --rebuild, checks a directory this script wrote the way an outside SEP-58
-rebuild would. Before the first build it refuses the directory unless:
-
-  - it holds only contracts.json, SHA256SUMS, the source archive, and one Wasm
-    per contract and key file in the archive
-  - every file matches SHA256SUMS and contracts.json
-  - every meta key is one this script writes, and every build image and build
-    flag in the meta is one it allows
-  - the source archive holds only regular files and directories under one
-    top-level directory
-  - each verifier's vk_sha256 and --features entry match its key file in the
-    archive
-  - each Wasm's own meta equals its meta in contracts.json
-
-It then rebuilds every Wasm, prints "ok FILE" or "MISMATCH FILE" for each, and
-exits 1 on any mismatch. A pass shows that the files rebuild from their own
-source. It does not show who built them.
-
-Needs git, the Stellar CLI 28.1.0 or later, docker, jq, tar, and sha256sum or shasum.
---rebuild needs only docker, jq, tar, and sha256sum or shasum.
+Needs docker, jq, tar, and sha256sum or shasum. --out also needs git and the Stellar
+CLI 28.1.0 or later.
 
 Options:
   --out DIR             Output directory: new or empty, and outside the checkout
