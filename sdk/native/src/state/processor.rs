@@ -62,9 +62,10 @@ mod tests {
     use super::*;
     use crate::{
         state::test_events::{b64, commitment_entries, commitment_event, raw_event, symbol, u256},
-        types::{ContractEvent, ContractsEventData, EncryptionPrivateKey},
-        zk::encryption::encryption_edwards_key,
+        types::{ContractEvent, ContractsEventData, EncryptionPrivateKey, NotePublicKey},
+        zk::encryption::{encryption_edwards_key, registration_digest, registration_message},
     };
+    use ed25519_dalek::Signer;
     use stellar_xdr as xdr;
 
     const COMMITMENT: u64 = 99;
@@ -160,9 +161,15 @@ mod tests {
         Ok(())
     }
 
+    fn signing_key(seed: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+    }
+
     fn owner(seed: u8) -> xdr::ScVal {
         xdr::ScVal::Address(xdr::ScAddress::Account(xdr::AccountId(
-            xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([seed; 32])),
+            xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(
+                signing_key(seed).verifying_key().to_bytes(),
+            )),
         )))
     }
 
@@ -188,19 +195,49 @@ mod tests {
         owner_seed: u8,
         encryption_key: [u8; 32],
     ) -> Result<ContractEvent> {
+        registration_with_signature(id, registry, owner_seed, encryption_key, Some(owner_seed))
+    }
+
+    /// A registration event whose `owner_signature` is made by `signer_seed`
+    /// (`None` omits the signature entirely), over the registration message
+    /// for `owner_seed`.
+    fn registration_with_signature(
+        id: &str,
+        registry: &str,
+        owner_seed: u8,
+        encryption_key: [u8; 32],
+        signer_seed: Option<u8>,
+    ) -> Result<ContractEvent> {
         let bytes = |b: Vec<u8>| -> Result<xdr::ScVal> {
             Ok(xdr::ScVal::Bytes(xdr::ScBytes(b.try_into()?)))
         };
-        let entries = vec![
+        let note_key = [owner_seed; 32];
+        let mut entries = vec![
             xdr::ScMapEntry {
                 key: symbol("encryption_key")?,
                 val: bytes(encryption_key.to_vec())?,
             },
             xdr::ScMapEntry {
                 key: symbol("note_key")?,
-                val: bytes(vec![owner_seed; 32])?,
+                val: bytes(note_key.to_vec())?,
             },
         ];
+        if let Some(signer_seed) = signer_seed {
+            let owner_address = crate::chain::scval_to_address_string(&owner(owner_seed))?;
+            let message = registration_message(
+                registry,
+                &owner_address,
+                &NotePublicKey(note_key),
+                &encryption_key,
+            );
+            let signature = signing_key(signer_seed)
+                .sign(&registration_digest(&message))
+                .to_bytes();
+            entries.push(xdr::ScMapEntry {
+                key: symbol("owner_signature")?,
+                val: bytes(signature.to_vec())?,
+            });
+        }
         Ok(ContractEvent {
             contract_id: registry.to_string(),
             ..raw_event(
@@ -306,6 +343,53 @@ mod tests {
             registered_key(&storage, OLD_REGISTRY, 8)?,
             Some(x25519_key(3))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_registration_with_a_valid_owner_signature_is_stored() -> Result<()> {
+        let mut storage = storage_with(vec![registration(
+            "0000000000000000001-0000000000",
+            REGISTRY,
+            7,
+            edwards_key(1),
+        )?])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(1)));
+        Ok(())
+    }
+
+    #[test]
+    fn a_registration_without_an_owner_signature_is_not_stored() -> Result<()> {
+        let mut storage = storage_with(vec![registration_with_signature(
+            "0000000000000000001-0000000000",
+            REGISTRY,
+            7,
+            edwards_key(1),
+            None,
+        )?])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_registration_signed_by_another_key_is_not_stored() -> Result<()> {
+        let mut storage = storage_with(vec![registration_with_signature(
+            "0000000000000000001-0000000000",
+            REGISTRY,
+            7,
+            edwards_key(1),
+            Some(8),
+        )?])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
         Ok(())
     }
 }
