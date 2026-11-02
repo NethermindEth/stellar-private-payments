@@ -12,7 +12,7 @@ As a consequence, on-chain observers can correlate:
 
 ## 2. Public Key Registry Opt-In Trade-off
 
-The `PublicKeyEvent` emitted by `PublicKeyRegistry` deliberately binds a user's public Stellar `Address` to their BN254 `note_key` and their X25519 encryption key. The event's `encryption_key` carries that key in its Edwards (Ed25519) encoding; clients convert it to the Montgomery (X25519) form before encrypting to it. Each event also carries the owner's SEP-53 signature over the registration message; clients verify it before indexing, so an RPC or bootnode cannot substitute keys.
+The `PublicKeyEvent` emitted by `PublicKeyRegistry` binds a user's public Stellar `Address` to their BN254 `note_key` and their X25519 encryption key. The `encryption_key` field carries the key in its Edwards (Ed25519) encoding; clients convert it to Montgomery (X25519) before encrypting to it. The event also carries the owner's SEP-53 signature over the registration message, and clients verify that signature before indexing the event. A source that substitutes different keys cannot produce the signature, so the binding survives an untrusted RPC or bootnode.
 
 * **Purpose**: Allows senders to resolve a recipient's keys on-chain without out-of-band communication.
 * **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band. Registration is permanent: the keys registered for an address can't be changed or removed.
