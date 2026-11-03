@@ -32,6 +32,12 @@ pub const MEMBERSHIP_LEVELS: u32 = 10;
 /// Deposit cap the fixture registers the pool with.
 pub const MAXIMUM_DEPOSIT: u32 = 1_000_000;
 
+/// Fee the fixture registers the pool with.
+pub const FEE: u32 = 7;
+
+/// Minimum deposit the fixture registers the pool with.
+pub const MINIMUM_DEPOSIT: u32 = 9;
+
 pub struct Deployment {
     pub env: Env,
     pub pool: Address,
@@ -65,6 +71,8 @@ pub fn deploy() -> Deployment {
             asp_non_membership.clone(),
             wasm_hash(&asp_membership),
             wasm_hash(&asp_non_membership),
+            i128::from(FEE),
+            i128::from(MINIMUM_DEPOSIT),
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,

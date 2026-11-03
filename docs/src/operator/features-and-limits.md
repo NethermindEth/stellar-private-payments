@@ -18,9 +18,10 @@ from the one that owns their notes.
 
 ## Admin page
 
-The admin page builds every admin call. When the connected account can sign a call alone, it signs
-and sends it at once. Otherwise the call waits in the Admin Transaction card, where the admin
-account's signers review, sign, and submit it. Its tabs:
+The admin page builds every admin call except a fee claim, which goes through the Stellar CLI. When
+the connected account can sign a call alone, it signs and sends it at once. Otherwise the call waits
+in the Admin Transaction card, where the admin account's signers review, sign, and submit it. Its
+tabs:
 
 | Tab | Purpose |
 | --- | --- |
@@ -61,6 +62,7 @@ and the
 | Limit | Value |
 | --- | --- |
 | Notes per transaction | Two spent, two created |
+| Deposit size | A deposit sends the pool fee plus what it leaves in notes, which is at least the smallest deposit and at most the maximum deposit less the pool fee. |
 | Transactions per pool | 524,288, filling its commitment tree of 2^20 commitments |
 | Allowlist members | 1,024 per allowlist |
 | Blocklist depth | 31 levels. A key that shares its lowest 31 bits with two blocked keys can't spend or deposit. |
@@ -120,6 +122,10 @@ means new circuits, keys, and pools.
 
 - Contract storage expires when unused. A call that reads an archived entry restores it and pays
   for the restore, which can cost several XLM.
+- A note worth the pool fee or less can't move any value on its own, since the fee takes all of it
+  or more. Its owner can use it only together with a second note or a deposit in the same
+  transaction, as [Pool fee and smallest deposit](../deploy.md#pool-fee-and-smallest-deposit)
+  describes. Change and small transfers create such notes.
 - Browser storage can be lost, for example to antivirus software. The user signs again to recover
   their keys, and the client rebuilds their notes from events. App settings and the record of past
   operations are lost.

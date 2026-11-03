@@ -1,4 +1,6 @@
-use super::{ContractConfig, EncryptionPublicKey, NoteOwnerAddress, NotePublicKey, SignerAddress};
+use super::{
+    ContractConfig, EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, SignerAddress,
+};
 use serde::{Deserialize, Serialize};
 
 /// Circuit bytes for lazy prover init (load via platform I/O before
@@ -102,6 +104,8 @@ impl From<&str> for TransferRecipient {
 #[serde(rename_all = "camelCase")]
 pub struct Estimate {
     pub tx_count: u32,
+    /// Pool fees the spend pays, one per transaction.
+    pub fees: NoteAmount,
 }
 
 #[derive(Debug, Clone)]

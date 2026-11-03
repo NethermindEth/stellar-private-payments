@@ -13,12 +13,13 @@
 //! can only be described in one place: the contracts.
 
 use super::deployment::{
-    LEVELS, MAXIMUM_DEPOSIT, config_for, deploy, ledger_entries_as_rpc_results, strkey,
+    FEE, LEVELS, MAXIMUM_DEPOSIT, MINIMUM_DEPOSIT, config_for, deploy,
+    ledger_entries_as_rpc_results, strkey,
 };
 use anyhow::Result;
 use stellar_private_payments::{
     chain::{Client, StateFetcher},
-    types::ExtAmount,
+    types::{ExtAmount, NoteAmount},
 };
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -75,6 +76,11 @@ async fn the_reader_parses_a_deployed_pools_own_entries() -> Result<()> {
     assert_eq!(
         info.maximum_deposit_amount,
         ExtAmount::from(i128::from(MAXIMUM_DEPOSIT))
+    );
+    assert_eq!(info.fee, NoteAmount::from(u128::from(FEE)));
+    assert_eq!(
+        info.minimum_deposit_amount,
+        NoteAmount::from(u128::from(MINIMUM_DEPOSIT))
     );
     Ok(())
 }

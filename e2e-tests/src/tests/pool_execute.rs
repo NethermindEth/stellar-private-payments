@@ -6,7 +6,10 @@
 //!
 //! [`PrivatePool`]: stellar_private_payments::PrivatePool
 
-use super::offline_pool::{BuildParams, OWNER, OfflinePool, tx_hash};
+use super::{
+    deployment::FEE,
+    offline_pool::{BuildParams, OWNER, OfflinePool, tx_hash},
+};
 use anyhow::Result;
 use serde_json::json;
 use stellar_private_payments::{
@@ -227,9 +230,16 @@ async fn a_transaction_that_failed_on_chain_fails_the_deposit() -> Result<()> {
 
 #[tokio::test]
 async fn a_plan_failing_at_its_second_step_reports_the_first_as_completed() -> Result<()> {
-    let h = OfflinePool::builder().notes(&[1, 2, 3, 5]).build().await?;
-    let amount = NoteAmount::from(10u128);
-    assert_eq!(h.pool.estimate(amount).await?.tx_count, 2);
+    let h = OfflinePool::builder()
+        .notes(&[10, 20, 30, 50])
+        .build()
+        .await?;
+    // The three largest notes take two steps, and each step pays the fee.
+    let amount = NoteAmount::from(100 - 2 * u128::from(FEE));
+    assert_eq!(
+        h.pool.estimate(amount, h.pool.fee().await?).await?.tx_count,
+        2
+    );
     h.storage
         .script_build_transact_params([BuildParams::Real, BuildParams::Fail("step two broke")]);
 

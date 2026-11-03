@@ -39,7 +39,9 @@ default.
 | `--deployer <NAME>` | Stellar identity or secret key used to deploy |
 | `--asp-levels <N>` | Merkle tree levels for asp-membership |
 | `--pool-levels <N>` | Merkle tree levels for pool |
-| `--max-deposit <N>` | Maximum deposit amount |
+| `--fee <N>` | Fee every transaction pays, in the token's smallest unit |
+| `--min-deposit <N>` | Smallest amount a deposit may leave in notes after the fee, in the token's smallest unit |
+| `--max-deposit <N>` | Most a single deposit sends, fee included, in the token's smallest unit |
 | `--kdf-domain <STRING>` | Privacy key derivation domain. Any chosen string. Shows in the message signed by users for key derivation |
 | `--policy-flags <SPEC>` | Default `<policy>` for `--pool` specs that omit one; required unless every spec includes its own |
 
@@ -94,6 +96,32 @@ cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
 generate` can also save the key into an encrypted client SDK wallet database via
 `--db PATH --storage-account <identity>`.
 
+## Pool fee and smallest deposit
+
+Every `transact` pays the pool fee: a deposit sends it on top of what it
+leaves in notes, and a transfer or withdrawal pays it from the notes it spends.
+The pool's `get_fee` returns the fee. No entry point changes the
+fee or the smallest deposit after deployment. The examples below set a fee of
+0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
+
+When you choose the values, weigh these effects:
+
+- `--min-deposit` applies to what a deposit leaves in notes after the fee.
+  Withdrawals have no minimum.
+- `--max-deposit` caps what a deposit sends, fee included, so a deposit leaves
+  at most the maximum deposit less the fee in notes. The fee plus the smallest
+  deposit must not exceed it. `deploy.sh` refuses values that break this before
+  it deploys anything, and the pool constructor refuses them with
+  `Error(Contract, #6)`.
+- A note worth the fee or less can't move any value on its own, since the fee
+  takes all of it or more. Its owner can use it only together with a second
+  note, when the two add up to more than the fee, or with a deposit. The higher
+  the fee, the more small notes, such as change, are worthless alone.
+- With a fee of 0, anyone the pool admits can add two commitments to its
+  commitment tree for the network fee alone, bringing the pool closer to a full
+  tree, after which it takes no more transactions. A fee above 0 makes each
+  such call pay it.
+
 ## Template
 
 Every option in its generic `<placeholder>` form:
@@ -104,6 +132,8 @@ deployments/scripts/deploy.sh <network> \
   --policy-flags <policy> \
   --asp-levels <n> \
   --pool-levels <n> \
+  --fee <n> \
+  --min-deposit <n> \
   --max-deposit <n> \
   --kdf-domain <string> \
   --pool <policy>:<gvk-mode>:<asset-spec> \
@@ -122,6 +152,8 @@ deployments/scripts/deploy.sh testnet \
   --policy-flags blocklist \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool native:$(stellar contract id asset --asset native --network testnet)
@@ -135,6 +167,8 @@ deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
@@ -149,11 +183,47 @@ deployments/scripts/deploy.sh testnet \
   --gvk-authority-pubkey-file ./admin-pub.json \
   --asp-levels 10 \
   --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```
+
+## Claim collected fees
+
+A pool keeps two totals: the value of its unspent notes, and the fees it has
+collected and not paid out. Its token balance is their sum, plus any tokens
+sent to it directly, which belong to neither total and no call can pay out.
+`claim_fees` pays only from the fees collected, never from the value in users'
+notes, and returns `Error(Contract, #23)` for a negative amount, an amount
+above the fees collected, or the pool itself as recipient. A claim needs the
+admin's authorization, works while deposits are paused, and publishes a
+`FeesClaimed` event. The
+[governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
+covers the recipient's trustline and how an M-of-N admin builds and signs a
+claim.
+
+A single-key admin can read a pool's collected fees and pay 0.1 XLM of them to
+itself with these commands:
+
+```bash
+NETWORK=testnet
+ADMIN_ID=deployer
+POOL=$(jq -r '.pools[0].poolContractId' "deployments/$NETWORK/deployments.json")
+stellar contract invoke --id "$POOL" --source-account "$ADMIN_ID" --network "$NETWORK" \
+  --send=no -- get_fees_total
+stellar contract invoke --id "$POOL" --source-account "$ADMIN_ID" --network "$NETWORK" \
+  -- claim_fees --to "$(stellar keys address "$ADMIN_ID")" --amount 1000000
+```
+
+Replace the following:
+
+- `testnet`: the network the deployment is on.
+- `deployer`: the `stellar keys` identity of the pool's admin.
+- `.pools[0]`: the manifest entry of the pool to claim from.
+- `1000000`: the amount to claim, in the token's smallest unit.
 
 ## Keep a deployment alive
 
