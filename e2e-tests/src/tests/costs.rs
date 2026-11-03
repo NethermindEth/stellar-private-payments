@@ -61,7 +61,7 @@ use public_key_registry::{
 };
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, IntoVal, U256, Val, Vec,
     address_payload::AddressPayload,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::{Address as _, Deployer as _, Ledger as _, storage::Persistent as _},
@@ -233,6 +233,8 @@ impl PoolFixture {
                 asp_non_membership.clone(),
                 wasm_hash(&asp_membership),
                 wasm_hash(&asp_non_membership),
+                0i128,
+                0i128,
                 U256::from_u32(&env, 1_000_000),
                 POOL_LEVELS,
                 policy_flags,
@@ -242,6 +244,11 @@ impl PoolFixture {
         let mint = StellarAssetClient::new(&env, &token);
         mint.mint(&sender, &FUNDING);
         mint.mint(&pool, &FUNDING);
+        // The minted tokens stand for the deposits that made the notes a
+        // withdrawal spends.
+        env.as_contract(&pool, || {
+            pool_core::totals::record(&env, FUNDING, 0).expect("the notes total takes the credit");
+        });
         Self {
             env,
             admin,
@@ -304,24 +311,25 @@ fn gvk_transact_row() -> Row {
         x: U256::from_u32(env, 1),
         y: U256::from_u32(env, 2),
     };
-    let pool = env.register(
-        PoolGvkContract,
-        (
-            base.admin.clone(),
-            base.token.clone(),
-            base.verifier.clone(),
-            base.asp_membership.clone(),
-            base.asp_non_membership.clone(),
-            wasm_hash(&base.asp_membership),
-            wasm_hash(&base.asp_non_membership),
-            U256::from_u32(env, 1_000_000),
-            POOL_LEVELS,
-            policy::BLOCKLIST_BIT,
-            soroban_sdk::String::from_str(env, "tests"),
-            view_key,
-            gvk::VIEW_ONLY,
-        ),
-    );
+    let args: Vec<Val> = soroban_sdk::vec![
+        env,
+        base.admin.into_val(env),
+        base.token.into_val(env),
+        base.verifier.into_val(env),
+        base.asp_membership.into_val(env),
+        base.asp_non_membership.into_val(env),
+        wasm_hash(&base.asp_membership).into_val(env),
+        wasm_hash(&base.asp_non_membership).into_val(env),
+        0i128.into_val(env),
+        0i128.into_val(env),
+        U256::from_u32(env, 1_000_000).into_val(env),
+        POOL_LEVELS.into_val(env),
+        policy::BLOCKLIST_BIT.into_val(env),
+        soroban_sdk::String::from_str(env, "tests").into_val(env),
+        view_key.into_val(env),
+        gvk::VIEW_ONLY.into_val(env),
+    ];
+    let pool = env.register(PoolGvkContract, args);
     let client = PoolGvkContractClient::new(env, &pool);
     let ext = ext_data(env, &base.sender, 0);
     let (membership_root, non_membership_root) = base.roots();
@@ -453,14 +461,14 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, blocklist, fresh tree" => 11, 4, 4444, 2, 530_841_344;
-    "pool transact, withdrawal, blocklist, fresh tree" => 14, 6, 4892, 2, 530_841_344;
-    "pool transact, transfer, root one transaction old" => 11, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 4, 4444, 2, 530_841_344;
-    "pool transact, transfer, membership root one insert old" => 14, 4, 4444, 2, 530_841_344;
+    "pool transact, deposit, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
+    "pool transact, transfer, blocklist, fresh tree" => 11, 5, 5460, 2, 530_841_344;
+    "pool transact, withdrawal, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
+    "pool transact, transfer, root one transaction old" => 11, 5, 5460, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 5, 5460, 2, 530_841_344;
+    "pool transact, transfer, membership root one insert old" => 14, 5, 5460, 2, 530_841_344;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 11, 4, 4444, 2, 530_841_344;
+    "pool-gvk transact, transfer, view-only" => 11, 5, 5636, 2, 530_841_344;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
@@ -672,7 +680,7 @@ fn a_transact_renews_its_entries_by_a_day() {
 }
 
 /// Entries and writes of a transfer whose proof the real verifier checks.
-const EXPECTED_REAL_PROOF: (u32, u32) = (14, 4);
+const EXPECTED_REAL_PROOF: (u32, u32) = (14, 5);
 
 /// The same transfer with a real Groth16 proof and the compiled verifier, so
 /// the instruction column shows what the pairing check adds.

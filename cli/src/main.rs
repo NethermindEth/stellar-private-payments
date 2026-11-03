@@ -105,7 +105,7 @@ enum Commands {
         /// Set the explorer base URL
         #[arg(long)]
         explorer_url: Option<String>,
-        /// Register public keys on-chain during onboarding
+        /// Register public keys on-chain during onboarding (permanent)
         #[arg(long)]
         register: bool,
         /// Skip public-key registration
@@ -152,7 +152,7 @@ enum Commands {
     AspSecret,
     /// Print the CLI version
     Version,
-    /// Register your public keys in the on-chain address book
+    /// Register your public keys in the on-chain address book (permanent)
     Register,
     /// Deposit public tokens into a pool
     Deposit {

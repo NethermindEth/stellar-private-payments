@@ -1,10 +1,13 @@
 //! Transfers between two wallets on a real pool contract, checking both
 //! balances afterward, plus the ways a transfer can be rejected.
 
-use anyhow::{Context, Result};
-use stellar_private_payments::types::{NoteAmount, TransferRecipient};
+use anyhow::Result;
+use stellar_private_payments::{
+    Error,
+    types::{NoteAmount, TransferRecipient},
+};
 
-use super::support::{assert_contract_error, deploy_default, session};
+use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, note_states, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
@@ -28,9 +31,7 @@ async fn transfer_via_address() -> Result<()> {
     let sender_balance = sender.pool()?.balance().await?;
     assert_eq!(
         sender_balance,
-        deposit_amount
-            .checked_sub(transfer_amount)
-            .context("transfer amount fits within deposit")?
+        NoteAmount::from(DEPOSIT_STROOPS - TRANSFER_STROOPS - FEE_STROOPS)
     );
 
     let recipient_balance = recipient.pool()?.balance().await?;
@@ -61,13 +62,58 @@ async fn transfer_via_keys() -> Result<()> {
     let sender_balance = sender.pool()?.balance().await?;
     assert_eq!(
         sender_balance,
-        deposit_amount
-            .checked_sub(transfer_amount)
-            .context("transfer amount fits within deposit")?
+        NoteAmount::from(DEPOSIT_STROOPS - TRANSFER_STROOPS - FEE_STROOPS)
     );
 
     let recipient_balance = recipient.pool()?.balance().await?;
     assert_eq!(recipient_balance, transfer_amount);
+
+    Ok(())
+}
+
+/// Declining the wallet prompt leaves the sender's note unspent and the
+/// recipient without one, so the same transfer retried right after lands
+/// (#428).
+#[tokio::test]
+async fn transfer_retry_after_wallet_rejection() -> Result<()> {
+    let deployment = deploy_default().await?;
+    let sender = session(deployment.clone()).await?;
+    let recipient = session(deployment).await?;
+    let (note_public_key, encryption_public_key) = recipient.account.privacy_keys().await?;
+    let pool = sender.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let transfer_amount = NoteAmount::from(TRANSFER_STROOPS);
+
+    pool.deposit(deposit_amount).await?;
+    let notes = note_states(&pool).await?;
+
+    sender.reject_next_transaction();
+    let rejected = pool
+        .transfer(
+            TransferRecipient::keys(note_public_key.clone(), encryption_public_key.clone()),
+            transfer_amount,
+        )
+        .await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "the transfer must fail with the wallet's rejection: {rejected:?}"
+    );
+    assert_eq!(note_states(&pool).await?, notes);
+    assert_eq!(pool.balance().await?, deposit_amount);
+    assert!(recipient.pool()?.notes().await?.is_empty());
+
+    pool.transfer(
+        TransferRecipient::keys(note_public_key, encryption_public_key),
+        transfer_amount,
+    )
+    .await?;
+
+    assert_eq!(
+        pool.balance().await?,
+        NoteAmount::from(DEPOSIT_STROOPS - TRANSFER_STROOPS - FEE_STROOPS)
+    );
+    assert_eq!(recipient.pool()?.balance().await?, transfer_amount);
 
     Ok(())
 }
@@ -85,8 +131,9 @@ async fn transfer_multi_tx() -> Result<()> {
     pool.deposit(deposit_amount).await?;
     pool.deposit(deposit_amount).await?;
 
-    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
-    let estimate = pool.estimate(total).await?;
+    // Three notes take two steps, and each step pays the fee.
+    let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
+    let estimate = pool.estimate(total, pool.fee().await?).await?;
     assert_eq!(
         estimate.tx_count, 2,
         "combining 3 notes with a 2-input circuit should take 2 transactions"
@@ -120,12 +167,12 @@ async fn transfer_insufficient_balance() -> Result<()> {
         .pool()?
         .transfer(
             recipient.wallet.address(),
-            NoteAmount::from(DEPOSIT_STROOPS.saturating_add(1)),
+            NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS + 1),
         )
         .await;
     assert!(
-        transfer.is_err(),
-        "transferring more than the wallet's pool balance must be rejected"
+        matches!(transfer, Err(Error::SpendSession(_))),
+        "a transfer the notes cannot pay with the fee must not plan: {transfer:?}"
     );
 
     Ok(())
@@ -178,14 +225,15 @@ async fn transfer_double_spend() -> Result<()> {
 
     let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
     let recipient_address = recipient.wallet.address();
+    let fee = pool.fee().await?;
 
     let mut plan_a = pool
-        .prepare_transfer(&wallet, recipient_address.as_str(), half)
+        .prepare_transfer(&wallet, recipient_address.as_str(), half, fee)
         .await?;
     let mut prepared_a = pool.prove_next(&mut plan_a).await?;
 
     let mut plan_b = pool
-        .prepare_transfer(&wallet, recipient_address.as_str(), half)
+        .prepare_transfer(&wallet, recipient_address.as_str(), half, fee)
         .await?;
     let mut prepared_b = pool.prove_next(&mut plan_b).await?;
 
