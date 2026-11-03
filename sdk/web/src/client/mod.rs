@@ -78,6 +78,7 @@ fn refusal(cause: &Error) -> Option<(&'static str, Vec<(&'static str, BigInt)>)>
             ],
         ),
         Error::NotBalanced { gap } => ("NOT_BALANCED", vec![("gap", i128::from(*gap).into())]),
+        Error::WithdrawalToContract => ("WITHDRAWAL_TO_CONTRACT", Vec::new()),
         _ => match cause.plan_error()? {
             PlanError::NoSpendableNotes => ("NO_SPENDABLE_NOTES", Vec::new()),
             PlanError::NoCombination { max_spend } => (
@@ -438,6 +439,18 @@ mod tests {
             Some(
                 "transaction does not balance: the private outputs, withdrawal and pool fee exceed the input notes and deposit"
             )
+        );
+    }
+
+    /// Through `execute_result`, so `transact` throws it as `withdraw` does.
+    #[wasm_bindgen_test]
+    fn a_withdrawal_to_a_deployment_contract_carries_its_code() {
+        let error = execute::execute_result(ExecuteOutcome::Failed(Error::WithdrawalToContract))
+            .err()
+            .expect("a refusal before any submission throws");
+        assert_eq!(
+            property(&error, "code").as_deref(),
+            Some("WITHDRAWAL_TO_CONTRACT")
         );
     }
 

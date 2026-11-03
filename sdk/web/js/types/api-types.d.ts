@@ -161,7 +161,8 @@ export interface PoolRefusal extends Error {
     | 'DEPOSIT_ABOVE_MAXIMUM'
     | 'NO_COMBINATION'
     | 'NO_SPENDABLE_NOTES'
-    | 'NOT_BALANCED';
+    | 'NOT_BALANCED'
+    | 'WITHDRAWAL_TO_CONTRACT';
   /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
   minimum?: bigint;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */
