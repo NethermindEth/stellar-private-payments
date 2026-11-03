@@ -295,7 +295,8 @@ fn names_key(feature: &str, key: &str, network: Option<&str>) -> bool {
     let key = dashed(if key.is_empty() { "none" } else { key });
     match network {
         Some(network) => feature == format!("vk-{}-{key}", dashed(network)),
-        // The first dash ends the network, so `vk-testnet-a-gvk-v` never names `gvk_V`.
+        // The first dash ends the network, so `vk-testnet-a-gvk-v` never names
+        // `gvk_V`.
         None => feature
             .strip_prefix("vk-")
             .and_then(|rest| rest.split_once('-'))
