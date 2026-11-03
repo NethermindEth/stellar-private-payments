@@ -83,7 +83,7 @@ pub struct PreparedTx {
     pub input_nullifiers: [Field; N_INPUTS],
     /// Computed commitments for both output slots.
     pub output_commitments: [Field; N_OUTPUTS],
-    /// Field element representation of ext_amount.
+    /// Field element representation of the public amount, `ext_amount - fee`.
     pub public_amount_field: Field,
     /// Hash of extData used by both circuit and contract checks (32-byte
     /// big-endian).
@@ -118,7 +118,7 @@ pub struct TransactArtifacts {
 /// Parameters for the generic pool transaction builder.
 ///
 /// Invariant: the equation must balance:
-/// `Inputs + Public = Outputs`.
+/// `inputs + ext_amount = outputs + fee`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactParams {
@@ -145,6 +145,8 @@ pub struct TransactParams {
     /// External amount in stroops. See `crate::types::ExtData::ext_amount` for
     /// semantics.
     pub ext_amount: ExtAmount,
+    /// Pool fee in token base units, paid out of `ext_amount` or the inputs.
+    pub fee: NoteAmount,
 
     /// Input notes to spend (0..=2). If empty, `transact()` uses dummy inputs
     /// (deposit-style).
@@ -178,7 +180,7 @@ pub struct TransactParams {
 /// Handles deposits into the privacy pool.
 ///
 /// Deposit invariant:
-/// `Deposit amount must equal sum of outputs`.
+/// `amount = outputs + fee`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepositParams {
     /// User's BN254 note private key (32 bytes).
@@ -196,6 +198,8 @@ pub struct DepositParams {
     pub token_address: String,
     /// Total amount to deposit (stroops). Passed as `ext_amount > 0`.
     pub amount: ExtAmount,
+    /// Pool fee in token base units, paid out of `amount`.
+    pub fee: NoteAmount,
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
     pub outputs: Vec<TransactOutput>,
 
@@ -248,6 +252,9 @@ pub struct WithdrawParams {
     /// Amount to withdraw in stroops. `withdraw()` sets `ext_amount =
     /// -withdraw_amount`.
     pub withdraw_amount: ExtAmount,
+    /// Pool fee in token base units, paid out of the inputs on top of
+    /// `withdraw_amount`.
+    pub fee: NoteAmount,
     /// Notes to spend (1..=2). If one is provided, `transact()` pads the second
     /// input with a dummy.
     pub inputs: Vec<TransactInputNote>,
@@ -278,7 +285,7 @@ pub struct WithdrawParams {
 /// Handles private note transfers to other users.
 ///
 /// Transfer invariant:
-/// `Input notes must equal output notes`.
+/// `inputs = outputs + fee`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferParams {
@@ -301,6 +308,8 @@ pub struct TransferParams {
     /// Outputs to create (<= 2). Recipient keys can be set per output to
     /// transfer privately.
     pub outputs: Vec<TransactOutput>,
+    /// Pool fee in token base units, paid out of the inputs.
+    pub fee: NoteAmount,
 
     /// ASP membership proof when `policy_flags` requires allowlist proofs.
     pub membership_proof: Option<AspMembershipProof>,
@@ -333,6 +342,7 @@ where
         pool_address,
         token_address,
         amount,
+        fee,
         outputs,
         membership_proof,
         non_membership_proof,
@@ -353,6 +363,7 @@ where
             token_address,
             ext_recipient: pool_address,
             ext_amount: amount,
+            fee,
             inputs: Vec::new(),
             outputs,
             membership_proof,
@@ -381,6 +392,7 @@ where
         token_address,
         withdraw_recipient,
         withdraw_amount,
+        fee,
         inputs,
         outputs,
         membership_proof,
@@ -394,16 +406,18 @@ where
     } = params;
 
     let input_total = sum_note_amounts_inputs(&inputs)?;
-    let withdraw_note_amount = NoteAmount::try_from(withdraw_amount)?;
-    if input_total < withdraw_note_amount {
+    let needed = NoteAmount::try_from(withdraw_amount)?
+        .checked_add(fee)
+        .ok_or_else(|| anyhow!("withdraw amount plus fee overflow"))?;
+    if input_total < needed {
         return Err(anyhow!(
             "insufficient input amount: have {}, need {}",
             input_total,
-            withdraw_amount
+            needed
         ));
     }
     let change = input_total
-        .checked_sub(withdraw_note_amount)
+        .checked_sub(needed)
         .ok_or_else(|| anyhow!("insufficient input amount"))?;
 
     let outputs = match outputs {
@@ -441,6 +455,7 @@ where
             ext_amount: withdraw_amount
                 .checked_neg()
                 .ok_or_else(|| anyhow!("withdraw amount overflow"))?,
+            fee,
             inputs,
             outputs,
             membership_proof,
@@ -469,6 +484,7 @@ where
         token_address,
         inputs,
         outputs,
+        fee,
         membership_proof,
         non_membership_proof,
         tree_depth,
@@ -488,6 +504,7 @@ where
             token_address,
             ext_recipient: pool_address,
             ext_amount: ExtAmount::ZERO,
+            fee,
             inputs,
             outputs,
             membership_proof,
@@ -521,6 +538,7 @@ where
         token_address,
         ext_recipient,
         ext_amount,
+        fee,
         inputs,
         outputs,
         membership_proof,
@@ -607,19 +625,23 @@ where
         ));
     }
 
-    // Enforce the conservation equation: inputs + ext_amount == outputs.
+    // Enforce the conservation equation: inputs + public_amount == outputs,
+    // where the public amount is ext_amount minus the pool fee.
+    let public_amount = ext_amount
+        .checked_sub(ExtAmount::try_from(fee)?)
+        .ok_or_else(|| anyhow!("ext_amount({ext_amount}) - fee({fee}) overflows"))?;
     let inputs_sum = sum_note_amounts_inputs(&inputs)?;
     let outputs_sum = sum_note_amounts_outputs(&outputs)?;
 
-    let balanced = if ext_amount >= ExtAmount::ZERO {
-        let public_note = NoteAmount::try_from(ext_amount)?;
+    let balanced = if public_amount >= ExtAmount::ZERO {
+        let public_note = NoteAmount::try_from(public_amount)?;
         let lhs = inputs_sum
             .checked_add(public_note)
             .ok_or_else(|| anyhow!("overflow computing note amount LHS"))?;
         lhs == outputs_sum
     } else {
         let public_note = NoteAmount::try_from(
-            ext_amount
+            public_amount
                 .checked_neg()
                 .ok_or_else(|| anyhow!("public amount negation overflow"))?,
         )?;
@@ -631,10 +653,11 @@ where
 
     if !balanced {
         return Err(anyhow!(
-            "not balanced: inputs({}) + public({}) != outputs({})",
+            "not balanced: inputs({}) + ext_amount({}) != outputs({}) + fee({})",
             inputs_sum,
             ext_amount,
-            outputs_sum
+            outputs_sum,
+            fee
         ));
     }
 
@@ -703,8 +726,8 @@ where
 
     // Public inputs.
     circuit.set_single("root", &field_to_circuit_hex(&pool_root)?);
-    let public_amount_field = Field::try_from(ext_amount)?;
-    circuit.set_single("publicAmount", &ext_amount_to_circuit_hex(ext_amount)?);
+    let public_amount_field = Field::try_from(public_amount)?;
+    circuit.set_single("publicAmount", &ext_amount_to_circuit_hex(public_amount)?);
 
     // Input notes: compute commitments/signatures/nullifiers.
     let priv_key_hex = field_bytes_to_hex(&priv_key.0)?;
@@ -1346,6 +1369,7 @@ mod tests {
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
                     blinding: out_blinding,
@@ -1420,6 +1444,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1470,6 +1495,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1522,6 +1548,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1574,6 +1601,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1617,6 +1645,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1655,6 +1684,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1693,6 +1723,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 ext_recipient: "POOL".into(),
                 ext_amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 inputs: Vec::new(),
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
@@ -1743,6 +1774,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 withdraw_recipient: "G...".into(),
                 withdraw_amount: ExtAmount::from(7),
+                fee: NoteAmount::ZERO,
                 inputs: vec![input],
                 outputs: None,
                 membership_proof: Some(zero_membership(asp_depth_usize)),
@@ -1804,6 +1836,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 inputs: vec![input],
                 outputs: vec![out],
+                fee: NoteAmount::ZERO,
                 membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
@@ -1848,6 +1881,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 withdraw_recipient: "G...".into(),
                 withdraw_amount: ExtAmount::ONE,
+                fee: NoteAmount::ZERO,
                 inputs: vec![input0],
                 outputs: None,
                 membership_proof: Some(zero_membership(asp_depth_usize)),
@@ -1863,6 +1897,63 @@ mod tests {
         );
 
         assert!(res.is_ok());
+    }
+
+    fn transfer_from_a_note_of_ten(output: u128, fee: u128) -> Result<TransactArtifacts> {
+        transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                token_address: "TOKEN".into(),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::ZERO,
+                fee: NoteAmount::from(fee),
+                inputs: vec![TransactInputNote {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+                    merkle_path_elements: vec![Field::ZERO; 10],
+                    merkle_path_indices: Field::ZERO,
+                }],
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(output),
+                    blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: None,
+                non_membership_proof: None,
+                tree_depth: 10,
+                asp_depth: 8,
+                smt_depth: 10,
+                policy_flags: PolicyFlags::EMPTY,
+                gvk_mode: GvkMode::Off,
+                admin_view_key: None,
+            },
+            |_, _, _| Ok([0u8; 32]),
+        )
+    }
+
+    #[test]
+    fn transact_takes_the_fee_from_the_inputs() {
+        let artifacts = transfer_from_a_note_of_ten(7, 3).expect("a transfer paying 3 builds");
+
+        let public_amount = Field::try_from(ExtAmount::from(-3)).expect("field");
+        assert_eq!(artifacts.prepared.public_amount_field, public_amount);
+        assert_eq!(
+            gvk_signal_single(&artifacts.circuit_inputs, "publicAmount"),
+            field_to_circuit_hex(&public_amount).expect("hex")
+        );
+    }
+
+    #[test]
+    fn transact_refuses_outputs_that_ignore_the_fee() {
+        let err = transfer_from_a_note_of_ten(10, 3).expect_err("outputs must leave the fee");
+        assert!(
+            err.to_string().contains("not balanced"),
+            "unexpected error: {err}"
+        );
     }
 
     fn test_admin_key() -> BabyJubJubPoint {
@@ -1925,6 +2016,7 @@ mod tests {
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
                     blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
@@ -1965,6 +2057,7 @@ mod tests {
                 pool_address: "POOL".into(),
                 token_address: "TOKEN".into(),
                 amount: ExtAmount::from(10),
+                fee: NoteAmount::ZERO,
                 outputs: vec![TransactOutput {
                     amount: NoteAmount::from(10),
                     blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
@@ -2033,6 +2126,7 @@ mod tests {
                 token_address: "TOKEN".into(),
                 inputs: vec![input],
                 outputs: vec![out],
+                fee: NoteAmount::ZERO,
                 membership_proof: Some(zero_membership(asp_depth_usize)),
                 non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,

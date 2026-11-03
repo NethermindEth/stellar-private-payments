@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // create a note with the required amount. Deposits only require one
     // transaction.
     println!("Estimating transaction count for a transfer/withdraw...");
-    match pool.estimate(amount) {
+    match pool.estimate(amount, pool.fee()?) {
         Ok(estimate) => {
             println!(
                 "Estimated number of on-chain transactions: {}",

@@ -10,7 +10,7 @@ use stellar_private_payments::{
     },
 };
 
-use super::support::{TestSession, deploy, deploy_scoped, session};
+use super::support::{FEE_STROOPS, TestSession, deploy, deploy_scoped, session};
 use crate::{
     network::{DeploymentIdentity, LocalNetwork, lock_asp_tree},
     pool::{PoolAsset, PoolOptions},
@@ -111,9 +111,9 @@ async fn viewonly() -> Result<()> {
     let expected_outputs = HashSet::from([
         (alice_pk, NoteAmount::from(10_000_000)),
         (bob_pk, NoteAmount::from(20_000_000)),
-        (alice_pk, NoteAmount::from(7_000_000)),
+        (alice_pk, NoteAmount::from(7_000_000 - FEE_STROOPS)),
         (bob_pk, NoteAmount::from(3_000_000)),
-        (bob_pk, NoteAmount::from(2_000_000)),
+        (bob_pk, NoteAmount::from(2_000_000 - FEE_STROOPS)),
     ]);
     assert_eq!(outputs, expected_outputs);
 
@@ -187,9 +187,9 @@ async fn traceable() -> Result<()> {
     let expected_outputs = HashSet::from([
         (alice_pk, NoteAmount::from(10_000_000)),
         (bob_pk, NoteAmount::from(20_000_000)),
-        (alice_pk, NoteAmount::from(7_000_000)),
+        (alice_pk, NoteAmount::from(7_000_000 - FEE_STROOPS)),
         (bob_pk, NoteAmount::from(3_000_000)),
-        (bob_pk, NoteAmount::from(2_000_000)),
+        (bob_pk, NoteAmount::from(2_000_000 - FEE_STROOPS)),
     ]);
     assert_eq!(outputs, expected_outputs);
 
@@ -426,9 +426,9 @@ async fn audit_skips_dummy() -> Result<()> {
     let expected_outputs = HashSet::from([
         (alice_pk, NoteAmount::from(10_000_000)),
         (bob_pk, NoteAmount::from(20_000_000)),
-        (alice_pk, NoteAmount::from(7_000_000)),
+        (alice_pk, NoteAmount::from(7_000_000 - FEE_STROOPS)),
         (bob_pk, NoteAmount::from(3_000_000)),
-        (bob_pk, NoteAmount::from(2_000_000)),
+        (bob_pk, NoteAmount::from(2_000_000 - FEE_STROOPS)),
     ]);
     assert_eq!(outputs.len(), expected_outputs.len());
     assert_eq!(outputs, expected_outputs);

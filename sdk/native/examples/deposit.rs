@@ -38,8 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => return Err(e.into()),
     };
     let amount = common::amount()?;
+    // The deposit sends the pool fee on top of the note.
+    let sent = amount
+        .checked_add(pool.fee()?)
+        .ok_or("the deposit plus the pool fee overflows the token amount")?;
 
-    common::require_funded_for_pool(&account, &pool_config, amount);
+    common::require_funded_for_pool(&account, &pool_config, sent);
 
     println!("Pool:      {}", pool_config.pool_contract_id);
     println!("Asset:     {}", pool_config.token_label());

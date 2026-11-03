@@ -1,13 +1,14 @@
 # Compliance controls
 
 A pool gives its operator a fixed set of controls. None of them lets the admin move a user's
-funds: only `transact` moves tokens, and only with a proof from the notes' owner.
+funds: only `transact` spends notes, and only with a proof from their owner. The admin can pay
+out only the fees collected, through `claim_fees`.
 
 | Control | Enforces | Doesn't | Set |
 | --- | --- | --- | --- |
 | Allowlist | Only enrolled note public keys can spend or deposit | Screen recipients, or tell you who holds a key | Policy at deployment; members any time |
 | Blocklist | Listed note public keys can't spend or deposit | Stop a user from deriving new keys from a new Stellar account | Policy at deployment; entries any time |
-| Maximum deposit | No single deposit exceeds the limit | Limit a user's total, or limit withdrawals | At deployment |
+| Maximum deposit | No single deposit sends more than the limit, pool fee included | Limit a user's total, or limit withdrawals | At deployment |
 | Deposit pause | No new deposits enter the pool | Stop transfers or withdrawals | Any time, by the admin or a pause file |
 | GVK | The GVK holder can read every note, and in traceable mode every spend | Let the holder spend, freeze, or change anything | At deployment |
 | Selective disclosure | A user can prove to an authority that they own chosen notes | Let anyone but the user produce the proof | Always available to users |

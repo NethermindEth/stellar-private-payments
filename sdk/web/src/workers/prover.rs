@@ -79,27 +79,27 @@ fn to_hex(bytes: &[u8]) -> String {
 // wasm threads?
 
 thread_local! {
-    static TRANSACT_PROVERS: RefCell<HashMap<String, ProverEngine>> =
+    /// Transact and `keyOwnership` provers, keyed by circuit stem.
+    static PROVERS: RefCell<HashMap<String, ProverEngine>> =
         RefCell::new(HashMap::new());
     static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> =
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
-    static KEY_OWNERSHIP_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
 }
 
 fn circuit_err(error: Error) -> JsError {
     JsError::new(&error.to_string())
 }
 
-fn init_transact_prover(
+fn init_prover(
     stem: &str,
     proving_key: &[u8],
     graph_bytes: &[u8],
     r1cs_bytes: &[u8],
 ) -> Result<ProverEngine, JsError> {
     ProverEngine::new(proving_key, graph_bytes, r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init {stem} transact prover: {e:#}")))
+        .map_err(|e| JsError::new(&format!("failed to init {stem} prover: {e:#}")))
 }
 
 fn disclosure_stem(n_notes: usize) -> Result<&'static str, JsError> {
@@ -182,13 +182,13 @@ async fn build_disclosure_from_compressed(
         .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))
 }
 
-async fn build_transact_from_compressed(
+async fn build_prover_from_compressed(
     stem: &str,
     graph_bytes: &[u8],
     r1cs_bytes: &[u8],
 ) -> Result<ProverEngine, JsError> {
     let compressed = fetch_circuit_artifact(stem, "proving_key.bin").await?;
-    init_transact_prover(stem, &compressed, graph_bytes, r1cs_bytes)
+    init_prover(stem, &compressed, graph_bytes, r1cs_bytes)
 }
 
 async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
@@ -221,8 +221,8 @@ async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>,
     .await
 }
 
-async fn ensure_transact_prover(stem: &str) -> Result<(), JsError> {
-    if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
+async fn ensure_prover(stem: &str) -> Result<(), JsError> {
+    if PROVERS.with(|s| s.borrow().contains_key(stem)) {
         return Ok(());
     }
 
@@ -231,35 +231,16 @@ async fn ensure_transact_prover(stem: &str) -> Result<(), JsError> {
         fetch_circuit_artifact(stem, "r1cs")
     )?;
 
-    let engine = build_transact_prover(stem, &graph_bytes, &r1cs_bytes).await?;
+    let engine = build_prover(stem, &graph_bytes, &r1cs_bytes).await?;
 
-    TRANSACT_PROVERS.with(|cell| {
+    PROVERS.with(|cell| {
         cell.borrow_mut().insert(stem.to_owned(), engine);
     });
 
     Ok(())
 }
 
-async fn ensure_key_ownership_prover() -> Result<(), JsError> {
-    if KEY_OWNERSHIP_PROVER.with(|s| s.borrow().is_some()) {
-        return Ok(());
-    }
-
-    let (graph_bytes, r1cs_bytes) = try_join!(
-        fetch_circuit_artifact(KEY_OWNERSHIP_CIRCUIT, "graph.bin"),
-        fetch_circuit_artifact(KEY_OWNERSHIP_CIRCUIT, "r1cs")
-    )?;
-
-    let engine = build_transact_prover(KEY_OWNERSHIP_CIRCUIT, &graph_bytes, &r1cs_bytes).await?;
-
-    KEY_OWNERSHIP_PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(engine);
-    });
-
-    Ok(())
-}
-
-async fn build_transact_prover(
+async fn build_prover(
     stem: &str,
     graph_bytes: &[u8],
     r1cs_bytes: &[u8],
@@ -274,19 +255,19 @@ async fn build_transact_prover(
                 Ok(engine) => return Ok(engine),
                 Err(e) => {
                     tracing::warn!(
-                        "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) prover build failed ({e:#}), falling back to compressed"
+                        "[{WORKER_NAME}] uncompressed {pk_name_for_log} prover build failed ({e:#}), falling back to compressed"
                     );
                 }
             }
         }
         Err(e) => {
             tracing::warn!(
-                "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) proving key unavailable ({e:?}), falling back to compressed"
+                "[{WORKER_NAME}] uncompressed {pk_name_for_log} proving key unavailable ({e:?}), falling back to compressed"
             );
         }
     }
 
-    build_transact_from_compressed(stem, &graph_bytes, r1cs_bytes).await
+    build_prover_from_compressed(stem, &graph_bytes, r1cs_bytes).await
 }
 
 pub fn worker_main() {
@@ -338,10 +319,10 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 params.gvk_mode,
             )
             .to_string();
-            ensure_transact_prover(&stem)
+            ensure_prover(&stem)
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-            let prepared = TRANSACT_PROVERS.with(|cell| {
+            let prepared = PROVERS.with(|cell| {
                 let borrow = cell.borrow();
                 let engine = borrow.get(&stem).ok_or_else(|| {
                     anyhow::anyhow!("transact prover for {stem} is not initialized")
@@ -497,12 +478,12 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::KeyOwnership(params) => {
             tracing::debug!("[{WORKER_NAME}] key ownership");
-            ensure_key_ownership_prover()
+            ensure_prover(KEY_OWNERSHIP_CIRCUIT)
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-            let proof = KEY_OWNERSHIP_PROVER.with(|cell| {
+            let proof = PROVERS.with(|cell| {
                 cell.borrow()
-                    .as_ref()
+                    .get(KEY_OWNERSHIP_CIRCUIT)
                     .ok_or_else(|| anyhow::anyhow!("key ownership prover is not initialized"))?
                     .prove_key_ownership(params)
             })?;

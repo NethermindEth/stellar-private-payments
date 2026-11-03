@@ -44,9 +44,10 @@ export async function run(helpers) {
   await page.getByTestId('move-flow-transfer').click();
   await page.getByTestId('move-panel-transfer').waitFor({ state: 'visible', timeout: 10_000 });
 
+  // With the 0.0001 XLM pool fee, 0.0099 spends exactly one 0.01 note.
   const transferResult = await transfer(helpers, {
     logTag,
-    amount: '0.01',
+    amount: '0.0099',
     rpcUrl,
     fillBeforeSubmit: async () => {
       await page.locator('#transfer-address').fill(recipient);

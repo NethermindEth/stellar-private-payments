@@ -4,9 +4,10 @@ One admin account administers every pool and tree a deployment runs: a Stellar a
 M of its N signers on every change. This runbook is for those signers and for whoever keeps the
 account's pause files.
 
-The admin can pause deposits, switch the trees a pool reads, edit the lists, and hand its role to
-another account. It cannot move funds: only `transact` moves tokens, against a verifier fixed at
-construction, and no contract has an upgrade entry point.
+The admin can pause deposits, switch the trees a pool reads, edit the lists, claim the fees a pool
+has collected, and hand its role to another account. It cannot move the value in users' notes:
+`claim_fees` pays only from the fees collected, only `transact` spends notes, its verifier is
+fixed at construction, and no contract has an upgrade entry point.
 
 The commands below run on `testnet`. On another network, replace `testnet` with its name.
 
@@ -59,15 +60,16 @@ from every pool and tree the manifest names and every tree those pools read:
 | `DepositPauseChanged` | pools | Deposits pause or unpause |
 | `DepositPauseRepeated` | pools | A pause or unpause finds the flag already set; `paused` is the flag. A pause file sent this way is spent |
 | `AspMembershipUpdated`, `AspNonMembershipUpdated` | pools | The pool switches to another allowlist or blocklist |
+| `FeesClaimed` | pools | The admin claims collected fees |
 | `AdminTransferProposed`, `AdminTransferCancelled`, `AdminTransferAccepted` | pools and trees | An admin transfer starts, is withdrawn, or completes |
 | `LeafAdded` | allowlists | A member joins |
 | `LeafInserted`, `LeafDeleted` | blocklists | A key is listed or released |
 
 The pool and admin transfer events use their name in lowercase with underscores as their topic,
-for example `deposit_pause_changed`. A pause file can be sent from any account, so only the
-pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the nonce from its
-transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find which file was
-spent, and sign a replacement for whoever kept it.
+for example `deposit_pause_changed` or `fees_claimed`. A pause file can be sent from any account,
+so only the pool's events show it. After a `deposit_pause_repeated` with `paused` true, read the
+nonce from its transaction, as [Pre-sign deposit pauses](#pre-sign-deposit-pauses) shows, to find
+which file was spent, and sign a replacement for whoever kept it.
 
 After a blocklist re-point, a pool reads a tree the manifest does not name. To list the trees a
 pool reads, read its instance entry, whose key is `AAAAFA==`:
@@ -91,6 +93,7 @@ construction, and the deployer keeps no power over them:
 ```bash
 deployments/scripts/deploy.sh testnet --deployer DEPLOYER --admin ADMIN_ACCOUNT \
   --kdf-domain KDF_DOMAIN --asp-levels 10 --pool-levels 20 --max-deposit 1000000000 \
+  --fee FEE --min-deposit MIN_DEPOSIT \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
@@ -99,6 +102,11 @@ Replace the following:
 - `DEPLOYER`: the deployer's `stellar keys` identity.
 - `ADMIN_ACCOUNT`: the admin account's address.
 - `KDF_DOMAIN`: the key derivation domain, which users see in the message they sign.
+- `FEE`: the pool fee every transaction pays, in the token's smallest unit.
+- `MIN_DEPOSIT`: the least a deposit can leave in notes after the pool fee, in the token's smallest
+  unit.
+
+To choose both, see [Pool fee and smallest deposit](./deploy.md#pool-fee-and-smallest-deposit).
 
 `deploy.sh` takes native XLM and classic assets, and refuses a token ID that is not the asset's own
 Stellar asset contract. For a classic asset, it warns about each power the issuer's flags give it
@@ -154,7 +162,7 @@ the call again.
 A call that reads an archived entry, such as an `Admin` entry nothing has extended, restores it,
 and the admin account pays for the restore within the call's fee. On testnet on 2026-10-03, an
 `insert_leaf` that restored five entries simulated to a fee of 66,214,618 stroops, about 6.6 XLM.
-The card shows the maximum fee before anyone signs.
+The card shows the maximum network fee before anyone signs.
 
 An entry that archives while signers sign makes the call fail once sent, so the page refuses to
 build a call that reads an entry with less than 25 hours left, the call's 24 hours plus an hour.
@@ -167,8 +175,8 @@ refunds what the call does not owe.
 
 ### Sign with the CLI
 
-The card describes only contract calls. A signer change, and the acceptance of a tree the manifest
-does not name, go through the Stellar CLI as a file passed from signer to signer.
+A signer change, a fee claim, and the acceptance of a tree the manifest does not name go through the
+Stellar CLI, as a file passed from signer to signer.
 
 The CLI builds a transaction with no time bound, which, once signed, stays valid until another
 admin transaction uses its sequence number. Before the first signature, whoever built `tx.xdr`
@@ -206,6 +214,36 @@ passes:
 ```bash
 stellar tx send --network testnet < tx.xdr
 ```
+
+## Claim collected fees
+
+`claim_fees` pays the admin's choice of recipient from the fees a pool has collected, never from
+the value in users' notes. For a classic asset, the recipient needs a trustline to the asset,
+authorized by the issuer if the asset requires authorization, before a claim can pay it.
+
+The admin page does not build claims, so build the claim with the CLI. Read what the pool has
+collected, then build a claim that pays the admin account:
+
+```bash
+stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet --send=no \
+  -- get_fees_total
+stellar contract invoke --id POOL --source-account ADMIN_ACCOUNT --network testnet \
+  --build-only -- claim_fees --to ADMIN_ACCOUNT --amount AMOUNT \
+| stellar tx simulate --source-account ADMIN_ACCOUNT --network testnet > tx.xdr
+```
+
+Replace the following:
+
+- `POOL`: the pool's address.
+- `ADMIN_ACCOUNT`: the admin account's address.
+- `AMOUNT`: the amount to claim in the token's smallest unit, at most what `get_fees_total`
+  prints.
+
+Before signing, each signer checks the recipient in the decoded transaction, since the pool pays
+whatever address the call names. The pool refuses only a claim paid to itself; one paid to another
+pool or to the token contract leaves the amount where nobody can move it.
+
+Then sign and send `tx.xdr` as [Sign with the CLI](#sign-with-the-cli) describes.
 
 ## Pre-sign deposit pauses
 

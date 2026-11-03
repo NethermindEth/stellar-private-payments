@@ -4,7 +4,7 @@ use stellar_private_payments::{
     types::{AssetDescriptor, NoteAmount},
 };
 
-use super::support::{deploy, deploy_default, session};
+use super::support::{FEE_STROOPS, deploy, deploy_default, session};
 use crate::{network::LocalNetwork, pool::PoolOptions};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
@@ -59,9 +59,7 @@ async fn user_notes_transfer() -> Result<()> {
     );
     assert_eq!(
         sender_notes[0].amount,
-        deposit_amount
-            .checked_sub(transfer_amount)
-            .expect("transfer amount fits within deposit")
+        NoteAmount::from(DEPOSIT_STROOPS - TRANSFER_STROOPS - FEE_STROOPS)
     );
 
     let recipient_notes = recipient.account.user_notes(10).await?;

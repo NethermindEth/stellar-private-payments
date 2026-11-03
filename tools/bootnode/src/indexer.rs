@@ -42,9 +42,7 @@ impl Indexer {
 
         let latest = self.state.upstream.get_latest_ledger().await?;
         let tip_sequence = latest.sequence;
-        self.state.ledger_tip.store(tip_sequence, Ordering::Relaxed);
-        gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
-        self.state.storage.set_ledger_tip(tip_sequence).await?;
+        gauge!("bootnode_upstream_tip").set(f64::from(tip_sequence));
 
         let indexer = self.state.storage.load_indexer_state().await?;
         let mut cursor = indexer.last_upstream_cursor;
@@ -103,6 +101,9 @@ impl Indexer {
             }
 
             if at_upstream_tail {
+                self.state.ledger_tip.store(tip_sequence, Ordering::Relaxed);
+                gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
+                self.state.storage.set_ledger_tip(tip_sequence).await?;
                 may_have_more = false;
                 break;
             }

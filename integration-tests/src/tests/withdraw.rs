@@ -7,7 +7,7 @@ use stellar_private_payments::{
     types::{AssetDescriptor, NoteAmount},
 };
 
-use super::support::{assert_contract_error, deploy_default, note_states, session};
+use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, note_states, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
@@ -21,8 +21,11 @@ async fn withdraw_basic() -> Result<()> {
     let balance_after_deposit = pool.balance().await?;
     assert_eq!(balance_after_deposit, deposit_amount);
 
-    pool.withdraw(deposit_amount, session.wallet.address())
-        .await?;
+    pool.withdraw(
+        NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS),
+        session.wallet.address(),
+    )
+    .await?;
     let balance_after_withdraw = pool.balance().await?;
     assert_eq!(balance_after_withdraw, NoteAmount::ZERO);
 
@@ -39,8 +42,9 @@ async fn withdraw_multi_tx() -> Result<()> {
     pool.deposit(deposit_amount).await?;
     pool.deposit(deposit_amount).await?;
 
-    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
-    let estimate = pool.estimate(total).await?;
+    // Three notes take two steps, and each step pays the fee.
+    let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
+    let estimate = pool.estimate(total, pool.fee().await?).await?;
     assert_eq!(
         estimate.tx_count, 2,
         "combining 3 notes with a 2-input circuit should take 2 transactions"
@@ -62,6 +66,7 @@ async fn withdraw_retry_after_wallet_rejection() -> Result<()> {
     let session = session(deploy_default().await?).await?;
     let pool = session.pool()?;
     let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let withdraw_amount = NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS);
 
     pool.deposit(deposit_amount).await?;
     let notes = note_states(&pool).await?;
@@ -69,7 +74,7 @@ async fn withdraw_retry_after_wallet_rejection() -> Result<()> {
 
     session.reject_next_transaction();
     let rejected = pool
-        .withdraw(deposit_amount, session.wallet.address())
+        .withdraw(withdraw_amount, session.wallet.address())
         .await;
     assert!(
         matches!(rejected, Err(Error::UserRejected(_))),
@@ -82,7 +87,7 @@ async fn withdraw_retry_after_wallet_rejection() -> Result<()> {
         funded_balance
     );
 
-    pool.withdraw(deposit_amount, session.wallet.address())
+    pool.withdraw(withdraw_amount, session.wallet.address())
         .await?;
 
     assert_eq!(pool.balance().await?, NoteAmount::ZERO);
@@ -103,7 +108,8 @@ async fn withdraw_multi_tx_retry_after_second_step_rejection() -> Result<()> {
     pool.deposit(deposit_amount).await?;
     pool.deposit(deposit_amount).await?;
     pool.deposit(deposit_amount).await?;
-    let total = NoteAmount::from(DEPOSIT_STROOPS.saturating_mul(3));
+    // Three notes take two steps, and each step pays the fee.
+    let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
 
     session.reject_transaction(2);
     let rejected = pool.withdraw(total, session.wallet.address()).await;
@@ -115,8 +121,12 @@ async fn withdraw_multi_tx_retry_after_second_step_rejection() -> Result<()> {
         matches!(stopped.cause(), Error::UserRejected(_)),
         "the second step must fail with the wallet's rejection: {rejected:?}"
     );
-    // The first step merged two notes, so the balance is still in the pool.
-    assert_eq!(pool.balance().await?, total);
+    // The first step merged two notes, so the balance is still in the pool,
+    // less that step's fee.
+    assert_eq!(
+        pool.balance().await?,
+        NoteAmount::from(3 * DEPOSIT_STROOPS - FEE_STROOPS)
+    );
     assert_eq!(pool.spendable_notes().await?.len(), 2);
 
     let results = pool.withdraw(total, session.wallet.address()).await?;
@@ -136,13 +146,13 @@ async fn withdraw_insufficient_balance() -> Result<()> {
 
     let withdrawal = pool
         .withdraw(
-            NoteAmount::from(DEPOSIT_STROOPS.saturating_add(1)),
+            NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS + 1),
             session.wallet.address(),
         )
         .await;
     assert!(
-        withdrawal.is_err(),
-        "withdrawing more than the wallet's pool balance must be rejected"
+        matches!(withdrawal, Err(Error::SpendSession(_))),
+        "a withdrawal the notes cannot pay with the fee must not plan: {withdrawal:?}"
     );
 
     Ok(())
@@ -156,11 +166,18 @@ async fn withdraw_malformed_address() -> Result<()> {
     pool.deposit(NoteAmount::from(DEPOSIT_STROOPS)).await?;
 
     let withdrawal = pool
-        .withdraw(NoteAmount::from(DEPOSIT_STROOPS), "not-a-real-address")
+        .withdraw(
+            NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS),
+            "not-a-real-address",
+        )
         .await;
+    // The XDR error for the recipient does not name the address, so this pins
+    // that planning passed and the recipient was refused.
     assert!(
-        withdrawal.is_err(),
-        "withdrawing to a syntactically invalid address must be rejected"
+        withdrawal
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("xdr value invalid")),
+        "withdrawing to a syntactically invalid address must be rejected for the address: {withdrawal:?}"
     );
 
     Ok(())
@@ -183,11 +200,12 @@ async fn withdraw_double_spend() -> Result<()> {
     );
 
     let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
+    let fee = pool.fee().await?;
 
-    let mut plan_a = pool.prepare_withdraw(&wallet, half, session.wallet.address())?;
+    let mut plan_a = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
     let mut prepared_a = pool.prove_next(&mut plan_a).await?;
 
-    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address())?;
+    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
     let mut prepared_b = pool.prove_next(&mut plan_b).await?;
 
     pool.simulate(&mut prepared_a).await?;
