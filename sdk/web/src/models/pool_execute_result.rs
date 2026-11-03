@@ -3,9 +3,8 @@ use wasm_bindgen::prelude::*;
 
 /// Result of pool transact flows (`deposit`, `transfer`, `withdraw`, …).
 ///
-/// A deposit the SDK refuses before proving, because deposits are paused or
-/// the amount is outside the pool's limits, rejects with a coded error
-/// instead. A refusal the network returns later still resolves as `failed`.
+/// A flow the SDK refuses before its first step confirms rejects with a coded
+/// error instead. A refusal from the network still resolves as `failed`.
 #[wasm_bindgen]
 pub struct PoolExecuteResult {
     status: String,
