@@ -7,7 +7,7 @@ use crate::{
     types::{
         ContractEvent, EncryptionPublicKey, Field, KeyDerivationSignature, LeafAddedEvent,
         LeafDeletedEvent, LeafInsertedEvent, LeafUpdatedEvent, NewCommitmentEvent,
-        NewNullifierEvent, ProcessedEvent, PublicKeyEvent,
+        NewNullifierEvent, NotePublicKey, ProcessedEvent, PublicKeyEvent,
     },
     zk::encryption::{registration_message, verify_owner_signature},
 };
@@ -163,32 +163,43 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //
 // An event is indexed only after its owner signature verifies over the
 // registration message built from the emitting contract, the owner and both
-// keys, so a lying RPC or bootnode cannot substitute keys. The encryption key
-// is stored in its X25519 form. A key that is not a curve point skips the
-// event, since a parse error stops all later processing.
+// keys, so a lying RPC or bootnode cannot substitute keys the owner did not
+// sign. The encryption key is stored in its X25519 form. The registry
+// guarantees the event's shape, so a malformed field can only come from a
+// lying source: it skips the event, like a missing or invalid signature or a
+// key that is not a curve point, since a parse error stops all later
+// processing.
 fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKeyEvent>> {
     let ParsedContractEvent {
         id,
         contract_id,
-        name,
         topics,
         values,
         ..
     } = parsed;
-    let owner_scval = topics
+    let Some(owner) = topics
         .first()
-        .ok_or_else(|| anyhow!("event `{name}` id {id} should have a owner topic value"))?;
-    let owner = scval_to_address_string(owner_scval)?;
-    let encryption_key_scval = values
+        .and_then(|owner| scval_to_address_string(owner).ok())
+    else {
+        tracing::warn!(%id, "skipping a registration without an owner address");
+        return Ok(None);
+    };
+    let Some(edwards) = values
         .get("encryption_key")
-        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an encryption_key value"))?;
-    let edwards: [u8; 32] = scval_to_bytes(encryption_key_scval)?
-        .try_into()
-        .map_err(|_| anyhow!("event `{name}` id {id}: encryption_key is not 32 bytes"))?;
-    let note_key_scval = values
+        .and_then(|key| scval_to_bytes(key).ok())
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+    else {
+        tracing::warn!(%id, "skipping a registration without a 32-byte encryption key");
+        return Ok(None);
+    };
+    let Some(note_key) = values
         .get("note_key")
-        .ok_or_else(|| anyhow!("event `{name}` id {id} should have an note_key value"))?;
-    let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
+        .and_then(|key| scval_to_bytes(key).ok())
+        .and_then(|bytes| NotePublicKey::try_from(bytes).ok())
+    else {
+        tracing::warn!(%id, "skipping a registration without a 32-byte note key");
+        return Ok(None);
+    };
     let Some(owner_signature_scval) = values.get("owner_signature") else {
         tracing::warn!(%id, "skipping a registration without an owner signature");
         return Ok(None);

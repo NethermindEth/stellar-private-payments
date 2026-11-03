@@ -145,7 +145,7 @@ SPP_DEPLOYMENT_FILE=/absolute/path/to/deployments.json docker compose up --build
 The `docker-compose.no-https.yml` override serves plain HTTP for local testing only; an app served
 over HTTPS can't call it. For systemd and every setting, see the
 [bootnode README](https://github.com/NethermindEth/stellar-private-payments/blob/main/tools/bootnode/README.md).
-Users still trust the bootnode for the completeness of the history it serves. Registry events carry the owner's signature, so the bootnode cannot substitute recipient keys, but it can withhold a registration. The [Bootnode](../bootnode.md) page covers the remaining risks.
+Users still trust the bootnode to serve complete history. Registry events carry the owner's signature, so the bootnode cannot substitute recipient keys the owner did not sign, though it can withhold a registration. The [Bootnode](../bootnode.md) page covers the remaining risks.
 
 ## Host the web app
 

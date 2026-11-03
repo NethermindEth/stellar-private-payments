@@ -334,6 +334,65 @@ mod tests {
         Ok(())
     }
 
+    /// A registration with a malformed field, which only a lying source can
+    /// serve, is skipped, and the events after it are still processed.
+    #[test]
+    fn a_registration_with_a_malformed_field_is_skipped() -> Result<()> {
+        let bytes = |len: usize| -> Result<xdr::ScVal> {
+            Ok(xdr::ScVal::Bytes(xdr::ScBytes(vec![1; len].try_into()?)))
+        };
+        let malformed = |id: &str, owner: xdr::ScVal, fields: Vec<(&str, xdr::ScVal)>| {
+            let entries = fields
+                .into_iter()
+                .map(|(key, val)| {
+                    Ok(xdr::ScMapEntry {
+                        key: symbol(key)?,
+                        val,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            Ok::<_, anyhow::Error>(ContractEvent {
+                contract_id: REGISTRY.to_string(),
+                ..raw_event(id, &[symbol("public_key_event")?, owner], entries)?
+            })
+        };
+        let mut storage = storage_with(vec![
+            malformed(
+                "0000000000000000001-0000000000",
+                u256(1),
+                vec![("encryption_key", bytes(32)?), ("note_key", bytes(32)?)],
+            )?,
+            malformed(
+                "0000000000000000002-0000000000",
+                owner(7),
+                vec![("encryption_key", bytes(31)?), ("note_key", bytes(32)?)],
+            )?,
+            malformed(
+                "0000000000000000003-0000000000",
+                owner(7),
+                vec![("encryption_key", bytes(32)?), ("note_key", bytes(31)?)],
+            )?,
+            malformed(
+                "0000000000000000004-0000000000",
+                owner(7),
+                vec![("encryption_key", bytes(32)?)],
+            )?,
+            registration(
+                "0000000000000000005-0000000000",
+                REGISTRY,
+                8,
+                edwards_key(1),
+            )?,
+        ])?;
+
+        assert!(process_events(&mut storage, 10)?);
+        assert!(!process_events(&mut storage, 10)?);
+
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
+        assert_eq!(registered_key(&storage, REGISTRY, 8)?, Some(x25519_key(1)));
+        Ok(())
+    }
+
     /// Entries from another registry, such as one a deployment replaced, are
     /// never returned, even when they are newer.
     #[test]
