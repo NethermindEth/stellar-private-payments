@@ -422,21 +422,51 @@ mod store {
         ) {
             let mut header = Header::new_gnu();
             // `Header::set_path` refuses `..` and absolute names, so fill the
-            // raw name field the way a hostile archive would.
-            header
-                .as_old_mut()
-                .name
-                .get_mut(..name.len())
-                .expect("name fits the 100-byte tar field")
-                .copy_from_slice(name.as_bytes());
-            header.set_entry_type(kind);
+            // raw fields the way a hostile archive would.
+            raw_field(
+                builder,
+                &mut header.as_old_mut().name,
+                name,
+                EntryType::GNULongName,
+            );
             if let Some(link) = link {
-                header.set_link_name(link).expect("link name");
+                raw_field(
+                    builder,
+                    &mut header.as_old_mut().linkname,
+                    link,
+                    EntryType::GNULongLink,
+                );
             }
+            header.set_entry_type(kind);
             header.set_size(u64::try_from(data.len()).expect("entry size"));
             header.set_mode(0o644);
             header.set_cksum();
             builder.append(&header, data).expect("append entry");
+        }
+
+        /// Writes `value` into a raw header field, or into a preceding GNU
+        /// long-name entry when it does not fit, as GNU tar does. Temp paths
+        /// on macOS make absolute names longer than the 100-byte field.
+        fn raw_field(
+            builder: &mut Builder<Vec<u8>>,
+            field: &mut [u8],
+            value: &str,
+            kind: EntryType,
+        ) {
+            if value.len() < field.len() {
+                field[..value.len()].copy_from_slice(value.as_bytes());
+                return;
+            }
+            let mut header = Header::new_gnu();
+            header.as_old_mut().name[..13].copy_from_slice(b"././@LongLink");
+            header.set_entry_type(kind);
+            header.set_mode(0o644);
+            let data = [value.as_bytes(), b"\0"].concat();
+            header.set_size(u64::try_from(data.len()).expect("long name size"));
+            header.set_cksum();
+            builder
+                .append(&header, data.as_slice())
+                .expect("append long name");
         }
 
         fn file(builder: &mut Builder<Vec<u8>>, name: &str, data: &[u8]) {
