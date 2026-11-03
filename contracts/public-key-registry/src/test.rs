@@ -8,7 +8,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, String, Vec,
     crypto::bn254::{Bn254G1Affine, Bn254G2Affine},
     symbol_short,
-    testutils::{Deployer as _, Events as _},
+    testutils::{Deployer as _, Events as _, storage::Persistent as _},
 };
 use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::BN256_MOD_BYTES};
 use std::{format, string::String as StdString};
@@ -593,6 +593,7 @@ fn test_public_key_event_exact_shape() {
         owner: account.owner,
         encryption_key: account.encryption_key,
         note_key: account.note_key,
+        owner_signature: proof.owner_signature.clone(),
     }
     .to_xdr(env, &setup.registry);
     assert_eq!(events.events()[0], expected);
@@ -625,4 +626,23 @@ fn register_renews_the_instance() {
         env.deployer().get_contract_instance_ttl(&setup.registry),
         before.saturating_add(MAX_EXTENSION_LEDGERS)
     );
+}
+
+#[test]
+fn register_renews_the_persistent_registration() {
+    let setup = Setup::new();
+    let env = &setup.env;
+    let registrant = Registrant::new(0x11);
+    let account = registrant.account(env);
+    let proof = registrant.prove(env, &setup.registry, &account);
+    let key = DataKey::Registration(account.owner.clone());
+
+    setup.client().register(&account, &proof);
+    let before = env.as_contract(&setup.registry, || env.storage().persistent().get_ttl(&key));
+
+    // A registration that changes nothing still renews.
+    setup.client().register(&account, &proof);
+
+    let after = env.as_contract(&setup.registry, || env.storage().persistent().get_ttl(&key));
+    assert_eq!(after, before.saturating_add(MAX_EXTENSION_LEDGERS));
 }
