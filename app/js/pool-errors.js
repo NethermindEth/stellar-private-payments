@@ -12,7 +12,7 @@ export function poolErrorMessage(error, { fee, format, feeIncluded = false, amou
     case 'NOT_BALANCED': {
       if (!amounts) return null;
       const { inputs, deposit, outputs, withdraw } = amounts;
-      const gap = BigInt(error.gap);
+      const { gap } = error;
       const excess = -gap;
       const rule = fee
         ? `Selected notes and public deposit must add up to the private outputs, public withdraw and the ${format(fee)} pool fee.`
