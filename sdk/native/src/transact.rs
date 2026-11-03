@@ -254,16 +254,36 @@ pub(crate) fn check_balance(
     })
 }
 
-/// Returns the sum of the `notes` that `inputs` names, or
-/// [`Error::MembershipSync`] for an input not yet synced.
+/// Returns the sum of the `notes` that `inputs` names, a separate copy for
+/// each listing of a commitment.
+///
+/// Fails with [`Error::MembershipSync`] for an input not yet synced, and at
+/// once for a commitment listed more often than `notes` holds it.
 pub(crate) fn input_total(inputs: &[Field], notes: &[SpendableNote]) -> Result<NoteAmount, Error> {
-    inputs.iter().try_fold(NoteAmount::ZERO, |sum, commitment| {
-        let note = notes
-            .iter()
-            .find(|note| note.commitment == *commitment)
-            .ok_or(Error::MembershipSync(AspMembershipSync::SyncRequired(None)))?;
-        sum.checked_add(note.amount).ok_or_else(too_large)
-    })
+    inputs
+        .iter()
+        .enumerate()
+        .try_fold(NoteAmount::ZERO, |sum, (index, commitment)| {
+            let copy = inputs[..index]
+                .iter()
+                .filter(|earlier| *earlier == commitment)
+                .count();
+            let note = notes
+                .iter()
+                .filter(|note| note.commitment == *commitment)
+                .nth(copy)
+                .ok_or_else(|| match copy {
+                    0 => Error::MembershipSync(AspMembershipSync::SyncRequired(None)),
+                    _ => Error::Other(listed_twice()),
+                })?;
+            sum.checked_add(note.amount).ok_or_else(too_large)
+        })
+}
+
+fn listed_twice() -> anyhow::Error {
+    anyhow::anyhow!(
+        "a note ID is listed twice in the inputs, but the wallet holds only one unspent note with that ID in this pool"
+    )
 }
 
 fn too_large() -> Error {
@@ -440,9 +460,7 @@ fn build_pool_inputs(
         let Some((amount, blinding, leaf_index)) = note else {
             // Most likely one note listed twice, so fail rather than sync.
             if req.input_commitments[..index].contains(commitment) {
-                anyhow::bail!(
-                    "a note ID is listed twice in the inputs, but the wallet holds only one unspent note with that ID in this pool"
-                );
+                return Err(listed_twice());
             }
             tracing::info!(
                 commitment = ?crate::types::Sensitive(commitment),
@@ -822,6 +840,20 @@ mod tests {
         assert!(matches!(
             input_total(&[Field::ZERO, unknown], &notes),
             Err(Error::MembershipSync(AspMembershipSync::SyncRequired(None)))
+        ));
+
+        let twice = [Field::ZERO; 2];
+        let copies = twice.map(|commitment| SpendableNote {
+            commitment,
+            amount: NoteAmount::from(4),
+        });
+        assert_eq!(
+            input_total(&twice, &copies).expect("each listing takes its own copy"),
+            NoteAmount::from(8)
+        );
+        assert!(matches!(
+            input_total(&twice, &copies[..1]),
+            Err(Error::Other(error)) if error.to_string().contains("listed twice")
         ));
     }
 

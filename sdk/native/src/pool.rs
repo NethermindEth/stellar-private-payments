@@ -199,8 +199,9 @@ impl PrivatePool {
     /// # Errors
     ///
     /// Returns the deposit-limit, recipient, and balance errors of
-    /// [`Self::transact`], and [`Error::MembershipSync`] at once for an input
-    /// not yet synced.
+    /// [`Self::transact`], an error for a commitment listed more often than the
+    /// wallet holds unspent copies of it, and [`Error::MembershipSync`] at once
+    /// for an input not yet synced.
     pub async fn check_transact(&self, step: &Transact) -> Result<(), Error> {
         let pool = self.pool_info().await?;
         DepositLimits::from(&pool).check(step.ext_amount, &self.config.pool_contract_id)?;
