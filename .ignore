@@ -1,0 +1,9 @@
+# Kept out of contract source archives: `stellar contract build archive` refuses symlinks, and no
+# contract build reads the circuit binaries. rg, fd, and typos read this file too and skip these.
+docs/src/app.md
+docs/src/architecture.md
+docs/src/contributing.md
+docs/src/deploy.md
+docs/src/introduction.md
+docs/src/security.md
+deployments/*/circuit_keys/*.bin

@@ -47,7 +47,7 @@ A request naming a contract the bootnode does not follow, beside ones it does, g
 
 Using a bootnode adds additional trust and privacy considerations:
 
-- **Integrity risk:** the bootnode can serve incorrect history, omit events, or selectively censor data.
+- **Integrity risk:** the bootnode can omit events, censor data selectively, or serve incorrect history for event types that clients do not authenticate. Registry registrations are signed by their owner and checked before indexing, so the bootnode cannot substitute keys the recipient did not sign. It can still withhold a registration, and the registered address then looks unregistered.
 - **Availability risk:** the bootnode can be down or rate limit users.
 - **Privacy risk:** the bootnode operator can observe client IP addresses and request timing/volume.
 - **Handoff integrity risk:** a malicious bootnode could return an incorrect `fromLedger`, causing the indexer to skip or replay the wrong ledger range on the main RPC.
@@ -56,7 +56,8 @@ Using a bootnode adds additional trust and privacy considerations:
 
 Non-exhaustive list of things a malicious or compromised bootnode could do:
 
-- Serve a forged event history that causes an incorrect local reconstruction.
+- Forge history for event types that carry no owner signature, causing the client to reconstruct the wrong state.
+- Withhold a registry registration, so a registered address looks unregistered. This denies service; it does not substitute keys.
 - Return stale data to delay catch-up.
 - Censor specific contract IDs/events (selective omission).
 - Use timing/IP correlation to fingerprint user activity.
@@ -66,5 +67,6 @@ Non-exhaustive list of things a malicious or compromised bootnode could do:
 
 - The bootnode restricts the JSON-RPC surface area (only `getEvents`, `getLatestLedger`) and rejects all other methods.
 - The service is intended to be **HTTPS-only** in production and includes basic security headers and IP rate limiting.
+- Clients verify the owner signature on every registry event before indexing it, which rules out keys the owner did not sign. The signature shows that the owner signed the registration message, not that the registry accepted it, so a message the owner signed but never submitted still verifies; a phishing signing prompt is one way to obtain one. Omission also remains, and cross-checking independent RPC providers or reading the registry state can reduce that risk.
 - Users who need stronger trust guarantees should self-host a bootnode and/or cross-check history using multiple RPC providers.
 

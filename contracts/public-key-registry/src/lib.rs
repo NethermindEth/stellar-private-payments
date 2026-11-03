@@ -57,6 +57,9 @@ pub struct PublicKeyEvent {
     pub encryption_key: Bytes,
     /// BN254 note public key
     pub note_key: Bytes,
+    /// SEP-53 signature by the owner's master key over the registration
+    /// message, so clients can verify the event without trusting its source.
+    pub owner_signature: BytesN<64>,
 }
 
 /// Contract error types for the public key registry
@@ -235,6 +238,9 @@ impl PublicKeyRegistry {
             .get::<DataKey, Registration>(&key)
         {
             return if existing == next {
+                // A no-op re-registration still renews the registration entry,
+                // so a user can keep their published keys alive.
+                soroban_utils::extend_persistent(&env, &key);
                 Ok(())
             } else {
                 Err(Error::AlreadyRegistered)
@@ -260,10 +266,12 @@ impl PublicKeyRegistry {
         )?;
 
         env.storage().persistent().set(&key, &next);
+        soroban_utils::extend_persistent(&env, &key);
         PublicKeyEvent {
             owner: account.owner,
             encryption_key: account.encryption_key,
             note_key: account.note_key,
+            owner_signature: proof.owner_signature.clone(),
         }
         .publish(&env);
         Ok(())

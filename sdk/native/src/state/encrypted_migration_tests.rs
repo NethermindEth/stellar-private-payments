@@ -196,7 +196,7 @@ fn copy_preserves_legacy_version_and_encryption_migrates_it() -> Result<()> {
         storage
             .conn
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-        6
+        7
     );
     assert!(
         storage
