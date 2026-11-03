@@ -78,15 +78,13 @@ Checks:
     unless --allow-unverified is passed.
   - With --rebuild: contracts_release.repo is --release-repo, and gh verifies
     that contracts-release.yml on that repository's main branch attested
-    DIR/SHA256SUMS. With --allow-unverified and no attestation, only the
-    vk_sha256 values in DIR/contracts.json say which key each verifier holds.
-    That file has contracts_release.tag, and the entry with each contract's
+    DIR/SHA256SUMS. With --allow-unverified and no attestation, only
+    DIR/contracts.json vouches for the key each verifier holds. That file has
+    contracts_release.tag, and the entry with each contract's
     contracts_release.code hash has the package that contract is built from.
-    A verifier's entry also has its key name, contracts_release.network, and
-    the SHA-256 of its key file in deployments/<network>/circuit_keys, the
-    file deploy.sh picks it by. Last, unless a check above failed,
-    scripts/build-contracts.sh --rebuild DIR rebuilds every Wasm and compares
-    hashes.
+    A verifier's entry also has its key name and contracts_release.network.
+    Last, unless a check above failed, scripts/build-contracts.sh --rebuild
+    DIR rebuilds every Wasm and compares hashes.
   - The admin account has master weight 0, three equal thresholds of at least 2,
     signers that are all ed25519 keys of weight 1, and no fewer signers than the
     threshold. Off mainnet, a failure here prints as a notice. A contract admin
@@ -419,24 +417,14 @@ if [[ -n "$REBUILD" ]]; then
   # Prints the role fields of the release's entry for code hash $1.
   release_role() {
     jq -rc --arg hash "$1" 'first(.contracts[] | select(.sha256 == $hash)
-      | {package, network, key_name, vk_sha256} | with_entries(select(.value != null)))
+      | {package, network, key_name} | with_entries(select(.value != null)))
       // "no entry with this hash"' "$RELEASE_JSON"
-  }
-  sha256() {
-    if command -v sha256sum >/dev/null 2>&1; then
-      sha256sum "$1" | cut -d' ' -f1
-    else
-      shasum -a 256 "$1" | cut -d' ' -f1
-    fi
   }
   while read -r id pkg key <&3; do
     want="$(printf '{"package":"%s"}' "$pkg")"
     if [[ "$pkg" == circom-groth16-verifier ]]; then
-      vk="policy_tx_2_2${key:+_$key}_vk.json"
-      [[ "$key" != keyOwnership ]] || vk=keyOwnership_vk.json
       want="$(jq -cn --arg package "$pkg" --arg network "$RELEASE_NETWORK" --arg key_name "$key" \
-        --arg vk_sha256 "$(sha256 "$ROOT_DIR/deployments/$NETWORK/circuit_keys/$vk")" \
-        '{$package, $network, $key_name, $vk_sha256}')"
+        '{$package, $network, $key_name}')"
     fi
     check "$id" "release role" "$want" \
       "$(release_role "$(jq -r --arg id "$id" '.contracts_release.code[$id]' "$MANIFEST")")"

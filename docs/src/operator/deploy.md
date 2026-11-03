@@ -241,11 +241,10 @@ Replace `RELEASE_DIR` with a new directory. For a fork's release, pass the fork 
 to `--release-repo`.
 
 With `--rebuild`, the check runs the same `gh attestation verify` as `deploy.sh` and checks each
-contract against the release's `contracts.json`, including the SHA-256 of the key file each
-verifier embeds. Last, unless an earlier check failed, it rebuilds every Wasm from the release's
-source archive with `scripts/build-contracts.sh --rebuild` and compares hashes. The rebuild needs
-Docker, and the attestation check needs `gh` installed and logged in: without it, the check fails
-unless you pass `--allow-unverified`.
+contract against the release's `contracts.json`. Last, unless an earlier check failed, it rebuilds
+every Wasm from the release's source archive with `scripts/build-contracts.sh --rebuild` and
+compares hashes. The rebuild needs Docker, and the attestation check needs `gh` installed and
+logged in: without it, the check fails unless you pass `--allow-unverified`.
 
 In the output, read the `attestation` line first. A rebuild proves only that the files rebuild
 from the source archive they came with, and a release built from any source passes it. The
