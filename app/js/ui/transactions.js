@@ -17,6 +17,7 @@ import { OpHistory } from './op-history.js';
 import { Dashboard } from './dashboard.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { poolErrorMessage } from '../pool-errors.js';
+import { disclosedCopy } from '../disclosure-notes.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
@@ -698,7 +699,7 @@ export const Transactions = {
                 const recipient = enteredRecipient || App.state.wallet.address;
                 let session = await ensureAppPool();
                 const notes = await session.notes();
-                const inputNotes = inputNoteIds.map(id => notes.find(n => n.id === id));
+                const inputNotes = inputNoteIds.map(id => disclosedCopy(notes, { id, poolContractId: pool.poolContractId }));
                 if (inputNotes.includes(undefined)) {
                     Toast.show('A selected note is not one of your notes for this token. Pick each one from your notes.', 'error', 7000, { origin: 'advanced' });
                     return;
