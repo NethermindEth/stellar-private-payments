@@ -61,8 +61,11 @@ pub(crate) fn process_notes(
 mod tests {
     use super::*;
     use crate::{
-        state::test_events::{b64, commitment_entries, commitment_event, raw_event, symbol, u256},
-        types::{ContractEvent, ContractsEventData, EncryptionPrivateKey},
+        state::test_events::{
+            b64, commitment_entries, commitment_event, leaf_event, membership_event, raw_event,
+            symbol, u256,
+        },
+        types::{ContractEvent, ContractsEventData, EncryptionPrivateKey, Field, U256},
         zk::encryption::encryption_edwards_key,
     };
     use stellar_xdr as xdr;
@@ -119,6 +122,102 @@ mod tests {
 
         assert!(format!("{err:#}").contains("0000000000000000001-0000000000"));
         assert_eq!(storage.get_unprocessed_events(10)?.len(), 2);
+        assert!(
+            storage
+                .get_pool_commitment_leaves_ordered("CPOOL")?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    /// Non-membership leaves have no table: the event is parsed, marked
+    /// processed, and the events after it are still saved.
+    #[test]
+    fn a_non_membership_event_is_marked_processed_without_being_saved() -> Result<()> {
+        let leaf = leaf_event(
+            "0000000000000000001-0000000000",
+            "LeafInserted",
+            &[("key", u256(1)), ("value", u256(42)), ("root", u256(7))],
+        )?;
+        // An unknown event is marked processed too, so check it is parsed.
+        assert!(matches!(
+            parse_event(leaf.clone())?,
+            Some(ProcessedEvent::LeafInserted(_))
+        ));
+        let mut storage = storage_with(vec![
+            leaf,
+            commitment_event(
+                "0000000000000000002-0000000000",
+                COMMITMENT,
+                commitment_entries(0)?,
+            )?,
+        ])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert!(storage.get_unprocessed_events(10)?.is_empty());
+        assert!(
+            storage
+                .get_all_asp_membership_leaves_ordered("CNONMEMBERSHIP")?
+                .is_empty()
+        );
+        assert_eq!(
+            storage.get_pool_commitment_leaves_ordered("CPOOL")?,
+            [Field(U256::from(COMMITMENT))]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_leaf_added_event_is_saved_as_a_membership_leaf() -> Result<()> {
+        let mut storage = storage_with(vec![membership_event(
+            "0000000000000000001-0000000000",
+            "LeafAdded",
+            &[
+                ("leaf", u256(42)),
+                ("index", xdr::ScVal::U64(0)),
+                ("root", u256(7)),
+            ],
+        )?])?;
+
+        assert!(process_events(&mut storage, 10)?);
+
+        assert!(storage.get_unprocessed_events(10)?.is_empty());
+        assert_eq!(
+            storage.get_all_asp_membership_leaves_ordered("CMEMBERSHIP")?,
+            [Field(U256::from(42))]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_malformed_non_membership_event_stops_processing() -> Result<()> {
+        let mut storage = storage_with(vec![
+            commitment_event(
+                "0000000000000000001-0000000000",
+                COMMITMENT,
+                commitment_entries(0)?,
+            )?,
+            leaf_event(
+                "0000000000000000002-0000000000",
+                "LeafDeleted",
+                &[("key", u256(1))],
+            )?,
+            commitment_event(
+                "0000000000000000003-0000000000",
+                COMMITMENT + 1,
+                commitment_entries(1)?,
+            )?,
+        ])?;
+
+        let err = process_events(&mut storage, 10).expect_err("bad event");
+
+        assert_eq!(
+            err.to_string(),
+            "cannot process event 0000000000000000002-0000000000"
+        );
+        assert!(format!("{err:#}").contains("should have an root value"));
+        assert_eq!(storage.get_unprocessed_events(10)?.len(), 3);
         assert!(
             storage
                 .get_pool_commitment_leaves_ordered("CPOOL")?
