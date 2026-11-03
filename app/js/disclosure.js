@@ -18,6 +18,7 @@ import { filterNotes, createNoteRow, formatAmount } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
 import { onEnter } from './ui/keys.js';
 import { createDisclosureMetadata } from './disclosure-metadata.js';
+import { disclosedCopy, preselectNotes, sameNote } from './disclosure-notes.js';
 import { refreshTokenDecimals } from './token-metadata.js';
 
 // ---------------------------------------------------------------------------
@@ -173,12 +174,9 @@ async function loadNotes() {
     // Apply query-param preselection if present
     const query = parseQueryParams();
     if (query.commitments && query.commitments.length > 0) {
-      const targets = query.commitments.map(normalizeCommitment);
-      const matches = state.notes.filter((n) =>
-        targets.includes(normalizeCommitment(n.id))
-      );
+      const matches = preselectNotes(state.notes, query.commitments, query.pool);
       if (matches.length > 0) {
-        state.selectedNotes = matches.slice(0, 4);
+        state.selectedNotes = matches;
       } else {
         state.notesError =
           'Preselected notes not found or not owned by this account.';
@@ -206,6 +204,7 @@ function parseQueryParams() {
   const commitments = hashParams.getAll('commitment').concat(searchParams.getAll('commitment')).filter(Boolean);
   return {
     commitments: commitments.length > 0 ? commitments : null,
+    pool: hashParams.get('pool') || searchParams.get('pool'),
     verify: hashParams.get('verify') === '1' || searchParams.get('verify') === '1' || hashParams.get('verify') === 'true' || searchParams.get('verify') === 'true',
   };
 }
@@ -231,15 +230,6 @@ function tokenLabelForPool(poolContractId) {
 function shortCommitment(hex) {
   if (!hex || hex.length < 10) return hex || '--';
   return `${hex.slice(0, 8)}…${hex.slice(-4)}`;
-}
-
-function normalizeCommitment(s) {
-  if (!s) return '';
-  let t = s.toLowerCase().trim();
-  if (t.startsWith('0x')) t = t.slice(2);
-  // strip leading zeros so "0x01" and "0x1" and "1" match
-  t = t.replace(/^0+/, '');
-  return t;
 }
 
 // Filter controls for the Generate selector: spent-status buttons plus a
@@ -362,7 +352,7 @@ export function mountGenerate(container) {
   list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'Notes');
 
-  const isSelected = (note) => state.selectedNotes.some((n) => n.id === note.id);
+  const isSelected = (note) => state.selectedNotes.some((n) => sameNote(n, note));
   const atMaxSelection = () => state.selectedNotes.length >= 4;
 
   if (notes.length === 0) {
@@ -377,13 +367,13 @@ export function mountGenerate(container) {
         decimals: poolDecimals(note.poolContractId),
         selectable: true,
         selected,
-        disabled: !selected && atMaxSelection(),
+        disabled: (!selected && atMaxSelection()) || !sameNote(note, disclosedCopy(state.notes, note)),
         testId: 'disclosure-note',
         onToggle: (n, checked) => {
           if (checked) {
             if (!isSelected(n)) state.selectedNotes.push(n);
           } else {
-            state.selectedNotes = state.selectedNotes.filter((x) => x.id !== n.id);
+            state.selectedNotes = state.selectedNotes.filter((x) => !sameNote(x, n));
           }
           mountGenerate(container);
         },
@@ -1471,7 +1461,8 @@ export async function initDisclosure() {
 
   App.events.addEventListener('disclosure:metadata', () => {
     generateContainer?.querySelectorAll('[data-note-id]').forEach(row => {
-      const note = state.notes.find(note => note.id === row.dataset.noteId);
+      const note = state.notes.find(note =>
+        note.id === row.dataset.noteId && note.poolContractId === row.dataset.poolId);
       const label = row.querySelector('[data-note-amount]');
       if (note && label) {
         label.textContent = formatAmount(note.amount, tokenLabelForPool(note.poolContractId), poolDecimals(note.poolContractId));
@@ -1489,11 +1480,10 @@ export async function initDisclosure() {
     if (generateContainer) mountGenerate(generateContainer);
   });
   App.events.addEventListener('disclosure:select-note', (event) => {
-    const { noteId } = event.detail;
-    const targets = [normalizeCommitment(noteId)];
-    const matches = state.notes.filter((n) => targets.includes(normalizeCommitment(n.id)));
+    const { noteId, poolId } = event.detail;
+    const matches = preselectNotes(state.notes, [noteId], poolId);
     if (matches.length > 0) {
-      state.selectedNotes = [matches[0]];
+      state.selectedNotes = matches;
       if (generateContainer) mountGenerate(generateContainer);
     }
   });
