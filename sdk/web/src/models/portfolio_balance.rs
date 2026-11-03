@@ -1,8 +1,6 @@
 use stellar_private_payments::types::PortfolioBalance as NativePortfolioBalance;
 use wasm_bindgen::prelude::*;
 
-use super::convert::note_amount_string;
-
 /// One pool balance row from [`crate::Account::portfolio`].
 #[wasm_bindgen]
 pub struct PortfolioBalance {
@@ -26,10 +24,10 @@ impl PortfolioBalance {
         self.inner.token_label.clone()
     }
 
-    /// Stroops as a decimal string.
+    /// Amount in stroops (`bigint` in JS).
     #[wasm_bindgen(getter)]
-    pub fn amount(&self) -> String {
-        note_amount_string(&self.inner.amount)
+    pub fn amount(&self) -> u128 {
+        u128::from(self.inner.amount)
     }
 
     #[wasm_bindgen(getter, js_name = noteCount)]

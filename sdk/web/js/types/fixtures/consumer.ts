@@ -48,6 +48,8 @@ async function typedConsumer(config: ContractConfig) {
   void (info.fee satisfies bigint);
   void (info.minimumDepositAmount satisfies bigint);
   void (info.maximumDepositAmount satisfies bigint);
+  void ((await pool.notes())[0]?.amount satisfies bigint | undefined);
+  void ((await account.portfolio())[0]?.amount satisfies bigint | undefined);
 }
 
 void typedConsumer;
