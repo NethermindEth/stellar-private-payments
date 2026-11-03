@@ -38,8 +38,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-targets: "true"
 
-      - name: Build circuit artifacts
-        run: make circuits
+      - name: Provide circuit artifacts
+        uses: ./.github/actions/circuits
 
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force

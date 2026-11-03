@@ -85,9 +85,8 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
-      - name: Build circuit artifacts
-        run: |
-          make circuits
+      - name: Provide circuit artifacts
+        uses: ./.github/actions/circuits
 
       - name: Build sdk/web dist
         run: |

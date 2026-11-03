@@ -100,9 +100,9 @@ jobs:
           cp deployments/testnet/circuit_keys/*.json testdata/
 
       # Artifacts land in target/circuits-artifacts/ (same path make serve and
-      # spp read). Building explicitly here keeps the served-app cold build short.
-      - name: Build circuit artifacts
-        run: make circuits
+      # spp read). Providing them here keeps the served-app cold build short.
+      - name: Provide circuit artifacts
+        uses: ./.github/actions/circuits
 
       # Empty = the whole suite. run-all.sh takes the subset as arguments.
       - name: Select tests

@@ -43,8 +43,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: sqlite3mc-${{ matrix.target }}
-      - name: Build circuit artifacts
-        run: make circuits
+      - name: Provide circuit artifacts
+        uses: ./.github/actions/circuits
       - name: Test encrypted native SDK
         run: cargo test --locked --release -p stellar-private-payments --lib --target '${{ matrix.target }}'
       - name: Build CLI with required backend
@@ -91,7 +91,8 @@ jobs:
         run: |
           cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
           npm ci --prefix sdk/web
-          make circuits
+      - name: Provide circuit artifacts
+        uses: ./.github/actions/circuits
       - name: Cache verified binaryen
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

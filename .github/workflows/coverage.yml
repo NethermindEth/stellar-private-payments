@@ -26,8 +26,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
-      - name: Build circuit artifacts (required by web)
-        run: make circuits
+      - name: Provide circuit artifacts (required by web)
+        uses: ./.github/actions/circuits
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload branch coverage artifact

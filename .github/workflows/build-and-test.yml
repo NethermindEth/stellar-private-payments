@@ -31,27 +31,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: tests
-      # Use the released circuits when the sources match the release, with
-      # the committed keys in place of a local trusted setup. Otherwise build.
       - name: Provide circuit artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          tag="circuits-v$(jq -r .version deployments/testnet/circuits.json)"
-          if git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag" &&
-            git diff --quiet "$tag" HEAD -- circuits tools/circuit-compiler deployments/testnet/circuits.json; then
-            echo "Using $tag"
-            gh release download "$tag" -p 'circuits.tar.gz*' -D "$RUNNER_TEMP"
-            (cd "$RUNNER_TEMP" && sha256sum -c circuits.tar.gz.sha256)
-            mkdir -p target/circuits-artifacts testdata
-            tar -xzf "$RUNNER_TEMP/circuits.tar.gz" -C target/circuits-artifacts --wildcards '*.r1cs'
-            cp deployments/testnet/circuit_keys/*.bin deployments/testnet/circuit_keys/*.json testdata/
-            sh deployments/scripts/circuit-artifacts.sh verify
-          else
-            echo "Circuits differ from $tag; building them"
-            make circuits
-          fi
+        uses: ./.github/actions/circuits
       - name: Build examples
         run: cargo build --workspace --examples
       - name: Build
