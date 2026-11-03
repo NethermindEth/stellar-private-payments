@@ -179,7 +179,7 @@ fn error_message(
         _ => cause.max_spend().and_then(|max_spend| {
             if max_spend == NoteAmount::ZERO {
                 return Some(format!(
-                    "you have nothing to send once the {} pool fee is paid; deposit more first",
+                    "you have nothing to send; each transaction spends at most two of your notes, and its {} pool fee would use them up; deposit more first",
                     fee.pool_fee
                 ));
             }
@@ -370,7 +370,7 @@ mod tests {
         });
         assert_eq!(
             error_message(&error, &fee("0.0001 XLM", 1_000), false, xlm).to_string(),
-            "you have nothing to send once the 0.0001 XLM pool fee is paid; deposit more first"
+            "you have nothing to send; each transaction spends at most two of your notes, and its 0.0001 XLM pool fee would use them up; deposit more first"
         );
         assert_eq!(
             error_message(&error, &fee("0 XLM", 0), false, xlm).to_string(),
