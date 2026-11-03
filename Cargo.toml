@@ -138,5 +138,9 @@ debug-assertions = true
 [profile.dev.build-override]
 opt-level = 3
 
+# Proving tests are slow with unoptimized dependencies
+[profile.dev.package."*"]
+opt-level = 3
+
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
