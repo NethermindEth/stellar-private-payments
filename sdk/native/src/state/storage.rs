@@ -136,6 +136,8 @@ impl Storage {
         if path.exists() && std::fs::metadata(path)?.len() > 0 {
             super::preflight::validate_plaintext(path)?;
         }
+        #[cfg(unix)]
+        create_private(path)?;
         Self::connect_with_connection(Connection::open(path)?)
     }
 
@@ -1792,6 +1794,24 @@ impl Storage {
         }
 
         Ok(did_any)
+    }
+}
+
+/// Create a missing plaintext database readable only by its owner, as
+/// encrypted storage is. SQLite gives its journal the database file's mode.
+#[cfg(all(unix, feature = "unencrypted-storage"))]
+fn create_private(path: &Path) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 

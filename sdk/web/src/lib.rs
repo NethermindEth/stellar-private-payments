@@ -2,6 +2,9 @@
 //!
 //! Connect with [`Client`], then [`Client::account`], then [`Account::pool`].
 
+#[cfg(not(any(feature = "encrypted-storage", feature = "unencrypted-storage")))]
+compile_error!("enable at least one of the `encrypted-storage` or `unencrypted-storage` features");
+
 mod bootnode;
 #[cfg(target_arch = "wasm32")]
 mod circuits;

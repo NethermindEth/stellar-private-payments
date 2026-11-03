@@ -58,9 +58,7 @@ class AdminRpcServer extends rpc.Server {
 
 /** Throws NoAnswer when the RPC doesn't answer: offline, timeout, 5xx, 429, or not JSON. */
 export function rpcServer(rpcUrl) {
-  const server = new AdminRpcServer(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
-  // The SDK's `timeout` constructor option is ignored.
-  server.httpClient.defaults.timeout = RPC_TIMEOUT_MS;
+  const server = new AdminRpcServer(rpcUrl, { allowHttp: rpcUrl.startsWith('http://'), timeout: RPC_TIMEOUT_MS });
   server.httpClient.interceptors.response.use(
     (response) => {
       // No body: a mid-stream timeout or a page that isn't the RPC.

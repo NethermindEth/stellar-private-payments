@@ -138,6 +138,20 @@ Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bu
 
 CI publishes from `main` when `version` in `package.json` is bumped (see `.github/workflows/release.yml`).
 
+### Storage features
+
+OPFS storage is selected with Cargo features; at least one must be enabled.
+
+- `encrypted-storage` (default): SQLite3MC-encrypted storage in `spp.encrypted.db`, opened with `Storage.open({ keyProvider })`.
+- `unencrypted-storage`: plaintext storage in `spp.db` under `.opfs-sahpool-plaintext`, separate from the legacy `.opfs-sahpool` directory, opened with `Storage.openPlaintext()`. No SQLite3MC is compiled when it is the only storage feature.
+
+`Storage.openPlaintext()` throws on a build without `unencrypted-storage`, and `Storage.open()` throws before calling `keyProvider` on a build without `encrypted-storage`. In a build with only `unencrypted-storage`, the WASM `Storage.open` opens plaintext storage when no key is supplied. Pass the features to the build through `SPP_WEB_CARGO_FEATURES`:
+
+```bash
+SPP_WEB_CARGO_FEATURES="--features unencrypted-storage" npm run build
+SPP_WEB_CARGO_FEATURES="--no-default-features --features unencrypted-storage" npm run build
+```
+
 ### Binaryen / `wasm-opt`
 
 The build script (`scripts/build.sh`) optimizes every shipped circuit witness
@@ -172,7 +186,7 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Mandatory storage encryption
 
-`Storage.open` requires a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
+In the default build, `Storage.open` requires a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
 
 In the web app, `keyProvider` seals a random 32-byte database key in `localStorage` under `AES-256-GCM`, using a wrapping key derived via `HKDF-SHA-256` from a verified Freighter signature in a dedicated storage domain. Enrolling a new database requests two signatures over the unlock message to confirm the wallet signs deterministically before sealing the key; later opens need one signature. When the user locks storage manually or the inactivity timer expires, the app closes the storage worker and reloads the page so decrypted state in WASM and JavaScript memory is discarded.
 

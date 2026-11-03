@@ -1,7 +1,7 @@
 use crate::{
     chain::IndexerError,
     planner::{PlanError, SpendSessionError},
-    types::{AspMembershipSync, Sensitive},
+    types::{AspMembershipSync, NoteAmount, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -77,6 +77,11 @@ pub enum Error {
     #[error("deposits into pool {pool} are paused")]
     DepositsPaused { pool: String },
 
+    /// A deposit leaves less than the pool's minimum in notes once the fee is
+    /// paid.
+    #[error("deposit is below the pool minimum of {minimum} base units after the fee")]
+    DepositBelowMinimum { minimum: NoteAmount },
+
     /// An untyped failure.
     ///
     /// The message holds the whole `anyhow` cause chain, so the variant has no
@@ -90,10 +95,11 @@ pub enum RetentionGap {
     #[error("main RPC is missing event history and no fallback bootnode is configured")]
     SyncGap,
 
+    /// The bootnode cannot serve this deployment; retrying cannot help.
     #[error("configured bootnode failed to fill retention gap: {0}")]
     BootnodeFailed(String),
 
-    /// The bootnode answered `-32004`; retry later.
+    /// The bootnode cannot answer now; retry later.
     #[error("configured bootnode cannot serve the event history yet: {0}")]
     BootnodeNotReady(String),
 }

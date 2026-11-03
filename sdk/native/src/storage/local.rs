@@ -379,6 +379,20 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn plaintext_storage_is_created_private() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(unique_name("spp-private")?);
+        let _cleanup = Cleanup(vec![path.clone()]);
+        LocalStorage::open(path.to_str().expect("UTF-8 temp path"))?;
+        assert_eq!(
+            std::fs::metadata(&path)?.permissions().mode() & 0o777,
+            0o600
+        );
+        Ok(())
+    }
+
     // A relative "file:" name must stay a literal filename for forks too,
     // not a URI that selects another database.
     #[cfg(unix)]

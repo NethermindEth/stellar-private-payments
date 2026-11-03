@@ -125,6 +125,9 @@ try {
   assert.deepEqual(await ctx.snapshot(), untouched);
   ctx.legacy = untouched;
   ctx.checks.push("keyless open rejects without modifying OPFS");
+  await expectFailure(() => ctx.js("window.storage=await sdk.Storage.openPlaintext();return true;"), "Unencrypted storage requires a build with the unencrypted-storage feature");
+  assert.deepEqual(await ctx.snapshot(), untouched);
+  ctx.checks.push("plaintext open rejects in encrypted-only build without modifying OPFS");
   await ctx.encrypted(true);
   await ctx.close();
 

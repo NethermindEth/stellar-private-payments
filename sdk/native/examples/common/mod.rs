@@ -206,20 +206,22 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
     }
 }
 
-/// Read proving key, graph, and r1cs for `pool`'s policy flags.
-///
-/// Uses in-repo `target/circuits-artifacts` (same dir as `make circuits`).
-/// Downloads the hashed GitHub release there when needed.
-pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
-    let stem = pool.circuit_stem();
+/// Circuit artifacts in in-repo `target/circuits-artifacts` (same dir as
+/// `make circuits`). Downloads the hashed GitHub release there when needed.
+fn circuit_store() -> Result<CircuitStore, String> {
     let lock = stellar_private_payments::circuit_lock(include_str!("../../circuits.json"))
         .map_err(|e| e.to_string())?;
     let store = CircuitStore::open(manifest_dir().join("../../target/circuits-artifacts"), lock);
     store
         .ensure_blocking()
         .map_err(|e| format!("circuit artifacts: {e}"))?;
-    store
-        .artifacts(&stem.to_string())
+    Ok(store)
+}
+
+/// Read proving key, graph, and r1cs for `pool`'s policy flags.
+pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
+    circuit_store()?
+        .artifacts(&pool.circuit_stem().to_string())
         .map_err(|e| format!("circuit artifacts: {e}"))
 }
 
@@ -244,6 +246,24 @@ pub fn build_client_for_pool(
     let prover = ProverHandle::from(
         LocalProver::from_artifacts(&[(pool.circuit_stem(), artifacts)])
             .map_err(|e| format!("init local prover: {e}"))?,
+    );
+    Client::init(&rpc_url, storage, prover, config, bootnode_url())
+        .map_err(|e| format!("init client: {e}"))
+}
+
+/// Build a client whose prover only covers `keyOwnership`, enough for
+/// `register_public_keys` and all read-only calls.
+pub fn build_registration_client(
+    storage: LocalStorage,
+    config: ContractConfig,
+) -> Result<Client, String> {
+    let rpc_url = env_or("SPP_RPC_URL", "https://soroban-testnet.stellar.org");
+    let artifacts = circuit_store()?
+        .key_ownership_artifacts()
+        .map_err(|e| format!("circuit artifacts: {e}"))?;
+    let prover = ProverHandle::from(
+        LocalProver::from_key_ownership_artifacts(&artifacts)
+            .map_err(|e| format!("init key ownership prover: {e}"))?,
     );
     Client::init(&rpc_url, storage, prover, config, bootnode_url())
         .map_err(|e| format!("init client: {e}"))

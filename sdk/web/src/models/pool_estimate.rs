@@ -13,6 +13,11 @@ impl PoolEstimate {
     pub fn tx_count(&self) -> u32 {
         self.inner.tx_count
     }
+
+    #[wasm_bindgen(getter)]
+    pub fn fees(&self) -> String {
+        self.inner.fees.to_string()
+    }
 }
 
 impl From<NativeEstimate> for PoolEstimate {

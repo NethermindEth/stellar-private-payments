@@ -19,6 +19,10 @@ case "$PROFILE" in
     ;;
 esac
 
+# Extra cargo feature flags, e.g. `--features unencrypted-storage` or
+# `--no-default-features --features unencrypted-storage`.
+CARGO_FEATURE_FLAGS="${SPP_WEB_CARGO_FEATURES:-}"
+
 WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.128}"
 WASM_OUT_NAME="stellar_private_payments_web"
 
@@ -50,9 +54,9 @@ if [[ "$(uname -s)" == "Darwin" && -z "${AR_wasm32_unknown_unknown:-}${TARGET_AR
 fi
 
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" $CARGO_FEATURE_FLAGS
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker $CARGO_FEATURE_FLAGS
+cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker $CARGO_FEATURE_FLAGS
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
@@ -186,6 +190,7 @@ bash "$WEB/scripts/stage-circuits-dist.sh"
 echo "==> Staging wasm-bindgen TypeScript declarations..."
 bash "$WEB/scripts/stage-wasm-types.sh"
 
-printf '%s:%s\n' "$PROFILE" "${SPP_NETWORK:-testnet}" > "$WEB/.trunk-wasm-profile"
+# Keep in sync with WASM_PROFILE_KEY in Trunk.toml.
+printf '%s:%s%s\n' "$PROFILE" "${SPP_NETWORK:-testnet}" "${SPP_WEB_CARGO_FEATURES:+:$SPP_WEB_CARGO_FEATURES}" > "$WEB/.trunk-wasm-profile"
 
 echo "==> Built sdk/web/dist/"

@@ -168,16 +168,6 @@ async fn events_of(
     .await
 }
 
-async fn wait_for(condition: impl Fn() -> bool) {
-    for _ in 0..100 {
-        if condition() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("condition not reached");
-}
-
 #[tokio::test]
 async fn an_added_allowlist_is_refused_until_its_events_are_archived() {
     const PORT: u16 = 40440;

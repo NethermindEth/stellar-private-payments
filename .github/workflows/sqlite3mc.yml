@@ -51,6 +51,22 @@ jobs:
       - name: Check native lint
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo clippy --locked --release -p stellar-private-payments --lib --tests -- -D warnings
+      - name: Test unencrypted-only native SDK
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo test --locked --release -p stellar-private-payments --lib --no-default-features --features unencrypted-storage
+      - name: Test and lint native SDK with both storage features
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo test --locked --release -p stellar-private-payments --lib --all-features
+          cargo clippy --locked --release -p stellar-private-payments --lib --tests --all-features -- -D warnings
+      - name: Reject native SDK without a storage feature
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          if cargo check --locked -p stellar-private-payments --lib --no-default-features 2> "$RUNNER_TEMP/no-storage.log"; then
+            echo "build without a storage feature unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -F 'enable at least one of the `encrypted-storage` or `unencrypted-storage` features' "$RUNNER_TEMP/no-storage.log"
 
   browser:
     runs-on: ubuntu-24.04
@@ -87,10 +103,12 @@ jobs:
           "$CHROMEWEBDRIVER/chromedriver" --version
           clang-18 --version
           llvm-ar-18 --version
-      - name: Build and lint encrypted WASM
+      - name: Build encrypted WASM and lint all storage features
         run: |
           bash sdk/web/scripts/build.sh
           cargo clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins -- -D warnings
+          cargo clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins --no-default-features --features unencrypted-storage -- -D warnings
+          cargo clippy --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins --all-features -- -D warnings
           npm run check:artifacts --prefix sdk/web
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
