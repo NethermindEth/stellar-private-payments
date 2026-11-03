@@ -152,7 +152,7 @@ export interface PoolOptions {
 
 /**
  * The error a pool call rejects with when the SDK refuses a deposit or a spend
- * before proving. Amounts are decimal strings of base units, for `BigInt`.
+ * before proving. Amounts are `bigint` base units.
  */
 export interface PoolRefusal extends Error {
   code:
@@ -162,13 +162,13 @@ export interface PoolRefusal extends Error {
     | 'NO_COMBINATION'
     | 'NO_SPENDABLE_NOTES';
   /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
-  minimum?: string;
+  minimum?: bigint;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */
-  maximum?: string;
+  maximum?: bigint;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit leaves in notes, `maximum` less the pool fee. */
-  largestDeposit?: string;
+  largestDeposit?: bigint;
   /** With `NO_COMBINATION`: the most one spend can send after pool fees. */
-  maxSpend?: string;
+  maxSpend?: bigint;
 }
 
 /** Options for {@link verifySelectiveDisclosure}. */
