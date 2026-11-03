@@ -255,6 +255,8 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 ./deployments/scripts/deploy.sh --help
 ```
 
+The contracts version is `version` under `[workspace.package]` in the root `Cargo.toml`. The SDK, the CLI, and the npm package set their own versions in `sdk/native/Cargo.toml`, `cli/Cargo.toml`, and `sdk/web/package.json`, so their releases do not change it. Crates with `version.workspace = true`, such as the contracts, the workspace tools, and the `sdk/web` Rust crate, share it, so bumping it for any of them publishes a contracts release. Merging a change to the contracts version makes the Contracts Release workflow publish `contracts-vX.Y.Z`. Every pull request to `main` runs the same workflow as a dry run, which attests and publishes nothing. To recover from a failed release, re-run its failed jobs, or bump the contracts version again in the pull request that fixes it.
+
 ### Deploying Contracts
 
 See [DEPLOY.md](DEPLOY.md) for the `deployments/scripts/deploy.sh` pool spec
