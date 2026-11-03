@@ -6,6 +6,29 @@ use crate::types::{NoteAmount, Sensitive, correlation_id_or_new};
 /// Upper bound on combination size explored by [`find_combination`].
 pub(crate) const TRANSACTION_LIMIT: usize = 10;
 
+/// Returns how many `transact` calls a spend of `notes` notes takes: one per
+/// merge, and at least one.
+pub(crate) fn step_count(notes: usize) -> usize {
+    notes.saturating_sub(1).max(1)
+}
+
+/// Returns the pool fees that `steps` calls pay at `fee` each.
+pub(crate) fn fees(steps: usize, fee: NoteAmount) -> Result<NoteAmount, PlanError> {
+    u128::try_from(steps)
+        .ok()
+        .and_then(|steps| u128::from(fee).checked_mul(steps))
+        .map(NoteAmount::from)
+        .ok_or(PlanError::InputAmountOverflow)
+}
+
+/// Returns the note total that sends `amount` and pays `fee` on each of `steps`
+/// calls.
+fn spend_goal(amount: NoteAmount, steps: usize, fee: NoteAmount) -> Result<NoteAmount, PlanError> {
+    fees(steps, fee)?
+        .checked_add(amount)
+        .ok_or(PlanError::InputAmountOverflow)
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum CombinationResult {
     /// Tier 1: Exactly two elements that sum exactly to the goal
@@ -24,13 +47,14 @@ pub(crate) enum CombinationResult {
     Impossible,
 }
 
-/// Find a combination of elements with sum equal to or larger than the goal,
-/// prioritizing the lowest combination count (with two-note pairs preferred
-/// over single-note exact matches).
-#[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), goal = ?Sensitive(&goal)))]
+/// Finds a combination of elements whose sum covers `amount` plus `fee` on
+/// every step, prioritizing the lowest combination count (with two-note pairs
+/// preferred over single-note exact matches).
+#[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), amount = ?Sensitive(&amount)))]
 pub(crate) fn find_combination(
     values: &[NoteAmount],
-    goal: NoteAmount,
+    amount: NoteAmount,
+    fee: NoteAmount,
 ) -> Result<CombinationResult, PlanError> {
     if values.is_empty() {
         return Ok(CombinationResult::Impossible);
@@ -39,6 +63,8 @@ pub(crate) fn find_combination(
     let mut sorted_vals: Vec<(usize, NoteAmount)> = values.iter().copied().enumerate().collect();
     sorted_vals.sort_unstable_by_key(|&(_, x)| x);
 
+    // One or two notes take one step.
+    let goal = spend_goal(amount, 1, fee)?;
     let two = TwoScan::scan(&sorted_vals, goal)?;
     if let TwoScan::Exact(i, j) = two {
         tracing::trace!(
@@ -77,7 +103,7 @@ pub(crate) fn find_combination(
         return Ok(CombinationResult::OneOvershoot(i, excess));
     }
 
-    match KScan::scan(&sorted_vals, goal)? {
+    match KScan::scan(&sorted_vals, amount, fee)? {
         KScan::Exact(indices) => {
             tracing::trace!(
                 tier = "k-scan-exact",
@@ -177,10 +203,19 @@ enum KScan {
 }
 
 impl KScan {
-    /// k≥3 DFS on notes `< goal`, then greedy overshoot (largest notes first).
-    fn scan(sorted: &[(usize, NoteAmount)], goal: NoteAmount) -> Result<Self, PlanError> {
-        let mut candidates_desc: Vec<(usize, NoteAmount)> =
-            sorted.iter().copied().filter(|&(_, x)| x < goal).collect();
+    /// k≥3 DFS on notes `< amount + fee`, searching each `k` for
+    /// `amount + (k - 1) * fee`, then greedy overshoot (largest notes first).
+    fn scan(
+        sorted: &[(usize, NoteAmount)],
+        amount: NoteAmount,
+        fee: NoteAmount,
+    ) -> Result<Self, PlanError> {
+        let one_step_goal = spend_goal(amount, 1, fee)?;
+        let mut candidates_desc: Vec<(usize, NoteAmount)> = sorted
+            .iter()
+            .copied()
+            .filter(|&(_, x)| x < one_step_goal)
+            .collect();
         candidates_desc.reverse();
 
         if candidates_desc.len() >= 3 {
@@ -192,7 +227,7 @@ impl KScan {
 
                 let mut ctx = DfsContext {
                     candidates: &candidates_desc,
-                    goal,
+                    goal: spend_goal(amount, step_count(k), fee)?,
                     target_k: k,
                     iteration_limit: &mut iteration_limit,
                     path: &mut path,
@@ -208,11 +243,15 @@ impl KScan {
             }
         }
 
-        Self::greedy_impl(sorted, goal)
+        Self::greedy_impl(sorted, amount, fee)
     }
 
-    /// Greedily add largest notes until the sum reaches the goal.
-    fn greedy_impl(sorted: &[(usize, NoteAmount)], goal: NoteAmount) -> Result<Self, PlanError> {
+    /// Adds the largest notes until the sum pays `amount` and a fee per step.
+    fn greedy_impl(
+        sorted: &[(usize, NoteAmount)],
+        amount: NoteAmount,
+        fee: NoteAmount,
+    ) -> Result<Self, PlanError> {
         let mut total = NoteAmount::ZERO;
         let mut picks: Vec<usize> = Vec::new();
         for &(idx, x) in sorted.iter().rev() {
@@ -221,6 +260,7 @@ impl KScan {
             };
             total = next_total;
             picks.push(idx);
+            let goal = spend_goal(amount, step_count(picks.len()), fee)?;
             if total >= goal {
                 let excess = total
                     .checked_sub(goal)
@@ -303,26 +343,35 @@ mod tests {
         NoteAmount::from(amount)
     }
 
-    fn find(values: &[NoteAmount], goal: NoteAmount) -> CombinationResult {
-        find_combination(values, goal).expect("combination should succeed")
+    fn find(values: &[NoteAmount], amount: NoteAmount, fee: NoteAmount) -> CombinationResult {
+        find_combination(values, amount, fee).expect("combination should succeed")
     }
 
     #[test]
     fn comb_two_exact() {
         let dataset = amounts(&[4, 6, 10]);
-        assert_eq!(find(&dataset, goal(10)), CombinationResult::TwoExact(0, 1));
+        assert_eq!(
+            find(&dataset, goal(10), NoteAmount::ZERO),
+            CombinationResult::TwoExact(0, 1)
+        );
     }
 
     #[test]
     fn comb_one_exact_0() {
         let dataset = amounts(&[3, 6, 10]);
-        assert_eq!(find(&dataset, goal(10)), CombinationResult::OneExact(2));
+        assert_eq!(
+            find(&dataset, goal(10), NoteAmount::ZERO),
+            CombinationResult::OneExact(2)
+        );
     }
 
     #[test]
     fn comb_one_exact_1() {
         let dataset = amounts(&[3, 6, 10, 13]);
-        assert_eq!(find(&dataset, goal(10)), CombinationResult::OneExact(2));
+        assert_eq!(
+            find(&dataset, goal(10), NoteAmount::ZERO),
+            CombinationResult::OneExact(2)
+        );
     }
 
     /// The pair scan stops where its pointers meet. Past that, it would pair
@@ -331,7 +380,7 @@ mod tests {
     fn comb_two_overshoot() {
         let dataset = amounts(&[1, 2, 5, 6, 12]);
         assert_eq!(
-            find(&dataset, goal(10)),
+            find(&dataset, goal(10), NoteAmount::ZERO),
             CombinationResult::TwoOvershoot(2, 3, excess(1))
         );
     }
@@ -340,7 +389,7 @@ mod tests {
     fn comb_one_overshoot() {
         let dataset = amounts(&[15]);
         assert_eq!(
-            find(&dataset, goal(10)),
+            find(&dataset, goal(10), NoteAmount::ZERO),
             CombinationResult::OneOvershoot(0, excess(5))
         );
     }
@@ -349,7 +398,7 @@ mod tests {
     fn comb_k_exact() {
         let dataset = amounts(&[2, 3, 5]);
         assert_eq!(
-            find(&dataset, goal(10)),
+            find(&dataset, goal(10), NoteAmount::ZERO),
             CombinationResult::ExactK(vec![2, 1, 0])
         );
     }
@@ -358,7 +407,7 @@ mod tests {
     fn comb_k_overshoot() {
         let dataset = amounts(&[2, 3, 6]);
         assert_eq!(
-            find(&dataset, goal(10)),
+            find(&dataset, goal(10), NoteAmount::ZERO),
             CombinationResult::Overshoot(vec![2, 1, 0], excess(1))
         );
     }
@@ -366,7 +415,63 @@ mod tests {
     #[test]
     fn comb_two_exact_before_one_exact() {
         let dataset = amounts(&[4, 6, 10]);
-        assert_eq!(find(&dataset, goal(10)), CombinationResult::TwoExact(0, 1));
+        assert_eq!(
+            find(&dataset, goal(10), NoteAmount::ZERO),
+            CombinationResult::TwoExact(0, 1)
+        );
+    }
+
+    /// One step pays one fee, so 4 + 7 covers 10 exactly.
+    #[test]
+    fn comb_two_exact_pays_one_fee() {
+        let dataset = amounts(&[4, 7]);
+        assert_eq!(
+            find(&dataset, NoteAmount::from(10), NoteAmount::ONE),
+            CombinationResult::TwoExact(0, 1)
+        );
+    }
+
+    #[test]
+    fn comb_one_exact_pays_one_fee() {
+        let dataset = amounts(&[11]);
+        assert_eq!(
+            find(&dataset, NoteAmount::from(10), NoteAmount::ONE),
+            CombinationResult::OneExact(0)
+        );
+    }
+
+    /// Three notes take two steps, so they must cover 10 + 2.
+    #[test]
+    fn comb_k_exact_pays_a_fee_per_step() {
+        let dataset = amounts(&[5, 4, 3]);
+        assert_eq!(
+            find(&dataset, NoteAmount::from(10), NoteAmount::ONE),
+            CombinationResult::ExactK(vec![0, 1, 2])
+        );
+    }
+
+    /// No `k` up to ten reaches `100 + (k - 1)`, while eleven notes reach
+    /// `100 + 10` exactly.
+    #[test]
+    fn comb_greedy_counts_a_fee_per_pick() {
+        let dataset = amounts(&[10; 12]);
+        let CombinationResult::Overshoot(picks, excess) =
+            find(&dataset, NoteAmount::from(100), NoteAmount::ONE)
+        else {
+            panic!("expected the greedy tier");
+        };
+        assert_eq!(picks.len(), 11);
+        assert_eq!(excess, NoteAmount::ZERO);
+    }
+
+    /// The notes sum to 9, but three of them take two steps and need 8 + 2.
+    #[test]
+    fn comb_impossible_when_the_fees_eat_the_balance() {
+        let dataset = amounts(&[3, 3, 3]);
+        assert_eq!(
+            find(&dataset, NoteAmount::from(8), NoteAmount::ONE),
+            CombinationResult::Impossible
+        );
     }
 
     /// The pair scan runs first, so it refuses the overflow although one note
@@ -374,7 +479,7 @@ mod tests {
     #[test]
     fn notes_summing_past_u128_overflow() {
         assert!(matches!(
-            find_combination(&amounts(&[u128::MAX, 1]), goal(u128::MAX)),
+            find_combination(&amounts(&[u128::MAX, 1]), goal(u128::MAX), NoteAmount::ZERO),
             Err(PlanError::InputAmountOverflow)
         ));
     }

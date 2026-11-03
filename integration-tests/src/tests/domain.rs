@@ -8,7 +8,7 @@ use stellar_private_payments::{
     types::{ContractConfig, NoteAmount, TransferRecipient},
 };
 
-use super::support::{deploy_default, session};
+use super::support::{FEE_STROOPS, deploy_default, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 const TRANSFER_STROOPS: u128 = 4_000_000;
@@ -76,9 +76,7 @@ async fn transfer_cross_domain() -> Result<()> {
     let sender_notes = sender.account.user_notes(10).await?;
     assert_eq!(
         sender_notes[0].amount,
-        deposit_amount
-            .checked_sub(transfer_amount)
-            .expect("transfer amount fits within deposit")
+        NoteAmount::from(DEPOSIT_STROOPS - TRANSFER_STROOPS - FEE_STROOPS)
     );
 
     let recipient_notes = recipient_b.account.user_notes(10).await?;

@@ -21,7 +21,10 @@ use pool_core::policy;
 use soroban_sdk::{Address, Env, U256, testutils::Address as _};
 use stellar_private_payments::{
     chain::{Client, StateFetcher},
-    types::{AssetDescriptor, ContractConfig, ExtAmount, GvkMode, PolicyFlags, PoolConfigEntry},
+    types::{
+        AssetDescriptor, ContractConfig, ExtAmount, GvkMode, NoteAmount, PolicyFlags,
+        PoolConfigEntry,
+    },
 };
 use stellar_xdr::{Limits, WriteXdr};
 use wiremock::{
@@ -45,6 +48,12 @@ const MEMBERSHIP_LEVELS: u32 = 10;
 
 /// Deposit cap the fixture registers the pool with.
 const MAXIMUM_DEPOSIT: u32 = 1_000_000;
+
+/// Fee the fixture registers the pool with.
+const FEE: u32 = 7;
+
+/// Minimum deposit the fixture registers the pool with.
+const MINIMUM_DEPOSIT: u32 = 9;
 
 struct Deployment {
     env: Env,
@@ -79,8 +88,8 @@ fn deploy() -> Deployment {
             asp_non_membership.clone(),
             wasm_hash(&asp_membership),
             wasm_hash(&asp_non_membership),
-            0i128,
-            0i128,
+            i128::from(FEE),
+            i128::from(MINIMUM_DEPOSIT),
             U256::from_u32(&env, MAXIMUM_DEPOSIT),
             LEVELS,
             policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
@@ -200,6 +209,11 @@ async fn the_reader_parses_a_deployed_pools_own_entries() -> Result<()> {
     assert_eq!(
         info.maximum_deposit_amount,
         ExtAmount::from(i128::from(MAXIMUM_DEPOSIT))
+    );
+    assert_eq!(info.fee, NoteAmount::from(u128::from(FEE)));
+    assert_eq!(
+        info.minimum_deposit_amount,
+        NoteAmount::from(u128::from(MINIMUM_DEPOSIT))
     );
     Ok(())
 }

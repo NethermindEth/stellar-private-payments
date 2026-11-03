@@ -1,7 +1,7 @@
 // many parts are taken from https://github.com/stellar/rs-stellar-rpc-client/blob/main/src/lib.rs
 // to make it wasm-compatible
 
-use crate::chain::conversions::instance_storage_entries;
+use crate::chain::conversions::{instance_storage_entries, scval_to_i128};
 use http::{Uri, uri::Authority};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_default_from_null;
@@ -787,27 +787,21 @@ impl Client {
         let arg = address
             .parse()
             .map_err(|_| Error::UnexpectedScVal(format!("invalid address: {address}")))?;
-        match self
-            .read_contract(
-                contract_id,
-                address,
-                "balance",
-                vec![xdr::ScVal::Address(arg)],
-            )
-            .await?
-        {
-            xdr::ScVal::I128(parts) => {
-                let value = i128::from(&parts);
-                u128::try_from(value).map_err(|_| {
-                    Error::UnexpectedScVal(format!(
-                        "token contract reported a negative balance: {value}"
-                    ))
-                })
-            }
-            other => Err(Error::UnexpectedScVal(format!(
-                "expected balance() to return i128, got {other:?}"
-            ))),
-        }
+        let value = scval_to_i128(
+            &self
+                .read_contract(
+                    contract_id,
+                    address,
+                    "balance",
+                    vec![xdr::ScVal::Address(arg)],
+                )
+                .await?,
+        )?;
+        u128::try_from(value).map_err(|_| {
+            Error::UnexpectedScVal(format!(
+                "token contract reported a negative balance: {value}"
+            ))
+        })
     }
 
     /// Submits a signed transaction envelope to the network.
