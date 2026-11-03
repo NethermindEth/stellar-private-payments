@@ -209,7 +209,8 @@ for each `policy_tx_2_2*_vk.json` and `keyOwnership_vk.json` file in
 contracts version on `main` publishes a release, as
 [CONTRIBUTING.md](CONTRIBUTING.md) describes: the `contracts-release.yml`
 workflow builds the files, rebuilds them on a second runner, and attests each
-file, signing a GitHub record that this run built it, before publishing it.
+Wasm and `SHA256SUMS`, signing a GitHub record that this run built the file,
+before publishing the release.
 
 Download a release into a new directory and pass that directory to
 `--release-dir`:
