@@ -1,8 +1,12 @@
 mod toml;
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
+use serde::Deserialize;
 use stellar_private_payments::{
     state::SqliteStorage,
     types::{ContractConfig, Sensitive},
@@ -56,6 +60,7 @@ pub struct CliConfig {
     /// Runtime deployment JSON file path.
     pub deployment_source: String,
     pub deployment: ContractConfig,
+    pub manifest: ManifestExtras,
     /// Stellar CLI network name (built-in like `testnet`, or a custom one).
     pub network: String,
     pub data_dir: PathBuf,
@@ -95,7 +100,7 @@ impl CliConfig {
         let stellar_config_dir =
             stellar_config_dir.or(file.defaults.stellar_config_dir.map(toml::expand_path));
 
-        let (deployment_source, deployment) =
+        let (deployment_source, deployment, manifest) =
             load_deployment(deployment_path.as_deref(), &data_dir)?;
         // Network name: --network > config default > the deployment's network
         // (which matches a Stellar CLI built-in like `testnet`).
@@ -110,6 +115,7 @@ impl CliConfig {
             config_file,
             deployment_source,
             deployment,
+            manifest,
             network,
             data_dir,
             stellar_config_dir,
@@ -261,6 +267,53 @@ impl CliConfig {
     }
 }
 
+/// Manifest fields the SDK's [`ContractConfig`] drops, which say what code each
+/// contract runs.
+///
+/// Only the code status reads them, so a manifest whose fields have the wrong
+/// type loads without them.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ManifestExtras {
+    pub contracts_release: ContractsRelease,
+    pub asp_membership_wasm_hash: Option<String>,
+    pub asp_non_membership_wasm_hash: Option<String>,
+    pub public_key_registry_verifier: Option<String>,
+    pub public_key_registry_verifier_wasm_hash: Option<String>,
+}
+
+/// The contracts release a deployment came from.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ContractsRelease {
+    /// The network the release's verifiers were built for.
+    pub network: Option<String>,
+    /// Wasm hash by contract id.
+    pub code: BTreeMap<String, String>,
+}
+
+/// A directory under the system temporary directory, removed on drop.
+#[cfg(test)]
+pub(crate) struct TempDir(pub(crate) PathBuf);
+
+#[cfg(test)]
+impl TempDir {
+    /// Names the directory for `name` and this process, and removes one an
+    /// earlier run left behind.
+    pub(crate) fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("spp-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        Self(dir)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// The refusal itself, split from the lookup so it can be tested without the
 /// Stellar CLI. Mirrors the SDK's `ensure_signer_is_note_owner`, which raises
 /// the equivalent for registration.
@@ -287,7 +340,10 @@ pub fn default_data_dir() -> PathBuf {
 
 /// Resolve the deployment config: `--deployment` > the copy provisioned into
 /// the data dir by `scripts/install.sh`. No embedded fallback.
-fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, ContractConfig)> {
+fn load_deployment(
+    path: Option<&Path>,
+    data_dir: &Path,
+) -> Result<(String, ContractConfig, ManifestExtras)> {
     if let Some(path) = path {
         return read_deployment_file(&if path.is_dir() {
             path.join(DEPLOYMENT_FILE_NAME)
@@ -304,7 +360,7 @@ fn load_deployment(path: Option<&Path>, data_dir: &Path) -> Result<(String, Cont
     )
 }
 
-fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
+fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig, ManifestExtras)> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("read deployment file {}", path.display()))?;
 
@@ -312,7 +368,15 @@ fn read_deployment_file(path: &Path) -> Result<(String, ContractConfig)> {
     let deployment: ContractConfig = serde_json::from_str(&raw)
         .with_context(|| format!("parse deployment file {}", path.display()))?;
     deployment.validate_network(deployment.network_passphrase.as_deref().unwrap_or_default())?;
-    Ok((path.display().to_string(), deployment))
+    let extras = serde_json::from_str(&raw).unwrap_or_else(|error| {
+        log::warn!(
+            "a value in {} has the wrong type, so `spp overview` ignores the code the file \
+             records and leaves out any registry verifier it names: {error}",
+            path.display()
+        );
+        ManifestExtras::default()
+    });
+    Ok((path.display().to_string(), deployment, extras))
 }
 
 pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {
@@ -469,16 +533,9 @@ mod network_validation_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let local =
-            std::env::temp_dir().join(format!("spp-network-{}-{nonce}", std::process::id()));
+        let tmp = TempDir::new(&format!("network-{nonce}"));
+        let local = tmp.0.clone();
         std::fs::create_dir(&local).expect("temporary deployment");
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
-        let _cleanup = Cleanup(local.clone());
         let mut deployment: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(root.join("testnet/deployments.json"))
                 .expect("testnet config"),
@@ -520,6 +577,50 @@ mod network_validation_tests {
             config.circuit_lock().expect("runtime circuit lock");
         }
         assert_ne!(identities[0], identities[1]);
+    }
+
+    #[test]
+    fn a_manifest_loads_with_and_without_contracts_release() {
+        let testnet = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deployments/testnet");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(testnet.join("deployments.json")).expect("testnet config"),
+        )
+        .expect("JSON");
+        let dir = TempDir::new("release");
+        std::fs::create_dir_all(&dir.0).expect("temporary deployment");
+        let path = dir.0.join(DEPLOYMENT_FILE_NAME);
+        let load = |manifest: &serde_json::Value| {
+            std::fs::write(&path, manifest.to_string()).expect("write deployment");
+            read_deployment_file(&path).expect("deployment loads").2
+        };
+
+        manifest
+            .as_object_mut()
+            .expect("object")
+            .remove("contracts_release");
+        let extras = load(&manifest);
+        assert!(extras.contracts_release.code.is_empty());
+        assert!(extras.public_key_registry_verifier.is_some());
+        assert!(extras.asp_non_membership_wasm_hash.is_some());
+        assert!(extras.public_key_registry_verifier_wasm_hash.is_some());
+
+        manifest["contracts_release"] = serde_json::json!({
+            "tag": "contracts-v0.2.0", "network": "testnet", "code": { "CPOOL": "ab" }
+        });
+        let release = load(&manifest).contracts_release;
+        assert_eq!(release.network.as_deref(), Some("testnet"));
+        assert_eq!(release.code["CPOOL"], "ab");
+
+        // A field of the wrong type drops the records, never the deployment.
+        manifest["contracts_release"]["network"] = 5.into();
+        let extras = load(&manifest);
+        assert!(extras.contracts_release.code.is_empty());
+        assert!(extras.public_key_registry_verifier.is_none());
+        manifest["contracts_release"]["network"] = "testnet".into();
+        manifest["asp_membership_wasm_hash"] = 5.into();
+        let extras = load(&manifest);
+        assert!(extras.contracts_release.code.is_empty());
+        assert!(extras.asp_non_membership_wasm_hash.is_none());
     }
 
     #[test]
